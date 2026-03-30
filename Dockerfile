@@ -8,7 +8,7 @@ ENV NODE_ENV=production
 
 WORKDIR ${HOME}
 
-ADD package.json ./
+ADD package.json .npmrc* ./
 
 RUN corepack enable
 
@@ -34,6 +34,7 @@ FROM base AS runtime
 COPY --from=pre /home/node/node_modules ./node_modules/
 COPY --from=pre /home/node/dist/ ./dist/
 COPY --from=pre /home/node/config/ ./config/
+RUN ln -s /home/node/dist /home/node/src
 
 CMD ["pnpm", "run", "start"]
 
