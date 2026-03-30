@@ -20,7 +20,7 @@ import { Client as BaseClient } from "./BaseClient.mjs";
 export class RedisClient extends BaseClient {
 	protected _redis: RedisClientType;
 
-	constructor({ endpointUri, password }: { endpointUri: string; password: string }) {
+	constructor({ endpointUri, password }: { endpointUri: string; password?: string }) {
 		super();
 
 		this._redis = createClient({

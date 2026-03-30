@@ -55,7 +55,7 @@ export const AppConfigSchema = z.object({
 		secret: z.string(),
 		maxAge: z.coerce.number().default(3600000),
 		secure: hoconBoolean.default(true),
-		sameSite: z.string().default("lax"),
+		sameSite: z.enum(["lax", "none", "strict"]).default("lax"),
 		domain: z.string().nullable().default(null),
 		storage: z.object({
 			type: z.string().default("redis"),

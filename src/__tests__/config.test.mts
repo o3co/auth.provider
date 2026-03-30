@@ -1,7 +1,7 @@
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
-import { AppConfigSchema } from "../../config/application.schema.mjs";
+import { AppConfigSchema } from "#/config/application.schema.mjs";
 
 describe("provider config", () => {
 	it("loads and validates application.conf with required env vars", () => {

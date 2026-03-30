@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 import type { Request, RequestHandler, Response, Router } from "express";
 import type { PassportStatic } from "passport";
 
-import type { AppConfig } from "../../../config/application.schema.mjs";
+import type { AppConfig } from "#/config/application.schema.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -119,7 +119,11 @@ export const createRouter = (
 					if (redirectTo && authCallbackUrl) {
 						return res.redirect(`${authCallbackUrl}?redirect_to=${encodeURIComponent(redirectTo)}`);
 					}
-					return res.redirect(config.endpoints.client.url);
+					const clientUrl = config.endpoints.client.url;
+					if (!clientUrl) {
+						return res.status(500).json({ error: "client URL not configured" });
+					}
+					return res.redirect(clientUrl);
 				});
 			},
 		);

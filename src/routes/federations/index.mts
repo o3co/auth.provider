@@ -17,7 +17,7 @@ import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
 
 import type { ClientFactory } from "#/clients/ClientFactory.mjs";
-import type { AppConfig } from "../../../config/application.schema.mjs";
+import type { AppConfig } from "#/config/application.schema.mjs";
 import * as google from "./Google.mjs";
 
 type ExpressLike = {

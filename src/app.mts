@@ -21,7 +21,7 @@ import session from "express-session";
 import helmet from "helmet";
 import { createClient } from "redis";
 
-import { type AppConfig, AppConfigSchema } from "../config/application.schema.mjs";
+import { type AppConfig, AppConfigSchema } from "#/config/application.schema.mjs";
 import { ClientFactory } from "./clients/ClientFactory.mjs";
 import logger from "./logger.mjs";
 import { createPassport } from "./Passport.mjs";

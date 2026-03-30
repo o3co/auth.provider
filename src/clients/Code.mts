@@ -30,7 +30,7 @@ export class CodeClient extends RedisClient {
 		endpointUri,
 		password,
 		defaultExpiresIn = 600, // 10 minutes
-	}: { endpointUri: string; password: string; defaultExpiresIn?: number }) {
+	}: { endpointUri: string; password?: string; defaultExpiresIn?: number }) {
 		super({ endpointUri, password });
 		this.defaultExpiresIn = defaultExpiresIn;
 	}

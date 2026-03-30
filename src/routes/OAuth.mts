@@ -23,7 +23,7 @@ import { HttpError } from "#/clients/base/RESTClient.mjs";
 import type { AppClient } from "#/clients/Client.mjs";
 import type { ClientFactory } from "#/clients/ClientFactory.mjs";
 import type { CodeClient } from "#/clients/Code.mjs";
-import type { AppConfig } from "../../config/application.schema.mjs";
+import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGrantRegistry, type GrantRegistry } from "./grants/registry.mjs";
 import { formatObject } from "./grants/token.mjs";
 

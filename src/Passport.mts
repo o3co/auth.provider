@@ -18,7 +18,7 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Strategy as ClientCredentialStrategy } from "passport-oauth2-client-password";
 
-import type { AppConfig } from "../config/application.schema.mjs";
+import type { AppConfig } from "#/config/application.schema.mjs";
 import type { AppClient } from "./clients/Client.mjs";
 import type { ClientFactory } from "./clients/ClientFactory.mjs";
 import type { UserClient } from "./clients/User.mjs";
