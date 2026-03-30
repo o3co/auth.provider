@@ -1,6 +1,6 @@
 # auth.provider
 
-OAuth 2.0 provider — token issuance, introspection, and session authentication.
+OAuth 2.0 provider. Handles login, JWT access/refresh token issuance, and token introspection (RFC 7662). Supports PKCE (RFC 7636), DID authentication (Ed25519), and Google OAuth federation.
 
 ## Endpoints
 
