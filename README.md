@@ -46,6 +46,7 @@ make docker       # Build runtime image
 ## Related Projects
 
 - [auth.proxy](https://github.com/o3co/auth.proxy) — Token validation reverse proxy
+- [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier) — No-DSL ABAC policy verifier
 - [auth](https://github.com/o3co/auth) — Architecture docs and cross-component E2E tests
 - [grpc.authz](https://github.com/o3co/grpc.authz) — gRPC authorization middleware
 
