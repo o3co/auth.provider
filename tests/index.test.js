@@ -29,35 +29,73 @@ const client = axios.create({
 const extractCookies = (res) => (res.headers['set-cookie'] ?? []).join('; ');
 
 describe('POST /oauth/introspect', () => {
-  it('returns active: false when no token is provided', async () => {
+  // Helper: self-introspect sends the token as both Bearer credential and body parameter
+  const selfIntrospect = (token, contentType = 'application/json') => {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': contentType,
+    };
+    const data =
+      contentType === 'application/x-www-form-urlencoded'
+        ? `token=${encodeURIComponent(token)}`
+        : { token };
+    return client.post('/oauth/introspect', data, { headers });
+  };
+
+  it('returns 401 when no authentication is provided', async () => {
     const res = await client.post('/oauth/introspect', {});
-    expect(res.status).toBe(200);
-    expect(res.data.active).toBe(false);
+    expect(res.status).toBe(401);
   });
 
-  it('returns active: false for an invalid token', async () => {
-    const res = await client.post('/oauth/introspect', {
-      token: 'invalid.token.here',
+  describe('self-introspect (JSON)', () => {
+    it('returns active: true for a valid JWT', async () => {
+      const token = jwt.sign({ user: { id: 1 }, scopes: ['read'] }, JWT_SECRET, {
+        expiresIn: 60,
+      });
+      const res = await selfIntrospect(token);
+      expect(res.status).toBe(200);
+      expect(res.data.active).toBe(true);
     });
-    expect(res.status).toBe(200);
-    expect(res.data.active).toBe(false);
-  });
 
-  it('returns active: true for a valid JWT', async () => {
-    const token = jwt.sign({ user: { id: 1 }, scopes: ['read'] }, JWT_SECRET, {
-      expiresIn: 60,
+    it('returns 401 for an invalid JWT', async () => {
+      const res = await selfIntrospect('invalid.token.here');
+      expect(res.status).toBe(401);
+      expect(res.data.active).toBe(false);
     });
-    const res = await client.post('/oauth/introspect', { token });
-    console.error(res.data);
-    expect(res.status).toBe(200);
-    expect(res.data.active).toBe(true);
+
+    it('returns 401 for an expired JWT', async () => {
+      const token = jwt.sign({ user: { id: 1 } }, JWT_SECRET, { expiresIn: -1 });
+      const res = await selfIntrospect(token);
+      expect(res.status).toBe(401);
+      expect(res.data.active).toBe(false);
+    });
   });
 
-  it('returns active: false for an expired JWT', async () => {
-    const token = jwt.sign({ user: { id: 1 } }, JWT_SECRET, { expiresIn: -1 });
-    const res = await client.post('/oauth/introspect', { token });
-    expect(res.status).toBe(200);
-    expect(res.data.active).toBe(false);
+  describe('self-introspect (application/x-www-form-urlencoded)', () => {
+    it('returns active: true for a valid JWT', async () => {
+      const token = jwt.sign({ user: { id: 1 }, scopes: ['read'] }, JWT_SECRET, {
+        expiresIn: 60,
+      });
+      const res = await selfIntrospect(token, 'application/x-www-form-urlencoded');
+      expect(res.status).toBe(200);
+      expect(res.data.active).toBe(true);
+    });
+
+    it('returns 401 for an invalid JWT', async () => {
+      const res = await selfIntrospect(
+        'invalid.token.here',
+        'application/x-www-form-urlencoded',
+      );
+      expect(res.status).toBe(401);
+      expect(res.data.active).toBe(false);
+    });
+
+    it('returns 401 for an expired JWT', async () => {
+      const token = jwt.sign({ user: { id: 1 } }, JWT_SECRET, { expiresIn: -1 });
+      const res = await selfIntrospect(token, 'application/x-www-form-urlencoded');
+      expect(res.status).toBe(401);
+      expect(res.data.active).toBe(false);
+    });
   });
 });
 
