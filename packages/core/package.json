@@ -1,0 +1,60 @@
+{
+	"name": "@o3co/auth-provider-core",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run"
+	},
+	"imports": {
+		"#/*": "./src/*"
+	},
+	"dependencies": {
+		"@noble/ed25519": "^3.0.1",
+		"@o3co/js.util.log": "^0.5.0",
+		"bcrypt": "^6.0.0",
+		"express-rate-limit": "^8.3.1",
+		"js-yaml": "^4.1.1",
+		"jsonwebtoken": "^9.0.3",
+		"zod": "^4.3.6"
+	},
+	"peerDependencies": {
+		"express": "^5.0.0",
+		"passport": "^0.7.0",
+		"passport-local": "^1.0.0",
+		"passport-oauth2-client-password": "^0.1.2",
+		"passport-google-oauth20": "^2.0.0"
+	},
+	"peerDependenciesMeta": {
+		"passport-google-oauth20": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@o3co/ts.hocon": "^0.1.2",
+		"@types/bcrypt": "^6.0.0",
+		"@types/express": "^5.0.6",
+		"@types/js-yaml": "^4.0.9",
+		"@types/jsonwebtoken": "^9.0.10",
+		"@types/node": "^25.1.0",
+		"@types/passport": "^0",
+		"@types/passport-local": "^1",
+		"@types/passport-oauth2-client-password": "^0.1.6",
+		"@types/passport-google-oauth20": "^2.0.17",
+		"express": "^5.2.1",
+		"passport": "^0.7.0",
+		"passport-local": "^1.0.0",
+		"passport-oauth2-client-password": "^0.1.2",
+		"pino": "^10.3.1",
+		"vitest": "^4.1.2"
+	}
+}

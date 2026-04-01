@@ -2,6 +2,14 @@
 
 OAuth 2.0 プロバイダー。ログイン、JWT アクセス/リフレッシュトークン発行、トークンイントロスペクション (RFC 7662) を担当。PKCE (RFC 7636)、DID 認証 (Ed25519)、Google OAuth フェデレーションに対応。
 
+## パッケージ構成
+
+| パッケージ | 説明 |
+| --- | --- |
+| `packages/core` (`@o3co/auth-provider-core`) | コアライブラリ: OAuth 2.0 ロジック、トークン発行、イントロスペクション、リポジトリ |
+| `templates/standalone` (`@o3co/auth-provider-standalone`) | コアライブラリを使用するリファレンス実装（スタンドアロンアプリ） |
+| `create-app` (`create-o3co-auth-provider`) | プロジェクトスキャフォルダー |
+
 ## エンドポイント
 
 | エンドポイント | 説明 |
@@ -23,18 +31,45 @@ OAuth 2.0 プロバイダー。ログイン、JWT アクセス/リフレッシ�
 - レート制限（ログイン、トークン、認可）
 - HOCON 設定 + Zod バリデーション
 
-## セットアップ
+## コアライブラリの使用
+
+自分のプロジェクトに `@o3co/auth-provider-core` を依存関係として追加する:
 
 ```bash
+npm install @o3co/auth-provider-core
+```
+
+OAuth 2.0 ルーターファクトリ、トークンサービス、リポジトリインターフェース、ミドルウェアを提供する。ピア依存関係 (`express`、`passport`、`passport-local`、`passport-oauth2-client-password`) は別途インストールが必要。
+
+## 新規プロジェクトのスキャフォールド
+
+`templates/standalone` テンプレートをベースに新しいスタンドアロンアプリを生成する:
+
+```bash
+npx create-o3co-auth-provider my-auth-app
+cd my-auth-app
 pnpm install
 pnpm run build
-pnpm run start
 ```
 
 ## 開発
 
+全パッケージのビルド:
+
 ```bash
-pnpm run debug    # tsx watch モード
+pnpm -r run build
+```
+
+全テストの実行:
+
+```bash
+pnpm -r run test
+```
+
+スタンドアロンアプリのウォッチモード:
+
+```bash
+pnpm -r --filter @o3co/auth-provider-standalone run debug
 ```
 
 ## Docker

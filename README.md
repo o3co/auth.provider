@@ -2,6 +2,14 @@
 
 OAuth 2.0 provider. Handles login, JWT access/refresh token issuance, and token introspection (RFC 7662). Supports PKCE (RFC 7636), DID authentication (Ed25519), and Google OAuth federation.
 
+## Packages
+
+| Package | Description |
+| --- | --- |
+| `packages/core` (`@o3co/auth-provider-core`) | Core library: OAuth 2.0 logic, token issuance, introspection, repositories |
+| `templates/standalone` (`@o3co/auth-provider-standalone`) | Reference standalone application using the core library |
+| `create-app` (`create-o3co-auth-provider`) | Project scaffolder |
+
 ## Endpoints
 
 | Endpoint | Description |
@@ -23,18 +31,45 @@ OAuth 2.0 provider. Handles login, JWT access/refresh token issuance, and token 
 - Rate limiting (login, token, authorize)
 - HOCON configuration with Zod validation
 
-## Setup
+## Using the Core Library
+
+Install `@o3co/auth-provider-core` as a dependency in your own project:
 
 ```bash
+npm install @o3co/auth-provider-core
+```
+
+The package provides OAuth 2.0 router factories, token services, repository interfaces, and middleware. Peer dependencies (`express`, `passport`, `passport-local`, `passport-oauth2-client-password`) must be installed separately.
+
+## Scaffolding a New Project
+
+To generate a new standalone application based on the `templates/standalone` template:
+
+```bash
+npx create-o3co-auth-provider my-auth-app
+cd my-auth-app
 pnpm install
 pnpm run build
-pnpm run start
 ```
 
 ## Development
 
+Build all packages:
+
 ```bash
-pnpm run debug    # tsx watch mode
+pnpm -r run build
+```
+
+Run all tests:
+
+```bash
+pnpm -r run test
+```
+
+Watch mode for the standalone app:
+
+```bash
+pnpm -r --filter @o3co/auth-provider-standalone run debug
 ```
 
 ## Docker

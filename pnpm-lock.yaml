@@ -7,6 +7,24 @@ settings:
 importers:
 
   .:
+    devDependencies:
+      '@biomejs/biome':
+        specifier: ^2.3.14
+        version: 2.4.9
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+
+  create-app:
+    devDependencies:
+      '@types/node':
+        specifier: ^25.1.0
+        version: 25.5.0
+      vitest:
+        specifier: ^4.1.2
+        version: 4.1.2(@types/node@25.5.0)(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(tsx@4.21.0))
+
+  packages/core:
     dependencies:
       '@noble/ed25519':
         specifier: ^3.0.1
@@ -14,70 +32,34 @@ importers:
       '@o3co/js.util.log':
         specifier: ^0.5.0
         version: 0.5.0(pino@10.3.1)
-      '@o3co/ts.hocon':
-        specifier: ^0.1.2
-        version: 0.1.3(zod@4.3.6)
-      '@types/passport-google-oauth20':
-        specifier: ^2.0.17
-        version: 2.0.17
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
-      connect-redis:
-        specifier: ^9.0.0
-        version: 9.0.0(express-session@1.19.0)(redis@5.11.0)
-      express:
-        specifier: ^5.2.1
-        version: 5.2.1
       express-rate-limit:
         specifier: ^8.3.1
-        version: 8.3.1(express@5.2.1)
-      express-session:
-        specifier: ^1.19.0
-        version: 1.19.0
-      helmet:
-        specifier: ^8.1.0
-        version: 8.1.0
+        version: 8.3.2(express@5.2.1)
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
       jsonwebtoken:
         specifier: ^9.0.3
         version: 9.0.3
-      passport:
-        specifier: ^0.7.0
-        version: 0.7.0
       passport-google-oauth20:
         specifier: ^2.0.0
         version: 2.0.0
-      passport-local:
-        specifier: ^1.0.0
-        version: 1.0.0
-      passport-oauth2:
-        specifier: ^1.8.0
-        version: 1.8.0
-      passport-oauth2-client-password:
-        specifier: ^0.1.2
-        version: 0.1.2
-      redis:
-        specifier: ^5.10.0
-        version: 5.11.0
       zod:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@biomejs/biome':
-        specifier: ^2.3.14
-        version: 2.4.9
+      '@o3co/ts.hocon':
+        specifier: ^0.1.2
+        version: 0.1.3(zod@4.3.6)
       '@types/bcrypt':
         specifier: ^6.0.0
         version: 6.0.0
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
-      '@types/express-session':
-        specifier: ^1
-        version: 1.18.2
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
@@ -90,12 +72,79 @@ importers:
       '@types/passport':
         specifier: ^0
         version: 0.4.7
+      '@types/passport-google-oauth20':
+        specifier: ^2.0.17
+        version: 2.0.17
       '@types/passport-local':
         specifier: ^1
         version: 1.0.38
       '@types/passport-oauth2-client-password':
         specifier: ^0.1.6
         version: 0.1.6
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      passport:
+        specifier: ^0.7.0
+        version: 0.7.0
+      passport-local:
+        specifier: ^1.0.0
+        version: 1.0.0
+      passport-oauth2-client-password:
+        specifier: ^0.1.2
+        version: 0.1.2
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^4.1.2
+        version: 4.1.2(@types/node@25.5.0)(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(tsx@4.21.0))
+
+  templates/standalone:
+    dependencies:
+      '@o3co/auth-provider-core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@o3co/js.util.log':
+        specifier: ^0.5.0
+        version: 0.5.0(pino@10.3.1)
+      '@o3co/ts.hocon':
+        specifier: ^0.1.2
+        version: 0.1.3(zod@4.3.6)
+      connect-redis:
+        specifier: ^9.0.0
+        version: 9.0.0(express-session@1.19.0)(redis@5.11.0)
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
+      express-session:
+        specifier: ^1.19.0
+        version: 1.19.0
+      helmet:
+        specifier: ^8.1.0
+        version: 8.1.0
+      passport:
+        specifier: ^0.7.0
+        version: 0.7.0
+      passport-google-oauth20:
+        specifier: ^2.0.0
+        version: 2.0.0
+      passport-local:
+        specifier: ^1.0.0
+        version: 1.0.0
+      passport-oauth2-client-password:
+        specifier: ^0.1.2
+        version: 0.1.2
+      redis:
+        specifier: ^5.10.0
+        version: 5.11.0
+    devDependencies:
+      '@types/express-session':
+        specifier: ^1
+        version: 1.18.2
+      '@types/node':
+        specifier: ^25.1.0
+        version: 25.5.0
       msw:
         specifier: ^2.12.14
         version: 2.12.14(@types/node@25.5.0)(typescript@5.9.3)
@@ -845,8 +894,8 @@ packages:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
     engines: {node: '>=12.0.0'}
 
-  express-rate-limit@8.3.1:
-    resolution: {integrity: sha512-D1dKN+cmyPWuvB+G2SREQDzPY1agpBIcTa9sJxOPMCNeH3gwzhqJRDWCXW3gg0y//+LQ/8j52JbMROWyrKdMdw==}
+  express-rate-limit@8.3.2:
+    resolution: {integrity: sha512-77VmFeJkO0/rvimEDuUC5H30oqUC4EyOhyGccfqoLebB0oiEYfM7nwPrsDsBL1gsTpwfzX8SFy2MT3TDyRq+bg==}
     engines: {node: '>= 16'}
     peerDependencies:
       express: '>= 4.11'
@@ -1183,8 +1232,8 @@ packages:
   path-to-regexp@6.3.0:
     resolution: {integrity: sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ==}
 
-  path-to-regexp@8.4.0:
-    resolution: {integrity: sha512-PuseHIvAnz3bjrM2rGJtSgo1zjgxapTLZ7x2pjhzWwlp4SJQgK3f3iZIQwkpEnBaKz6seKBADpM4B4ySkuYypg==}
+  path-to-regexp@8.4.1:
+    resolution: {integrity: sha512-fvU78fIjZ+SBM9YwCknCvKOUKkLVqtWDVctl0s7xIqfmfb38t2TT4ZU2gHm+Z8xGwgW+QWEU3oQSAzIbo89Ggw==}
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
@@ -2138,7 +2187,7 @@ snapshots:
 
   expect-type@1.3.0: {}
 
-  express-rate-limit@8.3.1(express@5.2.1):
+  express-rate-limit@8.3.2(express@5.2.1):
     dependencies:
       express: 5.2.1
       ip-address: 10.1.0
@@ -2473,7 +2522,7 @@ snapshots:
 
   path-to-regexp@6.3.0: {}
 
-  path-to-regexp@8.4.0: {}
+  path-to-regexp@8.4.1: {}
 
   pathe@2.0.3: {}
 
@@ -2581,7 +2630,7 @@ snapshots:
       depd: 2.0.0
       is-promise: 4.0.0
       parseurl: 1.3.3
-      path-to-regexp: 8.4.0
+      path-to-regexp: 8.4.1
     transitivePeerDependencies:
       - supports-color
 
