@@ -17,28 +17,38 @@
 import type { User, UserRepository } from "@o3co/auth-provider-core";
 
 export class HttpUserRepository implements UserRepository {
-	private baseURL: string;
+	private authenticateUrl: string;
+	private authenticateByTokenUrl: string;
 	private timeout: number;
 
-	constructor({ baseURL, timeout }: { baseURL: string; timeout: number }) {
-		this.baseURL = baseURL;
+	constructor({
+		authenticateUrl,
+		authenticateByTokenUrl,
+		timeout,
+	}: {
+		authenticateUrl: string;
+		authenticateByTokenUrl: string;
+		timeout: number;
+	}) {
+		this.authenticateUrl = authenticateUrl;
+		this.authenticateByTokenUrl = authenticateByTokenUrl;
 		this.timeout = timeout;
 	}
 
 	async authenticate(username: string, password: string): Promise<User | null> {
-		return this.post("/user/authenticate", { email: username, password });
+		return this.post(this.authenticateUrl, { email: username, password });
 	}
 
 	async authenticateByToken(token: string): Promise<User | null> {
-		return this.post("/user/authenticate/token", { token });
+		return this.post(this.authenticateByTokenUrl, { token });
 	}
 
-	private async post(endpoint: string, body: unknown): Promise<User | null> {
+	private async post(url: string, body: unknown): Promise<User | null> {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), this.timeout);
 
 		try {
-			const res = await fetch(`${this.baseURL}${endpoint}`, {
+			const res = await fetch(url, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
@@ -53,7 +63,7 @@ export class HttpUserRepository implements UserRepository {
 				return null;
 			}
 
-			throw new Error(`Unexpected HTTP status ${res.status} from ${endpoint}`);
+			throw new Error(`Unexpected HTTP status ${res.status} from ${url}`);
 		} finally {
 			clearTimeout(timer);
 		}

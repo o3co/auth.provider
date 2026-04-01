@@ -6,3 +6,4 @@ dist/
 .env.*
 .worktrees/
 docs/superpowers/
+create-app/templates/

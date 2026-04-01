@@ -17,10 +17,16 @@ cpSync(src, dest, {
 	},
 });
 
-// Embed the core package version so it's available at runtime without
+// Embed package versions so they're available at runtime without
 // traversing the monorepo source tree (which won't exist in published tarballs).
-const corePkgPath = resolve(__dirname, "../../packages/core/package.json");
-const corePkg = JSON.parse(readFileSync(corePkgPath, "utf-8"));
-const version = corePkg.version ?? "0.0.0";
+const readVersion = (pkgPath) => {
+	const pkg = JSON.parse(readFileSync(resolve(__dirname, pkgPath), "utf-8"));
+	return pkg.version ?? "0.0.0";
+};
 
-writeFileSync(resolve(dest, "..", "core-version.json"), `${JSON.stringify({ version })}\n`);
+const versions = {
+	"@o3co/auth-provider-core": readVersion("../../packages/core/package.json"),
+	"@o3co/auth-provider-repositories": readVersion("../../packages/repositories/package.json"),
+};
+
+writeFileSync(resolve(dest, "..", "versions.json"), `${JSON.stringify(versions, null, "\t")}\n`);

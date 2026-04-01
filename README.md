@@ -74,8 +74,11 @@ pnpm -r --filter @o3co/auth-provider-standalone run debug
 
 ## Docker
 
+The Dockerfile is included in the standalone template (`templates/standalone/Dockerfile`). Scaffolded projects can build directly:
+
 ```bash
-make docker       # Build runtime image
+cd my-auth-project
+docker build -t my-auth .
 ```
 
 ## Related Projects

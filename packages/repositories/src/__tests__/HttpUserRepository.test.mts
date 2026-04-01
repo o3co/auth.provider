@@ -47,7 +47,11 @@ afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
 describe("HttpUserRepository", () => {
-	const repo = new HttpUserRepository({ baseURL: BASE_URL, timeout: 5000 });
+	const repo = new HttpUserRepository({
+		authenticateUrl: `${BASE_URL}/user/authenticate`,
+		authenticateByTokenUrl: `${BASE_URL}/user/authenticate/token`,
+		timeout: 5000,
+	});
 
 	describe("authenticate", () => {
 		it("returns user on success", async () => {

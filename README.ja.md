@@ -74,8 +74,11 @@ pnpm -r --filter @o3co/auth-provider-standalone run debug
 
 ## Docker
 
+Dockerfile はスタンドアロンテンプレート (`templates/standalone/Dockerfile`) に含まれる。scaffold されたプロジェクトで直接ビルド可能:
+
 ```bash
-make docker       # ランタイムイメージのビルド
+cd my-auth-project
+docker build -t my-auth .
 ```
 
 ## 関連プロジェクト

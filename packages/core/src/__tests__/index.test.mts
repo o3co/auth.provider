@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	AppConfigSchema,
+	createDefaultFactories,
 	createGoogleProvider,
 	createPassport,
 	createRouter,
@@ -9,6 +10,7 @@ import {
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
+	RepositoryFactory,
 } from "../index.mjs";
 
 describe("public API", () => {
@@ -51,5 +53,14 @@ describe("public API", () => {
 	it("exports InMemoryCodeRepository class", () => {
 		expect(InMemoryCodeRepository).toBeDefined();
 		expect(typeof InMemoryCodeRepository).toBe("function");
+	});
+
+	it("exports RepositoryFactory class", () => {
+		expect(RepositoryFactory).toBeDefined();
+		expect(typeof RepositoryFactory).toBe("function");
+	});
+
+	it("exports createDefaultFactories function", () => {
+		expect(typeof createDefaultFactories).toBe("function");
 	});
 });

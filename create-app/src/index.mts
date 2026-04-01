@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { execSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,19 +20,18 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "../templates/standalone");
 
-const getCoreVersion = (): string => {
-	const versionFile = resolve(__dirname, "../templates/core-version.json");
+const getPackageVersions = (): Record<string, string> => {
+	const versionFile = resolve(__dirname, "../templates/versions.json");
 	if (existsSync(versionFile)) {
-		const data = JSON.parse(readFileSync(versionFile, "utf-8"));
-		return data.version ?? "0.0.0";
+		return JSON.parse(readFileSync(versionFile, "utf-8"));
 	}
-	return "0.0.0";
+	return {};
 };
 
 export const scaffold = (targetDir: string, projectName: string): void => {
 	if (!existsSync(TEMPLATES_DIR)) {
 		throw new Error(
-			`Template directory not found at ${TEMPLATES_DIR}. Run 'pnpm run prebuild' first.`,
+			`Template directory not found at ${TEMPLATES_DIR}. If developing locally, run the prebuild script first.`,
 		);
 	}
 
@@ -53,9 +51,22 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	pkg.name = projectName;
 	delete pkg.private;
 
-	// Replace workspace reference with published version
-	if (pkg.dependencies?.["@o3co/auth-provider-core"] === "workspace:*") {
-		pkg.dependencies["@o3co/auth-provider-core"] = `^${getCoreVersion()}`;
+	// Replace all workspace:* references with per-package published versions
+	const versions = getPackageVersions();
+	for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {
+		const deps = pkg[section];
+		if (!deps) continue;
+		for (const [name, version] of Object.entries(deps)) {
+			if (version === "workspace:*") {
+				const resolved = versions[name];
+				if (!resolved) {
+					throw new Error(
+						`Cannot resolve version for workspace dependency "${name}". Ensure versions.json includes this package.`,
+					);
+				}
+				deps[name] = `^${resolved}`;
+			}
+		}
 	}
 
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
@@ -87,18 +98,9 @@ export const main = (): void => {
 	console.log(`Creating ${projectName}...`);
 	scaffold(targetDir, projectName);
 
-	try {
-		console.log("Installing dependencies...");
-		execSync("pnpm install", { cwd: targetDir, stdio: "inherit" });
-	} catch {
-		console.warn("Warning: Automatic dependency installation with 'pnpm install' failed.");
-		console.warn(
-			`You can still use the scaffolded project. To finish setup, run 'pnpm install' inside '${projectName}'.`,
-		);
-	}
-
 	console.log(`\nDone! Created ${projectName} at ${targetDir}`);
 	console.log(`\nNext steps:`);
 	console.log(`  cd ${projectName}`);
-	console.log(`  pnpm run debug`);
+	console.log("  npm install");
+	console.log("  npm run debug");
 };

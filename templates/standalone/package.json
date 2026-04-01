@@ -18,6 +18,7 @@
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-repositories": "workspace:*",
 		"@o3co/js.util.log": "^0.5.0",
 		"@o3co/ts.hocon": "^0.1.2",
 		"connect-redis": "^9.0.0",
@@ -33,7 +34,6 @@
 	"devDependencies": {
 		"@types/express-session": "^1",
 		"@types/node": "^25.1.0",
-		"msw": "^2.12.14",
 		"pino": "^10.3.1",
 		"tsx": "^4.21.0",
 		"typescript": "^5.9.3",

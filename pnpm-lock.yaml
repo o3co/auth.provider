@@ -100,11 +100,36 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2(@types/node@25.5.0)(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(tsx@4.21.0))
 
+  packages/repositories:
+    dependencies:
+      redis:
+        specifier: ^5.10.0
+        version: 5.11.0
+    devDependencies:
+      '@o3co/auth-provider-core':
+        specifier: workspace:*
+        version: link:../core
+      '@types/node':
+        specifier: ^25.1.0
+        version: 25.5.0
+      msw:
+        specifier: ^2.12.14
+        version: 2.12.14(@types/node@25.5.0)(typescript@5.9.3)
+      pino:
+        specifier: ^10.3.1
+        version: 10.3.1
+      vitest:
+        specifier: ^4.1.2
+        version: 4.1.2(@types/node@25.5.0)(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(tsx@4.21.0))
+
   templates/standalone:
     dependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@o3co/auth-provider-repositories':
+        specifier: workspace:*
+        version: link:../../packages/repositories
       '@o3co/js.util.log':
         specifier: ^0.5.0
         version: 0.5.0(pino@10.3.1)
@@ -145,9 +170,6 @@ importers:
       '@types/node':
         specifier: ^25.1.0
         version: 25.5.0
-      msw:
-        specifier: ^2.12.14
-        version: 2.12.14(@types/node@25.5.0)(typescript@5.9.3)
       pino:
         specifier: ^10.3.1
         version: 10.3.1
