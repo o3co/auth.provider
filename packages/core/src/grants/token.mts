@@ -86,8 +86,8 @@ export const generateToken = (
 		{
 			algorithm: "HS256",
 			expiresIn,
-			issuer: issuer ?? undefined,
-			audience: audience ?? undefined,
+			...(issuer != null ? { issuer } : {}),
+			...(audience != null ? { audience } : {}),
 		},
 	);
 
