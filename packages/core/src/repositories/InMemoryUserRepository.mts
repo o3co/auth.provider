@@ -29,7 +29,7 @@ export const UserEntrySchema = z
 
 export type UserEntry = z.infer<typeof UserEntrySchema>;
 
-export class StaticUserRepository implements UserRepository {
+export class InMemoryUserRepository implements UserRepository {
 	private users: Map<string, UserEntry>;
 
 	constructor(users: Map<string, UserEntry>) {

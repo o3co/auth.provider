@@ -15,12 +15,12 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
-import { StaticClientRepository } from "../StaticClientRepository.mjs";
+import { InMemoryClientRepository } from "../InMemoryClientRepository.mjs";
 
-describe("StaticClientRepository", () => {
+describe("InMemoryClientRepository", () => {
 	describe("findById", () => {
 		it("returns client when found", async () => {
-			const repo = new StaticClientRepository(
+			const repo = new InMemoryClientRepository(
 				new Map([
 					[
 						"test-app",
@@ -41,7 +41,7 @@ describe("StaticClientRepository", () => {
 		});
 
 		it("returns null when not found", async () => {
-			const repo = new StaticClientRepository(
+			const repo = new InMemoryClientRepository(
 				new Map([
 					[
 						"test-app",
@@ -60,7 +60,7 @@ describe("StaticClientRepository", () => {
 
 	describe("authenticate", () => {
 		it("returns client with correct plain text secret", async () => {
-			const repo = new StaticClientRepository(
+			const repo = new InMemoryClientRepository(
 				new Map([
 					[
 						"my-client",
@@ -79,7 +79,7 @@ describe("StaticClientRepository", () => {
 		});
 
 		it("returns null with wrong plain text secret", async () => {
-			const repo = new StaticClientRepository(
+			const repo = new InMemoryClientRepository(
 				new Map([
 					[
 						"my-client",
@@ -96,7 +96,7 @@ describe("StaticClientRepository", () => {
 		});
 
 		it("returns null for nonexistent client", async () => {
-			const repo = new StaticClientRepository(
+			const repo = new InMemoryClientRepository(
 				new Map([
 					[
 						"my-client",
@@ -114,7 +114,7 @@ describe("StaticClientRepository", () => {
 
 		it("returns client with correct bcrypt secret", async () => {
 			const realHash = bcrypt.hashSync("my-secret", 10);
-			const repo = new StaticClientRepository(
+			const repo = new InMemoryClientRepository(
 				new Map([
 					[
 						"bcrypt-client",
@@ -133,7 +133,7 @@ describe("StaticClientRepository", () => {
 
 		it("returns null with wrong bcrypt secret", async () => {
 			const realHash = bcrypt.hashSync("my-secret", 10);
-			const repo = new StaticClientRepository(
+			const repo = new InMemoryClientRepository(
 				new Map([
 					[
 						"bcrypt-client",

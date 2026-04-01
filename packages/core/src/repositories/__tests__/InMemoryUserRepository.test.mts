@@ -15,12 +15,12 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
-import { StaticUserRepository } from "../StaticUserRepository.mjs";
+import { InMemoryUserRepository } from "../InMemoryUserRepository.mjs";
 
-describe("StaticUserRepository", () => {
+describe("InMemoryUserRepository", () => {
 	describe("authenticate", () => {
 		it("returns user for valid credentials (plain text)", async () => {
-			const repo = new StaticUserRepository(
+			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1", email: "alice@example.com" }]]),
 			);
 			const user = await repo.authenticate("alice", "secret123");
@@ -32,7 +32,7 @@ describe("StaticUserRepository", () => {
 		});
 
 		it("returns null for wrong password", async () => {
-			const repo = new StaticUserRepository(
+			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1" }]]),
 			);
 			const user = await repo.authenticate("alice", "wrong");
@@ -41,7 +41,7 @@ describe("StaticUserRepository", () => {
 		});
 
 		it("returns null for unknown username", async () => {
-			const repo = new StaticUserRepository(
+			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1" }]]),
 			);
 			const user = await repo.authenticate("bob", "secret123");
@@ -51,7 +51,7 @@ describe("StaticUserRepository", () => {
 
 		it("supports bcrypt hashed passwords", async () => {
 			const hash = await bcrypt.hash("secret123", 10);
-			const repo = new StaticUserRepository(new Map([["alice", { password: hash, id: "u1" }]]));
+			const repo = new InMemoryUserRepository(new Map([["alice", { password: hash, id: "u1" }]]));
 			const user = await repo.authenticate("alice", "secret123");
 
 			expect(user).not.toBeNull();
@@ -59,7 +59,7 @@ describe("StaticUserRepository", () => {
 		});
 
 		it("does not include password in returned user", async () => {
-			const repo = new StaticUserRepository(
+			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1" }]]),
 			);
 			const user = await repo.authenticate("alice", "secret123");
@@ -71,7 +71,7 @@ describe("StaticUserRepository", () => {
 
 	describe("authenticateByToken", () => {
 		it("returns user matching token field", async () => {
-			const repo = new StaticUserRepository(
+			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1", token: "tok_alice_123" }]]),
 			);
 			const user = await repo.authenticateByToken("tok_alice_123");
@@ -81,7 +81,7 @@ describe("StaticUserRepository", () => {
 		});
 
 		it("returns null when no user has matching token", async () => {
-			const repo = new StaticUserRepository(
+			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1", token: "tok_alice_123" }]]),
 			);
 			const user = await repo.authenticateByToken("tok_unknown");
@@ -90,7 +90,7 @@ describe("StaticUserRepository", () => {
 		});
 
 		it("returns null when no users have token field", async () => {
-			const repo = new StaticUserRepository(
+			const repo = new InMemoryUserRepository(
 				new Map([["alice", { password: "secret123", id: "u1" }]]),
 			);
 			const user = await repo.authenticateByToken("tok_anything");

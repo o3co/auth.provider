@@ -38,19 +38,19 @@ export { createPassport } from "./Passport.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
-// Built-in implementations
-export { InMemoryCodeRepository } from "./repositories/InMemoryCodeRepository.mjs";
-export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 export {
 	type ClientEntry,
 	ClientEntrySchema,
-	StaticClientRepository,
-} from "./repositories/StaticClientRepository.mjs";
+	InMemoryClientRepository,
+} from "./repositories/InMemoryClientRepository.mjs";
+// Built-in implementations
+export { InMemoryCodeRepository } from "./repositories/InMemoryCodeRepository.mjs";
 export {
-	StaticUserRepository,
+	InMemoryUserRepository,
 	type UserEntry,
 	UserEntrySchema,
-} from "./repositories/StaticUserRepository.mjs";
+} from "./repositories/InMemoryUserRepository.mjs";
+export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
 // Router factory

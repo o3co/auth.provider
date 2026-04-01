@@ -6,15 +6,15 @@ import {
 	createRouter,
 	FederationRegistry,
 	GrantRegistry,
+	InMemoryClientRepository,
 	InMemoryCodeRepository,
-	StaticClientRepository,
-	StaticUserRepository,
+	InMemoryUserRepository,
 } from "../index.mjs";
 
 describe("public API", () => {
-	it("exports StaticClientRepository class", () => {
-		expect(StaticClientRepository).toBeDefined();
-		expect(typeof StaticClientRepository).toBe("function");
+	it("exports InMemoryClientRepository class", () => {
+		expect(InMemoryClientRepository).toBeDefined();
+		expect(typeof InMemoryClientRepository).toBe("function");
 	});
 
 	it("exports AppConfigSchema", () => {
@@ -43,9 +43,9 @@ describe("public API", () => {
 		expect(typeof createGoogleProvider).toBe("function");
 	});
 
-	it("exports StaticUserRepository class", () => {
-		expect(StaticUserRepository).toBeDefined();
-		expect(typeof StaticUserRepository).toBe("function");
+	it("exports InMemoryUserRepository class", () => {
+		expect(InMemoryUserRepository).toBeDefined();
+		expect(typeof InMemoryUserRepository).toBe("function");
 	});
 
 	it("exports InMemoryCodeRepository class", () => {

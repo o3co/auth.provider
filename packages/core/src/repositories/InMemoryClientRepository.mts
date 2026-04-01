@@ -29,7 +29,7 @@ export const ClientEntrySchema = z
 
 export type ClientEntry = z.infer<typeof ClientEntrySchema>;
 
-export class StaticClientRepository implements ClientRepository {
+export class InMemoryClientRepository implements ClientRepository {
 	private clients: Map<string, ClientEntry>;
 
 	constructor(clients: Map<string, ClientEntry>) {

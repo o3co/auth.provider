@@ -21,8 +21,8 @@ import {
 	ClientEntrySchema,
 	createPassport,
 	createRouter,
+	InMemoryClientRepository,
 	loadYamlMap,
-	StaticClientRepository,
 } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -46,7 +46,7 @@ await (async (): Promise<void> => {
 	// Initialize repositories
 	const appDir = path.dirname(fileURLToPath(import.meta.url));
 	const clientsYamlPath = path.resolve(appDir, "..", config.clients.client.path);
-	const clientRepository = new StaticClientRepository(
+	const clientRepository = new InMemoryClientRepository(
 		loadYamlMap(clientsYamlPath, ClientEntrySchema),
 	);
 	const userRepository = new HttpUserRepository(config.clients.user);
