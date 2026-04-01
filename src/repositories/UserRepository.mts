@@ -13,21 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { Client } from "./base/BaseClient.mjs";
 
-export class ClientFactory {
-	private clients: Map<string, Client>;
+import type { User } from "./types.mjs";
 
-	constructor(clients: { [key: string]: Client }) {
-		this.clients = new Map(Object.entries(clients));
-	}
-
-	async initialize(): Promise<void> {
-		for (const c of this.clients.values()) {
-			await c.initialize();
-		}
-	}
-	get(name: string): Client | undefined {
-		return this.clients.get(name);
-	}
+export interface UserRepository {
+	authenticate(username: string, password: string): Promise<User | null>;
+	authenticateByToken(token: string): Promise<User | null>;
 }

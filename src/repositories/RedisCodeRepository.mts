@@ -13,26 +13,41 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 import crypto from "node:crypto";
-import { RedisClient } from "./base/RedisClient.mjs";
+import { createClient, type RedisClientType } from "redis";
+import type { CodeRepository } from "./CodeRepository.mjs";
+import type { Code } from "./types.mjs";
 
-export interface Code {
-	code: string;
-	code_challenge?: string;
-	code_challenge_method?: string;
-	expiresIn?: number;
-}
-
-export class CodeClient extends RedisClient {
-	private readonly defaultExpiresIn: number;
+export class RedisCodeRepository implements CodeRepository {
+	private redis: RedisClientType;
+	private defaultExpiresIn: number;
 
 	constructor({
 		endpointUri,
 		password,
-		defaultExpiresIn = 600, // 10 minutes
-	}: { endpointUri: string; password?: string; defaultExpiresIn?: number }) {
-		super({ endpointUri, password });
+		defaultExpiresIn = 600,
+	}: {
+		endpointUri: string;
+		password?: string;
+		defaultExpiresIn?: number;
+	}) {
+		this.redis = createClient({
+			url: endpointUri,
+			password,
+			socket: {
+				reconnectStrategy: (retries) => {
+					const jitter = Math.floor(Math.random() * 200);
+					const delay = Math.min(2 ** retries * 50, 2000);
+					return delay + jitter;
+				},
+			},
+		}) as RedisClientType;
 		this.defaultExpiresIn = defaultExpiresIn;
+	}
+
+	async initialize(): Promise<void> {
+		await this.redis.connect();
 	}
 
 	async createCode({
@@ -46,14 +61,13 @@ export class CodeClient extends RedisClient {
 	}): Promise<Code> {
 		const code = crypto.randomBytes(32).toString("base64url");
 
-		await this.setByCode(code, { code_challenge, code_challenge_method }, { expiresIn });
-
-		return {
+		await this.redis.set(
 			code,
-			code_challenge,
-			code_challenge_method,
-			expiresIn,
-		};
+			JSON.stringify({ code_challenge, code_challenge_method }),
+			{ EX: expiresIn },
+		);
+
+		return { code, code_challenge, code_challenge_method, expiresIn };
 	}
 
 	async getByCode(code: string): Promise<Code | null> {
@@ -62,26 +76,7 @@ export class CodeClient extends RedisClient {
 		return { ...JSON.parse(value), code } as Code;
 	}
 
-	async setByCode(
-		code: string,
-		{
-			code_challenge,
-			code_challenge_method,
-		}: {
-			code_challenge?: string;
-			code_challenge_method?: string;
-		},
-		{ expiresIn }: { expiresIn: number | undefined } = {
-			expiresIn: undefined,
-		},
-	): Promise<void> {
-		await this.redis.set(
-			code,
-			JSON.stringify({
-				code_challenge,
-				code_challenge_method,
-			}),
-			{ EX: expiresIn ?? undefined },
-		);
+	async removeByCode(code: string): Promise<void> {
+		await this.redis.del(code);
 	}
 }

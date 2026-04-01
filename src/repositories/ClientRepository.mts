@@ -13,6 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export class Client {
-	async initialize(): Promise<void> {}
+
+import type { Client } from "./types.mjs";
+
+export type AuthenticatedClient = Omit<Client, "clientSecret">;
+
+export interface ClientRepository {
+	findById(clientId: string): Promise<Client | null>;
+	authenticate(clientId: string, secret: string): Promise<AuthenticatedClient | null>;
 }
