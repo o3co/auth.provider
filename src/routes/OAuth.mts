@@ -33,8 +33,6 @@ declare module "express-session" {
 		user?: Record<string, unknown>;
 		code?: string;
 		code_client_id?: string;
-		code_challenge?: string;
-		code_challenge_method?: string;
 		granted_scopes?: string[];
 		isAuthenticated?: boolean;
 	}
@@ -199,8 +197,6 @@ export const createRouter = (
 
 				req.session.code = issue.code;
 				req.session.code_client_id = client_id;
-				req.session.code_challenge = issue.code_challenge;
-				req.session.code_challenge_method = issue.code_challenge_method;
 				req.session.granted_scopes = grantedScopes.length > 0 ? grantedScopes : undefined;
 
 				const url = new URL(redirect_uri);

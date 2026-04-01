@@ -19,7 +19,7 @@ import { formatObject, generateToken, generateTokenResponse } from "./token.mjs"
 import type { GrantContext, GrantDependencies, GrantHandler } from "./types.mjs";
 
 export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler => {
-	const { config } = deps;
+	const { config, codeRepository } = deps;
 
 	return {
 		async handle({ req, res, issuer }: GrantContext): Promise<void> {
@@ -35,14 +35,22 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 				return;
 			}
 
-			// Mark code as used (replay attack prevention)
+			// Load code data from repository
+			const codeData = await codeRepository.getByCode(code);
+			if (!codeData) {
+				res.status(400).json({ message: "invalid code" });
+				return;
+			}
+
+			// Consume code: remove from both repository and session (replay attack prevention)
+			await codeRepository.removeByCode(code);
 			const grantedScopes = req.session.granted_scopes;
 			req.session.code = undefined;
 			req.session.code_client_id = undefined;
 			req.session.granted_scopes = undefined;
 
-			// Validate code_verifier
-			if (req.session.code_challenge_method) {
+			// Validate code_verifier using code data from repository
+			if (codeData.code_challenge_method) {
 				if (!code_verifier) {
 					res.status(400).json({ message: "code_verifier required" });
 					return;
@@ -52,18 +60,18 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 					res.status(400).json({ message: "invalid code_verifier format" });
 					return;
 				}
-				switch (req.session.code_challenge_method) {
+				switch (codeData.code_challenge_method) {
 					case "S256": {
 						const hash = crypto.createHash("sha256").update(code_verifier).digest();
 						const base64url = hash.toString("base64url");
-						if (base64url !== req.session.code_challenge) {
+						if (base64url !== codeData.code_challenge) {
 							res.status(400).json({ message: "invalid code_verifier" });
 							return;
 						}
 						break;
 					}
 					case "plain":
-						if (code_verifier !== req.session.code_challenge) {
+						if (code_verifier !== codeData.code_challenge) {
 							res.status(400).json({ message: "invalid code_verifier" });
 							return;
 						}
