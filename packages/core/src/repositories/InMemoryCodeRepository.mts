@@ -15,8 +15,8 @@
  */
 
 import crypto from "node:crypto";
-import type { Code } from "./types.mjs";
 import type { CodeRepository } from "./CodeRepository.mjs";
+import type { Code } from "./types.mjs";
 
 interface StoredCode extends Code {
 	expiresAt: number;
@@ -53,7 +53,12 @@ export class InMemoryCodeRepository implements CodeRepository {
 			expiresAt: Date.now() + expiresIn * 1000,
 		};
 		this.codes.set(code, stored);
-		return { code, code_challenge: params.code_challenge, code_challenge_method: params.code_challenge_method, expiresIn };
+		return {
+			code,
+			code_challenge: params.code_challenge,
+			code_challenge_method: params.code_challenge_method,
+			expiresIn,
+		};
 	}
 
 	async getByCode(code: string): Promise<Code | null> {
@@ -63,7 +68,12 @@ export class InMemoryCodeRepository implements CodeRepository {
 			this.codes.delete(code);
 			return null;
 		}
-		return { code: stored.code, code_challenge: stored.code_challenge, code_challenge_method: stored.code_challenge_method, expiresIn: stored.expiresIn };
+		return {
+			code: stored.code,
+			code_challenge: stored.code_challenge,
+			code_challenge_method: stored.code_challenge_method,
+			expiresIn: stored.expiresIn,
+		};
 	}
 
 	async consumeByCode(code: string): Promise<Code | null> {
@@ -71,7 +81,12 @@ export class InMemoryCodeRepository implements CodeRepository {
 		if (!stored) return null;
 		this.codes.delete(code);
 		if (Date.now() >= stored.expiresAt) return null;
-		return { code: stored.code, code_challenge: stored.code_challenge, code_challenge_method: stored.code_challenge_method, expiresIn: stored.expiresIn };
+		return {
+			code: stored.code,
+			code_challenge: stored.code_challenge,
+			code_challenge_method: stored.code_challenge_method,
+			expiresIn: stored.expiresIn,
+		};
 	}
 
 	async removeByCode(code: string): Promise<void> {

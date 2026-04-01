@@ -46,9 +46,7 @@ describe("InMemoryCodeRepository", () => {
 
 		it("generates unique codes", async () => {
 			repo = new InMemoryCodeRepository();
-			const codes = await Promise.all(
-				Array.from({ length: 10 }, () => repo.createCode({})),
-			);
+			const codes = await Promise.all(Array.from({ length: 10 }, () => repo.createCode({})));
 			const unique = new Set(codes.map((c) => c.code));
 			expect(unique.size).toBe(10);
 		});

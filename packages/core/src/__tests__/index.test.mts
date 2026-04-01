@@ -6,7 +6,9 @@ import {
 	createRouter,
 	FederationRegistry,
 	GrantRegistry,
+	InMemoryCodeRepository,
 	StaticClientRepository,
+	StaticUserRepository,
 } from "../index.mjs";
 
 describe("public API", () => {
@@ -39,5 +41,15 @@ describe("public API", () => {
 
 	it("exports createGoogleProvider function", () => {
 		expect(typeof createGoogleProvider).toBe("function");
+	});
+
+	it("exports StaticUserRepository class", () => {
+		expect(StaticUserRepository).toBeDefined();
+		expect(typeof StaticUserRepository).toBe("function");
+	});
+
+	it("exports InMemoryCodeRepository class", () => {
+		expect(InMemoryCodeRepository).toBeDefined();
+		expect(typeof InMemoryCodeRepository).toBe("function");
 	});
 });
