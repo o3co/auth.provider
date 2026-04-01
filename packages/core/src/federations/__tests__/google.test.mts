@@ -49,7 +49,12 @@ const baseConfig = {
 	},
 	clients: {
 		client: { type: "yaml", path: "./config/clients.yaml" },
-		user: { type: "http", baseURL: "http://localhost:3001", timeout: 5000 },
+		user: {
+			type: "http",
+			authenticateUrl: "http://localhost:3001/user/authenticate",
+			authenticateByTokenUrl: "http://localhost:3001/user/authenticate/token",
+			timeout: 5000,
+		},
 		code: { type: "redis", endpointUri: "http://localhost:3002", defaultExpiresIn: 600 },
 	},
 	endpoints: {

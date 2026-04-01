@@ -23,11 +23,15 @@ export const registerBuiltinRepositories = (factories: {
 	codeFactory: RepositoryFactory<CodeRepository>;
 }): void => {
 	factories.userFactory.register("http", (config) => {
-		if (typeof config.baseURL !== "string") {
-			throw new Error('HttpUserRepository requires "baseURL" in config');
+		if (typeof config.authenticateUrl !== "string") {
+			throw new Error('HttpUserRepository requires "authenticateUrl" in config');
+		}
+		if (typeof config.authenticateByTokenUrl !== "string") {
+			throw new Error('HttpUserRepository requires "authenticateByTokenUrl" in config');
 		}
 		return new HttpUserRepository({
-			baseURL: config.baseURL,
+			authenticateUrl: config.authenticateUrl,
+			authenticateByTokenUrl: config.authenticateByTokenUrl,
 			timeout: typeof config.timeout === "number" ? config.timeout : 5000,
 		});
 	});
