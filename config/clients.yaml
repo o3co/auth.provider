@@ -1,8 +1,2 @@
-# NOTE: Override secrets per deployment. These placeholders MUST NOT be used in production.
-test-app:
-  clientSecret: "CHANGE_ME_CLIENT_SECRET"
-  allowedRedirectUris:
-    - "http://localhost:3000/callback"
-  allowedScopes:
-    - "read"
-    - "write"
+# Client definitions for StaticClientRepository.
+# Add client entries here. See clients.yaml.example for format.
