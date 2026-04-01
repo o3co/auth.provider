@@ -89,7 +89,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// RFC 6749 Section 6: requested scope MUST NOT exceed original scope
 			let grantedScopes = existingScopes as string[] | null;
 			if (requestedScope) {
-				const requested = requestedScope.split(" ").filter(Boolean);
+				const requested = [...new Set(requestedScope.split(" ").filter(Boolean))];
 				const original = Array.isArray(existingScopes) ? existingScopes : [];
 				const invalid = requested.filter((s) => !original.includes(s));
 				if (invalid.length > 0) {

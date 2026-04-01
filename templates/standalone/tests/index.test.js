@@ -58,6 +58,16 @@ describe("POST /oauth/introspect", () => {
 			expect(res.data.active).toBe(true);
 		});
 
+		it("returns scope as space-separated string per RFC 7662", async () => {
+			const token = jwt.sign({ user: { id: 1 }, scopes: ["read", "write"] }, JWT_SECRET, {
+				expiresIn: 60,
+			});
+			const res = await selfIntrospect(token);
+			expect(res.status).toBe(200);
+			expect(res.data.scope).toBe("read write");
+			expect(res.data.scopes).toBeUndefined();
+		});
+
 		it("returns 401 for an invalid JWT", async () => {
 			const res = await selfIntrospect("invalid.token.here");
 			expect(res.status).toBe(401);

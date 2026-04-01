@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createSessionGrant } from "../session.mjs";
 import type { GrantContext, GrantDependencies } from "../types.mjs";
@@ -32,11 +32,17 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-const mockDeps: GrantDependencies = {
+const makeDeps = (overrides?: Partial<GrantDependencies>): GrantDependencies => ({
 	config: mockConfig,
-	clientRepository: {} as GrantDependencies["clientRepository"],
+	clientRepository: {
+		findById: vi.fn(),
+		authenticate: vi.fn(),
+	} as unknown as GrantDependencies["clientRepository"],
 	codeRepository: {} as GrantDependencies["codeRepository"],
-};
+	...overrides,
+});
+
+const mockDeps = makeDeps();
 
 describe("createSessionGrant", () => {
 	describe("handle", () => {
@@ -115,7 +121,13 @@ describe("createSessionGrant", () => {
 		});
 
 		it("includes audience when client_id is provided", async () => {
-			const handler = createSessionGrant(mockDeps);
+			const deps = makeDeps();
+			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
+				clientId: "my-app",
+				allowedRedirectUris: [],
+				allowedScopes: ["read", "write"],
+			});
+			const handler = createSessionGrant(deps);
 			const ctx: GrantContext = {
 				body: { client_id: "my-app" },
 				session: { isAuthenticated: true, user: { id: "u1" } },
@@ -126,16 +138,81 @@ describe("createSessionGrant", () => {
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
 			if ("tokens" in result) {
-				// Decode the JWT to verify audience
 				const jwt = await import("jsonwebtoken");
 				const decoded = jwt.default.decode(result.tokens.access_token) as Record<string, unknown>;
 				expect(decoded.aud).toBe("my-app");
 			}
 		});
 
-		it("includes scope when scope is provided", async () => {
-			const handler = createSessionGrant(mockDeps);
+		it("validates scope against client allowedScopes when client_id is provided", async () => {
+			const deps = makeDeps();
+			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
+				clientId: "my-app",
+				allowedRedirectUris: [],
+				allowedScopes: ["read", "write"],
+			});
+			const handler = createSessionGrant(deps);
+			const ctx: GrantContext = {
+				body: { client_id: "my-app", scope: "read" },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBe("read");
+			}
+		});
+
+		it("rejects scope exceeding client allowedScopes", async () => {
+			const deps = makeDeps();
+			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
+				clientId: "my-app",
+				allowedRedirectUris: [],
+				allowedScopes: ["read"],
+			});
+			const handler = createSessionGrant(deps);
+			const ctx: GrantContext = {
+				body: { client_id: "my-app", scope: "read admin" },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			expect("error" in result).toBe(true);
+			if ("error" in result) {
+				expect(result.error).toBe("invalid_scope");
+			}
+		});
+
+		it("returns 400 when client_id is provided but client not found", async () => {
+			const deps = makeDeps();
+			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+			const handler = createSessionGrant(deps);
+			const ctx: GrantContext = {
+				body: { client_id: "unknown" },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			expect("error" in result).toBe(true);
+		});
+
+		it("accepts scope without client_id (no validation)", async () => {
+			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {
 				body: { scope: "read write" },
 				session: { isAuthenticated: true, user: { id: "u1" } },
@@ -146,8 +223,45 @@ describe("createSessionGrant", () => {
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
 			if ("tokens" in result) {
 				expect(result.tokens.scope).toBe("read write");
+			}
+		});
+
+		it("deduplicates scope values", async () => {
+			const handler = createSessionGrant(makeDeps());
+			const ctx: GrantContext = {
+				body: { scope: "read read write" },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBe("read write");
+			}
+		});
+
+		it("treats empty scope string as no scope", async () => {
+			const handler = createSessionGrant(makeDeps());
+			const ctx: GrantContext = {
+				body: { scope: "" },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBeUndefined();
 			}
 		});
 

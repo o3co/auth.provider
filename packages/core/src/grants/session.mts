@@ -22,7 +22,7 @@ import type {
 } from "./types.mjs";
 
 export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
-	const { config } = deps;
+	const { config, clientRepository } = deps;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -42,7 +42,35 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 				};
 			}
 
-			const scopes = requestedScope ? requestedScope.split(" ").filter(Boolean) : undefined;
+			// Parse and deduplicate scope
+			const rawScopes = requestedScope ? requestedScope.split(" ").filter(Boolean) : undefined;
+			const scopes = rawScopes?.length ? [...new Set(rawScopes)] : undefined;
+
+			// Validate scope against client's allowedScopes when client_id is provided
+			if (client_id) {
+				const client = await clientRepository.findById(client_id);
+				if (!client) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "client not found",
+						},
+					};
+				}
+				if (scopes) {
+					const invalid = scopes.filter((s) => !client.allowedScopes.includes(s));
+					if (invalid.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_scope",
+								errorDescription: `requested scope exceeds allowed: ${invalid.join(" ")}`,
+							},
+						};
+					}
+				}
+			}
 
 			const payload = formatObject({
 				user: session.user,

@@ -161,6 +161,7 @@ describe("createRefreshTokenGrant", () => {
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
 			if ("tokens" in result) {
 				expect(result.tokens.scope).toBe("read");
 			}
@@ -181,6 +182,44 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(400);
 			if ("error" in result) {
 				expect(result.error).toBe("invalid_scope");
+			}
+		});
+
+		it("deduplicates requested scope values", async () => {
+			const token = makeRefreshToken({ scopes: ["read", "write"] });
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: token, scope: "read read" },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBe("read");
+			}
+		});
+
+		it("treats empty scope string as no scope change", async () => {
+			const token = makeRefreshToken({ scopes: ["read", "write"] });
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: token, scope: "" },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBe("read write");
 			}
 		});
 
