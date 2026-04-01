@@ -77,7 +77,8 @@ export class RedisCodeRepository implements CodeRepository {
 		if (!value) return null;
 		try {
 			return { ...JSON.parse(value), code } as Code;
-		} catch {
+		} catch (err) {
+			console.error(`RedisCodeRepository: corrupted data for code ${code}`, err);
 			return null;
 		}
 	}

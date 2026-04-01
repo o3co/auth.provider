@@ -22,9 +22,9 @@ import { z } from "zod";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
 const ClientEntrySchema = z.object({
-	clientSecret: z.string(),
-	allowedRedirectUris: z.array(z.string()),
-	allowedScopes: z.array(z.string()),
+	clientSecret: z.string().min(1),
+	allowedRedirectUris: z.array(z.string()).default([]),
+	allowedScopes: z.array(z.string()).default([]),
 });
 
 type ClientEntry = z.infer<typeof ClientEntrySchema>;
