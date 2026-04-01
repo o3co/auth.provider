@@ -29,9 +29,14 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, issuer, metadata } = ctx;
-			const { refresh_token: refreshTokenValue, client_id } = body as {
+			const {
+				refresh_token: refreshTokenValue,
+				client_id,
+				scope: requestedScope,
+			} = body as {
 				refresh_token?: string;
 				client_id?: string;
+				scope?: string;
 			};
 
 			if (!refreshTokenValue) {
@@ -80,6 +85,25 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			}
 
 			const { user, client, scopes: existingScopes } = tokenPayload;
+
+			// RFC 6749 Section 6: requested scope MUST NOT exceed original scope
+			let grantedScopes = existingScopes as string[] | null;
+			if (requestedScope) {
+				const requested = requestedScope.split(" ").filter(Boolean);
+				const original = Array.isArray(existingScopes) ? existingScopes : [];
+				const invalid = requested.filter((s) => !original.includes(s));
+				if (invalid.length > 0) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_scope",
+							errorDescription: `requested scope exceeds original grant: ${invalid.join(" ")}`,
+						},
+					};
+				}
+				grantedScopes = requested;
+			}
+
 			const refreshPayload = formatObject({ user, client, ...metadata });
 
 			return {
@@ -91,7 +115,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 							secret: config.oauth.jwt.secret,
 							issuer,
 							audience: tokenAud ?? client_id ?? null,
-							scopes: existingScopes as string[] | null,
+							scopes: grantedScopes,
 							type: "access",
 						}),
 						refreshToken: generateToken(refreshPayload, {
@@ -99,7 +123,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 							secret: config.oauth.jwt.secret,
 							issuer,
 							audience: tokenAud ?? client_id ?? null,
-							scopes: existingScopes as string[] | null,
+							scopes: grantedScopes,
 							type: "refresh",
 						}),
 					}),

@@ -148,6 +148,42 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(200);
 		});
 
+		it("allows scope reduction via scope parameter", async () => {
+			const token = makeRefreshToken({ scopes: ["read", "write"] });
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: token, scope: "read" },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBe("read");
+			}
+		});
+
+		it("rejects scope that exceeds original grant", async () => {
+			const token = makeRefreshToken({ scopes: ["read"] });
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: token, scope: "read write" },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			if ("error" in result) {
+				expect(result.error).toBe("invalid_scope");
+			}
+		});
+
 		it("does not return sessionMutation", async () => {
 			const token = makeRefreshToken();
 			const handler = createRefreshTokenGrant(mockDeps);

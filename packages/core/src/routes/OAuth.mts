@@ -145,7 +145,8 @@ export const createRouter = (
 							iss,
 							aud,
 							sub,
-							scopes,
+							// RFC 7662 Section 2.2: scope is a space-separated string
+							scope: Array.isArray(scopes) ? scopes.join(" ") : scopes,
 							type,
 							user,
 							client,

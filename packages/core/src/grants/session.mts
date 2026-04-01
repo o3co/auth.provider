@@ -26,7 +26,11 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
-			const { session, issuer, metadata } = ctx;
+			const { body, session, issuer, metadata } = ctx;
+			const { client_id, scope: requestedScope } = body as {
+				client_id?: string;
+				scope?: string;
+			};
 
 			if (!session.isAuthenticated) {
 				return {
@@ -37,6 +41,8 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 					},
 				};
 			}
+
+			const scopes = requestedScope ? requestedScope.split(" ").filter(Boolean) : undefined;
 
 			const payload = formatObject({
 				user: session.user,
@@ -52,6 +58,8 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 							secret: config.oauth.jwt.secret,
 							expiresIn: config.oauth.accessToken.expiresIn,
 							issuer,
+							audience: client_id ?? null,
+							scopes: scopes ?? null,
 							type: "access",
 						}),
 					}),

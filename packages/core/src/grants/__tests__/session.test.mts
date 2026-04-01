@@ -114,6 +114,43 @@ describe("createSessionGrant", () => {
 			expect("tokens" in result).toBe(true);
 		});
 
+		it("includes audience when client_id is provided", async () => {
+			const handler = createSessionGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { client_id: "my-app" },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if ("tokens" in result) {
+				// Decode the JWT to verify audience
+				const jwt = await import("jsonwebtoken");
+				const decoded = jwt.default.decode(result.tokens.access_token) as Record<string, unknown>;
+				expect(decoded.aud).toBe("my-app");
+			}
+		});
+
+		it("includes scope when scope is provided", async () => {
+			const handler = createSessionGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { scope: "read write" },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBe("read write");
+			}
+		});
+
 		it("does not return sessionMutation", async () => {
 			const handler = createSessionGrant(mockDeps);
 			const ctx: GrantContext = {
