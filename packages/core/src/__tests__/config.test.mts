@@ -5,7 +5,7 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
 
 describe("provider config", () => {
 	it("loads and validates application.conf with required env vars", () => {
-		const raw = parseFile(new URL("../../../../config/application.conf", import.meta.url).pathname, {
+		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
@@ -23,14 +23,14 @@ describe("provider config", () => {
 	});
 
 	it("fails validation when required fields are missing", () => {
-		const raw = parseFile(new URL("../../../../config/application.conf", import.meta.url).pathname, {
+		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {},
 		});
 		expect(() => validate(raw, AppConfigSchema)).toThrow();
 	});
 
 	it("overrides defaults with env vars", () => {
-		const raw = parseFile(new URL("../../../../config/application.conf", import.meta.url).pathname, {
+		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
