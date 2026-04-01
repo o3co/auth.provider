@@ -16,7 +16,12 @@
 import crypto from "node:crypto";
 
 import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
-import type { GrantContext, GrantDependencies, GrantHandler, GrantHandlerResult } from "./types.mjs";
+import type {
+	GrantContext,
+	GrantDependencies,
+	GrantHandler,
+	GrantHandlerResult,
+} from "./types.mjs";
 
 export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, codeRepository } = deps;
@@ -24,7 +29,11 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, session, issuer, metadata } = ctx;
-			const { code, code_verifier = null, client_id } = body as {
+			const {
+				code,
+				code_verifier = null,
+				client_id,
+			} = body as {
 				code?: string;
 				code_verifier?: string | null;
 				client_id?: string;

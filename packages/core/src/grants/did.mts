@@ -16,7 +16,12 @@
 import { verifyAsync } from "@noble/ed25519";
 
 import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
-import type { GrantContext, GrantDependencies, GrantHandler, GrantHandlerResult } from "./types.mjs";
+import type {
+	GrantContext,
+	GrantDependencies,
+	GrantHandler,
+	GrantHandlerResult,
+} from "./types.mjs";
 
 export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config } = deps;
@@ -36,7 +41,12 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, issuer, metadata } = ctx;
-			const { did, signature, message: signedMessage, publicKey } = body as {
+			const {
+				did,
+				signature,
+				message: signedMessage,
+				publicKey,
+			} = body as {
 				did?: string;
 				signature?: string;
 				message?: string;

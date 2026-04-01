@@ -16,13 +16,23 @@
 
 // Configuration
 export { type AppConfig, AppConfigSchema } from "./config/application.schema.mjs";
-// Grant registry and types
+export { createGoogleProvider } from "./federations/google.mjs";
+// Federation types and interfaces
+export type { FederationProvider, FederationResult } from "./federations/types.mjs";
+export { FederationRegistry } from "./federations/types.mjs";
+// Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
 export type {
 	GrantContext,
 	GrantDependencies,
+	GrantError,
 	GrantFactory,
 	GrantHandler,
+	GrantHandlerResult,
+	GrantResult,
+	GrantSuccess,
+	SessionData,
+	SessionMutation,
 } from "./grants/types.mjs";
 export { createPassport } from "./Passport.mjs";
 // Repository interfaces

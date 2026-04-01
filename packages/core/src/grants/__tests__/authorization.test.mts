@@ -34,7 +34,9 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-function makeDeps(consumeByCodeImpl: GrantDependencies["codeRepository"]["consumeByCode"]): GrantDependencies {
+function makeDeps(
+	consumeByCodeImpl: GrantDependencies["codeRepository"]["consumeByCode"],
+): GrantDependencies {
 	return {
 		config: mockConfig,
 		clientRepository: {} as GrantDependencies["clientRepository"],

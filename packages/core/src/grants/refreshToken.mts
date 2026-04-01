@@ -16,7 +16,12 @@
 import jwt, { type JwtPayload } from "jsonwebtoken";
 
 import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
-import type { GrantContext, GrantDependencies, GrantHandler, GrantHandlerResult } from "./types.mjs";
+import type {
+	GrantContext,
+	GrantDependencies,
+	GrantHandler,
+	GrantHandlerResult,
+} from "./types.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config } = deps;

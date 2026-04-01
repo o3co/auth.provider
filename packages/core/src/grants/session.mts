@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
-import type { GrantContext, GrantDependencies, GrantHandler, GrantHandlerResult } from "./types.mjs";
+import type {
+	GrantContext,
+	GrantDependencies,
+	GrantHandler,
+	GrantHandlerResult,
+} from "./types.mjs";
 
 export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config } = deps;

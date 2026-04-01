@@ -133,7 +133,7 @@ describe("createGoogleProvider", () => {
 
 		it("rejects a URL exceeding 2048 characters", () => {
 			const provider = createGoogleProvider(baseConfig);
-			const long = "https://example.com/" + "a".repeat(2050);
+			const long = `https://example.com/${"a".repeat(2050)}`;
 			const result = provider.validateRedirect(long);
 			expect(result.ok).toBe(false);
 			if (!result.ok) {

@@ -38,7 +38,10 @@ const mockDeps: GrantDependencies = {
 	codeRepository: {} as GrantDependencies["codeRepository"],
 };
 
-function makeValidMessage(did: string, overrides: Partial<{ did: string; timestamp: string; nonce: string; audience?: string }> = {}): string {
+function makeValidMessage(
+	did: string,
+	overrides: Partial<{ did: string; timestamp: string; nonce: string; audience?: string }> = {},
+): string {
 	return JSON.stringify({
 		did,
 		timestamp: new Date().toISOString(),

@@ -42,11 +42,9 @@ const mockDeps: GrantDependencies = {
 };
 
 function makeRefreshToken(overrides: object = {}): string {
-	return jwt.sign(
-		{ type: "refresh", user: { id: "u1" }, ...overrides },
-		SECRET,
-		{ expiresIn: 86400 },
-	);
+	return jwt.sign({ type: "refresh", user: { id: "u1" }, ...overrides }, SECRET, {
+		expiresIn: 86400,
+	});
 }
 
 describe("createRefreshTokenGrant", () => {
@@ -96,11 +94,9 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 400 when client_id does not match token audience", async () => {
-			const token = jwt.sign(
-				{ type: "refresh", user: { id: "u1" } },
-				SECRET,
-				{ audience: "client1" },
-			);
+			const token = jwt.sign({ type: "refresh", user: { id: "u1" } }, SECRET, {
+				audience: "client1",
+			});
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, client_id: "wrong-client" },
@@ -135,11 +131,10 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 200 when client_id matches token audience", async () => {
-			const token = jwt.sign(
-				{ type: "refresh", user: { id: "u1" } },
-				SECRET,
-				{ audience: "client1", expiresIn: 86400 },
-			);
+			const token = jwt.sign({ type: "refresh", user: { id: "u1" } }, SECRET, {
+				audience: "client1",
+				expiresIn: 86400,
+			});
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, client_id: "client1" },
