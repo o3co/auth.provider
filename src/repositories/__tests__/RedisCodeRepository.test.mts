@@ -54,8 +54,8 @@ describe("RedisCodeRepository", () => {
 
 			expect(typeof result.code).toBe("string");
 			expect(result.code.length).toBeGreaterThan(0);
-			// Verify it was stored
-			expect(store.has(result.code)).toBe(true);
+			// Verify it was stored with namespace prefix
+			expect(store.has(`oauth:code:${result.code}`)).toBe(true);
 		});
 
 		it("returns code with code_challenge and code_challenge_method", async () => {
@@ -74,7 +74,7 @@ describe("RedisCodeRepository", () => {
 				code_challenge_method: "S256",
 			});
 
-			const stored = store.get(result.code);
+			const stored = store.get(`oauth:code:${result.code}`);
 			expect(stored).toBeDefined();
 			const parsed = JSON.parse(stored!);
 			expect(parsed.code_challenge).toBe("challenge-value");
@@ -111,15 +111,21 @@ describe("RedisCodeRepository", () => {
 			const result = await repo.getByCode("nonexistent-code");
 			expect(result).toBeNull();
 		});
+
+		it("returns null for corrupted data", async () => {
+			store.set("oauth:code:corrupted", "not-valid-json{{{");
+			const result = await repo.getByCode("corrupted");
+			expect(result).toBeNull();
+		});
 	});
 
 	describe("removeByCode", () => {
 		it("removes a stored code", async () => {
 			const created = await repo.createCode({ code_challenge: "c" });
-			expect(store.has(created.code)).toBe(true);
+			expect(store.has(`oauth:code:${created.code}`)).toBe(true);
 
 			await repo.removeByCode(created.code);
-			expect(store.has(created.code)).toBe(false);
+			expect(store.has(`oauth:code:${created.code}`)).toBe(false);
 		});
 
 		it("does not throw for unknown code", async () => {
