@@ -1,0 +1,17 @@
+{
+  "name": "provider-api-test",
+  "version": "1.0.0",
+  "description": "provider REST API テスト用プロジェクト",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.0.1",
+    "axios": "^1.6.0",
+    "jsonwebtoken": "^9.0.3"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0"
+  }
+}
