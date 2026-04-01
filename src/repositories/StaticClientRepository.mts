@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import bcrypt from "bcrypt";
 import yaml from "js-yaml";
@@ -57,9 +58,14 @@ export class StaticClientRepository implements ClientRepository {
 		const stored = client.clientSecret;
 		const isBcrypt = /^\$2[aby]\$/.test(stored);
 
-		const match = isBcrypt
-			? await bcrypt.compare(secret, stored)
-			: secret === stored;
+		let match: boolean;
+		if (isBcrypt) {
+			match = await bcrypt.compare(secret, stored);
+		} else {
+			const a = Buffer.from(secret);
+			const b = Buffer.from(stored);
+			match = a.length === b.length && crypto.timingSafeEqual(a, b);
+		}
 
 		if (!match) return null;
 
