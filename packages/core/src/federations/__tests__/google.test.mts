@@ -55,7 +55,7 @@ const baseConfig = {
 			authenticateByTokenUrl: "http://localhost:3001/user/authenticate/token",
 			timeout: 5000,
 		},
-		code: { type: "redis", endpointUri: "http://localhost:3002", defaultExpiresIn: 600 },
+		code: { type: "redis", endpointUri: "redis://localhost:6379", defaultExpiresIn: 600 },
 	},
 	endpoints: {
 		login: { url: "http://example.com/login" },

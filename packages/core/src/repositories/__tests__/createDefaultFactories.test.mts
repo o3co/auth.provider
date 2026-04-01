@@ -104,6 +104,34 @@ describe("createDefaultFactories", () => {
 			expect(fetched?.code).toBe(code.code);
 		});
 
+		it("rejects non-numeric defaultExpiresIn", async () => {
+			const { codeFactory } = createDefaultFactories();
+			await expect(
+				codeFactory.create({ type: "memory", defaultExpiresIn: "not-a-number" }),
+			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
+		});
+
+		it("rejects Infinity defaultExpiresIn", async () => {
+			const { codeFactory } = createDefaultFactories();
+			await expect(
+				codeFactory.create({ type: "memory", defaultExpiresIn: Infinity }),
+			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
+		});
+
+		it("rejects negative defaultExpiresIn", async () => {
+			const { codeFactory } = createDefaultFactories();
+			await expect(
+				codeFactory.create({ type: "memory", defaultExpiresIn: -1 }),
+			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
+		});
+
+		it("rejects zero defaultExpiresIn", async () => {
+			const { codeFactory } = createDefaultFactories();
+			await expect(
+				codeFactory.create({ type: "memory", defaultExpiresIn: 0 }),
+			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
+		});
+
 		it("throws for unregistered type", async () => {
 			const { codeFactory } = createDefaultFactories();
 			await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(
