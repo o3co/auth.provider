@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-import type { User } from "./types.mjs";
-import type { UserRepository } from "./UserRepository.mjs";
+import type { User, UserRepository } from "@o3co/auth-provider-core";
 
 export class HttpUserRepository implements UserRepository {
 	private baseURL: string;

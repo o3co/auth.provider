@@ -15,6 +15,13 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+	type AppConfig,
+	AppConfigSchema,
+	StaticClientRepository,
+	createPassport,
+	createRouter,
+} from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { RedisStore } from "connect-redis";
@@ -23,15 +30,9 @@ import session from "express-session";
 import helmet from "helmet";
 import { createClient } from "redis";
 
-import { type AppConfig, AppConfigSchema } from "#/config/application.schema.mjs";
-import logger from "./logger.mjs";
-import { createPassport } from "./Passport.mjs";
-import {
-	HttpUserRepository,
-	RedisCodeRepository,
-	StaticClientRepository,
-} from "./repositories/index.mjs";
-import { createRouter } from "./routes/index.mjs";
+import logger from "#/logger.mjs";
+import { HttpUserRepository } from "#/repositories/HttpUserRepository.mjs";
+import { RedisCodeRepository } from "#/repositories/RedisCodeRepository.mjs";
 
 const config: AppConfig = validate(
 	parseFile(fileURLToPath(new URL("../config/application.conf", import.meta.url))),

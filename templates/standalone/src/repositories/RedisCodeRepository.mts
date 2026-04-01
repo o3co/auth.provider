@@ -15,9 +15,8 @@
  */
 
 import crypto from "node:crypto";
+import type { Code, CodeRepository } from "@o3co/auth-provider-core";
 import { createClient, type RedisClientType } from "redis";
-import type { CodeRepository } from "./CodeRepository.mjs";
-import type { Code } from "./types.mjs";
 
 const KEY_PREFIX = "oauth:code:";
 
