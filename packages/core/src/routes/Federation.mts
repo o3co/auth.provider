@@ -46,7 +46,7 @@ export const createRouter = (
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
-		.get("/oauth/:provider", (req: Request, res: Response, next) => {
+		.get("/oauth/federation/:provider", (req: Request, res: Response, next) => {
 			const provider = federationRegistry.get(String(req.params.provider));
 			if (!provider?.enabled) {
 				return res.status(404).json({ message: "NotFound" });
@@ -85,7 +85,7 @@ export const createRouter = (
 			});
 		})
 		.get(
-			"/oauth/:provider/callback",
+			"/oauth/federation/:provider/callback",
 			(req: Request, res: Response, next) => {
 				const provider = federationRegistry.get(String(req.params.provider));
 				if (!provider?.enabled) {

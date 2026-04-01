@@ -186,19 +186,19 @@ describe("GET /oauth/authorize", () => {
 	});
 });
 
-describe("GET /session/oauth/google", () => {
+describe("GET /session/oauth/federation/google", () => {
 	// NOTE: Development config has Google federation disabled (google.enabled: false).
 	// The googleEnabled check runs first and returns 404, so redirect_to validation
 	// tests cannot run in this environment. Validation logic is identical to
 	// POST /session/login and covered by those tests.
 
 	it("returns 404 when Google federation is disabled", async () => {
-		const res = await client.get("/session/oauth/google?redirect_to=https://localhost:3001");
+		const res = await client.get("/session/oauth/federation/google?redirect_to=https://localhost:3001");
 		expect(res.status).toBe(404);
 	});
 
 	it("returns 404 even with invalid redirect_to when Google is disabled", async () => {
-		const res = await client.get("/session/oauth/google?redirect_to=javascript:alert(1)");
+		const res = await client.get("/session/oauth/federation/google?redirect_to=javascript:alert(1)");
 		expect(res.status).toBe(404);
 	});
 });
