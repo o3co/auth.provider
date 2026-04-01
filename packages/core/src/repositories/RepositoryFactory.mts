@@ -56,20 +56,24 @@ export const createDefaultFactories = (): {
 	codeFactory: RepositoryFactory<CodeRepository>;
 } => {
 	const clientFactory = new RepositoryFactory<ClientRepository>("client");
-	clientFactory.register("yaml", (config) => {
+	const yamlClientBuilder: RepositoryBuilder<ClientRepository> = (config) => {
 		if (typeof config.path !== "string") {
 			throw new Error('YAML client repository requires "path" in config');
 		}
 		return new InMemoryClientRepository(loadYamlMap(config.path, ClientEntrySchema));
-	});
+	};
+	clientFactory.register("yaml", yamlClientBuilder);
+	clientFactory.register("static", yamlClientBuilder); // backward compat alias
 
 	const userFactory = new RepositoryFactory<UserRepository>("user");
-	userFactory.register("yaml", (config) => {
+	const yamlUserBuilder: RepositoryBuilder<UserRepository> = (config) => {
 		if (typeof config.path !== "string") {
 			throw new Error('YAML user repository requires "path" in config');
 		}
 		return new InMemoryUserRepository(loadYamlMap(config.path, UserEntrySchema));
-	});
+	};
+	userFactory.register("yaml", yamlUserBuilder);
+	userFactory.register("static", yamlUserBuilder); // backward compat alias
 
 	const codeFactory = new RepositoryFactory<CodeRepository>("code");
 	codeFactory.register("memory", (config) => {

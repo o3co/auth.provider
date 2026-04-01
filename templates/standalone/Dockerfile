@@ -4,11 +4,10 @@ FROM node:25-alpine AS base
 RUN npm install -g corepack --force
 
 ENV HOME=/home/node
-ENV NODE_ENV=production
 
 WORKDIR ${HOME}
 
-ADD package.json .npmrc* ./
+ADD package.json ./
 
 RUN corepack enable
 
@@ -30,6 +29,8 @@ RUN pnpm prune --prod
 
 #############################################
 FROM base AS runtime
+
+ENV NODE_ENV=production
 
 COPY --from=pre /home/node/node_modules ./node_modules/
 COPY --from=pre /home/node/dist/ ./dist/
