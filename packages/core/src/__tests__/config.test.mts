@@ -46,4 +46,43 @@ describe("provider config", () => {
 		expect(config.http.port).toBe(9090);
 		expect(config.oauth.grants.did.enabled).toBe(false);
 	});
+
+	it("clients.client.type defaults to yaml", () => {
+		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_SECRET: "test-secret",
+				SESSION_SECRET: "test-session-secret",
+				CLIENT_USER_BASE_URL: "http://localhost:8080",
+				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+		expect(config.clients.client.type).toBe("yaml");
+	});
+
+	it("clients.user.type defaults to http", () => {
+		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_SECRET: "test-secret",
+				SESSION_SECRET: "test-session-secret",
+				CLIENT_USER_BASE_URL: "http://localhost:8080",
+				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+		expect(config.clients.user.type).toBe("http");
+	});
+
+	it("clients.code.type defaults to redis", () => {
+		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_SECRET: "test-secret",
+				SESSION_SECRET: "test-session-secret",
+				CLIENT_USER_BASE_URL: "http://localhost:8080",
+				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+		expect(config.clients.code.type).toBe("redis");
+	});
 });

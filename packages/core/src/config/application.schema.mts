@@ -80,15 +80,17 @@ export const AppConfigSchema = z.object({
 	}),
 	clients: z.object({
 		client: z.object({
-			type: z.enum(["static"]).default("static"),
+			type: z.string().default("yaml"),
 			path: z.string().default("./config/clients.yaml"),
 		}),
 		user: z.object({
-			baseURL: z.string(),
+			type: z.string().default("http"),
+			baseURL: z.string().optional(),
 			timeout: z.coerce.number().default(5000),
 		}),
 		code: z.object({
-			endpointUri: z.string(),
+			type: z.string().default("redis"),
+			endpointUri: z.string().optional(),
 			password: z.string().optional(),
 			defaultExpiresIn: z.coerce.number().default(600),
 		}),
