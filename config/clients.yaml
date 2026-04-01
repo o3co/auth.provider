@@ -1,5 +1,6 @@
+# NOTE: Override secrets per deployment. These placeholders MUST NOT be used in production.
 test-app:
-  clientSecret: "test-secret"
+  clientSecret: "CHANGE_ME_CLIENT_SECRET"
   allowedRedirectUris:
     - "http://localhost:3000/callback"
   allowedScopes:

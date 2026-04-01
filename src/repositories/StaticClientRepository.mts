@@ -31,8 +31,12 @@ export class StaticClientRepository implements ClientRepository {
 
 	constructor(filePath: string) {
 		const content = fs.readFileSync(filePath, "utf-8");
-		const data = yaml.load(content) as Record<string, ClientEntry> | null;
-		this.clients = new Map(Object.entries(data ?? {}));
+		const raw = yaml.load(content);
+		if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) {
+			throw new Error(`Invalid client configuration in ${filePath}: expected a YAML mapping`);
+		}
+		const data = (raw ?? {}) as Record<string, ClientEntry>;
+		this.clients = new Map(Object.entries(data));
 	}
 
 	async findById(clientId: string): Promise<Client | null> {

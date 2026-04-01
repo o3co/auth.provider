@@ -75,6 +75,17 @@ describe("HttpUserRepository", () => {
 			const user = await repo.authenticate("alice@example.com", "wrong-pass");
 			expect(user).toBeNull();
 		});
+
+		it("throws on unexpected HTTP status", async () => {
+			server.use(
+				http.post(`${BASE_URL}/user/authenticate`, () => {
+					return new HttpResponse(null, { status: 500 });
+				}),
+			);
+			await expect(repo.authenticate("alice@example.com", "pass")).rejects.toThrow(
+				"Unexpected HTTP status 500",
+			);
+		});
 	});
 
 	describe("authenticateByToken", () => {

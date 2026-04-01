@@ -21,6 +21,7 @@ import type { PassportStatic } from "passport";
 
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
+import type { Client } from "#/repositories/types.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGrantRegistry, type GrantRegistry } from "./grants/registry.mjs";
 import { formatObject } from "./grants/token.mjs";
@@ -160,7 +161,12 @@ export const createRouter = (
 					return res.status(400).json({ message: "invalid redirect_uri" });
 				}
 
-				const client = await clientRepository.findById(client_id);
+				let client: Client | null;
+				try {
+					client = await clientRepository.findById(client_id);
+				} catch {
+					return res.status(500).json({ message: "Failed to fetch client" });
+				}
 				if (!client) {
 					return res.status(400).json({ message: "client not found" });
 				}

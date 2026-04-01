@@ -80,7 +80,7 @@ export const AppConfigSchema = z.object({
 	}),
 	clients: z.object({
 		client: z.object({
-			type: z.string().default("static"),
+			type: z.enum(["static"]).default("static"),
 			path: z.string().default("./config/clients.yaml"),
 		}),
 		user: z.object({

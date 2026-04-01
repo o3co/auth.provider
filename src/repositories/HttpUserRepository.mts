@@ -46,10 +46,15 @@ export class HttpUserRepository implements UserRepository {
 				signal: controller.signal,
 			});
 
-			if (!res.ok) return null;
-			return (await res.json()) as User;
-		} catch {
-			return null;
+			if (res.ok) {
+				return (await res.json()) as User;
+			}
+
+			if (res.status === 401 || res.status === 403) {
+				return null;
+			}
+
+			throw new Error(`Unexpected HTTP status ${res.status} from ${endpoint}`);
 		} finally {
 			clearTimeout(timer);
 		}

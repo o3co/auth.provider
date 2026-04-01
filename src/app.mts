@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { RedisStore } from "connect-redis";
@@ -33,18 +34,19 @@ import {
 import { createRouter } from "./routes/index.mjs";
 
 const config: AppConfig = validate(
-	parseFile(new URL("../config/application.conf", import.meta.url).pathname),
+	parseFile(fileURLToPath(new URL("../config/application.conf", import.meta.url))),
 	AppConfigSchema,
 );
 
 // eslint-disable-next-line @typescript-eslint/no-floating-promises
 await (async (): Promise<void> => {
 	// Initialize repositories
-	const clientsYamlPath = path.resolve(
-		path.dirname(new URL(import.meta.url).pathname),
-		"..",
-		config.clients.client.path,
-	);
+	const appDir = path.dirname(fileURLToPath(import.meta.url));
+	const clientsYamlPath = path.resolve(appDir, "..", config.clients.client.path);
+
+	if (config.clients.client.type !== "static") {
+		throw new Error(`Unsupported client repository type: ${config.clients.client.type}`);
+	}
 	const clientRepository = new StaticClientRepository(clientsYamlPath);
 	const userRepository = new HttpUserRepository(config.clients.user);
 	const codeRepository = new RedisCodeRepository(config.clients.code);
