@@ -1,5 +1,3 @@
-DOCKER_IMAGE:=auth-provider
-
 .PHONY: build
 build: install
 	pnpm -r run build
@@ -18,19 +16,8 @@ install:
 
 .PHONY: clean
 clean:
-	rm -rf packages/core/dist templates/standalone/dist create-app/dist
+	rm -rf packages/core/dist packages/repositories/dist templates/standalone/dist create-app/dist
 
 .PHONY: test
 test:
 	pnpm -r run test
-
-.PHONY: docker
-docker: docker/runtime
-
-.PHONY: docker/builder
-docker/builder:
-	docker build . -t ${DOCKER_IMAGE}:builder --target=builder
-
-.PHONY: docker/runtime
-docker/runtime:
-	docker build . -t ${DOCKER_IMAGE}:latest --target=runtime
