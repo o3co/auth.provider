@@ -95,6 +95,7 @@ my-client:
 			const client = await repo.authenticate("my-client", "plain-secret");
 			expect(client).not.toBeNull();
 			expect(client?.clientId).toBe("my-client");
+			expect(client).not.toHaveProperty("clientSecret");
 		});
 
 		it("returns null with wrong plain text secret", async () => {

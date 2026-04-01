@@ -17,7 +17,7 @@
 import fs from "node:fs";
 import bcrypt from "bcrypt";
 import yaml from "js-yaml";
-import type { ClientRepository } from "./ClientRepository.mjs";
+import type { AuthenticatedClient, ClientRepository } from "./ClientRepository.mjs";
 import type { Client } from "./types.mjs";
 
 interface ClientEntry {
@@ -50,7 +50,7 @@ export class StaticClientRepository implements ClientRepository {
 		};
 	}
 
-	async authenticate(clientId: string, secret: string): Promise<Client | null> {
+	async authenticate(clientId: string, secret: string): Promise<AuthenticatedClient | null> {
 		const client = await this.findById(clientId);
 		if (!client) return null;
 
@@ -61,6 +61,9 @@ export class StaticClientRepository implements ClientRepository {
 			? await bcrypt.compare(secret, stored)
 			: secret === stored;
 
-		return match ? client : null;
+		if (!match) return null;
+
+		const { clientSecret: _, ...authenticated } = client;
+		return authenticated;
 	}
 }

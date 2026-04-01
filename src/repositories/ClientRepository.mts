@@ -16,7 +16,9 @@
 
 import type { Client } from "./types.mjs";
 
+export type AuthenticatedClient = Omit<Client, "clientSecret">;
+
 export interface ClientRepository {
 	findById(clientId: string): Promise<Client | null>;
-	authenticate(clientId: string, secret: string): Promise<Client | null>;
+	authenticate(clientId: string, secret: string): Promise<AuthenticatedClient | null>;
 }

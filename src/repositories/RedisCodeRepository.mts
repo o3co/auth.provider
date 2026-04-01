@@ -75,4 +75,8 @@ export class RedisCodeRepository implements CodeRepository {
 		if (!value) return null;
 		return { ...JSON.parse(value), code } as Code;
 	}
+
+	async removeByCode(code: string): Promise<void> {
+		await this.redis.del(code);
+	}
 }

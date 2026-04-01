@@ -29,6 +29,10 @@ vi.mock("redis", () => {
 		get: vi.fn().mockImplementation((key: string) => {
 			return Promise.resolve(store.get(key) ?? null);
 		}),
+		del: vi.fn().mockImplementation((key: string) => {
+			store.delete(key);
+			return Promise.resolve(1);
+		}),
 	}));
 	return { createClient };
 });
@@ -106,6 +110,20 @@ describe("RedisCodeRepository", () => {
 		it("returns null for unknown code", async () => {
 			const result = await repo.getByCode("nonexistent-code");
 			expect(result).toBeNull();
+		});
+	});
+
+	describe("removeByCode", () => {
+		it("removes a stored code", async () => {
+			const created = await repo.createCode({ code_challenge: "c" });
+			expect(store.has(created.code)).toBe(true);
+
+			await repo.removeByCode(created.code);
+			expect(store.has(created.code)).toBe(false);
+		});
+
+		it("does not throw for unknown code", async () => {
+			await expect(repo.removeByCode("nonexistent")).resolves.toBeUndefined();
 		});
 	});
 });
