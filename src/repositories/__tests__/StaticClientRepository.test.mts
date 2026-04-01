@@ -145,4 +145,27 @@ bcrypt-client:
 			expect(client).toBeNull();
 		});
 	});
+
+	describe("validation", () => {
+		it("throws on invalid entry (missing clientSecret)", () => {
+			expect(() =>
+				createRepo(`
+bad-client:
+  allowedRedirectUris: []
+  allowedScopes: []
+`),
+			).toThrow(/Invalid client entry "bad-client"/);
+		});
+
+		it("throws on invalid entry (allowedRedirectUris is string)", () => {
+			expect(() =>
+				createRepo(`
+bad-client:
+  clientSecret: "secret"
+  allowedRedirectUris: "not-an-array"
+  allowedScopes: []
+`),
+			).toThrow(/Invalid client entry "bad-client"/);
+		});
+	});
 });
