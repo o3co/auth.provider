@@ -1,8 +1,8 @@
 DOCKER_IMAGE:=auth-provider
 
 .PHONY: build
-build: clean install
-	pnpm run build
+build: install
+	pnpm -r run build
 
 .PHONY: lint
 lint:
@@ -18,7 +18,11 @@ install:
 
 .PHONY: clean
 clean:
-	rm -rf dist
+	rm -rf packages/core/dist templates/standalone/dist create-app/dist
+
+.PHONY: test
+test:
+	pnpm -r run test
 
 .PHONY: docker
 docker: docker/runtime
