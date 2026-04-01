@@ -79,11 +79,11 @@ export const AppConfigSchema = z.object({
 		}),
 	}),
 	clients: z.object({
-		user: z.object({
-			baseURL: z.string(),
-			timeout: z.coerce.number().default(5000),
-		}),
 		client: z.object({
+			type: z.string().default("static"),
+			path: z.string().default("./config/clients.yaml"),
+		}),
+		user: z.object({
 			baseURL: z.string(),
 			timeout: z.coerce.number().default(5000),
 		}),
