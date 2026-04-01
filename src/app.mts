@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import path from "node:path";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { RedisStore } from "connect-redis";
@@ -22,9 +23,13 @@ import helmet from "helmet";
 import { createClient } from "redis";
 
 import { type AppConfig, AppConfigSchema } from "#/config/application.schema.mjs";
-import { ClientFactory } from "./clients/ClientFactory.mjs";
 import logger from "./logger.mjs";
 import { createPassport } from "./Passport.mjs";
+import {
+	HttpUserRepository,
+	RedisCodeRepository,
+	StaticClientRepository,
+} from "./repositories/index.mjs";
 import { createRouter } from "./routes/index.mjs";
 
 const config: AppConfig = validate(
@@ -34,13 +39,16 @@ const config: AppConfig = validate(
 
 // eslint-disable-next-line @typescript-eslint/no-floating-promises
 await (async (): Promise<void> => {
-	const clients = new ClientFactory({
-		User: new (await import("./clients/User.mjs")).UserClient(config.clients.user),
-		Client: new (await import("./clients/Client.mjs")).AppClient(config.clients.client),
-		code: new (await import("./clients/Code.mjs")).CodeClient(config.clients.code),
-	});
-
-	await clients.initialize();
+	// Initialize repositories
+	const clientsYamlPath = path.resolve(
+		path.dirname(new URL(import.meta.url).pathname),
+		"..",
+		config.clients.client.path,
+	);
+	const clientRepository = new StaticClientRepository(clientsYamlPath);
+	const userRepository = new HttpUserRepository(config.clients.user);
+	const codeRepository = new RedisCodeRepository(config.clients.code);
+	await codeRepository.initialize();
 
 	const app = express();
 
@@ -92,13 +100,13 @@ await (async (): Promise<void> => {
 	);
 
 	// Initialize Passport
-	const passport = await createPassport({ clients, config });
+	const passport = await createPassport({ clientRepository, userRepository, config });
 
 	app.use(passport.initialize());
 	app.use(passport.session());
 
 	// Initialize Routes with DI
-	const { router, grantRegistry } = createRouter(express, { passport, config, clients });
+	const { router, grantRegistry } = createRouter(express, { passport, config, clientRepository, codeRepository });
 	app.use(router);
 
 	const server = app.listen(config.http.port, (): void => {

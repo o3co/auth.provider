@@ -81,7 +81,7 @@ export const createPassport = async ({
 					if (!client) {
 						return done(null, false);
 					}
-					return done(null, client as Express.User);
+					return done(null, client as unknown as Express.User);
 				} catch (cause) {
 					return done(cause as Error);
 				}
