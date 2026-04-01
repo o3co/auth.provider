@@ -18,12 +18,11 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
-	ClientEntrySchema,
+	createDefaultFactories,
 	createPassport,
 	createRouter,
-	InMemoryClientRepository,
-	loadYamlMap,
 } from "@o3co/auth-provider-core";
+import { registerBuiltinRepositories } from "@o3co/auth-provider-repositories";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { RedisStore } from "connect-redis";
@@ -33,8 +32,6 @@ import helmet from "helmet";
 import { createClient } from "redis";
 
 import logger from "#/logger.mjs";
-import { HttpUserRepository } from "#/repositories/HttpUserRepository.mjs";
-import { RedisCodeRepository } from "#/repositories/RedisCodeRepository.mjs";
 
 const config: AppConfig = validate(
 	parseFile(fileURLToPath(new URL("../config/application.conf", import.meta.url))),
@@ -42,15 +39,17 @@ const config: AppConfig = validate(
 );
 
 await (async (): Promise<void> => {
-	// Initialize repositories
+	// Initialize repositories via factory
 	const appDir = path.dirname(fileURLToPath(import.meta.url));
-	const clientsYamlPath = path.resolve(appDir, "..", config.clients.client.path);
-	const clientRepository = new InMemoryClientRepository(
-		loadYamlMap(clientsYamlPath, ClientEntrySchema),
-	);
-	const userRepository = new HttpUserRepository(config.clients.user);
-	const codeRepository = new RedisCodeRepository(config.clients.code);
-	await codeRepository.initialize();
+	const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+	registerBuiltinRepositories({ userFactory, codeFactory });
+
+	const clientRepository = await clientFactory.create({
+		...config.clients.client,
+		path: path.resolve(appDir, "..", config.clients.client.path),
+	});
+	const userRepository = await userFactory.create(config.clients.user);
+	const codeRepository = await codeFactory.create(config.clients.code);
 
 	const app = express();
 

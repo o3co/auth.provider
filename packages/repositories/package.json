@@ -1,34 +1,34 @@
 {
-  "name": "@o3co/auth-provider-repositories",
-  "version": "0.0.0",
-  "license": "Apache-2.0",
-  "type": "module",
-  "main": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "types": "./dist/index.d.mts"
-    }
-  },
-  "scripts": {
-    "build": "tsc",
-    "test": "vitest run"
-  },
-  "imports": {
-    "#/*": "./src/*"
-  },
-  "dependencies": {
-    "redis": "^5.10.0"
-  },
-  "peerDependencies": {
-    "@o3co/auth-provider-core": "workspace:*"
-  },
-  "devDependencies": {
-    "@o3co/auth-provider-core": "workspace:*",
-    "@types/node": "^25.1.0",
-    "msw": "^2.12.14",
-    "pino": "^10.3.1",
-    "vitest": "^4.1.2"
-  }
+	"name": "@o3co/auth-provider-repositories",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run"
+	},
+	"imports": {
+		"#/*": "./src/*"
+	},
+	"dependencies": {
+		"redis": "^5.10.0"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:*"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@types/node": "^25.1.0",
+		"msw": "^2.12.14",
+		"pino": "^10.3.1",
+		"vitest": "^4.1.2"
+	}
 }

@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { RepositoryFactory } from "@o3co/auth-provider-core";
 import type { CodeRepository, UserRepository } from "@o3co/auth-provider-core";
+import { RepositoryFactory } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { registerBuiltinRepositories } from "../index.mjs";
 
