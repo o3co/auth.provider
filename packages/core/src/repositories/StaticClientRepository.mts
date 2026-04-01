@@ -15,13 +15,11 @@
  */
 
 import crypto from "node:crypto";
-import fs from "node:fs";
 import bcrypt from "bcrypt";
-import yaml from "js-yaml";
 import { z } from "zod";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
-const ClientEntrySchema = z
+export const ClientEntrySchema = z
 	.object({
 		clientSecret: z.string().min(1),
 		allowedRedirectUris: z.array(z.string()).default([]),
@@ -29,28 +27,13 @@ const ClientEntrySchema = z
 	})
 	.strict();
 
-type ClientEntry = z.infer<typeof ClientEntrySchema>;
+export type ClientEntry = z.infer<typeof ClientEntrySchema>;
 
 export class StaticClientRepository implements ClientRepository {
 	private clients: Map<string, ClientEntry>;
 
-	constructor(filePath: string) {
-		const content = fs.readFileSync(filePath, "utf-8");
-		const raw = yaml.load(content);
-		if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) {
-			throw new Error(`Invalid client configuration in ${filePath}: expected a YAML mapping`);
-		}
-		const data = (raw ?? {}) as Record<string, unknown>;
-		this.clients = new Map<string, ClientEntry>();
-		for (const [clientId, entry] of Object.entries(data)) {
-			const result = ClientEntrySchema.safeParse(entry);
-			if (!result.success) {
-				throw new Error(
-					`Invalid client entry "${clientId}" in ${filePath}: ${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`,
-				);
-			}
-			this.clients.set(clientId, result.data);
-		}
+	constructor(clients: Map<string, ClientEntry>) {
+		this.clients = clients;
 	}
 
 	async findById(clientId: string): Promise<PublicClient | null> {
