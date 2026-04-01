@@ -18,8 +18,10 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
+	ClientEntrySchema,
 	createPassport,
 	createRouter,
+	loadYamlMap,
 	StaticClientRepository,
 } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
@@ -44,11 +46,9 @@ await (async (): Promise<void> => {
 	// Initialize repositories
 	const appDir = path.dirname(fileURLToPath(import.meta.url));
 	const clientsYamlPath = path.resolve(appDir, "..", config.clients.client.path);
-
-	if (config.clients.client.type !== "static") {
-		throw new Error(`Unsupported client repository type: ${config.clients.client.type}`);
-	}
-	const clientRepository = new StaticClientRepository(clientsYamlPath);
+	const clientRepository = new StaticClientRepository(
+		loadYamlMap(clientsYamlPath, ClientEntrySchema),
+	);
 	const userRepository = new HttpUserRepository(config.clients.user);
 	const codeRepository = new RedisCodeRepository(config.clients.code);
 	await codeRepository.initialize();

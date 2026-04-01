@@ -21,9 +21,7 @@ describe("StaticUserRepository", () => {
 	describe("authenticate", () => {
 		it("returns user for valid credentials (plain text)", async () => {
 			const repo = new StaticUserRepository(
-				new Map([
-					["alice", { password: "secret123", id: "u1", email: "alice@example.com" }],
-				]),
+				new Map([["alice", { password: "secret123", id: "u1", email: "alice@example.com" }]]),
 			);
 			const user = await repo.authenticate("alice", "secret123");
 
@@ -53,9 +51,7 @@ describe("StaticUserRepository", () => {
 
 		it("supports bcrypt hashed passwords", async () => {
 			const hash = await bcrypt.hash("secret123", 10);
-			const repo = new StaticUserRepository(
-				new Map([["alice", { password: hash, id: "u1" }]]),
-			);
+			const repo = new StaticUserRepository(new Map([["alice", { password: hash, id: "u1" }]]));
 			const user = await repo.authenticate("alice", "secret123");
 
 			expect(user).not.toBeNull();

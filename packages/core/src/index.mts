@@ -40,8 +40,17 @@ export type { ClientRepository, PublicClient } from "./repositories/ClientReposi
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
 // Built-in implementations
 export { InMemoryCodeRepository } from "./repositories/InMemoryCodeRepository.mjs";
-export { StaticClientRepository } from "./repositories/StaticClientRepository.mjs";
-export { StaticUserRepository } from "./repositories/StaticUserRepository.mjs";
+export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
+export {
+	type ClientEntry,
+	ClientEntrySchema,
+	StaticClientRepository,
+} from "./repositories/StaticClientRepository.mjs";
+export {
+	StaticUserRepository,
+	type UserEntry,
+	UserEntrySchema,
+} from "./repositories/StaticUserRepository.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
 // Router factory
