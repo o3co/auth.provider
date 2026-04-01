@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
+import type { ClientRepository } from "./ClientRepository.mjs";
+import type { CodeRepository } from "./CodeRepository.mjs";
+import { ClientEntrySchema, InMemoryClientRepository } from "./InMemoryClientRepository.mjs";
+import { InMemoryCodeRepository } from "./InMemoryCodeRepository.mjs";
+import { InMemoryUserRepository, UserEntrySchema } from "./InMemoryUserRepository.mjs";
+import { loadYamlMap } from "./loadYamlMap.mjs";
+import type { UserRepository } from "./UserRepository.mjs";
+
 export type RepositoryBuilder<T> = (config: Record<string, unknown>) => Promise<T> | T;
 
 export class RepositoryFactory<T> {
@@ -41,3 +49,26 @@ export class RepositoryFactory<T> {
 		return builder(config);
 	}
 }
+
+export const createDefaultFactories = (): {
+	clientFactory: RepositoryFactory<ClientRepository>;
+	userFactory: RepositoryFactory<UserRepository>;
+	codeFactory: RepositoryFactory<CodeRepository>;
+} => {
+	const clientFactory = new RepositoryFactory<ClientRepository>("client");
+	clientFactory.register("yaml", (config) => {
+		return new InMemoryClientRepository(loadYamlMap(config.path as string, ClientEntrySchema));
+	});
+
+	const userFactory = new RepositoryFactory<UserRepository>("user");
+	userFactory.register("yaml", (config) => {
+		return new InMemoryUserRepository(loadYamlMap(config.path as string, UserEntrySchema));
+	});
+
+	const codeFactory = new RepositoryFactory<CodeRepository>("code");
+	codeFactory.register("memory", (config) => {
+		return new InMemoryCodeRepository(config as { defaultExpiresIn?: number });
+	});
+
+	return { clientFactory, userFactory, codeFactory };
+};
