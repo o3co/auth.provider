@@ -19,9 +19,8 @@ import { Strategy as LocalStrategy } from "passport-local";
 import { Strategy as ClientCredentialStrategy } from "passport-oauth2-client-password";
 
 import type { AppConfig } from "#/config/application.schema.mjs";
-import type { AppClient } from "./clients/Client.mjs";
-import type { ClientFactory } from "./clients/ClientFactory.mjs";
-import type { UserClient } from "./clients/User.mjs";
+import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
+import type { UserRepository } from "#/repositories/UserRepository.mjs";
 
 declare global {
 	namespace Express {
@@ -30,10 +29,12 @@ declare global {
 }
 
 export const createPassport = async ({
-	clients,
+	clientRepository,
+	userRepository,
 	config,
 }: {
-	clients: ClientFactory;
+	clientRepository: ClientRepository;
+	userRepository: UserRepository;
 	config: AppConfig;
 }): Promise<typeof passport> => {
 	passport.serializeUser((user: Express.User, done) => {
@@ -57,10 +58,7 @@ export const createPassport = async ({
 				},
 				async (un, ps, done) => {
 					try {
-						const user = await (clients.get("User") as UserClient).authenticate({
-							username: un,
-							password: ps,
-						});
+						const user = await userRepository.authenticate(un, ps);
 
 						if (!user) {
 							return done(null, false, {
@@ -78,10 +76,7 @@ export const createPassport = async ({
 		.use(
 			new ClientCredentialStrategy(async (clientId, clientSecret, done) => {
 				try {
-					const client = await (clients.get("Client") as AppClient).authenticate({
-						clientId,
-						password: clientSecret,
-					});
+					const client = await clientRepository.authenticate(clientId, clientSecret);
 
 					if (!client) {
 						return done(null, false);
@@ -103,9 +98,7 @@ export const createPassport = async ({
 				},
 				async (_accessToken, _refreshToken, profile, done) => {
 					try {
-						const user = await (clients.get("User") as UserClient).authenticateByToken(
-							`google:${profile.id}`,
-						);
+						const user = await userRepository.authenticateByToken(`google:${profile.id}`);
 						return done(null, user as Express.User);
 					} catch (cause) {
 						return done(cause as Error);
