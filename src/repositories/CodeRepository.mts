@@ -23,5 +23,6 @@ export interface CodeRepository {
 		expiresIn?: number;
 	}): Promise<Code>;
 	getByCode(code: string): Promise<Code | null>;
+	consumeByCode(code: string): Promise<Code | null>;
 	removeByCode(code: string): Promise<void>;
 }

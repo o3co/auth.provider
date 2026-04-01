@@ -35,15 +35,13 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 				return;
 			}
 
-			// Load code data from repository
-			const codeData = await codeRepository.getByCode(code);
+			// Atomically consume code data from repository (replay attack prevention)
+			const codeData = await codeRepository.consumeByCode(code);
 			if (!codeData) {
 				res.status(400).json({ message: "invalid code" });
 				return;
 			}
 
-			// Consume code: remove from both repository and session (replay attack prevention)
-			await codeRepository.removeByCode(code);
 			const grantedScopes = req.session.granted_scopes;
 			req.session.code = undefined;
 			req.session.code_client_id = undefined;

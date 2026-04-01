@@ -74,6 +74,19 @@ export class RedisCodeRepository implements CodeRepository {
 
 	async getByCode(code: string): Promise<Code | null> {
 		const value = await this.redis.get(KEY_PREFIX + code);
+		return this.parseCodeValue(code, value);
+	}
+
+	async consumeByCode(code: string): Promise<Code | null> {
+		const value = await this.redis.getDel(KEY_PREFIX + code);
+		return this.parseCodeValue(code, value);
+	}
+
+	async removeByCode(code: string): Promise<void> {
+		await this.redis.del(KEY_PREFIX + code);
+	}
+
+	private parseCodeValue(code: string, value: string | null): Code | null {
 		if (!value) return null;
 		try {
 			return { ...JSON.parse(value), code } as Code;
@@ -81,9 +94,5 @@ export class RedisCodeRepository implements CodeRepository {
 			console.error(`RedisCodeRepository: corrupted data for code ${code}`, err);
 			return null;
 		}
-	}
-
-	async removeByCode(code: string): Promise<void> {
-		await this.redis.del(KEY_PREFIX + code);
 	}
 }
