@@ -41,7 +41,6 @@ const config: AppConfig = validate(
 	AppConfigSchema,
 );
 
-// eslint-disable-next-line @typescript-eslint/no-floating-promises
 await (async (): Promise<void> => {
 	// Initialize repositories
 	const appDir = path.dirname(fileURLToPath(import.meta.url));

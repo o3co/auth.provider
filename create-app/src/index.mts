@@ -71,6 +71,12 @@ export const main = (): void => {
 		process.exit(1);
 	}
 
+	// Reject path separators and dot segments to prevent directory traversal
+	if (/[/\\]/.test(projectName) || projectName === "." || projectName === "..") {
+		console.error("Error: Project name must not contain path separators or be '.' / '..'.");
+		process.exit(1);
+	}
+
 	const targetDir = resolve(process.cwd(), projectName);
 
 	if (existsSync(targetDir)) {
@@ -81,8 +87,15 @@ export const main = (): void => {
 	console.log(`Creating ${projectName}...`);
 	scaffold(targetDir, projectName);
 
-	console.log(`Installing dependencies...`);
-	execSync("pnpm install", { cwd: targetDir, stdio: "inherit" });
+	try {
+		console.log("Installing dependencies...");
+		execSync("pnpm install", { cwd: targetDir, stdio: "inherit" });
+	} catch {
+		console.warn("Warning: Automatic dependency installation with 'pnpm install' failed.");
+		console.warn(
+			`You can still use the scaffolded project. To finish setup, run 'pnpm install' inside '${projectName}'.`,
+		);
+	}
 
 	console.log(`\nDone! Created ${projectName} at ${targetDir}`);
 	console.log(`\nNext steps:`);

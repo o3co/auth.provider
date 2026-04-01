@@ -1,4 +1,4 @@
-# Example client definitions for StaticClientRepository.
+# Example client definitions loaded via loadYamlMap into InMemoryClientRepository.
 # Copy this file to clients.yaml and customize for your deployment.
 #
 # Secret format:
