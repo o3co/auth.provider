@@ -19,10 +19,10 @@ import jwt, { type JwtPayload } from "jsonwebtoken";
 
 import type { PassportStatic } from "passport";
 import type { AppConfig } from "#/config/application.schema.mjs";
+import { createGrantRegistry, type GrantRegistry } from "#/grants/registry.mjs";
+import { formatObject } from "#/grants/token.mjs";
 import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import { createGrantRegistry, type GrantRegistry } from "./grants/registry.mjs";
-import { formatObject } from "./grants/token.mjs";
 
 // Session data type augmentation
 declare module "express-session" {
@@ -55,7 +55,7 @@ export const createRouter = (
 	},
 ): { router: Router; registry: GrantRegistry } => {
 	const router = express.Router();
-	const registry = createGrantRegistry({ config, clientRepository, codeRepository, passport });
+	const registry = createGrantRegistry({ config, clientRepository, codeRepository });
 
 	const tokenRateLimit = rateLimit({
 		windowMs: config.rateLimit.token.windowMs,
@@ -86,7 +86,29 @@ export const createRouter = (
 				});
 			}
 
-			return handler.handle({ req, res, issuer });
+			const ctx = {
+				body: req.body,
+				session: req.session,
+				issuer,
+				metadata: { ip: req.ip },
+			};
+			const { result, sessionMutation } = await handler.handle(ctx);
+
+			if (sessionMutation?.clear) {
+				for (const key of sessionMutation.clear) {
+					(req.session as unknown as Record<string, unknown>)[key] = undefined;
+				}
+			}
+			if (sessionMutation?.set) {
+				Object.assign(req.session, sessionMutation.set);
+			}
+
+			if ("tokens" in result) {
+				return res.status(result.status).json(result.tokens);
+			}
+			const errorBody: Record<string, unknown> = { error: result.error };
+			if (result.errorDescription) errorBody.error_description = result.errorDescription;
+			return res.status(result.status).json(errorBody);
 		})
 		// RFC 7662: Token Introspection
 		// Auth: Bearer <token> (self-introspect only) or client_id + client_secret (any token)

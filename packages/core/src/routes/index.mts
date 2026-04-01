@@ -16,10 +16,12 @@
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
 import type { AppConfig } from "#/config/application.schema.mjs";
+import { createGoogleProvider } from "#/federations/google.mjs";
+import { FederationRegistry } from "#/federations/types.mjs";
+import type { GrantRegistry } from "#/grants/registry.mjs";
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import * as federation from "./federations/index.mjs";
-import type { GrantRegistry } from "./grants/registry.mjs";
+import * as federation from "./Federation.mjs";
 import * as healthcheck from "./Healthcheck.mjs";
 import * as oauth from "./OAuth.mjs";
 import * as session from "./Session.mjs";
@@ -44,6 +46,10 @@ export const createRouter = (
 	const router = express.Router();
 	const { router: oauthRouter, registry: grantRegistry } = oauth.createRouter(express, params);
 
+	// Build federation registry
+	const federationRegistry = new FederationRegistry();
+	federationRegistry.register(createGoogleProvider(params.config));
+
 	router
 		.use(healthcheck.createRouter(express))
 		.use("/oauth", oauthRouter)
@@ -53,7 +59,11 @@ export const createRouter = (
 		)
 		.use(
 			"/session",
-			federation.createRouter(express, { passport: params.passport, config: params.config }),
+			federation.createRouter(express, {
+				passport: params.passport,
+				config: params.config,
+				federationRegistry,
+			}),
 		);
 
 	return { router, grantRegistry };
