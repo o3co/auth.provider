@@ -16,7 +16,6 @@
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
 
-import type { ClientFactory } from "#/clients/ClientFactory.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import * as google from "./Google.mjs";
 
@@ -29,7 +28,6 @@ type ExpressLike = {
 type RouterParams = {
 	passport: PassportStatic;
 	config: AppConfig;
-	clients: ClientFactory;
 };
 
 export const createRouter = (express: ExpressLike, params: RouterParams): Router => {

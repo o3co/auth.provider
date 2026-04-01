@@ -19,10 +19,8 @@ import jwt, { type JwtPayload } from "jsonwebtoken";
 
 import type { PassportStatic } from "passport";
 
-import { HttpError } from "#/clients/base/RESTClient.mjs";
-import type { AppClient } from "#/clients/Client.mjs";
-import type { ClientFactory } from "#/clients/ClientFactory.mjs";
-import type { CodeClient } from "#/clients/Code.mjs";
+import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
+import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGrantRegistry, type GrantRegistry } from "./grants/registry.mjs";
 import { formatObject } from "./grants/token.mjs";
@@ -50,11 +48,12 @@ export const createRouter = (
 	{
 		passport,
 		config,
-		clients,
-	}: { passport: PassportStatic; config: AppConfig; clients: ClientFactory },
+		clientRepository,
+		codeRepository,
+	}: { passport: PassportStatic; config: AppConfig; clientRepository: ClientRepository; codeRepository: CodeRepository },
 ): { router: Router; registry: GrantRegistry } => {
 	const router = express.Router();
-	const registry = createGrantRegistry({ config, clients, passport });
+	const registry = createGrantRegistry({ config, clientRepository, codeRepository, passport });
 
 	const tokenRateLimit = rateLimit({
 		windowMs: config.rateLimit.token.windowMs,
@@ -161,19 +160,12 @@ export const createRouter = (
 					return res.status(400).json({ message: "invalid redirect_uri" });
 				}
 
-				let allowedUris: string[];
-				let allowedScopes: string[];
-				try {
-					[allowedUris, allowedScopes] = await Promise.all([
-						(clients.get("Client") as AppClient).listAllowedRedirectUris(client_id),
-						(clients.get("Client") as AppClient).listAllowedScopes(client_id),
-					]);
-				} catch (err) {
-					if (err instanceof HttpError && err.status === 404) {
-						return res.status(400).json({ message: "client not found" });
-					}
-					return res.status(500).json({ message: "Failed to fetch client" });
+				const client = await clientRepository.findById(client_id);
+				if (!client) {
+					return res.status(400).json({ message: "client not found" });
 				}
+				const allowedUris = client.allowedRedirectUris;
+				const allowedScopes = client.allowedScopes;
 
 				if (!allowedUris.includes(redirect_uri)) {
 					return res.status(400).json({ message: "redirect_uri not allowed" });
@@ -189,9 +181,9 @@ export const createRouter = (
 					? (toStr(code_challenge_method) ?? "S256")
 					: toStr(code_challenge_method);
 
-				let issue: Awaited<ReturnType<CodeClient["createCode"]>>;
+				let issue: Awaited<ReturnType<typeof codeRepository.createCode>>;
 				try {
-					issue = await (clients.get("code") as CodeClient).createCode({
+					issue = await codeRepository.createCode({
 						code_challenge: toStr(code_challenge),
 						code_challenge_method: resolvedMethod,
 					});
