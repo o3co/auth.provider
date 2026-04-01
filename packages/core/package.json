@@ -40,6 +40,7 @@
     }
   },
   "devDependencies": {
+    "@o3co/ts.hocon": "^0.1.2",
     "@types/bcrypt": "^6.0.0",
     "@types/express": "^5.0.6",
     "@types/js-yaml": "^4.0.9",
