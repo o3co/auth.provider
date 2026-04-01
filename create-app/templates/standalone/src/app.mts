@@ -18,9 +18,9 @@ import { fileURLToPath } from "node:url";
 import {
 	type AppConfig,
 	AppConfigSchema,
-	StaticClientRepository,
 	createPassport,
 	createRouter,
+	StaticClientRepository,
 } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -109,7 +109,12 @@ await (async (): Promise<void> => {
 	app.use(passport.session());
 
 	// Initialize Routes with DI
-	const { router, grantRegistry } = createRouter(express, { passport, config, clientRepository, codeRepository });
+	const { router, grantRegistry } = createRouter(express, {
+		passport,
+		config,
+		clientRepository,
+		codeRepository,
+	});
 	app.use(router);
 
 	const server = app.listen(config.http.port, (): void => {

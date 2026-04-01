@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { execSync } from "node:child_process";
 /*
  * Copyright 2026 1o1 Inc.
  *
@@ -14,10 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { cpSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "../templates/standalone");
@@ -54,7 +54,7 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 		pkg.dependencies["@o3co/auth-provider-core"] = `^${coreVersion}`;
 	}
 
-	writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
 // CLI entry point

@@ -83,7 +83,7 @@ describe("RedisCodeRepository", () => {
 
 			const stored = store.get(`${KEY_PREFIX}${result.code}`);
 			expect(stored).toBeDefined();
-			const parsed = JSON.parse(stored!);
+			const parsed = JSON.parse(stored as string);
 			expect(parsed.code_challenge).toBe("challenge-value");
 			expect(parsed.code_challenge_method).toBe("S256");
 		});

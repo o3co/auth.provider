@@ -15,10 +15,9 @@
  */
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
-
+import type { AppConfig } from "#/config/application.schema.mjs";
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import type { AppConfig } from "#/config/application.schema.mjs";
 import * as federation from "./federations/index.mjs";
 import type { GrantRegistry } from "./grants/registry.mjs";
 import * as healthcheck from "./Healthcheck.mjs";
@@ -48,8 +47,14 @@ export const createRouter = (
 	router
 		.use(healthcheck.createRouter(express))
 		.use("/oauth", oauthRouter)
-		.use("/session", session.createRouter(express, { passport: params.passport, config: params.config }))
-		.use("/session", federation.createRouter(express, { passport: params.passport, config: params.config }));
+		.use(
+			"/session",
+			session.createRouter(express, { passport: params.passport, config: params.config }),
+		)
+		.use(
+			"/session",
+			federation.createRouter(express, { passport: params.passport, config: params.config }),
+		);
 
 	return { router, grantRegistry };
 };

@@ -22,7 +22,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { StaticClientRepository } from "../StaticClientRepository.mjs";
 
 function writeTempYaml(content: string): string {
-	const tmpFile = path.join(os.tmpdir(), `clients-${Date.now()}-${Math.random().toString(36).slice(2)}.yaml`);
+	const tmpFile = path.join(
+		os.tmpdir(),
+		`clients-${Date.now()}-${Math.random().toString(36).slice(2)}.yaml`,
+	);
 	fs.writeFileSync(tmpFile, content, "utf-8");
 	return tmpFile;
 }

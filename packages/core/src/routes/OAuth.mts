@@ -18,10 +18,9 @@ import rateLimit from "express-rate-limit";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 
 import type { PassportStatic } from "passport";
-
+import type { AppConfig } from "#/config/application.schema.mjs";
 import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGrantRegistry, type GrantRegistry } from "./grants/registry.mjs";
 import { formatObject } from "./grants/token.mjs";
 
@@ -48,7 +47,12 @@ export const createRouter = (
 		config,
 		clientRepository,
 		codeRepository,
-	}: { passport: PassportStatic; config: AppConfig; clientRepository: ClientRepository; codeRepository: CodeRepository },
+	}: {
+		passport: PassportStatic;
+		config: AppConfig;
+		clientRepository: ClientRepository;
+		codeRepository: CodeRepository;
+	},
 ): { router: Router; registry: GrantRegistry } => {
 	const router = express.Router();
 	const registry = createGrantRegistry({ config, clientRepository, codeRepository, passport });

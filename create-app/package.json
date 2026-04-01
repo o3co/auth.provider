@@ -1,22 +1,22 @@
 {
-  "name": "create-o3co-auth-provider",
-  "version": "0.0.0",
-  "license": "Apache-2.0",
-  "type": "module",
-  "bin": {
-    "create-o3co-auth-provider": "./dist/index.mjs"
-  },
-  "files": [
-    "dist",
-    "templates"
-  ],
-  "scripts": {
-    "build": "tsc",
-    "prebuild": "node scripts/copy-templates.mjs",
-    "test": "vitest run"
-  },
-  "devDependencies": {
-    "@types/node": "^25.1.0",
-    "vitest": "^4.1.2"
-  }
+	"name": "create-o3co-auth-provider",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"bin": {
+		"create-o3co-auth-provider": "./dist/index.mjs"
+	},
+	"files": [
+		"dist",
+		"templates"
+	],
+	"scripts": {
+		"build": "tsc",
+		"prebuild": "node scripts/copy-templates.mjs",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"@types/node": "^25.1.0",
+		"vitest": "^4.1.2"
+	}
 }

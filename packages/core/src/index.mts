@@ -14,27 +14,24 @@
  * limitations under the License.
  */
 
-// Repository interfaces and types
-export type { Client, User, Code, CodeData } from "./repositories/types.mjs";
+// Configuration
+export { type AppConfig, AppConfigSchema } from "./config/application.schema.mjs";
+export { createPassport } from "./Passport.mjs";
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
-export type { UserRepository } from "./repositories/UserRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
 
 // Built-in implementation
 export { StaticClientRepository } from "./repositories/StaticClientRepository.mjs";
-
+// Repository interfaces and types
+export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
+export type { UserRepository } from "./repositories/UserRepository.mjs";
+export { GrantRegistry } from "./routes/grants/registry.mjs";
 // Grant types
 export type {
-	GrantDependencies,
 	GrantContext,
-	GrantHandler,
+	GrantDependencies,
 	GrantFactory,
+	GrantHandler,
 } from "./routes/grants/types.mjs";
-export { GrantRegistry } from "./routes/grants/registry.mjs";
-
 // Router and Passport factories
 export { createRouter } from "./routes/index.mjs";
-export { createPassport } from "./Passport.mjs";
-
-// Configuration
-export { AppConfigSchema, type AppConfig } from "./config/application.schema.mjs";

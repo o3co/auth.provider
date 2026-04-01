@@ -15,10 +15,9 @@
  */
 import type { Request, Response } from "express";
 import type { PassportStatic } from "passport";
-
+import type { AppConfig } from "#/config/application.schema.mjs";
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import type { AppConfig } from "#/config/application.schema.mjs";
 
 export interface GrantDependencies {
 	config: AppConfig;

@@ -1,24 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-	StaticClientRepository,
 	AppConfigSchema,
-	createRouter,
 	createPassport,
-} from "../index.mjs";
-import type {
-	ClientRepository,
-	UserRepository,
-	CodeRepository,
-	PublicClient,
-	Client,
-	User,
-	Code,
-	CodeData,
-	AppConfig,
-	GrantFactory,
-	GrantDependencies,
-	GrantHandler,
-	GrantContext,
+	createRouter,
+	StaticClientRepository,
 } from "../index.mjs";
 
 describe("public API", () => {

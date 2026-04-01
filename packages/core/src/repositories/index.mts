@@ -13,8 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export type { Client, User, Code, CodeData } from "./types.mjs";
+
 export type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
-export type { UserRepository } from "./UserRepository.mjs";
 export type { CodeRepository } from "./CodeRepository.mjs";
 export { StaticClientRepository } from "./StaticClientRepository.mjs";
+export type { Client, Code, CodeData, User } from "./types.mjs";
+export type { UserRepository } from "./UserRepository.mjs";
