@@ -46,7 +46,9 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 			const rawScopes = requestedScope ? requestedScope.split(" ").filter(Boolean) : undefined;
 			const scopes = rawScopes?.length ? [...new Set(rawScopes)] : undefined;
 
-			// Validate scope against client's allowedScopes when client_id is provided
+			// Validate scope against client's allowedScopes when client_id is provided.
+			// Without client_id, scope is accepted as-is — this grant is intended for
+			// first-party use where the server trusts the caller's scope request.
 			if (client_id) {
 				const client = await clientRepository.findById(client_id);
 				if (!client) {
