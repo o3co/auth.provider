@@ -16,8 +16,34 @@
 
 import type { CodeRepository, UserRepository } from "@o3co/auth-provider-core";
 import { RepositoryFactory } from "@o3co/auth-provider-core";
-import { describe, expect, it } from "vitest";
+import { HttpResponse, http } from "msw";
+import { setupServer } from "msw/node";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { registerBuiltinRepositories } from "../index.mjs";
+
+const BASE_URL = "http://localhost:19090";
+const mockUser = { id: "u1", username: "alice" };
+
+const server = setupServer(
+	http.post(`${BASE_URL}/auth`, async ({ request }) => {
+		const body = (await request.json()) as { email?: string; password?: string };
+		if (body.email === "alice" && body.password === "pass") {
+			return HttpResponse.json(mockUser, { status: 200 });
+		}
+		return new HttpResponse(null, { status: 401 });
+	}),
+	http.post(`${BASE_URL}/auth/token`, async ({ request }) => {
+		const body = (await request.json()) as { token?: string };
+		if (body.token === "valid") {
+			return HttpResponse.json(mockUser, { status: 200 });
+		}
+		return new HttpResponse(null, { status: 401 });
+	}),
+);
+
+beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+afterEach(() => server.resetHandlers());
+afterAll(() => server.close());
 
 describe("registerBuiltinRepositories", () => {
 	it("registers 'http' type in userFactory", async () => {
@@ -36,5 +62,46 @@ describe("registerBuiltinRepositories", () => {
 		registerBuiltinRepositories({ userFactory, codeFactory });
 
 		await expect(codeFactory.create({ type: "unknown" })).rejects.toThrow(/redis/);
+	});
+
+	it("http builder creates a working HttpUserRepository", async () => {
+		const userFactory = new RepositoryFactory<UserRepository>("user");
+		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		registerBuiltinRepositories({ userFactory, codeFactory });
+
+		const repo = await userFactory.create({
+			type: "http",
+			authenticateUrl: `${BASE_URL}/auth`,
+			authenticateByTokenUrl: `${BASE_URL}/auth/token`,
+			timeout: 5000,
+		});
+
+		const user = await repo.authenticate("alice", "pass");
+		expect(user).not.toBeNull();
+		expect(user?.username).toBe("alice");
+
+		const byToken = await repo.authenticateByToken("valid");
+		expect(byToken).not.toBeNull();
+
+		const invalid = await repo.authenticate("alice", "wrong");
+		expect(invalid).toBeNull();
+	});
+
+	it("http builder throws when authenticateUrl is missing", async () => {
+		const userFactory = new RepositoryFactory<UserRepository>("user");
+		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		registerBuiltinRepositories({ userFactory, codeFactory });
+
+		await expect(userFactory.create({ type: "http", timeout: 5000 })).rejects.toThrow(
+			/authenticateUrl/,
+		);
+	});
+
+	it("redis builder throws when endpointUri is missing", async () => {
+		const userFactory = new RepositoryFactory<UserRepository>("user");
+		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		registerBuiltinRepositories({ userFactory, codeFactory });
+
+		await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(/endpointUri/);
 	});
 });

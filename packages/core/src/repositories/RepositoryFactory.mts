@@ -73,7 +73,12 @@ export const createDefaultFactories = (): {
 
 	const codeFactory = new RepositoryFactory<CodeRepository>("code");
 	codeFactory.register("memory", (config) => {
-		return new InMemoryCodeRepository(config as { defaultExpiresIn?: number });
+		const defaultExpiresIn =
+			config.defaultExpiresIn != null ? Number(config.defaultExpiresIn) : undefined;
+		if (defaultExpiresIn !== undefined && Number.isNaN(defaultExpiresIn)) {
+			throw new Error('"defaultExpiresIn" must be a number');
+		}
+		return new InMemoryCodeRepository({ defaultExpiresIn });
 	});
 
 	return { clientFactory, userFactory, codeFactory };
