@@ -31,7 +31,7 @@ const getPackageVersions = (): Record<string, string> => {
 export const scaffold = (targetDir: string, projectName: string): void => {
 	if (!existsSync(TEMPLATES_DIR)) {
 		throw new Error(
-			`Template directory not found at ${TEMPLATES_DIR}. Run 'pnpm run prebuild' first.`,
+			`Template directory not found at ${TEMPLATES_DIR}. If developing locally, run the prebuild script first.`,
 		);
 	}
 
