@@ -49,8 +49,8 @@ const baseConfig = {
 	},
 	clients: {
 		client: { type: "static" as const, path: "./config/clients.yaml" },
-		user: { baseURL: "http://localhost:3001", timeout: 5000 },
-		code: { endpointUri: "http://localhost:3002", defaultExpiresIn: 600 },
+		user: { type: "http", baseURL: "http://localhost:3001", timeout: 5000 },
+		code: { type: "redis", endpointUri: "http://localhost:3002", defaultExpiresIn: 600 },
 	},
 	endpoints: {
 		login: { url: "http://example.com/login" },
