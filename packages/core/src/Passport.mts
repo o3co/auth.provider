@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import passport from "passport";
-import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as LocalStrategy } from "passport-local";
 import { Strategy as ClientCredentialStrategy } from "passport-oauth2-client-password";
 
@@ -89,6 +88,7 @@ export const createPassport = async ({
 		);
 
 	if (config.federations.google.enabled) {
+		const { Strategy: GoogleStrategy } = await import("passport-google-oauth20");
 		passport.use(
 			new GoogleStrategy(
 				{

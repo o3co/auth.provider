@@ -15,7 +15,7 @@
  */
 import { execSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,10 +38,12 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	}
 
 	// Copy template to target
+	const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 	cpSync(TEMPLATES_DIR, targetDir, {
 		recursive: true,
 		filter: (source) => {
-			return !source.includes("node_modules") && !source.includes("/dist/");
+			const segments = source.split(sep);
+			return !segments.some((s) => EXCLUDED_DIRS.has(s));
 		},
 	});
 
