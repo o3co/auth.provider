@@ -15,42 +15,25 @@
  */
 
 import crypto from "node:crypto";
-import fs from "node:fs";
 import bcrypt from "bcrypt";
-import yaml from "js-yaml";
 import { z } from "zod";
 import type { User } from "./types.mjs";
 import type { UserRepository } from "./UserRepository.mjs";
 
-const UserEntrySchema = z
+export const UserEntrySchema = z
 	.object({
 		password: z.string().min(1),
 		id: z.string().optional(),
 	})
 	.catchall(z.unknown());
 
-type UserEntry = z.infer<typeof UserEntrySchema>;
+export type UserEntry = z.infer<typeof UserEntrySchema>;
 
 export class StaticUserRepository implements UserRepository {
 	private users: Map<string, UserEntry>;
 
-	constructor(filePath: string) {
-		const content = fs.readFileSync(filePath, "utf-8");
-		const raw = yaml.load(content);
-		if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) {
-			throw new Error(`Invalid user configuration in ${filePath}: expected a YAML mapping`);
-		}
-		const data = (raw ?? {}) as Record<string, unknown>;
-		this.users = new Map<string, UserEntry>();
-		for (const [username, entry] of Object.entries(data)) {
-			const result = UserEntrySchema.safeParse(entry);
-			if (!result.success) {
-				throw new Error(
-					`Invalid user entry "${username}" in ${filePath}: ${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`,
-				);
-			}
-			this.users.set(username, result.data);
-		}
+	constructor(users: Map<string, UserEntry>) {
+		this.users = users;
 	}
 
 	private toUser(username: string, entry: UserEntry): User {
