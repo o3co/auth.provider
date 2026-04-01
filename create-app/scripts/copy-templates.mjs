@@ -23,4 +23,7 @@ const corePkgPath = resolve(__dirname, "../../packages/core/package.json");
 const corePkg = JSON.parse(readFileSync(corePkgPath, "utf-8"));
 const version = corePkg.version ?? "0.0.0";
 
-writeFileSync(resolve(dest, "..", "core-version.json"), `${JSON.stringify({ version })}\n`);
+writeFileSync(
+	resolve(dest, "..", "core-version.json"),
+	`${JSON.stringify({ version }, null, "\t")}\n`,
+);
