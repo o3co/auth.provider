@@ -53,9 +53,16 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	pkg.name = projectName;
 	delete pkg.private;
 
-	// Replace workspace reference with published version
-	if (pkg.dependencies?.["@o3co/auth-provider-core"] === "workspace:*") {
-		pkg.dependencies["@o3co/auth-provider-core"] = `^${getCoreVersion()}`;
+	// Replace all workspace:* references with published versions
+	const coreVersion = getCoreVersion();
+	for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {
+		const deps = pkg[section];
+		if (!deps) continue;
+		for (const [name, version] of Object.entries(deps)) {
+			if (version === "workspace:*") {
+				deps[name] = `^${coreVersion}`;
+			}
+		}
 	}
 
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
