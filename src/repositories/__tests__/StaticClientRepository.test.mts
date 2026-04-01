@@ -67,7 +67,7 @@ test-app:
 			const client = await repo.findById("test-app");
 			expect(client).not.toBeNull();
 			expect(client?.clientId).toBe("test-app");
-			expect(client?.clientSecret).toBe("test-secret");
+			expect(client).not.toHaveProperty("clientSecret");
 			expect(client?.allowedRedirectUris).toEqual(["http://localhost:3000/callback"]);
 			expect(client?.allowedScopes).toEqual(["read", "write"]);
 		});

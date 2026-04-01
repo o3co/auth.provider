@@ -19,8 +19,7 @@ import fs from "node:fs";
 import bcrypt from "bcrypt";
 import yaml from "js-yaml";
 import { z } from "zod";
-import type { AuthenticatedClient, ClientRepository } from "./ClientRepository.mjs";
-import type { Client } from "./types.mjs";
+import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
 const ClientEntrySchema = z.object({
 	clientSecret: z.string(),
@@ -52,22 +51,21 @@ export class StaticClientRepository implements ClientRepository {
 		}
 	}
 
-	async findById(clientId: string): Promise<Client | null> {
+	async findById(clientId: string): Promise<PublicClient | null> {
 		const entry = this.clients.get(clientId);
 		if (!entry) return null;
 		return {
 			clientId,
-			clientSecret: entry.clientSecret,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
 		};
 	}
 
-	async authenticate(clientId: string, secret: string): Promise<AuthenticatedClient | null> {
-		const client = await this.findById(clientId);
-		if (!client) return null;
+	async authenticate(clientId: string, secret: string): Promise<PublicClient | null> {
+		const entry = this.clients.get(clientId);
+		if (!entry) return null;
 
-		const stored = client.clientSecret;
+		const stored = entry.clientSecret;
 		const isBcrypt = /^\$2[aby]\$/.test(stored);
 
 		let match: boolean;
@@ -81,7 +79,10 @@ export class StaticClientRepository implements ClientRepository {
 
 		if (!match) return null;
 
-		const { clientSecret: _, ...authenticated } = client;
-		return authenticated;
+		return {
+			clientId,
+			allowedRedirectUris: entry.allowedRedirectUris,
+			allowedScopes: entry.allowedScopes,
+		};
 	}
 }
