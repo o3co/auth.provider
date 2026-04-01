@@ -48,7 +48,7 @@ const baseConfig = {
 		google: { enabled: true },
 	},
 	clients: {
-		client: { type: "static" as const, path: "./config/clients.yaml" },
+		client: { type: "yaml", path: "./config/clients.yaml" },
 		user: { type: "http", baseURL: "http://localhost:3001", timeout: 5000 },
 		code: { type: "redis", endpointUri: "http://localhost:3002", defaultExpiresIn: 600 },
 	},

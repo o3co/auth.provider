@@ -21,13 +21,12 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "../templates/standalone");
 
-const getCoreVersion = (): string => {
-	const versionFile = resolve(__dirname, "../templates/core-version.json");
+const getPackageVersions = (): Record<string, string> => {
+	const versionFile = resolve(__dirname, "../templates/versions.json");
 	if (existsSync(versionFile)) {
-		const data = JSON.parse(readFileSync(versionFile, "utf-8"));
-		return data.version ?? "0.0.0";
+		return JSON.parse(readFileSync(versionFile, "utf-8"));
 	}
-	return "0.0.0";
+	return {};
 };
 
 export const scaffold = (targetDir: string, projectName: string): void => {
@@ -53,14 +52,14 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	pkg.name = projectName;
 	delete pkg.private;
 
-	// Replace all workspace:* references with published versions
-	const coreVersion = getCoreVersion();
+	// Replace all workspace:* references with per-package published versions
+	const versions = getPackageVersions();
 	for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {
 		const deps = pkg[section];
 		if (!deps) continue;
 		for (const [name, version] of Object.entries(deps)) {
 			if (version === "workspace:*") {
-				deps[name] = `^${coreVersion}`;
+				deps[name] = `^${versions[name] ?? "0.0.0"}`;
 			}
 		}
 	}

@@ -48,10 +48,14 @@ export class RedisCodeRepository implements CodeRepository {
 	}
 
 	static async create(config: Record<string, unknown>): Promise<RedisCodeRepository> {
+		if (typeof config.endpointUri !== "string") {
+			throw new Error('RedisCodeRepository requires "endpointUri" in config');
+		}
 		const repo = new RedisCodeRepository({
-			endpointUri: config.endpointUri as string,
-			password: config.password as string | undefined,
-			defaultExpiresIn: config.defaultExpiresIn as number | undefined,
+			endpointUri: config.endpointUri,
+			password: typeof config.password === "string" ? config.password : undefined,
+			defaultExpiresIn:
+				typeof config.defaultExpiresIn === "number" ? config.defaultExpiresIn : undefined,
 		});
 		await repo.initialize();
 		return repo;

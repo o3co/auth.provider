@@ -23,13 +23,19 @@ export const registerBuiltinRepositories = (factories: {
 	codeFactory: RepositoryFactory<CodeRepository>;
 }): void => {
 	factories.userFactory.register("http", (config) => {
+		if (typeof config.baseURL !== "string") {
+			throw new Error('HttpUserRepository requires "baseURL" in config');
+		}
 		return new HttpUserRepository({
-			baseURL: config.baseURL as string,
-			timeout: (config.timeout as number) ?? 5000,
+			baseURL: config.baseURL,
+			timeout: typeof config.timeout === "number" ? config.timeout : 5000,
 		});
 	});
 
 	factories.codeFactory.register("redis", (config) => {
+		if (typeof config.endpointUri !== "string") {
+			throw new Error('RedisCodeRepository requires "endpointUri" in config');
+		}
 		return RedisCodeRepository.create(config);
 	});
 };

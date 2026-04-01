@@ -60,29 +60,25 @@ describe("provider config", () => {
 		expect(config.clients.client.type).toBe("yaml");
 	});
 
-	it("clients.user.type defaults to http", () => {
+	it("clients.user.type defaults to yaml", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
-				CLIENT_USER_BASE_URL: "http://localhost:8080",
-				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
-		expect(config.clients.user.type).toBe("http");
+		expect(config.clients.user.type).toBe("yaml");
 	});
 
-	it("clients.code.type defaults to redis", () => {
+	it("clients.code.type defaults to memory", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
-				CLIENT_USER_BASE_URL: "http://localhost:8080",
-				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
-		expect(config.clients.code.type).toBe("redis");
+		expect(config.clients.code.type).toBe("memory");
 	});
 });
