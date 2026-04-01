@@ -4,7 +4,7 @@
 	"license": "Apache-2.0",
 	"type": "module",
 	"bin": {
-		"create-o3co-auth-provider": "./dist/index.mjs"
+		"create-o3co-auth-provider": "./dist/cli.mjs"
 	},
 	"files": [
 		"dist",

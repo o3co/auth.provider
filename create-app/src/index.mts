@@ -1,7 +1,5 @@
-#!/usr/bin/env node
-import { execSync } from "node:child_process";
 /*
- * Copyright 2026 1o1 Inc.
+ * Copyright 2026 1o1 Co. Ltd.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +13,22 @@ import { execSync } from "node:child_process";
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { execSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "../templates/standalone");
+
+const getCoreVersion = (): string => {
+	const versionFile = resolve(__dirname, "../templates/core-version.json");
+	if (existsSync(versionFile)) {
+		const data = JSON.parse(readFileSync(versionFile, "utf-8"));
+		return data.version ?? "0.0.0";
+	}
+	return "0.0.0";
+};
 
 export const scaffold = (targetDir: string, projectName: string): void => {
 	if (!existsSync(TEMPLATES_DIR)) {
@@ -45,20 +53,14 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 
 	// Replace workspace reference with published version
 	if (pkg.dependencies?.["@o3co/auth-provider-core"] === "workspace:*") {
-		const corePkgPath = resolve(TEMPLATES_DIR, "..", "..", "packages", "core", "package.json");
-		let coreVersion = "0.0.0";
-		if (existsSync(corePkgPath)) {
-			const corePkg = JSON.parse(readFileSync(corePkgPath, "utf-8"));
-			coreVersion = corePkg.version ?? "0.0.0";
-		}
-		pkg.dependencies["@o3co/auth-provider-core"] = `^${coreVersion}`;
+		pkg.dependencies["@o3co/auth-provider-core"] = `^${getCoreVersion()}`;
 	}
 
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
 // CLI entry point
-const main = (): void => {
+export const main = (): void => {
 	const args = process.argv.slice(2);
 	const projectName = args[0];
 
@@ -85,8 +87,3 @@ const main = (): void => {
 	console.log(`  cd ${projectName}`);
 	console.log(`  pnpm run debug`);
 };
-
-// Only run CLI when executed directly (not imported in tests)
-if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-	main();
-}
