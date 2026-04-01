@@ -22,7 +22,7 @@
 		"redis": "^5.10.0"
 	},
 	"peerDependencies": {
-		"@o3co/auth-provider-core": "workspace:*"
+		"@o3co/auth-provider-core": "^0.0.0"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",

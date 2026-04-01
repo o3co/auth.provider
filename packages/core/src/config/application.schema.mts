@@ -87,7 +87,7 @@ export const AppConfigSchema = z.object({
 			type: z.string().default("yaml"),
 			authenticateUrl: z.string().optional(),
 			authenticateByTokenUrl: z.string().optional(),
-			path: z.string().optional(),
+			path: z.string().default("./config/users.yaml"),
 			timeout: z.coerce.number().default(5000),
 		}),
 		code: z.object({

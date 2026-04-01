@@ -59,7 +59,13 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 		if (!deps) continue;
 		for (const [name, version] of Object.entries(deps)) {
 			if (version === "workspace:*") {
-				deps[name] = `^${versions[name] ?? "0.0.0"}`;
+				const resolved = versions[name];
+				if (!resolved) {
+					throw new Error(
+						`Cannot resolve version for workspace dependency "${name}". Ensure versions.json includes this package.`,
+					);
+				}
+				deps[name] = `^${resolved}`;
 			}
 		}
 	}
