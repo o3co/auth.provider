@@ -1,0 +1,7 @@
+test-app:
+  clientSecret: "test-secret"
+  allowedRedirectUris:
+    - "http://localhost:3000/callback"
+  allowedScopes:
+    - "read"
+    - "write"
