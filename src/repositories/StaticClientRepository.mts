@@ -21,11 +21,13 @@ import yaml from "js-yaml";
 import { z } from "zod";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
-const ClientEntrySchema = z.object({
-	clientSecret: z.string().min(1),
-	allowedRedirectUris: z.array(z.string()).default([]),
-	allowedScopes: z.array(z.string()).default([]),
-});
+const ClientEntrySchema = z
+	.object({
+		clientSecret: z.string().min(1),
+		allowedRedirectUris: z.array(z.string()).default([]),
+		allowedScopes: z.array(z.string()).default([]),
+	})
+	.strict();
 
 type ClientEntry = z.infer<typeof ClientEntrySchema>;
 

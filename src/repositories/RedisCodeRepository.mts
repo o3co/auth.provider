@@ -91,7 +91,8 @@ export class RedisCodeRepository implements CodeRepository {
 		try {
 			return { ...JSON.parse(value), code } as Code;
 		} catch (err) {
-			console.error(`RedisCodeRepository: corrupted data for code ${code}`, err);
+			const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
+			console.error(`RedisCodeRepository: corrupted data for code (hash=${codeHash})`, err);
 			return null;
 		}
 	}
