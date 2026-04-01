@@ -67,7 +67,7 @@ test-app:
 			const client = await repo.findById("test-app");
 			expect(client).not.toBeNull();
 			expect(client?.clientId).toBe("test-app");
-			expect(client?.clientSecret).toBe("test-secret");
+			expect(client).not.toHaveProperty("clientSecret");
 			expect(client?.allowedRedirectUris).toEqual(["http://localhost:3000/callback"]);
 			expect(client?.allowedScopes).toEqual(["read", "write"]);
 		});
@@ -143,6 +143,29 @@ bcrypt-client:
 `);
 			const client = await repo.authenticate("bcrypt-client", "wrong-secret");
 			expect(client).toBeNull();
+		});
+	});
+
+	describe("validation", () => {
+		it("throws on invalid entry (missing clientSecret)", () => {
+			expect(() =>
+				createRepo(`
+bad-client:
+  allowedRedirectUris: []
+  allowedScopes: []
+`),
+			).toThrow(/Invalid client entry "bad-client"/);
+		});
+
+		it("throws on invalid entry (allowedRedirectUris is string)", () => {
+			expect(() =>
+				createRepo(`
+bad-client:
+  clientSecret: "secret"
+  allowedRedirectUris: "not-an-array"
+  allowedScopes: []
+`),
+			).toThrow(/Invalid client entry "bad-client"/);
 		});
 	});
 });

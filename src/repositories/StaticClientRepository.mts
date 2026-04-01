@@ -18,14 +18,18 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import bcrypt from "bcrypt";
 import yaml from "js-yaml";
-import type { AuthenticatedClient, ClientRepository } from "./ClientRepository.mjs";
-import type { Client } from "./types.mjs";
+import { z } from "zod";
+import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
-interface ClientEntry {
-	clientSecret: string;
-	allowedRedirectUris: string[];
-	allowedScopes: string[];
-}
+const ClientEntrySchema = z
+	.object({
+		clientSecret: z.string().min(1),
+		allowedRedirectUris: z.array(z.string()).default([]),
+		allowedScopes: z.array(z.string()).default([]),
+	})
+	.strict();
+
+type ClientEntry = z.infer<typeof ClientEntrySchema>;
 
 export class StaticClientRepository implements ClientRepository {
 	private clients: Map<string, ClientEntry>;
@@ -36,26 +40,34 @@ export class StaticClientRepository implements ClientRepository {
 		if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) {
 			throw new Error(`Invalid client configuration in ${filePath}: expected a YAML mapping`);
 		}
-		const data = (raw ?? {}) as Record<string, ClientEntry>;
-		this.clients = new Map(Object.entries(data));
+		const data = (raw ?? {}) as Record<string, unknown>;
+		this.clients = new Map<string, ClientEntry>();
+		for (const [clientId, entry] of Object.entries(data)) {
+			const result = ClientEntrySchema.safeParse(entry);
+			if (!result.success) {
+				throw new Error(
+					`Invalid client entry "${clientId}" in ${filePath}: ${result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join(", ")}`,
+				);
+			}
+			this.clients.set(clientId, result.data);
+		}
 	}
 
-	async findById(clientId: string): Promise<Client | null> {
+	async findById(clientId: string): Promise<PublicClient | null> {
 		const entry = this.clients.get(clientId);
 		if (!entry) return null;
 		return {
 			clientId,
-			clientSecret: entry.clientSecret,
-			allowedRedirectUris: entry.allowedRedirectUris ?? [],
-			allowedScopes: entry.allowedScopes ?? [],
+			allowedRedirectUris: entry.allowedRedirectUris,
+			allowedScopes: entry.allowedScopes,
 		};
 	}
 
-	async authenticate(clientId: string, secret: string): Promise<AuthenticatedClient | null> {
-		const client = await this.findById(clientId);
-		if (!client) return null;
+	async authenticate(clientId: string, secret: string): Promise<PublicClient | null> {
+		const entry = this.clients.get(clientId);
+		if (!entry) return null;
 
-		const stored = client.clientSecret;
+		const stored = entry.clientSecret;
 		const isBcrypt = /^\$2[aby]\$/.test(stored);
 
 		let match: boolean;
@@ -69,7 +81,10 @@ export class StaticClientRepository implements ClientRepository {
 
 		if (!match) return null;
 
-		const { clientSecret: _, ...authenticated } = client;
-		return authenticated;
+		return {
+			clientId,
+			allowedRedirectUris: entry.allowedRedirectUris,
+			allowedScopes: entry.allowedScopes,
+		};
 	}
 }

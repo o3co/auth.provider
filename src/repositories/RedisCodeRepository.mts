@@ -19,6 +19,8 @@ import { createClient, type RedisClientType } from "redis";
 import type { CodeRepository } from "./CodeRepository.mjs";
 import type { Code } from "./types.mjs";
 
+const KEY_PREFIX = "oauth:code:";
+
 export class RedisCodeRepository implements CodeRepository {
 	private redis: RedisClientType;
 	private defaultExpiresIn: number;
@@ -62,7 +64,7 @@ export class RedisCodeRepository implements CodeRepository {
 		const code = crypto.randomBytes(32).toString("base64url");
 
 		await this.redis.set(
-			code,
+			KEY_PREFIX + code,
 			JSON.stringify({ code_challenge, code_challenge_method }),
 			{ EX: expiresIn },
 		);
@@ -71,12 +73,27 @@ export class RedisCodeRepository implements CodeRepository {
 	}
 
 	async getByCode(code: string): Promise<Code | null> {
-		const value = await this.redis.get(code);
-		if (!value) return null;
-		return { ...JSON.parse(value), code } as Code;
+		const value = await this.redis.get(KEY_PREFIX + code);
+		return this.parseCodeValue(code, value);
+	}
+
+	async consumeByCode(code: string): Promise<Code | null> {
+		const value = await this.redis.getDel(KEY_PREFIX + code);
+		return this.parseCodeValue(code, value);
 	}
 
 	async removeByCode(code: string): Promise<void> {
-		await this.redis.del(code);
+		await this.redis.del(KEY_PREFIX + code);
+	}
+
+	private parseCodeValue(code: string, value: string | null): Code | null {
+		if (!value) return null;
+		try {
+			return { ...JSON.parse(value), code } as Code;
+		} catch (err) {
+			const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
+			console.error(`RedisCodeRepository: corrupted data for code (hash=${codeHash})`, err);
+			return null;
+		}
 	}
 }

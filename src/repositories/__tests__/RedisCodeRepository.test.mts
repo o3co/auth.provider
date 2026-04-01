@@ -16,6 +16,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const KEY_PREFIX = "oauth:code:";
+
 // In-memory store simulating Redis
 const store = new Map<string, string>();
 
@@ -28,6 +30,11 @@ vi.mock("redis", () => {
 		}),
 		get: vi.fn().mockImplementation((key: string) => {
 			return Promise.resolve(store.get(key) ?? null);
+		}),
+		getDel: vi.fn().mockImplementation((key: string) => {
+			const value = store.get(key) ?? null;
+			store.delete(key);
+			return Promise.resolve(value);
 		}),
 		del: vi.fn().mockImplementation((key: string) => {
 			store.delete(key);
@@ -54,8 +61,8 @@ describe("RedisCodeRepository", () => {
 
 			expect(typeof result.code).toBe("string");
 			expect(result.code.length).toBeGreaterThan(0);
-			// Verify it was stored
-			expect(store.has(result.code)).toBe(true);
+			// Verify it was stored with namespace prefix
+			expect(store.has(`${KEY_PREFIX}${result.code}`)).toBe(true);
 		});
 
 		it("returns code with code_challenge and code_challenge_method", async () => {
@@ -74,7 +81,7 @@ describe("RedisCodeRepository", () => {
 				code_challenge_method: "S256",
 			});
 
-			const stored = store.get(result.code);
+			const stored = store.get(`${KEY_PREFIX}${result.code}`);
 			expect(stored).toBeDefined();
 			const parsed = JSON.parse(stored!);
 			expect(parsed.code_challenge).toBe("challenge-value");
@@ -111,15 +118,51 @@ describe("RedisCodeRepository", () => {
 			const result = await repo.getByCode("nonexistent-code");
 			expect(result).toBeNull();
 		});
+
+		it("returns null for corrupted data", async () => {
+			store.set(`${KEY_PREFIX}corrupted`, "not-valid-json{{{");
+			const result = await repo.getByCode("corrupted");
+			expect(result).toBeNull();
+		});
+	});
+
+	describe("consumeByCode", () => {
+		it("returns code data and removes it atomically", async () => {
+			const created = await repo.createCode({
+				code_challenge: "consume-test",
+				code_challenge_method: "S256",
+			});
+
+			const consumed = await repo.consumeByCode(created.code);
+			expect(consumed).not.toBeNull();
+			expect(consumed?.code).toBe(created.code);
+			expect(consumed?.code_challenge).toBe("consume-test");
+
+			// Should be gone from store
+			expect(store.has(`${KEY_PREFIX}${created.code}`)).toBe(false);
+		});
+
+		it("returns null for unknown code", async () => {
+			expect(await repo.consumeByCode("nonexistent")).toBeNull();
+		});
+
+		it("second consume returns null (replay prevention)", async () => {
+			const created = await repo.createCode({});
+			const first = await repo.consumeByCode(created.code);
+			expect(first).not.toBeNull();
+
+			const second = await repo.consumeByCode(created.code);
+			expect(second).toBeNull();
+		});
 	});
 
 	describe("removeByCode", () => {
 		it("removes a stored code", async () => {
 			const created = await repo.createCode({ code_challenge: "c" });
-			expect(store.has(created.code)).toBe(true);
+			expect(store.has(`${KEY_PREFIX}${created.code}`)).toBe(true);
 
 			await repo.removeByCode(created.code);
-			expect(store.has(created.code)).toBe(false);
+			expect(store.has(`${KEY_PREFIX}${created.code}`)).toBe(false);
 		});
 
 		it("does not throw for unknown code", async () => {

@@ -19,9 +19,8 @@ import jwt, { type JwtPayload } from "jsonwebtoken";
 
 import type { PassportStatic } from "passport";
 
-import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
+import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import type { Client } from "#/repositories/types.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGrantRegistry, type GrantRegistry } from "./grants/registry.mjs";
 import { formatObject } from "./grants/token.mjs";
@@ -33,8 +32,6 @@ declare module "express-session" {
 		user?: Record<string, unknown>;
 		code?: string;
 		code_client_id?: string;
-		code_challenge?: string;
-		code_challenge_method?: string;
 		granted_scopes?: string[];
 		isAuthenticated?: boolean;
 	}
@@ -161,7 +158,7 @@ export const createRouter = (
 					return res.status(400).json({ message: "invalid redirect_uri" });
 				}
 
-				let client: Client | null;
+				let client: PublicClient | null;
 				try {
 					client = await clientRepository.findById(client_id);
 				} catch {
@@ -199,8 +196,6 @@ export const createRouter = (
 
 				req.session.code = issue.code;
 				req.session.code_client_id = client_id;
-				req.session.code_challenge = issue.code_challenge;
-				req.session.code_challenge_method = issue.code_challenge_method;
 				req.session.granted_scopes = grantedScopes.length > 0 ? grantedScopes : undefined;
 
 				const url = new URL(redirect_uri);
