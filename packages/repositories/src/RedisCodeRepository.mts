@@ -47,6 +47,16 @@ export class RedisCodeRepository implements CodeRepository {
 		this.defaultExpiresIn = defaultExpiresIn;
 	}
 
+	static async create(config: Record<string, unknown>): Promise<RedisCodeRepository> {
+		const repo = new RedisCodeRepository({
+			endpointUri: config.endpointUri as string,
+			password: config.password as string | undefined,
+			defaultExpiresIn: config.defaultExpiresIn as number | undefined,
+		});
+		await repo.initialize();
+		return repo;
+	}
+
 	async initialize(): Promise<void> {
 		await this.redis.connect();
 	}
