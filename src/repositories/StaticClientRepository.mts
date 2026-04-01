@@ -51,7 +51,7 @@ export class StaticClientRepository implements ClientRepository {
 		if (!client) return null;
 
 		const stored = client.clientSecret;
-		const isBcrypt = stored.startsWith("$2b$");
+		const isBcrypt = /^\$2[aby]\$/.test(stored);
 
 		const match = isBcrypt
 			? await bcrypt.compare(secret, stored)
