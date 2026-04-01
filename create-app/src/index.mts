@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { execSync } from "node:child_process";
 import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,18 +98,9 @@ export const main = (): void => {
 	console.log(`Creating ${projectName}...`);
 	scaffold(targetDir, projectName);
 
-	try {
-		console.log("Installing dependencies...");
-		execSync("pnpm install", { cwd: targetDir, stdio: "inherit" });
-	} catch {
-		console.warn("Warning: Automatic dependency installation with 'pnpm install' failed.");
-		console.warn(
-			`You can still use the scaffolded project. To finish setup, run 'pnpm install' inside '${projectName}'.`,
-		);
-	}
-
 	console.log(`\nDone! Created ${projectName} at ${targetDir}`);
 	console.log(`\nNext steps:`);
 	console.log(`  cd ${projectName}`);
-	console.log(`  pnpm run debug`);
+	console.log("  npm install");
+	console.log("  npm run debug");
 };
