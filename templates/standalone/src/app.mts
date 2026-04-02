@@ -24,6 +24,7 @@ import {
 	createKeyStoreFromConfig,
 } from "@o3co/auth-provider-core";
 import { registerBuiltinRepositories } from "@o3co/auth-provider-repositories";
+import { gracefulShutdown } from "@o3co/auth.utils";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { RedisStore } from "connect-redis";
@@ -124,10 +125,5 @@ await (async (): Promise<void> => {
 		logger.info(`Server is running on http://localhost:${config.http.port}`);
 	});
 
-	const shutdown = (): void => {
-		grantRegistry.cleanup();
-		server.close(() => process.exit(0));
-	};
-	process.on("SIGTERM", shutdown);
-	process.on("SIGINT", shutdown);
+	gracefulShutdown(server, () => grantRegistry.cleanup());
 })();

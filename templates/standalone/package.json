@@ -20,7 +20,7 @@
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-repositories": "workspace:*",
-		"@o3co/js.util.log": "^0.5.0",
+		"@o3co/auth.utils": "^0.0.1",
 		"@o3co/ts.hocon": "^0.1.2",
 		"connect-redis": "^9.0.0",
 		"express": "^5.2.1",
