@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { initLogger } from "@o3co/js.util.log";
-import type { Logger } from "pino";
+import { createLogger } from "@o3co/auth.utils";
 
-const logger: Logger = initLogger("provider", { level: process.env.LOG_LEVEL ?? "info" });
-export default logger;
+export default createLogger("provider");
