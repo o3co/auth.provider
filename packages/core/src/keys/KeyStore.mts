@@ -13,8 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { createSecretKey, type KeyObject } from "node:crypto";
-import type { KeyLike } from "jose";
+import { type KeyObject, createSecretKey } from "node:crypto";
+
+export type KeyLike = CryptoKey | KeyObject | Uint8Array;
 
 export interface ManagedKey {
 	kid: string;

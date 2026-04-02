@@ -21,7 +21,7 @@ import { createGoogleProvider } from "../google.mjs";
 const baseConfig = {
 	http: { port: 3000, trustProxy: false },
 	oauth: {
-		jwt: { secret: "secret" },
+		jwt: { secret: "secret", kid: "v0" },
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {
@@ -51,6 +51,7 @@ const baseConfig = {
 		client: { type: "yaml", path: "./config/clients.yaml" },
 		user: {
 			type: "http",
+			path: "./config/users.yaml",
 			authenticateUrl: "http://localhost:3001/user/authenticate",
 			authenticateByTokenUrl: "http://localhost:3001/user/authenticate/token",
 			timeout: 5000,
