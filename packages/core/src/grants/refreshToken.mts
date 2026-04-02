@@ -67,7 +67,9 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			if (typ !== "rt+jwt") {
+			// Accept both new typ header ("rt+jwt") and legacy type payload ("refresh")
+			const legacyType = (tokenPayload as Record<string, unknown>).type;
+			if (typ !== "rt+jwt" && legacyType !== "refresh") {
 				return {
 					result: {
 						status: 400,

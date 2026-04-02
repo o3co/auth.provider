@@ -235,9 +235,28 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("accepts legacy tokens with type payload instead of typ header", async () => {
+			// Tokens issued before claims standardization use type: "refresh" in payload
+			// instead of typ: "rt+jwt" in the protected header.
+			const legacyToken = await new SignJWT({ type: "refresh", sub: "u1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setExpirationTime("24h")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: legacyToken },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+		});
+
 		it("accepts legacy tokens without kid header", async () => {
-			// Tokens issued before jose migration have no kid in the protected header.
-			// The fallback uses keyStore.current.kid to resolve the verification key.
 			const legacyToken = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", typ: "rt+jwt" })
 				.setExpirationTime("24h")
