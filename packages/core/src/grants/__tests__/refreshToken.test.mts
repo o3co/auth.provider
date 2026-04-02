@@ -235,6 +235,27 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("accepts legacy tokens without kid header", async () => {
+			// Tokens issued before jose migration have no kid in the protected header.
+			// The fallback uses keyStore.current.kid to resolve the verification key.
+			const legacyToken = await new SignJWT({ type: "refresh", user: { id: "u1" } })
+				.setProtectedHeader({ alg: "HS256" })
+				.setExpirationTime("24h")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: legacyToken },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+		});
+
 		it("does not return sessionMutation", async () => {
 			const token = await makeRefreshToken();
 			const handler = createRefreshTokenGrant(mockDeps);
