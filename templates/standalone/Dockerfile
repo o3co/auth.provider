@@ -1,5 +1,7 @@
 FROM node:25-alpine AS node-base
 
+ENV HOME=/home/node
+
 RUN apk add --no-cache tini \
  && npm install -g corepack --force \
  && corepack enable
