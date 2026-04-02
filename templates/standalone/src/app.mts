@@ -21,7 +21,7 @@ import {
 	createDefaultFactories,
 	createPassport,
 	createRouter,
-	createSymmetricKeyStore,
+	createKeyStoreFromConfig,
 } from "@o3co/auth-provider-core";
 import { registerBuiltinRepositories } from "@o3co/auth-provider-repositories";
 import { parseFile } from "@o3co/ts.hocon";
@@ -108,7 +108,7 @@ await (async (): Promise<void> => {
 	app.use(passport.session());
 
 	// Initialize KeyStore
-	const keyStore = createSymmetricKeyStore(config.oauth.jwt.secret, config.oauth.jwt.kid);
+	const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
 
 	// Initialize Routes with DI
 	const { router, grantRegistry } = createRouter(express, {
