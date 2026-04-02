@@ -83,7 +83,9 @@ export const generateToken = async (
 		...data,
 		...(scopes ? { scopes } : {}),
 		...(type ? { type } : {}),
-	}).setProtectedHeader({ alg: keyStore.algorithm, kid });
+	})
+		.setProtectedHeader({ alg: keyStore.algorithm, kid })
+		.setIssuedAt();
 
 	if (expiresIn !== undefined) {
 		builder = builder.setExpirationTime(`${expiresIn}s`);
