@@ -15,7 +15,7 @@
  */
 import { verifyAsync } from "@noble/ed25519";
 
-import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
+import { generateToken, generateTokenResponse } from "./token.mjs";
 import type {
 	GrantContext,
 	GrantDependencies,
@@ -40,7 +40,7 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
-			const { body, issuer, metadata } = ctx;
+			const { body, issuer } = ctx;
 			const {
 				did,
 				signature,
@@ -173,20 +173,17 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 			nonceStore.set(nonceKey, Date.now());
 
 			// 9. Generate token (M2M: access token only, no refresh token)
-			const didPayload = formatObject({
-				did,
-				...metadata,
-			});
-
 			return {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken(didPayload, {
+						accessToken: await generateToken({}, {
 							expiresIn: config.oauth.accessToken.expiresIn,
 							keyStore,
 							issuer,
-							type: "access",
+							subject: did,
+							authorizedParty: parsedMessage.audience ?? null,
+							tokenType: "at+jwt",
 							audience: parsedMessage.audience,
 						}),
 					}),

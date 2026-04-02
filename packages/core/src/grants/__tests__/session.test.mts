@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it, vi } from "vitest";
+import { decodeJwt } from "jose";
 
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createSessionGrant } from "../session.mjs";
@@ -142,9 +143,10 @@ describe("createSessionGrant", () => {
 			expect(result.status).toBe(200);
 			expect("tokens" in result).toBe(true);
 			if ("tokens" in result) {
-				const { decodeJwt } = await import("jose");
 				const decoded = decodeJwt(result.tokens.access_token);
 				expect(decoded.aud).toBe("my-app");
+				expect(decoded.sub).toBe("u1");
+				expect((decoded as Record<string, unknown>).azp).toBe("my-app");
 			}
 		});
 

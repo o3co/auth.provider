@@ -16,6 +16,7 @@
 import crypto from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
+import { decodeJwt } from "jose";
 
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createAuthorizationGrant } from "../authorization.mjs";
@@ -136,6 +137,9 @@ describe("createAuthorizationGrant", () => {
 			if ("tokens" in result) {
 				expect(result.tokens.access_token).toBeDefined();
 				expect(result.tokens.refresh_token).toBeDefined();
+				const decoded = decodeJwt(result.tokens.access_token);
+				expect(decoded.sub).toBe("u1");
+				expect((decoded as Record<string, unknown>).azp).toBe("client1");
 			}
 			// Session must be cleared
 			expect(sessionMutation).toBeDefined();
