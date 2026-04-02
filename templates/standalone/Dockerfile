@@ -1,20 +1,17 @@
-#############################################
 FROM node:25-alpine AS base
 
-RUN npm install -g corepack --force
+RUN apk add --no-cache tini \
+ && npm install -g corepack --force \
+ && corepack enable
 
-ENV HOME=/home/node
+WORKDIR /home/node
 
-WORKDIR ${HOME}
+COPY package.json ./
 
-ADD package.json ./
-
-RUN corepack enable
+RUN pnpm install
 
 #############################################
 FROM base AS builder
-
-RUN pnpm install
 
 COPY tsconfig.json ./
 COPY config/ ./config/
@@ -35,11 +32,21 @@ ENV NODE_ENV=production
 COPY --from=pre /home/node/node_modules ./node_modules/
 COPY --from=pre /home/node/dist/ ./dist/
 COPY --from=pre /home/node/config/ ./config/
-RUN ln -s /home/node/dist /home/node/src
 
+USER node
+
+ENTRYPOINT ["tini", "--"]
 CMD ["node", "dist/app.mjs"]
 
-##############################################
+#############################################
+FROM builder AS test
+
+COPY vitest.config.mts ./
+COPY tests/ ./tests/
+
+RUN pnpm run test
+
+#############################################
 FROM builder AS develop
 
 CMD ["pnpm", "run", "debug"]
