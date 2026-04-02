@@ -141,15 +141,12 @@ export const createRouter = (
 					return res.status(200).json({ active: false });
 				}
 				try {
-					const { kid } = decodeProtectedHeader(token);
-					const key = keyStore.getVerificationKey(kid ?? keyStore.current.kid);
+					const header = decodeProtectedHeader(token);
+					const key = keyStore.getVerificationKey(header.kid ?? keyStore.current.kid);
 					const { payload } = await jwtVerify(token, key);
 					const { exp, iss, aud, sub } = payload;
-					const scopes = payload.scopes as string[] | string | undefined;
-					const type = payload.type as string | undefined;
-					const user = payload.user as Record<string, unknown> | undefined;
-					const client = payload.client as Record<string, unknown> | undefined;
-					const ip = payload.ip as string | undefined;
+					const azp = (payload as Record<string, unknown>).azp as string | undefined;
+					const scope = (payload as Record<string, unknown>).scope as string | undefined;
 					return res.status(200).json(
 						formatObject({
 							active: true,
@@ -157,12 +154,9 @@ export const createRouter = (
 							iss,
 							aud,
 							sub,
-							// RFC 7662 Section 2.2: scope is a space-separated string
-							scope: Array.isArray(scopes) ? scopes.join(" ") : scopes,
-							type,
-							user,
-							client,
-							ip,
+							azp,
+							scope,
+							token_type: header.typ,
 						}),
 					);
 				} catch {
