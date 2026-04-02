@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { type KeyObject, createSecretKey } from "node:crypto";
+import { importPKCS8, importSPKI } from "jose";
 
 export type KeyLike = CryptoKey | KeyObject | Uint8Array;
 
@@ -34,6 +35,64 @@ export interface KeyStore {
 	getSigningKey(): { kid: string; privateKey: KeyLike };
 	getVerificationKeys(): ManagedKey[];
 	getVerificationKey(kid: string): KeyLike;
+}
+
+export interface AsymmetricKeyStoreOptions {
+	algorithm: string;
+	kid: string;
+	privateKeyPem: string;
+	publicKeyPem: string;
+	previousKeys?: Array<{
+		kid: string;
+		publicKeyPem: string;
+		expiresAt: Date;
+	}>;
+}
+
+export async function createAsymmetricKeyStore(options: AsymmetricKeyStoreOptions): Promise<KeyStore> {
+	const { algorithm, kid, privateKeyPem, publicKeyPem, previousKeys = [] } = options;
+
+	const privateKey = await importPKCS8(privateKeyPem, algorithm);
+	const publicKey = await importSPKI(publicKeyPem, algorithm);
+
+	// Import all previous public keys upfront
+	const resolvedPrevious: Array<ManagedKey & { expiresAt: Date }> = await Promise.all(
+		previousKeys.map(async (prev) => ({
+			kid: prev.kid,
+			publicKey: await importSPKI(prev.publicKeyPem, algorithm) as KeyLike,
+			expiresAt: prev.expiresAt,
+		})),
+	);
+
+	return {
+		algorithm,
+		current: { kid, privateKey, publicKey },
+		previous: resolvedPrevious,
+
+		getSigningKey() {
+			return { kid, privateKey };
+		},
+
+		getVerificationKeys(): ManagedKey[] {
+			const now = new Date();
+			const active = resolvedPrevious.filter((k) => k.expiresAt > now);
+			return [{ kid, publicKey }, ...active];
+		},
+
+		getVerificationKey(requestedKid: string): KeyLike {
+			if (requestedKid === kid) {
+				return publicKey;
+			}
+			const prev = resolvedPrevious.find((k) => k.kid === requestedKid);
+			if (!prev) {
+				throw new Error(`Unknown kid: ${requestedKid}`);
+			}
+			if (prev.expiresAt <= new Date()) {
+				throw new Error(`Expired kid: ${requestedKid}`);
+			}
+			return prev.publicKey;
+		},
+	};
 }
 
 export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
