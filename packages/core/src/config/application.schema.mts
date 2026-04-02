@@ -15,11 +15,6 @@
  */
 import { z } from "zod";
 
-// HOCON values can be boolean literals (true) or env var strings ("false").
-// hoconBoolean only accepts strings; z.boolean() only accepts booleans.
-// Union handles both cases.
-const hoconBoolean = z.union([z.boolean(), z.stringbool()]);
-
 const rateLimitSchema = z.object({
 	windowMs: z.coerce.number(),
 	limit: z.coerce.number(),
@@ -28,7 +23,7 @@ const rateLimitSchema = z.object({
 export const AppConfigSchema = z.object({
 	http: z.object({
 		port: z.coerce.number().default(3000),
-		trustProxy: hoconBoolean.default(false),
+		trustProxy: z.boolean().default(false),
 	}),
 	oauth: z.object({
 		jwt: z.object({
@@ -42,11 +37,11 @@ export const AppConfigSchema = z.object({
 			expiresIn: z.coerce.number().default(86400),
 		}),
 		grants: z.object({
-			session: z.object({ enabled: hoconBoolean.default(true) }),
-			authorization: z.object({ enabled: hoconBoolean.default(true) }),
-			refresh_token: z.object({ enabled: hoconBoolean.default(true) }),
+			session: z.object({ enabled: z.boolean().default(true) }),
+			authorization: z.object({ enabled: z.boolean().default(true) }),
+			refresh_token: z.object({ enabled: z.boolean().default(true) }),
 			did: z.object({
-				enabled: hoconBoolean.default(true),
+				enabled: z.boolean().default(true),
 				messageMaxAgeSec: z.coerce.number().default(300),
 			}),
 		}),
@@ -54,7 +49,7 @@ export const AppConfigSchema = z.object({
 	session: z.object({
 		secret: z.string(),
 		maxAge: z.coerce.number().default(3600000),
-		secure: hoconBoolean.default(true),
+		secure: z.boolean().default(true),
 		sameSite: z.enum(["lax", "none", "strict"]).default("lax"),
 		domain: z.string().nullable().default(null),
 		storage: z.object({
@@ -72,7 +67,7 @@ export const AppConfigSchema = z.object({
 	}),
 	federations: z.object({
 		google: z.object({
-			enabled: hoconBoolean.default(false),
+			enabled: z.boolean().default(false),
 			clientId: z.string().optional(),
 			clientSecret: z.string().optional(),
 			callbackURL: z.string().optional(),

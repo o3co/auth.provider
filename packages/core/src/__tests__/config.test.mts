@@ -38,13 +38,19 @@ describe("provider config", () => {
 				CLIENT_APP_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
 				HTTP_PORT: "9090",
+				HTTP_TRUST_PROXY: "true",
+				SESSION_SECURE: "false",
 				OAUTH_GRANTS_DID_ENABLED: "false",
+				FEDERATIONS_GOOGLE_ENABLED: "true",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
 
 		expect(config.http.port).toBe(9090);
+		expect(config.http.trustProxy).toBe(true);
+		expect(config.session.secure).toBe(false);
 		expect(config.oauth.grants.did.enabled).toBe(false);
+		expect(config.federations.google.enabled).toBe(true);
 	});
 
 	it("clients.client.type defaults to yaml", () => {
