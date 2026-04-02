@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createDidGrant } from "../did.mjs";
 import type { GrantContext, GrantDependencies } from "../types.mjs";
 
@@ -34,6 +35,7 @@ const mockConfig = {
 
 const mockDeps: GrantDependencies = {
 	config: mockConfig,
+	keyStore: createSymmetricKeyStore("test-secret"),
 	clientRepository: {} as GrantDependencies["clientRepository"],
 	codeRepository: {} as GrantDependencies["codeRepository"],
 };
