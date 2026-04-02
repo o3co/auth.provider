@@ -27,9 +27,20 @@ export const AppConfigSchema = z.object({
 	}),
 	oauth: z.object({
 		jwt: z.object({
-			secret: z.string(),
+			algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]).default("HS256"),
+			secret: z.string().optional(),
 			issuer: z.string().optional(),
 			kid: z.string().default("v0"),
+			privateKey: z.string().optional(),
+			privateKeyPath: z.string().optional(),
+			publicKey: z.string().optional(),
+			publicKeyPath: z.string().optional(),
+			previousKeys: z.array(z.object({
+				kid: z.string(),
+				publicKey: z.string().optional(),
+				publicKeyPath: z.string().optional(),
+				expiresAt: z.string(),
+			})).default([]),
 		}),
 		accessToken: z.object({
 			expiresIn: z.coerce.number().default(3600),
