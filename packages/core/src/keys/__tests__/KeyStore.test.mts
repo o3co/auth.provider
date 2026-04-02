@@ -180,6 +180,40 @@ describe("AsymmetricKeyStore", () => {
 		expect(payload.sub).toBe("user-old");
 	});
 
+	it("throws on duplicate kid between current and previousKeys", async () => {
+		const keys = await generateTestKeyPair("ES256");
+		const prev = await generateTestKeyPair("ES256");
+
+		await expect(createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "same-kid",
+			privateKeyPem: keys.privateKeyPem,
+			publicKeyPem: keys.publicKeyPem,
+			previousKeys: [{
+				kid: "same-kid",
+				publicKeyPem: prev.publicKeyPem,
+				expiresAt: new Date(Date.now() + 86400000),
+			}],
+		})).rejects.toThrow("Duplicate kid");
+	});
+
+	it("throws on duplicate kid within previousKeys", async () => {
+		const keys = await generateTestKeyPair("ES256");
+		const prev1 = await generateTestKeyPair("ES256");
+		const prev2 = await generateTestKeyPair("ES256");
+
+		await expect(createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "current",
+			privateKeyPem: keys.privateKeyPem,
+			publicKeyPem: keys.publicKeyPem,
+			previousKeys: [
+				{ kid: "dup", publicKeyPem: prev1.publicKeyPem, expiresAt: new Date(Date.now() + 86400000) },
+				{ kid: "dup", publicKeyPem: prev2.publicKeyPem, expiresAt: new Date(Date.now() + 86400000) },
+			],
+		})).rejects.toThrow("Duplicate kid");
+	});
+
 	it("throws for unknown kid", async () => {
 		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
 		const store = await createAsymmetricKeyStore({

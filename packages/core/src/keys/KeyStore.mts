@@ -25,8 +25,10 @@ export interface ManagedKey {
 	expiresAt?: Date;
 }
 
+export type Algorithm = "HS256" | "RS256" | "ES256" | "EdDSA";
+
 export interface KeyStore {
-	readonly algorithm: string;
+	readonly algorithm: Algorithm;
 	readonly current: {
 		readonly kid: string;
 		readonly privateKey: KeyLike;
@@ -39,7 +41,7 @@ export interface KeyStore {
 }
 
 export interface AsymmetricKeyStoreOptions {
-	algorithm: string;
+	algorithm: "RS256" | "ES256" | "EdDSA";
 	kid: string;
 	privateKeyPem: string;
 	publicKeyPem: string;
@@ -52,6 +54,13 @@ export interface AsymmetricKeyStoreOptions {
 
 export async function createAsymmetricKeyStore(options: AsymmetricKeyStoreOptions): Promise<KeyStore> {
 	const { algorithm, kid, privateKeyPem, publicKeyPem, previousKeys = [] } = options;
+
+	// Validate kid uniqueness
+	const allKids = [kid, ...previousKeys.map((k) => k.kid)];
+	const duplicates = allKids.filter((k, i) => allKids.indexOf(k) !== i);
+	if (duplicates.length > 0) {
+		throw new Error(`Duplicate kid values: ${[...new Set(duplicates)].join(", ")}`);
+	}
 
 	const privateKey = await importPKCS8(privateKeyPem, algorithm);
 	const publicKey = await importSPKI(publicKeyPem, algorithm);

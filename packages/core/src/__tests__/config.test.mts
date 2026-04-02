@@ -93,7 +93,7 @@ describe("provider config", () => {
 
 describe("jwt config schema", () => {
 	it("algorithm defaults to HS256", () => {
-		const result = jwtSchema.parse({});
+		const result = jwtSchema.parse({ secret: "test-secret" });
 		expect(result.algorithm).toBe("HS256");
 	});
 
@@ -109,18 +109,20 @@ describe("jwt config schema", () => {
 	});
 
 	it("accepts ES256 and EdDSA algorithms", () => {
-		expect(jwtSchema.parse({ algorithm: "ES256" }).algorithm).toBe("ES256");
-		expect(jwtSchema.parse({ algorithm: "EdDSA" }).algorithm).toBe("EdDSA");
+		expect(jwtSchema.parse({ algorithm: "ES256", privateKey: "pk", publicKey: "pub" }).algorithm).toBe("ES256");
+		expect(jwtSchema.parse({ algorithm: "EdDSA", privateKey: "pk", publicKey: "pub" }).algorithm).toBe("EdDSA");
 	});
 
 	it("previousKeys defaults to empty array", () => {
-		const result = jwtSchema.parse({});
+		const result = jwtSchema.parse({ secret: "test-secret" });
 		expect(result.previousKeys).toEqual([]);
 	});
 
 	it("accepts previousKeys array with valid entries", () => {
 		const result = jwtSchema.parse({
 			algorithm: "ES256",
+			privateKey: "pk",
+			publicKey: "pub",
 			previousKeys: [
 				{
 					kid: "v0",
@@ -139,13 +141,38 @@ describe("jwt config schema", () => {
 		expect(result.previousKeys[1].publicKeyPath).toBe("/path/to/key.pem");
 	});
 
-	it("secret is optional", () => {
-		const result = jwtSchema.parse({ algorithm: "ES256" });
+	it("secret is optional for asymmetric algorithms", () => {
+		const result = jwtSchema.parse({ algorithm: "ES256", privateKey: "pk", publicKey: "pub" });
 		expect(result.secret).toBeUndefined();
 	});
 
 	it("kid defaults to v0", () => {
-		const result = jwtSchema.parse({});
+		const result = jwtSchema.parse({ secret: "test-secret" });
 		expect(result.kid).toBe("v0");
+	});
+
+	it("rejects HS256 without secret", () => {
+		const result = jwtSchema.safeParse({});
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects asymmetric algorithm without privateKey", () => {
+		const result = jwtSchema.safeParse({ algorithm: "ES256", publicKey: "pub" });
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects asymmetric algorithm without publicKey", () => {
+		const result = jwtSchema.safeParse({ algorithm: "RS256", privateKey: "pk" });
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects previousKeys entry without publicKey or publicKeyPath", () => {
+		const result = jwtSchema.safeParse({
+			algorithm: "ES256",
+			privateKey: "pk",
+			publicKey: "pub",
+			previousKeys: [{ kid: "old", expiresAt: "2099-01-01T00:00:00Z" }],
+		});
+		expect(result.success).toBe(false);
 	});
 });
