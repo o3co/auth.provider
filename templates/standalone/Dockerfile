@@ -45,9 +45,11 @@ FROM builder AS test
 COPY vitest.config.mts ./
 COPY tests/ ./tests/
 
-CMD ["pnpm", "run", "test"]
+CMD ["pnpm", "run", "test", "--", "--passWithNoTests"]
 
 #############################################
 FROM builder AS develop
+
+USER node
 
 CMD ["pnpm", "run", "debug"]
