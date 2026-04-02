@@ -13,13 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import jwt from "jsonwebtoken";
+import { createSecretKey } from "node:crypto";
+import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 
+import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createRefreshTokenGrant } from "../refreshToken.mjs";
 import type { GrantContext, GrantDependencies } from "../types.mjs";
 
-const SECRET = "test-secret";
+const SECRET = "test-secret-at-least-32-chars!!";
+const keyStore = createSymmetricKeyStore(SECRET);
+const secretKey = createSecretKey(Buffer.from(SECRET));
 
 const mockConfig = {
 	oauth: {
@@ -37,14 +41,16 @@ const mockConfig = {
 
 const mockDeps: GrantDependencies = {
 	config: mockConfig,
+	keyStore,
 	clientRepository: {} as GrantDependencies["clientRepository"],
 	codeRepository: {} as GrantDependencies["codeRepository"],
 };
 
-function makeRefreshToken(overrides: object = {}): string {
-	return jwt.sign({ type: "refresh", user: { id: "u1" }, ...overrides }, SECRET, {
-		expiresIn: 86400,
-	});
+async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
+	return new SignJWT({ type: "refresh", user: { id: "u1" }, ...overrides })
+		.setProtectedHeader({ alg: "HS256", kid: "v0" })
+		.setExpirationTime("24h")
+		.sign(secretKey);
 }
 
 describe("createRefreshTokenGrant", () => {
@@ -79,7 +85,10 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 400 when JWT type is not refresh", async () => {
-			const accessToken = jwt.sign({ type: "access", user: { id: "u1" } }, SECRET);
+			const accessToken = await new SignJWT({ type: "access", user: { id: "u1" } })
+				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setExpirationTime("1h")
+				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: accessToken },
@@ -94,9 +103,11 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 400 when client_id does not match token audience", async () => {
-			const token = jwt.sign({ type: "refresh", user: { id: "u1" } }, SECRET, {
-				audience: "client1",
-			});
+			const token = await new SignJWT({ type: "refresh", user: { id: "u1" } })
+				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setAudience("client1")
+				.setExpirationTime("24h")
+				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, client_id: "wrong-client" },
@@ -111,7 +122,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 200 with new access and refresh tokens on valid refresh token", async () => {
-			const token = makeRefreshToken();
+			const token = await makeRefreshToken();
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token },
@@ -131,10 +142,11 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 200 when client_id matches token audience", async () => {
-			const token = jwt.sign({ type: "refresh", user: { id: "u1" } }, SECRET, {
-				audience: "client1",
-				expiresIn: 86400,
-			});
+			const token = await new SignJWT({ type: "refresh", user: { id: "u1" } })
+				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setAudience("client1")
+				.setExpirationTime("24h")
+				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, client_id: "client1" },
@@ -149,7 +161,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("allows scope reduction via scope parameter", async () => {
-			const token = makeRefreshToken({ scopes: ["read", "write"] });
+			const token = await makeRefreshToken({ scopes: ["read", "write"] });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "read" },
@@ -168,7 +180,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("rejects scope that exceeds original grant", async () => {
-			const token = makeRefreshToken({ scopes: ["read"] });
+			const token = await makeRefreshToken({ scopes: ["read"] });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "read write" },
@@ -186,7 +198,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("deduplicates requested scope values", async () => {
-			const token = makeRefreshToken({ scopes: ["read", "write"] });
+			const token = await makeRefreshToken({ scopes: ["read", "write"] });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "read read" },
@@ -205,7 +217,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("treats empty scope string as no scope change", async () => {
-			const token = makeRefreshToken({ scopes: ["read", "write"] });
+			const token = await makeRefreshToken({ scopes: ["read", "write"] });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "" },
@@ -224,7 +236,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("does not return sessionMutation", async () => {
-			const token = makeRefreshToken();
+			const token = await makeRefreshToken();
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token },
