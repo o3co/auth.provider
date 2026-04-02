@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import jwt from "jsonwebtoken";
+import { SignJWT } from "jose";
+import type { KeyStore } from "#/keys/KeyStore.mjs";
 
 export const formatObject = <T extends object>(data: T): Partial<T> => {
 	return Object.fromEntries(Object.entries(data).filter(([, v]) => v)) as Partial<T>;
@@ -58,38 +59,43 @@ export const generateTokenResponse = ({
 
 export interface GenerateTokenOptions {
 	expiresIn?: number;
-	secret: string;
+	keyStore: KeyStore;
 	issuer?: string | null;
 	audience?: string | null;
 	scopes?: string[] | null;
 	type?: "access" | "refresh" | null;
 }
 
-export const generateToken = (
+export const generateToken = async (
 	data: object,
 	{
 		expiresIn = undefined,
-		secret,
+		keyStore,
 		issuer = null,
 		audience = null,
 		scopes = null,
 		type = null,
 	}: GenerateTokenOptions,
-): Token => {
-	const token = jwt.sign(
-		{
-			...data,
-			...(scopes ? { scopes } : {}),
-			...(type ? { type } : {}),
-		},
-		secret,
-		{
-			algorithm: "HS256",
-			expiresIn,
-			...(issuer != null ? { issuer } : {}),
-			...(audience != null ? { audience } : {}),
-		},
-	);
+): Promise<Token> => {
+	const { kid, privateKey } = keyStore.getSigningKey();
+
+	let builder = new SignJWT({
+		...data,
+		...(scopes ? { scopes } : {}),
+		...(type ? { type } : {}),
+	}).setProtectedHeader({ alg: keyStore.algorithm, kid });
+
+	if (expiresIn !== undefined) {
+		builder = builder.setExpirationTime(`${expiresIn}s`);
+	}
+	if (issuer != null) {
+		builder = builder.setIssuer(issuer);
+	}
+	if (audience != null) {
+		builder = builder.setAudience(audience);
+	}
+
+	const token = await builder.sign(privateKey);
 
 	const result: Token = { token };
 
