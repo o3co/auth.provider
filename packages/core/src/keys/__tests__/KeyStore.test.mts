@@ -13,10 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { generateKeyPair, exportSPKI, exportPKCS8, SignJWT, jwtVerify, decodeProtectedHeader } from "jose";
-import { describe, expect, it } from "vitest";
-import { createSymmetricKeyStore, createAsymmetricKeyStore } from "../KeyStore.mjs";
-import type { AsymmetricKeyStoreOptions } from "../KeyStore.mjs";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "../KeyStore.mjs";
+import type { JwtConfig } from "../KeyStore.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -208,5 +211,192 @@ describe("AsymmetricKeyStore", () => {
 		});
 
 		expect(() => store.getVerificationKey("k1")).toThrow();
+	});
+});
+
+describe("createKeyStoreFromConfig", () => {
+	let tmpDir: string;
+
+	beforeAll(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "keystore-test-"));
+	});
+
+	afterAll(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	it("HS256 with secret creates symmetric key store", async () => {
+		const config: JwtConfig = {
+			algorithm: "HS256",
+			secret: "my-test-secret",
+			kid: "v0",
+			previousKeys: [],
+		};
+		const store = await createKeyStoreFromConfig(config);
+		expect(store.algorithm).toBe("HS256");
+		expect(store.current.kid).toBe("v0");
+	});
+
+	it("HS256 without secret throws", async () => {
+		const config: JwtConfig = {
+			algorithm: "HS256",
+			kid: "v0",
+			previousKeys: [],
+		};
+		await expect(createKeyStoreFromConfig(config)).rejects.toThrow();
+	});
+
+	it("ES256 with privateKey and publicKey creates asymmetric key store", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "k1",
+			privateKey: privateKeyPem,
+			publicKey: publicKeyPem,
+			previousKeys: [],
+		};
+		const store = await createKeyStoreFromConfig(config);
+		expect(store.algorithm).toBe("ES256");
+
+		// Verify round-trip
+		const { kid, privateKey } = store.getSigningKey();
+		const token = await new SignJWT({ sub: "u1" })
+			.setProtectedHeader({ alg: "ES256", kid })
+			.sign(privateKey);
+		const verificationKey = store.getVerificationKey(kid);
+		const { payload } = await jwtVerify(token, verificationKey);
+		expect(payload.sub).toBe("u1");
+	});
+
+	it("RS256 with keys creates asymmetric key store", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("RS256");
+		const config: JwtConfig = {
+			algorithm: "RS256",
+			kid: "r1",
+			privateKey: privateKeyPem,
+			publicKey: publicKeyPem,
+			previousKeys: [],
+		};
+		const store = await createKeyStoreFromConfig(config);
+		expect(store.algorithm).toBe("RS256");
+	});
+
+	it("ES256 without privateKey throws", async () => {
+		const { publicKeyPem } = await generateTestKeyPair("ES256");
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "k1",
+			publicKey: publicKeyPem,
+			previousKeys: [],
+		};
+		await expect(createKeyStoreFromConfig(config)).rejects.toThrow();
+	});
+
+	it("ES256 without publicKey throws", async () => {
+		const { privateKeyPem } = await generateTestKeyPair("ES256");
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "k1",
+			privateKey: privateKeyPem,
+			previousKeys: [],
+		};
+		await expect(createKeyStoreFromConfig(config)).rejects.toThrow();
+	});
+
+	it("reads keys from file paths", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
+		const privPath = join(tmpDir, "private.pem");
+		const pubPath = join(tmpDir, "public.pem");
+		writeFileSync(privPath, privateKeyPem);
+		writeFileSync(pubPath, publicKeyPem);
+
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "f1",
+			privateKeyPath: privPath,
+			publicKeyPath: pubPath,
+			previousKeys: [],
+		};
+		const store = await createKeyStoreFromConfig(config);
+		expect(store.algorithm).toBe("ES256");
+		expect(store.current.kid).toBe("f1");
+	});
+
+	it("file path takes priority over PEM string", async () => {
+		const pair1 = await generateTestKeyPair("ES256");
+		const pair2 = await generateTestKeyPair("ES256");
+		const privPath = join(tmpDir, "private-priority.pem");
+		const pubPath = join(tmpDir, "public-priority.pem");
+		writeFileSync(privPath, pair1.privateKeyPem);
+		writeFileSync(pubPath, pair1.publicKeyPem);
+
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "p1",
+			privateKey: pair2.privateKeyPem,  // different key — should be ignored
+			privateKeyPath: privPath,
+			publicKey: pair2.publicKeyPem,
+			publicKeyPath: pubPath,
+			previousKeys: [],
+		};
+		const store = await createKeyStoreFromConfig(config);
+
+		// Sign with store and verify with pair1's public key (from file)
+		const { kid, privateKey } = store.getSigningKey();
+		const token = await new SignJWT({ sub: "priority" })
+			.setProtectedHeader({ alg: "ES256", kid })
+			.sign(privateKey);
+
+		const { importSPKI: importSPKIFn } = await import("jose");
+		const pubKeyFromFile = await importSPKIFn(pair1.publicKeyPem, "ES256");
+		const { payload } = await jwtVerify(token, pubKeyFromFile);
+		expect(payload.sub).toBe("priority");
+	});
+
+	it("previousKeys with expiresAt loaded correctly", async () => {
+		const current = await generateTestKeyPair("ES256");
+		const prev = await generateTestKeyPair("ES256");
+
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "k2",
+			privateKey: current.privateKeyPem,
+			publicKey: current.publicKeyPem,
+			previousKeys: [
+				{
+					kid: "k1",
+					publicKey: prev.publicKeyPem,
+					expiresAt: "2099-12-31T00:00:00Z",
+				},
+			],
+		};
+		const store = await createKeyStoreFromConfig(config);
+		const keys = store.getVerificationKeys();
+		expect(keys).toHaveLength(2);
+		expect(keys.map((k) => k.kid)).toContain("k1");
+	});
+
+	it("previousKeys with publicKeyPath reads from file", async () => {
+		const current = await generateTestKeyPair("ES256");
+		const prev = await generateTestKeyPair("ES256");
+		const prevPubPath = join(tmpDir, "prev-public.pem");
+		writeFileSync(prevPubPath, prev.publicKeyPem);
+
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "k2",
+			privateKey: current.privateKeyPem,
+			publicKey: current.publicKeyPem,
+			previousKeys: [
+				{
+					kid: "k1",
+					publicKeyPath: prevPubPath,
+					expiresAt: "2099-12-31T00:00:00Z",
+				},
+			],
+		};
+		const store = await createKeyStoreFromConfig(config);
+		const keys = store.getVerificationKeys();
+		expect(keys).toHaveLength(2);
 	});
 });
