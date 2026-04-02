@@ -1,14 +1,24 @@
 services:
-  test:
+  app:
     build:
       context: .
-      target: test
+      target: develop
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./src:/home/node/src
+      - ./config:/home/node/config
     depends_on:
       redis:
         condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
 
   redis:
     image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s

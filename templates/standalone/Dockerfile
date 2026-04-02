@@ -1,20 +1,22 @@
-#############################################
-FROM node:25-alpine AS base
-
-RUN npm install -g corepack --force
+FROM node:25-alpine AS node-base
 
 ENV HOME=/home/node
 
-WORKDIR ${HOME}
+RUN apk add --no-cache tini \
+ && npm install -g corepack --force \
+ && corepack enable
 
-ADD package.json ./
-
-RUN corepack enable
+WORKDIR /home/node
 
 #############################################
-FROM base AS builder
+FROM node-base AS deps
+
+COPY package.json ./
 
 RUN pnpm install
+
+#############################################
+FROM deps AS builder
 
 COPY tsconfig.json ./
 COPY config/ ./config/
@@ -23,23 +25,34 @@ COPY src/ ./src/
 RUN pnpm run build
 
 #############################################
-FROM builder AS pre
-
-RUN pnpm prune --prod
-
-#############################################
-FROM base AS runtime
+FROM node-base AS runtime
 
 ENV NODE_ENV=production
 
-COPY --from=pre /home/node/node_modules ./node_modules/
-COPY --from=pre /home/node/dist/ ./dist/
-COPY --from=pre /home/node/config/ ./config/
-RUN ln -s /home/node/dist /home/node/src
+COPY --from=deps /home/node/package.json /home/node/pnpm-lock.yaml ./
 
+RUN pnpm install --frozen-lockfile --prod \
+ && pnpm store prune
+
+COPY --from=builder /home/node/dist/ ./dist/
+COPY --from=builder /home/node/config/ ./config/
+
+USER node
+
+ENTRYPOINT ["tini", "--"]
 CMD ["node", "dist/app.mjs"]
 
-##############################################
+#############################################
+FROM builder AS test
+
+COPY vitest.config.mts ./
+COPY tests/ ./tests/
+
+CMD ["pnpm", "run", "test", "--", "--passWithNoTests"]
+
+#############################################
 FROM builder AS develop
+
+USER node
 
 CMD ["pnpm", "run", "debug"]
