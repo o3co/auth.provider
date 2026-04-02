@@ -15,6 +15,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
+import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createSessionGrant } from "../session.mjs";
 import type { GrantContext, GrantDependencies } from "../types.mjs";
 
@@ -34,6 +35,7 @@ const mockConfig = {
 
 const makeDeps = (overrides?: Partial<GrantDependencies>): GrantDependencies => ({
 	config: mockConfig,
+	keyStore: createSymmetricKeyStore("test-secret"),
 	clientRepository: {
 		findById: vi.fn(),
 		authenticate: vi.fn(),
@@ -140,8 +142,8 @@ describe("createSessionGrant", () => {
 			expect(result.status).toBe(200);
 			expect("tokens" in result).toBe(true);
 			if ("tokens" in result) {
-				const jwt = await import("jsonwebtoken");
-				const decoded = jwt.default.decode(result.tokens.access_token) as Record<string, unknown>;
+				const { decodeJwt } = await import("jose");
+				const decoded = decodeJwt(result.tokens.access_token);
 				expect(decoded.aud).toBe("my-app");
 			}
 		});
