@@ -91,9 +91,17 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			const subjectStr = typeof tokenPayload.sub === "string" ? tokenPayload.sub : undefined;
-			const azpStr = typeof (tokenPayload as Record<string, unknown>).azp === "string" ? (tokenPayload as Record<string, unknown>).azp as string : undefined;
-			const scopeStr = typeof (tokenPayload as Record<string, unknown>).scope === "string" ? (tokenPayload as Record<string, unknown>).scope as string : undefined;
+			const claims = tokenPayload as Record<string, unknown>;
+			// Read standard claims, with legacy fallback for pre-standardization tokens
+			const subjectStr = typeof tokenPayload.sub === "string" ? tokenPayload.sub
+				: typeof (claims.user as Record<string, unknown> | undefined)?.id === "string" ? (claims.user as Record<string, unknown>).id as string
+				: undefined;
+			const azpStr = typeof claims.azp === "string" ? claims.azp as string
+				: typeof (claims.client as Record<string, unknown> | undefined)?.id === "string" ? (claims.client as Record<string, unknown>).id as string
+				: undefined;
+			const scopeStr = typeof claims.scope === "string" ? claims.scope as string
+				: Array.isArray(claims.scopes) ? (claims.scopes as string[]).join(" ")
+				: undefined;
 
 			// RFC 6749 Section 6: requested scope MUST NOT exceed original scope
 			let grantedScope = scopeStr ?? null;

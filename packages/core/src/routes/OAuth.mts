@@ -145,8 +145,9 @@ export const createRouter = (
 					const key = keyStore.getVerificationKey(header.kid ?? keyStore.current.kid);
 					const { payload } = await jwtVerify(token, key);
 					const { exp, iss, aud, sub } = payload;
-					const azp = (payload as Record<string, unknown>).azp as string | undefined;
-					const scope = (payload as Record<string, unknown>).scope as string | undefined;
+					const claims = payload as Record<string, unknown>;
+					const azp = typeof claims.azp === "string" ? claims.azp : undefined;
+					const scope = typeof claims.scope === "string" ? claims.scope : undefined;
 					return res.status(200).json(
 						formatObject({
 							active: true,
