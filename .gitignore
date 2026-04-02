@@ -4,6 +4,7 @@ dist/
 *.log
 .env
 .env.*
+!.env.example
 .worktrees/
 docs/superpowers/
 create-app/templates/
