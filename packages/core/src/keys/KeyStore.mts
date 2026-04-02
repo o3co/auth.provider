@@ -114,7 +114,13 @@ export interface JwtConfig {
 }
 
 function readKeyValue(pemString?: string, filePath?: string): string | undefined {
-	if (filePath) return readFileSync(filePath, "utf-8");
+	if (filePath) {
+		try {
+			return readFileSync(filePath, "utf-8");
+		} catch (err) {
+			throw new Error(`Failed to read key file: ${filePath}`, { cause: err });
+		}
+	}
 	return pemString;
 }
 
@@ -142,10 +148,14 @@ export async function createKeyStoreFromConfig(config: JwtConfig): Promise<KeySt
 		if (!pubPem) {
 			throw new Error(`publicKey or publicKeyPath is required for previous key ${prev.kid}`);
 		}
+		const expiresAt = new Date(prev.expiresAt);
+		if (Number.isNaN(expiresAt.getTime())) {
+			throw new Error(`Invalid expiresAt for previous key "${prev.kid}": ${prev.expiresAt}`);
+		}
 		return {
 			kid: prev.kid,
 			publicKeyPem: pubPem,
-			expiresAt: new Date(prev.expiresAt),
+			expiresAt,
 		};
 	});
 

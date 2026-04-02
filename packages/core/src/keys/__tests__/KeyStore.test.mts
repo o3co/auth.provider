@@ -399,4 +399,34 @@ describe("createKeyStoreFromConfig", () => {
 		const keys = store.getVerificationKeys();
 		expect(keys).toHaveLength(2);
 	});
+
+	it("throws on invalid expiresAt in previousKeys", async () => {
+		const current = await generateTestKeyPair("ES256");
+		const prev = await generateTestKeyPair("ES256");
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "k1",
+			privateKey: current.privateKeyPem,
+			publicKey: current.publicKeyPem,
+			previousKeys: [
+				{
+					kid: "old",
+					publicKey: prev.publicKeyPem,
+					expiresAt: "not-a-date",
+				},
+			],
+		};
+		await expect(createKeyStoreFromConfig(config)).rejects.toThrow("Invalid expiresAt");
+	});
+
+	it("throws descriptive error for nonexistent key file", async () => {
+		const config: JwtConfig = {
+			algorithm: "ES256",
+			kid: "k1",
+			privateKeyPath: "/nonexistent/private.pem",
+			publicKeyPath: "/nonexistent/public.pem",
+			previousKeys: [],
+		};
+		await expect(createKeyStoreFromConfig(config)).rejects.toThrow("Failed to read key file");
+	});
 });
