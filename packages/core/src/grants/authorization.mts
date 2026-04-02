@@ -15,7 +15,7 @@
  */
 import crypto from "node:crypto";
 
-import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
+import { generateToken, generateTokenResponse } from "./token.mjs";
 import type {
 	GrantContext,
 	GrantDependencies,
@@ -28,7 +28,7 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
-			const { body, session, issuer, metadata } = ctx;
+			const { body, session, issuer } = ctx;
 			const {
 				code,
 				code_verifier = null,
@@ -131,31 +131,32 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 				}
 			}
 
-			const payload = formatObject({
-				user: session.user,
-				client: session.client,
-				...metadata,
-			});
+			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
+			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
 			return {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken(payload, {
+						accessToken: await generateToken({}, {
 							expiresIn: config.oauth.accessToken.expiresIn,
 							keyStore,
 							issuer,
 							audience: client_id,
-							scopes: grantedScopes,
-							type: "access",
+							subject: userId ?? null,
+							authorizedParty: client_id ?? null,
+							scope: grantedScopes?.join(" ") ?? null,
+							tokenType: "at+jwt",
 						}),
-						refreshToken: await generateToken(payload, {
+						refreshToken: await generateToken({}, {
 							expiresIn: config.oauth.refreshToken.expiresIn,
 							keyStore,
 							issuer,
 							audience: client_id,
-							scopes: grantedScopes,
-							type: "refresh",
+							subject: userId ?? null,
+							authorizedParty: client_id ?? null,
+							scope: grantedScopes?.join(" ") ?? null,
+							tokenType: "rt+jwt",
 						}),
 					}),
 				},

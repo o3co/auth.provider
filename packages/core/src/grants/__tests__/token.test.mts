@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { decodeProtectedHeader } from "jose";
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { generateToken, generateTokenResponse } from "../token.mjs";
 
@@ -22,10 +22,10 @@ const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 
 describe("generateToken", () => {
 	it("returns a Token with a valid JWT string", async () => {
-		const token = await generateToken({ user: "alice" }, {
+		const token = await generateToken({}, {
 			keyStore,
 			expiresIn: 3600,
-			type: "access",
+			tokenType: "at+jwt",
 		});
 
 		expect(token.token).toBeDefined();
@@ -34,9 +34,9 @@ describe("generateToken", () => {
 	});
 
 	it("sets kid in JWT protected header", async () => {
-		const token = await generateToken({ user: "alice" }, {
+		const token = await generateToken({}, {
 			keyStore,
-			type: "access",
+			tokenType: "at+jwt",
 		});
 
 		const header = decodeProtectedHeader(token.token);
@@ -46,50 +46,124 @@ describe("generateToken", () => {
 
 	it("sets custom kid from keyStore", async () => {
 		const ks = createSymmetricKeyStore("test-secret-at-least-32-chars!!", "v2");
-		const token = await generateToken({ user: "alice" }, {
+		const token = await generateToken({}, {
 			keyStore: ks,
-			type: "access",
+			tokenType: "at+jwt",
 		});
 
 		const header = decodeProtectedHeader(token.token);
 		expect(header.kid).toBe("v2");
 	});
 
-	it("includes expiresIn, audience, issuer, scopes, type in result", async () => {
-		const token = await generateToken({ user: "alice" }, {
+	it("sets sub claim via subject option", async () => {
+		const token = await generateToken({}, {
+			keyStore,
+			subject: "user-123",
+			tokenType: "at+jwt",
+		});
+
+		const payload = decodeJwt(token.token);
+		expect(payload.sub).toBe("user-123");
+		expect(token.subject).toBe("user-123");
+	});
+
+	it("sets azp claim via authorizedParty option", async () => {
+		const token = await generateToken({}, {
+			keyStore,
+			authorizedParty: "client-abc",
+			tokenType: "at+jwt",
+		});
+
+		const payload = decodeJwt(token.token);
+		expect((payload as Record<string, unknown>).azp).toBe("client-abc");
+	});
+
+	it("sets scope claim as string in payload", async () => {
+		const token = await generateToken({}, {
+			keyStore,
+			scope: "read write",
+			tokenType: "at+jwt",
+		});
+
+		const payload = decodeJwt(token.token);
+		expect((payload as Record<string, unknown>).scope).toBe("read write");
+		expect(token.scope).toBe("read write");
+	});
+
+	it("sets typ in protected header via tokenType option", async () => {
+		const token = await generateToken({}, {
+			keyStore,
+			tokenType: "at+jwt",
+		});
+
+		const header = decodeProtectedHeader(token.token);
+		expect(header.typ).toBe("at+jwt");
+		expect(token.tokenType).toBe("at+jwt");
+	});
+
+	it("sets typ to rt+jwt for refresh tokens", async () => {
+		const token = await generateToken({}, {
+			keyStore,
+			tokenType: "rt+jwt",
+		});
+
+		const header = decodeProtectedHeader(token.token);
+		expect(header.typ).toBe("rt+jwt");
+		expect(token.tokenType).toBe("rt+jwt");
+	});
+
+	it("does not include legacy user, client, scopes, type, ip in payload", async () => {
+		const token = await generateToken({}, {
+			keyStore,
+			subject: "user-123",
+			authorizedParty: "client-abc",
+			scope: "read",
+			tokenType: "at+jwt",
+		});
+
+		const payload = decodeJwt(token.token) as Record<string, unknown>;
+		expect(payload.user).toBeUndefined();
+		expect(payload.client).toBeUndefined();
+		expect(payload.scopes).toBeUndefined();
+		expect(payload.type).toBeUndefined();
+		expect(payload.ip).toBeUndefined();
+	});
+
+	it("includes expiresIn, audience, issuer, scope, tokenType in result", async () => {
+		const token = await generateToken({}, {
 			keyStore,
 			expiresIn: 3600,
 			issuer: "auth.provider",
 			audience: "client1",
-			scopes: ["read", "write"],
-			type: "access",
+			scope: "read write",
+			tokenType: "at+jwt",
 		});
 
 		expect(token.expiresIn).toBe(3600);
 		expect(token.issuer).toBe("auth.provider");
 		expect(token.audience).toBe("client1");
-		expect(token.scopes).toEqual(["read", "write"]);
-		expect(token.type).toBe("access");
+		expect(token.scope).toBe("read write");
+		expect(token.tokenType).toBe("at+jwt");
 	});
 
 	it("omits optional fields when not provided", async () => {
-		const token = await generateToken({ user: "alice" }, { keyStore });
+		const token = await generateToken({}, { keyStore, tokenType: "at+jwt" });
 
 		expect(token.expiresIn).toBeUndefined();
 		expect(token.issuer).toBeUndefined();
 		expect(token.audience).toBeUndefined();
-		expect(token.scopes).toBeUndefined();
-		expect(token.type).toBeUndefined();
+		expect(token.scope).toBeUndefined();
+		expect(token.subject).toBeUndefined();
 	});
 });
 
 describe("generateTokenResponse", () => {
 	it("formats access token response", async () => {
-		const accessToken = await generateToken({ user: "alice" }, {
+		const accessToken = await generateToken({}, {
 			keyStore,
 			expiresIn: 3600,
-			scopes: ["read"],
-			type: "access",
+			scope: "read",
+			tokenType: "at+jwt",
 		});
 
 		const response = generateTokenResponse({ accessToken });
@@ -102,8 +176,8 @@ describe("generateTokenResponse", () => {
 	});
 
 	it("includes refresh token when provided", async () => {
-		const accessToken = await generateToken({}, { keyStore, type: "access" });
-		const refreshToken = await generateToken({}, { keyStore, type: "refresh" });
+		const accessToken = await generateToken({}, { keyStore, tokenType: "at+jwt" });
+		const refreshToken = await generateToken({}, { keyStore, tokenType: "rt+jwt" });
 
 		const response = generateTokenResponse({ accessToken, refreshToken });
 

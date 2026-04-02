@@ -47,8 +47,8 @@ const mockDeps: GrantDependencies = {
 };
 
 async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
-	return new SignJWT({ type: "refresh", user: { id: "u1" }, ...overrides })
-		.setProtectedHeader({ alg: "HS256", kid: "v0" })
+	return new SignJWT({ sub: "u1", scope: "read write", ...overrides })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 		.setExpirationTime("24h")
 		.sign(secretKey);
 }
@@ -84,9 +84,9 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(400);
 		});
 
-		it("returns 400 when JWT type is not refresh", async () => {
-			const accessToken = await new SignJWT({ type: "access", user: { id: "u1" } })
-				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+		it("returns 400 when JWT typ header is not rt+jwt", async () => {
+			const accessToken = await new SignJWT({ sub: "u1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
 				.setExpirationTime("1h")
 				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
@@ -103,8 +103,8 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 400 when client_id does not match token audience", async () => {
-			const token = await new SignJWT({ type: "refresh", user: { id: "u1" } })
-				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+			const token = await new SignJWT({ sub: "u1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setAudience("client1")
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -142,8 +142,8 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("returns 200 when client_id matches token audience", async () => {
-			const token = await new SignJWT({ type: "refresh", user: { id: "u1" } })
-				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+			const token = await new SignJWT({ sub: "u1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setAudience("client1")
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -161,7 +161,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("allows scope reduction via scope parameter", async () => {
-			const token = await makeRefreshToken({ scopes: ["read", "write"] });
+			const token = await makeRefreshToken({ scope: "read write" });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "read" },
@@ -180,7 +180,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("rejects scope that exceeds original grant", async () => {
-			const token = await makeRefreshToken({ scopes: ["read"] });
+			const token = await makeRefreshToken({ scope: "read" });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "read write" },
@@ -198,7 +198,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("deduplicates requested scope values", async () => {
-			const token = await makeRefreshToken({ scopes: ["read", "write"] });
+			const token = await makeRefreshToken({ scope: "read write" });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "read read" },
@@ -217,7 +217,7 @@ describe("createRefreshTokenGrant", () => {
 		});
 
 		it("treats empty scope string as no scope change", async () => {
-			const token = await makeRefreshToken({ scopes: ["read", "write"] });
+			const token = await makeRefreshToken({ scope: "read write" });
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
 				body: { refresh_token: token, scope: "" },
@@ -235,11 +235,30 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("accepts legacy tokens with type payload instead of typ header", async () => {
+			// Tokens issued before claims standardization use type: "refresh" in payload
+			// instead of typ: "rt+jwt" in the protected header.
+			const legacyToken = await new SignJWT({ type: "refresh", sub: "u1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setExpirationTime("24h")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: legacyToken },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+		});
+
 		it("accepts legacy tokens without kid header", async () => {
-			// Tokens issued before jose migration have no kid in the protected header.
-			// The fallback uses keyStore.current.kid to resolve the verification key.
-			const legacyToken = await new SignJWT({ type: "refresh", user: { id: "u1" } })
-				.setProtectedHeader({ alg: "HS256" })
+			const legacyToken = await new SignJWT({ sub: "u1" })
+				.setProtectedHeader({ alg: "HS256", typ: "rt+jwt" })
 				.setExpirationTime("24h")
 				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);

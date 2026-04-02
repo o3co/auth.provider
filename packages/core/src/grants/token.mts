@@ -23,8 +23,9 @@ export const formatObject = <T extends object>(data: T): Partial<T> => {
 export interface Token {
 	token: string;
 	expiresIn?: number;
-	scopes?: string[];
-	type?: "access" | "refresh";
+	subject?: string;
+	scope?: string;
+	tokenType?: "at+jwt" | "rt+jwt";
 	audience?: string;
 	issuer?: string;
 }
@@ -50,7 +51,7 @@ export const generateTokenResponse = ({
 		access_token: accessToken.token,
 		token_type: "Bearer",
 		...formatObject({
-			scope: accessToken.scopes?.join(" "),
+			scope: accessToken.scope,
 			refresh_token: refreshToken ? refreshToken.token : null,
 			expires_in: accessToken.expiresIn,
 		}),
@@ -62,8 +63,10 @@ export interface GenerateTokenOptions {
 	keyStore: KeyStore;
 	issuer?: string | null;
 	audience?: string | null;
-	scopes?: string[] | null;
-	type?: "access" | "refresh" | null;
+	subject?: string | null;
+	authorizedParty?: string | null;
+	scope?: string | null;
+	tokenType?: "at+jwt" | "rt+jwt";
 }
 
 export const generateToken = async (
@@ -73,18 +76,20 @@ export const generateToken = async (
 		keyStore,
 		issuer = null,
 		audience = null,
-		scopes = null,
-		type = null,
+		subject = null,
+		authorizedParty = null,
+		scope = null,
+		tokenType = undefined,
 	}: GenerateTokenOptions,
 ): Promise<Token> => {
 	const { kid, privateKey } = keyStore.getSigningKey();
 
 	let builder = new SignJWT({
 		...data,
-		...(scopes ? { scopes } : {}),
-		...(type ? { type } : {}),
+		...(authorizedParty ? { azp: authorizedParty } : {}),
+		...(scope ? { scope } : {}),
 	})
-		.setProtectedHeader({ alg: keyStore.algorithm, kid })
+		.setProtectedHeader({ alg: keyStore.algorithm, kid, ...(tokenType ? { typ: tokenType } : {}) })
 		.setIssuedAt();
 
 	if (expiresIn !== undefined) {
@@ -96,6 +101,9 @@ export const generateToken = async (
 	if (audience != null) {
 		builder = builder.setAudience(audience);
 	}
+	if (subject != null) {
+		builder = builder.setSubject(subject);
+	}
 
 	const token = await builder.sign(privateKey);
 
@@ -104,8 +112,9 @@ export const generateToken = async (
 	if (expiresIn !== undefined) result.expiresIn = expiresIn;
 	if (audience !== null && audience !== undefined) result.audience = audience;
 	if (issuer !== null && issuer !== undefined) result.issuer = issuer;
-	if (scopes !== null && scopes !== undefined) result.scopes = scopes;
-	if (type !== null && type !== undefined) result.type = type;
+	if (subject !== null && subject !== undefined) result.subject = subject;
+	if (scope !== null && scope !== undefined) result.scope = scope;
+	if (tokenType !== undefined) result.tokenType = tokenType;
 
 	return result;
 };

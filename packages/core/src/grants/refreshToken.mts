@@ -15,7 +15,7 @@
  */
 import { decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 
-import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
+import { generateToken, generateTokenResponse } from "./token.mjs";
 import type {
 	GrantContext,
 	GrantDependencies,
@@ -28,7 +28,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
-			const { body, issuer, metadata } = ctx;
+			const { body, issuer } = ctx;
 			const {
 				refresh_token: refreshTokenValue,
 				client_id,
@@ -50,9 +50,11 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			}
 
 			let tokenPayload: JWTPayload;
+			let typ: string | undefined;
 			try {
-				const { kid } = decodeProtectedHeader(refreshTokenValue);
-				const key = keyStore.getVerificationKey(kid ?? keyStore.current.kid);
+				const header = decodeProtectedHeader(refreshTokenValue);
+				typ = header.typ;
+				const key = keyStore.getVerificationKey(header.kid ?? keyStore.current.kid);
 				const { payload } = await jwtVerify(refreshTokenValue, key);
 				tokenPayload = payload;
 			} catch {
@@ -65,7 +67,9 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			if (tokenPayload.type !== "refresh") {
+			// Accept both new typ header ("rt+jwt") and legacy type payload ("refresh")
+			const legacyType = (tokenPayload as Record<string, unknown>).type;
+			if (typ !== "rt+jwt" && legacyType !== "refresh") {
 				return {
 					result: {
 						status: 400,
@@ -87,15 +91,33 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			const user = tokenPayload.user as Record<string, unknown> | undefined;
-			const client = tokenPayload.client as Record<string, unknown> | undefined;
-			const existingScopes = tokenPayload.scopes as string[] | undefined;
+			const claims = tokenPayload as Record<string, unknown>;
+			// Read standard claims, with legacy fallback for pre-standardization tokens
+			const subjectStr = typeof tokenPayload.sub === "string" ? tokenPayload.sub
+				: typeof (claims.user as Record<string, unknown> | undefined)?.id === "string" ? (claims.user as Record<string, unknown>).id as string
+				: undefined;
+			const azpStr = typeof claims.azp === "string" ? claims.azp as string
+				: typeof (claims.client as Record<string, unknown> | undefined)?.id === "string" ? (claims.client as Record<string, unknown>).id as string
+				: undefined;
+			const scopeStr = typeof claims.scope === "string" ? claims.scope as string
+				: Array.isArray(claims.scopes) ? (claims.scopes as string[]).join(" ")
+				: undefined;
+
+			if (!subjectStr) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "refresh token has no subject",
+					},
+				};
+			}
 
 			// RFC 6749 Section 6: requested scope MUST NOT exceed original scope
-			let grantedScopes = existingScopes as string[] | null;
+			let grantedScope = scopeStr ?? null;
 			if (requestedScope) {
 				const requested = [...new Set(requestedScope.split(" ").filter(Boolean))];
-				const original = Array.isArray(existingScopes) ? existingScopes : [];
+				const original = scopeStr ? scopeStr.split(" ") : [];
 				const invalid = requested.filter((s) => !original.includes(s));
 				if (invalid.length > 0) {
 					return {
@@ -106,30 +128,32 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 						},
 					};
 				}
-				grantedScopes = requested;
+				grantedScope = requested.join(" ");
 			}
-
-			const refreshPayload = formatObject({ user, client, ...metadata });
 
 			return {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken(refreshPayload, {
+						accessToken: await generateToken({}, {
 							expiresIn: config.oauth.accessToken.expiresIn,
 							keyStore,
 							issuer,
 							audience: tokenAud ?? client_id ?? null,
-							scopes: grantedScopes,
-							type: "access",
+							subject: subjectStr ?? null,
+							authorizedParty: azpStr ?? null,
+							scope: grantedScope,
+							tokenType: "at+jwt",
 						}),
-						refreshToken: await generateToken(refreshPayload, {
+						refreshToken: await generateToken({}, {
 							expiresIn: config.oauth.refreshToken.expiresIn,
 							keyStore,
 							issuer,
 							audience: tokenAud ?? client_id ?? null,
-							scopes: grantedScopes,
-							type: "refresh",
+							subject: subjectStr ?? null,
+							authorizedParty: azpStr ?? null,
+							scope: grantedScope,
+							tokenType: "rt+jwt",
 						}),
 					}),
 				},

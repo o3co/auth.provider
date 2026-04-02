@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
+import { generateToken, generateTokenResponse } from "./token.mjs";
 import type {
 	GrantContext,
 	GrantDependencies,
@@ -26,7 +26,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
-			const { body, session, issuer, metadata } = ctx;
+			const { body, session, issuer } = ctx;
 			const { client_id, scope: requestedScope } = body as {
 				client_id?: string;
 				scope?: string;
@@ -74,23 +74,22 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 				}
 			}
 
-			const payload = formatObject({
-				user: session.user,
-				client: session.client,
-				...metadata,
-			});
+			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
+			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
 			return {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken(payload, {
+						accessToken: await generateToken({}, {
 							keyStore,
 							expiresIn: config.oauth.accessToken.expiresIn,
 							issuer,
 							audience: client_id ?? null,
-							scopes: scopes ?? null,
-							type: "access",
+							subject: userId ?? null,
+							authorizedParty: client_id ?? null,
+							scope: scopes?.join(" ") ?? null,
+							tokenType: "at+jwt",
 						}),
 					}),
 				},
