@@ -1,4 +1,4 @@
-FROM node:25-alpine AS node-base
+FROM node:24-alpine AS node-base
 
 ENV HOME=/home/node
 
