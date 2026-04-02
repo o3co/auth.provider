@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
 	AppConfigSchema,
+	createAsymmetricKeyStore,
 	createDefaultFactories,
 	createGoogleProvider,
+	createKeyStoreFromConfig,
 	createPassport,
 	createRouter,
 	createSymmetricKeyStore,
@@ -67,5 +69,13 @@ describe("public API", () => {
 
 	it("exports createSymmetricKeyStore function", () => {
 		expect(typeof createSymmetricKeyStore).toBe("function");
+	});
+
+	it("exports createAsymmetricKeyStore function", () => {
+		expect(typeof createAsymmetricKeyStore).toBe("function");
+	});
+
+	it("exports createKeyStoreFromConfig function", () => {
+		expect(typeof createKeyStoreFromConfig).toBe("function");
 	});
 });

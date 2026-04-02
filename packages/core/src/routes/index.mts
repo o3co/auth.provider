@@ -24,6 +24,7 @@ import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
 import * as federation from "./Federation.mjs";
 import * as healthcheck from "./Healthcheck.mjs";
+import * as jwks from "./Jwks.mjs";
 import * as oauth from "./OAuth.mjs";
 import * as session from "./Session.mjs";
 
@@ -54,6 +55,7 @@ export const createRouter = (
 
 	router
 		.use(healthcheck.createRouter(express))
+		.use(jwks.createRouter(express, params.keyStore))
 		.use("/oauth", oauthRouter)
 		.use(
 			"/session",
