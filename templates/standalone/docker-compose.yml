@@ -12,7 +12,8 @@ services:
       redis:
         condition: service_healthy
     env_file:
-      - .env
+      - path: .env
+        required: false
 
   redis:
     image: redis:7-alpine

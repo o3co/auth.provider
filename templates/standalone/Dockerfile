@@ -1,4 +1,4 @@
-FROM node:25-alpine AS base
+FROM node:25-alpine AS node-base
 
 RUN apk add --no-cache tini \
  && npm install -g corepack --force \
@@ -6,12 +6,15 @@ RUN apk add --no-cache tini \
 
 WORKDIR /home/node
 
+#############################################
+FROM node-base AS deps
+
 COPY package.json ./
 
 RUN pnpm install
 
 #############################################
-FROM base AS builder
+FROM deps AS builder
 
 COPY tsconfig.json ./
 COPY config/ ./config/
@@ -20,18 +23,16 @@ COPY src/ ./src/
 RUN pnpm run build
 
 #############################################
-FROM builder AS pre
-
-RUN pnpm prune --prod
-
-#############################################
-FROM base AS runtime
+FROM node-base AS runtime
 
 ENV NODE_ENV=production
 
-COPY --from=pre /home/node/node_modules ./node_modules/
-COPY --from=pre /home/node/dist/ ./dist/
-COPY --from=pre /home/node/config/ ./config/
+COPY --from=deps /home/node/package.json /home/node/pnpm-lock.yaml ./
+
+RUN pnpm install --frozen-lockfile --prod
+
+COPY --from=builder /home/node/dist/ ./dist/
+COPY --from=builder /home/node/config/ ./config/
 
 USER node
 
