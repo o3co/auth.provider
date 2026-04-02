@@ -17,6 +17,7 @@ import crypto from "node:crypto";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createAuthorizationGrant } from "../authorization.mjs";
 import type { GrantContext, GrantDependencies } from "../types.mjs";
 
@@ -39,6 +40,7 @@ function makeDeps(
 ): GrantDependencies {
 	return {
 		config: mockConfig,
+		keyStore: createSymmetricKeyStore("test-secret"),
 		clientRepository: {} as GrantDependencies["clientRepository"],
 		codeRepository: {
 			consumeByCode: consumeByCodeImpl,
