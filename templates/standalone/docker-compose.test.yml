@@ -1,4 +1,12 @@
 services:
+  test:
+    build:
+      context: .
+      target: test
+    depends_on:
+      redis:
+        condition: service_healthy
+
   redis:
     image: redis:7-alpine
     ports:
