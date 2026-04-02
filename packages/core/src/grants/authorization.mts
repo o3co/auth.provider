@@ -131,7 +131,8 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 				}
 			}
 
-			const userId = (session.user as Record<string, unknown> | undefined)?.id as string | undefined;
+			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
+			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
 			return {
 				result: {

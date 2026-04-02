@@ -103,6 +103,16 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				: Array.isArray(claims.scopes) ? (claims.scopes as string[]).join(" ")
 				: undefined;
 
+			if (!subjectStr) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "refresh token has no subject",
+					},
+				};
+			}
+
 			// RFC 6749 Section 6: requested scope MUST NOT exceed original scope
 			let grantedScope = scopeStr ?? null;
 			if (requestedScope) {
