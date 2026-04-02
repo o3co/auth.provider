@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import jwt, { type JwtPayload } from "jsonwebtoken";
+import { decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 
 import { formatObject, generateToken, generateTokenResponse } from "./token.mjs";
 import type {
@@ -24,7 +24,7 @@ import type {
 } from "./types.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
-	const { config } = deps;
+	const { config, keyStore } = deps;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -49,9 +49,12 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			let tokenPayload: JwtPayload;
+			let tokenPayload: JWTPayload;
 			try {
-				tokenPayload = jwt.verify(refreshTokenValue, config.oauth.jwt.secret) as JwtPayload;
+				const { kid } = decodeProtectedHeader(refreshTokenValue);
+				const key = keyStore.getVerificationKey(kid ?? keyStore.current.kid);
+				const { payload } = await jwtVerify(refreshTokenValue, key);
+				tokenPayload = payload;
 			} catch {
 				return {
 					result: {
@@ -84,7 +87,9 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			const { user, client, scopes: existingScopes } = tokenPayload;
+			const user = tokenPayload.user as Record<string, unknown> | undefined;
+			const client = tokenPayload.client as Record<string, unknown> | undefined;
+			const existingScopes = tokenPayload.scopes as string[] | undefined;
 
 			// RFC 6749 Section 6: requested scope MUST NOT exceed original scope
 			let grantedScopes = existingScopes as string[] | null;
@@ -110,17 +115,17 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: generateToken(refreshPayload, {
+						accessToken: await generateToken(refreshPayload, {
 							expiresIn: config.oauth.accessToken.expiresIn,
-							secret: config.oauth.jwt.secret,
+							keyStore,
 							issuer,
 							audience: tokenAud ?? client_id ?? null,
 							scopes: grantedScopes,
 							type: "access",
 						}),
-						refreshToken: generateToken(refreshPayload, {
+						refreshToken: await generateToken(refreshPayload, {
 							expiresIn: config.oauth.refreshToken.expiresIn,
-							secret: config.oauth.jwt.secret,
+							keyStore,
 							issuer,
 							audience: tokenAud ?? client_id ?? null,
 							scopes: grantedScopes,

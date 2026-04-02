@@ -5,6 +5,7 @@ import {
 	createGoogleProvider,
 	createPassport,
 	createRouter,
+	createSymmetricKeyStore,
 	FederationRegistry,
 	GrantRegistry,
 	InMemoryClientRepository,
@@ -62,5 +63,9 @@ describe("public API", () => {
 
 	it("exports createDefaultFactories function", () => {
 		expect(typeof createDefaultFactories).toBe("function");
+	});
+
+	it("exports createSymmetricKeyStore function", () => {
+		expect(typeof createSymmetricKeyStore).toBe("function");
 	});
 });

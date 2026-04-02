@@ -29,6 +29,7 @@ export const AppConfigSchema = z.object({
 		jwt: z.object({
 			secret: z.string(),
 			issuer: z.string().optional(),
+			kid: z.string().default("v0"),
 		}),
 		accessToken: z.object({
 			expiresIn: z.coerce.number().default(3600),

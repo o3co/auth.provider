@@ -24,7 +24,7 @@ import type {
 } from "./types.mjs";
 
 export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler => {
-	const { config, codeRepository } = deps;
+	const { config, codeRepository, keyStore } = deps;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -141,17 +141,17 @@ export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler 
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: generateToken(payload, {
+						accessToken: await generateToken(payload, {
 							expiresIn: config.oauth.accessToken.expiresIn,
-							secret: config.oauth.jwt.secret,
+							keyStore,
 							issuer,
 							audience: client_id,
 							scopes: grantedScopes,
 							type: "access",
 						}),
-						refreshToken: generateToken(payload, {
+						refreshToken: await generateToken(payload, {
 							expiresIn: config.oauth.refreshToken.expiresIn,
-							secret: config.oauth.jwt.secret,
+							keyStore,
 							issuer,
 							audience: client_id,
 							scopes: grantedScopes,

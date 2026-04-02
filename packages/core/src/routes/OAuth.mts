@@ -15,12 +15,13 @@
  */
 import type { Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
-import jwt, { type JwtPayload } from "jsonwebtoken";
+import { decodeProtectedHeader, jwtVerify } from "jose";
 
 import type { PassportStatic } from "passport";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGrantRegistry, type GrantRegistry } from "#/grants/registry.mjs";
 import { formatObject } from "#/grants/token.mjs";
+import type { KeyStore } from "#/keys/KeyStore.mjs";
 import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
 
@@ -47,15 +48,17 @@ export const createRouter = (
 		config,
 		clientRepository,
 		codeRepository,
+		keyStore,
 	}: {
 		passport: PassportStatic;
 		config: AppConfig;
 		clientRepository: ClientRepository;
 		codeRepository: CodeRepository;
+		keyStore: KeyStore;
 	},
 ): { router: Router; registry: GrantRegistry } => {
 	const router = express.Router();
-	const registry = createGrantRegistry({ config, clientRepository, codeRepository });
+	const registry = createGrantRegistry({ config, clientRepository, codeRepository, keyStore });
 
 	const tokenRateLimit = rateLimit({
 		windowMs: config.rateLimit.token.windowMs,
@@ -114,7 +117,7 @@ export const createRouter = (
 		// Auth: Bearer <token> (self-introspect only) or client_id + client_secret (any token)
 		.post(
 			"/introspect",
-			(req: Request, res: Response, next) => {
+			async (req: Request, res: Response, next) => {
 				const auth = req.headers.authorization;
 				if (auth?.startsWith("Bearer ")) {
 					const bearerToken = auth.slice(7);
@@ -122,7 +125,9 @@ export const createRouter = (
 						return res.status(403).json({ active: false });
 					}
 					try {
-						jwt.verify(bearerToken, config.oauth.jwt.secret);
+						const { kid } = decodeProtectedHeader(bearerToken);
+						const key = keyStore.getVerificationKey(kid ?? keyStore.current.kid);
+						await jwtVerify(bearerToken, key);
 						return next();
 					} catch {
 						return res.status(401).json({ active: false });
@@ -130,14 +135,21 @@ export const createRouter = (
 				}
 				return passport.authenticate("oauth2-client-password", { session: false })(req, res, next);
 			},
-			(req: Request, res: Response) => {
+			async (req: Request, res: Response) => {
 				const { token } = req.body;
 				if (!token) {
 					return res.status(200).json({ active: false });
 				}
 				try {
-					const payload = jwt.verify(token, config.oauth.jwt.secret) as JwtPayload;
-					const { exp, iss, aud, sub, scopes, type, user, client, ip } = payload;
+					const { kid } = decodeProtectedHeader(token);
+					const key = keyStore.getVerificationKey(kid ?? keyStore.current.kid);
+					const { payload } = await jwtVerify(token, key);
+					const { exp, iss, aud, sub } = payload;
+					const scopes = payload.scopes as string[] | string | undefined;
+					const type = payload.type as string | undefined;
+					const user = payload.user as Record<string, unknown> | undefined;
+					const client = payload.client as Record<string, unknown> | undefined;
+					const ip = payload.ip as string | undefined;
 					return res.status(200).json(
 						formatObject({
 							active: true,

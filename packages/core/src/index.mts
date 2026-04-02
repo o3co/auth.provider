@@ -58,5 +58,8 @@ export {
 } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
+// Keys
+export type { KeyStore, ManagedKey } from "./keys/KeyStore.mjs";
+export { createSymmetricKeyStore } from "./keys/KeyStore.mjs";
 // Router factory
 export { createRouter } from "./routes/index.mjs";

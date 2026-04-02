@@ -19,6 +19,7 @@ import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGoogleProvider } from "#/federations/google.mjs";
 import { FederationRegistry } from "#/federations/types.mjs";
 import type { GrantRegistry } from "#/grants/registry.mjs";
+import type { KeyStore } from "#/keys/KeyStore.mjs";
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
 import * as federation from "./Federation.mjs";
@@ -35,6 +36,7 @@ type ExpressLike = {
 type RouterParams = {
 	passport: PassportStatic;
 	config: AppConfig;
+	keyStore: KeyStore;
 	clientRepository: ClientRepository;
 	codeRepository: CodeRepository;
 };

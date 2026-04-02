@@ -24,7 +24,7 @@ import type {
 } from "./types.mjs";
 
 export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
-	const { config } = deps;
+	const { config, keyStore } = deps;
 	const messageMaxAgeMs = config.oauth.grants.did.messageMaxAgeSec * 1000;
 
 	// In-memory nonce store (PoC)
@@ -182,9 +182,9 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: generateToken(didPayload, {
+						accessToken: await generateToken(didPayload, {
 							expiresIn: config.oauth.accessToken.expiresIn,
-							secret: config.oauth.jwt.secret,
+							keyStore,
 							issuer,
 							type: "access",
 							audience: parsedMessage.audience,

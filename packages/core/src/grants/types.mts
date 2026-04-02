@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import type { AppConfig } from "#/config/application.schema.mjs";
+import type { KeyStore } from "#/keys/KeyStore.mjs";
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
 
@@ -63,6 +64,7 @@ export interface GrantHandler {
 
 export interface GrantDependencies {
 	config: AppConfig;
+	keyStore: KeyStore;
 	clientRepository: ClientRepository;
 	codeRepository: CodeRepository;
 }

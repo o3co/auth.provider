@@ -22,7 +22,7 @@ import type {
 } from "./types.mjs";
 
 export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
-	const { config, clientRepository } = deps;
+	const { config, clientRepository, keyStore } = deps;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -84,8 +84,8 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: generateToken(payload, {
-							secret: config.oauth.jwt.secret,
+						accessToken: await generateToken(payload, {
+							keyStore,
 							expiresIn: config.oauth.accessToken.expiresIn,
 							issuer,
 							audience: client_id ?? null,
