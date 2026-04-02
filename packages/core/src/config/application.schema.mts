@@ -27,9 +27,54 @@ export const AppConfigSchema = z.object({
 	}),
 	oauth: z.object({
 		jwt: z.object({
-			secret: z.string(),
+			algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]).default("HS256"),
+			secret: z.string().optional(),
 			issuer: z.string().optional(),
 			kid: z.string().default("v0"),
+			privateKey: z.string().optional(),
+			privateKeyPath: z.string().optional(),
+			publicKey: z.string().optional(),
+			publicKeyPath: z.string().optional(),
+			previousKeys: z.array(z.object({
+				kid: z.string(),
+				publicKey: z.string().optional(),
+				publicKeyPath: z.string().optional(),
+				expiresAt: z.string(),
+			})).default([]),
+		}).superRefine((data, ctx) => {
+			if (data.algorithm === "HS256" && !data.secret) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "secret is required for HS256 algorithm",
+					path: ["secret"],
+				});
+			}
+			const isAsymmetric = data.algorithm === "RS256" || data.algorithm === "ES256" || data.algorithm === "EdDSA";
+			if (isAsymmetric) {
+				if (!data.privateKey && !data.privateKeyPath) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: "privateKey or privateKeyPath is required for asymmetric algorithms",
+						path: ["privateKey"],
+					});
+				}
+				if (!data.publicKey && !data.publicKeyPath) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: "publicKey or publicKeyPath is required for asymmetric algorithms",
+						path: ["publicKey"],
+					});
+				}
+			}
+			for (const [i, key] of data.previousKeys.entries()) {
+				if (!key.publicKey && !key.publicKeyPath) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: "publicKey or publicKeyPath is required for each previousKeys entry",
+						path: ["previousKeys", i, "publicKey"],
+					});
+				}
+			}
 		}),
 		accessToken: z.object({
 			expiresIn: z.coerce.number().default(3600),
