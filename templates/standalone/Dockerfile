@@ -44,7 +44,7 @@ FROM builder AS test
 COPY vitest.config.mts ./
 COPY tests/ ./tests/
 
-RUN pnpm run test
+CMD ["pnpm", "run", "test"]
 
 #############################################
 FROM builder AS develop
