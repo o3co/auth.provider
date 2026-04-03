@@ -18,6 +18,7 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { decodeJwt } from "jose";
 
+import type { CodeRepository } from "../../repositories/CodeRepository.mjs";
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createAuthorizationGrant } from "../authorization.mjs";
 import type { GrantContext, GrantDependencies } from "../types.mjs";
@@ -36,19 +37,16 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-function makeDeps(
-	consumeByCodeImpl: GrantDependencies["codeRepository"]["consumeByCode"],
-): GrantDependencies {
+function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"]) {
 	return {
 		config: mockConfig,
 		keyStore: createSymmetricKeyStore("test-secret"),
-		clientRepository: {} as GrantDependencies["clientRepository"],
 		codeRepository: {
 			consumeByCode: consumeByCodeImpl,
 			createCode: vi.fn(),
 			getByCode: vi.fn(),
 			removeByCode: vi.fn(),
-		},
+		} as unknown as CodeRepository,
 	};
 }
 
