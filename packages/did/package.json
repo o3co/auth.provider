@@ -1,0 +1,28 @@
+{
+  "name": "@o3co/auth-provider-did",
+  "description": "DID authentication grant for auth.provider",
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.0.1",
+    "@o3co/auth-provider-core": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.2"
+  }
+}

@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
+
 import { generateToken, generateTokenResponse } from "./token.mjs";
 import type {
 	GrantContext,
@@ -21,7 +23,7 @@ import type {
 	GrantHandlerResult,
 } from "./types.mjs";
 
-export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
+export const createSessionGrant = (deps: GrantDependencies & { clientRepository: ClientRepository }): GrantHandler => {
 	const { config, clientRepository, keyStore } = deps;
 
 	return {

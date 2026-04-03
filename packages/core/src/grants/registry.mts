@@ -13,11 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { createAuthorizationGrant } from "./authorization.mjs";
-import { createDidGrant } from "./did.mjs";
-import { createRefreshTokenGrant } from "./refreshToken.mjs";
-import { createSessionGrant } from "./session.mjs";
-import type { GrantDependencies, GrantHandler } from "./types.mjs";
+import type { GrantDependencies, GrantHandler, GrantModule } from "./types.mjs";
 
 export class GrantRegistry {
 	private handlers = new Map<string, GrantHandler>();
@@ -30,28 +26,44 @@ export class GrantRegistry {
 		return this.handlers.get(grantType);
 	}
 
+	addModule(module: GrantModule, deps: GrantDependencies): void {
+		// Apply configSchema defaults when provided.
+		// Pre-fill missing top-level keys with {} so nested defaults are applied in a single parse.
+		const effectiveDeps = module.configSchema
+			? {
+					...deps,
+					config: {
+						...deps.config,
+						oauth: {
+							...deps.config.oauth,
+							grants: {
+								...deps.config.oauth.grants,
+								...module.configSchema.parse(
+									Object.fromEntries(
+										Object.keys(module.grants).map((name) => [
+											name,
+											(deps.config.oauth.grants as Record<string, unknown>)[name] ?? {},
+										]),
+									),
+								),
+							},
+						},
+					},
+				}
+			: deps;
+
+		for (const [name, factory] of Object.entries(module.grants)) {
+			const grantConfig = (
+				effectiveDeps.config.oauth.grants as Record<string, { enabled?: boolean }>
+			)[name];
+			if (grantConfig?.enabled === false) continue;
+			this.register(name, factory(effectiveDeps));
+		}
+	}
+
 	cleanup(): void {
 		for (const handler of this.handlers.values()) {
 			handler.cleanup?.();
 		}
 	}
 }
-
-export const createGrantRegistry = (deps: GrantDependencies): GrantRegistry => {
-	const registry = new GrantRegistry();
-
-	if (deps.config.oauth.grants.session.enabled) {
-		registry.register("session", createSessionGrant(deps));
-	}
-	if (deps.config.oauth.grants.authorization.enabled) {
-		registry.register("authorization", createAuthorizationGrant(deps));
-	}
-	if (deps.config.oauth.grants.refresh_token.enabled) {
-		registry.register("refresh_token", createRefreshTokenGrant(deps));
-	}
-	if (deps.config.oauth.grants.did.enabled) {
-		registry.register("did", createDidGrant(deps));
-	}
-
-	return registry;
-};

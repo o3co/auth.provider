@@ -23,6 +23,7 @@ import {
 	createRouter,
 	createKeyStoreFromConfig,
 } from "@o3co/auth-provider-core";
+import { didModule } from "@o3co/auth-provider-did";
 import { registerBuiltinRepositories } from "@o3co/auth-provider-repositories";
 import { gracefulShutdown } from "@o3co/auth.utils";
 import { parseFile } from "@o3co/ts.hocon";
@@ -119,6 +120,10 @@ await (async (): Promise<void> => {
 		clientRepository,
 		codeRepository,
 	});
+
+	// Register DID authentication module
+	grantRegistry.addModule(didModule, { config, keyStore });
+
 	app.use(router);
 
 	const server = app.listen(config.http.port, (): void => {

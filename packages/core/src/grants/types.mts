@@ -13,10 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { z } from "zod";
+
 import type { AppConfig } from "#/config/application.schema.mjs";
 import type { KeyStore } from "#/keys/KeyStore.mjs";
-import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
-import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
 
 export interface SessionData {
 	user?: Record<string, unknown>;
@@ -65,8 +65,6 @@ export interface GrantHandler {
 export interface GrantDependencies {
 	config: AppConfig;
 	keyStore: KeyStore;
-	clientRepository: ClientRepository;
-	codeRepository: CodeRepository;
 }
 
 /**
@@ -74,3 +72,12 @@ export interface GrantDependencies {
  * Used by OSS consumers to implement custom grant types.
  */
 export type GrantFactory = (deps: GrantDependencies) => GrantHandler;
+
+/**
+ * A module that bundles one or more grant factories together.
+ * Used with GrantRegistry.addModule() for plugin-style registration.
+ */
+export interface GrantModule {
+	grants: Record<string, GrantFactory>;
+	configSchema?: z.ZodType;
+}

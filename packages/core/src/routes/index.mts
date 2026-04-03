@@ -18,7 +18,8 @@ import type { PassportStatic } from "passport";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGoogleProvider } from "#/federations/google.mjs";
 import { FederationRegistry } from "#/federations/types.mjs";
-import type { GrantRegistry } from "#/grants/registry.mjs";
+import { createOAuthModule } from "#/grants/oauth.mjs";
+import { GrantRegistry } from "#/grants/registry.mjs";
 import type { KeyStore } from "#/keys/KeyStore.mjs";
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
@@ -47,7 +48,26 @@ export const createRouter = (
 	params: RouterParams,
 ): { router: Router; grantRegistry: GrantRegistry } => {
 	const router = express.Router();
-	const { router: oauthRouter, registry: grantRegistry } = oauth.createRouter(express, params);
+
+	// Create grant registry and wire built-in OAuth module
+	const grantRegistry = new GrantRegistry();
+	const deps = { config: params.config, keyStore: params.keyStore };
+	grantRegistry.addModule(
+		createOAuthModule({
+			clientRepository: params.clientRepository,
+			codeRepository: params.codeRepository,
+		}),
+		deps,
+	);
+
+	const { router: oauthRouter } = oauth.createRouter(express, {
+		passport: params.passport,
+		registry: grantRegistry,
+		config: params.config,
+		clientRepository: params.clientRepository,
+		codeRepository: params.codeRepository,
+		keyStore: params.keyStore,
+	});
 
 	// Build federation registry
 	const federationRegistry = new FederationRegistry();

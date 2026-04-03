@@ -19,7 +19,6 @@
 		"#/*": "./src/*"
 	},
 	"dependencies": {
-		"@noble/ed25519": "^3.0.1",
 		"bcrypt": "^6.0.0",
 		"express-rate-limit": "^8.3.1",
 		"jose": "^6.2.2",

@@ -15,9 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
+import { createSymmetricKeyStore, type GrantContext, type GrantDependencies } from "@o3co/auth-provider-core";
 import { createDidGrant } from "../did.mjs";
-import type { GrantContext, GrantDependencies } from "../types.mjs";
 
 const mockConfig = {
 	oauth: {
@@ -36,8 +35,6 @@ const mockConfig = {
 const mockDeps: GrantDependencies = {
 	config: mockConfig,
 	keyStore: createSymmetricKeyStore("test-secret"),
-	clientRepository: {} as GrantDependencies["clientRepository"],
-	codeRepository: {} as GrantDependencies["codeRepository"],
 };
 
 function makeValidMessage(
@@ -140,7 +137,6 @@ describe("createDidGrant", () => {
 			const message = JSON.stringify({
 				did: "did:key:abc",
 				timestamp: new Date().toISOString(),
-				// nonce intentionally missing
 			});
 			const ctx: GrantContext = {
 				body: { did: "did:key:abc", signature: "sig", message },
@@ -159,7 +155,6 @@ describe("createDidGrant", () => {
 			const message = JSON.stringify({
 				did: "did:key:abc",
 				nonce: "some-nonce",
-				// timestamp intentionally missing
 			});
 			const ctx: GrantContext = {
 				body: { did: "did:key:abc", signature: "sig", message },
@@ -175,7 +170,6 @@ describe("createDidGrant", () => {
 
 		it("returns 400 when timestamp is expired", async () => {
 			const handler = createDidGrant(mockDeps);
-			// 10 minutes ago — beyond the 300s max age
 			const oldTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 			const message = JSON.stringify({
 				did: "did:key:abc",
@@ -239,7 +233,6 @@ describe("createDidGrant", () => {
 			const handler = createDidGrant(mockDeps);
 			const did = "did:key:abc";
 			const message = makeValidMessage(did);
-			// Random public key that won't match any valid signature
 			const fakePublicKey = Buffer.alloc(32, 0x42).toString("base64");
 			const fakeSignature = Buffer.alloc(64, 0x01).toString("base64");
 			const ctx: GrantContext = {
@@ -251,7 +244,6 @@ describe("createDidGrant", () => {
 
 			const { result } = await handler.handle(ctx);
 
-			// signature verification fails → 401
 			expect(result.status).toBe(401);
 			if ("error" in result) {
 				expect(result.error).toBe("invalid_grant");
@@ -259,11 +251,37 @@ describe("createDidGrant", () => {
 		});
 	});
 
+	describe("config defaults", () => {
+		it("uses default messageMaxAgeSec when did config is absent", () => {
+			const noDIDConfig = {
+				oauth: {
+					accessToken: { expiresIn: 3600 },
+					grants: {},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			// Should not throw — falls back to 300s default
+			const handler = createDidGrant({ config: noDIDConfig, keyStore: createSymmetricKeyStore("test-secret") });
+			expect(typeof handler.handle).toBe("function");
+		});
+
+		it("uses default when messageMaxAgeSec is missing from did config", () => {
+			const partialConfig = {
+				oauth: {
+					accessToken: { expiresIn: 3600 },
+					grants: { did: { enabled: true } },
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const handler = createDidGrant({ config: partialConfig, keyStore: createSymmetricKeyStore("test-secret") });
+			expect(typeof handler.handle).toBe("function");
+		});
+	});
+
 	describe("cleanup", () => {
 		it("exposes a cleanup method", () => {
 			const handler = createDidGrant(mockDeps);
 			expect(typeof handler.cleanup).toBe("function");
-			// Should not throw
 			handler.cleanup?.();
 		});
 	});

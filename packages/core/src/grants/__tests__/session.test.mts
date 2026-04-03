@@ -16,6 +16,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { decodeJwt } from "jose";
 
+import type { ClientRepository } from "../../repositories/ClientRepository.mjs";
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { createSessionGrant } from "../session.mjs";
 import type { GrantContext, GrantDependencies } from "../types.mjs";
@@ -34,14 +35,13 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-const makeDeps = (overrides?: Partial<GrantDependencies>): GrantDependencies => ({
+const makeDeps = (overrides?: Partial<GrantDependencies & { clientRepository: ClientRepository }>) => ({
 	config: mockConfig,
 	keyStore: createSymmetricKeyStore("test-secret"),
 	clientRepository: {
 		findById: vi.fn(),
 		authenticate: vi.fn(),
-	} as unknown as GrantDependencies["clientRepository"],
-	codeRepository: {} as GrantDependencies["codeRepository"],
+	} as unknown as ClientRepository,
 	...overrides,
 });
 

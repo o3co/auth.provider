@@ -42,8 +42,6 @@ const mockConfig = {
 const mockDeps: GrantDependencies = {
 	config: mockConfig,
 	keyStore,
-	clientRepository: {} as GrantDependencies["clientRepository"],
-	codeRepository: {} as GrantDependencies["codeRepository"],
 };
 
 async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {

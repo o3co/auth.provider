@@ -15,6 +15,8 @@
  */
 import crypto from "node:crypto";
 
+import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
+
 import { generateToken, generateTokenResponse } from "./token.mjs";
 import type {
 	GrantContext,
@@ -23,7 +25,7 @@ import type {
 	GrantHandlerResult,
 } from "./types.mjs";
 
-export const createAuthorizationGrant = (deps: GrantDependencies): GrantHandler => {
+export const createAuthorizationGrant = (deps: GrantDependencies & { codeRepository: CodeRepository }): GrantHandler => {
 	const { config, codeRepository, keyStore } = deps;
 
 	return {

@@ -15,17 +15,22 @@
  */
 import { verifyAsync } from "@noble/ed25519";
 
-import { generateToken, generateTokenResponse } from "./token.mjs";
-import type {
-	GrantContext,
-	GrantDependencies,
-	GrantHandler,
-	GrantHandlerResult,
-} from "./types.mjs";
+import {
+	generateToken,
+	generateTokenResponse,
+	type GrantContext,
+	type GrantDependencies,
+	type GrantHandler,
+	type GrantHandlerResult,
+} from "@o3co/auth-provider-core";
 
 export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
-	const messageMaxAgeMs = config.oauth.grants.did.messageMaxAgeSec * 1000;
+	// When used via didModule + addModule(), configSchema applies defaults.
+	// Fallback protects direct createDidGrant() callers who skip addModule().
+	const DEFAULT_MESSAGE_MAX_AGE_SEC = 300;
+	const didConfig = (config.oauth.grants as Record<string, Record<string, unknown> | undefined>).did;
+	const messageMaxAgeMs = ((didConfig?.messageMaxAgeSec as number | undefined) ?? DEFAULT_MESSAGE_MAX_AGE_SEC) * 1000;
 
 	// In-memory nonce store (PoC)
 	// Production: use Redis with TTL
