@@ -26,9 +26,14 @@ import {
 
 export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
-	const didConfig = (config.oauth.grants as Record<string, unknown>).did as {
-		messageMaxAgeSec: number;
-	};
+	const didConfig = (config.oauth.grants as Record<string, unknown>).did as
+		| { messageMaxAgeSec: number }
+		| undefined;
+	if (!didConfig) {
+		throw new Error(
+			"DID grant requires oauth.grants.did config block (with messageMaxAgeSec)",
+		);
+	}
 	const messageMaxAgeMs = didConfig.messageMaxAgeSec * 1000;
 
 	// In-memory nonce store (PoC)
