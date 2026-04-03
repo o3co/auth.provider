@@ -21,7 +21,7 @@ describe("provider config", () => {
 		expect(config.oauth.jwt.secret).toBe("test-secret");
 		expect(config.session.secret).toBe("test-session-secret");
 		expect(config.http.port).toBe(3000);
-		expect(config.oauth.grants.did.messageMaxAgeSec).toBe(300);
+		expect(config.oauth.grants.session.enabled).toBe(true);
 	});
 
 	it("fails validation when required fields are missing", () => {
@@ -42,7 +42,6 @@ describe("provider config", () => {
 				HTTP_PORT: "9090",
 				HTTP_TRUST_PROXY: "true",
 				SESSION_SECURE: "false",
-				OAUTH_GRANTS_DID_ENABLED: "false",
 				FEDERATIONS_GOOGLE_ENABLED: "true",
 			},
 		});
@@ -51,7 +50,6 @@ describe("provider config", () => {
 		expect(config.http.port).toBe(9090);
 		expect(config.http.trustProxy).toBe(true);
 		expect(config.session.secure).toBe(false);
-		expect(config.oauth.grants.did.enabled).toBe(false);
 		expect(config.federations.google.enabled).toBe(true);
 	});
 

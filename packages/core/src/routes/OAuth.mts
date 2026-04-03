@@ -19,7 +19,7 @@ import { decodeProtectedHeader, jwtVerify } from "jose";
 
 import type { PassportStatic } from "passport";
 import type { AppConfig } from "#/config/application.schema.mjs";
-import { createGrantRegistry, type GrantRegistry } from "#/grants/registry.mjs";
+import type { GrantRegistry } from "#/grants/registry.mjs";
 import { formatObject } from "#/grants/token.mjs";
 import type { KeyStore } from "#/keys/KeyStore.mjs";
 import type { ClientRepository, PublicClient } from "#/repositories/ClientRepository.mjs";
@@ -45,12 +45,14 @@ export const createRouter = (
 	},
 	{
 		passport,
+		registry,
 		config,
 		clientRepository,
 		codeRepository,
 		keyStore,
 	}: {
 		passport: PassportStatic;
+		registry: GrantRegistry;
 		config: AppConfig;
 		clientRepository: ClientRepository;
 		codeRepository: CodeRepository;
@@ -58,7 +60,6 @@ export const createRouter = (
 	},
 ): { router: Router; registry: GrantRegistry } => {
 	const router = express.Router();
-	const registry = createGrantRegistry({ config, clientRepository, codeRepository, keyStore });
 
 	const tokenRateLimit = rateLimit({
 		windowMs: config.rateLimit.token.windowMs,

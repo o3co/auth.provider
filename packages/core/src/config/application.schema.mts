@@ -86,11 +86,7 @@ export const AppConfigSchema = z.object({
 			session: z.object({ enabled: z.boolean().default(true) }),
 			authorization: z.object({ enabled: z.boolean().default(true) }),
 			refresh_token: z.object({ enabled: z.boolean().default(true) }),
-			did: z.object({
-				enabled: z.boolean().default(true),
-				messageMaxAgeSec: z.coerce.number().default(300),
-			}),
-		}),
+		}).passthrough(),
 	}),
 	session: z.object({
 		secret: z.string(),

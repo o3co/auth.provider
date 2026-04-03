@@ -22,6 +22,8 @@ export type { FederationProvider, FederationResult } from "./federations/types.m
 export { FederationRegistry } from "./federations/types.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
+export type { GrantModule } from "./grants/types.mjs";
+export { createOAuthModule } from "./grants/oauth.mjs";
 export type {
 	GrantContext,
 	GrantDependencies,
@@ -34,6 +36,13 @@ export type {
 	SessionData,
 	SessionMutation,
 } from "./grants/types.mjs";
+export {
+	generateToken,
+	generateTokenResponse,
+	type GenerateTokenOptions,
+	type Token,
+	type TokenResponse,
+} from "./grants/token.mjs";
 export { createPassport } from "./Passport.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
