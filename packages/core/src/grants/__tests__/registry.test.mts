@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { GrantRegistry } from "../registry.mjs";
@@ -112,5 +113,81 @@ describe("GrantRegistry.addModule", () => {
 		expect(registry.get("session")).toBeDefined();
 		expect(registry.get("authorization")).toBeDefined();
 		expect(registry.get("refresh_token")).toBeDefined();
+	});
+
+	it("applies configSchema defaults when config block is missing", () => {
+		const registry = new GrantRegistry();
+		let receivedDeps: GrantDependencies | undefined;
+		const module: GrantModule = {
+			grants: {
+				custom: (deps) => {
+					receivedDeps = deps;
+					return makeHandler("custom");
+				},
+			},
+			configSchema: z.object({
+				custom: z.object({
+					enabled: z.boolean().default(true),
+					timeout: z.coerce.number().default(500),
+				}).default({}),
+			}),
+		};
+		// No "custom" entry in grants config
+		const deps = makeDeps({});
+
+		registry.addModule(module, deps);
+
+		expect(registry.get("custom")).toBeDefined();
+		expect(receivedDeps).toBeDefined();
+		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<string, Record<string, unknown>>;
+		expect(grants.custom.timeout).toBe(500);
+		expect(grants.custom.enabled).toBe(true);
+	});
+
+	it("merges configSchema defaults with existing config values", () => {
+		const registry = new GrantRegistry();
+		let receivedDeps: GrantDependencies | undefined;
+		const module: GrantModule = {
+			grants: {
+				custom: (deps) => {
+					receivedDeps = deps;
+					return makeHandler("custom");
+				},
+			},
+			configSchema: z.object({
+				custom: z.object({
+					enabled: z.boolean().default(true),
+					timeout: z.coerce.number().default(500),
+				}).default({}),
+			}),
+		};
+		// Partial config — timeout should get default, enabled is explicit
+		const deps = makeDeps({ custom: { enabled: true } } as Record<string, { enabled?: boolean }>);
+
+		registry.addModule(module, deps);
+
+		expect(receivedDeps).toBeDefined();
+		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<string, Record<string, unknown>>;
+		expect(grants.custom.timeout).toBe(500);
+	});
+
+	it("skips configSchema application when not provided", () => {
+		const registry = new GrantRegistry();
+		let receivedDeps: GrantDependencies | undefined;
+		const module: GrantModule = {
+			grants: {
+				session: (deps) => {
+					receivedDeps = deps;
+					return makeHandler("session");
+				},
+			},
+			// No configSchema
+		};
+		const deps = makeDeps({ session: { enabled: true } });
+
+		registry.addModule(module, deps);
+
+		// deps passed through unmodified
+		expect(receivedDeps).toBe(deps);
 	});
 });

@@ -26,15 +26,9 @@ import {
 
 export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
-	const didConfig = (config.oauth.grants as Record<string, unknown>).did as
-		| { messageMaxAgeSec: number }
-		| undefined;
-	if (!didConfig) {
-		throw new Error(
-			"DID grant requires oauth.grants.did config block (with messageMaxAgeSec)",
-		);
-	}
-	const messageMaxAgeMs = didConfig.messageMaxAgeSec * 1000;
+	// didModule.configSchema applies defaults via addModule(), so did config is guaranteed
+	const didConfig = (config.oauth.grants as Record<string, Record<string, unknown>>).did;
+	const messageMaxAgeMs = (didConfig.messageMaxAgeSec as number) * 1000;
 
 	// In-memory nonce store (PoC)
 	// Production: use Redis with TTL

@@ -251,21 +251,6 @@ describe("createDidGrant", () => {
 		});
 	});
 
-	describe("missing config", () => {
-		it("throws when oauth.grants.did config block is absent", () => {
-			const noDIDConfig = {
-				oauth: {
-					accessToken: { expiresIn: 3600 },
-					grants: { session: { enabled: true } },
-				},
-			} as unknown as GrantDependencies["config"];
-
-			expect(() =>
-				createDidGrant({ config: noDIDConfig, keyStore: createSymmetricKeyStore("test-secret") }),
-			).toThrow("DID grant requires oauth.grants.did config block");
-		});
-	});
-
 	describe("cleanup", () => {
 		it("exposes a cleanup method", () => {
 			const handler = createDidGrant(mockDeps);

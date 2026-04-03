@@ -21,7 +21,7 @@ export const didConfigSchema = z.object({
 	did: z.object({
 		enabled: z.boolean().default(true),
 		messageMaxAgeSec: z.coerce.number().default(300),
-	}),
+	}).default({}),
 });
 
 export const didModule: GrantModule = {

@@ -27,12 +27,33 @@ export class GrantRegistry {
 	}
 
 	addModule(module: GrantModule, deps: GrantDependencies): void {
+		// Apply configSchema defaults when provided. Double-parse is intentional:
+		// 1st pass materializes top-level keys via .default({}),
+		// 2nd pass fills nested field defaults (e.g. messageMaxAgeSec: 300).
+		const effectiveDeps = module.configSchema
+			? {
+					...deps,
+					config: {
+						...deps.config,
+						oauth: {
+							...deps.config.oauth,
+							grants: {
+								...deps.config.oauth.grants,
+								...module.configSchema.parse(
+									module.configSchema.parse(deps.config.oauth.grants),
+								),
+							},
+						},
+					},
+				}
+			: deps;
+
 		for (const [name, factory] of Object.entries(module.grants)) {
 			const grantConfig = (
-				deps.config.oauth.grants as Record<string, { enabled?: boolean }>
+				effectiveDeps.config.oauth.grants as Record<string, { enabled?: boolean }>
 			)[name];
 			if (grantConfig?.enabled === false) continue;
-			this.register(name, factory(deps));
+			this.register(name, factory(effectiveDeps));
 		}
 	}
 
