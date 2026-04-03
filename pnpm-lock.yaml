@@ -26,9 +26,6 @@ importers:
 
   packages/core:
     dependencies:
-      '@noble/ed25519':
-        specifier: ^3.0.1
-        version: 3.0.1
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
@@ -94,6 +91,22 @@ importers:
         specifier: ^4.1.2
         version: 4.1.2(@types/node@25.5.0)(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(tsx@4.21.0))
 
+  packages/did:
+    dependencies:
+      '@noble/ed25519':
+        specifier: ^3.0.1
+        version: 3.0.1
+      '@o3co/auth-provider-core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      typescript:
+        specifier: ^5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ^4.1.2
+        version: 4.1.2(@types/node@25.5.0)(msw@2.12.14(@types/node@25.5.0)(typescript@5.9.3))(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(tsx@4.21.0))
+
   packages/repositories:
     dependencies:
       redis:
@@ -121,6 +134,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@o3co/auth-provider-did':
+        specifier: workspace:*
+        version: link:../../packages/did
       '@o3co/auth-provider-repositories':
         specifier: workspace:*
         version: link:../../packages/repositories

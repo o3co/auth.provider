@@ -19,6 +19,7 @@
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-did": "workspace:*",
 		"@o3co/auth-provider-repositories": "workspace:*",
 		"@o3co/auth.utils": "^0.0.1",
 		"@o3co/ts.hocon": "^0.1.2",
