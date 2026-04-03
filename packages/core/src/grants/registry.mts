@@ -27,9 +27,8 @@ export class GrantRegistry {
 	}
 
 	addModule(module: GrantModule, deps: GrantDependencies): void {
-		// Apply configSchema defaults when provided. Double-parse is intentional:
-		// 1st pass materializes top-level keys via .default({}),
-		// 2nd pass fills nested field defaults (e.g. messageMaxAgeSec: 300).
+		// Apply configSchema defaults when provided.
+		// Pre-fill missing top-level keys with {} so nested defaults are applied in a single parse.
 		const effectiveDeps = module.configSchema
 			? {
 					...deps,
@@ -40,7 +39,12 @@ export class GrantRegistry {
 							grants: {
 								...deps.config.oauth.grants,
 								...module.configSchema.parse(
-									module.configSchema.parse(deps.config.oauth.grants),
+									Object.fromEntries(
+										Object.keys(module.grants).map((name) => [
+											name,
+											(deps.config.oauth.grants as Record<string, unknown>)[name] ?? {},
+										]),
+									),
 								),
 							},
 						},

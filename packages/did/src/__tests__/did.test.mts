@@ -251,6 +251,33 @@ describe("createDidGrant", () => {
 		});
 	});
 
+	describe("config defaults", () => {
+		it("uses default messageMaxAgeSec when did config is absent", () => {
+			const noDIDConfig = {
+				oauth: {
+					accessToken: { expiresIn: 3600 },
+					grants: {},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			// Should not throw — falls back to 300s default
+			const handler = createDidGrant({ config: noDIDConfig, keyStore: createSymmetricKeyStore("test-secret") });
+			expect(typeof handler.handle).toBe("function");
+		});
+
+		it("uses default when messageMaxAgeSec is missing from did config", () => {
+			const partialConfig = {
+				oauth: {
+					accessToken: { expiresIn: 3600 },
+					grants: { did: { enabled: true } },
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const handler = createDidGrant({ config: partialConfig, keyStore: createSymmetricKeyStore("test-secret") });
+			expect(typeof handler.handle).toBe("function");
+		});
+	});
+
 	describe("cleanup", () => {
 		it("exposes a cleanup method", () => {
 			const handler = createDidGrant(mockDeps);
