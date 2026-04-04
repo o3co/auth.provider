@@ -129,7 +129,7 @@ describe("GrantRegistry.addModule", () => {
 				custom: z.object({
 					enabled: z.boolean().default(true),
 					timeout: z.coerce.number().default(500),
-				}).default({}),
+				}).default({ enabled: true, timeout: 500 }),
 			}),
 		};
 		// No "custom" entry in grants config
@@ -158,7 +158,7 @@ describe("GrantRegistry.addModule", () => {
 				custom: z.object({
 					enabled: z.boolean().default(true),
 					timeout: z.coerce.number().default(500),
-				}).default({}),
+				}).default({ enabled: true, timeout: 500 }),
 			}),
 		};
 		// Partial config — timeout should get default, enabled is explicit

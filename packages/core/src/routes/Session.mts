@@ -115,7 +115,7 @@ export const createRouter = (
 			(req: Request, res: Response) => {
 				const user = req.user;
 				const redirectTo = req.body.redirect_to as string | undefined;
-				req.session.regenerate((err) => {
+				req.session.regenerate((err: Error | null) => {
 					if (err) {
 						return res.status(500).json({ message: "Error regenerating session" });
 					}

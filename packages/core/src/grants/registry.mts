@@ -38,14 +38,14 @@ export class GrantRegistry {
 							...deps.config.oauth,
 							grants: {
 								...deps.config.oauth.grants,
-								...module.configSchema.parse(
+								...(module.configSchema.parse(
 									Object.fromEntries(
 										Object.keys(module.grants).map((name) => [
 											name,
 											(deps.config.oauth.grants as Record<string, unknown>)[name] ?? {},
 										]),
 									),
-								),
+								) as Record<string, unknown>),
 							},
 						},
 					},
