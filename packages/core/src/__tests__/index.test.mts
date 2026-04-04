@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
 	AppConfigSchema,
+	createApp,
 	createAsymmetricKeyStore,
 	createDefaultFactories,
-	createGoogleProvider,
 	createKeyStoreFromConfig,
-	createPassport,
-	createRouter,
 	createSymmetricKeyStore,
-	FederationRegistry,
+	formatObject,
 	GrantRegistry,
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
+	oauthAuthorizationModule,
+	oauthSessionModule,
 	RepositoryFactory,
 } from "../index.mjs";
 
@@ -26,26 +26,9 @@ describe("public API", () => {
 		expect(AppConfigSchema).toBeDefined();
 	});
 
-	it("exports createRouter function", () => {
-		expect(typeof createRouter).toBe("function");
-	});
-
-	it("exports createPassport function", () => {
-		expect(typeof createPassport).toBe("function");
-	});
-
 	it("exports GrantRegistry class", () => {
 		expect(GrantRegistry).toBeDefined();
 		expect(typeof GrantRegistry).toBe("function");
-	});
-
-	it("exports FederationRegistry class", () => {
-		expect(FederationRegistry).toBeDefined();
-		expect(typeof FederationRegistry).toBe("function");
-	});
-
-	it("exports createGoogleProvider function", () => {
-		expect(typeof createGoogleProvider).toBe("function");
 	});
 
 	it("exports InMemoryUserRepository class", () => {
@@ -77,5 +60,21 @@ describe("public API", () => {
 
 	it("exports createKeyStoreFromConfig function", () => {
 		expect(typeof createKeyStoreFromConfig).toBe("function");
+	});
+
+	it("exports createApp function", () => {
+		expect(typeof createApp).toBe("function");
+	});
+
+	it("exports formatObject function", () => {
+		expect(typeof formatObject).toBe("function");
+	});
+
+	it("exports oauthSessionModule", () => {
+		expect(oauthSessionModule).toBeDefined();
+	});
+
+	it("exports oauthAuthorizationModule", () => {
+		expect(oauthAuthorizationModule).toBeDefined();
 	});
 });

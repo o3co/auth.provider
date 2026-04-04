@@ -20,20 +20,15 @@
 	},
 	"dependencies": {
 		"bcrypt": "^6.0.0",
-		"express-rate-limit": "^8.3.1",
 		"jose": "^6.2.2",
 		"js-yaml": "^4.1.1",
 		"zod": "^4.3.6"
 	},
 	"peerDependencies": {
-		"express": "^5.0.0",
-		"passport": "^0.7.0",
-		"passport-google-oauth20": "^2.0.0",
-		"passport-local": "^1.0.0",
-		"passport-oauth2-client-password": "^0.1.2"
+		"express": "^5.0.0"
 	},
 	"peerDependenciesMeta": {
-		"passport-google-oauth20": {
+		"express": {
 			"optional": true
 		}
 	},
@@ -41,16 +36,10 @@
 		"@o3co/ts.hocon": "^0.1.2",
 		"@types/bcrypt": "^6.0.0",
 		"@types/express": "^5.0.6",
+		"@types/express-session": "^1",
 		"@types/js-yaml": "^4.0.9",
 		"@types/node": "^25.1.0",
-		"@types/passport": "^0",
-		"@types/passport-google-oauth20": "^2.0.17",
-		"@types/passport-local": "^1",
-		"@types/passport-oauth2-client-password": "^0.1.6",
 		"express": "^5.2.1",
-		"passport": "^0.7.0",
-		"passport-local": "^1.0.0",
-		"passport-oauth2-client-password": "^0.1.2",
 		"pino": "^10.3.1",
 		"vitest": "^4.1.2"
 	}

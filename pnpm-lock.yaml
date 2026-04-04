@@ -29,18 +29,12 @@ importers:
       bcrypt:
         specifier: ^6.0.0
         version: 6.0.0
-      express-rate-limit:
-        specifier: ^8.3.1
-        version: 8.3.2(express@5.2.1)
       jose:
         specifier: ^6.2.2
         version: 6.2.2
       js-yaml:
         specifier: ^4.1.1
         version: 4.1.1
-      passport-google-oauth20:
-        specifier: ^2.0.0
-        version: 2.0.0
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -54,36 +48,18 @@ importers:
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
+      '@types/express-session':
+        specifier: ^1
+        version: 1.18.2
       '@types/js-yaml':
         specifier: ^4.0.9
         version: 4.0.9
       '@types/node':
         specifier: ^25.1.0
         version: 25.5.0
-      '@types/passport':
-        specifier: ^0
-        version: 0.4.7
-      '@types/passport-google-oauth20':
-        specifier: ^2.0.17
-        version: 2.0.17
-      '@types/passport-local':
-        specifier: ^1
-        version: 1.0.38
-      '@types/passport-oauth2-client-password':
-        specifier: ^0.1.6
-        version: 0.1.6
       express:
         specifier: ^5.2.1
         version: 5.2.1
-      passport:
-        specifier: ^0.7.0
-        version: 0.7.0
-      passport-local:
-        specifier: ^1.0.0
-        version: 1.0.0
-      passport-oauth2-client-password:
-        specifier: ^0.1.2
-        version: 0.1.2
       pino:
         specifier: ^10.3.1
         version: 10.3.1
