@@ -22,7 +22,7 @@ import {
   type ModuleContext,
   type UserRepository,
 } from "@o3co/auth-provider-core";
-import { sessionModule } from "../module.mjs";
+import { sessionModule } from "#/module.mjs";
 
 const mockConfig = {
   oauth: {

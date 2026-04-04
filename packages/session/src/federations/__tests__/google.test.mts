@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AppConfig } from "@o3co/auth-provider-core";
-import { createGoogleProvider } from "../google.mjs";
+import { createGoogleProvider } from "#/federations/google.mjs";
 
 const baseConfig = {
   federations: {

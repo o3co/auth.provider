@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import type { Module, ModuleContext, PathResolver } from "../types.mjs";
+import type { Module, ModuleContext, PathResolver } from "#/modules/types.mjs";
 
 describe("Module interface", () => {
 	it("PathResolver is a function from string to string", () => {

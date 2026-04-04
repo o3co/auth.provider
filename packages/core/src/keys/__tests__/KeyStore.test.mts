@@ -18,8 +18,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateKeyPair, exportSPKI, exportPKCS8, SignJWT, jwtVerify, decodeProtectedHeader } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "../KeyStore.mjs";
-import type { JwtConfig } from "../KeyStore.mjs";
+import { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import type { JwtConfig } from "#/keys/KeyStore.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });

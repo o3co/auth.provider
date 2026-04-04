@@ -15,7 +15,7 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
-import { InMemoryClientRepository } from "../InMemoryClientRepository.mjs";
+import { InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";
 
 describe("InMemoryClientRepository", () => {
 	describe("findById", () => {

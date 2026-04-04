@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { InMemoryCodeRepository } from "../InMemoryCodeRepository.mjs";
+import { InMemoryCodeRepository } from "#/repositories/InMemoryCodeRepository.mjs";
 
 describe("InMemoryCodeRepository", () => {
 	let repo: InMemoryCodeRepository;

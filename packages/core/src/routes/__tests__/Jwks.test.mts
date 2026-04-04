@@ -15,8 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
-import { createAsymmetricKeyStore, createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
-import { createRouter } from "../Jwks.mjs";
+import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import { createRouter } from "#/routes/Jwks.mjs";
 
 function createMockExpress() {
 	const routes: Record<string, Function> = {};

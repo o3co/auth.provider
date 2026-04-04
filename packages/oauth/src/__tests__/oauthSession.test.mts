@@ -22,7 +22,7 @@ import {
 	type ClientRepository,
 	type AppConfig,
 } from "@o3co/auth-provider-core";
-import { oauthSessionModule } from "../oauthSession.mjs";
+import { oauthSessionModule } from "#/oauthSession.mjs";
 
 const mockConfig = {
 	oauth: {

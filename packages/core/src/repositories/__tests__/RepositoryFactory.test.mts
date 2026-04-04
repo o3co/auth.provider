@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it, vi } from "vitest";
-import { RepositoryFactory } from "../RepositoryFactory.mjs";
+import { RepositoryFactory } from "#/repositories/RepositoryFactory.mjs";
 
 interface MockRepo {
 	name: string;

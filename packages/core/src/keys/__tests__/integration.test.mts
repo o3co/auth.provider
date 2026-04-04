@@ -15,8 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { generateKeyPair, exportSPKI, exportPKCS8, jwtVerify, decodeProtectedHeader } from "jose";
-import { createKeyStoreFromConfig } from "../KeyStore.mjs";
-import { generateToken } from "../../grants/token.mjs";
+import { createKeyStoreFromConfig } from "#/keys/KeyStore.mjs";
+import { generateToken } from "#/grants/token.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });

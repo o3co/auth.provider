@@ -22,7 +22,7 @@ import {
 	type CodeRepository,
 	type AppConfig,
 } from "@o3co/auth-provider-core";
-import { oauthAuthorizationModule } from "../oauthAuthorization.mjs";
+import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 
 const mockConfig = {
 	oauth: {

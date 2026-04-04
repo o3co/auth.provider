@@ -12,7 +12,7 @@ import {
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
 	RepositoryFactory,
-} from "../index.mjs";
+} from "#/index.mjs";
 
 describe("public API", () => {
 	it("exports InMemoryClientRepository class", () => {
