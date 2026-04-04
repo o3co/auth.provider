@@ -19,8 +19,6 @@ import { createApp } from "../app.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
 import { createSymmetricKeyStore } from "../keys/KeyStore.mjs";
 import type { Module } from "../modules/types.mjs";
-import type { ClientRepository } from "../repositories/ClientRepository.mjs";
-import type { CodeRepository } from "../repositories/CodeRepository.mjs";
 import type { AppConfig } from "../config/application.schema.mjs";
 
 const mockExpress = {
@@ -49,9 +47,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [],
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+			});
 
 		expect(result.router).toBeDefined();
 		expect(result.grantRegistry).toBeInstanceOf(GrantRegistry);
@@ -70,9 +66,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore,
 			modules: [testModule],
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+			});
 
 		await result.init();
 
@@ -94,9 +88,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [testModule],
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+			});
 
 		await result.init();
 
@@ -119,9 +111,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [moduleA, moduleB],
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+			});
 
 		await result.init();
 
@@ -136,9 +126,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [testModule],
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+			});
 
 		await result.init();
 
@@ -162,9 +150,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [],
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+			});
 
 		// Router.use should have been called for healthcheck and jwks sub-routers
 		expect((routerMock.use as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(1);

@@ -18,9 +18,6 @@ import type { RequestHandler, Router } from "express";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { GrantRegistry } from "#/grants/registry.mjs";
 import type { KeyStore } from "#/keys/KeyStore.mjs";
-import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
-import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import type { UserRepository } from "#/repositories/UserRepository.mjs";
 import type { Module, ModuleContext, PathResolver } from "#/modules/types.mjs";
 import * as healthcheck from "#/routes/Healthcheck.mjs";
 import * as jwks from "#/routes/Jwks.mjs";
@@ -36,9 +33,6 @@ export interface AppOptions {
 	config: AppConfig;
 	keyStore: KeyStore;
 	modules: Module[];
-	clientRepository: ClientRepository;
-	codeRepository: CodeRepository;
-	userRepository?: UserRepository;
 }
 
 export interface AppResult {

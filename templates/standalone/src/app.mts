@@ -126,9 +126,6 @@ await (async (): Promise<void> => {
       oauthAuthorizationModule({ codeRepository }),
       oauthDidModule,
     ],
-    clientRepository,
-    codeRepository,
-    userRepository,
   });
 
   // Initialize all modules (async — resolves external deps via pathResolver)
