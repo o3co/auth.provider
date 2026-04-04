@@ -29,9 +29,18 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 
 	const DEFAULT_MESSAGE_MAX_AGE_SEC = 300;
 	const DEFAULT_ALGORITHM: Algorithm = "ed25519_raw";
+	const SUPPORTED_ALGORITHMS: readonly string[] = ["ed25519_raw", "ed25519_jws", "es256_jws", "es256k_jws"];
+
 	const didConfig = (config.oauth.grants as Record<string, Record<string, unknown> | undefined>).did;
 	const messageMaxAgeMs = ((didConfig?.messageMaxAgeSec as number | undefined) ?? DEFAULT_MESSAGE_MAX_AGE_SEC) * 1000;
-	const algorithm = (didConfig?.algorithm as Algorithm | undefined) ?? DEFAULT_ALGORITHM;
+
+	const configuredAlgorithm = didConfig?.algorithm;
+	if (configuredAlgorithm !== undefined && !SUPPORTED_ALGORITHMS.includes(String(configuredAlgorithm))) {
+		throw new Error(
+			`Invalid DID grant algorithm: "${String(configuredAlgorithm)}". Supported: ${SUPPORTED_ALGORITHMS.join(", ")}`,
+		);
+	}
+	const algorithm = (configuredAlgorithm as Algorithm | undefined) ?? DEFAULT_ALGORITHM;
 
 	// In-memory nonce store (PoC)
 	const nonceStore = new Map<string, number>();
@@ -76,6 +85,9 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 			}
 
 			// 2. Verify signature via strategy
+			// Note: nonce/timestamp checks happen after verification because the verifier
+			// owns message parsing (format-specific). Trade-off: replay requests pay crypto
+			// cost before rejection. Acceptable for PoC in-memory nonce store.
 			let v: SignatureVerifier;
 			try {
 				v = await getVerifier();

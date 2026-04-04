@@ -22,7 +22,7 @@ import { JwsVerifier } from "../jws.mjs";
  * Helper: create a signed JWS for a DID message using a real key pair.
  */
 async function createSignedJws(
-	alg: "EdDSA" | "ES256",
+	alg: "EdDSA" | "ES256" | "ES256K",
 	did: string,
 	overrides?: { audience?: string; didOverride?: string },
 ): Promise<{ jws: string; publicKey: string }> {
@@ -99,6 +99,12 @@ describe("JwsVerifier", () => {
 			expect(result.errorDescription).toContain("algorithm");
 		}
 	});
+
+	// ES256K (secp256k1) is not supported by Node.js WebCrypto / jose.generateKeyPair.
+	// The JwsVerifier handles it via the same compactVerify path as ES256,
+	// so it is covered by the ES256 tests structurally. Skip until secp256k1 support
+	// is available in the runtime or a dedicated library is added.
+	it.todo("returns valid result for correct ES256K JWS");
 
 	it("returns error when jws field is missing from body", async () => {
 		const verifier = new JwsVerifier("EdDSA");

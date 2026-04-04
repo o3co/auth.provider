@@ -103,6 +103,34 @@ describe("createDidGrant", () => {
 			expect("error" in result && result.error).toBe("invalid_request");
 			expect("errorDescription" in result && result.errorDescription).toContain("timestamp");
 		});
+
+		it("returns 401 when signature verification fails", async () => {
+			const handler = createDidGrant(mockDeps);
+			const message = JSON.stringify({
+				did: "did:key:z6MkTest",
+				timestamp: new Date().toISOString(),
+				nonce: crypto.randomUUID(),
+			});
+			const fakeSignature = Buffer.alloc(64, 0x01).toString("base64");
+			const fakePublicKey = Buffer.alloc(32, 0x42).toString("base64");
+
+			const ctx: GrantContext = {
+				body: {
+					did: "did:key:z6MkTest",
+					message,
+					signature: fakeSignature,
+					publicKey: fakePublicKey,
+				},
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(401);
+			expect("error" in result && result.error).toBe("invalid_grant");
+		});
 	});
 
 	describe("handle – success", () => {

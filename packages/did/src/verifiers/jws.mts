@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { compactVerify, decodeProtectedHeader, importJWK, type JWK } from "jose";
+import { compactVerify, decodeProtectedHeader, importJWK, type JWK, type KeyLike } from "jose";
 
 import type { ParsedMessage, SignatureVerifier, VerificationContext, VerificationResult } from "./types.mjs";
 
@@ -64,7 +64,7 @@ export class JwsVerifier implements SignatureVerifier {
 		}
 
 		// 4. Import public key from JWK JSON string
-		let publicKey: CryptoKey | Uint8Array;
+		let publicKey: KeyLike | Uint8Array;
 		try {
 			const jwk = JSON.parse(body.publicKey) as JWK;
 			publicKey = await importJWK(jwk, this.expectedAlg);

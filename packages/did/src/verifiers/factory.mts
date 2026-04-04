@@ -29,11 +29,21 @@ export async function createVerifier(algorithm: Algorithm): Promise<SignatureVer
 		try {
 			const { Ed25519RawVerifier } = await import("./ed25519Raw.mjs");
 			return new Ed25519RawVerifier();
-		} catch {
-			throw new Error(
-				"ed25519_raw algorithm requires @noble/ed25519 package. " +
-				"Install it with: pnpm add @noble/ed25519 — or switch to a JWS algorithm (ed25519_jws, es256_jws, es256k_jws).",
-			);
+		} catch (err) {
+			const code = typeof err === "object" && err !== null && "code" in err
+				? (err as { code: unknown }).code
+				: undefined;
+			const message = err instanceof Error ? err.message : String(err);
+			if (
+				(code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") &&
+				message.includes("@noble/ed25519")
+			) {
+				throw new Error(
+					"ed25519_raw algorithm requires @noble/ed25519 package. " +
+					"Install it with: pnpm add @noble/ed25519 — or switch to a JWS algorithm (ed25519_jws, es256_jws, es256k_jws).",
+				);
+			}
+			throw err;
 		}
 	}
 
