@@ -35,6 +35,7 @@ import { RedisStore } from "connect-redis";
 import express from "express";
 import session from "express-session";
 import helmet from "helmet";
+import passport from "passport";
 import { createClient } from "redis";
 
 import logger from "#/logger.mjs";
@@ -105,6 +106,10 @@ await (async (): Promise<void> => {
       },
     }),
   );
+
+  // Initialize Passport middleware (strategies are registered by modules during init)
+  app.use(passport.initialize());
+  app.use(passport.session());
 
   // Initialize KeyStore
   const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);

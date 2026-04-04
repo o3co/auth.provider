@@ -18,15 +18,15 @@ import rateLimit from "express-rate-limit";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 
 import type { PassportStatic } from "passport";
-import type {
-  AppConfig,
-  ClientRepository,
-  CodeRepository,
-  GrantRegistry,
-  KeyStore,
-  PublicClient,
+import {
+  formatObject,
+  type AppConfig,
+  type ClientRepository,
+  type CodeRepository,
+  type GrantRegistry,
+  type KeyStore,
+  type PublicClient,
 } from "@o3co/auth-provider-core";
-import { formatObject } from "./tokenFormat.mjs";
 
 // Session data type augmentation
 declare module "express-session" {
