@@ -27,7 +27,8 @@ export const didConfigSchema = z.object({
 			"es256k_jws",
 		]).default("ed25519_raw"),
 		messageMaxAgeSec: z.coerce.number().default(300),
-	}).default({}),
+	// Full default object required by zod v4 typing — field-level defaults are authoritative
+	}).default({ enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300 }),
 });
 
 export const didModule: GrantModule = {
