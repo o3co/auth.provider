@@ -21,6 +21,8 @@
 		"@noble/ed25519": "^3.0.1",
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-did": "workspace:*",
+		"@o3co/auth-provider-oauth": "workspace:*",
+		"@o3co/auth-provider-session": "workspace:*",
 		"@o3co/auth-provider-repositories": "workspace:*",
 		"@o3co/auth.utils": "^0.0.1",
 		"@o3co/ts.hocon": "^0.1.2",
@@ -36,6 +38,7 @@
 		"redis": "^5.10.0"
 	},
 	"devDependencies": {
+		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
 		"@types/node": "^25.1.0",
 		"tsx": "^4.21.0",

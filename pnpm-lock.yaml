@@ -205,9 +205,15 @@ importers:
       '@o3co/auth-provider-did':
         specifier: workspace:*
         version: link:../../packages/did
+      '@o3co/auth-provider-oauth':
+        specifier: workspace:*
+        version: link:../../packages/oauth
       '@o3co/auth-provider-repositories':
         specifier: workspace:*
         version: link:../../packages/repositories
+      '@o3co/auth-provider-session':
+        specifier: workspace:*
+        version: link:../../packages/session
       '@o3co/auth.utils':
         specifier: ^0.0.1
         version: 0.0.1(express@5.2.1)(pino@10.3.1)
@@ -245,6 +251,9 @@ importers:
         specifier: ^5.10.0
         version: 5.11.0
     devDependencies:
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
       '@types/express-session':
         specifier: ^1
         version: 1.18.2
