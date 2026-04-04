@@ -22,7 +22,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
-import { createRefreshTokenGrant } from "../grants/refreshToken.mjs";
+import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);

@@ -23,7 +23,7 @@ import {
   type ClientRepository,
   type CodeRepository,
 } from "@o3co/auth-provider-core";
-import { oauthModule } from "../module.mjs";
+import { oauthModule } from "#/module.mjs";
 
 const mockConfig = {
   oauth: {

@@ -22,7 +22,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
-import { createSessionGrant } from "../grants/session.mjs";
+import { createSessionGrant } from "#/grants/session.mjs";
 
 const mockConfig = {
 	oauth: {

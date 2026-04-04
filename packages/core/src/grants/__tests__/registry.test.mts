@@ -16,14 +16,14 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
-import { GrantRegistry } from "../registry.mjs";
+import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import { GrantRegistry } from "#/grants/registry.mjs";
 import type {
 	GrantDependencies,
 	GrantFactory,
 	GrantHandler,
 	GrantModule,
-} from "../types.mjs";
+} from "#/grants/types.mjs";
 
 const makeHandler = (name: string): GrantHandler => ({
 	handle: vi.fn().mockResolvedValue({

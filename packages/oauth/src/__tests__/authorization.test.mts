@@ -24,7 +24,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
-import { createAuthorizationGrant } from "../grants/authorization.mjs";
+import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 
 const mockConfig = {
 	oauth: {

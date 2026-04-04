@@ -18,7 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { loadYamlMap } from "../loadYamlMap.mjs";
+import { loadYamlMap } from "#/repositories/loadYamlMap.mjs";
 
 const TestSchema = z
 	.object({

@@ -15,8 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { decodeJwt, decodeProtectedHeader } from "jose";
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
-import { generateToken, generateTokenResponse } from "../token.mjs";
+import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import { generateToken, generateTokenResponse } from "#/grants/token.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 

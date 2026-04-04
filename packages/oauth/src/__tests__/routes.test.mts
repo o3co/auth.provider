@@ -22,7 +22,7 @@ import {
   type ClientRepository,
   type CodeRepository,
 } from "@o3co/auth-provider-core";
-import { createOAuthRouter } from "../routes.mjs";
+import { createOAuthRouter } from "#/routes.mjs";
 import type { PassportStatic } from "passport";
 
 const mockConfig = {

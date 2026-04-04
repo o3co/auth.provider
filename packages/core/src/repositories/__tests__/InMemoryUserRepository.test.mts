@@ -15,7 +15,7 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
-import { InMemoryUserRepository } from "../InMemoryUserRepository.mjs";
+import { InMemoryUserRepository } from "#/repositories/InMemoryUserRepository.mjs";
 
 describe("InMemoryUserRepository", () => {
 	describe("authenticate", () => {

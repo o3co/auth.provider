@@ -15,11 +15,11 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Router } from "express";
-import { createApp } from "../app.mjs";
-import { GrantRegistry } from "../grants/registry.mjs";
-import { createSymmetricKeyStore } from "../keys/KeyStore.mjs";
-import type { Module } from "../modules/types.mjs";
-import type { AppConfig } from "../config/application.schema.mjs";
+import { createApp } from "#/app.mjs";
+import { GrantRegistry } from "#/grants/registry.mjs";
+import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import type { Module } from "#/modules/types.mjs";
+import type { AppConfig } from "#/config/application.schema.mjs";
 
 const mockExpress = {
 	Router: () =>
