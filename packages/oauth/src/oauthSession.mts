@@ -13,9 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
-import { createSessionGrant } from "#/grants/session.mjs";
-import type { Module, ModuleContext } from "./types.mjs";
+import type {
+	ClientRepository,
+	Module,
+	ModuleContext,
+} from "@o3co/auth-provider-core";
+import { createSessionGrant } from "./grants/session.mjs";
 
 export const oauthSessionModule = (params: {
 	clientRepository: ClientRepository;

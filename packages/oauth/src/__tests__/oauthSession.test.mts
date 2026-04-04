@@ -15,11 +15,13 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Router } from "express";
-import { GrantRegistry } from "../../grants/registry.mjs";
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
-import type { ModuleContext } from "../types.mjs";
-import type { ClientRepository } from "../../repositories/ClientRepository.mjs";
-import type { AppConfig } from "../../config/application.schema.mjs";
+import {
+	GrantRegistry,
+	createSymmetricKeyStore,
+	type ModuleContext,
+	type ClientRepository,
+	type AppConfig,
+} from "@o3co/auth-provider-core";
 import { oauthSessionModule } from "../oauthSession.mjs";
 
 const mockConfig = {

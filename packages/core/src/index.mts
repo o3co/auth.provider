@@ -66,8 +66,6 @@ export type { AsymmetricKeyStoreOptions, JwtConfig, KeyStore, ManagedKey } from 
 export { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "./keys/KeyStore.mjs";
 // Module system
 export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
-export { oauthSessionModule } from "./modules/oauthSession.mjs";
-export { oauthAuthorizationModule } from "./modules/oauthAuthorization.mjs";
 // App factory
 export { createApp, type AppOptions, type AppResult } from "./app.mjs";
 // Token formatting utility (used by oauth package)

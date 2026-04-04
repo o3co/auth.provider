@@ -15,15 +15,15 @@
  */
 import crypto from "node:crypto";
 
-import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-
-import { generateToken, generateTokenResponse } from "./token.mjs";
-import type {
-	GrantContext,
-	GrantDependencies,
-	GrantHandler,
-	GrantHandlerResult,
-} from "./types.mjs";
+import {
+	generateToken,
+	generateTokenResponse,
+	type CodeRepository,
+	type GrantContext,
+	type GrantDependencies,
+	type GrantHandler,
+	type GrantHandlerResult,
+} from "@o3co/auth-provider-core";
 
 export const createAuthorizationGrant = (deps: GrantDependencies & { codeRepository: CodeRepository }): GrantHandler => {
 	const { config, codeRepository, keyStore } = deps;

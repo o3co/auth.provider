@@ -11,8 +11,6 @@ import {
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
-	oauthAuthorizationModule,
-	oauthSessionModule,
 	RepositoryFactory,
 } from "../index.mjs";
 
@@ -70,11 +68,4 @@ describe("public API", () => {
 		expect(typeof formatObject).toBe("function");
 	});
 
-	it("exports oauthSessionModule", () => {
-		expect(oauthSessionModule).toBeDefined();
-	});
-
-	it("exports oauthAuthorizationModule", () => {
-		expect(oauthAuthorizationModule).toBeDefined();
-	});
 });

@@ -21,11 +21,13 @@ import {
   createApp,
   createDefaultFactories,
   createKeyStoreFromConfig,
-  oauthSessionModule,
-  oauthAuthorizationModule,
 } from "@o3co/auth-provider-core";
 import { oauthDidModule } from "@o3co/auth-provider-did";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import {
+  oauthModule,
+  oauthSessionModule,
+  oauthAuthorizationModule,
+} from "@o3co/auth-provider-oauth";
 import { sessionModule } from "@o3co/auth-provider-session";
 import { registerBuiltinRepositories } from "@o3co/auth-provider-repositories";
 import { gracefulShutdown } from "@o3co/auth.utils";
