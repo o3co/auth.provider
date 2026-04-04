@@ -15,13 +15,14 @@
  */
 import { decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 
-import { generateToken, generateTokenResponse } from "./token.mjs";
-import type {
-	GrantContext,
-	GrantDependencies,
-	GrantHandler,
-	GrantHandlerResult,
-} from "./types.mjs";
+import {
+	generateToken,
+	generateTokenResponse,
+	type GrantContext,
+	type GrantDependencies,
+	type GrantHandler,
+	type GrantHandlerResult,
+} from "@o3co/auth-provider-core";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;

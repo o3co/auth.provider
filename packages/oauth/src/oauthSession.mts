@@ -13,12 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-	createSessionGrant,
-	type ClientRepository,
-	type Module,
-	type ModuleContext,
+import type {
+	ClientRepository,
+	Module,
+	ModuleContext,
 } from "@o3co/auth-provider-core";
+import { createSessionGrant } from "./grants/session.mjs";
 
 export const oauthSessionModule = (params: {
 	clientRepository: ClientRepository;

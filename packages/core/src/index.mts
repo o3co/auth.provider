@@ -38,10 +38,6 @@ export {
 	type Token,
 	type TokenResponse,
 } from "./grants/token.mjs";
-// Built-in grant factories (used by oauth package modules)
-export { createSessionGrant } from "./grants/session.mjs";
-export { createAuthorizationGrant } from "./grants/authorization.mjs";
-export { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";

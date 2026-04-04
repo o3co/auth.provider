@@ -18,10 +18,13 @@ import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { decodeJwt } from "jose";
 
-import type { CodeRepository } from "../../repositories/CodeRepository.mjs";
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
-import { createAuthorizationGrant } from "../authorization.mjs";
-import type { GrantContext, GrantDependencies } from "../types.mjs";
+import {
+	createSymmetricKeyStore,
+	type CodeRepository,
+	type GrantContext,
+	type GrantDependencies,
+} from "@o3co/auth-provider-core";
+import { createAuthorizationGrant } from "../grants/authorization.mjs";
 
 const mockConfig = {
 	oauth: {

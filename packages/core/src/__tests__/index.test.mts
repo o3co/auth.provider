@@ -3,11 +3,8 @@ import {
 	AppConfigSchema,
 	createApp,
 	createAsymmetricKeyStore,
-	createAuthorizationGrant,
 	createDefaultFactories,
 	createKeyStoreFromConfig,
-	createRefreshTokenGrant,
-	createSessionGrant,
 	createSymmetricKeyStore,
 	formatObject,
 	GrantRegistry,
@@ -71,15 +68,4 @@ describe("public API", () => {
 		expect(typeof formatObject).toBe("function");
 	});
 
-	it("exports createSessionGrant function", () => {
-		expect(typeof createSessionGrant).toBe("function");
-	});
-
-	it("exports createAuthorizationGrant function", () => {
-		expect(typeof createAuthorizationGrant).toBe("function");
-	});
-
-	it("exports createRefreshTokenGrant function", () => {
-		expect(typeof createRefreshTokenGrant).toBe("function");
-	});
 });

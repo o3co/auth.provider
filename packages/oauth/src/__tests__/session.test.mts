@@ -16,10 +16,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { decodeJwt } from "jose";
 
-import type { ClientRepository } from "../../repositories/ClientRepository.mjs";
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
-import { createSessionGrant } from "../session.mjs";
-import type { GrantContext, GrantDependencies } from "../types.mjs";
+import {
+	createSymmetricKeyStore,
+	type ClientRepository,
+	type GrantContext,
+	type GrantDependencies,
+} from "@o3co/auth-provider-core";
+import { createSessionGrant } from "../grants/session.mjs";
 
 const mockConfig = {
 	oauth: {
