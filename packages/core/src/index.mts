@@ -70,5 +70,9 @@ export type { UserRepository } from "./repositories/UserRepository.mjs";
 // Keys
 export type { AsymmetricKeyStoreOptions, JwtConfig, KeyStore, ManagedKey } from "./keys/KeyStore.mjs";
 export { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "./keys/KeyStore.mjs";
+// Module system
+export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
+// App factory
+export { createApp, type AppOptions, type AppResult } from "./app.mjs";
 // Router factory
 export { createRouter } from "./routes/index.mjs";
