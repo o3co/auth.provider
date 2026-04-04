@@ -14,6 +14,6 @@
  * limitations under the License.
  */
 export { createDidGrant } from "./did.mjs";
-export { didModule, didConfigSchema } from "./module.mjs";
+export { didModule, didGrantModule, oauthDidModule, didConfigSchema } from "./module.mjs";
 export type { SignatureVerifier, VerificationContext, VerificationResult, ParsedMessage } from "./verifiers/types.mjs";
 export { createVerifier, type Algorithm } from "./verifiers/factory.mjs";

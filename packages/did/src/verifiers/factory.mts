@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { PathResolver } from "@o3co/auth-provider-core";
+
 import type { SignatureVerifier } from "./types.mjs";
 import { JwsVerifier } from "./jws.mjs";
 
@@ -24,11 +26,11 @@ const JWS_ALG_MAP = {
 	es256k_jws: "ES256K",
 } as const;
 
-export async function createVerifier(algorithm: Algorithm): Promise<SignatureVerifier> {
+export async function createVerifier(algorithm: Algorithm, pathResolver?: PathResolver): Promise<SignatureVerifier> {
 	if (algorithm === "ed25519_raw") {
 		try {
 			const { Ed25519RawVerifier } = await import("./ed25519Raw.mjs");
-			return new Ed25519RawVerifier();
+			return new Ed25519RawVerifier(pathResolver);
 		} catch (err) {
 			const code = typeof err === "object" && err !== null && "code" in err
 				? (err as { code: unknown }).code
