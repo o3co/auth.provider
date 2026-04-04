@@ -76,7 +76,7 @@ export const createRouter = (
 				req.session.redirectTo = redirect_to;
 			}
 
-			return req.session.save((err) => {
+			return req.session.save((err: Error | null) => {
 				if (err) return res.status(500).json({ message: "Error saving session" });
 				return passport.authenticate(provider.strategyName, {
 					scope: provider.scope,
@@ -110,7 +110,7 @@ export const createRouter = (
 				const user = req.user;
 				const { redirectTo } = req.session;
 
-				req.session.regenerate((err) => {
+				req.session.regenerate((err: Error | null) => {
 					if (err) return res.status(500).json({ message: "Error regenerating session" });
 
 					req.session.isAuthenticated = true;

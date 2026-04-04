@@ -21,15 +21,14 @@ import { createGoogleProvider } from "../google.mjs";
 const baseConfig = {
 	http: { port: 3000, trustProxy: false },
 	oauth: {
-		jwt: { secret: "secret", kid: "v0" },
+		jwt: { secret: "secret", kid: "v0", algorithm: "HS256" as const, previousKeys: [] },
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {
 			session: { enabled: true },
 			authorization: { enabled: true },
 			refresh_token: { enabled: true },
-			did: { enabled: true, messageMaxAgeSec: 300 },
-		},
+},
 	},
 	session: {
 		secret: "sess",
