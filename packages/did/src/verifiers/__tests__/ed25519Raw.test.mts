@@ -19,25 +19,27 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { Ed25519RawVerifier } from "../ed25519Raw.mjs";
 
 /**
- * Helper: create a signed DID message using a real Ed25519 key pair.
+ * Helper: create a signed DID request using a real Ed25519 key pair.
+ * message is a raw JSON string (not base64), matching the original wire format.
  */
-async function createSignedMessage(
+async function createSignedRequest(
 	did: string,
 	privateKey: Uint8Array,
 	overrides?: { audience?: string },
 ): Promise<{ message: string; signature: string; publicKey: string }> {
 	const publicKey = await ed.getPublicKeyAsync(privateKey);
-	const msg = JSON.stringify({
+	const message = JSON.stringify({
 		did,
 		timestamp: new Date().toISOString(),
 		nonce: crypto.randomUUID(),
 		...(overrides?.audience ? { audience: overrides.audience } : {}),
 	});
-	const messageBytes = new TextEncoder().encode(msg);
+	// Sign the raw UTF-8 bytes of the JSON string
+	const messageBytes = new TextEncoder().encode(message);
 	const signatureBytes = await ed.signAsync(messageBytes, privateKey);
 
 	return {
-		message: Buffer.from(messageBytes).toString("base64"),
+		message, // raw JSON string
 		signature: Buffer.from(signatureBytes).toString("base64"),
 		publicKey: Buffer.from(publicKey).toString("base64"),
 	};
@@ -53,7 +55,7 @@ describe("Ed25519RawVerifier", () => {
 
 	it("returns valid result for correct signature", async () => {
 		const verifier = new Ed25519RawVerifier();
-		const { message, signature, publicKey } = await createSignedMessage(did, privateKey);
+		const { message, signature, publicKey } = await createSignedRequest(did, privateKey);
 
 		const result = await verifier.verify({
 			body: { signature, message, publicKey },
@@ -72,7 +74,7 @@ describe("Ed25519RawVerifier", () => {
 	it("returns valid result with audience when present", async () => {
 		const verifier = new Ed25519RawVerifier();
 		const audience = "https://api.example.com";
-		const { message, signature, publicKey } = await createSignedMessage(did, privateKey, { audience });
+		const { message, signature, publicKey } = await createSignedRequest(did, privateKey, { audience });
 
 		const result = await verifier.verify({
 			body: { signature, message, publicKey },
@@ -88,13 +90,10 @@ describe("Ed25519RawVerifier", () => {
 
 	it("returns invalid when signature is wrong", async () => {
 		const verifier = new Ed25519RawVerifier();
-		const { message, publicKey } = await createSignedMessage(did, privateKey);
-		// Use a different key to produce a wrong signature
+		const { message, publicKey } = await createSignedRequest(did, privateKey);
+		// Sign with a different key
 		const wrongKey = ed.utils.randomSecretKey();
-		const wrongSigBytes = await ed.signAsync(
-			Buffer.from(message, "base64"),
-			wrongKey,
-		);
+		const wrongSigBytes = await ed.signAsync(new TextEncoder().encode(message), wrongKey);
 		const wrongSignature = Buffer.from(wrongSigBytes).toString("base64");
 
 		const result = await verifier.verify({
@@ -110,7 +109,7 @@ describe("Ed25519RawVerifier", () => {
 
 	it("returns error when signature field is missing", async () => {
 		const verifier = new Ed25519RawVerifier();
-		const { message, publicKey } = await createSignedMessage(did, privateKey);
+		const { message, publicKey } = await createSignedRequest(did, privateKey);
 
 		const result = await verifier.verify({
 			body: { message, publicKey },
@@ -126,10 +125,9 @@ describe("Ed25519RawVerifier", () => {
 
 	it("returns error when message is not valid JSON", async () => {
 		const verifier = new Ed25519RawVerifier();
-		const notJson = Buffer.from("not-json").toString("base64");
 
 		const result = await verifier.verify({
-			body: { signature: "dW51c2Vk", message: notJson, publicKey: "dW51c2Vk" },
+			body: { signature: "dW51c2Vk", message: "not-json", publicKey: "dW51c2Vk" },
 			did,
 		});
 
@@ -142,7 +140,7 @@ describe("Ed25519RawVerifier", () => {
 
 	it("returns error when message.did does not match ctx.did", async () => {
 		const verifier = new Ed25519RawVerifier();
-		const { message, signature, publicKey } = await createSignedMessage("did:key:z6MkOther", privateKey);
+		const { message, signature, publicKey } = await createSignedRequest("did:key:z6MkOther", privateKey);
 
 		const result = await verifier.verify({
 			body: { signature, message, publicKey },
@@ -158,7 +156,7 @@ describe("Ed25519RawVerifier", () => {
 
 	it("returns error when publicKey is missing", async () => {
 		const verifier = new Ed25519RawVerifier();
-		const { message, signature } = await createSignedMessage(did, privateKey);
+		const { message, signature } = await createSignedRequest(did, privateKey);
 
 		const result = await verifier.verify({
 			body: { signature, message },

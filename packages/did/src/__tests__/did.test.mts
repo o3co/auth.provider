@@ -40,9 +40,8 @@ const mockDeps: GrantDependencies = {
 
 /**
  * Create a GrantContext with a real Ed25519 signature.
- * The Ed25519RawVerifier expects body.message, body.signature, and body.publicKey
- * all as base64-encoded strings. The signature is over the raw message bytes
- * (i.e., the base64-decoded content of body.message).
+ * body.message is a raw JSON string (not base64) — matching the original wire format.
+ * body.signature and body.publicKey are base64-encoded.
  */
 async function makeSignedCtx(
 	did: string,
@@ -51,21 +50,21 @@ async function makeSignedCtx(
 	const privateKey = ed.utils.randomSecretKey();
 	const publicKey = await ed.getPublicKeyAsync(privateKey);
 
-	const messageObj = {
+	const message = JSON.stringify({
 		did,
 		timestamp: overrides.timestamp ?? new Date().toISOString(),
 		nonce: overrides.nonce ?? `nonce-${Date.now()}-${Math.random()}`,
 		...(overrides.audience !== undefined ? { audience: overrides.audience } : {}),
-	};
+	});
 
-	const messageString = JSON.stringify(messageObj);
-	const messageBytes = new TextEncoder().encode(messageString);
+	// Sign the raw UTF-8 bytes of the JSON string
+	const messageBytes = new TextEncoder().encode(message);
 	const signature = await ed.signAsync(messageBytes, privateKey);
 
 	return {
 		body: {
 			did,
-			message: Buffer.from(messageBytes).toString("base64"),
+			message, // raw JSON string
 			signature: Buffer.from(signature).toString("base64"),
 			publicKey: Buffer.from(publicKey).toString("base64"),
 		},

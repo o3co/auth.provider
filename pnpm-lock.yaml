@@ -137,6 +137,9 @@ importers:
 
   templates/standalone:
     dependencies:
+      '@noble/ed25519':
+        specifier: ^3.0.1
+        version: 3.0.1
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../../packages/core

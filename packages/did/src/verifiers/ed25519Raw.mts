@@ -37,21 +37,10 @@ export class Ed25519RawVerifier implements SignatureVerifier {
 			};
 		}
 
-		// 2. Decode and parse message as JSON
-		let messageString: string;
-		try {
-			messageString = Buffer.from(body.message, "base64").toString("utf-8");
-		} catch {
-			return {
-				valid: false,
-				error: "invalid_request",
-				errorDescription: "message must be valid base64",
-			};
-		}
-
+		// 2. Parse message as JSON (body.message is a raw JSON string, not base64)
 		let parsedMessage: ParsedMessage;
 		try {
-			parsedMessage = JSON.parse(messageString) as ParsedMessage;
+			parsedMessage = JSON.parse(body.message) as ParsedMessage;
 		} catch {
 			return {
 				valid: false,
@@ -79,9 +68,10 @@ export class Ed25519RawVerifier implements SignatureVerifier {
 		}
 
 		// 5. Verify Ed25519 signature
+		// signature and publicKey are base64-encoded, message is signed as raw UTF-8 bytes
 		try {
 			const signatureBytes = Buffer.from(body.signature, "base64");
-			const messageBytes = Buffer.from(body.message, "base64");
+			const messageBytes = new TextEncoder().encode(body.message);
 			const publicKeyBytes = Buffer.from(body.publicKey, "base64");
 
 			const valid = await verifyAsync(signatureBytes, messageBytes, publicKeyBytes);

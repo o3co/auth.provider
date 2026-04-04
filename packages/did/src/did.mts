@@ -21,7 +21,7 @@ import {
 	type GrantHandler,
 	type GrantHandlerResult,
 } from "@o3co/auth-provider-core";
-import { createVerifier, type Algorithm } from "./verifiers/index.mjs";
+import { createVerifier, type Algorithm } from "./verifiers/factory.mjs";
 import type { SignatureVerifier } from "./verifiers/types.mjs";
 
 export const createDidGrant = (deps: GrantDependencies): GrantHandler => {

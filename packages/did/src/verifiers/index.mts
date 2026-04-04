@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 export type { SignatureVerifier, VerificationContext, VerificationResult, ParsedMessage } from "./types.mjs";
-export { Ed25519RawVerifier } from "./ed25519Raw.mjs";
+// Ed25519RawVerifier intentionally NOT re-exported — it statically imports @noble/ed25519
+// which is an optional peer dep. Use createVerifier("ed25519_raw") or import directly.
 export { JwsVerifier } from "./jws.mjs";
 export { createVerifier, type Algorithm } from "./factory.mjs";
