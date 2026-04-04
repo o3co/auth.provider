@@ -17,6 +17,7 @@ import type { z } from "zod";
 
 import type { AppConfig } from "#/config/application.schema.mjs";
 import type { KeyStore } from "#/keys/KeyStore.mjs";
+import type { PathResolver } from "#/modules/types.mjs";
 
 export interface SessionData {
 	user?: Record<string, unknown>;
@@ -65,6 +66,7 @@ export interface GrantHandler {
 export interface GrantDependencies {
 	config: AppConfig;
 	keyStore: KeyStore;
+	pathResolver?: PathResolver;
 }
 
 /**

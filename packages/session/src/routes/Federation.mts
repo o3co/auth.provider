@@ -17,8 +17,8 @@ import crypto from "node:crypto";
 import type { Request, RequestHandler, Response, Router } from "express";
 import type { PassportStatic } from "passport";
 
-import type { AppConfig } from "#/config/application.schema.mjs";
-import type { FederationRegistry } from "#/federations/types.mjs";
+import type { AppConfig } from "@o3co/auth-provider-core";
+import type { FederationRegistry } from "../federations/types.mjs";
 
 declare module "express-session" {
 	interface SessionData {

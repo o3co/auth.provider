@@ -60,7 +60,7 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 		if (verifierError) throw verifierError;
 		if (verifier) return verifier;
 		try {
-			verifier = await createVerifier(algorithm);
+			verifier = await createVerifier(algorithm, deps.pathResolver);
 			return verifier;
 		} catch (err) {
 			verifierError = err instanceof Error ? err : new Error(String(err));

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { z } from "zod";
-import type { GrantModule } from "@o3co/auth-provider-core";
+import type { GrantModule, Module, ModuleContext } from "@o3co/auth-provider-core";
 import { createDidGrant } from "./did.mjs";
 
 export const didConfigSchema = z.object({
@@ -31,9 +31,39 @@ export const didConfigSchema = z.object({
 	}).default({ enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300 }),
 });
 
-export const didModule: GrantModule = {
+/**
+ * Legacy GrantModule interface — kept for backward compatibility with
+ * GrantRegistry.addModule() pattern.
+ */
+export const didGrantModule: GrantModule = {
 	grants: {
 		did: (deps) => createDidGrant(deps),
 	},
 	configSchema: didConfigSchema,
+};
+
+/**
+ * @deprecated Use oauthDidModule instead for the new Module interface.
+ */
+export const didModule = didGrantModule;
+
+/**
+ * New Module interface — uses ModuleContext with pathResolver.
+ * Register with createApp's modules array.
+ */
+export const oauthDidModule: Module = {
+	name: "oauth-did",
+	async init(context: ModuleContext): Promise<void> {
+		const grantConfig = (
+			context.config.oauth.grants as Record<string, { enabled?: boolean }>
+		).did;
+		if (grantConfig?.enabled === false) return;
+
+		const handler = createDidGrant({
+			config: context.config,
+			keyStore: context.keyStore,
+			pathResolver: context.pathResolver,
+		});
+		context.grantRegistry.register("did", handler);
+	},
 };

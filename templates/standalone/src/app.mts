@@ -16,14 +16,17 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-	type AppConfig,
-	AppConfigSchema,
-	createDefaultFactories,
-	createPassport,
-	createRouter,
-	createKeyStoreFromConfig,
+  type AppConfig,
+  AppConfigSchema,
+  createApp,
+  createDefaultFactories,
+  createKeyStoreFromConfig,
+  oauthSessionModule,
+  oauthAuthorizationModule,
 } from "@o3co/auth-provider-core";
-import { didModule } from "@o3co/auth-provider-did";
+import { oauthDidModule } from "@o3co/auth-provider-did";
+import { oauthModule } from "@o3co/auth-provider-oauth";
+import { sessionModule } from "@o3co/auth-provider-session";
 import { registerBuiltinRepositories } from "@o3co/auth-provider-repositories";
 import { gracefulShutdown } from "@o3co/auth.utils";
 import { parseFile } from "@o3co/ts.hocon";
@@ -32,103 +35,107 @@ import { RedisStore } from "connect-redis";
 import express from "express";
 import session from "express-session";
 import helmet from "helmet";
+import passport from "passport";
 import { createClient } from "redis";
 
 import logger from "#/logger.mjs";
 
 const config: AppConfig = validate(
-	parseFile(fileURLToPath(new URL("../config/application.conf", import.meta.url))),
-	AppConfigSchema,
+  parseFile(fileURLToPath(new URL("../config/application.conf", import.meta.url))),
+  AppConfigSchema,
 );
 
 await (async (): Promise<void> => {
-	// Initialize repositories via factory
-	const appDir = path.dirname(fileURLToPath(import.meta.url));
-	const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
-	registerBuiltinRepositories({ userFactory, codeFactory });
+  // Initialize repositories via factory
+  const appDir = path.dirname(fileURLToPath(import.meta.url));
+  const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+  registerBuiltinRepositories({ userFactory, codeFactory });
 
-	const clientRepository = await clientFactory.create({
-		...config.clients.client,
-		path: path.resolve(appDir, "..", config.clients.client.path),
-	});
-	const userRepository = await userFactory.create(config.clients.user);
-	const codeRepository = await codeFactory.create(config.clients.code);
+  const clientRepository = await clientFactory.create({
+    ...config.clients.client,
+    path: path.resolve(appDir, "..", config.clients.client.path),
+  });
+  const userRepository = await userFactory.create(config.clients.user);
+  const codeRepository = await codeFactory.create(config.clients.code);
 
-	const app = express();
+  const app = express();
 
-	app.set("trust proxy", config.http.trustProxy);
-	app.use(
-		helmet({
-			contentSecurityPolicy: {
-				directives: {
-					defaultSrc: ["'none'"],
-					frameAncestors: ["'none'"],
-				},
-			},
-		}),
-	);
+  app.set("trust proxy", config.http.trustProxy);
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'none'"],
+          frameAncestors: ["'none'"],
+        },
+      },
+    }),
+  );
 
-	const storageType = config.session.storage.type;
-	let store: session.Store | undefined;
-	switch (storageType) {
-		case "redis":
-			{
-				const options = config.session.storage.redis;
-				const redisClient = createClient({ url: options.url, password: options.password });
-				await redisClient.connect();
-				store = new RedisStore({ client: redisClient });
-			}
-			break;
-		case "memory":
-			store = undefined; // Use default in-memory store
-			break;
-		default:
-			throw new Error(`Unsupported session storage type: ${storageType}`);
-	}
+  const storageType = config.session.storage.type;
+  let store: session.Store | undefined;
+  switch (storageType) {
+    case "redis":
+      {
+        const options = config.session.storage.redis;
+        const redisClient = createClient({ url: options.url, password: options.password });
+        await redisClient.connect();
+        store = new RedisStore({ client: redisClient });
+      }
+      break;
+    case "memory":
+      store = undefined; // Use default in-memory store
+      break;
+    default:
+      throw new Error(`Unsupported session storage type: ${storageType}`);
+  }
 
-	app.use(
-		session({
-			secret: config.session.secret,
-			resave: false,
-			saveUninitialized: false,
-			store,
-			cookie: {
-				path: "/",
-				httpOnly: true,
-				secure: config.session.secure,
-				maxAge: config.session.maxAge,
-				sameSite: config.session.sameSite,
-				domain: config.session.domain || undefined,
-			},
-		}),
-	);
+  app.use(
+    session({
+      secret: config.session.secret,
+      resave: false,
+      saveUninitialized: false,
+      store,
+      cookie: {
+        path: "/",
+        httpOnly: true,
+        secure: config.session.secure,
+        maxAge: config.session.maxAge,
+        sameSite: config.session.sameSite,
+        domain: config.session.domain || undefined,
+      },
+    }),
+  );
 
-	// Initialize Passport
-	const passport = await createPassport({ clientRepository, userRepository, config });
+  // Initialize Passport middleware (strategies are registered by modules during init)
+  app.use(passport.initialize());
+  app.use(passport.session());
 
-	app.use(passport.initialize());
-	app.use(passport.session());
+  // Initialize KeyStore
+  const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
 
-	// Initialize KeyStore
-	const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
+  // Create app with module composition
+  const { init, router, grantRegistry } = createApp(express, {
+    pathResolver: import.meta.resolve,
+    config,
+    keyStore,
+    modules: [
+      oauthModule({ clientRepository, codeRepository, express }),
+      sessionModule({ userRepository, express }),
+      oauthSessionModule({ clientRepository }),
+      oauthAuthorizationModule({ codeRepository }),
+      oauthDidModule,
+    ],
+  });
 
-	// Initialize Routes with DI
-	const { router, grantRegistry } = createRouter(express, {
-		passport,
-		config,
-		keyStore,
-		clientRepository,
-		codeRepository,
-	});
+  // Initialize all modules (async — resolves external deps via pathResolver)
+  await init();
 
-	// Register DID authentication module
-	grantRegistry.addModule(didModule, { config, keyStore });
+  app.use(router);
 
-	app.use(router);
+  const server = app.listen(config.http.port, (): void => {
+    logger.info(`Server is running on http://localhost:${config.http.port}`);
+  });
 
-	const server = app.listen(config.http.port, (): void => {
-		logger.info(`Server is running on http://localhost:${config.http.port}`);
-	});
-
-	gracefulShutdown(server, () => grantRegistry.cleanup());
+  gracefulShutdown(server, () => grantRegistry.cleanup());
 })();

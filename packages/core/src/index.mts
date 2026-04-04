@@ -16,14 +16,9 @@
 
 // Configuration
 export { type AppConfig, AppConfigSchema } from "./config/application.schema.mjs";
-export { createGoogleProvider } from "./federations/google.mjs";
-// Federation types and interfaces
-export type { FederationProvider, FederationResult } from "./federations/types.mjs";
-export { FederationRegistry } from "./federations/types.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
 export type { GrantModule } from "./grants/types.mjs";
-export { createOAuthModule } from "./grants/oauth.mjs";
 export type {
 	GrantContext,
 	GrantDependencies,
@@ -43,7 +38,6 @@ export {
 	type Token,
 	type TokenResponse,
 } from "./grants/token.mjs";
-export { createPassport } from "./Passport.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
@@ -70,5 +64,11 @@ export type { UserRepository } from "./repositories/UserRepository.mjs";
 // Keys
 export type { AsymmetricKeyStoreOptions, JwtConfig, KeyStore, ManagedKey } from "./keys/KeyStore.mjs";
 export { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "./keys/KeyStore.mjs";
-// Router factory
-export { createRouter } from "./routes/index.mjs";
+// Module system
+export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
+export { oauthSessionModule } from "./modules/oauthSession.mjs";
+export { oauthAuthorizationModule } from "./modules/oauthAuthorization.mjs";
+// App factory
+export { createApp, type AppOptions, type AppResult } from "./app.mjs";
+// Token formatting utility (used by oauth package)
+export { formatObject } from "./grants/token.mjs";

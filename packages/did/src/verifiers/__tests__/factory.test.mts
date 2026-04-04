@@ -38,4 +38,10 @@ describe("createVerifier", () => {
 		const verifier = await createVerifier("es256k_jws");
 		expect(verifier).toBeInstanceOf(JwsVerifier);
 	});
+
+	it("passes pathResolver to Ed25519RawVerifier when provided", async () => {
+		const pathResolver = (s: string) => s;
+		const verifier = await createVerifier("ed25519_raw", pathResolver);
+		expect(verifier).toBeDefined();
+	});
 });

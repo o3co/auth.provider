@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export { createDidGrant } from "./did.mjs";
-export { didModule, didGrantModule, oauthDidModule, didConfigSchema } from "./module.mjs";
-export type { SignatureVerifier, VerificationContext, VerificationResult, ParsedMessage } from "./verifiers/types.mjs";
-export { createVerifier, type Algorithm } from "./verifiers/factory.mjs";
+export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
+export { oauthSessionModule } from "./oauthSession.mjs";
+export type { Module, ModuleContext, PathResolver } from "./types.mjs";

@@ -17,7 +17,7 @@ import type { NextFunction, Request, RequestHandler, Response, Router } from "ex
 import rateLimit from "express-rate-limit";
 import type { PassportStatic } from "passport";
 
-import type { AppConfig } from "#/config/application.schema.mjs";
+import type { AppConfig } from "@o3co/auth-provider-core";
 
 declare module "express-session" {
 	interface SessionData {

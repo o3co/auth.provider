@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { AppConfig } from "#/config/application.schema.mjs";
+import type { AppConfig } from "@o3co/auth-provider-core";
 import type { FederationProvider, FederationResult } from "./types.mjs";
 
 export const createGoogleProvider = (config: AppConfig): FederationProvider => ({
