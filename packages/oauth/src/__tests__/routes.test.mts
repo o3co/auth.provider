@@ -21,8 +21,6 @@ import {
   type AppConfig,
   type ClientRepository,
   type CodeRepository,
-  type KeyStore,
-  type PathResolver,
 } from "@o3co/auth-provider-core";
 import { createOAuthRouter } from "../routes.mjs";
 import type { PassportStatic } from "passport";
