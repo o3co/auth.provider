@@ -20,6 +20,12 @@ import { createDidGrant } from "./did.mjs";
 export const didConfigSchema = z.object({
 	did: z.object({
 		enabled: z.boolean().default(true),
+		algorithm: z.enum([
+			"ed25519_raw",
+			"ed25519_jws",
+			"es256_jws",
+			"es256k_jws",
+		]).default("ed25519_raw"),
 		messageMaxAgeSec: z.coerce.number().default(300),
 	}).default({}),
 });

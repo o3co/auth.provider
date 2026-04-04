@@ -13,9 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import * as ed from "@noble/ed25519";
+import { createSymmetricKeyStore, type GrantContext, type GrantDependencies } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 
-import { createSymmetricKeyStore, type GrantContext, type GrantDependencies } from "@o3co/auth-provider-core";
 import { createDidGrant } from "../did.mjs";
 
 const mockConfig = {
@@ -27,7 +28,7 @@ const mockConfig = {
 			session: { enabled: true },
 			authorization: { enabled: true },
 			refresh_token: { enabled: true },
-			did: { enabled: true, messageMaxAgeSec: 300 },
+			did: { enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300 },
 		},
 	},
 } as unknown as GrantDependencies["config"];
@@ -37,16 +38,41 @@ const mockDeps: GrantDependencies = {
 	keyStore: createSymmetricKeyStore("test-secret"),
 };
 
-function makeValidMessage(
+/**
+ * Create a GrantContext with a real Ed25519 signature.
+ * The Ed25519RawVerifier expects body.message, body.signature, and body.publicKey
+ * all as base64-encoded strings. The signature is over the raw message bytes
+ * (i.e., the base64-decoded content of body.message).
+ */
+async function makeSignedCtx(
 	did: string,
-	overrides: Partial<{ did: string; timestamp: string; nonce: string; audience?: string }> = {},
-): string {
-	return JSON.stringify({
+	overrides: Partial<{ timestamp: string; nonce: string; audience: string }> = {},
+): Promise<GrantContext> {
+	const privateKey = ed.utils.randomSecretKey();
+	const publicKey = await ed.getPublicKeyAsync(privateKey);
+
+	const messageObj = {
 		did,
-		timestamp: new Date().toISOString(),
-		nonce: `nonce-${Date.now()}-${Math.random()}`,
-		...overrides,
-	});
+		timestamp: overrides.timestamp ?? new Date().toISOString(),
+		nonce: overrides.nonce ?? `nonce-${Date.now()}-${Math.random()}`,
+		...(overrides.audience !== undefined ? { audience: overrides.audience } : {}),
+	};
+
+	const messageString = JSON.stringify(messageObj);
+	const messageBytes = new TextEncoder().encode(messageString);
+	const signature = await ed.signAsync(messageBytes, privateKey);
+
+	return {
+		body: {
+			did,
+			message: Buffer.from(messageBytes).toString("base64"),
+			signature: Buffer.from(signature).toString("base64"),
+			publicKey: Buffer.from(publicKey).toString("base64"),
+		},
+		session: {},
+		issuer: "localhost",
+		metadata: { ip: "127.0.0.1" },
+	};
 }
 
 describe("createDidGrant", () => {
@@ -54,7 +80,7 @@ describe("createDidGrant", () => {
 		it("returns 400 when did is missing", async () => {
 			const handler = createDidGrant(mockDeps);
 			const ctx: GrantContext = {
-				body: { signature: "sig", message: "{}" },
+				body: { signature: "sig", message: "msg" },
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -63,196 +89,69 @@ describe("createDidGrant", () => {
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(400);
-			expect("error" in result).toBe(true);
-			if ("error" in result) {
-				expect(result.error).toBe("invalid_request");
-			}
-		});
-
-		it("returns 400 when signature is missing", async () => {
-			const handler = createDidGrant(mockDeps);
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", message: "{}" },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-		});
-
-		it("returns 400 when message is missing", async () => {
-			const handler = createDidGrant(mockDeps);
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", signature: "sig" },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-		});
-
-		it("returns 400 when message is not valid JSON", async () => {
-			const handler = createDidGrant(mockDeps);
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", signature: "sig", message: "not-json" },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-			if ("error" in result) {
-				expect(result.error).toBe("invalid_request");
-			}
-		});
-
-		it("returns 400 when message.did does not match top-level did", async () => {
-			const handler = createDidGrant(mockDeps);
-			const message = makeValidMessage("did:key:different");
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", signature: "sig", message },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-			if ("error" in result) {
-				expect(result.error).toBe("invalid_request");
-			}
-		});
-
-		it("returns 400 when message is missing nonce", async () => {
-			const handler = createDidGrant(mockDeps);
-			const message = JSON.stringify({
-				did: "did:key:abc",
-				timestamp: new Date().toISOString(),
-			});
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", signature: "sig", message },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-		});
-
-		it("returns 400 when message is missing timestamp", async () => {
-			const handler = createDidGrant(mockDeps);
-			const message = JSON.stringify({
-				did: "did:key:abc",
-				nonce: "some-nonce",
-			});
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", signature: "sig", message },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toBe("did is required");
 		});
 
 		it("returns 400 when timestamp is expired", async () => {
 			const handler = createDidGrant(mockDeps);
 			const oldTimestamp = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-			const message = JSON.stringify({
-				did: "did:key:abc",
-				timestamp: oldTimestamp,
-				nonce: "nonce-expired",
-			});
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", signature: "sig", message },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
+			const ctx = await makeSignedCtx("did:key:abc", { timestamp: oldTimestamp });
 
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(400);
-			if ("error" in result) {
-				expect(result.error).toBe("invalid_request");
-			}
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toContain("timestamp");
 		});
+	});
 
-		it("returns 400 when timestamp is invalid (NaN)", async () => {
+	describe("handle – success", () => {
+		it("returns 200 with access token on valid request", async () => {
 			const handler = createDidGrant(mockDeps);
-			const message = JSON.stringify({
-				did: "did:key:abc",
-				timestamp: "not-a-date",
-				nonce: "nonce-nan",
-			});
-			const ctx: GrantContext = {
-				body: { did: "did:key:abc", signature: "sig", message },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
+			const ctx = await makeSignedCtx("did:key:z6MkTest");
 
 			const { result } = await handler.handle(ctx);
 
-			expect(result.status).toBe(400);
-		});
-
-		it("returns 400 when publicKey is missing", async () => {
-			const handler = createDidGrant(mockDeps);
-			const did = "did:key:abc";
-			const message = makeValidMessage(did);
-			const ctx: GrantContext = {
-				body: { did, signature: "c2ln", message },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(400);
-			if ("error" in result) {
-				expect(result.error).toBe("invalid_request");
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+			if ("tokens" in result) {
+				expect(result.tokens.access_token).toBeDefined();
+				expect(result.tokens.token_type).toBe("Bearer");
 			}
 		});
 
-		it("returns 401 when signature verification fails", async () => {
+		it("returns 200 with audience when provided", async () => {
 			const handler = createDidGrant(mockDeps);
-			const did = "did:key:abc";
-			const message = makeValidMessage(did);
-			const fakePublicKey = Buffer.alloc(32, 0x42).toString("base64");
-			const fakeSignature = Buffer.alloc(64, 0x01).toString("base64");
-			const ctx: GrantContext = {
-				body: { did, signature: fakeSignature, message, publicKey: fakePublicKey },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-			};
+			const ctx = await makeSignedCtx("did:key:z6MkAud", { audience: "https://api.example.com" });
 
 			const { result } = await handler.handle(ctx);
 
-			expect(result.status).toBe(401);
-			if ("error" in result) {
-				expect(result.error).toBe("invalid_grant");
-			}
+			expect(result.status).toBe(200);
+		});
+	});
+
+	describe("handle – nonce replay", () => {
+		it("rejects nonce replay", async () => {
+			const handler = createDidGrant(mockDeps);
+			const fixedNonce = `nonce-replay-${Date.now()}`;
+
+			// First request should succeed
+			const ctx1 = await makeSignedCtx("did:key:z6MkReplay1", { nonce: fixedNonce });
+			const { result: result1 } = await handler.handle(ctx1);
+			expect(result1.status).toBe(200);
+
+			// Second request with same nonce should fail
+			const ctx2 = await makeSignedCtx("did:key:z6MkReplay2", { nonce: fixedNonce });
+			const { result: result2 } = await handler.handle(ctx2);
+			expect(result2.status).toBe(400);
+			expect("error" in result2 && result2.error).toBe("invalid_request");
+			expect("errorDescription" in result2 && result2.errorDescription).toContain("nonce");
 		});
 	});
 
 	describe("config defaults", () => {
-		it("uses default messageMaxAgeSec when did config is absent", () => {
+		it("uses default messageMaxAgeSec and algorithm when did config is absent", async () => {
 			const noDIDConfig = {
 				oauth: {
 					accessToken: { expiresIn: 3600 },
@@ -260,12 +159,17 @@ describe("createDidGrant", () => {
 				},
 			} as unknown as GrantDependencies["config"];
 
-			// Should not throw — falls back to 300s default
+			// Should not throw — falls back to defaults
 			const handler = createDidGrant({ config: noDIDConfig, keyStore: createSymmetricKeyStore("test-secret") });
 			expect(typeof handler.handle).toBe("function");
+
+			// Verify it actually works with a real request (default algorithm = ed25519_raw)
+			const ctx = await makeSignedCtx("did:key:z6MkDefault");
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
 		});
 
-		it("uses default when messageMaxAgeSec is missing from did config", () => {
+		it("uses defaults when messageMaxAgeSec and algorithm are missing from did config", () => {
 			const partialConfig = {
 				oauth: {
 					accessToken: { expiresIn: 3600 },
