@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { verifyAsync } from "@noble/ed25519";
-
 import {
 	generateToken,
 	generateTokenResponse,
@@ -23,17 +21,28 @@ import {
 	type GrantHandler,
 	type GrantHandlerResult,
 } from "@o3co/auth-provider-core";
+import { createVerifier, type Algorithm } from "./verifiers/factory.mjs";
+import type { SignatureVerifier } from "./verifiers/types.mjs";
 
 export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
-	// When used via didModule + addModule(), configSchema applies defaults.
-	// Fallback protects direct createDidGrant() callers who skip addModule().
+
 	const DEFAULT_MESSAGE_MAX_AGE_SEC = 300;
+	const DEFAULT_ALGORITHM: Algorithm = "ed25519_raw";
+	const SUPPORTED_ALGORITHMS: readonly string[] = ["ed25519_raw", "ed25519_jws", "es256_jws", "es256k_jws"];
+
 	const didConfig = (config.oauth.grants as Record<string, Record<string, unknown> | undefined>).did;
 	const messageMaxAgeMs = ((didConfig?.messageMaxAgeSec as number | undefined) ?? DEFAULT_MESSAGE_MAX_AGE_SEC) * 1000;
 
+	const configuredAlgorithm = didConfig?.algorithm;
+	if (configuredAlgorithm !== undefined && !SUPPORTED_ALGORITHMS.includes(String(configuredAlgorithm))) {
+		throw new Error(
+			`Invalid DID grant algorithm: "${String(configuredAlgorithm)}". Supported: ${SUPPORTED_ALGORITHMS.join(", ")}`,
+		);
+	}
+	const algorithm = (configuredAlgorithm as Algorithm | undefined) ?? DEFAULT_ALGORITHM;
+
 	// In-memory nonce store (PoC)
-	// Production: use Redis with TTL
 	const nonceStore = new Map<string, number>();
 
 	const cleanupInterval = setInterval(() => {
@@ -43,63 +52,70 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 		}
 	}, 60 * 1000);
 
+	// Verifier is created lazily on first request (async factory)
+	let verifier: SignatureVerifier | undefined;
+	let verifierError: Error | undefined;
+
+	const getVerifier = async (): Promise<SignatureVerifier> => {
+		if (verifierError) throw verifierError;
+		if (verifier) return verifier;
+		try {
+			verifier = await createVerifier(algorithm);
+			return verifier;
+		} catch (err) {
+			verifierError = err instanceof Error ? err : new Error(String(err));
+			throw verifierError;
+		}
+	};
+
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, issuer } = ctx;
-			const {
-				did,
-				signature,
-				message: signedMessage,
-				publicKey,
-			} = body as {
-				did?: string;
-				signature?: string;
-				message?: string;
-				publicKey?: string;
-			};
+			const did = body.did as string | undefined;
 
-			// 1. Validate required fields
-			if (!did || !signature || !signedMessage) {
+			// 1. Validate DID presence
+			if (!did) {
 				return {
 					result: {
 						status: 400,
 						error: "invalid_request",
-						errorDescription: "did, signature, and message are required",
+						errorDescription: "did is required",
 					},
 				};
 			}
 
-			// 2. Parse message JSON
-			let parsedMessage: {
-				did: string;
-				timestamp: string;
-				nonce: string;
-				audience?: string;
-			};
+			// 2. Verify signature via strategy
+			// Note: nonce/timestamp checks happen after verification because the verifier
+			// owns message parsing (format-specific). Trade-off: replay requests pay crypto
+			// cost before rejection. Acceptable for PoC in-memory nonce store.
+			let v: SignatureVerifier;
 			try {
-				parsedMessage = JSON.parse(signedMessage);
-			} catch {
+				v = await getVerifier();
+			} catch (err) {
 				return {
 					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "message must be valid JSON",
+						status: 500,
+						error: "server_error",
+						errorDescription: err instanceof Error ? err.message : "verifier initialization failed",
 					},
 				};
 			}
 
-			// 3. Validate message.did matches top-level did
-			if (parsedMessage.did !== did) {
+			const verification = await v.verify({ body, did });
+			if (!verification.valid) {
+				const status = verification.error === "invalid_grant" ? 401 : 400;
 				return {
 					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "message.did must match did",
+						status,
+						error: verification.error,
+						errorDescription: verification.errorDescription,
 					},
 				};
 			}
 
-			// 4. Validate nonce and timestamp presence
+			const { parsedMessage } = verification;
+
+			// 3. Validate nonce and timestamp presence
 			if (!parsedMessage.nonce || !parsedMessage.timestamp) {
 				return {
 					result: {
@@ -110,7 +126,7 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 				};
 			}
 
-			// 5. Validate timestamp (within configurable max age)
+			// 4. Validate timestamp freshness
 			const messageTime = new Date(parsedMessage.timestamp).getTime();
 			const now = Date.now();
 			if (Number.isNaN(messageTime) || Math.abs(now - messageTime) > messageMaxAgeMs) {
@@ -123,7 +139,7 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 				};
 			}
 
-			// 6. Nonce replay check (before signature verification — reject cheaply)
+			// 5. Nonce replay check
 			const nonceKey = `did-nonce:${parsedMessage.nonce}`;
 			if (nonceStore.has(nonceKey)) {
 				return {
@@ -135,49 +151,10 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 				};
 			}
 
-			// 7. Verify Ed25519 signature
-			// PoC: publicKey provided directly in request body
-			// Production: resolve from DID Document via Registry
-			if (!publicKey) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription:
-							"publicKey is required (PoC: provide directly, production: resolve from DID Document)",
-					},
-				};
-			}
-
-			try {
-				const signatureBytes = Buffer.from(signature, "base64");
-				const messageBytes = new TextEncoder().encode(signedMessage);
-				const publicKeyBytes = Buffer.from(publicKey, "base64");
-
-				const valid = await verifyAsync(signatureBytes, messageBytes, publicKeyBytes);
-				if (!valid) {
-					return {
-						result: {
-							status: 401,
-							error: "invalid_grant",
-							errorDescription: "DID signature verification failed",
-						},
-					};
-				}
-			} catch {
-				return {
-					result: {
-						status: 401,
-						error: "invalid_grant",
-						errorDescription: "DID signature verification error",
-					},
-				};
-			}
-
-			// 8. Store nonce (only after signature is verified)
+			// 6. Store nonce (only after verification passed)
 			nonceStore.set(nonceKey, Date.now());
 
-			// 9. Generate token (M2M: access token only, no refresh token)
+			// 7. Generate token
 			return {
 				result: {
 					status: 200,
@@ -186,10 +163,10 @@ export const createDidGrant = (deps: GrantDependencies): GrantHandler => {
 							expiresIn: config.oauth.accessToken.expiresIn,
 							keyStore,
 							issuer,
-							subject: did,
-							authorizedParty: parsedMessage.audience ?? null,
+							subject: verification.subject,
+							authorizedParty: verification.audience ?? null,
 							tokenType: "at+jwt",
-							audience: parsedMessage.audience,
+							audience: verification.audience,
 						}),
 					}),
 				},

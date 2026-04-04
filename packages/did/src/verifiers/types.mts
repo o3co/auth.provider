@@ -13,26 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { z } from "zod";
-import type { GrantModule } from "@o3co/auth-provider-core";
-import { createDidGrant } from "./did.mjs";
+export interface ParsedMessage {
+	did: string;
+	timestamp: string;
+	nonce: string;
+	audience?: string;
+}
 
-export const didConfigSchema = z.object({
-	did: z.object({
-		enabled: z.boolean().default(true),
-		algorithm: z.enum([
-			"ed25519_raw",
-			"ed25519_jws",
-			"es256_jws",
-			"es256k_jws",
-		]).default("ed25519_raw"),
-		messageMaxAgeSec: z.coerce.number().default(300),
-	}).default({}),
-});
+export interface VerificationContext {
+	body: Record<string, unknown>;
+	did: string;
+}
 
-export const didModule: GrantModule = {
-	grants: {
-		did: (deps) => createDidGrant(deps),
-	},
-	configSchema: didConfigSchema,
-};
+export type VerificationResult =
+	| { valid: true; subject: string; audience?: string; parsedMessage: ParsedMessage }
+	| { valid: false; error: string; errorDescription: string };
+
+export interface SignatureVerifier {
+	verify(ctx: VerificationContext): Promise<VerificationResult>;
+}

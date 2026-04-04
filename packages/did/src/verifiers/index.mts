@@ -13,26 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { z } from "zod";
-import type { GrantModule } from "@o3co/auth-provider-core";
-import { createDidGrant } from "./did.mjs";
-
-export const didConfigSchema = z.object({
-	did: z.object({
-		enabled: z.boolean().default(true),
-		algorithm: z.enum([
-			"ed25519_raw",
-			"ed25519_jws",
-			"es256_jws",
-			"es256k_jws",
-		]).default("ed25519_raw"),
-		messageMaxAgeSec: z.coerce.number().default(300),
-	}).default({}),
-});
-
-export const didModule: GrantModule = {
-	grants: {
-		did: (deps) => createDidGrant(deps),
-	},
-	configSchema: didConfigSchema,
-};
+export type { SignatureVerifier, VerificationContext, VerificationResult, ParsedMessage } from "./types.mjs";
+// Ed25519RawVerifier intentionally NOT re-exported — it statically imports @noble/ed25519
+// which is an optional peer dep. Use createVerifier("ed25519_raw") or import directly.
+export { JwsVerifier } from "./jws.mjs";
+export { createVerifier, type Algorithm } from "./factory.mjs";
