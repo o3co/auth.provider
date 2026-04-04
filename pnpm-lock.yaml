@@ -93,9 +93,6 @@ importers:
 
   packages/did:
     dependencies:
-      '@noble/ed25519':
-        specifier: ^3.0.1
-        version: 3.0.1
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
@@ -106,6 +103,9 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
+      '@noble/ed25519':
+        specifier: ^3.0.1
+        version: 3.0.1
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
