@@ -13,10 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
-import { createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
-import type { Module, ModuleContext } from "./types.mjs";
+import {
+	createAuthorizationGrant,
+	createRefreshTokenGrant,
+	type CodeRepository,
+	type Module,
+	type ModuleContext,
+} from "@o3co/auth-provider-core";
 
 export const oauthAuthorizationModule = (params: {
 	codeRepository: CodeRepository;

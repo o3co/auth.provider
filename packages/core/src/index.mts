@@ -38,6 +38,10 @@ export {
 	type Token,
 	type TokenResponse,
 } from "./grants/token.mjs";
+// Built-in grant factories (used by oauth package modules)
+export { createSessionGrant } from "./grants/session.mjs";
+export { createAuthorizationGrant } from "./grants/authorization.mjs";
+export { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
@@ -66,8 +70,6 @@ export type { AsymmetricKeyStoreOptions, JwtConfig, KeyStore, ManagedKey } from 
 export { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "./keys/KeyStore.mjs";
 // Module system
 export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
-export { oauthSessionModule } from "./modules/oauthSession.mjs";
-export { oauthAuthorizationModule } from "./modules/oauthAuthorization.mjs";
 // App factory
 export { createApp, type AppOptions, type AppResult } from "./app.mjs";
 // Token formatting utility (used by oauth package)
