@@ -18,8 +18,10 @@ import type { PassportStatic } from "passport";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { createGoogleProvider } from "#/federations/google.mjs";
 import { FederationRegistry } from "#/federations/types.mjs";
-import { createOAuthModule } from "#/grants/oauth.mjs";
+import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { GrantRegistry } from "#/grants/registry.mjs";
+import { createSessionGrant } from "#/grants/session.mjs";
 import type { KeyStore } from "#/keys/KeyStore.mjs";
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
@@ -49,16 +51,12 @@ export const createRouter = (
 ): { router: Router; grantRegistry: GrantRegistry } => {
 	const router = express.Router();
 
-	// Create grant registry and wire built-in OAuth module
+	// Create grant registry and wire built-in grant handlers
 	const grantRegistry = new GrantRegistry();
 	const deps = { config: params.config, keyStore: params.keyStore };
-	grantRegistry.addModule(
-		createOAuthModule({
-			clientRepository: params.clientRepository,
-			codeRepository: params.codeRepository,
-		}),
-		deps,
-	);
+	grantRegistry.register("session", createSessionGrant({ ...deps, clientRepository: params.clientRepository }));
+	grantRegistry.register("authorization", createAuthorizationGrant({ ...deps, codeRepository: params.codeRepository }));
+	grantRegistry.register("refresh_token", createRefreshTokenGrant(deps));
 
 	const { router: oauthRouter } = oauth.createRouter(express, {
 		passport: params.passport,

@@ -13,4 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
+export { oauthSessionModule } from "./oauthSession.mjs";
 export type { Module, ModuleContext, PathResolver } from "./types.mjs";

@@ -23,7 +23,8 @@ export { FederationRegistry } from "./federations/types.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
 export type { GrantModule } from "./grants/types.mjs";
-export { createOAuthModule } from "./grants/oauth.mjs";
+export { oauthSessionModule } from "./modules/oauthSession.mjs";
+export { oauthAuthorizationModule } from "./modules/oauthAuthorization.mjs";
 export type {
 	GrantContext,
 	GrantDependencies,

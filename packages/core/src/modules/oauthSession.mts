@@ -14,20 +14,24 @@
  * limitations under the License.
  */
 import type { ClientRepository } from "#/repositories/ClientRepository.mjs";
-import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
+import { createSessionGrant } from "#/grants/session.mjs";
+import type { Module, ModuleContext } from "./types.mjs";
 
-import { createAuthorizationGrant } from "./authorization.mjs";
-import { createRefreshTokenGrant } from "./refreshToken.mjs";
-import { createSessionGrant } from "./session.mjs";
-import type { GrantModule } from "./types.mjs";
-
-export const createOAuthModule = (extra: {
+export const oauthSessionModule = (params: {
 	clientRepository: ClientRepository;
-	codeRepository: CodeRepository;
-}): GrantModule => ({
-	grants: {
-		session: (deps) => createSessionGrant({ ...deps, clientRepository: extra.clientRepository }),
-		authorization: (deps) => createAuthorizationGrant({ ...deps, codeRepository: extra.codeRepository }),
-		refresh_token: (deps) => createRefreshTokenGrant(deps),
+}): Module => ({
+	name: "oauth-session",
+	async init(context: ModuleContext): Promise<void> {
+		const grantConfig = (
+			context.config.oauth.grants as Record<string, { enabled?: boolean }>
+		).session;
+		if (grantConfig?.enabled === false) return;
+
+		const handler = createSessionGrant({
+			config: context.config,
+			keyStore: context.keyStore,
+			clientRepository: params.clientRepository,
+		});
+		context.grantRegistry.register("session", handler);
 	},
 });
