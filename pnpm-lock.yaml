@@ -189,6 +189,9 @@ importers:
         specifier: ^5.10.0
         version: 5.11.0
     devDependencies:
+      '@types/express':
+        specifier: ^5
+        version: 5.0.6
       '@types/express-session':
         specifier: ^1
         version: 1.18.2
