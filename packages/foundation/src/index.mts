@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-import type { CodeRepository, RepositoryFactory, UserRepository } from "@o3co/auth-provider-core";
-import { HttpUserRepository } from "./HttpUserRepository.mjs";
-import { RedisCodeRepository } from "./RedisCodeRepository.mjs";
+import type { CodeRepository, PathResolver, RepositoryFactory, UserRepository } from "@o3co/auth-provider-core";
+import { HttpUserRepository } from "./repositories/HttpUserRepository.mjs";
+import { RedisCodeRepository } from "./repositories/RedisCodeRepository.mjs";
 
-export const registerBuiltinRepositories = (factories: {
+export const registerBuiltinAdapters = (factories: {
 	userFactory: RepositoryFactory<UserRepository>;
 	codeFactory: RepositoryFactory<CodeRepository>;
+	pathResolver?: PathResolver;
 }): void => {
+	const { pathResolver } = factories;
 	factories.userFactory.register("http", (config) => {
 		if (typeof config.authenticateUrl !== "string") {
 			throw new Error('HttpUserRepository requires "authenticateUrl" in config');
@@ -40,9 +42,9 @@ export const registerBuiltinRepositories = (factories: {
 		if (typeof config.endpointUri !== "string") {
 			throw new Error('RedisCodeRepository requires "endpointUri" in config');
 		}
-		return RedisCodeRepository.create(config);
+		return RedisCodeRepository.create(config, pathResolver);
 	});
 };
 
-export { HttpUserRepository } from "./HttpUserRepository.mjs";
-export { RedisCodeRepository } from "./RedisCodeRepository.mjs";
+export { HttpUserRepository } from "./repositories/HttpUserRepository.mjs";
+export { RedisCodeRepository } from "./repositories/RedisCodeRepository.mjs";

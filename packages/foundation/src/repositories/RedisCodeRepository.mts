@@ -15,48 +15,55 @@
  */
 
 import crypto from "node:crypto";
-import type { Code, CodeRepository } from "@o3co/auth-provider-core";
-import { createClient, type RedisClientType } from "redis";
+import type { Code, CodeRepository, PathResolver } from "@o3co/auth-provider-core";
 
 const KEY_PREFIX = "oauth:code:";
 
+// Minimal interface for the redis client methods we use.
+// Avoids importing the full "redis" types at the module level.
+interface RedisClient {
+	connect(): Promise<void>;
+	get(key: string): Promise<string | null>;
+	set(key: string, value: string, options?: { EX?: number }): Promise<unknown>;
+	getDel(key: string): Promise<string | null>;
+	del(key: string): Promise<number>;
+}
+
 export class RedisCodeRepository implements CodeRepository {
-	private redis: RedisClientType;
+	private redis: RedisClient;
 	private defaultExpiresIn: number;
 
-	constructor({
-		endpointUri,
-		password,
-		defaultExpiresIn = 600,
-	}: {
-		endpointUri: string;
-		password?: string;
-		defaultExpiresIn?: number;
-	}) {
-		this.redis = createClient({
-			url: endpointUri,
-			password,
+	constructor(redis: RedisClient, defaultExpiresIn = 600) {
+		this.redis = redis;
+		this.defaultExpiresIn = defaultExpiresIn;
+	}
+
+	static async create(
+		config: Record<string, unknown>,
+		pathResolver?: PathResolver,
+	): Promise<RedisCodeRepository> {
+		if (typeof config.endpointUri !== "string") {
+			throw new Error('RedisCodeRepository requires "endpointUri" in config');
+		}
+
+		const { createClient } = pathResolver
+			? (await import(pathResolver("redis"))) as typeof import("redis")
+			: await import("redis");
+
+		const redis = createClient({
+			url: config.endpointUri,
+			password: typeof config.password === "string" ? config.password : undefined,
 			socket: {
-				reconnectStrategy: (retries) => {
+				reconnectStrategy: (retries: number) => {
 					const jitter = Math.floor(Math.random() * 200);
 					const delay = Math.min(2 ** retries * 50, 2000);
 					return delay + jitter;
 				},
 			},
-		}) as RedisClientType;
-		this.defaultExpiresIn = defaultExpiresIn;
-	}
-
-	static async create(config: Record<string, unknown>): Promise<RedisCodeRepository> {
-		if (typeof config.endpointUri !== "string") {
-			throw new Error('RedisCodeRepository requires "endpointUri" in config');
-		}
-		const repo = new RedisCodeRepository({
-			endpointUri: config.endpointUri,
-			password: typeof config.password === "string" ? config.password : undefined,
-			defaultExpiresIn:
-				typeof config.defaultExpiresIn === "number" ? config.defaultExpiresIn : undefined,
 		});
+		const defaultExpiresIn =
+			typeof config.defaultExpiresIn === "number" ? config.defaultExpiresIn : undefined;
+		const repo = new RedisCodeRepository(redis as unknown as RedisClient, defaultExpiresIn);
 		await repo.initialize();
 		return repo;
 	}
