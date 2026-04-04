@@ -31,7 +31,7 @@ ENV NODE_ENV=production
 
 COPY --from=deps /home/node/package.json /home/node/pnpm-lock.yaml ./
 
-RUN pnpm install --frozen-lockfile --prod \
+RUN pnpm install --prod \
  && pnpm store prune
 
 COPY --from=builder /home/node/dist/ ./dist/

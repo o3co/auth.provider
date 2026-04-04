@@ -8,3 +8,4 @@ dist/
 .worktrees/
 docs/superpowers/
 create-app/templates/
+pnpm-lock.yaml
