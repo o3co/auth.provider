@@ -29,7 +29,7 @@ import {
   oauthAuthorizationModule,
 } from "@o3co/auth-provider-oauth";
 import { sessionModule } from "@o3co/auth-provider-session";
-import { registerBuiltinRepositories } from "@o3co/auth-provider-repositories";
+import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import { gracefulShutdown } from "@o3co/auth.utils";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -51,7 +51,7 @@ await (async (): Promise<void> => {
   // Initialize repositories via factory
   const appDir = path.dirname(fileURLToPath(import.meta.url));
   const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
-  registerBuiltinRepositories({ userFactory, codeFactory });
+  registerBuiltinAdapters({ userFactory, codeFactory, pathResolver: import.meta.resolve });
 
   const clientRepository = await clientFactory.create({
     ...config.clients.client,

@@ -21,37 +21,35 @@ const KEY_PREFIX = "oauth:code:";
 // In-memory store simulating Redis
 const store = new Map<string, string>();
 
-vi.mock("redis", () => {
-	const createClient = vi.fn(() => ({
-		connect: vi.fn().mockResolvedValue(undefined),
-		set: vi.fn().mockImplementation((key: string, value: string) => {
-			store.set(key, value);
-			return Promise.resolve("OK");
-		}),
-		get: vi.fn().mockImplementation((key: string) => {
-			return Promise.resolve(store.get(key) ?? null);
-		}),
-		getDel: vi.fn().mockImplementation((key: string) => {
-			const value = store.get(key) ?? null;
-			store.delete(key);
-			return Promise.resolve(value);
-		}),
-		del: vi.fn().mockImplementation((key: string) => {
-			store.delete(key);
-			return Promise.resolve(1);
-		}),
-	}));
-	return { createClient };
-});
-
 import { RedisCodeRepository } from "../RedisCodeRepository.mjs";
+
+const createMockRedis = () => ({
+	connect: vi.fn().mockResolvedValue(undefined),
+	set: vi.fn().mockImplementation((key: string, value: string) => {
+		store.set(key, value);
+		return Promise.resolve("OK");
+	}),
+	get: vi.fn().mockImplementation((key: string) => {
+		return Promise.resolve(store.get(key) ?? null);
+	}),
+	getDel: vi.fn().mockImplementation((key: string) => {
+		const value = store.get(key) ?? null;
+		store.delete(key);
+		return Promise.resolve(value);
+	}),
+	del: vi.fn().mockImplementation((key: string) => {
+		store.delete(key);
+		return Promise.resolve(1);
+	}),
+});
 
 describe("RedisCodeRepository", () => {
 	let repo: RedisCodeRepository;
 
 	beforeEach(async () => {
 		store.clear();
-		repo = new RedisCodeRepository({ endpointUri: "redis://localhost:6379" });
+		const redis = createMockRedis();
+		repo = new RedisCodeRepository(redis);
 		await repo.initialize();
 	});
 

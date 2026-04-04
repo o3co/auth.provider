@@ -26,7 +26,7 @@ const readVersion = (pkgPath) => {
 
 const versions = {
 	"@o3co/auth-provider-core": readVersion("../../packages/core/package.json"),
-	"@o3co/auth-provider-repositories": readVersion("../../packages/repositories/package.json"),
+	"@o3co/auth-provider-foundation": readVersion("../../packages/foundation/package.json"),
 };
 
 writeFileSync(resolve(dest, "..", "versions.json"), `${JSON.stringify(versions, null, "\t")}\n`);

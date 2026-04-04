@@ -1,5 +1,5 @@
 {
-	"name": "@o3co/auth-provider-repositories",
+	"name": "@o3co/auth-provider-foundation",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"type": "module",
@@ -18,16 +18,18 @@
 	"imports": {
 		"#/*": "./src/*"
 	},
-	"dependencies": {
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "^0.0.0",
 		"redis": "^5.10.0"
 	},
-	"peerDependencies": {
-		"@o3co/auth-provider-core": "^0.0.0"
+	"peerDependenciesMeta": {
+		"redis": { "optional": true }
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@types/node": "^25.1.0",
 		"msw": "^2.12.14",
+		"redis": "^5.10.0",
 		"pino": "^10.3.1",
 		"vitest": "^4.1.2"
 	}

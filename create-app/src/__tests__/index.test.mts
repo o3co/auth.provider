@@ -50,7 +50,7 @@ describe("scaffold", () => {
 
 		// Specific checks
 		expect(pkg.dependencies["@o3co/auth-provider-core"]).toMatch(/^\^/);
-		expect(pkg.dependencies["@o3co/auth-provider-repositories"]).toMatch(/^\^/);
+		expect(pkg.dependencies["@o3co/auth-provider-foundation"]).toMatch(/^\^/);
 	});
 
 	it("removes private field from package.json", () => {
