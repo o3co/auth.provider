@@ -12,7 +12,10 @@
     }
   },
   "imports": {
-    "#/*": "./src/*"
+    "#/*": {
+      "development": "./src/*",
+      "default": "./dist/*"
+    }
   },
   "scripts": {
     "build": "tsc",
