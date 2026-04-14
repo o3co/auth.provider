@@ -22,9 +22,9 @@ import {
 	type Module,
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
+import { z } from "zod";
 import { createOAuthRouter } from "./routes.mjs";
 
 type ExpressLike = {
