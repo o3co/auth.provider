@@ -21,13 +21,12 @@ import {
 	type Module,
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
-const oauthAuthorizationConfigSchema = z.object({
-	endpoints: fullSectionsSchema.shape.endpoints,
-	clients: fullSectionsSchema.shape.clients,
+const oauthAuthorizationConfigSchema = fullSectionsSchema.pick({
+	endpoints: true,
+	clients: true,
 });
 
 export const oauthAuthorizationModule = (params: {

@@ -34,6 +34,7 @@ const mockExpress = {
 };
 
 const mockConfig = {
+	http: { port: 3000, trustProxy: false },
 	oauth: {
 		jwt: { secret: "test-secret" },
 		accessToken: { expiresIn: 3600 },
@@ -75,7 +76,7 @@ describe("createApp", () => {
 
 		expect(initFn).toHaveBeenCalledTimes(1);
 		const ctx = initFn.mock.calls[0][0];
-		expect(ctx.config).toBe(mockConfig);
+		expect(ctx.config).toMatchObject(mockConfig);
 		expect(ctx.keyStore).toBe(keyStore);
 		expect(ctx.grantRegistry).toBeInstanceOf(GrantRegistry);
 		expect(ctx.router).toBeDefined();

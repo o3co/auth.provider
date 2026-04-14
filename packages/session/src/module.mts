@@ -22,7 +22,6 @@ import {
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
-import { z } from "zod";
 import { createGoogleProvider } from "./federations/google.mjs";
 import { FederationRegistry } from "./federations/types.mjs";
 import { createPassport } from "./passport.mjs";
@@ -35,12 +34,12 @@ type ExpressLike = {
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
 
-const sessionConfigSchema = z.object({
-	session: fullSectionsSchema.shape.session,
-	rateLimit: fullSectionsSchema.shape.rateLimit,
-	federations: fullSectionsSchema.shape.federations,
-	endpoints: fullSectionsSchema.shape.endpoints,
-	cors: fullSectionsSchema.shape.cors,
+const sessionConfigSchema = fullSectionsSchema.pick({
+	session: true,
+	rateLimit: true,
+	federations: true,
+	endpoints: true,
+	cors: true,
 });
 
 export const sessionModule = (params: {

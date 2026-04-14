@@ -20,11 +20,10 @@ import {
 	type Module,
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import { createSessionGrant } from "./grants/session.mjs";
 
-const oauthSessionConfigSchema = z.object({
-	clients: fullSectionsSchema.shape.clients,
+const oauthSessionConfigSchema = fullSectionsSchema.pick({
+	clients: true,
 });
 
 export const oauthSessionModule = (params: { clientRepository: ClientRepository }): Module => ({

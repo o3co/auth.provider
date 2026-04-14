@@ -24,7 +24,6 @@ import {
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
-import { z } from "zod";
 import { createOAuthRouter } from "./routes.mjs";
 
 type ExpressLike = {
@@ -33,9 +32,9 @@ type ExpressLike = {
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
 
-const oauthConfigSchema = z.object({
-	rateLimit: fullSectionsSchema.shape.rateLimit,
-	endpoints: fullSectionsSchema.shape.endpoints,
+const oauthConfigSchema = fullSectionsSchema.pick({
+	rateLimit: true,
+	endpoints: true,
 });
 
 export const oauthModule = (params: {
