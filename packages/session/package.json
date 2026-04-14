@@ -10,7 +10,11 @@
       "types": "./dist/index.d.mts"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/o3co/auth.provider.git",
@@ -38,9 +42,15 @@
     "passport-google-oauth20": "^2.0.0"
   },
   "peerDependenciesMeta": {
-    "passport": { "optional": true },
-    "passport-local": { "optional": true },
-    "passport-google-oauth20": { "optional": true }
+    "passport": {
+      "optional": true
+    },
+    "passport-local": {
+      "optional": true
+    },
+    "passport-google-oauth20": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
