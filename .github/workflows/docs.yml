@@ -22,10 +22,10 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - run: pnpm install
-      - run: pnpm build
-      - run: pnpm docs
+      - run: pnpm run build
+      - run: pnpm run docs
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/api
