@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import type { AppConfig } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
 import type { PassportStatic } from "passport";
-
-import type { AppConfig } from "@o3co/auth-provider-core";
 
 declare module "express-session" {
 	interface SessionData {

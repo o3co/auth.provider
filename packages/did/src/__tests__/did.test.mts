@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 import * as ed from "@noble/ed25519";
-import { createSymmetricKeyStore, type GrantContext, type GrantDependencies } from "@o3co/auth-provider-core";
+import {
+	createSymmetricKeyStore,
+	type GrantContext,
+	type GrantDependencies,
+} from "@o3co/auth-provider-core";
 import { CompactSign, exportJWK, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
 
@@ -75,7 +79,12 @@ function buildResolver(did: string, publicKeyBytes: Uint8Array): DidDocumentReso
  */
 async function makeSignedCtx(
 	did: string,
-	overrides: Partial<{ timestamp: string; nonce: string; audience: string; privateKey: Uint8Array }> = {},
+	overrides: Partial<{
+		timestamp: string;
+		nonce: string;
+		audience: string;
+		privateKey: Uint8Array;
+	}> = {},
 ): Promise<{ ctx: GrantContext; resolver: DidDocumentResolver; privateKey: Uint8Array }> {
 	const privateKey = overrides.privateKey ?? ed.utils.randomSecretKey();
 	const publicKey = await ed.getPublicKeyAsync(privateKey);
@@ -159,7 +168,10 @@ describe("createDidGrant", () => {
 			});
 			// Signature made with a different private key — mismatches the resolver's key
 			const differentPrivateKey = ed.utils.randomSecretKey();
-			const wrongSignature = await ed.signAsync(new TextEncoder().encode(message), differentPrivateKey);
+			const wrongSignature = await ed.signAsync(
+				new TextEncoder().encode(message),
+				differentPrivateKey,
+			);
 
 			const ctx: GrantContext = {
 				body: {
@@ -214,7 +226,9 @@ describe("createDidGrant", () => {
 		});
 
 		it("returns 200 with audience when provided", async () => {
-			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAud", { audience: "https://api.example.com" });
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAud", {
+				audience: "https://api.example.com",
+			});
 			const handler = createDidGrant(mockDeps, { resolver });
 
 			const { result } = await handler.handle(ctx);
@@ -296,7 +310,10 @@ describe("createDidGrant", () => {
 		 * Build a GrantContext where the DID signature is a compact JWS (EdDSA).
 		 * Returns the context and a resolver that has the matching public key.
 		 */
-		async function makeJwsCtx(did: string, overrides: { audience?: string } = {}): Promise<{
+		async function makeJwsCtx(
+			did: string,
+			overrides: { audience?: string } = {},
+		): Promise<{
 			ctx: GrantContext;
 			resolver: DidDocumentResolver;
 		}> {
@@ -521,14 +538,14 @@ describe("createDidGrant", () => {
 		}
 
 		it("returns 200 when audience is in the allowlist", async () => {
-			const config = makeConfigWithAllowedAudiences(["https://api.example.com", "https://other.example.com"]);
+			const config = makeConfigWithAllowedAudiences([
+				"https://api.example.com",
+				"https://other.example.com",
+			]);
 			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudAllow", {
 				audience: "https://api.example.com",
 			});
-			const handler = createDidGrant(
-				{ config, keyStore: mockDeps.keyStore },
-				{ resolver },
-			);
+			const handler = createDidGrant({ config, keyStore: mockDeps.keyStore }, { resolver });
 
 			const { result } = await handler.handle(ctx);
 
@@ -541,16 +558,15 @@ describe("createDidGrant", () => {
 			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudDeny", {
 				audience: "https://evil.example.com",
 			});
-			const handler = createDidGrant(
-				{ config, keyStore: mockDeps.keyStore },
-				{ resolver },
-			);
+			const handler = createDidGrant({ config, keyStore: mockDeps.keyStore }, { resolver });
 
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(400);
 			expect("error" in result && result.error).toBe("invalid_request");
-			expect("errorDescription" in result && result.errorDescription).toContain("https://evil.example.com");
+			expect("errorDescription" in result && result.errorDescription).toContain(
+				"https://evil.example.com",
+			);
 			expect("errorDescription" in result && result.errorDescription).toContain("not allowed");
 		});
 
@@ -559,10 +575,7 @@ describe("createDidGrant", () => {
 			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudAny", {
 				audience: "https://anything.example.com",
 			});
-			const handler = createDidGrant(
-				{ config, keyStore: mockDeps.keyStore },
-				{ resolver },
-			);
+			const handler = createDidGrant({ config, keyStore: mockDeps.keyStore }, { resolver });
 
 			const { result } = await handler.handle(ctx);
 
@@ -573,10 +586,7 @@ describe("createDidGrant", () => {
 			const config = makeConfigWithAllowedAudiences(["https://api.example.com"]);
 			// makeSignedCtx without audience override — audience is optional
 			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudOptional");
-			const handler = createDidGrant(
-				{ config, keyStore: mockDeps.keyStore },
-				{ resolver },
-			);
+			const handler = createDidGrant({ config, keyStore: mockDeps.keyStore }, { resolver });
 
 			const { result } = await handler.handle(ctx);
 

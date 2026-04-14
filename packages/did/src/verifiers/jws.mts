@@ -15,7 +15,12 @@
  */
 import { compactVerify, decodeProtectedHeader, importJWK } from "jose";
 
-import type { ParsedMessage, SignatureVerifier, VerificationContext, VerificationResult } from "./types.mjs";
+import type {
+	ParsedMessage,
+	SignatureVerifier,
+	VerificationContext,
+	VerificationResult,
+} from "./types.mjs";
 
 type JwsAlgorithm = "EdDSA" | "ES256" | "ES256K";
 

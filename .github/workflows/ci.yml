@@ -15,6 +15,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('**/package.json') }}
+          restore-keys: pnpm-store-
+
       - run: pnpm install
-      - run: pnpm build
-      - run: pnpm test
+      - run: pnpm run lint
+      - run: pnpm run build
+      - run: pnpm -r --if-present run typecheck
+      - run: pnpm run test

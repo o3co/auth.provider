@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 import {
-	generateToken,
-	generateTokenResponse,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
 	type GrantHandlerResult,
+	generateToken,
+	generateTokenResponse,
 } from "@o3co/auth-provider-core";
 import { extractVerificationKey } from "./resolver/extractKey.mjs";
 import type { DidDocumentResolver } from "./resolver/types.mjs";
@@ -31,18 +31,17 @@ export interface DidGrantOptions {
 	resolver: DidDocumentResolver;
 }
 
-export const createDidGrant = (
-	deps: GrantDependencies,
-	options: DidGrantOptions,
-): GrantHandler => {
+export const createDidGrant = (deps: GrantDependencies, options: DidGrantOptions): GrantHandler => {
 	const { config, keyStore } = deps;
 	const { resolver } = options;
 
 	const DEFAULT_MESSAGE_MAX_AGE_SEC = 300;
 	const DEFAULT_ALGORITHM = "ed25519_raw";
 
-	const didConfig = (config.oauth.grants as Record<string, Record<string, unknown> | undefined>).did;
-	const messageMaxAgeMs = ((didConfig?.messageMaxAgeSec as number | undefined) ?? DEFAULT_MESSAGE_MAX_AGE_SEC) * 1000;
+	const didConfig = (config.oauth.grants as Record<string, Record<string, unknown> | undefined>)
+		.did;
+	const messageMaxAgeMs =
+		((didConfig?.messageMaxAgeSec as number | undefined) ?? DEFAULT_MESSAGE_MAX_AGE_SEC) * 1000;
 	const allowedAudiences = (didConfig?.allowedAudiences as string[] | undefined) ?? [];
 
 	const verifierRegistry = createDefaultVerifierRegistry();
@@ -51,8 +50,7 @@ export const createDidGrant = (
 	const rawSupported = didConfig?.supportedAlgorithms as string[] | undefined;
 	const rawAlgorithm = didConfig?.algorithm as string | undefined;
 	const supportedAlgorithms: string[] =
-		rawSupported ??
-		(rawAlgorithm ? [rawAlgorithm] : [DEFAULT_ALGORITHM]);
+		rawSupported ?? (rawAlgorithm ? [rawAlgorithm] : [DEFAULT_ALGORITHM]);
 
 	// Validate all configured algorithms are registered
 	for (const alg of supportedAlgorithms) {
@@ -250,15 +248,18 @@ export const createDidGrant = (
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken({}, {
-							expiresIn: config.oauth.accessToken.expiresIn,
-							keyStore,
-							issuer,
-							subject: verification.subject,
-							authorizedParty: verification.audience ?? null,
-							tokenType: "at+jwt",
-							audience: verification.audience,
-						}),
+						accessToken: await generateToken(
+							{},
+							{
+								expiresIn: config.oauth.accessToken.expiresIn,
+								keyStore,
+								issuer,
+								subject: verification.subject,
+								authorizedParty: verification.audience ?? null,
+								tokenType: "at+jwt",
+								audience: verification.audience,
+							},
+						),
 					}),
 				},
 			};

@@ -13,75 +13,78 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it, vi } from "vitest";
-import type { Router } from "express";
+
 import {
-  GrantRegistry,
-  createSymmetricKeyStore,
-  type AppConfig,
-  type ModuleContext,
-  type ClientRepository,
-  type CodeRepository,
+	type AppConfig,
+	type ClientRepository,
+	type CodeRepository,
+	createSymmetricKeyStore,
+	GrantRegistry,
+	type ModuleContext,
 } from "@o3co/auth-provider-core";
+import type { Router } from "express";
+import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 
 const mockConfig = {
-  oauth: {
-    jwt: { secret: "test-secret" },
-    accessToken: { expiresIn: 3600 },
-    refreshToken: { expiresIn: 86400 },
-    grants: {},
-  },
-  rateLimit: {
-    token: { windowMs: 60000, limit: 100 },
-    authorize: { windowMs: 60000, limit: 100 },
-  },
-  endpoints: {
-    login: { url: "/login" },
-  },
+	oauth: {
+		jwt: { secret: "test-secret" },
+		accessToken: { expiresIn: 3600 },
+		refreshToken: { expiresIn: 86400 },
+		grants: {},
+	},
+	rateLimit: {
+		token: { windowMs: 60000, limit: 100 },
+		authorize: { windowMs: 60000, limit: 100 },
+	},
+	endpoints: {
+		login: { url: "/login" },
+	},
 } as unknown as AppConfig;
 
 const makeContext = (overrides?: Partial<ModuleContext>): ModuleContext => ({
-  pathResolver: (s: string) => s,
-  config: mockConfig,
-  keyStore: createSymmetricKeyStore("test-secret"),
-  grantRegistry: new GrantRegistry(),
-  router: {
-    use: vi.fn().mockReturnThis(),
-    get: vi.fn().mockReturnThis(),
-    post: vi.fn().mockReturnThis(),
-  } as unknown as Router,
-  ...overrides,
+	pathResolver: (s: string) => s,
+	config: mockConfig,
+	keyStore: createSymmetricKeyStore("test-secret"),
+	grantRegistry: new GrantRegistry(),
+	router: {
+		use: vi.fn().mockReturnThis(),
+		get: vi.fn().mockReturnThis(),
+		post: vi.fn().mockReturnThis(),
+	} as unknown as Router,
+	...overrides,
 });
 
 describe("oauthModule", () => {
-  it("has name 'oauth'", () => {
-    const module = oauthModule({
-      clientRepository: {} as ClientRepository,
-      codeRepository: {} as CodeRepository,
-    });
-    expect(module.name).toBe("oauth");
-  });
+	it("has name 'oauth'", () => {
+		const module = oauthModule({
+			clientRepository: {} as ClientRepository,
+			codeRepository: {} as CodeRepository,
+		});
+		expect(module.name).toBe("oauth");
+	});
 
-  it("mounts /oauth routes on context.router", async () => {
-    const routerMock = {
-      use: vi.fn().mockReturnThis(),
-      get: vi.fn().mockReturnThis(),
-      post: vi.fn().mockReturnThis(),
-    } as unknown as Router;
-    const ctx = makeContext({ router: routerMock });
-    const module = oauthModule({
-      clientRepository: {} as ClientRepository,
-      codeRepository: {} as CodeRepository,
-    });
+	it("mounts /oauth routes on context.router", async () => {
+		const routerMock = {
+			use: vi.fn().mockReturnThis(),
+			get: vi.fn().mockReturnThis(),
+			post: vi.fn().mockReturnThis(),
+		} as unknown as Router;
+		const ctx = makeContext({ router: routerMock });
+		const module = oauthModule({
+			clientRepository: {} as ClientRepository,
+			codeRepository: {} as CodeRepository,
+		});
 
-    await module.init(ctx);
+		await module.init(ctx);
 
-    // Should have mounted the oauth sub-router on /oauth
-    expect((routerMock.use as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(1);
-    const oauthCall = (routerMock.use as ReturnType<typeof vi.fn>).mock.calls.find(
-      (call: unknown[]) => call[0] === "/oauth",
-    );
-    expect(oauthCall).toBeDefined();
-  });
+		// Should have mounted the oauth sub-router on /oauth
+		expect((routerMock.use as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(
+			1,
+		);
+		const oauthCall = (routerMock.use as ReturnType<typeof vi.fn>).mock.calls.find(
+			(call: unknown[]) => call[0] === "/oauth",
+		);
+		expect(oauthCall).toBeDefined();
+	});
 });

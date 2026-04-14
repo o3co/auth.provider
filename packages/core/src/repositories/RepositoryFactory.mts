@@ -79,7 +79,10 @@ export const createDefaultFactories = (): {
 	codeFactory.register("memory", (config) => {
 		const defaultExpiresIn =
 			config.defaultExpiresIn != null ? Number(config.defaultExpiresIn) : undefined;
-		if (defaultExpiresIn !== undefined && (!Number.isFinite(defaultExpiresIn) || defaultExpiresIn <= 0)) {
+		if (
+			defaultExpiresIn !== undefined &&
+			(!Number.isFinite(defaultExpiresIn) || defaultExpiresIn <= 0)
+		) {
 			throw new Error('"defaultExpiresIn" must be a finite positive number');
 		}
 		return new InMemoryCodeRepository({ defaultExpiresIn });

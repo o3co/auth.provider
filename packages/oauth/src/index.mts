@@ -14,6 +14,6 @@
  * limitations under the License.
  */
 export { oauthModule } from "./module.mjs";
-export { oauthSessionModule } from "./oauthSession.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
+export { oauthSessionModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";

@@ -14,16 +14,18 @@
  * limitations under the License.
  */
 import {
-	generateToken,
-	generateTokenResponse,
 	type ClientRepository,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
 	type GrantHandlerResult,
+	generateToken,
+	generateTokenResponse,
 } from "@o3co/auth-provider-core";
 
-export const createSessionGrant = (deps: GrantDependencies & { clientRepository: ClientRepository }): GrantHandler => {
+export const createSessionGrant = (
+	deps: GrantDependencies & { clientRepository: ClientRepository },
+): GrantHandler => {
 	const { config, clientRepository, keyStore } = deps;
 
 	return {
@@ -83,16 +85,19 @@ export const createSessionGrant = (deps: GrantDependencies & { clientRepository:
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken({}, {
-							keyStore,
-							expiresIn: config.oauth.accessToken.expiresIn,
-							issuer,
-							audience: client_id ?? null,
-							subject: userId ?? null,
-							authorizedParty: client_id ?? null,
-							scope: scopes?.join(" ") ?? null,
-							tokenType: "at+jwt",
-						}),
+						accessToken: await generateToken(
+							{},
+							{
+								keyStore,
+								expiresIn: config.oauth.accessToken.expiresIn,
+								issuer,
+								audience: client_id ?? null,
+								subject: userId ?? null,
+								authorizedParty: client_id ?? null,
+								scope: scopes?.join(" ") ?? null,
+								tokenType: "at+jwt",
+							},
+						),
 					}),
 				},
 			};

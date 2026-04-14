@@ -34,10 +34,14 @@ export function detectAlgorithm(body: Record<string, unknown>): string | null {
 		try {
 			const header = decodeProtectedHeader(body.jws as string);
 			switch (header.alg) {
-				case "EdDSA": return "ed25519_jws";
-				case "ES256": return "es256_jws";
-				case "ES256K": return "es256k_jws";
-				default: return null;
+				case "EdDSA":
+					return "ed25519_jws";
+				case "ES256":
+					return "es256_jws";
+				case "ES256K":
+					return "es256k_jws";
+				default:
+					return null;
 			}
 		} catch {
 			return null;

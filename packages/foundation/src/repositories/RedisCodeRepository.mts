@@ -47,7 +47,7 @@ export class RedisCodeRepository implements CodeRepository {
 		}
 
 		const { createClient } = pathResolver
-			? (await import(pathResolver("redis"))) as typeof import("redis")
+			? ((await import(pathResolver("redis"))) as typeof import("redis"))
 			: await import("redis");
 
 		const redis = createClient({

@@ -1,68 +1,68 @@
 {
-  "name": "@o3co/auth-provider-session",
-  "description": "Session and federation routes module for auth.provider",
-  "version": "0.0.0",
-  "license": "Apache-2.0",
-  "type": "module",
-  "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "types": "./dist/index.d.mts"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/o3co/auth.provider.git",
-    "directory": "packages/session"
-  },
-  "imports": {
-    "#/*": {
-      "development": "./src/*",
-      "default": "./dist/*"
-    }
-  },
-  "scripts": {
-    "prebuild": "rimraf dist",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "@o3co/auth-provider-core": "workspace:*",
-    "express-rate-limit": "^8.3.1"
-  },
-  "peerDependencies": {
-    "express": "^5.0.0",
-    "passport": "^0.7.0",
-    "passport-local": "^1.0.0",
-    "passport-google-oauth20": "^2.0.0"
-  },
-  "peerDependenciesMeta": {
-    "passport": {
-      "optional": true
-    },
-    "passport-local": {
-      "optional": true
-    },
-    "passport-google-oauth20": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/express-session": "^1",
-    "@types/passport": "^0",
-    "@types/passport-local": "^1",
-    "@types/passport-google-oauth20": "^2.0.17",
-    "express": "^5.2.1",
-    "passport": "^0.7.0",
-    "passport-local": "^1.0.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.2"
-  }
+	"name": "@o3co/auth-provider-session",
+	"description": "Session and federation routes module for auth.provider",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/session"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"express-rate-limit": "^8.3.1"
+	},
+	"peerDependencies": {
+		"express": "^5.0.0",
+		"passport": "^0.7.0",
+		"passport-local": "^1.0.0",
+		"passport-google-oauth20": "^2.0.0"
+	},
+	"peerDependenciesMeta": {
+		"passport": {
+			"optional": true
+		},
+		"passport-local": {
+			"optional": true
+		},
+		"passport-google-oauth20": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/express": "^5.0.6",
+		"@types/express-session": "^1",
+		"@types/passport": "^0",
+		"@types/passport-local": "^1",
+		"@types/passport-google-oauth20": "^2.0.17",
+		"express": "^5.2.1",
+		"passport": "^0.7.0",
+		"passport-local": "^1.0.0",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.2"
+	}
 }

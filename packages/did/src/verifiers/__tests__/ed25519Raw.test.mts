@@ -82,7 +82,9 @@ describe("Ed25519RawVerifier", () => {
 	it("returns valid result with audience when present", async () => {
 		const verifier = new Ed25519RawVerifier();
 		const audience = "https://api.example.com";
-		const { message, signature, resolvedKey } = await createSignedRequest(did, privateKey, { audience });
+		const { message, signature, resolvedKey } = await createSignedRequest(did, privateKey, {
+			audience,
+		});
 
 		const result = await verifier.verify({
 			body: { signature, message },
@@ -155,7 +157,10 @@ describe("Ed25519RawVerifier", () => {
 
 	it("returns error when message.did does not match ctx.did", async () => {
 		const verifier = new Ed25519RawVerifier();
-		const { message, signature, resolvedKey } = await createSignedRequest("did:key:z6MkOther", privateKey);
+		const { message, signature, resolvedKey } = await createSignedRequest(
+			"did:key:z6MkOther",
+			privateKey,
+		);
 
 		const result = await verifier.verify({
 			body: { signature, message },

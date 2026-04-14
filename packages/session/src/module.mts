@@ -13,18 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import type { AppConfig, Module, ModuleContext, UserRepository } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
-import type {
-	AppConfig,
-	Module,
-	ModuleContext,
-	UserRepository,
-} from "@o3co/auth-provider-core";
-import { createPassport } from "./passport.mjs";
-import * as sessionRoutes from "./routes/Session.mjs";
-import * as federationRoutes from "./routes/Federation.mjs";
 import { createGoogleProvider } from "./federations/google.mjs";
 import { FederationRegistry } from "./federations/types.mjs";
+import { createPassport } from "./passport.mjs";
+import * as federationRoutes from "./routes/Federation.mjs";
+import * as sessionRoutes from "./routes/Session.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -38,10 +34,12 @@ export const sessionModule = (params: {
 }): Module => ({
 	name: "session",
 	async init(context: ModuleContext): Promise<void> {
-		const express: ExpressLike = params.express ?? await (async () => {
-			const mod = await import(context.pathResolver("express"));
-			return mod.default as ExpressLike;
-		})();
+		const express: ExpressLike =
+			params.express ??
+			(await (async () => {
+				const mod = await import(context.pathResolver("express"));
+				return mod.default as ExpressLike;
+			})());
 		const config = context.config as AppConfig;
 
 		// Initialize passport with pathResolver

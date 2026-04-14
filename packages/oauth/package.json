@@ -1,64 +1,64 @@
 {
-  "name": "@o3co/auth-provider-oauth",
-  "description": "OAuth routes module for auth.provider",
-  "version": "0.0.0",
-  "license": "Apache-2.0",
-  "type": "module",
-  "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "types": "./dist/index.d.mts"
-    }
-  },
-  "files": [
-    "dist",
-    "README.md",
-    "LICENSE"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/o3co/auth.provider.git",
-    "directory": "packages/oauth"
-  },
-  "imports": {
-    "#/*": {
-      "development": "./src/*",
-      "default": "./dist/*"
-    }
-  },
-  "scripts": {
-    "prebuild": "rimraf dist",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "@o3co/auth-provider-core": "workspace:*",
-    "express-rate-limit": "^8.3.1",
-    "jose": "^6.2.2"
-  },
-  "peerDependencies": {
-    "express": "^5.0.0",
-    "passport": "^0.7.0",
-    "passport-oauth2-client-password": "^0.1.2"
-  },
-  "peerDependenciesMeta": {
-    "passport": {
-      "optional": true
-    },
-    "passport-oauth2-client-password": {
-      "optional": true
-    }
-  },
-  "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/express-session": "^1",
-    "@types/passport": "^0",
-    "@types/passport-oauth2-client-password": "^0.1.6",
-    "express": "^5.2.1",
-    "passport": "^0.7.0",
-    "passport-oauth2-client-password": "^0.1.2",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.2"
-  }
+	"name": "@o3co/auth-provider-oauth",
+	"description": "OAuth routes module for auth.provider",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/oauth"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run"
+	},
+	"dependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"express-rate-limit": "^8.3.1",
+		"jose": "^6.2.2"
+	},
+	"peerDependencies": {
+		"express": "^5.0.0",
+		"passport": "^0.7.0",
+		"passport-oauth2-client-password": "^0.1.2"
+	},
+	"peerDependenciesMeta": {
+		"passport": {
+			"optional": true
+		},
+		"passport-oauth2-client-password": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@types/express": "^5.0.6",
+		"@types/express-session": "^1",
+		"@types/passport": "^0",
+		"@types/passport-oauth2-client-password": "^0.1.6",
+		"express": "^5.2.1",
+		"passport": "^0.7.0",
+		"passport-oauth2-client-password": "^0.1.2",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.2"
+	}
 }

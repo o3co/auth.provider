@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { createVerifier } from "../factory.mjs";
 import { Ed25519RawVerifier } from "../ed25519Raw.mjs";
+import { createVerifier } from "../factory.mjs";
 import { JwsVerifier } from "../jws.mjs";
 
 describe("createVerifier", () => {
