@@ -15,7 +15,6 @@
  */
 import type { RequestHandler, Router } from "express";
 import type { z } from "zod";
-
 import type { CoreConfig } from "./config/application.schema.mjs";
 import { composeConfigSchema } from "./config/application.schema.mjs";
 import { GrantRegistry } from "./grants/registry.mjs";
@@ -73,9 +72,8 @@ export function createApp(options: AppOptions): AppResult {
 		const moduleSchemas = modules
 			.map((m) => m.configSchema)
 			.filter((s): s is z.ZodObject<z.ZodRawShape> => s !== undefined);
-		if (moduleSchemas.length > 0) {
-			composeConfigSchema(moduleSchemas).parse(config);
-		}
+		const validatedConfig = composeConfigSchema(moduleSchemas).parse(config);
+		context.config = validatedConfig as CoreConfig & Record<string, unknown>;
 
 		for (const module of modules) {
 			await module.init(context);
