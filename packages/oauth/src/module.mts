@@ -13,75 +13,90 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import type {
+	AppConfig,
+	ClientRepository,
+	CodeRepository,
+	Module,
+	ModuleContext,
+} from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
-import type {
-  AppConfig,
-  ClientRepository,
-  CodeRepository,
-  Module,
-  ModuleContext,
-} from "@o3co/auth-provider-core";
 import { createOAuthRouter } from "./routes.mjs";
 
 type ExpressLike = {
-  Router: () => Router;
-  json: () => RequestHandler;
-  urlencoded: (opts: { extended: boolean }) => RequestHandler;
+	Router: () => Router;
+	json: () => RequestHandler;
+	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
 
 export const oauthModule = (params: {
-  clientRepository: ClientRepository;
-  codeRepository: CodeRepository;
-  express?: ExpressLike;
+	clientRepository: ClientRepository;
+	codeRepository: CodeRepository;
+	express?: ExpressLike;
 }): Module => ({
-  name: "oauth",
-  async init(context: ModuleContext): Promise<void> {
-    const config = context.config as AppConfig;
+	name: "oauth",
+	async init(context: ModuleContext): Promise<void> {
+		const config = context.config as AppConfig;
 
-    // Resolve passport via pathResolver for client credential auth on introspect
-    const { default: passport } = (await import(
-      context.pathResolver("passport")
-    )) as { default: PassportStatic };
+		// Resolve passport via pathResolver for client credential auth on introspect
+		const { default: passport } = (await import(context.pathResolver("passport"))) as {
+			default: PassportStatic;
+		};
 
-    // Resolve passport-oauth2-client-password for client credential strategy
-    const { Strategy: ClientCredentialStrategy } = (await import(
-      context.pathResolver("passport-oauth2-client-password")
-    )) as { Strategy: new (...args: unknown[]) => unknown };
+		// Resolve passport-oauth2-client-password for client credential strategy
+		const { Strategy: ClientCredentialStrategy } = (await import(
+			context.pathResolver("passport-oauth2-client-password")
+		)) as { Strategy: new (...args: unknown[]) => unknown };
 
-    // Register client credential strategy on this passport instance
-    passport.use(
-      new (ClientCredentialStrategy as new (
-        verify: (clientId: string, clientSecret: string, done: (err: Error | null, client?: unknown) => void) => void,
-      ) => unknown)(async (clientId: string, clientSecret: string, done: (err: Error | null, client?: unknown) => void) => {
-        try {
-          const client = await params.clientRepository.authenticate(clientId, clientSecret);
-          if (!client) {
-            return done(null, false);
-          }
-          return done(null, client as unknown);
-        } catch (cause) {
-          return done(cause as Error);
-        }
-      }) as import("passport").Strategy,
-    );
+		// Register client credential strategy on this passport instance
+		passport.use(
+			new (
+				ClientCredentialStrategy as new (
+					verify: (
+						clientId: string,
+						clientSecret: string,
+						done: (err: Error | null, client?: unknown) => void,
+					) => void,
+				) => unknown
+			)(
+				async (
+					clientId: string,
+					clientSecret: string,
+					done: (err: Error | null, client?: unknown) => void,
+				) => {
+					try {
+						const client = await params.clientRepository.authenticate(clientId, clientSecret);
+						if (!client) {
+							return done(null, false);
+						}
+						return done(null, client as unknown);
+					} catch (cause) {
+						return done(cause as Error);
+					}
+				},
+			) as import("passport").Strategy,
+		);
 
-    // We need express-like factory for creating sub-router.
-    // Use the express instance passed via params, or construct a minimal one.
-    const express: ExpressLike = params.express ?? await (async () => {
-      const mod = await import(context.pathResolver("express"));
-      return mod.default as ExpressLike;
-    })();
+		// We need express-like factory for creating sub-router.
+		// Use the express instance passed via params, or construct a minimal one.
+		const express: ExpressLike =
+			params.express ??
+			(await (async () => {
+				const mod = await import(context.pathResolver("express"));
+				return mod.default as ExpressLike;
+			})());
 
-    const { router: oauthRouter } = await createOAuthRouter(express, {
-      passport,
-      registry: context.grantRegistry,
-      config,
-      clientRepository: params.clientRepository,
-      codeRepository: params.codeRepository,
-      keyStore: context.keyStore,
-    });
+		const { router: oauthRouter } = await createOAuthRouter(express, {
+			passport,
+			registry: context.grantRegistry,
+			config,
+			clientRepository: params.clientRepository,
+			codeRepository: params.codeRepository,
+			keyStore: context.keyStore,
+		});
 
-    context.router.use("/oauth", oauthRouter);
-  },
+		context.router.use("/oauth", oauthRouter);
+	},
 });

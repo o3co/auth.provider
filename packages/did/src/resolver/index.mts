@@ -13,10 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export type {
-    DidDocument,
-    DidDocumentResolver,
-    VerificationMethod,
-} from "./types.mjs";
-export { extractVerificationKey } from "./extractKey.mjs";
+
 export type { ExtractedKey } from "./extractKey.mjs";
+export { extractVerificationKey } from "./extractKey.mjs";
+export type {
+	DidDocument,
+	DidDocumentResolver,
+	VerificationMethod,
+} from "./types.mjs";

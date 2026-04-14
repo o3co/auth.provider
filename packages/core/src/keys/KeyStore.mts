@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { type KeyObject, createSecretKey } from "node:crypto";
+import { createSecretKey, type KeyObject } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { importPKCS8, importSPKI } from "jose";
 
@@ -52,7 +52,9 @@ export interface AsymmetricKeyStoreOptions {
 	}>;
 }
 
-export async function createAsymmetricKeyStore(options: AsymmetricKeyStoreOptions): Promise<KeyStore> {
+export async function createAsymmetricKeyStore(
+	options: AsymmetricKeyStoreOptions,
+): Promise<KeyStore> {
 	const { algorithm, kid, privateKeyPem, publicKeyPem, previousKeys = [] } = options;
 
 	// Validate kid uniqueness
@@ -69,7 +71,7 @@ export async function createAsymmetricKeyStore(options: AsymmetricKeyStoreOption
 	const resolvedPrevious: Array<ManagedKey & { expiresAt: Date }> = await Promise.all(
 		previousKeys.map(async (prev) => ({
 			kid: prev.kid,
-			publicKey: await importSPKI(prev.publicKeyPem, algorithm) as KeyLike,
+			publicKey: (await importSPKI(prev.publicKeyPem, algorithm)) as KeyLike,
 			expiresAt: prev.expiresAt,
 		})),
 	);

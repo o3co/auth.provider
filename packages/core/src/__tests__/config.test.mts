@@ -21,7 +21,9 @@ describe("provider config", () => {
 		expect(config.oauth.jwt.secret).toBe("test-secret");
 		expect(config.session.secret).toBe("test-session-secret");
 		expect(config.http.port).toBe(3000);
-		expect((config.oauth.grants as Record<string, unknown>).session).toMatchObject({ enabled: true });
+		expect((config.oauth.grants as Record<string, unknown>).session).toMatchObject({
+			enabled: true,
+		});
 	});
 
 	it("fails validation when required fields are missing", () => {
@@ -156,8 +158,12 @@ describe("jwt config schema", () => {
 	});
 
 	it("accepts ES256 and EdDSA algorithms", () => {
-		expect(jwtSchema.parse({ algorithm: "ES256", privateKey: "pk", publicKey: "pub" }).algorithm).toBe("ES256");
-		expect(jwtSchema.parse({ algorithm: "EdDSA", privateKey: "pk", publicKey: "pub" }).algorithm).toBe("EdDSA");
+		expect(
+			jwtSchema.parse({ algorithm: "ES256", privateKey: "pk", publicKey: "pub" }).algorithm,
+		).toBe("ES256");
+		expect(
+			jwtSchema.parse({ algorithm: "EdDSA", privateKey: "pk", publicKey: "pub" }).algorithm,
+		).toBe("EdDSA");
 	});
 
 	it("previousKeys defaults to empty array", () => {

@@ -13,97 +13,98 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it, vi } from "vitest";
-import type { Router } from "express";
+
 import {
-  GrantRegistry,
-  createSymmetricKeyStore,
-  type AppConfig,
-  type ClientRepository,
-  type CodeRepository,
+	type AppConfig,
+	type ClientRepository,
+	type CodeRepository,
+	createSymmetricKeyStore,
+	GrantRegistry,
 } from "@o3co/auth-provider-core";
-import { createOAuthRouter } from "#/routes.mjs";
+import type { Router } from "express";
 import type { PassportStatic } from "passport";
+import { describe, expect, it, vi } from "vitest";
+import { createOAuthRouter } from "#/routes.mjs";
 
 const mockConfig = {
-  rateLimit: {
-    token: { windowMs: 60000, limit: 100 },
-    authorize: { windowMs: 60000, limit: 100 },
-  },
-  endpoints: {
-    login: { url: "/login" },
-  },
+	rateLimit: {
+		token: { windowMs: 60000, limit: 100 },
+		authorize: { windowMs: 60000, limit: 100 },
+	},
+	endpoints: {
+		login: { url: "/login" },
+	},
 } as unknown as AppConfig;
 
 const mockExpress = {
-  Router: () =>
-    ({
-      use: vi.fn().mockReturnThis(),
-      get: vi.fn().mockReturnThis(),
-      post: vi.fn().mockReturnThis(),
-    }) as unknown as Router,
-  json: () => vi.fn(),
-  urlencoded: () => vi.fn(),
+	Router: () =>
+		({
+			use: vi.fn().mockReturnThis(),
+			get: vi.fn().mockReturnThis(),
+			post: vi.fn().mockReturnThis(),
+		}) as unknown as Router,
+	json: () => vi.fn(),
+	urlencoded: () => vi.fn(),
 };
 
 describe("createOAuthRouter", () => {
-  it("returns a router", async () => {
-    const mockPassport = {
-      authenticate: vi.fn().mockReturnValue(vi.fn()),
-    } as unknown as PassportStatic;
+	it("returns a router", async () => {
+		const mockPassport = {
+			authenticate: vi.fn().mockReturnValue(vi.fn()),
+		} as unknown as PassportStatic;
 
-    const result = await createOAuthRouter(mockExpress, {
-      passport: mockPassport,
-      registry: new GrantRegistry(),
-      config: mockConfig,
-      clientRepository: {} as ClientRepository,
-      codeRepository: {} as CodeRepository,
-      keyStore: createSymmetricKeyStore("test-secret"),
-    });
+		const result = await createOAuthRouter(mockExpress, {
+			passport: mockPassport,
+			registry: new GrantRegistry(),
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			codeRepository: {} as CodeRepository,
+			keyStore: createSymmetricKeyStore("test-secret"),
+		});
 
-    expect(result.router).toBeDefined();
-  });
+		expect(result.router).toBeDefined();
+	});
 
-  it("applies rate limit middleware to POST /introspect", async () => {
-    const mockPassport = {
-      authenticate: vi.fn().mockReturnValue(vi.fn()),
-    } as unknown as PassportStatic;
+	it("applies rate limit middleware to POST /introspect", async () => {
+		const mockPassport = {
+			authenticate: vi.fn().mockReturnValue(vi.fn()),
+		} as unknown as PassportStatic;
 
-    const postCalls: unknown[][] = [];
-    const router = {
-      use: vi.fn().mockReturnThis(),
-      get: vi.fn().mockReturnThis(),
-      post: vi.fn((...args: unknown[]) => {
-        postCalls.push(args);
-        return router;
-      }),
-    } as unknown as Router;
+		const postCalls: unknown[][] = [];
+		const router = {
+			use: vi.fn().mockReturnThis(),
+			get: vi.fn().mockReturnThis(),
+			post: vi.fn((...args: unknown[]) => {
+				postCalls.push(args);
+				return router;
+			}),
+		} as unknown as Router;
 
-    const trackingExpress = {
-      Router: () => router,
-      json: () => vi.fn(),
-      urlencoded: () => vi.fn(),
-    };
+		const trackingExpress = {
+			Router: () => router,
+			json: () => vi.fn(),
+			urlencoded: () => vi.fn(),
+		};
 
-    await createOAuthRouter(trackingExpress, {
-      passport: mockPassport,
-      registry: new GrantRegistry(),
-      config: mockConfig,
-      clientRepository: {} as ClientRepository,
-      codeRepository: {} as CodeRepository,
-      keyStore: createSymmetricKeyStore("test-secret"),
-    });
+		await createOAuthRouter(trackingExpress, {
+			passport: mockPassport,
+			registry: new GrantRegistry(),
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			codeRepository: {} as CodeRepository,
+			keyStore: createSymmetricKeyStore("test-secret"),
+		});
 
-    // Find the /introspect POST registration
-    const introspectCall = postCalls.find((args) => args[0] === "/introspect");
-    expect(introspectCall).toBeDefined();
-    if (!introspectCall) return;
+		// Find the /introspect POST registration
+		const introspectCall = postCalls.find((args) => args[0] === "/introspect");
+		expect(introspectCall).toBeDefined();
+		if (!introspectCall) return;
 
-    // Should have at least 3 args: path, rate-limit middleware, auth middleware, handler
-    // (path + tokenRateLimit + authMiddleware + handler = 4 args minimum)
-    expect(introspectCall.length).toBeGreaterThanOrEqual(3);
+		// Should have at least 3 args: path, rate-limit middleware, auth middleware, handler
+		// (path + tokenRateLimit + authMiddleware + handler = 4 args minimum)
+		expect(introspectCall.length).toBeGreaterThanOrEqual(3);
 
-    // The second arg (index 1) is the rate-limit middleware — it must be a function
-    expect(typeof introspectCall[1]).toBe("function");
-  });
+		// The second arg (index 1) is the rate-limit middleware — it must be a function
+		expect(typeof introspectCall[1]).toBe("function");
+	});
 });

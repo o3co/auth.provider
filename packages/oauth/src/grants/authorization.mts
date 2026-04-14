@@ -16,17 +16,19 @@
 import crypto from "node:crypto";
 
 import {
-	generateToken,
-	generateTokenResponse,
 	type ClientRepository,
 	type CodeRepository,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
 	type GrantHandlerResult,
+	generateToken,
+	generateTokenResponse,
 } from "@o3co/auth-provider-core";
 
-export const createAuthorizationGrant = (deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository }): GrantHandler => {
+export const createAuthorizationGrant = (
+	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
+): GrantHandler => {
 	const { config, codeRepository, clientRepository, keyStore } = deps;
 
 	const grantsConfig = config.oauth.grants as Record<string, Record<string, unknown>> | undefined;
@@ -212,26 +214,32 @@ export const createAuthorizationGrant = (deps: GrantDependencies & { codeReposit
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken({}, {
-							expiresIn: config.oauth.accessToken.expiresIn,
-							keyStore,
-							issuer,
-							audience: client_id,
-							subject: userId ?? null,
-							authorizedParty: client_id ?? null,
-							scope: grantedScopes?.join(" ") ?? null,
-							tokenType: "at+jwt",
-						}),
-						refreshToken: await generateToken({}, {
-							expiresIn: config.oauth.refreshToken.expiresIn,
-							keyStore,
-							issuer,
-							audience: client_id,
-							subject: userId ?? null,
-							authorizedParty: client_id ?? null,
-							scope: grantedScopes?.join(" ") ?? null,
-							tokenType: "rt+jwt",
-						}),
+						accessToken: await generateToken(
+							{},
+							{
+								expiresIn: config.oauth.accessToken.expiresIn,
+								keyStore,
+								issuer,
+								audience: client_id,
+								subject: userId ?? null,
+								authorizedParty: client_id ?? null,
+								scope: grantedScopes?.join(" ") ?? null,
+								tokenType: "at+jwt",
+							},
+						),
+						refreshToken: await generateToken(
+							{},
+							{
+								expiresIn: config.oauth.refreshToken.expiresIn,
+								keyStore,
+								issuer,
+								audience: client_id,
+								subject: userId ?? null,
+								authorizedParty: client_id ?? null,
+								scope: grantedScopes?.join(" ") ?? null,
+								tokenType: "rt+jwt",
+							},
+						),
 					}),
 				},
 				sessionMutation: {

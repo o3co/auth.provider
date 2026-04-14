@@ -24,7 +24,7 @@ jobs:
           restore-keys: pnpm-store-
 
       - run: pnpm install
-      - run: pnpm -r --if-present run typecheck
       - run: pnpm run lint
       - run: pnpm run build
+      - run: pnpm -r --if-present run typecheck
       - run: pnpm run test

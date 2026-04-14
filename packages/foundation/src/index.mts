@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { CodeRepository, PathResolver, RepositoryFactory, UserRepository } from "@o3co/auth-provider-core";
+import type {
+	CodeRepository,
+	PathResolver,
+	RepositoryFactory,
+	UserRepository,
+} from "@o3co/auth-provider-core";
 import { HttpUserRepository } from "./repositories/HttpUserRepository.mjs";
 import { RedisCodeRepository } from "./repositories/RedisCodeRepository.mjs";
 
