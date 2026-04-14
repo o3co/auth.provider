@@ -31,9 +31,9 @@ jobs:
         run: pnpm -r exec pnpm version "${GITHUB_REF#refs/tags/v}" --no-git-tag-version --no-commit-hooks
 
       - run: pnpm install
+      - run: pnpm run build
       - run: pnpm -r --if-present run typecheck
       - run: pnpm run test
-      - run: pnpm run build
 
       - name: Create GitHub Release (draft)
         uses: softprops/action-gh-release@v2

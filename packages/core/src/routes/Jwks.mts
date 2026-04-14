@@ -17,10 +17,7 @@ import type { Request, Response, Router } from "express";
 import { exportJWK } from "jose";
 import type { KeyStore } from "../keys/KeyStore.mjs";
 
-export const createRouter = (
-	express: { Router: () => Router },
-	keyStore: KeyStore,
-): Router => {
+export const createRouter = (express: { Router: () => Router }, keyStore: KeyStore): Router => {
 	const router = express.Router();
 
 	router.get("/.well-known/jwks.json", async (_req: Request, res: Response) => {

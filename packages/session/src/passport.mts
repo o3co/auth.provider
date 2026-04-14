@@ -13,8 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { PassportStatic } from "passport";
+
 import type { AppConfig, PathResolver, UserRepository } from "@o3co/auth-provider-core";
+import type { PassportStatic } from "passport";
 
 declare global {
 	namespace Express {
@@ -31,16 +32,20 @@ export const createPassport = async ({
 	userRepository: UserRepository;
 	config: AppConfig;
 }): Promise<PassportStatic> => {
-	const { default: passport } = (await import(
-		pathResolver("passport")
-	)) as { default: PassportStatic };
+	const { default: passport } = (await import(pathResolver("passport"))) as {
+		default: PassportStatic;
+	};
 
-	const { Strategy: LocalStrategy } = (await import(
-		pathResolver("passport-local")
-	)) as { Strategy: new (
-		options: { usernameField: string; passwordField: string },
-		verify: (username: string, password: string, done: (err: Error | null, user?: unknown, info?: { message: string }) => void) => void,
-	) => import("passport").Strategy };
+	const { Strategy: LocalStrategy } = (await import(pathResolver("passport-local"))) as {
+		Strategy: new (
+			options: { usernameField: string; passwordField: string },
+			verify: (
+				username: string,
+				password: string,
+				done: (err: Error | null, user?: unknown, info?: { message: string }) => void,
+			) => void,
+		) => import("passport").Strategy;
+	};
 
 	passport.serializeUser((user: Express.User, done) => {
 		done(null, JSON.stringify(user));
@@ -72,12 +77,19 @@ export const createPassport = async ({
 	);
 
 	if (config.federations.google.enabled) {
-		const { Strategy: GoogleStrategy } = await import(
+		const { Strategy: GoogleStrategy } = (await import(
 			pathResolver("passport-google-oauth20")
-		) as { Strategy: new (
-			options: { clientID: string; clientSecret: string; callbackURL: string },
-			verify: (accessToken: string, refreshToken: string, profile: { id: string }, done: (err: Error | null, user?: unknown) => void) => void,
-		) => import("passport").Strategy };
+		)) as {
+			Strategy: new (
+				options: { clientID: string; clientSecret: string; callbackURL: string },
+				verify: (
+					accessToken: string,
+					refreshToken: string,
+					profile: { id: string },
+					done: (err: Error | null, user?: unknown) => void,
+				) => void,
+			) => import("passport").Strategy;
+		};
 
 		passport.use(
 			new GoogleStrategy(

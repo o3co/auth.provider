@@ -14,14 +14,13 @@
  * limitations under the License.
  */
 import { createSecretKey } from "node:crypto";
-import { SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
-
 import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
+import { SignJWT } from "jose";
+import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";

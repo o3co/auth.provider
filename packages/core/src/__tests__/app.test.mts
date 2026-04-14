@@ -13,13 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it, vi } from "vitest";
+
 import type { Router } from "express";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "#/app.mjs";
+import type { AppConfig } from "#/config/application.schema.mjs";
 import { GrantRegistry } from "#/grants/registry.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { Module } from "#/modules/types.mjs";
-import type { AppConfig } from "#/config/application.schema.mjs";
 
 const mockExpress = {
 	Router: () =>
@@ -48,7 +49,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [],
-			});
+		});
 
 		expect(result.router).toBeDefined();
 		expect(result.grantRegistry).toBeInstanceOf(GrantRegistry);
@@ -68,7 +69,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore,
 			modules: [testModule],
-			});
+		});
 
 		await result.init();
 
@@ -91,7 +92,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [testModule],
-			});
+		});
 
 		await result.init();
 
@@ -103,11 +104,15 @@ describe("createApp", () => {
 		const order: string[] = [];
 		const moduleA: Module = {
 			name: "a",
-			async init() { order.push("a"); },
+			async init() {
+				order.push("a");
+			},
 		};
 		const moduleB: Module = {
 			name: "b",
-			async init() { order.push("b"); },
+			async init() {
+				order.push("b");
+			},
 		};
 
 		const result = createApp({
@@ -115,7 +120,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [moduleA, moduleB],
-			});
+		});
 
 		await result.init();
 
@@ -131,7 +136,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [testModule],
-			});
+		});
 
 		await result.init();
 
@@ -156,9 +161,11 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [],
-			});
+		});
 
 		// Router.use should have been called for healthcheck and jwks sub-routers
-		expect((routerMock.use as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(1);
+		expect((routerMock.use as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(
+			1,
+		);
 	});
 });

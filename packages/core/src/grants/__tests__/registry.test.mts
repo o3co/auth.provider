@@ -15,8 +15,6 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-
-import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { GrantRegistry } from "#/grants/registry.mjs";
 import type {
 	GrantDependencies,
@@ -24,6 +22,7 @@ import type {
 	GrantHandler,
 	GrantModule,
 } from "#/grants/types.mjs";
+import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
 const makeHandler = (name: string): GrantHandler => ({
 	handle: vi.fn().mockResolvedValue({
@@ -126,10 +125,12 @@ describe("GrantRegistry.addModule", () => {
 				},
 			},
 			configSchema: z.object({
-				custom: z.object({
-					enabled: z.boolean().default(true),
-					timeout: z.coerce.number().default(500),
-				}).default({ enabled: true, timeout: 500 }),
+				custom: z
+					.object({
+						enabled: z.boolean().default(true),
+						timeout: z.coerce.number().default(500),
+					})
+					.default({ enabled: true, timeout: 500 }),
 			}),
 		};
 		// No "custom" entry in grants config
@@ -139,7 +140,10 @@ describe("GrantRegistry.addModule", () => {
 
 		expect(registry.get("custom")).toBeDefined();
 		expect(receivedDeps).toBeDefined();
-		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<string, Record<string, unknown>>;
+		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<
+			string,
+			Record<string, unknown>
+		>;
 		expect(grants.custom.timeout).toBe(500);
 		expect(grants.custom.enabled).toBe(true);
 	});
@@ -155,10 +159,12 @@ describe("GrantRegistry.addModule", () => {
 				},
 			},
 			configSchema: z.object({
-				custom: z.object({
-					enabled: z.boolean().default(true),
-					timeout: z.coerce.number().default(500),
-				}).default({ enabled: true, timeout: 500 }),
+				custom: z
+					.object({
+						enabled: z.boolean().default(true),
+						timeout: z.coerce.number().default(500),
+					})
+					.default({ enabled: true, timeout: 500 }),
 			}),
 		};
 		// Partial config — timeout should get default, enabled is explicit
@@ -167,7 +173,10 @@ describe("GrantRegistry.addModule", () => {
 		registry.addModule(module, deps);
 
 		expect(receivedDeps).toBeDefined();
-		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<string, Record<string, unknown>>;
+		const grants = (receivedDeps as GrantDependencies).config.oauth.grants as Record<
+			string,
+			Record<string, unknown>
+		>;
 		expect(grants.custom.timeout).toBe(500);
 	});
 

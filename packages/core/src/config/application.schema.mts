@@ -20,56 +20,63 @@ const rateLimitSchema = z.object({
 	limit: z.coerce.number(),
 });
 
-const jwtSchema = z.object({
-	algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]).default("HS256"),
-	secret: z.string().optional(),
-	issuer: z.string().optional(),
-	kid: z.string().default("v0"),
-	privateKey: z.string().optional(),
-	privateKeyPath: z.string().optional(),
-	publicKey: z.string().optional(),
-	publicKeyPath: z.string().optional(),
-	previousKeys: z.array(z.object({
-		kid: z.string(),
+const jwtSchema = z
+	.object({
+		algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]).default("HS256"),
+		secret: z.string().optional(),
+		issuer: z.string().optional(),
+		kid: z.string().default("v0"),
+		privateKey: z.string().optional(),
+		privateKeyPath: z.string().optional(),
 		publicKey: z.string().optional(),
 		publicKeyPath: z.string().optional(),
-		expiresAt: z.string(),
-	})).default([]),
-}).superRefine((data, ctx) => {
-	if (data.algorithm === "HS256" && !data.secret) {
-		ctx.addIssue({
-			code: z.ZodIssueCode.custom,
-			message: "secret is required for HS256 algorithm",
-			path: ["secret"],
-		});
-	}
-	const isAsymmetric = data.algorithm === "RS256" || data.algorithm === "ES256" || data.algorithm === "EdDSA";
-	if (isAsymmetric) {
-		if (!data.privateKey && !data.privateKeyPath) {
+		previousKeys: z
+			.array(
+				z.object({
+					kid: z.string(),
+					publicKey: z.string().optional(),
+					publicKeyPath: z.string().optional(),
+					expiresAt: z.string(),
+				}),
+			)
+			.default([]),
+	})
+	.superRefine((data, ctx) => {
+		if (data.algorithm === "HS256" && !data.secret) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
-				message: "privateKey or privateKeyPath is required for asymmetric algorithms",
-				path: ["privateKey"],
+				message: "secret is required for HS256 algorithm",
+				path: ["secret"],
 			});
 		}
-		if (!data.publicKey && !data.publicKeyPath) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: "publicKey or publicKeyPath is required for asymmetric algorithms",
-				path: ["publicKey"],
-			});
+		const isAsymmetric =
+			data.algorithm === "RS256" || data.algorithm === "ES256" || data.algorithm === "EdDSA";
+		if (isAsymmetric) {
+			if (!data.privateKey && !data.privateKeyPath) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "privateKey or privateKeyPath is required for asymmetric algorithms",
+					path: ["privateKey"],
+				});
+			}
+			if (!data.publicKey && !data.publicKeyPath) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "publicKey or publicKeyPath is required for asymmetric algorithms",
+					path: ["publicKey"],
+				});
+			}
 		}
-	}
-	for (const [i, key] of data.previousKeys.entries()) {
-		if (!key.publicKey && !key.publicKeyPath) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: "publicKey or publicKeyPath is required for each previousKeys entry",
-				path: ["previousKeys", i, "publicKey"],
-			});
+		for (const [i, key] of data.previousKeys.entries()) {
+			if (!key.publicKey && !key.publicKeyPath) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: "publicKey or publicKeyPath is required for each previousKeys entry",
+					path: ["previousKeys", i, "publicKey"],
+				});
+			}
 		}
-	}
-});
+	});
 
 /**
  * Minimal always-required config for the auth provider core.
@@ -99,9 +106,7 @@ export type CoreConfig = z.infer<typeof CoreConfigSchema>;
  * Each module can declare its required config shape; the resulting schema validates
  * the intersection of core + all module schemas.
  */
-export function composeConfigSchema(
-	moduleSchemas: z.ZodObject<z.ZodRawShape>[],
-): z.ZodType {
+export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[]): z.ZodType {
 	let schema: z.ZodType = CoreConfigSchema;
 	for (const moduleSchema of moduleSchemas) {
 		schema = schema.and(moduleSchema);
@@ -130,36 +135,38 @@ const fullSectionsSchema = z.object({
 		authorize: rateLimitSchema,
 	}),
 	federations: z.object({
-		google: z.object({
-			enabled: z.boolean().default(false),
-			clientId: z.string().optional(),
-			clientSecret: z.string().optional(),
-			callbackURL: z.string().optional(),
-		}).superRefine((data, ctx) => {
-			if (data.enabled) {
-				if (!data.clientId) {
-					ctx.addIssue({
-						code: z.ZodIssueCode.custom,
-						message: "clientId is required when google federation is enabled",
-						path: ["clientId"],
-					});
+		google: z
+			.object({
+				enabled: z.boolean().default(false),
+				clientId: z.string().optional(),
+				clientSecret: z.string().optional(),
+				callbackURL: z.string().optional(),
+			})
+			.superRefine((data, ctx) => {
+				if (data.enabled) {
+					if (!data.clientId) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: "clientId is required when google federation is enabled",
+							path: ["clientId"],
+						});
+					}
+					if (!data.clientSecret) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: "clientSecret is required when google federation is enabled",
+							path: ["clientSecret"],
+						});
+					}
+					if (!data.callbackURL) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: "callbackURL is required when google federation is enabled",
+							path: ["callbackURL"],
+						});
+					}
 				}
-				if (!data.clientSecret) {
-					ctx.addIssue({
-						code: z.ZodIssueCode.custom,
-						message: "clientSecret is required when google federation is enabled",
-						path: ["clientSecret"],
-					});
-				}
-				if (!data.callbackURL) {
-					ctx.addIssue({
-						code: z.ZodIssueCode.custom,
-						message: "callbackURL is required when google federation is enabled",
-						path: ["callbackURL"],
-					});
-				}
-			}
-		}),
+			}),
 	}),
 	clients: z.object({
 		client: z.object({

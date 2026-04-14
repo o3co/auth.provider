@@ -30,10 +30,7 @@ export const oauthAuthorizationModule = (params: {
 	name: "oauth-authorization",
 	async init(context: ModuleContext): Promise<void> {
 		const config = context.config as AppConfig;
-		const grantsConfig = config.oauth.grants as Record<
-			string,
-			{ enabled?: boolean }
-		>;
+		const grantsConfig = config.oauth.grants as Record<string, { enabled?: boolean }>;
 
 		if (grantsConfig.authorization?.enabled !== false) {
 			const handler = createAuthorizationGrant({

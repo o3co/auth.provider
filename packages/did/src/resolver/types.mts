@@ -16,25 +16,25 @@
 // Minimal subset of the Web Crypto API JsonWebKey interface (public key fields only).
 // Defined locally to avoid a DOM lib dependency in this Node.js package.
 export interface JsonWebKey {
-    kty?: string;
-    crv?: string;
-    x?: string;
-    y?: string;
+	kty?: string;
+	crv?: string;
+	x?: string;
+	y?: string;
 }
 
 export interface VerificationMethod {
-    id: string;
-    type: string;
-    controller: string;
-    publicKeyJwk?: JsonWebKey;
-    publicKeyMultibase?: string;
+	id: string;
+	type: string;
+	controller: string;
+	publicKeyJwk?: JsonWebKey;
+	publicKeyMultibase?: string;
 }
 
 export interface DidDocument {
-    id: string;
-    verificationMethod?: VerificationMethod[];
+	id: string;
+	verificationMethod?: VerificationMethod[];
 }
 
 export interface DidDocumentResolver {
-    resolve(did: string): Promise<DidDocument>;
+	resolve(did: string): Promise<DidDocument>;
 }

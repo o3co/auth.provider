@@ -13,23 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type {
-	AppConfig,
-	ClientRepository,
-	Module,
-	ModuleContext,
-} from "@o3co/auth-provider-core";
+import type { AppConfig, ClientRepository, Module, ModuleContext } from "@o3co/auth-provider-core";
 import { createSessionGrant } from "./grants/session.mjs";
 
-export const oauthSessionModule = (params: {
-	clientRepository: ClientRepository;
-}): Module => ({
+export const oauthSessionModule = (params: { clientRepository: ClientRepository }): Module => ({
 	name: "oauth-session",
 	async init(context: ModuleContext): Promise<void> {
 		const config = context.config as AppConfig;
-		const grantConfig = (
-			config.oauth.grants as Record<string, { enabled?: boolean }>
-		).session;
+		const grantConfig = (config.oauth.grants as Record<string, { enabled?: boolean }>).session;
 		if (grantConfig?.enabled === false) return;
 
 		const handler = createSessionGrant({
