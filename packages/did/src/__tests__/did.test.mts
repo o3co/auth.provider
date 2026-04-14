@@ -289,4 +289,90 @@ describe("createDidGrant", () => {
 			handler.cleanup?.();
 		});
 	});
+
+	describe("handle – audience allowlist", () => {
+		function makeConfigWithAllowedAudiences(allowedAudiences: string[]) {
+			return {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					grants: {
+						session: { enabled: true },
+						authorization: { enabled: true },
+						refresh_token: { enabled: true },
+						did: {
+							enabled: true,
+							algorithm: "ed25519_raw",
+							messageMaxAgeSec: 300,
+							allowedAudiences,
+						},
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+		}
+
+		it("returns 200 when audience is in the allowlist", async () => {
+			const config = makeConfigWithAllowedAudiences(["https://api.example.com", "https://other.example.com"]);
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudAllow", {
+				audience: "https://api.example.com",
+			});
+			const handler = createDidGrant(
+				{ config, keyStore: mockDeps.keyStore },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+		});
+
+		it("returns 400 when audience is NOT in the allowlist", async () => {
+			const config = makeConfigWithAllowedAudiences(["https://api.example.com"]);
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudDeny", {
+				audience: "https://evil.example.com",
+			});
+			const handler = createDidGrant(
+				{ config, keyStore: mockDeps.keyStore },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toContain("https://evil.example.com");
+			expect("errorDescription" in result && result.errorDescription).toContain("not allowed");
+		});
+
+		it("accepts any audience when allowedAudiences is empty (backward compat)", async () => {
+			const config = makeConfigWithAllowedAudiences([]);
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudAny", {
+				audience: "https://anything.example.com",
+			});
+			const handler = createDidGrant(
+				{ config, keyStore: mockDeps.keyStore },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+		});
+
+		it("returns 200 when no audience is provided even with allowedAudiences configured", async () => {
+			const config = makeConfigWithAllowedAudiences(["https://api.example.com"]);
+			// makeSignedCtx without audience override — audience is optional
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkAudOptional");
+			const handler = createDidGrant(
+				{ config, keyStore: mockDeps.keyStore },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+		});
+	});
 });

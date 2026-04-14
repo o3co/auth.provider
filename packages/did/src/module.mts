@@ -23,8 +23,9 @@ export const didConfigSchema = z.object({
 		enabled: z.boolean().default(true),
 		algorithm: z.string().default("ed25519_raw"),
 		messageMaxAgeSec: z.coerce.number().default(300),
+		allowedAudiences: z.array(z.string()).default([]),
 	// Full default object required by zod v4 typing — field-level defaults are authoritative
-	}).default({ enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300 }),
+	}).default({ enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300, allowedAudiences: [] }),
 });
 
 export type DidModuleOptions =
