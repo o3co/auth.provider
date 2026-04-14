@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 
-import type { AppConfig, Module, ModuleContext, UserRepository } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	fullSectionsSchema,
+	type Module,
+	type ModuleContext,
+	type UserRepository,
+} from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
 import { createGoogleProvider } from "./federations/google.mjs";
 import { FederationRegistry } from "./federations/types.mjs";
@@ -28,11 +34,20 @@ type ExpressLike = {
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
 
+const sessionConfigSchema = fullSectionsSchema.pick({
+	session: true,
+	rateLimit: true,
+	federations: true,
+	endpoints: true,
+	cors: true,
+});
+
 export const sessionModule = (params: {
 	userRepository: UserRepository;
 	express?: ExpressLike;
 }): Module => ({
 	name: "session",
+	configSchema: sessionConfigSchema,
 	async init(context: ModuleContext): Promise<void> {
 		const express: ExpressLike =
 			params.express ??
