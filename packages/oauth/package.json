@@ -21,7 +21,10 @@
     "directory": "packages/oauth"
   },
   "imports": {
-    "#/*": "./dist/*"
+    "#/*": {
+      "development": "./src/*",
+      "default": "./dist/*"
+    }
   },
   "scripts": {
     "build": "tsc",
