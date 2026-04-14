@@ -23,6 +23,7 @@
 		"directory": "packages/core"
 	},
 	"scripts": {
+		"prebuild": "rm -rf dist",
 		"build": "tsc",
 		"test": "vitest run"
 	},

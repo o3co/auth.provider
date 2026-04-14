@@ -15,7 +15,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
-import type { KeyStore } from "#/keys/KeyStore.mjs";
+import type { KeyStore } from "../keys/KeyStore.mjs";
 
 export const formatObject = <T extends object>(data: T): Partial<T> => {
 	return Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined && v !== null)) as Partial<T>;
