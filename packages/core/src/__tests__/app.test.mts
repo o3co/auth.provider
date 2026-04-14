@@ -145,6 +145,24 @@ describe("createApp", () => {
 		expect(ctx.pathResolver("foo")).toBe("foo");
 	});
 
+	it("init() rejects when module configSchema requires missing config sections", async () => {
+		const { z } = await import("zod");
+		const moduleWithSchema: Module = {
+			name: "needs-session",
+			configSchema: z.object({ session: z.object({ secret: z.string() }) }),
+			async init() {},
+		};
+
+		const result = createApp({
+			express: mockExpress,
+			config: mockConfig,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			modules: [moduleWithSchema],
+		});
+
+		await expect(result.init()).rejects.toThrow();
+	});
+
 	it("wires healthcheck and jwks routes on router", () => {
 		const routerMock = {
 			use: vi.fn().mockReturnThis(),
