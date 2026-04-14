@@ -81,6 +81,25 @@ describe("createGoogleProvider", () => {
 		}
 	});
 
+	it("returns misconfiguration error when redirectTo is set but authCallback is undefined", () => {
+		const configWithClientOnly = {
+			...baseConfig,
+			endpoints: {
+				login: { url: "/login" },
+				client: { url: "http://localhost:3001" },
+			},
+		} as unknown as AppConfig;
+		const provider = createGoogleProvider(configWithClientOnly);
+		const result = provider.resolveCallbackRedirect({
+			redirectTo: "https://app.example.com/dashboard",
+		});
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error).toBe("misconfiguration");
+			expect(result.errorDescription).toContain("authCallback");
+		}
+	});
+
 	it("falls back to client URL when authCallback is undefined and no redirectTo", () => {
 		const configWithClient = {
 			...baseConfig,
