@@ -1,0 +1,127 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { afterAll, describe, expect, it } from "vitest";
+import express from "express";
+import request from "supertest";
+import {
+  type AppConfig,
+  InMemoryClientRepository,
+  InMemoryCodeRepository,
+  InMemoryUserRepository,
+  createApp,
+  createKeyStoreFromConfig,
+} from "@o3co/auth-provider-core";
+import {
+  oauthModule,
+  oauthSessionModule,
+  oauthAuthorizationModule,
+} from "@o3co/auth-provider-oauth";
+import { sessionModule } from "@o3co/auth-provider-session";
+
+const config: AppConfig = {
+  http: { port: 0, trustProxy: false },
+  oauth: {
+    jwt: { algorithm: "HS256", secret: "test-secret-for-smoke-test", kid: "v0", previousKeys: [] },
+    accessToken: { expiresIn: 3600 },
+    refreshToken: { expiresIn: 86400 },
+    grants: {},
+  },
+  session: {
+    secret: "test-session-secret",
+    maxAge: 3600000,
+    secure: false,
+    sameSite: "lax",
+    domain: null,
+    storage: { type: "memory", redis: { url: "redis://localhost:6379" } },
+  },
+  rateLimit: {
+    login: { windowMs: 60000, limit: 10 },
+    token: { windowMs: 60000, limit: 10 },
+    authorize: { windowMs: 60000, limit: 10 },
+  },
+  federations: {
+    google: { enabled: false },
+  },
+  clients: {
+    client: { type: "yaml", path: "./config/clients.yaml" },
+    user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
+    code: { type: "memory", defaultExpiresIn: 600 },
+  },
+  endpoints: {
+    login: { url: undefined },
+    client: { url: undefined },
+    authCallback: { url: undefined },
+  },
+  cors: { allowedOrigins: [] },
+};
+
+describe("standalone smoke test", () => {
+  let grantRegistryRef: Awaited<ReturnType<typeof buildApp>>["grantRegistry"];
+  let appRef: ReturnType<typeof express>;
+
+  async function buildApp() {
+    const clientRepository = new InMemoryClientRepository(new Map());
+    const userRepository = new InMemoryUserRepository(new Map());
+    const codeRepository = new InMemoryCodeRepository();
+
+    const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
+
+    const { init, router, grantRegistry } = createApp({
+      express,
+      config,
+      keyStore,
+      modules: [
+        oauthModule({ clientRepository, codeRepository, express }),
+        sessionModule({ userRepository, express }),
+        oauthSessionModule({ clientRepository }),
+        oauthAuthorizationModule({ codeRepository }),
+      ],
+    });
+
+    await init();
+
+    const app = express();
+    app.use(router);
+
+    return { app, grantRegistry };
+  }
+
+  afterAll(async () => {
+    await grantRegistryRef?.cleanup();
+  });
+
+  it("GET /_healthcheck returns 200", async () => {
+    const { app, grantRegistry } = await buildApp();
+    grantRegistryRef = grantRegistry;
+    appRef = app;
+
+    const res = await request(app).get("/_healthcheck");
+    expect(res.status).toBe(200);
+  });
+
+  it("POST /oauth/token with unsupported grant_type returns 400", async () => {
+    const { app, grantRegistry } = await buildApp();
+    grantRegistryRef = grantRegistry;
+    appRef = app;
+
+    const res = await request(app)
+      .post("/oauth/token")
+      .type("form")
+      .send({ grant_type: "unsupported" });
+
+    expect(res.status).toBe(400);
+  });
+});

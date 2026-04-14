@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+.worktrees/
+docs/superpowers/
+create-app/templates/
+pnpm-lock.yaml

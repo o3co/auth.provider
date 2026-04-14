@@ -1,0 +1,56 @@
+{
+	"name": "@o3co/auth-provider-core",
+	"description": "Core types, config, and utilities for auth.provider",
+	"version": "0.1.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": ["dist", "README.md", "LICENSE"],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/core"
+	},
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"dependencies": {
+		"bcrypt": "^6.0.0",
+		"jose": "^6.2.2",
+		"js-yaml": "^4.1.1",
+		"zod": "^4.3.6"
+	},
+	"peerDependencies": {
+		"express": "^5.0.0"
+	},
+	"peerDependenciesMeta": {
+		"express": {
+			"optional": true
+		}
+	},
+	"devDependencies": {
+		"@o3co/ts.hocon": "^0.1.2",
+		"@types/bcrypt": "^6.0.0",
+		"@types/express": "^5.0.6",
+		"@types/express-session": "^1",
+		"@types/js-yaml": "^4.0.9",
+		"@types/node": "^25.1.0",
+		"express": "^5.2.1",
+		"pino": "^10.3.1",
+		"vitest": "^4.1.2"
+	}
+}

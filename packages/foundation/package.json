@@ -1,0 +1,46 @@
+{
+	"name": "@o3co/auth-provider-foundation",
+	"description": "Production adapters for auth.provider",
+	"version": "0.1.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": ["dist", "README.md", "LICENSE"],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/foundation"
+	},
+	"scripts": {
+		"build": "tsc",
+		"test": "vitest run"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "^0.0.0",
+		"redis": "^5.10.0"
+	},
+	"peerDependenciesMeta": {
+		"redis": { "optional": true }
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@types/node": "^25.1.0",
+		"msw": "^2.12.14",
+		"redis": "^5.10.0",
+		"pino": "^10.3.1",
+		"vitest": "^4.1.2"
+	}
+}
