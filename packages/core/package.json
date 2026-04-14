@@ -27,7 +27,10 @@
 		"test": "vitest run"
 	},
 	"imports": {
-		"#/*": "./dist/*"
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
 	},
 	"dependencies": {
 		"bcrypt": "^6.0.0",
