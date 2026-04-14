@@ -16,9 +16,9 @@
 import type { Router } from "express";
 import type { z } from "zod";
 
-import type { CoreConfig } from "#/config/application.schema.mjs";
-import type { GrantRegistry } from "#/grants/registry.mjs";
-import type { KeyStore } from "#/keys/KeyStore.mjs";
+import type { CoreConfig } from "../config/application.schema.mjs";
+import type { GrantRegistry } from "../grants/registry.mjs";
+import type { KeyStore } from "../keys/KeyStore.mjs";
 
 /**
  * Resolves a module specifier to a URL/path that can be passed to dynamic import().

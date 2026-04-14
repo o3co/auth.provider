@@ -23,6 +23,7 @@
 		"directory": "packages/foundation"
 	},
 	"scripts": {
+		"prebuild": "rimraf dist",
 		"build": "tsc",
 		"test": "vitest run"
 	},
