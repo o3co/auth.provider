@@ -48,7 +48,7 @@
 		}
 	},
 	"devDependencies": {
-		"@o3co/ts.hocon": "^0.1.2",
+		"@o3co/ts.hocon": "^1.1.0",
 		"@types/bcrypt": "^6.0.0",
 		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
