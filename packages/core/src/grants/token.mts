@@ -13,11 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
 import type { KeyStore } from "#/keys/KeyStore.mjs";
 
 export const formatObject = <T extends object>(data: T): Partial<T> => {
-	return Object.fromEntries(Object.entries(data).filter(([, v]) => v)) as Partial<T>;
+	return Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined && v !== null)) as Partial<T>;
 };
 
 export interface Token {
@@ -90,7 +91,8 @@ export const generateToken = async (
 		...(scope ? { scope } : {}),
 	})
 		.setProtectedHeader({ alg: keyStore.algorithm, kid, ...(tokenType ? { typ: tokenType } : {}) })
-		.setIssuedAt();
+		.setIssuedAt()
+		.setJti(randomUUID());
 
 	if (expiresIn !== undefined) {
 		builder = builder.setExpirationTime(`${expiresIn}s`);

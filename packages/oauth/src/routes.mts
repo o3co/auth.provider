@@ -83,7 +83,7 @@ export const createOAuthRouter = async (
     .use(express.urlencoded({ extended: false }))
     .post("/token", tokenRateLimit, async (req: Request, res: Response) => {
       const { grant_type } = req.body;
-      const issuer = req.get("host");
+      const issuer = config.oauth.jwt.issuer ?? req.get("host");
 
       if (typeof grant_type !== "string" || grant_type === "") {
         return res.status(400).json({
@@ -118,10 +118,15 @@ export const createOAuthRouter = async (
       }
 
       if ("tokens" in result) {
+        res.set("Cache-Control", "no-store");
+        res.set("Pragma", "no-cache");
         return res.status(result.status).json(result.tokens);
       }
       const errorBody: Record<string, unknown> = { error: result.error };
       if (result.errorDescription) errorBody.error_description = result.errorDescription;
+      if (result.status === 401) {
+        res.set("WWW-Authenticate", "Bearer");
+      }
       return res.status(result.status).json(errorBody);
     })
     // RFC 7662: Token Introspection
@@ -159,7 +164,7 @@ export const createOAuthRouter = async (
           const header = decodeProtectedHeader(token);
           const key = keyStore.getVerificationKey(header.kid ?? keyStore.current.kid);
           const { payload } = await jwtVerify(token, key);
-          const { exp, iss, aud, sub } = payload;
+          const { exp, iat, iss, aud, sub } = payload;
           const claims = payload as Record<string, unknown>;
           const azp = typeof claims.azp === "string" ? claims.azp : undefined;
           const scope = typeof claims.scope === "string" ? claims.scope : undefined;
@@ -167,6 +172,7 @@ export const createOAuthRouter = async (
             formatObject({
               active: true,
               exp,
+              iat,
               iss,
               aud,
               sub,

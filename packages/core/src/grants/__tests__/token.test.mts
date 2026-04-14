@@ -155,6 +155,23 @@ describe("generateToken", () => {
 		expect(token.scope).toBeUndefined();
 		expect(token.subject).toBeUndefined();
 	});
+
+	it("sets jti claim in JWT payload", async () => {
+		const token = await generateToken({}, { keyStore, tokenType: "at+jwt" });
+		const payload = decodeJwt(token.token);
+		expect(typeof payload.jti).toBe("string");
+		expect(payload.jti).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+		);
+	});
+
+	it("generates a unique jti per token", async () => {
+		const t1 = await generateToken({}, { keyStore, tokenType: "at+jwt" });
+		const t2 = await generateToken({}, { keyStore, tokenType: "at+jwt" });
+		const p1 = decodeJwt(t1.token);
+		const p2 = decodeJwt(t2.token);
+		expect(p1.jti).not.toBe(p2.jti);
+	});
 });
 
 describe("generateTokenResponse", () => {

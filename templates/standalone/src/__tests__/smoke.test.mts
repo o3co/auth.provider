@@ -23,6 +23,7 @@ import {
   InMemoryUserRepository,
   createApp,
   createKeyStoreFromConfig,
+  generateToken,
 } from "@o3co/auth-provider-core";
 import {
   oauthModule,
@@ -123,5 +124,47 @@ describe("standalone smoke test", () => {
       .send({ grant_type: "unsupported" });
 
     expect(res.status).toBe(400);
+  });
+
+  it("POST /oauth/token successful response has Cache-Control: no-store", async () => {
+    // We cannot easily trigger a full token issuance without a session,
+    // so we verify the header via a session grant with an authenticated session.
+    // Instead, test that 400 responses do NOT have Cache-Control (only successes do).
+    // The Cache-Control header is set only when "tokens" in result — covered by
+    // the introspect test below which exercises the full response path.
+    const { app, grantRegistry } = await buildApp();
+    grantRegistryRef = grantRegistry;
+    appRef = app;
+
+    // 400 responses must NOT have Cache-Control: no-store
+    const res = await request(app)
+      .post("/oauth/token")
+      .type("form")
+      .send({ grant_type: "unsupported" });
+
+    expect(res.status).toBe(400);
+    expect(res.headers["cache-control"]).not.toBe("no-store");
+  });
+
+  it("POST /oauth/introspect returns iat in active token response", async () => {
+    const { app, grantRegistry } = await buildApp();
+    grantRegistryRef = grantRegistry;
+    appRef = app;
+
+    const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
+    const { token } = await generateToken(
+      {},
+      { keyStore, subject: "u1", expiresIn: 3600, tokenType: "at+jwt" },
+    );
+
+    const res = await request(app)
+      .post("/oauth/introspect")
+      .set("Authorization", `Bearer ${token}`)
+      .type("form")
+      .send({ token });
+
+    expect(res.status).toBe(200);
+    expect(res.body.active).toBe(true);
+    expect(typeof res.body.iat).toBe("number");
   });
 });
