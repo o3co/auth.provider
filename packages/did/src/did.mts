@@ -42,6 +42,7 @@ export const createDidGrant = (
 
 	const didConfig = (config.oauth.grants as Record<string, Record<string, unknown> | undefined>).did;
 	const messageMaxAgeMs = ((didConfig?.messageMaxAgeSec as number | undefined) ?? DEFAULT_MESSAGE_MAX_AGE_SEC) * 1000;
+	const allowedAudiences = (didConfig?.allowedAudiences as string[] | undefined) ?? [];
 
 	const verifierRegistry = createDefaultVerifierRegistry();
 	const configuredAlgorithm = didConfig?.algorithm;
@@ -191,10 +192,23 @@ export const createDidGrant = (
 				};
 			}
 
-			// 8. Store nonce (only after verification passed)
+			// 8. Validate audience against allowlist (empty allowlist = any audience accepted)
+			if (verification.audience && allowedAudiences.length > 0) {
+				if (!allowedAudiences.includes(verification.audience)) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: `audience "${verification.audience}" is not allowed`,
+						},
+					};
+				}
+			}
+
+			// 9. Store nonce (only after ALL validations passed)
 			nonceStore.set(nonceKey, Date.now());
 
-			// 9. Generate token
+			// 10. Generate token
 			return {
 				result: {
 					status: 200,
