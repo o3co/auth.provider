@@ -13,21 +13,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type {
-	AppConfig,
-	ClientRepository,
-	CodeRepository,
-	Module,
-	ModuleContext,
+import {
+	type AppConfig,
+	type ClientRepository,
+	type CodeRepository,
+	fullSectionsSchema,
+	type Module,
+	type ModuleContext,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
+
+const oauthAuthorizationConfigSchema = z.object({
+	endpoints: fullSectionsSchema.shape.endpoints,
+	clients: fullSectionsSchema.shape.clients,
+});
 
 export const oauthAuthorizationModule = (params: {
 	codeRepository: CodeRepository;
 	clientRepository: ClientRepository;
 }): Module => ({
 	name: "oauth-authorization",
+	configSchema: oauthAuthorizationConfigSchema,
 	async init(context: ModuleContext): Promise<void> {
 		const config = context.config as AppConfig;
 		const grantsConfig = config.oauth.grants as Record<string, { enabled?: boolean }>;

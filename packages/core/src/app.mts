@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 import type { RequestHandler, Router } from "express";
+import type { z } from "zod";
 
 import type { CoreConfig } from "./config/application.schema.mjs";
+import { composeConfigSchema } from "./config/application.schema.mjs";
 import { GrantRegistry } from "./grants/registry.mjs";
 import type { KeyStore } from "./keys/KeyStore.mjs";
 import type { Module, ModuleContext, PathResolver } from "./modules/types.mjs";
@@ -68,6 +70,13 @@ export function createApp(options: AppOptions): AppResult {
 	};
 
 	async function init(): Promise<void> {
+		const moduleSchemas = modules
+			.map((m) => m.configSchema)
+			.filter((s): s is z.ZodObject<z.ZodRawShape> => s !== undefined);
+		if (moduleSchemas.length > 0) {
+			composeConfigSchema(moduleSchemas).parse(config);
+		}
+
 		for (const module of modules) {
 			await module.init(context);
 		}
