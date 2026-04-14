@@ -16,6 +16,7 @@
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
 import type {
+  AppConfig,
   ClientRepository,
   CodeRepository,
   Module,
@@ -36,6 +37,8 @@ export const oauthModule = (params: {
 }): Module => ({
   name: "oauth",
   async init(context: ModuleContext): Promise<void> {
+    const config = context.config as AppConfig;
+
     // Resolve passport via pathResolver for client credential auth on introspect
     const { default: passport } = (await import(
       context.pathResolver("passport")
@@ -73,7 +76,7 @@ export const oauthModule = (params: {
     const { router: oauthRouter } = await createOAuthRouter(express, {
       passport,
       registry: context.grantRegistry,
-      config: context.config,
+      config,
       clientRepository: params.clientRepository,
       codeRepository: params.codeRepository,
       keyStore: context.keyStore,

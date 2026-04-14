@@ -15,12 +15,12 @@
  */
 import type { RequestHandler, Router } from "express";
 
-import type { CoreConfig } from "#/config/application.schema.mjs";
-import { GrantRegistry } from "#/grants/registry.mjs";
-import type { KeyStore } from "#/keys/KeyStore.mjs";
-import type { Module, ModuleContext, PathResolver } from "#/modules/types.mjs";
-import * as healthcheck from "#/routes/Healthcheck.mjs";
-import * as jwks from "#/routes/Jwks.mjs";
+import type { CoreConfig } from "./config/application.schema.mjs";
+import { GrantRegistry } from "./grants/registry.mjs";
+import type { KeyStore } from "./keys/KeyStore.mjs";
+import type { Module, ModuleContext, PathResolver } from "./modules/types.mjs";
+import * as healthcheck from "./routes/Healthcheck.mjs";
+import * as jwks from "./routes/Jwks.mjs";
 
 type ExpressLike = {
 	Router: () => Router;

@@ -15,7 +15,7 @@
  */
 import type { Request, Response, Router } from "express";
 import { exportJWK } from "jose";
-import type { KeyStore } from "#/keys/KeyStore.mjs";
+import type { KeyStore } from "../keys/KeyStore.mjs";
 
 export const createRouter = (
 	express: { Router: () => Router },

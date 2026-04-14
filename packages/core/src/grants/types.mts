@@ -15,9 +15,9 @@
  */
 import type { z } from "zod";
 
-import type { CoreConfig } from "#/config/application.schema.mjs";
-import type { KeyStore } from "#/keys/KeyStore.mjs";
-import type { PathResolver } from "#/modules/types.mjs";
+import type { CoreConfig } from "../config/application.schema.mjs";
+import type { KeyStore } from "../keys/KeyStore.mjs";
+import type { PathResolver } from "../modules/types.mjs";
 
 export interface SessionData {
 	user?: Record<string, unknown>;

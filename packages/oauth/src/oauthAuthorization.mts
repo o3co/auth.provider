@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import type {
+	AppConfig,
 	ClientRepository,
 	CodeRepository,
 	Module,
@@ -28,14 +29,15 @@ export const oauthAuthorizationModule = (params: {
 }): Module => ({
 	name: "oauth-authorization",
 	async init(context: ModuleContext): Promise<void> {
-		const grantsConfig = context.config.oauth.grants as Record<
+		const config = context.config as AppConfig;
+		const grantsConfig = config.oauth.grants as Record<
 			string,
 			{ enabled?: boolean }
 		>;
 
 		if (grantsConfig.authorization?.enabled !== false) {
 			const handler = createAuthorizationGrant({
-				config: context.config,
+				config,
 				keyStore: context.keyStore,
 				codeRepository: params.codeRepository,
 				clientRepository: params.clientRepository,
@@ -45,7 +47,7 @@ export const oauthAuthorizationModule = (params: {
 
 		if (grantsConfig.refresh_token?.enabled !== false) {
 			const handler = createRefreshTokenGrant({
-				config: context.config,
+				config,
 				keyStore: context.keyStore,
 			});
 			context.grantRegistry.register("refresh_token", handler);

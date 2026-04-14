@@ -21,6 +21,7 @@
     "directory": "packages/did"
   },
   "scripts": {
+    "prebuild": "rimraf dist",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
