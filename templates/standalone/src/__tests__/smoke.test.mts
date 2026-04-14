@@ -88,7 +88,7 @@ describe("standalone smoke test", () => {
         oauthModule({ clientRepository, codeRepository, express }),
         sessionModule({ userRepository, express }),
         oauthSessionModule({ clientRepository }),
-        oauthAuthorizationModule({ codeRepository }),
+        oauthAuthorizationModule({ codeRepository, clientRepository }),
       ],
     });
 
