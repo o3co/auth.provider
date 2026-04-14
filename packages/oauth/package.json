@@ -27,6 +27,7 @@
     }
   },
   "scripts": {
+    "prebuild": "rm -rf dist",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

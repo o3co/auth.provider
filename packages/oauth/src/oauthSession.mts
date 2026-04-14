@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import type {
+	AppConfig,
 	ClientRepository,
 	Module,
 	ModuleContext,
@@ -25,13 +26,14 @@ export const oauthSessionModule = (params: {
 }): Module => ({
 	name: "oauth-session",
 	async init(context: ModuleContext): Promise<void> {
+		const config = context.config as AppConfig;
 		const grantConfig = (
-			context.config.oauth.grants as Record<string, { enabled?: boolean }>
+			config.oauth.grants as Record<string, { enabled?: boolean }>
 		).session;
 		if (grantConfig?.enabled === false) return;
 
 		const handler = createSessionGrant({
-			config: context.config,
+			config,
 			keyStore: context.keyStore,
 			clientRepository: params.clientRepository,
 		});

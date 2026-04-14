@@ -15,6 +15,7 @@
  */
 import type { RequestHandler, Router } from "express";
 import type {
+	AppConfig,
 	Module,
 	ModuleContext,
 	UserRepository,
@@ -41,24 +42,25 @@ export const sessionModule = (params: {
 			const mod = await import(context.pathResolver("express"));
 			return mod.default as ExpressLike;
 		})();
+		const config = context.config as AppConfig;
 
 		// Initialize passport with pathResolver
 		const passport = await createPassport({
 			pathResolver: context.pathResolver,
 			userRepository: params.userRepository,
-			config: context.config,
+			config,
 		});
 
 		// Build federation registry
 		const federationRegistry = new FederationRegistry();
-		federationRegistry.register(createGoogleProvider(context.config));
+		federationRegistry.register(createGoogleProvider(config));
 
 		// Mount session routes
 		context.router.use(
 			"/session",
 			sessionRoutes.createRouter(express, {
 				passport,
-				config: context.config,
+				config,
 			}),
 		);
 
@@ -67,7 +69,7 @@ export const sessionModule = (params: {
 			"/session",
 			federationRoutes.createRouter(express, {
 				passport,
-				config: context.config,
+				config,
 				federationRegistry,
 			}),
 		);
