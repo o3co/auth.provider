@@ -13,55 +13,56 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it } from "vitest";
+
 import type { AppConfig } from "@o3co/auth-provider-core";
+import { describe, expect, it } from "vitest";
 import { createGoogleProvider } from "#/federations/google.mjs";
 
 const baseConfig = {
-  federations: {
-    google: {
-      enabled: true,
-      clientId: "gid",
-      clientSecret: "gsecret",
-      callbackURL: "http://localhost/callback",
-    },
-  },
-  session: { domain: ".example.com" },
-  endpoints: {
-    login: { url: "/login" },
-    client: { url: "http://localhost:3001" },
-    authCallback: { url: "/auth/callback" },
-  },
+	federations: {
+		google: {
+			enabled: true,
+			clientId: "gid",
+			clientSecret: "gsecret",
+			callbackURL: "http://localhost/callback",
+		},
+	},
+	session: { domain: ".example.com" },
+	endpoints: {
+		login: { url: "/login" },
+		client: { url: "http://localhost:3001" },
+		authCallback: { url: "/auth/callback" },
+	},
 } as unknown as AppConfig;
 
 describe("createGoogleProvider", () => {
-  it("returns a provider with name 'google'", () => {
-    const provider = createGoogleProvider(baseConfig);
-    expect(provider.name).toBe("google");
-    expect(provider.strategyName).toBe("google");
-  });
+	it("returns a provider with name 'google'", () => {
+		const provider = createGoogleProvider(baseConfig);
+		expect(provider.name).toBe("google");
+		expect(provider.strategyName).toBe("google");
+	});
 
-  it("validates redirect URL against session domain", () => {
-    const provider = createGoogleProvider(baseConfig);
-    const result = provider.validateRedirect("https://app.example.com/callback");
-    expect(result.ok).toBe(true);
-  });
+	it("validates redirect URL against session domain", () => {
+		const provider = createGoogleProvider(baseConfig);
+		const result = provider.validateRedirect("https://app.example.com/callback");
+		expect(result.ok).toBe(true);
+	});
 
-  it("rejects redirect URL from different domain", () => {
-    const provider = createGoogleProvider(baseConfig);
-    const result = provider.validateRedirect("https://evil.com/callback");
-    expect(result.ok).toBe(false);
-  });
+	it("rejects redirect URL from different domain", () => {
+		const provider = createGoogleProvider(baseConfig);
+		const result = provider.validateRedirect("https://evil.com/callback");
+		expect(result.ok).toBe(false);
+	});
 
-  it("resolves callback redirect with redirectTo", () => {
-    const provider = createGoogleProvider(baseConfig);
-    const result = provider.resolveCallbackRedirect({
-      redirectTo: "https://app.example.com/dashboard",
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.value).toContain("/auth/callback");
-      expect(result.value).toContain("redirect_to=");
-    }
-  });
+	it("resolves callback redirect with redirectTo", () => {
+		const provider = createGoogleProvider(baseConfig);
+		const result = provider.resolveCallbackRedirect({
+			redirectTo: "https://app.example.com/dashboard",
+		});
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toContain("/auth/callback");
+			expect(result.value).toContain("redirect_to=");
+		}
+	});
 });

@@ -16,7 +16,7 @@
 import type { PathResolver } from "@o3co/auth-provider-core";
 
 import { JwsVerifier } from "./jws.mjs";
-import { VerifierRegistry, type VerifierFactory } from "./registry.mjs";
+import { type VerifierFactory, VerifierRegistry } from "./registry.mjs";
 import type { SignatureVerifier } from "./types.mjs";
 
 // Algorithm is now an open string type — any registered algorithm name is valid
@@ -36,9 +36,10 @@ export function createDefaultVerifierRegistry(): VerifierRegistry {
 			const { Ed25519RawVerifier } = await import("./ed25519Raw.mjs");
 			return new Ed25519RawVerifier(pathResolver);
 		} catch (err) {
-			const code = typeof err === "object" && err !== null && "code" in err
-				? (err as { code: unknown }).code
-				: undefined;
+			const code =
+				typeof err === "object" && err !== null && "code" in err
+					? (err as { code: unknown }).code
+					: undefined;
 			const message = err instanceof Error ? err.message : String(err);
 			if (
 				(code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") &&
@@ -46,7 +47,7 @@ export function createDefaultVerifierRegistry(): VerifierRegistry {
 			) {
 				throw new Error(
 					"ed25519_raw algorithm requires @noble/ed25519 package. " +
-					"Install it with: pnpm add @noble/ed25519 — or switch to a JWS algorithm (ed25519_jws, es256_jws, es256k_jws).",
+						"Install it with: pnpm add @noble/ed25519 — or switch to a JWS algorithm (ed25519_jws, es256_jws, es256k_jws).",
 				);
 			}
 			throw err;
@@ -60,11 +61,16 @@ export function createDefaultVerifierRegistry(): VerifierRegistry {
 	return registry;
 }
 
-export async function createVerifier(algorithm: Algorithm, pathResolver?: PathResolver): Promise<SignatureVerifier> {
+export async function createVerifier(
+	algorithm: Algorithm,
+	pathResolver?: PathResolver,
+): Promise<SignatureVerifier> {
 	const registry = createDefaultVerifierRegistry();
 	const factory = registry.get(algorithm);
 	if (!factory) {
-		throw new Error(`Unsupported algorithm: "${algorithm}". Supported: ${registry.algorithms().join(", ")}`);
+		throw new Error(
+			`Unsupported algorithm: "${algorithm}". Supported: ${registry.algorithms().join(", ")}`,
+		);
 	}
 	return factory(pathResolver);
 }

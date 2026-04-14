@@ -13,16 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it, vi } from "vitest";
-import type { Router } from "express";
+
 import {
-	GrantRegistry,
-	createSymmetricKeyStore,
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createSymmetricKeyStore,
+	GrantRegistry,
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
+import type { Router } from "express";
+import { describe, expect, it, vi } from "vitest";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 
 const mockClientRepository: ClientRepository = {

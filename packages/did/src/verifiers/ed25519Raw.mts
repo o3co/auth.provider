@@ -15,7 +15,12 @@
  */
 import type { PathResolver } from "@o3co/auth-provider-core";
 import type { ExtractedKey } from "../resolver/extractKey.mjs";
-import type { ParsedMessage, SignatureVerifier, VerificationContext, VerificationResult } from "./types.mjs";
+import type {
+	ParsedMessage,
+	SignatureVerifier,
+	VerificationContext,
+	VerificationResult,
+} from "./types.mjs";
 
 // Base58btc alphabet (Bitcoin alphabet)
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -60,7 +65,7 @@ function extractEd25519PublicKeyBytes(resolvedKey: ExtractedKey): Uint8Array {
 		if (!jwk.x) throw new Error("JWK is missing x field");
 		// base64url decode
 		const padded = jwk.x.replace(/-/g, "+").replace(/_/g, "/");
-		const base64 = padded.padEnd(padded.length + (4 - (padded.length % 4)) % 4, "=");
+		const base64 = padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), "=");
 		return Uint8Array.from(Buffer.from(base64, "base64"));
 	}
 
@@ -78,20 +83,28 @@ function extractEd25519PublicKeyBytes(resolvedKey: ExtractedKey): Uint8Array {
 }
 
 export class Ed25519RawVerifier implements SignatureVerifier {
-	private verifyAsync: ((sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean>) | undefined;
+	private verifyAsync:
+		| ((sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean>)
+		| undefined;
 	private pathResolver: PathResolver | undefined;
 
 	constructor(pathResolver?: PathResolver) {
 		this.pathResolver = pathResolver;
 	}
 
-	private async loadVerifyAsync(): Promise<(sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean>> {
+	private async loadVerifyAsync(): Promise<
+		(sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean>
+	> {
 		if (this.verifyAsync) return this.verifyAsync;
 
 		const specifier = "@noble/ed25519";
 		const mod = this.pathResolver
-			? (await import(this.pathResolver(specifier))) as { verifyAsync: (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean> }
-			: (await import(specifier)) as { verifyAsync: (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean> };
+			? ((await import(this.pathResolver(specifier))) as {
+					verifyAsync: (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean>;
+				})
+			: ((await import(specifier)) as {
+					verifyAsync: (sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean>;
+				});
 
 		this.verifyAsync = mod.verifyAsync;
 		return this.verifyAsync;
@@ -113,12 +126,20 @@ export class Ed25519RawVerifier implements SignatureVerifier {
 		try {
 			parsedMessage = JSON.parse(body.message) as ParsedMessage;
 		} catch {
-			return { valid: false, error: "invalid_request", errorDescription: "message must be valid JSON" };
+			return {
+				valid: false,
+				error: "invalid_request",
+				errorDescription: "message must be valid JSON",
+			};
 		}
 
 		// 3. Validate message.did matches ctx.did
 		if (parsedMessage.did !== did) {
-			return { valid: false, error: "invalid_request", errorDescription: "message.did must match did" };
+			return {
+				valid: false,
+				error: "invalid_request",
+				errorDescription: "message.did must match did",
+			};
 		}
 
 		// 4. Extract public key bytes from resolvedKey
@@ -141,10 +162,18 @@ export class Ed25519RawVerifier implements SignatureVerifier {
 
 			const valid = await verifyAsync(signatureBytes, messageBytes, publicKeyBytes);
 			if (!valid) {
-				return { valid: false, error: "invalid_grant", errorDescription: "signature verification failed" };
+				return {
+					valid: false,
+					error: "invalid_grant",
+					errorDescription: "signature verification failed",
+				};
 			}
 		} catch {
-			return { valid: false, error: "invalid_grant", errorDescription: "signature verification error" };
+			return {
+				valid: false,
+				error: "invalid_grant",
+				errorDescription: "signature verification error",
+			};
 		}
 
 		// 6. Return success

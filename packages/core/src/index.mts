@@ -14,17 +14,27 @@
  * limitations under the License.
  */
 
+// App factory
+export { type AppOptions, type AppResult, createApp } from "./app.mjs";
 // Configuration
 export {
 	type AppConfig,
 	AppConfigSchema,
-	composeConfigSchema,
 	type CoreConfig,
 	CoreConfigSchema,
+	composeConfigSchema,
 } from "./config/application.schema.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
-export type { GrantModule } from "./grants/types.mjs";
+// Token formatting utility (used by oauth package)
+export {
+	formatObject,
+	type GenerateTokenOptions,
+	generateToken,
+	generateTokenResponse,
+	type Token,
+	type TokenResponse,
+} from "./grants/token.mjs";
 export type {
 	GrantContext,
 	GrantDependencies,
@@ -32,18 +42,26 @@ export type {
 	GrantFactory,
 	GrantHandler,
 	GrantHandlerResult,
+	GrantModule,
 	GrantResult,
 	GrantSuccess,
 	SessionData,
 	SessionMutation,
 } from "./grants/types.mjs";
+// Keys
+export type {
+	AsymmetricKeyStoreOptions,
+	JwtConfig,
+	KeyStore,
+	ManagedKey,
+} from "./keys/KeyStore.mjs";
 export {
-	generateToken,
-	generateTokenResponse,
-	type GenerateTokenOptions,
-	type Token,
-	type TokenResponse,
-} from "./grants/token.mjs";
+	createAsymmetricKeyStore,
+	createKeyStoreFromConfig,
+	createSymmetricKeyStore,
+} from "./keys/KeyStore.mjs";
+// Module system
+export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
@@ -67,12 +85,3 @@ export {
 } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
-// Keys
-export type { AsymmetricKeyStoreOptions, JwtConfig, KeyStore, ManagedKey } from "./keys/KeyStore.mjs";
-export { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "./keys/KeyStore.mjs";
-// Module system
-export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
-// App factory
-export { createApp, type AppOptions, type AppResult } from "./app.mjs";
-// Token formatting utility (used by oauth package)
-export { formatObject } from "./grants/token.mjs";

@@ -13,16 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { decodeProtectedHeader, jwtVerify, type JWTPayload } from "jose";
 
 import {
-	generateToken,
-	generateTokenResponse,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
 	type GrantHandlerResult,
+	generateToken,
+	generateTokenResponse,
 } from "@o3co/auth-provider-core";
+import { decodeProtectedHeader, type JWTPayload, jwtVerify } from "jose";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
@@ -94,15 +94,24 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 
 			const claims = tokenPayload as Record<string, unknown>;
 			// Read standard claims, with legacy fallback for pre-standardization tokens
-			const subjectStr = typeof tokenPayload.sub === "string" ? tokenPayload.sub
-				: typeof (claims.user as Record<string, unknown> | undefined)?.id === "string" ? (claims.user as Record<string, unknown>).id as string
-				: undefined;
-			const azpStr = typeof claims.azp === "string" ? claims.azp as string
-				: typeof (claims.client as Record<string, unknown> | undefined)?.id === "string" ? (claims.client as Record<string, unknown>).id as string
-				: undefined;
-			const scopeStr = typeof claims.scope === "string" ? claims.scope as string
-				: Array.isArray(claims.scopes) ? (claims.scopes as string[]).join(" ")
-				: undefined;
+			const subjectStr =
+				typeof tokenPayload.sub === "string"
+					? tokenPayload.sub
+					: typeof (claims.user as Record<string, unknown> | undefined)?.id === "string"
+						? ((claims.user as Record<string, unknown>).id as string)
+						: undefined;
+			const azpStr =
+				typeof claims.azp === "string"
+					? (claims.azp as string)
+					: typeof (claims.client as Record<string, unknown> | undefined)?.id === "string"
+						? ((claims.client as Record<string, unknown>).id as string)
+						: undefined;
+			const scopeStr =
+				typeof claims.scope === "string"
+					? (claims.scope as string)
+					: Array.isArray(claims.scopes)
+						? (claims.scopes as string[]).join(" ")
+						: undefined;
 
 			if (!subjectStr) {
 				return {
@@ -136,26 +145,32 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken({}, {
-							expiresIn: config.oauth.accessToken.expiresIn,
-							keyStore,
-							issuer,
-							audience: tokenAud ?? client_id ?? null,
-							subject: subjectStr ?? null,
-							authorizedParty: azpStr ?? null,
-							scope: grantedScope,
-							tokenType: "at+jwt",
-						}),
-						refreshToken: await generateToken({}, {
-							expiresIn: config.oauth.refreshToken.expiresIn,
-							keyStore,
-							issuer,
-							audience: tokenAud ?? client_id ?? null,
-							subject: subjectStr ?? null,
-							authorizedParty: azpStr ?? null,
-							scope: grantedScope,
-							tokenType: "rt+jwt",
-						}),
+						accessToken: await generateToken(
+							{},
+							{
+								expiresIn: config.oauth.accessToken.expiresIn,
+								keyStore,
+								issuer,
+								audience: tokenAud ?? client_id ?? null,
+								subject: subjectStr ?? null,
+								authorizedParty: azpStr ?? null,
+								scope: grantedScope,
+								tokenType: "at+jwt",
+							},
+						),
+						refreshToken: await generateToken(
+							{},
+							{
+								expiresIn: config.oauth.refreshToken.expiresIn,
+								keyStore,
+								issuer,
+								audience: tokenAud ?? client_id ?? null,
+								subject: subjectStr ?? null,
+								authorizedParty: azpStr ?? null,
+								scope: grantedScope,
+								tokenType: "rt+jwt",
+							},
+						),
 					}),
 				},
 			};

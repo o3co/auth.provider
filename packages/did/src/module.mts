@@ -13,21 +13,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { z } from "zod";
+
 import type { Module, ModuleContext } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import { createDidGrant } from "./did.mjs";
 import type { DidDocumentResolver } from "./resolver/types.mjs";
 
 export const didConfigSchema = z.object({
-	did: z.object({
-		enabled: z.boolean().default(true),
-		/** @deprecated Use supportedAlgorithms instead. Kept for backward compatibility. */
-		algorithm: z.string().optional(),
-		supportedAlgorithms: z.array(z.string()).default(["ed25519_raw"]),
-		messageMaxAgeSec: z.coerce.number().default(300),
-		allowedAudiences: z.array(z.string()).default([]),
-	// Full default object required by zod v4 typing — field-level defaults are authoritative
-	}).default({ enabled: true, supportedAlgorithms: ["ed25519_raw"], messageMaxAgeSec: 300, allowedAudiences: [] }),
+	did: z
+		.object({
+			enabled: z.boolean().default(true),
+			/** @deprecated Use supportedAlgorithms instead. Kept for backward compatibility. */
+			algorithm: z.string().optional(),
+			supportedAlgorithms: z.array(z.string()).default(["ed25519_raw"]),
+			messageMaxAgeSec: z.coerce.number().default(300),
+			allowedAudiences: z.array(z.string()).default([]),
+			// Full default object required by zod v4 typing — field-level defaults are authoritative
+		})
+		.default({
+			enabled: true,
+			supportedAlgorithms: ["ed25519_raw"],
+			messageMaxAgeSec: 300,
+			allowedAudiences: [],
+		}),
 });
 
 export type DidModuleOptions =
@@ -45,12 +53,13 @@ export type DidModuleOptions =
 export const oauthDidModule = (options: DidModuleOptions): Module => ({
 	name: "oauth-did",
 	async init(context: ModuleContext): Promise<void> {
-		const grantConfig = (context.config.oauth.grants as Record<string, Record<string, unknown> | undefined>).did;
+		const grantConfig = (
+			context.config.oauth.grants as Record<string, Record<string, unknown> | undefined>
+		).did;
 		if (grantConfig?.enabled === false) return;
 
-		const resolver = "resolver" in options
-			? options.resolver
-			: options.resolverFactory(grantConfig ?? {});
+		const resolver =
+			"resolver" in options ? options.resolver : options.resolverFactory(grantConfig ?? {});
 
 		const handler = createDidGrant(
 			{

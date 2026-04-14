@@ -13,15 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { describe, expect, it, vi } from "vitest";
-import { decodeJwt } from "jose";
 
 import {
-	createSymmetricKeyStore,
 	type ClientRepository,
+	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
+import { decodeJwt } from "jose";
+import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 
 const mockConfig = {
@@ -38,7 +38,9 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-const makeDeps = (overrides?: Partial<GrantDependencies & { clientRepository: ClientRepository }>) => ({
+const makeDeps = (
+	overrides?: Partial<GrantDependencies & { clientRepository: ClientRepository }>,
+) => ({
 	config: mockConfig,
 	keyStore: createSymmetricKeyStore("test-secret"),
 	clientRepository: {

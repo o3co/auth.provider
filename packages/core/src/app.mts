@@ -43,26 +43,21 @@ export interface AppResult {
 }
 
 export function createApp(options: AppOptions): AppResult {
-	const {
-		pathResolver = (s: string) => s,
-		config,
-		keyStore,
-		modules,
-	} = options;
+	const { pathResolver = (s: string) => s, config, keyStore, modules } = options;
 
-	const express: ExpressLike = options.express ?? (() => {
-		throw new Error(
-			"express must be provided in AppOptions or resolved via pathResolver before createApp is called",
-		);
-	})();
+	const express: ExpressLike =
+		options.express ??
+		(() => {
+			throw new Error(
+				"express must be provided in AppOptions or resolved via pathResolver before createApp is called",
+			);
+		})();
 
 	const router = express.Router();
 	const grantRegistry = new GrantRegistry();
 
 	// Wire core infrastructure routes (pure — no external deps)
-	router
-		.use(healthcheck.createRouter(express))
-		.use(jwks.createRouter(express, keyStore));
+	router.use(healthcheck.createRouter(express)).use(jwks.createRouter(express, keyStore));
 
 	const context: ModuleContext = {
 		pathResolver,

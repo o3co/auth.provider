@@ -67,5 +67,4 @@ describe("public API", () => {
 	it("exports formatObject function", () => {
 		expect(typeof formatObject).toBe("function");
 	});
-
 });

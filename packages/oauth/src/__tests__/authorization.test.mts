@@ -14,17 +14,15 @@
  * limitations under the License.
  */
 import crypto from "node:crypto";
-
-import { describe, expect, it, vi } from "vitest";
-import { decodeJwt } from "jose";
-
 import {
-	createSymmetricKeyStore,
 	type ClientRepository,
 	type CodeRepository,
+	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
+import { decodeJwt } from "jose";
+import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 
 const mockConfig = {
@@ -46,7 +44,10 @@ const mockClientRepository: ClientRepository = {
 	authenticate: vi.fn().mockResolvedValue(null),
 };
 
-function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"], clientRepository?: ClientRepository) {
+function makeDeps(
+	consumeByCodeImpl: CodeRepository["consumeByCode"],
+	clientRepository?: ClientRepository,
+) {
 	return {
 		config: mockConfig,
 		keyStore: createSymmetricKeyStore("test-secret"),
@@ -362,7 +363,11 @@ describe("createAuthorizationGrant", () => {
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1", redirect_uri: "https://evil.com/callback" },
-					session: { code: "abc", code_client_id: "client1", code_redirect_uri: "https://example.com/callback" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						code_redirect_uri: "https://example.com/callback",
+					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 				};
@@ -383,7 +388,11 @@ describe("createAuthorizationGrant", () => {
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1" },
-					session: { code: "abc", code_client_id: "client1", code_redirect_uri: "https://example.com/callback" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						code_redirect_uri: "https://example.com/callback",
+					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 				};
@@ -404,7 +413,11 @@ describe("createAuthorizationGrant", () => {
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1", redirect_uri: "https://example.com/callback" },
-					session: { code: "abc", code_client_id: "client1", code_redirect_uri: "https://example.com/callback" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						code_redirect_uri: "https://example.com/callback",
+					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
 				};
@@ -444,10 +457,7 @@ describe("createAuthorizationGrant", () => {
 					}),
 					authenticate: vi.fn().mockResolvedValue(null), // secret mismatch
 				};
-				const deps = makeDeps(
-					vi.fn().mockResolvedValue({ code: "abc" }),
-					clientRepo,
-				);
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }), clientRepo);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1", client_secret: "wrong-secret" },
@@ -475,10 +485,7 @@ describe("createAuthorizationGrant", () => {
 						allowedScopes: [],
 					}),
 				};
-				const deps = makeDeps(
-					vi.fn().mockResolvedValue({ code: "abc" }),
-					clientRepo,
-				);
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }), clientRepo);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1", client_secret: "correct-secret" },
@@ -502,10 +509,7 @@ describe("createAuthorizationGrant", () => {
 					}),
 					authenticate: vi.fn().mockResolvedValue(null),
 				};
-				const deps = makeDeps(
-					vi.fn().mockResolvedValue({ code: "abc" }),
-					clientRepo,
-				);
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }), clientRepo);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1" }, // no client_secret

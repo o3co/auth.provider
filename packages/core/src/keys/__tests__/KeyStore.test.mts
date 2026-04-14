@@ -13,13 +13,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generateKeyPair, exportSPKI, exportPKCS8, SignJWT, jwtVerify, decodeProtectedHeader } from "jose";
+import {
+	decodeProtectedHeader,
+	exportPKCS8,
+	exportSPKI,
+	generateKeyPair,
+	jwtVerify,
+	SignJWT,
+} from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createAsymmetricKeyStore, createKeyStoreFromConfig, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { JwtConfig } from "#/keys/KeyStore.mjs";
+import {
+	createAsymmetricKeyStore,
+	createKeyStoreFromConfig,
+	createSymmetricKeyStore,
+} from "#/keys/KeyStore.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -72,7 +83,11 @@ describe("SymmetricKeyStore", () => {
 });
 
 describe("AsymmetricKeyStore", () => {
-	it.each(["ES256", "RS256", "EdDSA"] as const)("creates %s key store and signs/verifies round-trip", async (alg) => {
+	it.each([
+		"ES256",
+		"RS256",
+		"EdDSA",
+	] as const)("creates %s key store and signs/verifies round-trip", async (alg) => {
 		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair(alg);
 		const store = await createAsymmetricKeyStore({
 			algorithm: alg,
@@ -184,17 +199,21 @@ describe("AsymmetricKeyStore", () => {
 		const keys = await generateTestKeyPair("ES256");
 		const prev = await generateTestKeyPair("ES256");
 
-		await expect(createAsymmetricKeyStore({
-			algorithm: "ES256",
-			kid: "same-kid",
-			privateKeyPem: keys.privateKeyPem,
-			publicKeyPem: keys.publicKeyPem,
-			previousKeys: [{
+		await expect(
+			createAsymmetricKeyStore({
+				algorithm: "ES256",
 				kid: "same-kid",
-				publicKeyPem: prev.publicKeyPem,
-				expiresAt: new Date(Date.now() + 86400000),
-			}],
-		})).rejects.toThrow("Duplicate kid");
+				privateKeyPem: keys.privateKeyPem,
+				publicKeyPem: keys.publicKeyPem,
+				previousKeys: [
+					{
+						kid: "same-kid",
+						publicKeyPem: prev.publicKeyPem,
+						expiresAt: new Date(Date.now() + 86400000),
+					},
+				],
+			}),
+		).rejects.toThrow("Duplicate kid");
 	});
 
 	it("throws on duplicate kid within previousKeys", async () => {
@@ -202,16 +221,26 @@ describe("AsymmetricKeyStore", () => {
 		const prev1 = await generateTestKeyPair("ES256");
 		const prev2 = await generateTestKeyPair("ES256");
 
-		await expect(createAsymmetricKeyStore({
-			algorithm: "ES256",
-			kid: "current",
-			privateKeyPem: keys.privateKeyPem,
-			publicKeyPem: keys.publicKeyPem,
-			previousKeys: [
-				{ kid: "dup", publicKeyPem: prev1.publicKeyPem, expiresAt: new Date(Date.now() + 86400000) },
-				{ kid: "dup", publicKeyPem: prev2.publicKeyPem, expiresAt: new Date(Date.now() + 86400000) },
-			],
-		})).rejects.toThrow("Duplicate kid");
+		await expect(
+			createAsymmetricKeyStore({
+				algorithm: "ES256",
+				kid: "current",
+				privateKeyPem: keys.privateKeyPem,
+				publicKeyPem: keys.publicKeyPem,
+				previousKeys: [
+					{
+						kid: "dup",
+						publicKeyPem: prev1.publicKeyPem,
+						expiresAt: new Date(Date.now() + 86400000),
+					},
+					{
+						kid: "dup",
+						publicKeyPem: prev2.publicKeyPem,
+						expiresAt: new Date(Date.now() + 86400000),
+					},
+				],
+			}),
+		).rejects.toThrow("Duplicate kid");
 	});
 
 	it("throws for unknown kid", async () => {
@@ -367,7 +396,7 @@ describe("createKeyStoreFromConfig", () => {
 		const config: JwtConfig = {
 			algorithm: "ES256",
 			kid: "p1",
-			privateKey: pair2.privateKeyPem,  // different key — should be ignored
+			privateKey: pair2.privateKeyPem, // different key — should be ignored
 			privateKeyPath: privPath,
 			publicKey: pair2.publicKeyPem,
 			publicKeyPath: pubPath,
