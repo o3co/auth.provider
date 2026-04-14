@@ -158,7 +158,7 @@ describe("fullSectionsSchema endpoints optionality", () => {
 		expect(result.success).toBe(true);
 	});
 
-	it("passes DID-only config through oauthModule-shaped schema (rateLimit + endpoints)", () => {
+	it("accepts rateLimit + endpoints without client or authCallback", () => {
 		const oauthModuleConfig = {
 			rateLimit: {
 				login: { windowMs: 60000, limit: 10 },
