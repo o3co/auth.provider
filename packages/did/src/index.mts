@@ -17,6 +17,7 @@ export { createDidGrant, type DidGrantOptions } from "./did.mjs";
 export { didConfigSchema, oauthDidModule, type DidModuleOptions } from "./module.mjs";
 export { extractVerificationKey, type ExtractedKey } from "./resolver/extractKey.mjs";
 export type { DidDocument, DidDocumentResolver, VerificationMethod } from "./resolver/types.mjs";
+export { detectAlgorithm } from "./verifiers/detect.mjs";
 export { createDefaultVerifierRegistry, createVerifier, type Algorithm, type VerifierFactory } from "./verifiers/factory.mjs";
 export { VerifierRegistry } from "./verifiers/registry.mjs";
 export type { ParsedMessage, SignatureVerifier, VerificationContext, VerificationResult } from "./verifiers/types.mjs";
