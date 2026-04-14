@@ -21,11 +21,13 @@ import type { DidDocumentResolver } from "./resolver/types.mjs";
 export const didConfigSchema = z.object({
 	did: z.object({
 		enabled: z.boolean().default(true),
-		algorithm: z.string().default("ed25519_raw"),
+		/** @deprecated Use supportedAlgorithms instead. Kept for backward compatibility. */
+		algorithm: z.string().optional(),
+		supportedAlgorithms: z.array(z.string()).default(["ed25519_raw"]),
 		messageMaxAgeSec: z.coerce.number().default(300),
 		allowedAudiences: z.array(z.string()).default([]),
 	// Full default object required by zod v4 typing — field-level defaults are authoritative
-	}).default({ enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300, allowedAudiences: [] }),
+	}).default({ enabled: true, supportedAlgorithms: ["ed25519_raw"], messageMaxAgeSec: 300, allowedAudiences: [] }),
 });
 
 export type DidModuleOptions =

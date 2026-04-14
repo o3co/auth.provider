@@ -23,6 +23,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { extractVerificationKey } from "./resolver/extractKey.mjs";
 import type { DidDocumentResolver } from "./resolver/types.mjs";
+import { detectAlgorithm } from "./verifiers/detect.mjs";
 import { createDefaultVerifierRegistry } from "./verifiers/factory.mjs";
 import type { SignatureVerifier } from "./verifiers/types.mjs";
 
@@ -45,13 +46,22 @@ export const createDidGrant = (
 	const allowedAudiences = (didConfig?.allowedAudiences as string[] | undefined) ?? [];
 
 	const verifierRegistry = createDefaultVerifierRegistry();
-	const configuredAlgorithm = didConfig?.algorithm;
-	if (configuredAlgorithm !== undefined && !verifierRegistry.has(String(configuredAlgorithm))) {
-		throw new Error(
-			`Invalid DID grant algorithm: "${String(configuredAlgorithm)}". Supported: ${verifierRegistry.algorithms().join(", ")}`,
-		);
+
+	// Resolve supportedAlgorithms with backward-compatible alias for the old `algorithm` field.
+	const rawSupported = didConfig?.supportedAlgorithms as string[] | undefined;
+	const rawAlgorithm = didConfig?.algorithm as string | undefined;
+	const supportedAlgorithms: string[] =
+		rawSupported ??
+		(rawAlgorithm ? [rawAlgorithm] : [DEFAULT_ALGORITHM]);
+
+	// Validate all configured algorithms are registered
+	for (const alg of supportedAlgorithms) {
+		if (!verifierRegistry.has(alg)) {
+			throw new Error(
+				`Invalid DID grant algorithm: "${alg}". Supported: ${verifierRegistry.algorithms().join(", ")}`,
+			);
+		}
 	}
-	const algorithm = (configuredAlgorithm as string | undefined) ?? DEFAULT_ALGORITHM;
 
 	// In-memory nonce store (PoC)
 	const nonceStore = new Map<string, number>();
@@ -63,21 +73,27 @@ export const createDidGrant = (
 		}
 	}, 60 * 1000);
 
-	// Verifier is created lazily on first request (async factory)
-	let verifier: SignatureVerifier | undefined;
-	let verifierError: Error | undefined;
+	// Per-algorithm verifier cache: created lazily on first use
+	const verifierCache = new Map<string, SignatureVerifier>();
+	const verifierErrorCache = new Map<string, Error>();
 
-	const getVerifier = async (): Promise<SignatureVerifier> => {
-		if (verifierError) throw verifierError;
-		if (verifier) return verifier;
+	const getVerifier = async (algorithm: string): Promise<SignatureVerifier> => {
+		const cached = verifierCache.get(algorithm);
+		if (cached) return cached;
+
+		const cachedError = verifierErrorCache.get(algorithm);
+		if (cachedError) throw cachedError;
+
 		try {
 			const factory = verifierRegistry.get(algorithm);
 			if (!factory) throw new Error(`Algorithm "${algorithm}" not registered`);
-			verifier = await factory(deps.pathResolver);
-			return verifier;
+			const v = await factory(deps.pathResolver);
+			verifierCache.set(algorithm, v);
+			return v;
 		} catch (err) {
-			verifierError = err instanceof Error ? err : new Error(String(err));
-			throw verifierError;
+			const error = err instanceof Error ? err : new Error(String(err));
+			verifierErrorCache.set(algorithm, error);
+			throw error;
 		}
 	};
 
@@ -125,13 +141,34 @@ export const createDidGrant = (
 				};
 			}
 
-			// 4. Verify signature via strategy
+			// 4. Detect algorithm from request body and validate it is allowed
+			const detectedAlgorithm = detectAlgorithm(body as Record<string, unknown>);
+			if (!detectedAlgorithm) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "unable to detect signature algorithm from request body",
+					},
+				};
+			}
+			if (!supportedAlgorithms.includes(detectedAlgorithm)) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: `algorithm "${detectedAlgorithm}" is not supported by this server`,
+					},
+				};
+			}
+
+			// 5. Get (or lazily create) the verifier for the detected algorithm
 			// Note: nonce/timestamp checks happen after verification because the verifier
 			// owns message parsing (format-specific). Trade-off: replay requests pay crypto
 			// cost before rejection. Acceptable for PoC in-memory nonce store.
 			let v: SignatureVerifier;
 			try {
-				v = await getVerifier();
+				v = await getVerifier(detectedAlgorithm);
 			} catch (err) {
 				return {
 					result: {
@@ -156,7 +193,7 @@ export const createDidGrant = (
 
 			const { parsedMessage } = verification;
 
-			// 5. Validate nonce and timestamp presence
+			// 6. Validate nonce and timestamp presence
 			if (!parsedMessage.nonce || !parsedMessage.timestamp) {
 				return {
 					result: {
@@ -167,7 +204,7 @@ export const createDidGrant = (
 				};
 			}
 
-			// 6. Validate timestamp freshness
+			// 7. Validate timestamp freshness
 			const messageTime = new Date(parsedMessage.timestamp).getTime();
 			const now = Date.now();
 			if (Number.isNaN(messageTime) || Math.abs(now - messageTime) > messageMaxAgeMs) {
@@ -180,7 +217,7 @@ export const createDidGrant = (
 				};
 			}
 
-			// 7. Nonce replay check
+			// 8. Nonce replay check
 			const nonceKey = `did-nonce:${parsedMessage.nonce}`;
 			if (nonceStore.has(nonceKey)) {
 				return {
@@ -192,7 +229,7 @@ export const createDidGrant = (
 				};
 			}
 
-			// 8. Validate audience against allowlist (empty allowlist = any audience accepted)
+			// 9. Validate audience against allowlist (empty allowlist = any audience accepted)
 			if (verification.audience && allowedAudiences.length > 0) {
 				if (!allowedAudiences.includes(verification.audience)) {
 					return {
@@ -205,10 +242,10 @@ export const createDidGrant = (
 				}
 			}
 
-			// 9. Store nonce (only after ALL validations passed)
+			// 10. Store nonce (only after ALL validations passed)
 			nonceStore.set(nonceKey, Date.now());
 
-			// 10. Generate token
+			// 11. Generate token
 			return {
 				result: {
 					status: 200,

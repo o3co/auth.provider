@@ -15,6 +15,7 @@
  */
 import * as ed from "@noble/ed25519";
 import { createSymmetricKeyStore, type GrantContext, type GrantDependencies } from "@o3co/auth-provider-core";
+import { CompactSign, exportJWK, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
 
 import { createDidGrant } from "../did.mjs";
@@ -287,6 +288,213 @@ describe("createDidGrant", () => {
 			const handler = createDidGrant(mockDeps, { resolver });
 			expect(typeof handler.cleanup).toBe("function");
 			handler.cleanup?.();
+		});
+	});
+
+	describe("handle – multi-algorithm support", () => {
+		/**
+		 * Build a GrantContext where the DID signature is a compact JWS (EdDSA).
+		 * Returns the context and a resolver that has the matching public key.
+		 */
+		async function makeJwsCtx(did: string, overrides: { audience?: string } = {}): Promise<{
+			ctx: GrantContext;
+			resolver: DidDocumentResolver;
+		}> {
+			const { privateKey, publicKey } = await generateKeyPair("EdDSA");
+			const jwk = await exportJWK(publicKey);
+
+			const payload = JSON.stringify({
+				did,
+				timestamp: new Date().toISOString(),
+				nonce: `nonce-jws-${Date.now()}-${Math.random()}`,
+				...(overrides.audience !== undefined ? { audience: overrides.audience } : {}),
+			});
+
+			const jws = await new CompactSign(new TextEncoder().encode(payload))
+				.setProtectedHeader({ alg: "EdDSA" })
+				.sign(privateKey);
+
+			const didDoc: DidDocument = {
+				id: did,
+				verificationMethod: [
+					{
+						id: `${did}#key-1`,
+						type: "JsonWebKey2020",
+						controller: did,
+						publicKeyJwk: jwk as JsonWebKey,
+					},
+				],
+			};
+			const resolver: DidDocumentResolver = {
+				async resolve(d) {
+					if (d === did) return didDoc;
+					throw new Error(`DID not found: ${d}`);
+				},
+			};
+
+			return {
+				ctx: {
+					body: { did, jws },
+					session: {},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				},
+				resolver,
+			};
+		}
+
+		it("accepts ed25519_raw when supportedAlgorithms includes it", async () => {
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_raw"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkMultiRaw");
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
+		});
+
+		it("accepts ed25519_jws when supportedAlgorithms includes it", async () => {
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_jws"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const { ctx, resolver } = await makeJwsCtx("did:key:z6MkMultiJws");
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
+		});
+
+		it("accepts both ed25519_raw and ed25519_jws when both are in supportedAlgorithms", async () => {
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_raw", "ed25519_jws"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const rawResult = await (async () => {
+				const { ctx, resolver } = await makeSignedCtx("did:key:z6MkBothRaw");
+				const handler = createDidGrant(
+					{ config, keyStore: createSymmetricKeyStore("test-secret") },
+					{ resolver },
+				);
+				return handler.handle(ctx);
+			})();
+
+			const jwsResult = await (async () => {
+				const { ctx, resolver } = await makeJwsCtx("did:key:z6MkBothJws");
+				const handler = createDidGrant(
+					{ config, keyStore: createSymmetricKeyStore("test-secret") },
+					{ resolver },
+				);
+				return handler.handle(ctx);
+			})();
+
+			expect(rawResult.result.status).toBe(200);
+			expect(jwsResult.result.status).toBe(200);
+		});
+
+		it("rejects a request whose detected algorithm is NOT in supportedAlgorithms", async () => {
+			// Handler only supports ed25519_jws, but request uses ed25519_raw
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_jws"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkRejectRaw");
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toContain("ed25519_raw");
+			expect("errorDescription" in result && result.errorDescription).toContain("not supported");
+		});
+
+		it("rejects a request body that cannot be matched to any algorithm", async () => {
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_raw"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const { resolver } = await makeSignedCtx("did:key:z6MkNoAlg");
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const ctx: GrantContext = {
+				body: { did: "did:key:z6MkNoAlg" }, // neither signature/message nor jws
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toContain("detect");
+		});
+
+		it("backward compat: old algorithm field maps to supportedAlgorithms=[algorithm]", async () => {
+			// Old config uses `algorithm` string — should still work
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300 },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkBackCompat");
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
 		});
 	});
 
