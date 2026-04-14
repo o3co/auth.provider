@@ -1,0 +1,16 @@
+{
+  "name": "@o3co/auth.provider",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "lint": "biome check packages/ templates/ create-app/",
+    "test": "pnpm -r run test",
+    "audit": "pnpm audit --audit-level=high"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.14",
+    "typescript": "^5.9.3"
+  }
+}

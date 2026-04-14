@@ -1,0 +1,20 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+export type { SignatureVerifier, VerificationContext, VerificationResult, ParsedMessage } from "./types.mjs";
+// Ed25519RawVerifier intentionally NOT re-exported — it statically imports @noble/ed25519
+// which is an optional peer dep. Use createVerifier("ed25519_raw") or import directly.
+export { JwsVerifier } from "./jws.mjs";
+export { createVerifier, type Algorithm } from "./factory.mjs";

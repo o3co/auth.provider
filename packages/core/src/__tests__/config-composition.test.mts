@@ -1,0 +1,190 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { z } from "zod";
+import { describe, expect, it } from "vitest";
+import {
+    AppConfigSchema,
+    composeConfigSchema,
+    CoreConfigSchema,
+} from "#/config/application.schema.mjs";
+
+const minimalDIDConfig = {
+    http: { port: 3000, trustProxy: false },
+    oauth: {
+        jwt: { algorithm: "HS256", secret: "test-secret" },
+        accessToken: { expiresIn: 3600 },
+        refreshToken: { expiresIn: 86400 },
+        grants: {},
+    },
+};
+
+describe("CoreConfigSchema", () => {
+    it("validates minimal DID-only config (just http + oauth)", () => {
+        const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(true);
+    });
+
+    it("does not require session", () => {
+        const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect((result.data as Record<string, unknown>).session).toBeUndefined();
+        }
+    });
+
+    it("does not require federations", () => {
+        const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect((result.data as Record<string, unknown>).federations).toBeUndefined();
+        }
+    });
+
+    it("does not require endpoints", () => {
+        const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect((result.data as Record<string, unknown>).endpoints).toBeUndefined();
+        }
+    });
+
+    it("does not require cors", () => {
+        const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect((result.data as Record<string, unknown>).cors).toBeUndefined();
+        }
+    });
+
+    it("does not require clients", () => {
+        const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect((result.data as Record<string, unknown>).clients).toBeUndefined();
+        }
+    });
+
+    it("still rejects when jwt secret is missing for HS256", () => {
+        const result = CoreConfigSchema.safeParse({
+            ...minimalDIDConfig,
+            oauth: {
+                ...minimalDIDConfig.oauth,
+                jwt: { algorithm: "HS256" },
+            },
+        });
+        expect(result.success).toBe(false);
+    });
+});
+
+describe("composeConfigSchema", () => {
+    it("merges module schemas with core", () => {
+        const moduleSchema = z.object({
+            myModule: z.object({ enabled: z.boolean() }),
+        });
+        const composed = composeConfigSchema([moduleSchema]);
+        const result = composed.safeParse({
+            ...minimalDIDConfig,
+            myModule: { enabled: true },
+        });
+        expect(result.success).toBe(true);
+    });
+
+    it("rejects when module-required field is missing", () => {
+        const moduleSchema = z.object({
+            myModule: z.object({ enabled: z.boolean() }),
+        });
+        const composed = composeConfigSchema([moduleSchema]);
+        // Missing myModule
+        const result = composed.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(false);
+    });
+
+    it("merges multiple module schemas", () => {
+        const moduleA = z.object({ moduleA: z.object({ value: z.string() }) });
+        const moduleB = z.object({ moduleB: z.object({ count: z.number() }) });
+        const composed = composeConfigSchema([moduleA, moduleB]);
+        const result = composed.safeParse({
+            ...minimalDIDConfig,
+            moduleA: { value: "hello" },
+            moduleB: { count: 42 },
+        });
+        expect(result.success).toBe(true);
+    });
+
+    it("returns CoreConfigSchema when no modules are provided", () => {
+        const composed = composeConfigSchema([]);
+        const result = composed.safeParse(minimalDIDConfig);
+        expect(result.success).toBe(true);
+    });
+});
+
+describe("AppConfigSchema backward compatibility", () => {
+    it("still validates full config with all sections", () => {
+        const fullConfig = {
+            http: { port: 3000, trustProxy: false },
+            oauth: {
+                jwt: { algorithm: "HS256", secret: "test-secret" },
+                accessToken: { expiresIn: 3600 },
+                refreshToken: { expiresIn: 86400 },
+                grants: {
+                    session: { enabled: true },
+                    authorization: { enabled: true },
+                    refresh_token: { enabled: true },
+                },
+            },
+            session: {
+                secret: "session-secret",
+                maxAge: 3600000,
+                secure: true,
+                sameSite: "lax",
+                domain: null,
+                storage: {
+                    type: "redis",
+                    redis: { url: "redis://localhost:6379" },
+                },
+            },
+            rateLimit: {
+                login: { windowMs: 60000, limit: 10 },
+                token: { windowMs: 60000, limit: 10 },
+                authorize: { windowMs: 60000, limit: 10 },
+            },
+            federations: {
+                google: { enabled: false },
+            },
+            clients: {
+                client: { type: "yaml", path: "./config/clients.yaml" },
+                user: {
+                    type: "yaml",
+                    path: "./config/users.yaml",
+                    timeout: 5000,
+                },
+                code: { type: "memory", defaultExpiresIn: 600 },
+            },
+            endpoints: {
+                login: {},
+                client: {},
+                authCallback: {},
+            },
+            cors: { allowedOrigins: [] },
+        };
+        const result = AppConfigSchema.safeParse(fullConfig);
+        expect(result.success).toBe(true);
+    });
+
+    it("AppConfigSchema is still exported and defined", () => {
+        expect(AppConfigSchema).toBeDefined();
+    });
+});
