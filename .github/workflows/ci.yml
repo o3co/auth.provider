@@ -15,6 +15,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store/v10
+          key: pnpm-store-${{ hashFiles('**/package.json') }}
+          restore-keys: pnpm-store-
+
       - run: pnpm install
-      - run: pnpm build
-      - run: pnpm test
+      - run: pnpm -r --if-present run typecheck
+      - run: pnpm run lint
+      - run: pnpm run build
+      - run: pnpm run test
