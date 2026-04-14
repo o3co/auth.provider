@@ -34,6 +34,7 @@ const mockExpress = {
 };
 
 const mockConfig = {
+	http: { port: 3000, trustProxy: false },
 	oauth: {
 		jwt: { secret: "test-secret" },
 		accessToken: { expiresIn: 3600 },
@@ -75,7 +76,7 @@ describe("createApp", () => {
 
 		expect(initFn).toHaveBeenCalledTimes(1);
 		const ctx = initFn.mock.calls[0][0];
-		expect(ctx.config).toBe(mockConfig);
+		expect(ctx.config).toMatchObject(mockConfig);
 		expect(ctx.keyStore).toBe(keyStore);
 		expect(ctx.grantRegistry).toBeInstanceOf(GrantRegistry);
 		expect(ctx.router).toBeDefined();
@@ -142,6 +143,24 @@ describe("createApp", () => {
 
 		const ctx = initFn.mock.calls[0][0];
 		expect(ctx.pathResolver("foo")).toBe("foo");
+	});
+
+	it("init() rejects when module configSchema requires missing config sections", async () => {
+		const { z } = await import("zod");
+		const moduleWithSchema: Module = {
+			name: "needs-session",
+			configSchema: z.object({ session: z.object({ secret: z.string() }) }),
+			async init() {},
+		};
+
+		const result = createApp({
+			express: mockExpress,
+			config: mockConfig,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			modules: [moduleWithSchema],
+		});
+
+		await expect(result.init()).rejects.toThrow();
 	});
 
 	it("wires healthcheck and jwks routes on router", () => {

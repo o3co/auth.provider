@@ -114,7 +114,7 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	return schema;
 }
 
-const fullSectionsSchema = z.object({
+export const fullSectionsSchema = z.object({
 	session: z.object({
 		secret: z.string(),
 		maxAge: z.coerce.number().default(3600000),
