@@ -13,7 +13,7 @@ export default defineConfig({
 			deps: {
 				// Externalize workspace packages so Node resolves their internal
 				// #/* subpath imports via their own package.json imports field.
-				external: [/@o3co\/auth-provider-/, /packages\/(core|foundation|session|did)/],
+				external: [/@o3co\/auth-provider-/, /packages\/(core|foundation|oauth|did)/],
 			},
 		},
 	},

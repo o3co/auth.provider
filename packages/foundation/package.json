@@ -27,10 +27,7 @@
 		"test": "vitest run"
 	},
 	"imports": {
-		"#/*": {
-			"development": "./src/*",
-			"default": "./dist/*"
-		}
+		"#/*": "./dist/*"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "^0.0.0",
