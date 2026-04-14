@@ -73,7 +73,7 @@ export const createGoogleProvider = (config: AppConfig): FederationProvider => (
 	},
 
 	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
-		const authCallbackUrl = config.endpoints.authCallback.url;
+		const authCallbackUrl = config.endpoints.authCallback?.url;
 		if (session.redirectTo && authCallbackUrl) {
 			return {
 				ok: true,
@@ -81,7 +81,7 @@ export const createGoogleProvider = (config: AppConfig): FederationProvider => (
 			};
 		}
 
-		const clientUrl = config.endpoints.client.url;
+		const clientUrl = config.endpoints.client?.url;
 		if (!clientUrl) {
 			return {
 				ok: false,

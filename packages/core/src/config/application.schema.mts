@@ -189,8 +189,8 @@ export const fullSectionsSchema = z.object({
 	}),
 	endpoints: z.object({
 		login: z.object({ url: z.string().optional() }),
-		client: z.object({ url: z.string().optional() }),
-		authCallback: z.object({ url: z.string().optional() }),
+		client: z.object({ url: z.string().optional() }).optional(),
+		authCallback: z.object({ url: z.string().optional() }).optional(),
 	}),
 	cors: z.object({
 		allowedOrigins: z.array(z.string()).default([]),

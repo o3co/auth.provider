@@ -20,6 +20,7 @@ import {
 	AppConfigSchema,
 	CoreConfigSchema,
 	composeConfigSchema,
+	fullSectionsSchema,
 } from "#/config/application.schema.mjs";
 
 const minimalDIDConfig = {
@@ -128,6 +129,51 @@ describe("composeConfigSchema", () => {
 	it("returns CoreConfigSchema when no modules are provided", () => {
 		const composed = composeConfigSchema([]);
 		const result = composed.safeParse(minimalDIDConfig);
+		expect(result.success).toBe(true);
+	});
+});
+
+describe("fullSectionsSchema endpoints optionality", () => {
+	it("accepts endpoints with only login (no client or authCallback)", () => {
+		const endpointsOnlyLogin = {
+			endpoints: {
+				login: { url: "/login" },
+			},
+		};
+		const schema = fullSectionsSchema.pick({ endpoints: true });
+		const result = schema.safeParse(endpointsOnlyLogin);
+		expect(result.success).toBe(true);
+	});
+
+	it("still accepts endpoints with all fields provided", () => {
+		const endpointsFull = {
+			endpoints: {
+				login: { url: "/login" },
+				client: { url: "http://localhost:3001" },
+				authCallback: { url: "/auth/callback" },
+			},
+		};
+		const schema = fullSectionsSchema.pick({ endpoints: true });
+		const result = schema.safeParse(endpointsFull);
+		expect(result.success).toBe(true);
+	});
+
+	it("passes DID-only config through oauthModule-shaped schema (rateLimit + endpoints)", () => {
+		const oauthModuleConfig = {
+			rateLimit: {
+				login: { windowMs: 60000, limit: 10 },
+				token: { windowMs: 60000, limit: 10 },
+				authorize: { windowMs: 60000, limit: 10 },
+			},
+			endpoints: {
+				login: { url: "/login" },
+			},
+		};
+		const oauthConfigSchema = fullSectionsSchema.pick({
+			rateLimit: true,
+			endpoints: true,
+		});
+		const result = oauthConfigSchema.safeParse(oauthModuleConfig);
 		expect(result.success).toBe(true);
 	});
 });
