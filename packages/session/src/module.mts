@@ -21,8 +21,8 @@ import {
 	type ModuleContext,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import type { RequestHandler, Router } from "express";
+import { z } from "zod";
 import { createGoogleProvider } from "./federations/google.mjs";
 import { FederationRegistry } from "./federations/types.mjs";
 import { createPassport } from "./passport.mjs";
