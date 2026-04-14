@@ -18,11 +18,17 @@ import type { Router } from "express";
 import {
 	GrantRegistry,
 	createSymmetricKeyStore,
-	type ModuleContext,
-	type CodeRepository,
 	type AppConfig,
+	type ClientRepository,
+	type CodeRepository,
+	type ModuleContext,
 } from "@o3co/auth-provider-core";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+
+const mockClientRepository: ClientRepository = {
+	findById: vi.fn().mockResolvedValue(null),
+	authenticate: vi.fn().mockResolvedValue(null),
+};
 
 const mockConfig = {
 	oauth: {
@@ -49,6 +55,7 @@ describe("oauthAuthorizationModule", () => {
 	it("has name 'oauth-authorization'", () => {
 		const module = oauthAuthorizationModule({
 			codeRepository: {} as CodeRepository,
+			clientRepository: mockClientRepository,
 		});
 		expect(module.name).toBe("oauth-authorization");
 	});
@@ -57,6 +64,7 @@ describe("oauthAuthorizationModule", () => {
 		const ctx = makeContext();
 		const module = oauthAuthorizationModule({
 			codeRepository: {} as CodeRepository,
+			clientRepository: mockClientRepository,
 		});
 
 		await module.init(ctx);
@@ -79,6 +87,7 @@ describe("oauthAuthorizationModule", () => {
 		const ctx = makeContext({ config: disabledConfig });
 		const module = oauthAuthorizationModule({
 			codeRepository: {} as CodeRepository,
+			clientRepository: mockClientRepository,
 		});
 
 		await module.init(ctx);
@@ -95,11 +104,15 @@ describe("oauthAuthorizationModule", () => {
 		} as unknown as CodeRepository;
 		const module = oauthAuthorizationModule({
 			codeRepository: mockCodeRepo,
+			clientRepository: mockClientRepository,
 		});
 
 		await module.init(ctx);
 
-		const handler = ctx.grantRegistry.get("authorization")!;
+		const handler = ctx.grantRegistry.get("authorization");
+		expect(handler).toBeDefined();
+		if (!handler) return;
+
 		const { result } = await handler.handle({
 			body: { code: "bad-code", client_id: "c1" },
 			session: { code: "different-code", code_client_id: "c1" },

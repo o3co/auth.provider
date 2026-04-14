@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import type {
+	ClientRepository,
 	CodeRepository,
 	Module,
 	ModuleContext,
@@ -23,6 +24,7 @@ import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
 export const oauthAuthorizationModule = (params: {
 	codeRepository: CodeRepository;
+	clientRepository: ClientRepository;
 }): Module => ({
 	name: "oauth-authorization",
 	async init(context: ModuleContext): Promise<void> {
@@ -36,6 +38,7 @@ export const oauthAuthorizationModule = (params: {
 				config: context.config,
 				keyStore: context.keyStore,
 				codeRepository: params.codeRepository,
+				clientRepository: params.clientRepository,
 			});
 			context.grantRegistry.register("authorization", handler);
 		}

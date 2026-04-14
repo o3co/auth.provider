@@ -125,7 +125,7 @@ await (async (): Promise<void> => {
       oauthModule({ clientRepository, codeRepository, express }),
       sessionModule({ userRepository, express }),
       oauthSessionModule({ clientRepository }),
-      oauthAuthorizationModule({ codeRepository }),
+      oauthAuthorizationModule({ codeRepository, clientRepository }),
     ],
   });
 

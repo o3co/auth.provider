@@ -16,8 +16,8 @@
 import type { Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
 import { decodeProtectedHeader, jwtVerify } from "jose";
-
 import type { PassportStatic } from "passport";
+
 import {
   formatObject,
   type AppConfig,
@@ -35,6 +35,7 @@ declare module "express-session" {
     user?: Record<string, unknown>;
     code?: string;
     code_client_id?: string;
+    code_redirect_uri?: string;
     granted_scopes?: string[];
     isAuthenticated?: boolean;
   }
@@ -193,6 +194,16 @@ export const createOAuthRouter = async (
         );
       }
 
+      // A-1: RFC 6749 §4.1.2.1 — errors that prevent redirect (invalid client / redirect_uri)
+      // must return 400 JSON. Other errors redirect with error params.
+      const redirectError = (redirectUri: string, error: string, errorDescription: string, state?: string | null): Response => {
+        const url = new URL(redirectUri);
+        url.searchParams.append("error", error);
+        url.searchParams.append("error_description", errorDescription);
+        if (typeof state === "string") url.searchParams.append("state", state);
+        return res.redirect(url.toString()) as unknown as Response;
+      };
+
       if ([req.query.response_type].flat().includes("code")) {
         const {
           client_id = null,
@@ -205,28 +216,54 @@ export const createOAuthRouter = async (
 
         const toStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
+        // A-1: invalid client_id and redirect_uri → 400 JSON (cannot redirect)
         if (typeof client_id !== "string" || !client_id) {
-          return res.status(400).json({ message: "client_id is required" });
+          return res.status(400).json({ error: "invalid_request", error_description: "client_id is required" });
         }
 
         if (typeof redirect_uri !== "string" || !redirect_uri) {
-          return res.status(400).json({ message: "invalid redirect_uri" });
+          return res.status(400).json({ error: "invalid_request", error_description: "redirect_uri is required" });
         }
 
         let client: PublicClient | null;
         try {
           client = await clientRepository.findById(client_id);
         } catch {
-          return res.status(500).json({ message: "Failed to fetch client" });
+          return res.status(500).json({ error: "server_error", error_description: "Failed to fetch client" });
         }
         if (!client) {
-          return res.status(400).json({ message: "client not found" });
+          // Cannot redirect — client unknown, redirect_uri untrusted
+          return res.status(400).json({ error: "invalid_client", error_description: "client not found" });
         }
         const allowedUris = client.allowedRedirectUris;
         const allowedScopes = client.allowedScopes;
 
         if (!allowedUris.includes(redirect_uri)) {
-          return res.status(400).json({ message: "redirect_uri not allowed" });
+          // Cannot redirect — redirect_uri not trusted
+          return res.status(400).json({ error: "invalid_request", error_description: "redirect_uri not allowed" });
+        }
+
+        // From here redirect_uri is validated — use redirect-based errors per RFC 6749 §4.1.2.1
+
+        // A-1: validate response_type (already checked above via includes("code") but handle unknown types)
+        const responseType = toStr(req.query.response_type);
+        if (responseType !== "code") {
+          return redirectError(redirect_uri, "unsupported_response_type", `response_type "${responseType}" is not supported`, toStr(state));
+        }
+
+        // B-7/B-8: resolve PKCE config
+        const grantsConfig = config.oauth.grants as Record<string, Record<string, unknown>> | undefined;
+        const authorizationConfig = grantsConfig?.authorization as Record<string, unknown> | undefined;
+        const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
+        const pkceRequired: boolean = pkceConfig?.required === true;
+        const defaultMethod: string = typeof pkceConfig?.defaultMethod === "string" ? pkceConfig.defaultMethod : "plain";
+        const supportedMethods: string[] = Array.isArray(pkceConfig?.supportedMethods)
+          ? (pkceConfig.supportedMethods as string[])
+          : ["S256", "plain"];
+
+        // B-8: PKCE required check at authorize endpoint
+        if (pkceRequired && (typeof code_challenge !== "string" || !code_challenge)) {
+          return redirectError(redirect_uri, "invalid_request", "code_challenge is required", toStr(state));
         }
 
         const requestedScopes = toStr(scope)?.split(" ").filter(Boolean) ?? [];
@@ -235,22 +272,33 @@ export const createOAuthRouter = async (
             ? requestedScopes.filter((s) => allowedScopes.includes(s))
             : allowedScopes;
 
-        const resolvedMethod = code_challenge
-          ? (toStr(code_challenge_method) ?? "S256")
-          : toStr(code_challenge_method);
+        // B-7: resolve code_challenge_method — use provided value or defaultMethod
+        let resolvedMethod: string | undefined;
+        if (typeof code_challenge === "string" && code_challenge) {
+          // Challenge provided: use explicit method or fall back to defaultMethod
+          resolvedMethod = toStr(code_challenge_method) ?? defaultMethod;
+          if (!supportedMethods.includes(resolvedMethod)) {
+            return redirectError(redirect_uri, "invalid_request", `code_challenge_method "${resolvedMethod}" is not supported`, toStr(state));
+          }
+        } else {
+          // No challenge: method is irrelevant (no PKCE)
+          resolvedMethod = undefined;
+        }
 
         let issue: Awaited<ReturnType<typeof codeRepository.createCode>>;
         try {
           issue = await codeRepository.createCode({
             code_challenge: toStr(code_challenge),
             code_challenge_method: resolvedMethod,
+            redirect_uri,
           });
         } catch {
-          return res.status(500).json({ message: "Failed to create authorization code" });
+          return redirectError(redirect_uri, "server_error", "Failed to create authorization code", toStr(state));
         }
 
         req.session.code = issue.code;
         req.session.code_client_id = client_id;
+        req.session.code_redirect_uri = redirect_uri;
         req.session.granted_scopes = grantedScopes.length > 0 ? grantedScopes : undefined;
 
         const url = new URL(redirect_uri);
@@ -262,9 +310,8 @@ export const createOAuthRouter = async (
         return res.redirect(url.toString());
       }
 
-      return res
-        .status(400)
-        .json({ message: `Unknown response_type "${req.query.response_type}"` });
+      // A-1: unknown response_type without a validated redirect_uri → 400 JSON
+      return res.status(400).json({ error: "unsupported_response_type", error_description: `response_type "${req.query.response_type}" is not supported` });
     });
 
   return { router, registry };
