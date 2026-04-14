@@ -14,13 +14,15 @@
  * limitations under the License.
  */
 
-import type {
-	AppConfig,
-	ClientRepository,
-	CodeRepository,
-	Module,
-	ModuleContext,
+import {
+	type AppConfig,
+	type ClientRepository,
+	type CodeRepository,
+	fullSectionsSchema,
+	type Module,
+	type ModuleContext,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
 import { createOAuthRouter } from "./routes.mjs";
@@ -31,12 +33,18 @@ type ExpressLike = {
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
 
+const oauthConfigSchema = z.object({
+	rateLimit: fullSectionsSchema.shape.rateLimit,
+	endpoints: fullSectionsSchema.shape.endpoints,
+});
+
 export const oauthModule = (params: {
 	clientRepository: ClientRepository;
 	codeRepository: CodeRepository;
 	express?: ExpressLike;
 }): Module => ({
 	name: "oauth",
+	configSchema: oauthConfigSchema,
 	async init(context: ModuleContext): Promise<void> {
 		const config = context.config as AppConfig;
 

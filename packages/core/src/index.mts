@@ -23,6 +23,7 @@ export {
 	type CoreConfig,
 	CoreConfigSchema,
 	composeConfigSchema,
+	fullSectionsSchema,
 } from "./config/application.schema.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
