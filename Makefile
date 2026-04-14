@@ -16,7 +16,7 @@ install:
 
 .PHONY: clean
 clean:
-	rm -rf packages/core/dist packages/foundation/dist templates/standalone/dist create-app/dist
+	pnpm -r exec rimraf dist
 
 .PHONY: test
 test:
