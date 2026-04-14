@@ -24,6 +24,7 @@ export interface SessionData {
 	client?: Record<string, unknown>;
 	code?: string;
 	code_client_id?: string;
+	code_redirect_uri?: string;
 	granted_scopes?: string[];
 	isAuthenticated?: boolean;
 }

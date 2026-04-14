@@ -18,6 +18,7 @@ import crypto from "node:crypto";
 import {
 	generateToken,
 	generateTokenResponse,
+	type ClientRepository,
 	type CodeRepository,
 	type GrantContext,
 	type GrantDependencies,
@@ -25,13 +26,22 @@ import {
 	type GrantHandlerResult,
 } from "@o3co/auth-provider-core";
 
-export const createAuthorizationGrant = (deps: GrantDependencies & { codeRepository: CodeRepository }): GrantHandler => {
-	const { config, codeRepository, keyStore } = deps;
+export const createAuthorizationGrant = (deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository }): GrantHandler => {
+	const { config, codeRepository, clientRepository, keyStore } = deps;
 
 	const grantsConfig = config.oauth.grants as Record<string, Record<string, unknown>> | undefined;
 	const authorizationConfig = grantsConfig?.authorization as Record<string, unknown> | undefined;
 	const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
-	const requireS256 = pkceConfig?.requireS256 === true;
+
+	// B-7: structured pkce config (supportedMethods, defaultMethod, required)
+	// Fall back to legacy requireS256 for backward compatibility
+	const supportedMethods: string[] = Array.isArray(pkceConfig?.supportedMethods)
+		? (pkceConfig.supportedMethods as string[])
+		: ["S256", "plain"];
+	const pkceRequired: boolean = pkceConfig?.required === true;
+	// Legacy fallback: requireS256=true means only S256 is supported
+	const requireS256Legacy = pkceConfig?.requireS256 === true;
+	const effectiveSupportedMethods = requireS256Legacy ? ["S256"] : supportedMethods;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -40,10 +50,14 @@ export const createAuthorizationGrant = (deps: GrantDependencies & { codeReposit
 				code,
 				code_verifier = null,
 				client_id,
+				client_secret = null,
+				redirect_uri = null,
 			} = body as {
 				code?: string;
 				code_verifier?: string | null;
 				client_id?: string;
+				client_secret?: string | null;
+				redirect_uri?: string | null;
 			};
 
 			if (!code || code !== session.code) {
@@ -66,6 +80,22 @@ export const createAuthorizationGrant = (deps: GrantDependencies & { codeReposit
 				};
 			}
 
+			// A-3: Client secret verification (RFC 6749 §3.2.1)
+			// Only verify when client_secret is provided (confidential clients send it;
+			// public clients omit it). If provided, authenticate against the repository.
+			if (client_secret !== null && client_secret !== undefined) {
+				const authenticated = await clientRepository.authenticate(client_id, client_secret);
+				if (!authenticated) {
+					return {
+						result: {
+							status: 401,
+							error: "invalid_client",
+							errorDescription: "client authentication failed",
+						},
+					};
+				}
+			}
+
 			// Atomically consume code data from repository (replay attack prevention)
 			const codeData = await codeRepository.consumeByCode(code);
 			if (!codeData) {
@@ -78,10 +108,47 @@ export const createAuthorizationGrant = (deps: GrantDependencies & { codeReposit
 				};
 			}
 
+			// A-2: redirect_uri binding (RFC 6749 §4.1.3)
+			// If redirect_uri was stored at authorization time, it MUST be present and match.
+			const storedRedirectUri = codeData.redirect_uri ?? session.code_redirect_uri;
+			if (storedRedirectUri) {
+				if (!redirect_uri || redirect_uri !== storedRedirectUri) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "redirect_uri mismatch",
+						},
+					};
+				}
+			}
+
 			const grantedScopes = session.granted_scopes;
+
+			// B-8: PKCE required check at token endpoint
+			if (pkceRequired && !codeData.code_challenge_method) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "PKCE is required but code was issued without code_challenge",
+					},
+				};
+			}
 
 			// Validate code_verifier using code data from repository
 			if (codeData.code_challenge_method) {
+				// B-7: check method is in supportedMethods
+				if (!effectiveSupportedMethods.includes(codeData.code_challenge_method)) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: `code_challenge_method "${codeData.code_challenge_method}" is not supported`,
+						},
+					};
+				}
+
 				if (!code_verifier) {
 					return {
 						result: {
@@ -117,15 +184,6 @@ export const createAuthorizationGrant = (deps: GrantDependencies & { codeReposit
 						break;
 					}
 					case "plain":
-						if (requireS256) {
-							return {
-								result: {
-									status: 400,
-									error: "invalid_request",
-									errorDescription: "plain code_challenge_method is not allowed; S256 is required",
-								},
-							};
-						}
 						if (code_verifier !== codeData.code_challenge) {
 							return {
 								result: {
@@ -177,7 +235,7 @@ export const createAuthorizationGrant = (deps: GrantDependencies & { codeReposit
 					}),
 				},
 				sessionMutation: {
-					clear: ["code", "code_client_id", "granted_scopes"],
+					clear: ["code", "code_client_id", "code_redirect_uri", "granted_scopes"],
 				},
 			};
 		},

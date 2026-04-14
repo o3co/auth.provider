@@ -20,6 +20,7 @@ import { decodeJwt } from "jose";
 
 import {
 	createSymmetricKeyStore,
+	type ClientRepository,
 	type CodeRepository,
 	type GrantContext,
 	type GrantDependencies,
@@ -40,7 +41,12 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"]) {
+const mockClientRepository: ClientRepository = {
+	findById: vi.fn().mockResolvedValue(null),
+	authenticate: vi.fn().mockResolvedValue(null),
+};
+
+function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"], clientRepository?: ClientRepository) {
 	return {
 		config: mockConfig,
 		keyStore: createSymmetricKeyStore("test-secret"),
@@ -50,6 +56,7 @@ function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"]) {
 			getByCode: vi.fn(),
 			removeByCode: vi.fn(),
 		} as unknown as CodeRepository,
+		clientRepository: clientRepository ?? mockClientRepository,
 	};
 }
 
@@ -261,7 +268,7 @@ describe("createAuthorizationGrant", () => {
 			expect(result.status).toBe(200);
 		});
 
-		describe("requireS256 config option", () => {
+		describe("requireS256 config option (legacy)", () => {
 			const s256Config = {
 				oauth: {
 					jwt: { secret: "test-secret" },
@@ -294,6 +301,7 @@ describe("createAuthorizationGrant", () => {
 						getByCode: vi.fn(),
 						removeByCode: vi.fn(),
 					} as unknown as CodeRepository,
+					clientRepository: mockClientRepository,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
@@ -327,10 +335,290 @@ describe("createAuthorizationGrant", () => {
 						getByCode: vi.fn(),
 						removeByCode: vi.fn(),
 					} as unknown as CodeRepository,
+					clientRepository: mockClientRepository,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1", code_verifier: verifier },
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(200);
+			});
+		});
+
+		describe("A-2: redirect_uri binding", () => {
+			it("returns invalid_grant when stored redirect_uri does not match body redirect_uri", async () => {
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+						redirect_uri: "https://example.com/callback",
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1", redirect_uri: "https://evil.com/callback" },
+					session: { code: "abc", code_client_id: "client1", code_redirect_uri: "https://example.com/callback" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_grant");
+			});
+
+			it("returns invalid_grant when redirect_uri was stored but omitted in token request", async () => {
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+						redirect_uri: "https://example.com/callback",
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1" },
+					session: { code: "abc", code_client_id: "client1", code_redirect_uri: "https://example.com/callback" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_grant");
+			});
+
+			it("returns 200 when redirect_uri matches stored value", async () => {
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+						redirect_uri: "https://example.com/callback",
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1", redirect_uri: "https://example.com/callback" },
+					session: { code: "abc", code_client_id: "client1", code_redirect_uri: "https://example.com/callback" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(200);
+			});
+
+			it("returns 200 when no redirect_uri was stored (redirect_uri not required in authorize)", async () => {
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1" },
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(200);
+			});
+		});
+
+		describe("A-3: client secret verification", () => {
+			it("returns invalid_client when client_secret is wrong for a confidential client", async () => {
+				const clientRepo: ClientRepository = {
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+					}),
+					authenticate: vi.fn().mockResolvedValue(null), // secret mismatch
+				};
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc" }),
+					clientRepo,
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1", client_secret: "wrong-secret" },
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(401);
+				expect("error" in result && result.error).toBe("invalid_client");
+			});
+
+			it("returns 200 when client_secret is correct", async () => {
+				const clientRepo: ClientRepository = {
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+					}),
+					authenticate: vi.fn().mockResolvedValue({
+						clientId: "client1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+					}),
+				};
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc" }),
+					clientRepo,
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1", client_secret: "correct-secret" },
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(200);
+			});
+
+			it("skips client secret check when client has no secret (public client - findById returns client but authenticate returns null with no secret provided)", async () => {
+				// Public client: no client_secret in request, findById succeeds
+				const clientRepo: ClientRepository = {
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+					}),
+					authenticate: vi.fn().mockResolvedValue(null),
+				};
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc" }),
+					clientRepo,
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1" }, // no client_secret
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				// Public client: no client_secret sent → skip verification
+				expect(result.status).toBe(200);
+			});
+		});
+
+		describe("B-7/B-8: pkce supportedMethods, defaultMethod, required", () => {
+			function makePkceConfig(pkce: Record<string, unknown>) {
+				return {
+					oauth: {
+						jwt: { secret: "test-secret" },
+						accessToken: { expiresIn: 3600 },
+						refreshToken: { expiresIn: 86400 },
+						grants: {
+							authorization: {
+								enabled: true,
+								pkce,
+							},
+						},
+					},
+				} as unknown as GrantDependencies["config"];
+			}
+
+			it("returns 400 when code_challenge_method is not in supportedMethods", async () => {
+				const config = makePkceConfig({ supportedMethods: ["S256"] });
+				const verifier = "b".repeat(43);
+				const deps = {
+					config,
+					keyStore: createSymmetricKeyStore("test-secret"),
+					codeRepository: {
+						consumeByCode: vi.fn().mockResolvedValue({
+							code: "abc",
+							code_challenge: verifier,
+							code_challenge_method: "plain",
+						}),
+						createCode: vi.fn(),
+						getByCode: vi.fn(),
+						removeByCode: vi.fn(),
+					} as unknown as CodeRepository,
+					clientRepository: mockClientRepository,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1", code_verifier: verifier },
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_request");
+			});
+
+			it("returns 400 when pkce.required=true and code has no code_challenge_method", async () => {
+				const config = makePkceConfig({ required: true, supportedMethods: ["S256", "plain"] });
+				const deps = {
+					config,
+					keyStore: createSymmetricKeyStore("test-secret"),
+					codeRepository: {
+						consumeByCode: vi.fn().mockResolvedValue({
+							code: "abc",
+							// no code_challenge_method
+						}),
+						createCode: vi.fn(),
+						getByCode: vi.fn(),
+						removeByCode: vi.fn(),
+					} as unknown as CodeRepository,
+					clientRepository: mockClientRepository,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1" },
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_request");
+			});
+
+			it("returns 200 when pkce.required=false and code has no code_challenge_method", async () => {
+				const config = makePkceConfig({ required: false, supportedMethods: ["S256", "plain"] });
+				const deps = {
+					config,
+					keyStore: createSymmetricKeyStore("test-secret"),
+					codeRepository: {
+						consumeByCode: vi.fn().mockResolvedValue({
+							code: "abc",
+							// no code_challenge_method
+						}),
+						createCode: vi.fn(),
+						getByCode: vi.fn(),
+						removeByCode: vi.fn(),
+					} as unknown as CodeRepository,
+					clientRepository: mockClientRepository,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1" },
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
