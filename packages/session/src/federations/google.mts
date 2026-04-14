@@ -73,7 +73,10 @@ export const createGoogleProvider = (config: AppConfig): FederationProvider => (
 	},
 
 	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
-		const authCallbackUrl = config.endpoints.authCallback.url;
+		// authCallback and client are optional in the schema (DID-only deployments
+		// don't need them). When Google federation is enabled, operators must
+		// configure authCallback if redirect_to flows are used.
+		const authCallbackUrl = config.endpoints.authCallback?.url;
 		if (session.redirectTo && authCallbackUrl) {
 			return {
 				ok: true,
@@ -81,7 +84,16 @@ export const createGoogleProvider = (config: AppConfig): FederationProvider => (
 			};
 		}
 
-		const clientUrl = config.endpoints.client.url;
+		if (session.redirectTo && !authCallbackUrl) {
+			return {
+				ok: false,
+				status: 500,
+				error: "misconfiguration",
+				errorDescription: "authCallback URL not configured but redirect_to was requested",
+			};
+		}
+
+		const clientUrl = config.endpoints.client?.url;
 		if (!clientUrl) {
 			return {
 				ok: false,

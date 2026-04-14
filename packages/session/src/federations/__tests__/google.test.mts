@@ -65,4 +65,54 @@ describe("createGoogleProvider", () => {
 			expect(result.value).toContain("redirect_to=");
 		}
 	});
+
+	it("returns misconfiguration error when endpoints.client and endpoints.authCallback are undefined", () => {
+		const configWithoutWebEndpoints = {
+			...baseConfig,
+			endpoints: {
+				login: { url: "/login" },
+			},
+		} as unknown as AppConfig;
+		const provider = createGoogleProvider(configWithoutWebEndpoints);
+		const result = provider.resolveCallbackRedirect({});
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error).toBe("misconfiguration");
+		}
+	});
+
+	it("returns misconfiguration error when redirectTo is set but authCallback is undefined", () => {
+		const configWithClientOnly = {
+			...baseConfig,
+			endpoints: {
+				login: { url: "/login" },
+				client: { url: "http://localhost:3001" },
+			},
+		} as unknown as AppConfig;
+		const provider = createGoogleProvider(configWithClientOnly);
+		const result = provider.resolveCallbackRedirect({
+			redirectTo: "https://app.example.com/dashboard",
+		});
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.error).toBe("misconfiguration");
+			expect(result.errorDescription).toContain("authCallback");
+		}
+	});
+
+	it("falls back to client URL when authCallback is undefined and no redirectTo", () => {
+		const configWithClient = {
+			...baseConfig,
+			endpoints: {
+				login: { url: "/login" },
+				client: { url: "http://localhost:3001" },
+			},
+		} as unknown as AppConfig;
+		const provider = createGoogleProvider(configWithClient);
+		const result = provider.resolveCallbackRedirect({});
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value).toBe("http://localhost:3001");
+		}
+	});
 });
