@@ -517,6 +517,110 @@ describe("createDidGrant", () => {
 		});
 	});
 
+	describe("handle – ed25519_prehash", () => {
+		it("accepts ed25519_prehash when supportedAlgorithms includes it", async () => {
+			const did = "did:key:z6MkPrehashE2E";
+			const privateKey = ed.utils.randomSecretKey();
+			const publicKey = await ed.getPublicKeyAsync(privateKey);
+			const resolver = buildResolver(did, publicKey);
+
+			const message = JSON.stringify({
+				did,
+				timestamp: new Date().toISOString(),
+				nonce: `nonce-prehash-${Date.now()}-${Math.random()}`,
+			});
+
+			// SHA-256 hash the message, then sign the hash
+			const messageBytes = new TextEncoder().encode(message);
+			const hashBuffer = await crypto.subtle.digest("SHA-256", messageBytes);
+			const hash = new Uint8Array(hashBuffer);
+			const signature = await ed.signAsync(hash, privateKey);
+
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_prehash"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const ctx: GrantContext = {
+				body: {
+					did,
+					message,
+					signature: Buffer.from(signature).toString("base64"),
+					prehash: "sha256",
+				},
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+		});
+
+		it("rejects ed25519_prehash when not in supportedAlgorithms", async () => {
+			const did = "did:key:z6MkPrehashReject";
+			const privateKey = ed.utils.randomSecretKey();
+			const publicKey = await ed.getPublicKeyAsync(privateKey);
+			const resolver = buildResolver(did, publicKey);
+
+			const message = JSON.stringify({
+				did,
+				timestamp: new Date().toISOString(),
+				nonce: `nonce-prehash-reject-${Date.now()}`,
+			});
+
+			const messageBytes = new TextEncoder().encode(message);
+			const hashBuffer = await crypto.subtle.digest("SHA-256", messageBytes);
+			const hash = new Uint8Array(hashBuffer);
+			const signature = await ed.signAsync(hash, privateKey);
+
+			// Only ed25519_raw is supported — prehash should be rejected
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_raw"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const ctx: GrantContext = {
+				body: {
+					did,
+					message,
+					signature: Buffer.from(signature).toString("base64"),
+					prehash: "sha256",
+				},
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toContain("ed25519_prehash");
+			expect("errorDescription" in result && result.errorDescription).toContain("not supported");
+		});
+	});
+
 	describe("handle – custom verifierRegistry", () => {
 		it("uses injected verifierRegistry instead of default", async () => {
 			const did = "did:key:z6MkCustom";
