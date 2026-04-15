@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+export { extractEd25519PublicKeyBytes } from "./ed25519Utils.mjs";
 export { type Algorithm, createVerifier } from "./factory.mjs";
 // Ed25519RawVerifier intentionally NOT re-exported — it statically imports @noble/ed25519
 // which is an optional peer dep. Use createVerifier("ed25519_raw") or import directly.
