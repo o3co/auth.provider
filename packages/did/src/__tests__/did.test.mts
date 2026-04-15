@@ -24,6 +24,12 @@ import { describe, expect, it } from "vitest";
 
 import { createDidGrant } from "../did.mjs";
 import type { DidDocument, DidDocumentResolver, JsonWebKey } from "../resolver/types.mjs";
+import { VerifierRegistry } from "../verifiers/registry.mjs";
+import type {
+	SignatureVerifier,
+	VerificationContext,
+	VerificationResult,
+} from "../verifiers/types.mjs";
 
 const mockConfig = {
 	oauth: {
@@ -505,6 +511,197 @@ describe("createDidGrant", () => {
 			} as unknown as GrantDependencies["config"];
 
 			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkBackCompat");
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
+		});
+	});
+
+	describe("handle – ed25519_prehash", () => {
+		it("accepts ed25519_prehash when supportedAlgorithms includes it", async () => {
+			const did = "did:key:z6MkPrehashE2E";
+			const privateKey = ed.utils.randomSecretKey();
+			const publicKey = await ed.getPublicKeyAsync(privateKey);
+			const resolver = buildResolver(did, publicKey);
+
+			const message = JSON.stringify({
+				did,
+				timestamp: new Date().toISOString(),
+				nonce: `nonce-prehash-${Date.now()}-${Math.random()}`,
+			});
+
+			// SHA-256 hash the message, then sign the hash
+			const messageBytes = new TextEncoder().encode(message);
+			const hashBuffer = await crypto.subtle.digest("SHA-256", messageBytes);
+			const hash = new Uint8Array(hashBuffer);
+			const signature = await ed.signAsync(hash, privateKey);
+
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_prehash"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const ctx: GrantContext = {
+				body: {
+					did,
+					message,
+					signature: Buffer.from(signature).toString("base64"),
+					prehash: "sha256",
+				},
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+		});
+
+		it("rejects ed25519_prehash when not in supportedAlgorithms", async () => {
+			const did = "did:key:z6MkPrehashReject";
+			const privateKey = ed.utils.randomSecretKey();
+			const publicKey = await ed.getPublicKeyAsync(privateKey);
+			const resolver = buildResolver(did, publicKey);
+
+			const message = JSON.stringify({
+				did,
+				timestamp: new Date().toISOString(),
+				nonce: `nonce-prehash-reject-${Date.now()}`,
+			});
+
+			const messageBytes = new TextEncoder().encode(message);
+			const hashBuffer = await crypto.subtle.digest("SHA-256", messageBytes);
+			const hash = new Uint8Array(hashBuffer);
+			const signature = await ed.signAsync(hash, privateKey);
+
+			// Only ed25519_raw is supported — prehash should be rejected
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_raw"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const ctx: GrantContext = {
+				body: {
+					did,
+					message,
+					signature: Buffer.from(signature).toString("base64"),
+					prehash: "sha256",
+				},
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toContain("ed25519_prehash");
+			expect("errorDescription" in result && result.errorDescription).toContain("not supported");
+		});
+	});
+
+	describe("handle – custom verifierRegistry", () => {
+		it("uses injected verifierRegistry instead of default", async () => {
+			const did = "did:key:z6MkCustom";
+			const privateKey = ed.utils.randomSecretKey();
+			const publicKey = await ed.getPublicKeyAsync(privateKey);
+			const resolver = buildResolver(did, publicKey);
+
+			// Track whether the mock verifier was called
+			let verifyCalled = false;
+			const mockVerifier: SignatureVerifier = {
+				async verify(ctx: VerificationContext): Promise<VerificationResult> {
+					verifyCalled = true;
+					const parsedMessage = JSON.parse(ctx.body.message as string);
+					return {
+						valid: true,
+						subject: ctx.did,
+						audience: parsedMessage.audience,
+						parsedMessage,
+					};
+				},
+			};
+
+			// Create a registry with only a custom algorithm
+			const customRegistry = new VerifierRegistry();
+			customRegistry.register("custom_alg", async () => mockVerifier);
+
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["custom_alg"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver, verifierRegistry: customRegistry },
+			);
+
+			const message = JSON.stringify({
+				did,
+				timestamp: new Date().toISOString(),
+				nonce: `nonce-custom-${Date.now()}-${Math.random()}`,
+			});
+
+			const ctx: GrantContext = {
+				body: {
+					did,
+					message,
+					signature: "dummy-signature",
+					algorithm: "custom_alg",
+				},
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+			expect(verifyCalled).toBe(true);
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+		});
+
+		it("falls back to default registry when verifierRegistry is not provided", async () => {
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkFallback");
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_raw"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
 			const handler = createDidGrant(
 				{ config, keyStore: createSymmetricKeyStore("test-secret") },
 				{ resolver },

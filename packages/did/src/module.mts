@@ -18,6 +18,7 @@ import type { Module, ModuleContext } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createDidGrant } from "./did.mjs";
 import type { DidDocumentResolver } from "./resolver/types.mjs";
+import type { VerifierRegistry } from "./verifiers/registry.mjs";
 
 export const didConfigSchema = z.object({
 	did: z
@@ -39,8 +40,11 @@ export const didConfigSchema = z.object({
 });
 
 export type DidModuleOptions =
-	| { resolver: DidDocumentResolver }
-	| { resolverFactory: (config: Record<string, unknown>) => DidDocumentResolver };
+	| { resolver: DidDocumentResolver; verifierRegistry?: VerifierRegistry }
+	| {
+			resolverFactory: (config: Record<string, unknown>) => DidDocumentResolver;
+			verifierRegistry?: VerifierRegistry;
+	  };
 
 /**
  * Module that registers the DID grant handler.
@@ -67,7 +71,7 @@ export const oauthDidModule = (options: DidModuleOptions): Module => ({
 				keyStore: context.keyStore,
 				pathResolver: context.pathResolver,
 			},
-			{ resolver },
+			{ resolver, verifierRegistry: options.verifierRegistry },
 		);
 		context.grantRegistry.register("did", handler);
 	},
