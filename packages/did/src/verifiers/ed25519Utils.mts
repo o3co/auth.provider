@@ -22,7 +22,7 @@ for (let i = 0; i < BASE58_ALPHABET.length; i++) {
 	BASE58_MAP[BASE58_ALPHABET[i]] = i;
 }
 
-export function decodeBase58btc(input: string): Uint8Array {
+function decodeBase58btc(input: string): Uint8Array {
 	const bytes = [0];
 	for (const char of input) {
 		const value = BASE58_MAP[char];

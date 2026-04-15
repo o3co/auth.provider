@@ -628,9 +628,11 @@ describe("createDidGrant", () => {
 			const publicKey = await ed.getPublicKeyAsync(privateKey);
 			const resolver = buildResolver(did, publicKey);
 
-			// Create a mock verifier that always succeeds
+			// Track whether the mock verifier was called
+			let verifyCalled = false;
 			const mockVerifier: SignatureVerifier = {
 				async verify(ctx: VerificationContext): Promise<VerificationResult> {
+					verifyCalled = true;
 					const parsedMessage = JSON.parse(ctx.body.message as string);
 					return {
 						valid: true,
@@ -655,14 +657,33 @@ describe("createDidGrant", () => {
 				},
 			} as unknown as GrantDependencies["config"];
 
-			// This would fail with default registry ("custom_alg" not registered)
-			// but succeeds with injected registry
 			const handler = createDidGrant(
 				{ config, keyStore: createSymmetricKeyStore("test-secret") },
 				{ resolver, verifierRegistry: customRegistry },
 			);
 
-			expect(typeof handler.handle).toBe("function");
+			const message = JSON.stringify({
+				did,
+				timestamp: new Date().toISOString(),
+				nonce: `nonce-custom-${Date.now()}-${Math.random()}`,
+			});
+
+			const ctx: GrantContext = {
+				body: {
+					did,
+					message,
+					signature: "dummy-signature",
+					algorithm: "custom_alg",
+				},
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+			expect(verifyCalled).toBe(true);
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
 		});
 
 		it("falls back to default registry when verifierRegistry is not provided", async () => {
