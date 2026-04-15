@@ -53,24 +53,31 @@ function decodeBase58btc(input: string): Uint8Array {
  * - Multibase format: base58btc string (prefixed with 'z'), multicodec-prefixed (0xed 0x01).
  */
 export function extractEd25519PublicKeyBytes(resolvedKey: ExtractedKey): Uint8Array {
+	let keyBytes: Uint8Array;
+
 	if (resolvedKey.format === "jwk") {
 		const jwk = resolvedKey.key;
 		if (!jwk.x) throw new Error("JWK is missing x field");
 		// base64url decode
 		const padded = jwk.x.replace(/-/g, "+").replace(/_/g, "/");
 		const base64 = padded.padEnd(padded.length + ((4 - (padded.length % 4)) % 4), "=");
-		return Uint8Array.from(Buffer.from(base64, "base64"));
+		keyBytes = Uint8Array.from(Buffer.from(base64, "base64"));
+	} else {
+		// Multibase: 'z' prefix indicates base58btc encoding
+		const multibaseStr = resolvedKey.key;
+		if (!multibaseStr.startsWith("z")) {
+			throw new Error("Only base58btc multibase ('z' prefix) is supported for Ed25519 keys");
+		}
+		const decoded = decodeBase58btc(multibaseStr.slice(1));
+		// Multicodec prefix for Ed25519 public key is 0xed 0x01
+		if (decoded.length < 2 || decoded[0] !== 0xed || decoded[1] !== 0x01) {
+			throw new Error("Invalid multicodec prefix for Ed25519 public key");
+		}
+		keyBytes = decoded.slice(2);
 	}
 
-	// Multibase: 'z' prefix indicates base58btc encoding
-	const multibaseStr = resolvedKey.key;
-	if (!multibaseStr.startsWith("z")) {
-		throw new Error("Only base58btc multibase ('z' prefix) is supported for Ed25519 keys");
+	if (keyBytes.length !== 32) {
+		throw new Error(`Expected 32-byte Ed25519 public key, got ${keyBytes.length} bytes`);
 	}
-	const decoded = decodeBase58btc(multibaseStr.slice(1));
-	// Multicodec prefix for Ed25519 public key is 0xed 0x01
-	if (decoded.length < 2 || decoded[0] !== 0xed || decoded[1] !== 0x01) {
-		throw new Error("Invalid multicodec prefix for Ed25519 public key");
-	}
-	return decoded.slice(2);
+	return keyBytes;
 }
