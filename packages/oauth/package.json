@@ -58,7 +58,7 @@
 		"express": "^5.2.1",
 		"passport": "^0.7.0",
 		"passport-oauth2-client-password": "^0.1.2",
-		"typescript": "^5.9.3",
+		"typescript": "^6.0.2",
 		"vitest": "^4.1.2"
 	}
 }

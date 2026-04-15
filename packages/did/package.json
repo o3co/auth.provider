@@ -41,7 +41,7 @@
 	},
 	"devDependencies": {
 		"@noble/ed25519": "^3.0.1",
-		"typescript": "^5.9.3",
+		"typescript": "^6.0.2",
 		"vitest": "^4.1.2"
 	}
 }
