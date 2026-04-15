@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
+import { Ed25519PrehashVerifier } from "../ed25519Prehash.mjs";
 import { Ed25519RawVerifier } from "../ed25519Raw.mjs";
 import { createVerifier } from "../factory.mjs";
 import { JwsVerifier } from "../jws.mjs";
@@ -43,5 +44,10 @@ describe("createVerifier", () => {
 		const pathResolver = (s: string) => s;
 		const verifier = await createVerifier("ed25519_raw", pathResolver);
 		expect(verifier).toBeDefined();
+	});
+
+	it("returns Ed25519PrehashVerifier for ed25519_prehash", async () => {
+		const verifier = await createVerifier("ed25519_prehash");
+		expect(verifier).toBeInstanceOf(Ed25519PrehashVerifier);
 	});
 });
