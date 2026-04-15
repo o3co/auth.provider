@@ -16,8 +16,9 @@
 
 export { extractEd25519PublicKeyBytes } from "./ed25519Utils.mjs";
 export { type Algorithm, createVerifier } from "./factory.mjs";
-// Ed25519RawVerifier intentionally NOT re-exported — it statically imports @noble/ed25519
-// which is an optional peer dep. Use createVerifier("ed25519_raw") or import directly.
+// Ed25519RawVerifier and Ed25519PrehashVerifier intentionally NOT re-exported — they
+// dynamically import @noble/ed25519 at runtime, which is an optional peer dep.
+// Use createVerifier("ed25519_raw") / createVerifier("ed25519_prehash") or import directly.
 export { JwsVerifier } from "./jws.mjs";
 export type {
 	ParsedMessage,
