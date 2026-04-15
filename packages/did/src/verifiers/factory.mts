@@ -54,6 +54,29 @@ export function createDefaultVerifierRegistry(): VerifierRegistry {
 		}
 	});
 
+	registry.register("ed25519_prehash", async (pathResolver?: PathResolver) => {
+		try {
+			const { Ed25519PrehashVerifier } = await import("./ed25519Prehash.mjs");
+			return new Ed25519PrehashVerifier(pathResolver);
+		} catch (err) {
+			const code =
+				typeof err === "object" && err !== null && "code" in err
+					? (err as { code: unknown }).code
+					: undefined;
+			const message = err instanceof Error ? err.message : String(err);
+			if (
+				(code === "ERR_MODULE_NOT_FOUND" || code === "MODULE_NOT_FOUND") &&
+				message.includes("@noble/ed25519")
+			) {
+				throw new Error(
+					"ed25519_prehash algorithm requires @noble/ed25519 package. " +
+						"Install it with: pnpm add @noble/ed25519 — or switch to a JWS algorithm (ed25519_jws, es256_jws, es256k_jws).",
+				);
+			}
+			throw err;
+		}
+	});
+
 	registry.register("ed25519_jws", async () => new JwsVerifier(JWS_ALG_MAP.ed25519_jws));
 	registry.register("es256_jws", async () => new JwsVerifier(JWS_ALG_MAP.es256_jws));
 	registry.register("es256k_jws", async () => new JwsVerifier(JWS_ALG_MAP.es256k_jws));

@@ -28,6 +28,22 @@ async function makeJws(alg: "EdDSA" | "ES256"): Promise<string> {
 }
 
 describe("detectAlgorithm", () => {
+	it("returns explicit body.algorithm when present", () => {
+		const body = { algorithm: "custom_alg", did: "did:key:abc" };
+		expect(detectAlgorithm(body)).toBe("custom_alg");
+	});
+
+	it("prefers explicit body.algorithm over shape-based detection", () => {
+		// Even though signature+message are present, explicit algorithm wins
+		const body = { algorithm: "custom_alg", signature: "abc", message: "hello" };
+		expect(detectAlgorithm(body)).toBe("custom_alg");
+	});
+
+	it("falls through to shape-based detection when algorithm is absent", () => {
+		const body = { signature: "abc", message: "hello" };
+		expect(detectAlgorithm(body)).toBe("ed25519_raw");
+	});
+
 	it("returns 'ed25519_raw' when signature and message are present", () => {
 		const body = { signature: "abc123", message: "hello" };
 		expect(detectAlgorithm(body)).toBe("ed25519_raw");
@@ -67,6 +83,21 @@ describe("detectAlgorithm", () => {
 	it("prefers ed25519_raw when both signature/message and jws are present", () => {
 		// signature + message takes precedence (checked first)
 		const body = { signature: "abc", message: "hello", jws: "some.jws.token" };
+		expect(detectAlgorithm(body)).toBe("ed25519_raw");
+	});
+
+	it("returns 'ed25519_prehash' when signature, message, and prehash='sha256' are present", () => {
+		const body = { signature: "abc123", message: "hello", prehash: "sha256" };
+		expect(detectAlgorithm(body)).toBe("ed25519_prehash");
+	});
+
+	it("returns 'ed25519_raw' when signature and message are present but prehash is absent", () => {
+		const body = { signature: "abc123", message: "hello" };
+		expect(detectAlgorithm(body)).toBe("ed25519_raw");
+	});
+
+	it("returns 'ed25519_raw' when prehash has an unrecognized value", () => {
+		const body = { signature: "abc123", message: "hello", prehash: "sha512" };
 		expect(detectAlgorithm(body)).toBe("ed25519_raw");
 	});
 });

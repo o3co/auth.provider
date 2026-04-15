@@ -18,6 +18,7 @@ export { type DidModuleOptions, didConfigSchema, oauthDidModule } from "./module
 export { type ExtractedKey, extractVerificationKey } from "./resolver/extractKey.mjs";
 export type { DidDocument, DidDocumentResolver, VerificationMethod } from "./resolver/types.mjs";
 export { detectAlgorithm } from "./verifiers/detect.mjs";
+export { extractEd25519PublicKeyBytes } from "./verifiers/ed25519Utils.mjs";
 export {
 	type Algorithm,
 	createDefaultVerifierRegistry,

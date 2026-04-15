@@ -23,7 +23,7 @@ import type {
 	VerificationResult,
 } from "./types.mjs";
 
-export class Ed25519RawVerifier implements SignatureVerifier {
+export class Ed25519PrehashVerifier implements SignatureVerifier {
 	private verifyAsync:
 		| ((sig: Uint8Array, msg: Uint8Array, pub: Uint8Array) => Promise<boolean>)
 		| undefined;
@@ -95,13 +95,15 @@ export class Ed25519RawVerifier implements SignatureVerifier {
 			};
 		}
 
-		// 5. Verify Ed25519 signature
+		// 5. Compute SHA-256 hash of message, then verify Ed25519 signature against the hash
 		try {
 			const verifyAsync = await this.loadVerifyAsync();
 			const signatureBytes = Buffer.from(body.signature, "base64");
 			const messageBytes = new TextEncoder().encode(body.message);
+			const hashBuffer = await crypto.subtle.digest("SHA-256", messageBytes);
+			const hash = new Uint8Array(hashBuffer);
 
-			const valid = await verifyAsync(signatureBytes, messageBytes, publicKeyBytes);
+			const valid = await verifyAsync(signatureBytes, hash, publicKeyBytes);
 			if (!valid) {
 				return {
 					valid: false,
