@@ -25,10 +25,12 @@ import { extractVerificationKey } from "./resolver/extractKey.mjs";
 import type { DidDocumentResolver } from "./resolver/types.mjs";
 import { detectAlgorithm } from "./verifiers/detect.mjs";
 import { createDefaultVerifierRegistry } from "./verifiers/factory.mjs";
+import type { VerifierRegistry } from "./verifiers/registry.mjs";
 import type { SignatureVerifier } from "./verifiers/types.mjs";
 
 export interface DidGrantOptions {
 	resolver: DidDocumentResolver;
+	verifierRegistry?: VerifierRegistry;
 }
 
 export const createDidGrant = (deps: GrantDependencies, options: DidGrantOptions): GrantHandler => {
@@ -44,7 +46,7 @@ export const createDidGrant = (deps: GrantDependencies, options: DidGrantOptions
 		((didConfig?.messageMaxAgeSec as number | undefined) ?? DEFAULT_MESSAGE_MAX_AGE_SEC) * 1000;
 	const allowedAudiences = (didConfig?.allowedAudiences as string[] | undefined) ?? [];
 
-	const verifierRegistry = createDefaultVerifierRegistry();
+	const verifierRegistry = options.verifierRegistry ?? createDefaultVerifierRegistry();
 
 	// Resolve supportedAlgorithms with backward-compatible alias for the old `algorithm` field.
 	const rawSupported = didConfig?.supportedAlgorithms as string[] | undefined;

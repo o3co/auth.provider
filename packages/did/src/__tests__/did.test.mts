@@ -24,6 +24,8 @@ import { describe, expect, it } from "vitest";
 
 import { createDidGrant } from "../did.mjs";
 import type { DidDocument, DidDocumentResolver, JsonWebKey } from "../resolver/types.mjs";
+import { VerifierRegistry } from "../verifiers/registry.mjs";
+import type { SignatureVerifier, VerificationContext, VerificationResult } from "../verifiers/types.mjs";
 
 const mockConfig = {
 	oauth: {
@@ -505,6 +507,72 @@ describe("createDidGrant", () => {
 			} as unknown as GrantDependencies["config"];
 
 			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkBackCompat");
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver },
+			);
+
+			const { result } = await handler.handle(ctx);
+			expect(result.status).toBe(200);
+		});
+	});
+
+	describe("handle – custom verifierRegistry", () => {
+		it("uses injected verifierRegistry instead of default", async () => {
+			const did = "did:key:z6MkCustom";
+			const privateKey = ed.utils.randomSecretKey();
+			const publicKey = await ed.getPublicKeyAsync(privateKey);
+			const resolver = buildResolver(did, publicKey);
+
+			// Create a mock verifier that always succeeds
+			const mockVerifier: SignatureVerifier = {
+				async verify(ctx: VerificationContext): Promise<VerificationResult> {
+					const parsedMessage = JSON.parse(ctx.body.message as string);
+					return {
+						valid: true,
+						subject: ctx.did,
+						audience: parsedMessage.audience,
+						parsedMessage,
+					};
+				},
+			};
+
+			// Create a registry with only a custom algorithm
+			const customRegistry = new VerifierRegistry();
+			customRegistry.register("custom_alg", async () => mockVerifier);
+
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["custom_alg"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			// This would fail with default registry ("custom_alg" not registered)
+			// but succeeds with injected registry
+			const handler = createDidGrant(
+				{ config, keyStore: createSymmetricKeyStore("test-secret") },
+				{ resolver, verifierRegistry: customRegistry },
+			);
+
+			expect(typeof handler.handle).toBe("function");
+		});
+
+		it("falls back to default registry when verifierRegistry is not provided", async () => {
+			const { ctx, resolver } = await makeSignedCtx("did:key:z6MkFallback");
+			const config = {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					grants: {
+						did: { enabled: true, supportedAlgorithms: ["ed25519_raw"] },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
 			const handler = createDidGrant(
 				{ config, keyStore: createSymmetricKeyStore("test-secret") },
 				{ resolver },
