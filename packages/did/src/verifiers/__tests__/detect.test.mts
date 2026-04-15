@@ -69,4 +69,19 @@ describe("detectAlgorithm", () => {
 		const body = { signature: "abc", message: "hello", jws: "some.jws.token" };
 		expect(detectAlgorithm(body)).toBe("ed25519_raw");
 	});
+
+	it("returns 'ed25519_prehash' when signature, message, and prehash='sha256' are present", () => {
+		const body = { signature: "abc123", message: "hello", prehash: "sha256" };
+		expect(detectAlgorithm(body)).toBe("ed25519_prehash");
+	});
+
+	it("returns 'ed25519_raw' when signature and message are present but prehash is absent", () => {
+		const body = { signature: "abc123", message: "hello" };
+		expect(detectAlgorithm(body)).toBe("ed25519_raw");
+	});
+
+	it("returns 'ed25519_raw' when prehash has an unrecognized value", () => {
+		const body = { signature: "abc123", message: "hello", prehash: "sha512" };
+		expect(detectAlgorithm(body)).toBe("ed25519_raw");
+	});
 });

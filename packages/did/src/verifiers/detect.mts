@@ -28,7 +28,10 @@ import { decodeProtectedHeader } from "jose";
  * Returns `null` if detection fails (e.g. invalid JWS, unknown alg).
  */
 export function detectAlgorithm(body: Record<string, unknown>): string | null {
-	if (body.signature && body.message) return "ed25519_raw";
+	if (body.signature && body.message) {
+		if (body.prehash === "sha256") return "ed25519_prehash";
+		return "ed25519_raw";
+	}
 
 	if (body.jws) {
 		try {
