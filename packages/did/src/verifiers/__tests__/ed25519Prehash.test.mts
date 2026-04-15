@@ -89,11 +89,9 @@ describe("Ed25519PrehashVerifier", () => {
 	it("returns valid result with audience when present", async () => {
 		const verifier = new Ed25519PrehashVerifier();
 		const audience = "https://api.example.com";
-		const { message, signature, resolvedKey } = await createPrehashSignedRequest(
-			did,
-			privateKey,
-			{ audience },
-		);
+		const { message, signature, resolvedKey } = await createPrehashSignedRequest(did, privateKey, {
+			audience,
+		});
 
 		const result = await verifier.verify({
 			body: { signature, message, prehash: "sha256" },

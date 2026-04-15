@@ -25,7 +25,11 @@ import { describe, expect, it } from "vitest";
 import { createDidGrant } from "../did.mjs";
 import type { DidDocument, DidDocumentResolver, JsonWebKey } from "../resolver/types.mjs";
 import { VerifierRegistry } from "../verifiers/registry.mjs";
-import type { SignatureVerifier, VerificationContext, VerificationResult } from "../verifiers/types.mjs";
+import type {
+	SignatureVerifier,
+	VerificationContext,
+	VerificationResult,
+} from "../verifiers/types.mjs";
 
 const mockConfig = {
 	oauth: {

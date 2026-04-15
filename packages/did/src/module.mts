@@ -41,7 +41,10 @@ export const didConfigSchema = z.object({
 
 export type DidModuleOptions =
 	| { resolver: DidDocumentResolver; verifierRegistry?: VerifierRegistry }
-	| { resolverFactory: (config: Record<string, unknown>) => DidDocumentResolver; verifierRegistry?: VerifierRegistry };
+	| {
+			resolverFactory: (config: Record<string, unknown>) => DidDocumentResolver;
+			verifierRegistry?: VerifierRegistry;
+	  };
 
 /**
  * Module that registers the DID grant handler.
