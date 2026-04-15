@@ -98,6 +98,8 @@ jobs:
           mkdir -p "v${VERSION}"
           cp -r "$TEMP_DIR/"* "v${VERSION}/"
 
+          touch .nojekyll
+
           cat > index.html << REDIRECT
           <!DOCTYPE html>
           <html>
