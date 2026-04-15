@@ -3,6 +3,7 @@
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
 [![codecov](https://codecov.io/gh/o3co/auth.provider/graph/badge.svg)](https://codecov.io/gh/o3co/auth.provider)
+[![API Docs](https://img.shields.io/badge/docs-API-blue)](https://o3co.github.io/auth.provider/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 OAuth 2.0 provider with DID (Decentralized Identifier) authentication. Issue JWTs from traditional login flows or DID-based cryptographic proof — same token format, same introspection endpoint, same downstream verification.

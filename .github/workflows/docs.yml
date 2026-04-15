@@ -49,7 +49,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "24"
-          cache: pnpm
+
+      - name: Get pnpm store path
+        if: steps.version.outputs.skip == 'false'
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        if: steps.version.outputs.skip == 'false'
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('**/package.json') }}
+          restore-keys: pnpm-store-
 
       - name: Install dependencies
         if: steps.version.outputs.skip == 'false'
