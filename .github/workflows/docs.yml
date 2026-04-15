@@ -2,40 +2,102 @@ name: Deploy API Docs
 
 on:
   push:
-    tags: ['v*']
-  workflow_dispatch:
+    tags:
+      - "v*"
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  contents: write
 
 jobs:
-  build:
+  deploy-docs:
+    name: Build and deploy API docs
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - run: pnpm install
-      - run: pnpm run build
-      - run: pnpm run docs
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/api
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Extract version and check if deployable
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # Skip pre-release versions (e.g., 1.0.0-beta.1)
+          if echo "$TAG" | grep -q '-'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping docs deploy for pre-release v$TAG"
+            exit 0
+          fi
+
+          # Skip patch releases (e.g., 1.0.1)
+          PATCH=$(echo "$TAG" | cut -d. -f3)
+          if [ "$PATCH" != "0" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping docs deploy for patch release v$TAG"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "Deploying docs for v$TAG"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.version.outputs.skip == 'false'
+
+      - name: Set up pnpm
+        if: steps.version.outputs.skip == 'false'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        if: steps.version.outputs.skip == 'false'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.version.outputs.skip == 'false'
+        run: pnpm install
+
+      - name: Build packages
+        if: steps.version.outputs.skip == 'false'
+        run: pnpm run build
+
+      - name: Build docs
+        if: steps.version.outputs.skip == 'false'
+        run: pnpm run docs
+
+      - name: Deploy to GitHub Pages
+        if: steps.version.outputs.skip == 'false'
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          TEMP_DIR=$(mktemp -d)
+          cp -r docs/api/* "$TEMP_DIR/"
+
+          git fetch origin gh-pages:gh-pages 2>/dev/null || true
+          git checkout --orphan gh-pages-tmp
+          git rm -rf . 2>/dev/null || true
+
+          if git rev-parse --verify gh-pages 2>/dev/null; then
+            git checkout gh-pages -- . 2>/dev/null || true
+          fi
+
+          rm -rf "v${VERSION}"
+          mkdir -p "v${VERSION}"
+          cp -r "$TEMP_DIR/"* "v${VERSION}/"
+
+          cat > index.html << REDIRECT
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta http-equiv="refresh" content="0; url=v${VERSION}/" />
+            <title>Redirecting to latest docs</title>
+          </head>
+          <body>
+            <p>Redirecting to <a href="v${VERSION}/">v${VERSION}</a>...</p>
+          </body>
+          </html>
+          REDIRECT
+
+          git add -A
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "docs: deploy API docs for v${VERSION}"
+          git push origin HEAD:gh-pages --force
