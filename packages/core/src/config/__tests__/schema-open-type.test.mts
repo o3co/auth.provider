@@ -28,6 +28,28 @@ describe("schema open type", () => {
 		expect(parsed.storage.type).toBe("memcached");
 	});
 
+	it("preserves custom session storage sub-section (passthrough carries memcached.servers)", () => {
+		const parsed = fullSectionsSchema.shape.session.parse({
+			secret: "s",
+			storage: {
+				type: "memcached",
+				memcached: { servers: ["mc1.example.com:11211", "mc2.example.com:11211"] },
+			},
+		});
+		expect(parsed.storage.type).toBe("memcached");
+		expect(
+			(parsed.storage as unknown as { memcached?: { servers?: string[] } }).memcached?.servers,
+		).toEqual(["mc1.example.com:11211", "mc2.example.com:11211"]);
+	});
+
+	it("allows omitting the redis sub-section when type != 'redis'", () => {
+		const parsed = fullSectionsSchema.shape.session.parse({
+			secret: "s",
+			storage: { type: "memory" },
+		});
+		expect(parsed.storage.type).toBe("memory");
+	});
+
 	it("still accepts the builtin session storage types", () => {
 		for (const type of ["redis", "memory"]) {
 			const parsed = fullSectionsSchema.shape.session.parse({
