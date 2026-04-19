@@ -22,10 +22,7 @@ import {
 	SignJWT,
 } from "jose";
 import { describe, expect, it } from "vitest";
-import {
-	createAsymmetricKeyStore,
-	createSymmetricKeyStore,
-} from "#/keys/KeyStore.mjs";
+import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -271,4 +268,3 @@ describe("AsymmetricKeyStore", () => {
 		expect(() => store.getVerificationKey("k1")).toThrow();
 	});
 });
-
