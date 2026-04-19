@@ -20,12 +20,11 @@ const rateLimitSchema = z.object({
 	limit: z.coerce.number(),
 });
 
-const jwtSchema = z
+const signingKeyLocalSchema = z
 	.object({
 		algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]).default("HS256"),
-		secret: z.string().optional(),
-		issuer: z.string().optional(),
 		kid: z.string().default("v0"),
+		secret: z.string().optional(),
 		privateKey: z.string().optional(),
 		privateKeyPath: z.string().optional(),
 		publicKey: z.string().optional(),
@@ -41,42 +40,19 @@ const jwtSchema = z
 			)
 			.default([]),
 	})
-	.superRefine((data, ctx) => {
-		if (data.algorithm === "HS256" && !data.secret) {
-			ctx.addIssue({
-				code: z.ZodIssueCode.custom,
-				message: "secret is required for HS256 algorithm",
-				path: ["secret"],
-			});
-		}
-		const isAsymmetric =
-			data.algorithm === "RS256" || data.algorithm === "ES256" || data.algorithm === "EdDSA";
-		if (isAsymmetric) {
-			if (!data.privateKey && !data.privateKeyPath) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: "privateKey or privateKeyPath is required for asymmetric algorithms",
-					path: ["privateKey"],
-				});
-			}
-			if (!data.publicKey && !data.publicKeyPath) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: "publicKey or publicKeyPath is required for asymmetric algorithms",
-					path: ["publicKey"],
-				});
-			}
-		}
-		for (const [i, key] of data.previousKeys.entries()) {
-			if (!key.publicKey && !key.publicKeyPath) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: "publicKey or publicKeyPath is required for each previousKeys entry",
-					path: ["previousKeys", i, "publicKey"],
-				});
-			}
-		}
-	});
+	.passthrough();
+
+const signingKeySchema = z
+	.object({
+		provider: z.string().default("local"),
+		local: signingKeyLocalSchema.optional(),
+	})
+	.passthrough();
+
+const jwtSchema = z.object({
+	issuer: z.string().optional(),
+	signingKey: signingKeySchema.default({ provider: "local" }),
+});
 
 /**
  * Minimal always-required config for the auth provider core.
