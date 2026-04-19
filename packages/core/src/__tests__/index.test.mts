@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { KeyStoreFactory } from "#/index.mjs";
 import {
 	AdapterFactoryError,
 	AppConfigSchema,
@@ -15,6 +16,11 @@ import {
 	InMemoryUserRepository,
 	registerBuiltinKeyStores,
 } from "#/index.mjs";
+
+// Force compile-time check that KeyStoreFactory type is exported.
+// No runtime assertion — tsc failing to resolve the import is the test.
+const _keyStoreFactoryTypeCheck: KeyStoreFactory | undefined = undefined;
+void _keyStoreFactoryTypeCheck;
 
 describe("public API", () => {
 	it("exports InMemoryClientRepository class", () => {

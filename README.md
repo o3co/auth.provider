@@ -63,13 +63,24 @@ For a DID-only deployment (no session, no federation):
 
 ```typescript
 import express from "express";
-import { createApp, CoreConfigSchema, createKeyStoreFromConfig } from "@o3co/auth-provider-core";
+import {
+  createApp,
+  createKeyStoreFactory,
+  registerBuiltinKeyStores,
+} from "@o3co/auth-provider-core";
 import { oauthDidModule } from "@o3co/auth-provider-did";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 
+const keyStoreFactory = createKeyStoreFactory();
+registerBuiltinKeyStores(keyStoreFactory);
+const keyStore = await keyStoreFactory.create({
+  type: config.oauth.jwt.signingKey.provider,
+  ...(config.oauth.jwt.signingKey.local ?? {}),
+});
+
 const { init, router } = createApp(express, {
   config,
-  keyStore: createKeyStoreFromConfig(config.oauth.jwt),
+  keyStore,
   modules: [
     oauthModule({ clientRepository, codeRepository }),
     oauthDidModule({ resolver: myDidResolver }),
@@ -135,9 +146,15 @@ HOCON config file with environment variable overrides. The config schema depends
 http { port = 3000 }
 oauth {
   jwt {
-    algorithm = "HS256"       # HS256 | RS256 | ES256 | EdDSA
-    secret = ${OAUTH_JWT_SECRET}
-    # For asymmetric: privateKey, publicKey, or privateKeyPath, publicKeyPath
+    issuer = ${?OAUTH_JWT_ISSUER}
+    signingKey {
+      provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory
+      local {
+        algorithm = "HS256"        # HS256 | RS256 | ES256 | EdDSA
+        secret = ${?OAUTH_JWT_SECRET}
+        # For asymmetric: privateKey/privateKeyPath + publicKey/publicKeyPath
+      }
+    }
   }
   accessToken { expiresIn = 3600 }
   refreshToken { expiresIn = 86400 }

@@ -25,12 +25,9 @@ export function createKeyStoreFactory(): KeyStoreFactory {
 }
 
 /**
- * Reads a key value from either an inline PEM string or a file path.
- * File path takes priority over PEM string when both are provided.
- * Returns undefined when neither is provided.
- *
- * Duplicated from KeyStore.mts intentionally — keeps Task 6 deletion of
- * createKeyStoreFromConfig self-contained without exposing a new public export.
+ * Private helper for the "local" builder. Reads a PEM value from an inline
+ * string or a file path. File path takes priority when both are supplied.
+ * Returns undefined when neither is provided. Not part of the public factory API.
  */
 function readKeyValue(pemString: unknown, filePath: unknown): string | undefined {
 	if (typeof filePath === "string" && filePath.length > 0) {
