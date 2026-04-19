@@ -25,15 +25,19 @@ export function createKeyStoreFactory(): KeyStoreFactory {
 
 export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 	factory.register("local", async (config) => {
-		const algorithm = (config.algorithm as string) ?? "HS256";
+		const rawAlgorithm = config.algorithm;
+		const algorithm =
+			typeof rawAlgorithm === "string" && rawAlgorithm.length > 0 ? rawAlgorithm : "HS256";
 		if (algorithm === "HS256") {
 			const secret = config.secret;
 			if (typeof secret !== "string" || secret.length === 0) {
 				throw new Error("secret is required for HS256 algorithm");
 			}
-			const kid = (config.kid as string) ?? "v0";
+			const rawKid = config.kid;
+			const kid = typeof rawKid === "string" && rawKid.length > 0 ? rawKid : "v0";
 			return createSymmetricKeyStore(secret, kid);
 		}
+		// TODO(Plan #4 Task 4): implement RS256/ES256/EdDSA via PEM/key-path dispatch
 		throw new Error(`Unsupported algorithm for local provider: ${algorithm}`);
 	});
 }

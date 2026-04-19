@@ -64,4 +64,18 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 			factory.create({ type: "local", algorithm: "HS256", kid: "v1", previousKeys: [] }),
 		).rejects.toThrow(/secret is required for HS256/i);
 	});
+
+	it("throws when HS256 secret is an empty string", async () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "HS256",
+				kid: "v1",
+				secret: "",
+				previousKeys: [],
+			}),
+		).rejects.toThrow(/secret is required for HS256/i);
+	});
 });
