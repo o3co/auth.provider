@@ -61,9 +61,7 @@ describe("createDefaultFactories", () => {
 
 		it("throws for unregistered type", async () => {
 			const { clientFactory } = createDefaultFactories();
-			await expect(clientFactory.create({ type: "redis" })).rejects.toThrow(
-				/Unknown client repository type: "redis"/,
-			);
+			await expect(clientFactory.create({ type: "redis" })).rejects.toThrow(/unknown type "redis"/);
 		});
 	});
 
@@ -86,9 +84,7 @@ describe("createDefaultFactories", () => {
 
 		it("throws for unregistered type", async () => {
 			const { userFactory } = createDefaultFactories();
-			await expect(userFactory.create({ type: "http" })).rejects.toThrow(
-				/Unknown user repository type: "http"/,
-			);
+			await expect(userFactory.create({ type: "http" })).rejects.toThrow(/unknown type "http"/);
 		});
 	});
 
@@ -134,9 +130,27 @@ describe("createDefaultFactories", () => {
 
 		it("throws for unregistered type", async () => {
 			const { codeFactory } = createDefaultFactories();
-			await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(
-				/Unknown code repository type: "redis"/,
-			);
+			await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(/unknown type "redis"/);
 		});
+	});
+});
+
+describe("createDefaultFactories — AdapterFactory shape", () => {
+	it("returns factories that expose register/create/registeredTypes", () => {
+		const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+
+		for (const factory of [clientFactory, userFactory, codeFactory]) {
+			expect(typeof factory.register).toBe("function");
+			expect(typeof factory.create).toBe("function");
+			expect(typeof factory.registeredTypes).toBe("function");
+		}
+	});
+
+	it("pre-registers yaml + static for client/user, memory for code", () => {
+		const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+
+		expect(clientFactory.registeredTypes().sort()).toEqual(["static", "yaml"]);
+		expect(userFactory.registeredTypes().sort()).toEqual(["static", "yaml"]);
+		expect(codeFactory.registeredTypes()).toEqual(["memory"]);
 	});
 });

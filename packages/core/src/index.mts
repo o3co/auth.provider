@@ -79,10 +79,6 @@ export {
 	UserEntrySchema,
 } from "./repositories/InMemoryUserRepository.mjs";
 export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
-export {
-	createDefaultFactories,
-	type RepositoryBuilder,
-	RepositoryFactory,
-} from "./repositories/RepositoryFactory.mjs";
+export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
