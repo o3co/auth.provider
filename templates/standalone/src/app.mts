@@ -64,10 +64,10 @@ await (async (): Promise<void> => {
 	const clientConfig = flattenAdapterConfig(
 		config.clients.client as { type: string } & Record<string, unknown>,
 	);
-	const clientRepository = await clientFactory.create({
-		...clientConfig,
-		path: path.resolve(appDir, "..", clientConfig.path as string),
-	});
+	if (typeof clientConfig.path === "string") {
+		clientConfig.path = path.resolve(appDir, "..", clientConfig.path);
+	}
+	const clientRepository = await clientFactory.create(clientConfig);
 	const userRepository = await userFactory.create(
 		flattenAdapterConfig(config.clients.user as { type: string } & Record<string, unknown>),
 	);
