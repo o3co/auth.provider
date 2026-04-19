@@ -14,6 +14,29 @@
  * limitations under the License.
  */
 
+/**
+ * Builder context passed to every adapter builder.
+ *
+ * Intentionally minimal in v1 — all fields are optional and future additions are
+ * guaranteed to be additive-only (non-breaking). Builders may ignore fields they
+ * do not need. Planned future fields:
+ *   - logger?: Logger         (startup-time logging, added when logger injection lands)
+ *   - abortSignal?: AbortSignal (timeout-aware init, e.g. database connections)
+ *   - tracer?: Tracer         (OpenTelemetry context propagation)
+ *   - metrics?: MetricsRecorder (metrics backend injection)
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: intentionally empty in v1; interface (not type alias) preserves declaration-merging for additive evolution
+export interface BuilderContext {}
+
+/**
+ * Factory builder function: given raw config plus a {@link BuilderContext}, produce
+ * an adapter instance (sync or async).
+ */
+export type AdapterBuilder<T> = (
+	config: Record<string, unknown>,
+	ctx: BuilderContext,
+) => T | Promise<T>;
+
 export class AdapterFactoryError extends Error {
 	public readonly kind: string;
 	public readonly type: string;
