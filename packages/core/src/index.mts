@@ -58,7 +58,7 @@ export type {
 	SessionMutation,
 } from "./grants/types.mjs";
 export type { KeyStoreFactory } from "./keys/factory.mjs";
-export { createKeyStoreFactory } from "./keys/factory.mjs";
+export { createKeyStoreFactory, registerBuiltinKeyStores } from "./keys/factory.mjs";
 // Keys
 export type {
 	AsymmetricKeyStoreOptions,

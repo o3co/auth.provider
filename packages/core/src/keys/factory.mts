@@ -15,9 +15,25 @@
  */
 import { type AdapterFactory, createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import type { KeyStore } from "./KeyStore.mjs";
+import { createSymmetricKeyStore } from "./KeyStore.mjs";
 
 export type KeyStoreFactory = AdapterFactory<KeyStore>;
 
 export function createKeyStoreFactory(): KeyStoreFactory {
 	return createAdapterFactory<KeyStore>("KeyStore");
+}
+
+export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
+	factory.register("local", async (config) => {
+		const algorithm = (config.algorithm as string) ?? "HS256";
+		if (algorithm === "HS256") {
+			const secret = config.secret;
+			if (typeof secret !== "string" || secret.length === 0) {
+				throw new Error("secret is required for HS256 algorithm");
+			}
+			const kid = (config.kid as string) ?? "v0";
+			return createSymmetricKeyStore(secret, kid);
+		}
+		throw new Error(`Unsupported algorithm for local provider: ${algorithm}`);
+	});
 }

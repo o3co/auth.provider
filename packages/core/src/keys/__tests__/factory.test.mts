@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
-import { createKeyStoreFactory } from "#/keys/factory.mjs";
+import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
 describe("createKeyStoreFactory", () => {
 	it("returns a factory with no registered types by default", () => {
@@ -33,5 +33,35 @@ describe("createKeyStoreFactory", () => {
 				err.name === "AdapterFactoryError" && err.reason === "unknown" && err.kind === "KeyStore"
 			);
 		});
+	});
+});
+
+describe("registerBuiltinKeyStores - local HS256", () => {
+	it("registers 'local' type", () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		expect(factory.registeredTypes()).toContain("local");
+	});
+
+	it("builds HS256 KeyStore with secret", async () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		const keyStore = await factory.create({
+			type: "local",
+			algorithm: "HS256",
+			kid: "v1",
+			secret: "s3cret",
+			previousKeys: [],
+		});
+		expect(keyStore.algorithm).toBe("HS256");
+		expect(keyStore.current.kid).toBe("v1");
+	});
+
+	it("throws clear error when HS256 secret is missing", async () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({ type: "local", algorithm: "HS256", kid: "v1", previousKeys: [] }),
+		).rejects.toThrow(/secret is required for HS256/i);
 	});
 });
