@@ -27,6 +27,7 @@ interface MockAdapter {
 describe("AdapterFactoryError", () => {
 	it("formats the message with kind, requested type, and registered types", () => {
 		const err = new AdapterFactoryError({
+			reason: "unknown",
 			kind: "UserRepository",
 			type: "postgres",
 			registered: ["yaml", "http"],
@@ -37,6 +38,7 @@ describe("AdapterFactoryError", () => {
 		expect(err.message).toBe(
 			'AdapterFactoryError [UserRepository]: unknown type "postgres". Registered types: yaml, http',
 		);
+		expect(err.reason).toBe("unknown");
 		expect(err.kind).toBe("UserRepository");
 		expect(err.type).toBe("postgres");
 		expect(err.registered).toEqual(["yaml", "http"]);
@@ -44,6 +46,7 @@ describe("AdapterFactoryError", () => {
 
 	it("handles empty registered list", () => {
 		const err = new AdapterFactoryError({
+			reason: "unknown",
 			kind: "SessionStore",
 			type: "memcached",
 			registered: [],
@@ -51,6 +54,20 @@ describe("AdapterFactoryError", () => {
 
 		expect(err.message).toBe(
 			'AdapterFactoryError [SessionStore]: unknown type "memcached". No types registered',
+		);
+	});
+
+	it("formats duplicate-type message", () => {
+		const err = new AdapterFactoryError({
+			reason: "duplicate",
+			kind: "UserRepository",
+			type: "yaml",
+			registered: ["yaml"],
+		});
+
+		expect(err.reason).toBe("duplicate");
+		expect(err.message).toBe(
+			'AdapterFactoryError [UserRepository]: type "yaml" is already registered. Registered types: yaml',
 		);
 	});
 });
@@ -83,6 +100,17 @@ describe("createAdapterFactory", () => {
 		await expect(factory.create({ type: "unknown" })).rejects.toThrow(
 			/AdapterFactoryError \[Mock\]: unknown type "unknown"\. Registered types: a, b/,
 		);
+
+		try {
+			await factory.create({ type: "unknown" });
+		} catch (err) {
+			expect(err).toBeInstanceOf(AdapterFactoryError);
+			const e = err as AdapterFactoryError;
+			expect(e.reason).toBe("unknown");
+			expect(e.kind).toBe("Mock");
+			expect(e.type).toBe("unknown");
+			expect(e.registered).toEqual(expect.arrayContaining(["a", "b"]));
+		}
 	});
 
 	it("throws AdapterFactoryError for an unknown type when nothing is registered", async () => {
@@ -93,13 +121,23 @@ describe("createAdapterFactory", () => {
 		);
 	});
 
-	it("throws when the same type is registered twice (silent override prevention)", () => {
+	it("throws AdapterFactoryError when the same type is registered twice", () => {
 		const factory = createAdapterFactory<MockAdapter>("Mock");
 		factory.register("x", () => ({ name: "first" }));
 
-		expect(() => factory.register("x", () => ({ name: "second" }))).toThrow(
-			/Mock.*type "x" is already registered/,
+		expect(() => factory.register("x", () => ({ name: "second" }))).toThrowError(
+			AdapterFactoryError,
 		);
+		try {
+			factory.register("x", () => ({ name: "second" }));
+		} catch (err) {
+			expect(err).toBeInstanceOf(AdapterFactoryError);
+			const e = err as AdapterFactoryError;
+			expect(e.reason).toBe("duplicate");
+			expect(e.kind).toBe("Mock");
+			expect(e.type).toBe("x");
+			expect(e.registered).toEqual(["x"]);
+		}
 	});
 
 	it("registeredTypes() returns a snapshot array of registered type names", () => {
@@ -136,7 +174,10 @@ describe("createAdapterFactory", () => {
 		const adapter = await factory.create({ type: "test" });
 
 		expect(adapter.name).toBe("hello");
-		expect(builder).toHaveBeenCalledWith({ type: "test" }, ctx);
+		expect(builder).toHaveBeenCalledWith(
+			{ type: "test" },
+			expect.objectContaining({ tag: "hello" }),
+		);
 	});
 
 	it("passes an empty BuilderContext when ctx is not provided", async () => {
@@ -157,5 +198,48 @@ describe("createAdapterFactory", () => {
 
 		expect(result).toBeInstanceOf(Promise);
 		await expect(result).resolves.toEqual({ name: "sync-value" });
+	});
+
+	it("freezes the BuilderContext so builders cannot mutate it", async () => {
+		interface TestCtx extends BuilderContext {
+			tag?: string;
+		}
+		const originalCtx: TestCtx = { tag: "hello" };
+		const factory = createAdapterFactory<MockAdapter>("Mock", originalCtx);
+
+		let receivedCtx: TestCtx | undefined;
+		factory.register("test", (_config, ctx) => {
+			receivedCtx = ctx as TestCtx;
+			return { name: "ok" };
+		});
+
+		await factory.create({ type: "test" });
+
+		expect(Object.isFrozen(receivedCtx)).toBe(true);
+		expect(() => {
+			(receivedCtx as { tag?: string }).tag = "mutated";
+		}).toThrow(TypeError);
+	});
+
+	it("isolates factory's frozen ctx from caller's mutations of the original ctx", async () => {
+		interface TestCtx extends BuilderContext {
+			tag?: string;
+		}
+		const originalCtx: TestCtx = { tag: "hello" };
+		const factory = createAdapterFactory<MockAdapter>("Mock", originalCtx);
+
+		// Mutate original after factory creation
+		originalCtx.tag = "mutated-after-creation";
+
+		let receivedTag: string | undefined;
+		factory.register("test", (_config, ctx) => {
+			receivedTag = (ctx as TestCtx).tag;
+			return { name: "ok" };
+		});
+
+		await factory.create({ type: "test" });
+
+		// Builder should see the pre-freeze value ("hello"), not the mutation
+		expect(receivedTag).toBe("hello");
 	});
 });

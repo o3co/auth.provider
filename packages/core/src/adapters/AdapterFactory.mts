@@ -31,10 +31,13 @@ export interface BuilderContext {}
 /**
  * Factory builder function: given raw config plus a {@link BuilderContext}, produce
  * an adapter instance (sync or async).
+ *
+ * The `ctx` parameter is always a frozen snapshot captured at factory creation time;
+ * builders must not assume they can mutate it.
  */
 export type AdapterBuilder<T> = (
 	config: Record<string, unknown>,
-	ctx: BuilderContext,
+	ctx: Readonly<BuilderContext>,
 ) => T | Promise<T>;
 
 /**
@@ -72,12 +75,18 @@ export interface AdapterFactory<T> {
  * @param ctx  factory-level BuilderContext passed to every builder. Defaults to `{}`.
  */
 export function createAdapterFactory<T>(kind: string, ctx: BuilderContext = {}): AdapterFactory<T> {
+	const frozenCtx: Readonly<BuilderContext> = Object.freeze({ ...ctx });
 	const builders = new Map<string, AdapterBuilder<T>>();
 
 	return {
 		register(type: string, builder: AdapterBuilder<T>): void {
 			if (builders.has(type)) {
-				throw new Error(`AdapterFactory [${kind}]: type "${type}" is already registered`);
+				throw new AdapterFactoryError({
+					reason: "duplicate",
+					kind,
+					type,
+					registered: [...builders.keys()],
+				});
 			}
 			builders.set(type, builder);
 		},
@@ -86,12 +95,13 @@ export function createAdapterFactory<T>(kind: string, ctx: BuilderContext = {}):
 			const builder = builders.get(config.type);
 			if (!builder) {
 				throw new AdapterFactoryError({
+					reason: "unknown",
 					kind,
 					type: config.type,
 					registered: [...builders.keys()],
 				});
 			}
-			return builder(config, ctx);
+			return builder(config, frozenCtx);
 		},
 
 		registeredTypes(): string[] {
@@ -101,17 +111,28 @@ export function createAdapterFactory<T>(kind: string, ctx: BuilderContext = {}):
 }
 
 export class AdapterFactoryError extends Error {
+	public readonly reason: "unknown" | "duplicate";
 	public readonly kind: string;
 	public readonly type: string;
 	public readonly registered: readonly string[];
 
-	constructor(args: { kind: string; type: string; registered: readonly string[] }) {
-		const suffix =
+	constructor(args: {
+		reason: "unknown" | "duplicate";
+		kind: string;
+		type: string;
+		registered: readonly string[];
+	}) {
+		const registeredSuffix =
 			args.registered.length > 0
 				? `Registered types: ${args.registered.join(", ")}`
 				: "No types registered";
-		super(`AdapterFactoryError [${args.kind}]: unknown type "${args.type}". ${suffix}`);
+		const detail =
+			args.reason === "unknown"
+				? `unknown type "${args.type}"`
+				: `type "${args.type}" is already registered`;
+		super(`AdapterFactoryError [${args.kind}]: ${detail}. ${registeredSuffix}`);
 		this.name = "AdapterFactoryError";
+		this.reason = args.reason;
 		this.kind = args.kind;
 		this.type = args.type;
 		this.registered = [...args.registered];
