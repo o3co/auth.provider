@@ -14,8 +14,12 @@
  * limitations under the License.
  */
 
-import type { CodeRepository, UserRepository } from "@o3co/auth-provider-core";
-import { RepositoryFactory } from "@o3co/auth-provider-core";
+import {
+	AdapterFactoryError,
+	type CodeRepository,
+	createAdapterFactory,
+	type UserRepository,
+} from "@o3co/auth-provider-core";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -47,26 +51,44 @@ afterAll(() => server.close());
 
 describe("registerBuiltinAdapters", () => {
 	it("registers 'http' type in userFactory", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
-		await expect(userFactory.create({ type: "unknown" })).rejects.toThrow(/http/);
+		try {
+			await userFactory.create({ type: "unknown" });
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect(err).toBeInstanceOf(AdapterFactoryError);
+			const e = err as AdapterFactoryError;
+			expect(e.reason).toBe("unknown");
+			expect(e.kind).toBe("UserRepository");
+			expect(e.registered).toContain("http");
+		}
 	});
 
 	it("registers 'redis' type in codeFactory", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
-		await expect(codeFactory.create({ type: "unknown" })).rejects.toThrow(/redis/);
+		try {
+			await codeFactory.create({ type: "unknown" });
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect(err).toBeInstanceOf(AdapterFactoryError);
+			const e = err as AdapterFactoryError;
+			expect(e.reason).toBe("unknown");
+			expect(e.kind).toBe("CodeRepository");
+			expect(e.registered).toContain("redis");
+		}
 	});
 
 	it("http builder creates a working HttpUserRepository", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
 		const repo = await userFactory.create({
@@ -88,8 +110,8 @@ describe("registerBuiltinAdapters", () => {
 	});
 
 	it("http builder throws when authenticateUrl is missing", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
 		await expect(userFactory.create({ type: "http", timeout: 5000 })).rejects.toThrow(
@@ -98,8 +120,8 @@ describe("registerBuiltinAdapters", () => {
 	});
 
 	it("redis builder throws when endpointUri is missing", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
 		await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(/endpointUri/);

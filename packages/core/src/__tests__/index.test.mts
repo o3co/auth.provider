@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+	AdapterFactoryError,
 	AppConfigSchema,
+	createAdapterFactory,
 	createApp,
 	createAsymmetricKeyStore,
 	createDefaultFactories,
@@ -11,7 +13,6 @@ import {
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
-	RepositoryFactory,
 } from "#/index.mjs";
 
 describe("public API", () => {
@@ -39,9 +40,13 @@ describe("public API", () => {
 		expect(typeof InMemoryCodeRepository).toBe("function");
 	});
 
-	it("exports RepositoryFactory class", () => {
-		expect(RepositoryFactory).toBeDefined();
-		expect(typeof RepositoryFactory).toBe("function");
+	it("exports createAdapterFactory function", () => {
+		expect(typeof createAdapterFactory).toBe("function");
+	});
+
+	it("exports AdapterFactoryError class", () => {
+		expect(AdapterFactoryError).toBeDefined();
+		expect(typeof AdapterFactoryError).toBe("function");
 	});
 
 	it("exports createDefaultFactories function", () => {

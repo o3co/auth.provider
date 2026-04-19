@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { type AdapterFactory, createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import type { ClientRepository } from "./ClientRepository.mjs";
 import type { CodeRepository } from "./CodeRepository.mjs";
 import { ClientEntrySchema, InMemoryClientRepository } from "./InMemoryClientRepository.mjs";
@@ -22,60 +23,37 @@ import { InMemoryUserRepository, UserEntrySchema } from "./InMemoryUserRepositor
 import { loadYamlMap } from "./loadYamlMap.mjs";
 import type { UserRepository } from "./UserRepository.mjs";
 
-export type RepositoryBuilder<T> = (config: Record<string, unknown>) => Promise<T> | T;
-
-export class RepositoryFactory<T> {
-	private builders = new Map<string, RepositoryBuilder<T>>();
-	private readonly label: string;
-
-	constructor(label: string) {
-		this.label = label;
-	}
-
-	register(type: string, builder: RepositoryBuilder<T>): void {
-		this.builders.set(type, builder);
-	}
-
-	async create(config: { type: string; [key: string]: unknown }): Promise<T> {
-		const builder = this.builders.get(config.type);
-		if (!builder) {
-			const registered = [...this.builders.keys()];
-			const suffix =
-				registered.length > 0
-					? `Registered types: ${registered.join(", ")}`
-					: "No types registered";
-			throw new Error(`Unknown ${this.label} repository type: "${config.type}". ${suffix}`);
-		}
-		return builder(config);
-	}
-}
-
+/**
+ * Construct the three default repository factories with built-in yaml/static/memory
+ * adapters pre-registered. Consumers register additional adapters (e.g. http, redis)
+ * via `registerBuiltinAdapters` from `@o3co/auth-provider-foundation`.
+ */
 export const createDefaultFactories = (): {
-	clientFactory: RepositoryFactory<ClientRepository>;
-	userFactory: RepositoryFactory<UserRepository>;
-	codeFactory: RepositoryFactory<CodeRepository>;
+	clientFactory: AdapterFactory<ClientRepository>;
+	userFactory: AdapterFactory<UserRepository>;
+	codeFactory: AdapterFactory<CodeRepository>;
 } => {
-	const clientFactory = new RepositoryFactory<ClientRepository>("client");
-	const yamlClientBuilder: RepositoryBuilder<ClientRepository> = (config) => {
+	const clientFactory = createAdapterFactory<ClientRepository>("ClientRepository");
+	const yamlClientBuilder = (config: Record<string, unknown>): ClientRepository => {
 		if (typeof config.path !== "string") {
 			throw new Error('YAML client repository requires "path" in config');
 		}
 		return new InMemoryClientRepository(loadYamlMap(config.path, ClientEntrySchema));
 	};
 	clientFactory.register("yaml", yamlClientBuilder);
-	clientFactory.register("static", yamlClientBuilder); // backward compat alias
+	clientFactory.register("static", yamlClientBuilder); // alias
 
-	const userFactory = new RepositoryFactory<UserRepository>("user");
-	const yamlUserBuilder: RepositoryBuilder<UserRepository> = (config) => {
+	const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+	const yamlUserBuilder = (config: Record<string, unknown>): UserRepository => {
 		if (typeof config.path !== "string") {
 			throw new Error('YAML user repository requires "path" in config');
 		}
 		return new InMemoryUserRepository(loadYamlMap(config.path, UserEntrySchema));
 	};
 	userFactory.register("yaml", yamlUserBuilder);
-	userFactory.register("static", yamlUserBuilder); // backward compat alias
+	userFactory.register("static", yamlUserBuilder); // alias
 
-	const codeFactory = new RepositoryFactory<CodeRepository>("code");
+	const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 	codeFactory.register("memory", (config) => {
 		const defaultExpiresIn =
 			config.defaultExpiresIn != null ? Number(config.defaultExpiresIn) : undefined;

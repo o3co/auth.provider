@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
+// Adapter factory primitives (public extension point)
+export {
+	type AdapterBuilder,
+	type AdapterFactory,
+	AdapterFactoryError,
+	type BuilderContext,
+	createAdapterFactory,
+} from "./adapters/AdapterFactory.mjs";
 // App factory
 export { type AppOptions, type AppResult, createApp } from "./app.mjs";
 // Configuration
@@ -79,10 +87,7 @@ export {
 	UserEntrySchema,
 } from "./repositories/InMemoryUserRepository.mjs";
 export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
-export {
-	createDefaultFactories,
-	type RepositoryBuilder,
-	RepositoryFactory,
-} from "./repositories/RepositoryFactory.mjs";
+// Default repository factories
+export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";

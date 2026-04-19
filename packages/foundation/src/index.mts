@@ -15,17 +15,17 @@
  */
 
 import type {
+	AdapterFactory,
 	CodeRepository,
 	PathResolver,
-	RepositoryFactory,
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import { HttpUserRepository } from "./repositories/HttpUserRepository.mjs";
 import { RedisCodeRepository } from "./repositories/RedisCodeRepository.mjs";
 
 export const registerBuiltinAdapters = (factories: {
-	userFactory: RepositoryFactory<UserRepository>;
-	codeFactory: RepositoryFactory<CodeRepository>;
+	userFactory: AdapterFactory<UserRepository>;
+	codeFactory: AdapterFactory<CodeRepository>;
 	pathResolver?: PathResolver;
 }): void => {
 	const { pathResolver } = factories;
