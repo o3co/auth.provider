@@ -169,23 +169,21 @@ export const fullSectionsSchema = z.object({
 			}),
 	}),
 	clients: z.object({
-		client: z.object({
-			type: z.string().default("yaml"),
-			path: z.string().default("./config/clients.yaml"),
-		}),
-		user: z.object({
-			type: z.string().default("yaml"),
-			authenticateUrl: z.string().optional(),
-			authenticateByTokenUrl: z.string().optional(),
-			path: z.string().default("./config/users.yaml"),
-			timeout: z.coerce.number().default(5000),
-		}),
-		code: z.object({
-			type: z.string().default("memory"),
-			endpointUri: z.string().optional(),
-			password: z.string().optional(),
-			defaultExpiresIn: z.coerce.number().default(600),
-		}),
+		client: z
+			.object({
+				type: z.string().default("yaml"),
+			})
+			.passthrough(),
+		user: z
+			.object({
+				type: z.string().default("yaml"),
+			})
+			.passthrough(),
+		code: z
+			.object({
+				type: z.string().default("memory"),
+			})
+			.passthrough(),
 	}),
 	endpoints: z.object({
 		login: z.object({ url: z.string().optional() }),
