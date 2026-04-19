@@ -39,7 +39,18 @@ export const registerBuiltinAdapters = (factories: {
 		return new HttpUserRepository({
 			authenticateUrl: config.authenticateUrl,
 			authenticateByTokenUrl: config.authenticateByTokenUrl,
-			timeout: typeof config.timeout === "number" ? config.timeout : 5000,
+			timeout: (() => {
+				if (typeof config.timeout === "number" && Number.isFinite(config.timeout)) {
+					return config.timeout;
+				}
+				if (typeof config.timeout === "string") {
+					const n = Number(config.timeout);
+					if (Number.isFinite(n) && n > 0) {
+						return n;
+					}
+				}
+				return 5000;
+			})(),
 		});
 	});
 

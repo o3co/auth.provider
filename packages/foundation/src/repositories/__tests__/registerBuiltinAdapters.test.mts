@@ -109,6 +109,24 @@ describe("registerBuiltinAdapters", () => {
 		expect(invalid).toBeNull();
 	});
 
+	it("http builder coerces string timeout to number (env-override path)", async () => {
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
+		registerBuiltinAdapters({ userFactory, codeFactory });
+
+		const repo = await userFactory.create({
+			type: "http",
+			authenticateUrl: `${BASE_URL}/auth`,
+			authenticateByTokenUrl: `${BASE_URL}/auth/token`,
+			timeout: "1234", // string, as HOCON env override produces
+		});
+		expect(repo).toBeDefined();
+		// HttpUserRepository doesn't expose timeout publicly; we verify it didn't throw
+		// and works via the MSW fixture. The coercion path is internal.
+		const user = await repo.authenticate("alice", "pass");
+		expect(user).not.toBeNull();
+	});
+
 	it("http builder throws when authenticateUrl is missing", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");

@@ -29,15 +29,17 @@ import {
 	oauthModule,
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
-import { sessionModule } from "@o3co/auth-provider-session";
+import {
+	createSessionStoreFactory,
+	registerBuiltinSessionStores,
+	sessionModule,
+} from "@o3co/auth-provider-session";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
-import { RedisStore } from "connect-redis";
 import express from "express";
 import session from "express-session";
 import helmet from "helmet";
 import passport from "passport";
-import { createClient } from "redis";
 
 import logger from "#/logger.mjs";
 
@@ -46,18 +48,36 @@ const config: AppConfig = validate(
 	AppConfigSchema,
 );
 
+const flattenAdapterConfig = (
+	section: { type: string } & Record<string, unknown>,
+): { type: string } & Record<string, unknown> => {
+	const sub = section[section.type];
+	const flattenedSub =
+		typeof sub === "object" && sub !== null && !Array.isArray(sub)
+			? (sub as Record<string, unknown>)
+			: {};
+	return { type: section.type, ...flattenedSub };
+};
+
 await (async (): Promise<void> => {
 	// Initialize repositories via factory
 	const appDir = path.dirname(fileURLToPath(import.meta.url));
 	const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 	registerBuiltinAdapters({ userFactory, codeFactory, pathResolver: import.meta.resolve });
 
-	const clientRepository = await clientFactory.create({
-		...config.clients.client,
-		path: path.resolve(appDir, "..", config.clients.client.path),
-	});
-	const userRepository = await userFactory.create(config.clients.user);
-	const codeRepository = await codeFactory.create(config.clients.code);
+	const clientConfig = flattenAdapterConfig(
+		config.clients.client as { type: string } & Record<string, unknown>,
+	);
+	if (typeof clientConfig.path === "string") {
+		clientConfig.path = path.resolve(appDir, "..", clientConfig.path);
+	}
+	const clientRepository = await clientFactory.create(clientConfig);
+	const userRepository = await userFactory.create(
+		flattenAdapterConfig(config.clients.user as { type: string } & Record<string, unknown>),
+	);
+	const codeRepository = await codeFactory.create(
+		flattenAdapterConfig(config.clients.code as { type: string } & Record<string, unknown>),
+	);
 
 	const app = express();
 
@@ -73,23 +93,11 @@ await (async (): Promise<void> => {
 		}),
 	);
 
-	const storageType = config.session.storage.type;
-	let store: session.Store | undefined;
-	switch (storageType) {
-		case "redis":
-			{
-				const options = config.session.storage.redis;
-				const redisClient = createClient({ url: options.url, password: options.password });
-				await redisClient.connect();
-				store = new RedisStore({ client: redisClient });
-			}
-			break;
-		case "memory":
-			store = undefined; // Use default in-memory store
-			break;
-		default:
-			throw new Error(`Unsupported session storage type: ${storageType}`);
-	}
+	const sessionStoreFactory = createSessionStoreFactory();
+	registerBuiltinSessionStores(sessionStoreFactory);
+	const store = await sessionStoreFactory.create(
+		flattenAdapterConfig(config.session.storage as { type: string } & Record<string, unknown>),
+	);
 
 	app.use(
 		session({

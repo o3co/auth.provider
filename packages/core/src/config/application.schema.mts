@@ -121,13 +121,17 @@ export const fullSectionsSchema = z.object({
 		secure: z.boolean().default(true),
 		sameSite: z.enum(["lax", "none", "strict"]).default("lax"),
 		domain: z.string().nullable().default(null),
-		storage: z.object({
-			type: z.enum(["redis", "memory"]).default("redis"),
-			redis: z.object({
-				url: z.string().default("redis://localhost:6379"),
-				password: z.string().optional(),
-			}),
-		}),
+		storage: z
+			.object({
+				type: z.string().default("redis"),
+				redis: z
+					.object({
+						url: z.string().default("redis://localhost:6379"),
+						password: z.string().optional(),
+					})
+					.optional(),
+			})
+			.passthrough(),
 	}),
 	rateLimit: z.object({
 		login: rateLimitSchema,
@@ -169,23 +173,21 @@ export const fullSectionsSchema = z.object({
 			}),
 	}),
 	clients: z.object({
-		client: z.object({
-			type: z.enum(["yaml"]).default("yaml"),
-			path: z.string().default("./config/clients.yaml"),
-		}),
-		user: z.object({
-			type: z.enum(["yaml", "http"]).default("yaml"),
-			authenticateUrl: z.string().optional(),
-			authenticateByTokenUrl: z.string().optional(),
-			path: z.string().default("./config/users.yaml"),
-			timeout: z.coerce.number().default(5000),
-		}),
-		code: z.object({
-			type: z.enum(["memory", "redis"]).default("memory"),
-			endpointUri: z.string().optional(),
-			password: z.string().optional(),
-			defaultExpiresIn: z.coerce.number().default(600),
-		}),
+		client: z
+			.object({
+				type: z.string().default("yaml"),
+			})
+			.passthrough(),
+		user: z
+			.object({
+				type: z.string().default("yaml"),
+			})
+			.passthrough(),
+		code: z
+			.object({
+				type: z.string().default("memory"),
+			})
+			.passthrough(),
 	}),
 	endpoints: z.object({
 		login: z.object({ url: z.string().optional() }),
