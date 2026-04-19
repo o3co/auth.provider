@@ -14,8 +14,11 @@
  * limitations under the License.
  */
 
-import type { CodeRepository, UserRepository } from "@o3co/auth-provider-core";
-import { RepositoryFactory } from "@o3co/auth-provider-core";
+import {
+	type CodeRepository,
+	createAdapterFactory,
+	type UserRepository,
+} from "@o3co/auth-provider-core";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -47,8 +50,8 @@ afterAll(() => server.close());
 
 describe("registerBuiltinAdapters", () => {
 	it("registers 'http' type in userFactory", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
@@ -56,8 +59,8 @@ describe("registerBuiltinAdapters", () => {
 	});
 
 	it("registers 'redis' type in codeFactory", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
@@ -65,8 +68,8 @@ describe("registerBuiltinAdapters", () => {
 	});
 
 	it("http builder creates a working HttpUserRepository", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
 		const repo = await userFactory.create({
@@ -88,8 +91,8 @@ describe("registerBuiltinAdapters", () => {
 	});
 
 	it("http builder throws when authenticateUrl is missing", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
 		await expect(userFactory.create({ type: "http", timeout: 5000 })).rejects.toThrow(
@@ -98,8 +101,8 @@ describe("registerBuiltinAdapters", () => {
 	});
 
 	it("redis builder throws when endpointUri is missing", async () => {
-		const userFactory = new RepositoryFactory<UserRepository>("user");
-		const codeFactory = new RepositoryFactory<CodeRepository>("code");
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
 		await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(/endpointUri/);
