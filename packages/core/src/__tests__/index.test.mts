@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+	AdapterFactoryError,
 	AppConfigSchema,
+	createAdapterFactory,
 	createApp,
 	createAsymmetricKeyStore,
 	createDefaultFactories,
@@ -36,6 +38,15 @@ describe("public API", () => {
 	it("exports InMemoryCodeRepository class", () => {
 		expect(InMemoryCodeRepository).toBeDefined();
 		expect(typeof InMemoryCodeRepository).toBe("function");
+	});
+
+	it("exports createAdapterFactory function", () => {
+		expect(typeof createAdapterFactory).toBe("function");
+	});
+
+	it("exports AdapterFactoryError class", () => {
+		expect(AdapterFactoryError).toBeDefined();
+		expect(typeof AdapterFactoryError).toBe("function");
 	});
 
 	it("exports createDefaultFactories function", () => {
