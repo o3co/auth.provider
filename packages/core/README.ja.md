@@ -299,25 +299,51 @@ function loadYamlMap<T extends z.ZodTypeAny>(
 
 `loadYamlMap` はトップレベルのキーをレコード ID とする YAML ファイルを読み込み、各エントリーを `schema` で検証します。結果を `InMemoryClientRepository` や `InMemoryUserRepository` にそのまま渡せます。
 
-#### リポジトリファクトリー
+#### アダプタファクトリー
 
 ```typescript
-type RepositoryBuilder<T> = (config: Record<string, unknown>) => Promise<T> | T;
+interface BuilderContext {
+  // v1 では意図的に空。将来追加される field（logger / tracer / abortSignal など）は
+  // すべて optional で、破壊を起こさない追加のみ（additive-only evolution）。
+}
 
-class RepositoryFactory<T> {
-  constructor(label: string);
-  register(type: string, builder: RepositoryBuilder<T>): void;
+type AdapterBuilder<T> = (
+  config: Record<string, unknown>,
+  ctx: BuilderContext,
+) => Promise<T> | T;
+
+interface AdapterFactory<T> {
+  register(type: string, builder: AdapterBuilder<T>): void;
   create(config: { type: string; [key: string]: unknown }): Promise<T>;
+  registeredTypes(): string[];
+}
+
+function createAdapterFactory<T>(
+  kind: string,
+  ctx?: BuilderContext,
+): AdapterFactory<T>;
+
+class AdapterFactoryError extends Error {
+  readonly kind: string;
+  readonly type: string;
+  readonly registered: readonly string[];
 }
 
 function createDefaultFactories(): {
-  clientFactory: RepositoryFactory<ClientRepository>;
-  userFactory: RepositoryFactory<UserRepository>;
-  codeFactory: RepositoryFactory<CodeRepository>;
+  clientFactory: AdapterFactory<ClientRepository>;
+  userFactory: AdapterFactory<UserRepository>;
+  codeFactory: AdapterFactory<CodeRepository>;
 };
 ```
 
-`createDefaultFactories` は組み込みの `in-memory` タイプが登録済みの 3 つのファクトリーを返します。データベースバックエンドなど独自の実装を追加するには `register` を呼び出してください。
+契約の主要な性質:
+
+- `create()` は同期ビルダーであっても必ず `Promise<T>` を返す。
+- `register()` は同一 `type` の二重登録で throw する（silent override 防止）。
+- `create()` は未登録 `type` で `AdapterFactoryError` を throw する。error は `kind` / `type` / `registered` を構造化フィールドとして保持する。
+- `BuilderContext` は factory 単位で共有される（call ごとのコピーではない）。builder 側では read-only として扱うこと。
+
+`createDefaultFactories` は組み込みの `yaml` / `static`（client、user）と `memory`（code）タイプが登録済みの 3 つのファクトリーを返します。`http` / `redis` は `@o3co/auth-provider-foundation` の `registerBuiltinAdapters` で追加できます。独自の backend は `register` で追加してください。
 
 ### モジュールシステム
 

@@ -23,8 +23,8 @@ npm install redis
 
 ```typescript
 function registerBuiltinAdapters(factories: {
-  userFactory: RepositoryFactory<UserRepository>;
-  codeFactory: RepositoryFactory<CodeRepository>;
+  userFactory: AdapterFactory<UserRepository>;
+  codeFactory: AdapterFactory<CodeRepository>;
   pathResolver?: PathResolver; // 任意 — "redis" モジュールのパス解決に使用
 }): void;
 ```
@@ -110,5 +110,5 @@ const codeRepo = await codeFactory.create({
 
 ## 関連
 
-- [`@o3co/auth-provider-core`](../core/README.md) — コアインターフェース（`UserRepository`、`CodeRepository`、`RepositoryFactory`、`PathResolver`）
+- [`@o3co/auth-provider-core`](../core/README.md) — コアインターフェース（`UserRepository`、`CodeRepository`、`AdapterFactory`、`createAdapterFactory`、`BuilderContext`、`PathResolver`）
 - [auth.provider](../../README.md) — リポジトリ全体のドキュメント
