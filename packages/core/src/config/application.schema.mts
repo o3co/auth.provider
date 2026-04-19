@@ -122,7 +122,7 @@ export const fullSectionsSchema = z.object({
 		sameSite: z.enum(["lax", "none", "strict"]).default("lax"),
 		domain: z.string().nullable().default(null),
 		storage: z.object({
-			type: z.enum(["redis", "memory"]).default("redis"),
+			type: z.string().default("redis"),
 			redis: z.object({
 				url: z.string().default("redis://localhost:6379"),
 				password: z.string().optional(),
@@ -170,18 +170,18 @@ export const fullSectionsSchema = z.object({
 	}),
 	clients: z.object({
 		client: z.object({
-			type: z.enum(["yaml"]).default("yaml"),
+			type: z.string().default("yaml"),
 			path: z.string().default("./config/clients.yaml"),
 		}),
 		user: z.object({
-			type: z.enum(["yaml", "http"]).default("yaml"),
+			type: z.string().default("yaml"),
 			authenticateUrl: z.string().optional(),
 			authenticateByTokenUrl: z.string().optional(),
 			path: z.string().default("./config/users.yaml"),
 			timeout: z.coerce.number().default(5000),
 		}),
 		code: z.object({
-			type: z.enum(["memory", "redis"]).default("memory"),
+			type: z.string().default("memory"),
 			endpointUri: z.string().optional(),
 			password: z.string().optional(),
 			defaultExpiresIn: z.coerce.number().default(600),
