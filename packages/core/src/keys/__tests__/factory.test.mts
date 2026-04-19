@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
-import { createKeyStoreFactory } from "../factory.mjs";
+import { createKeyStoreFactory } from "#/keys/factory.mjs";
 
 describe("createKeyStoreFactory", () => {
 	it("returns a factory with no registered types by default", () => {
@@ -29,7 +29,9 @@ describe("createKeyStoreFactory", () => {
 
 		await expect(factory.create({ type: "local" })).rejects.toSatisfy((err: unknown) => {
 			if (!(err instanceof AdapterFactoryError)) return false;
-			return err.name === "AdapterFactoryError" && err.reason === "unknown" && err.kind === "KeyStore";
+			return (
+				err.name === "AdapterFactoryError" && err.reason === "unknown" && err.kind === "KeyStore"
+			);
 		});
 	});
 });
