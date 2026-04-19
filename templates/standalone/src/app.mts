@@ -51,8 +51,12 @@ const config: AppConfig = validate(
 const flattenAdapterConfig = (
 	section: { type: string } & Record<string, unknown>,
 ): { type: string } & Record<string, unknown> => {
-	const sub = (section[section.type] as Record<string, unknown> | undefined) ?? {};
-	return { type: section.type, ...sub };
+	const sub = section[section.type];
+	const flattenedSub =
+		typeof sub === "object" && sub !== null && !Array.isArray(sub)
+			? (sub as Record<string, unknown>)
+			: {};
+	return { type: section.type, ...flattenedSub };
 };
 
 await (async (): Promise<void> => {

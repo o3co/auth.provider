@@ -412,10 +412,14 @@ const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 // The clients.<name> config uses nested adapter sub-sections:
 //   clients.user = { type: "http", http: { authenticateUrl, ... } }
 // Flatten the active sub-section before forwarding to the factory:
-const flatten = (section: { type: string } & Record<string, unknown>) => ({
-  type: section.type,
-  ...((section[section.type] as Record<string, unknown> | undefined) ?? {}),
-});
+const flatten = (section: { type: string } & Record<string, unknown>) => {
+  const sub = section[section.type];
+  const flattenedSub =
+    typeof sub === "object" && sub !== null && !Array.isArray(sub)
+      ? (sub as Record<string, unknown>)
+      : {};
+  return { type: section.type, ...flattenedSub };
+};
 
 const clientRepository = await clientFactory.create(flatten(config.clients.client));
 const userRepository = await userFactory.create(flatten(config.clients.user));

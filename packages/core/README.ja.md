@@ -412,10 +412,14 @@ const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 // clients.<name> は nested な adapter sub-section 構造:
 //   clients.user = { type: "http", http: { authenticateUrl, ... } }
 // アクティブな sub-section を flatten してから factory に渡す:
-const flatten = (section: { type: string } & Record<string, unknown>) => ({
-  type: section.type,
-  ...((section[section.type] as Record<string, unknown> | undefined) ?? {}),
-});
+const flatten = (section: { type: string } & Record<string, unknown>) => {
+  const sub = section[section.type];
+  const flattenedSub =
+    typeof sub === "object" && sub !== null && !Array.isArray(sub)
+      ? (sub as Record<string, unknown>)
+      : {};
+  return { type: section.type, ...flattenedSub };
+};
 
 const clientRepository = await clientFactory.create(flatten(config.clients.client));
 const userRepository = await userFactory.create(flatten(config.clients.user));
