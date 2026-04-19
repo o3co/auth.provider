@@ -24,9 +24,7 @@ export class AdapterFactoryError extends Error {
 			args.registered.length > 0
 				? `Registered types: ${args.registered.join(", ")}`
 				: "No types registered";
-		super(
-			`AdapterFactoryError [${args.kind}]: unknown type "${args.type}". ${suffix}`,
-		);
+		super(`AdapterFactoryError [${args.kind}]: unknown type "${args.type}". ${suffix}`);
 		this.name = "AdapterFactoryError";
 		this.kind = args.kind;
 		this.type = args.type;
