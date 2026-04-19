@@ -62,13 +62,11 @@ export { createKeyStoreFactory, registerBuiltinKeyStores } from "./keys/factory.
 // Keys
 export type {
 	AsymmetricKeyStoreOptions,
-	JwtConfig,
 	KeyStore,
 	ManagedKey,
 } from "./keys/KeyStore.mjs";
 export {
 	createAsymmetricKeyStore,
-	createKeyStoreFromConfig,
 	createSymmetricKeyStore,
 } from "./keys/KeyStore.mjs";
 // Module system

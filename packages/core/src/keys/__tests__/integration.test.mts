@@ -17,7 +17,7 @@
 import { decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
 import { generateToken } from "#/grants/token.mjs";
-import { createKeyStoreFromConfig } from "#/keys/KeyStore.mjs";
+import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -27,15 +27,23 @@ async function generateTestKeyPair(alg: string) {
 	};
 }
 
+function makeFactory() {
+	const factory = createKeyStoreFactory();
+	registerBuiltinKeyStores(factory);
+	return factory;
+}
+
 describe("Integration: generateToken + asymmetric KeyStore", () => {
 	it.each([
 		"ES256",
 		"RS256",
 		"EdDSA",
-	] as const)("%s: createKeyStoreFromConfig -> generateToken -> jwtVerify round-trip", async (alg) => {
+	] as const)("%s: factory.create -> generateToken -> jwtVerify round-trip", async (alg) => {
 		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair(alg);
+		const factory = makeFactory();
 
-		const keyStore = await createKeyStoreFromConfig({
+		const keyStore = await factory.create({
+			type: "local",
 			algorithm: alg,
 			kid: `${alg.toLowerCase()}-v1`,
 			privateKey: privateKeyPem,
@@ -88,9 +96,11 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 	it("key rotation: token signed with old key is verifiable after rotation", async () => {
 		const oldPair = await generateTestKeyPair("ES256");
 		const newPair = await generateTestKeyPair("ES256");
+		const factory = makeFactory();
 
 		// Step 1: Create KeyStore with old key and sign a token
-		const oldKeyStore = await createKeyStoreFromConfig({
+		const oldKeyStore = await factory.create({
+			type: "local",
 			algorithm: "ES256",
 			kid: "k-old",
 			privateKey: oldPair.privateKeyPem,
@@ -116,7 +126,8 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		expect(oldPayload.sub).toBe("user-456");
 
 		// Step 2: Rotate keys — new KeyStore with old key in previousKeys
-		const newKeyStore = await createKeyStoreFromConfig({
+		const newKeyStore = await factory.create({
+			type: "local",
 			algorithm: "ES256",
 			kid: "k-new",
 			privateKey: newPair.privateKeyPem,
@@ -153,9 +164,11 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 	it("key rotation: expired previous key is rejected", async () => {
 		const oldPair = await generateTestKeyPair("RS256");
 		const newPair = await generateTestKeyPair("RS256");
+		const factory = makeFactory();
 
 		// Sign a token with old key
-		const oldKeyStore = await createKeyStoreFromConfig({
+		const oldKeyStore = await factory.create({
+			type: "local",
 			algorithm: "RS256",
 			kid: "r-old",
 			privateKey: oldPair.privateKeyPem,
@@ -169,7 +182,8 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		);
 
 		// Rotate with expired previous key
-		const newKeyStore = await createKeyStoreFromConfig({
+		const newKeyStore = await factory.create({
+			type: "local",
 			algorithm: "RS256",
 			kid: "r-new",
 			privateKey: newPair.privateKeyPem,
