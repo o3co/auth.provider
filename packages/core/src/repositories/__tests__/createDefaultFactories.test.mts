@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
 import { createDefaultFactories } from "#/repositories/RepositoryFactory.mjs";
 
 describe("createDefaultFactories", () => {
@@ -59,9 +60,21 @@ describe("createDefaultFactories", () => {
 			expect(client?.allowedScopes).toEqual(["read"]);
 		});
 
-		it("throws for unregistered type", async () => {
+		it("throws AdapterFactoryError for unregistered type", async () => {
 			const { clientFactory } = createDefaultFactories();
-			await expect(clientFactory.create({ type: "redis" })).rejects.toThrow(/unknown type "redis"/);
+
+			await expect(clientFactory.create({ type: "redis" })).rejects.toBeInstanceOf(
+				AdapterFactoryError,
+			);
+			try {
+				await clientFactory.create({ type: "redis" });
+			} catch (err) {
+				const e = err as AdapterFactoryError;
+				expect(e.reason).toBe("unknown");
+				expect(e.kind).toBe("ClientRepository");
+				expect(e.type).toBe("redis");
+				expect(e.registered).toEqual(expect.arrayContaining(["yaml", "static"]));
+			}
 		});
 	});
 
@@ -82,9 +95,21 @@ describe("createDefaultFactories", () => {
 			expect(user?.username).toBe("alice");
 		});
 
-		it("throws for unregistered type", async () => {
+		it("throws AdapterFactoryError for unregistered type", async () => {
 			const { userFactory } = createDefaultFactories();
-			await expect(userFactory.create({ type: "http" })).rejects.toThrow(/unknown type "http"/);
+
+			await expect(userFactory.create({ type: "http" })).rejects.toBeInstanceOf(
+				AdapterFactoryError,
+			);
+			try {
+				await userFactory.create({ type: "http" });
+			} catch (err) {
+				const e = err as AdapterFactoryError;
+				expect(e.reason).toBe("unknown");
+				expect(e.kind).toBe("UserRepository");
+				expect(e.type).toBe("http");
+				expect(e.registered).toEqual(expect.arrayContaining(["yaml", "static"]));
+			}
 		});
 	});
 
@@ -128,9 +153,21 @@ describe("createDefaultFactories", () => {
 			);
 		});
 
-		it("throws for unregistered type", async () => {
+		it("throws AdapterFactoryError for unregistered type", async () => {
 			const { codeFactory } = createDefaultFactories();
-			await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(/unknown type "redis"/);
+
+			await expect(codeFactory.create({ type: "redis" })).rejects.toBeInstanceOf(
+				AdapterFactoryError,
+			);
+			try {
+				await codeFactory.create({ type: "redis" });
+			} catch (err) {
+				const e = err as AdapterFactoryError;
+				expect(e.reason).toBe("unknown");
+				expect(e.kind).toBe("CodeRepository");
+				expect(e.type).toBe("redis");
+				expect(e.registered).toEqual(expect.arrayContaining(["memory"]));
+			}
 		});
 	});
 });
