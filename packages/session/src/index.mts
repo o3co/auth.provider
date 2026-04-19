@@ -19,3 +19,8 @@ export type { FederationProvider, FederationResult } from "./federations/types.m
 export { FederationRegistry } from "./federations/types.mjs";
 export { sessionModule } from "./module.mjs";
 export { createPassport } from "./passport.mjs";
+export type { SessionStoreFactory } from "./store/factory.mjs";
+export {
+	createSessionStoreFactory,
+	registerBuiltinSessionStores,
+} from "./store/factory.mjs";
