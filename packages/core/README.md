@@ -409,9 +409,17 @@ const config = AppConfigSchema.parse(rawConfig);
 const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
 const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 
-const clientRepository = await clientFactory.create(config.clients.client);
-const userRepository = await userFactory.create(config.clients.user);
-const codeRepository = await codeFactory.create(config.clients.code);
+// The clients.<name> config uses nested adapter sub-sections:
+//   clients.user = { type: "http", http: { authenticateUrl, ... } }
+// Flatten the active sub-section before forwarding to the factory:
+const flatten = (section: { type: string } & Record<string, unknown>) => ({
+  type: section.type,
+  ...((section[section.type] as Record<string, unknown> | undefined) ?? {}),
+});
+
+const clientRepository = await clientFactory.create(flatten(config.clients.client));
+const userRepository = await userFactory.create(flatten(config.clients.user));
+const codeRepository = await codeFactory.create(flatten(config.clients.code));
 
 const app = createApp(express, {
   config,
