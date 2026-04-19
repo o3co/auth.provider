@@ -34,7 +34,9 @@
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
-		"express-rate-limit": "^8.3.1"
+		"connect-redis": "^9.0.0",
+		"express-rate-limit": "^8.3.1",
+		"redis": "^5.12.1"
 	},
 	"peerDependencies": {
 		"express": "^5.0.0",
