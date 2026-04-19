@@ -15,10 +15,27 @@ function makeFactory() {
 }
 
 describe("provider config", () => {
-	it.todo(
-		"loads and validates application.conf with required env vars" +
-			" — pending Task 8 migration of application.conf to nested signingKey shape",
-	);
+	it("loads and validates application.conf with required env vars", () => {
+		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_SECRET: "test-secret",
+				SESSION_SECRET: "test-session-secret",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+
+		// Nested signingKey shape: provider defaults to "local"
+		expect(config.oauth.jwt.signingKey.provider).toBe("local");
+
+		// OAUTH_JWT_SECRET flows into signingKey.local.secret
+		const local = config.oauth.jwt.signingKey.local as Record<string, unknown>;
+		expect(local).toBeDefined();
+		expect(local.secret).toBe("test-secret");
+
+		// algorithm and kid defaults applied
+		expect(local.algorithm).toBe("HS256");
+		expect(local.kid).toBe("v0");
+	});
 
 	it("fails validation when required fields are missing", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
