@@ -36,7 +36,12 @@ const mockExpress = {
 const mockConfig = {
 	http: { port: 3000, trustProxy: false },
 	oauth: {
-		jwt: { secret: "test-secret" },
+		jwt: {
+			signingKey: {
+				provider: "local",
+				local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+			},
+		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {},

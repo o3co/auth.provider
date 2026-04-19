@@ -22,11 +22,17 @@ import {
 	composeConfigSchema,
 	fullSectionsSchema,
 } from "#/config/application.schema.mjs";
+import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
 const minimalDIDConfig = {
 	http: { port: 3000, trustProxy: false },
 	oauth: {
-		jwt: { algorithm: "HS256", secret: "test-secret" },
+		jwt: {
+			signingKey: {
+				provider: "local",
+				local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+			},
+		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {},
@@ -79,15 +85,24 @@ describe("CoreConfigSchema", () => {
 		}
 	});
 
-	it("still rejects when jwt secret is missing for HS256", () => {
+	it("still rejects when jwt secret is missing for HS256 (builder-level)", async () => {
+		// Schema no longer rejects this shape — the superRefine moved to the local builder.
+		// Verify that CoreConfigSchema parses successfully, then that the builder throws.
 		const result = CoreConfigSchema.safeParse({
 			...minimalDIDConfig,
 			oauth: {
 				...minimalDIDConfig.oauth,
-				jwt: { algorithm: "HS256" },
+				jwt: { signingKey: { provider: "local", local: { algorithm: "HS256" } } },
 			},
 		});
-		expect(result.success).toBe(false);
+		expect(result.success).toBe(true);
+
+		// Builder-level validation: factory.create() must throw with the legacy wording.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(factory.create({ type: "local", algorithm: "HS256" })).rejects.toThrow(
+			/secret is required for HS256 algorithm/i,
+		);
 	});
 });
 
@@ -183,7 +198,12 @@ describe("AppConfigSchema backward compatibility", () => {
 		const fullConfig = {
 			http: { port: 3000, trustProxy: false },
 			oauth: {
-				jwt: { algorithm: "HS256", secret: "test-secret" },
+				jwt: {
+					signingKey: {
+						provider: "local",
+						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+					},
+				},
 				accessToken: { expiresIn: 3600 },
 				refreshToken: { expiresIn: 86400 },
 				grants: {
