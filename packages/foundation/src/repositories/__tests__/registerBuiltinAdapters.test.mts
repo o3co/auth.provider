@@ -15,6 +15,7 @@
  */
 
 import {
+	AdapterFactoryError,
 	type CodeRepository,
 	createAdapterFactory,
 	type UserRepository,
@@ -55,7 +56,16 @@ describe("registerBuiltinAdapters", () => {
 
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
-		await expect(userFactory.create({ type: "unknown" })).rejects.toThrow(/http/);
+		try {
+			await userFactory.create({ type: "unknown" });
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect(err).toBeInstanceOf(AdapterFactoryError);
+			const e = err as AdapterFactoryError;
+			expect(e.reason).toBe("unknown");
+			expect(e.kind).toBe("UserRepository");
+			expect(e.registered).toContain("http");
+		}
 	});
 
 	it("registers 'redis' type in codeFactory", async () => {
@@ -64,7 +74,16 @@ describe("registerBuiltinAdapters", () => {
 
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
-		await expect(codeFactory.create({ type: "unknown" })).rejects.toThrow(/redis/);
+		try {
+			await codeFactory.create({ type: "unknown" });
+			throw new Error("should have thrown");
+		} catch (err) {
+			expect(err).toBeInstanceOf(AdapterFactoryError);
+			const e = err as AdapterFactoryError;
+			expect(e.reason).toBe("unknown");
+			expect(e.kind).toBe("CodeRepository");
+			expect(e.registered).toContain("redis");
+		}
 	});
 
 	it("http builder creates a working HttpUserRepository", async () => {
