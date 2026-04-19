@@ -121,13 +121,17 @@ export const fullSectionsSchema = z.object({
 		secure: z.boolean().default(true),
 		sameSite: z.enum(["lax", "none", "strict"]).default("lax"),
 		domain: z.string().nullable().default(null),
-		storage: z.object({
-			type: z.string().default("redis"),
-			redis: z.object({
-				url: z.string().default("redis://localhost:6379"),
-				password: z.string().optional(),
-			}),
-		}),
+		storage: z
+			.object({
+				type: z.string().default("redis"),
+				redis: z
+					.object({
+						url: z.string().default("redis://localhost:6379"),
+						password: z.string().optional(),
+					})
+					.optional(),
+			})
+			.passthrough(),
 	}),
 	rateLimit: z.object({
 		login: rateLimitSchema,
