@@ -299,25 +299,51 @@ function loadYamlMap<T extends z.ZodTypeAny>(
 
 `loadYamlMap` reads a YAML file whose top-level keys are record IDs and validates each entry against `schema`. Pass the result directly to `InMemoryClientRepository` or `InMemoryUserRepository`.
 
-#### Repository factory
+#### Adapter factory primitives
 
 ```typescript
-type RepositoryBuilder<T> = (config: Record<string, unknown>) => Promise<T> | T;
+interface BuilderContext {
+  // Intentionally empty in v1; future additions (logger, tracer, abortSignal, ...)
+  // are guaranteed to be optional field additions (additive-only evolution).
+}
 
-class RepositoryFactory<T> {
-  constructor(label: string);
-  register(type: string, builder: RepositoryBuilder<T>): void;
+type AdapterBuilder<T> = (
+  config: Record<string, unknown>,
+  ctx: BuilderContext,
+) => Promise<T> | T;
+
+interface AdapterFactory<T> {
+  register(type: string, builder: AdapterBuilder<T>): void;
   create(config: { type: string; [key: string]: unknown }): Promise<T>;
+  registeredTypes(): string[];
+}
+
+function createAdapterFactory<T>(
+  kind: string,
+  ctx?: BuilderContext,
+): AdapterFactory<T>;
+
+class AdapterFactoryError extends Error {
+  readonly kind: string;
+  readonly type: string;
+  readonly registered: readonly string[];
 }
 
 function createDefaultFactories(): {
-  clientFactory: RepositoryFactory<ClientRepository>;
-  userFactory: RepositoryFactory<UserRepository>;
-  codeFactory: RepositoryFactory<CodeRepository>;
+  clientFactory: AdapterFactory<ClientRepository>;
+  userFactory: AdapterFactory<UserRepository>;
+  codeFactory: AdapterFactory<CodeRepository>;
 };
 ```
 
-`createDefaultFactories` returns three factories pre-registered with the built-in `in-memory` type. Register additional types to support other backends (e.g. a database-backed implementation).
+Key contract properties:
+
+- `create()` always returns `Promise<T>`, even for synchronous builders.
+- `register()` throws if a `type` is registered twice (silent-override prevention).
+- `create()` throws `AdapterFactoryError` when `type` is not registered; the error carries the `kind`, `type`, and `registered` list.
+- `BuilderContext` is shared by reference across builder invocations for a given factory. Treat it as read-only from builders.
+
+`createDefaultFactories` returns three factories pre-registered with the built-in `yaml`/`static` (client, user) and `memory` (code) types. Use `registerBuiltinAdapters` from `@o3co/auth-provider-foundation` to add `http` and `redis` adapters, or register your own types to support other backends.
 
 ### Module System
 

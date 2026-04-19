@@ -23,8 +23,8 @@ Registers the built-in adapter factories into the provided factory instances.
 
 ```typescript
 function registerBuiltinAdapters(factories: {
-  userFactory: RepositoryFactory<UserRepository>;
-  codeFactory: RepositoryFactory<CodeRepository>;
+  userFactory: AdapterFactory<UserRepository>;
+  codeFactory: AdapterFactory<CodeRepository>;
   pathResolver?: PathResolver; // optional — used to resolve the "redis" module path
 }): void;
 ```
@@ -110,5 +110,5 @@ const codeRepo = await codeFactory.create({
 
 ## See Also
 
-- [`@o3co/auth-provider-core`](../core/README.md) — Core interfaces (`UserRepository`, `CodeRepository`, `RepositoryFactory`, `PathResolver`)
+- [`@o3co/auth-provider-core`](../core/README.md) — Core interfaces (`UserRepository`, `CodeRepository`, `AdapterFactory`, `createAdapterFactory`, `BuilderContext`, `PathResolver`)
 - [auth.provider](../../README.md) — Top-level repository documentation
