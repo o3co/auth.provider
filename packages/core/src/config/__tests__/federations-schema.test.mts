@@ -133,20 +133,65 @@ describe("federations schema — open to z.record with passthrough", () => {
 		).not.toThrow();
 	});
 
-	it("coerces enabled from string 'true' to boolean true (env var path via z.coerce.boolean)", () => {
+	it("coerces enabled='true' string to boolean true (env var path)", () => {
 		// FEDERATIONS_GOOGLE_ENABLED=true arrives as the string "true" from ts.hocon env-var
 		// substitution when the z.record wrapper prevents hocon-level coerce traversal.
-		// z.coerce.boolean() handles this: Boolean("true") === true.
 		const parsed = federationsSchema.parse({
 			google: { enabled: "true" },
 		});
 		expect(parsed.google.enabled).toBe(true);
 	});
 
-	it("coerces enabled from boolean true to boolean true (non-env path stays working)", () => {
+	it("coerces enabled='false' string to boolean false (prevents accidental enable via env var)", () => {
+		// Critical: z.coerce.boolean() would coerce "false" → true (non-empty string).
+		// The preprocess must return false for the string "false".
+		const parsed = federationsSchema.parse({
+			google: { enabled: "false" },
+		});
+		expect(parsed.google.enabled).toBe(false);
+	});
+
+	it("coerces enabled='1' string to true", () => {
+		const parsed = federationsSchema.parse({
+			google: { enabled: "1" },
+		});
+		expect(parsed.google.enabled).toBe(true);
+	});
+
+	it("coerces enabled='0' string to false", () => {
+		const parsed = federationsSchema.parse({
+			google: { enabled: "0" },
+		});
+		expect(parsed.google.enabled).toBe(false);
+	});
+
+	it("preserves enabled=true boolean", () => {
 		const parsed = federationsSchema.parse({
 			google: { enabled: true },
 		});
 		expect(parsed.google.enabled).toBe(true);
+	});
+
+	it("preserves enabled=false boolean", () => {
+		const parsed = federationsSchema.parse({
+			google: { enabled: false },
+		});
+		expect(parsed.google.enabled).toBe(false);
+	});
+
+	it("treats empty string as false (env var unset case)", () => {
+		const parsed = federationsSchema.parse({
+			google: { enabled: "" },
+		});
+		expect(parsed.google.enabled).toBe(false);
+	});
+
+	it("rejects enabled='yes' with type error (unrecognized string values are not silently coerced)", () => {
+		expect(() =>
+			AppConfigSchema.parse({
+				...minimalConfig,
+				federations: { google: { enabled: "yes" } },
+			}),
+		).toThrow();
 	});
 });

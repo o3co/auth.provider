@@ -23,7 +23,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import { describe, expect, it, vi } from "vitest";
-import { sessionModule } from "#/module.mjs";
+import { _sessionModuleImpl, sessionModule } from "#/module.mjs";
 
 const mockConfig = {
 	oauth: {
@@ -101,7 +101,7 @@ describe("sessionModule", () => {
 			},
 		} as unknown as AppConfig;
 		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
+		const module = _sessionModuleImpl({
 			userRepository: {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
@@ -140,7 +140,7 @@ describe("sessionModule", () => {
 			},
 		} as unknown as AppConfig;
 		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
+		const module = _sessionModuleImpl({
 			userRepository: {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
@@ -180,7 +180,7 @@ describe("sessionModule", () => {
 			},
 		} as unknown as AppConfig;
 		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
+		const module = _sessionModuleImpl({
 			userRepository: {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
@@ -216,7 +216,7 @@ describe("sessionModule", () => {
 			},
 		} as unknown as AppConfig;
 		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
+		const module = _sessionModuleImpl({
 			userRepository: {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
@@ -262,7 +262,7 @@ describe("sessionModule", () => {
 			},
 		} as unknown as AppConfig;
 		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
+		const module = _sessionModuleImpl({
 			userRepository: {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
@@ -280,6 +280,39 @@ describe("sessionModule", () => {
 			audience: "api://my-corp", // top-level passthrough preserved
 			issuer: "https://idp.corp.example", // nested sub-section merged
 		});
+	});
+
+	it("rejects a custom builder that returns a provider with a different name", async () => {
+		// Guard: the config-key ↔ passport-strategy-name invariant requires that
+		// the provider returned by factory.create has name === the config key.
+		// A buggy builder that ignores config.name would silently break route lookups.
+		const factory = {
+			create: vi.fn().mockResolvedValue({
+				name: "WRONG", // builder returned a different name
+				scope: [],
+				validateRedirect: vi.fn(),
+				resolveCallbackRedirect: vi.fn(),
+				setupPassportStrategy: vi.fn().mockResolvedValue(undefined),
+			}),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				corp: { enabled: true, clientId: "id", clientSecret: "secret", callbackURL: "cb" },
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = _sessionModuleImpl({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			_federationFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		await expect(module.init(ctx)).rejects.toThrow(/provider builder returned name/i);
 	});
 
 	it("injects name and context fields into builder config", async () => {
@@ -311,7 +344,7 @@ describe("sessionModule", () => {
 			},
 		} as unknown as AppConfig;
 		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
+		const module = _sessionModuleImpl({
 			userRepository: {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),

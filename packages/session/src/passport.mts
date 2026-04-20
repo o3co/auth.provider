@@ -24,15 +24,22 @@ declare global {
 	}
 }
 
-export const createPassport = async ({
+export type CreatePassportOptions = {
+	pathResolver: PathResolver;
+	userRepository: UserRepository;
+	federationProviders: ReadonlyMap<string, FederationProvider>;
+};
+
+/**
+ * Internal implementation — accepts an optional passport override for testing.
+ * Not part of the public API; tests import this directly via the `#/` alias.
+ */
+export const _createPassportImpl = async ({
 	pathResolver,
 	userRepository,
 	federationProviders,
 	_passportOverride,
-}: {
-	pathResolver: PathResolver;
-	userRepository: UserRepository;
-	federationProviders: ReadonlyMap<string, FederationProvider>;
+}: CreatePassportOptions & {
 	/** For testing only — inject a passport stub to skip dynamic import. */
 	_passportOverride?: PassportStatic;
 }): Promise<PassportStatic> => {
@@ -99,3 +106,11 @@ export const createPassport = async ({
 
 	return passport;
 };
+
+/**
+ * Creates and configures a Passport instance with LocalStrategy and all federation strategies.
+ *
+ * Public API — does not expose test-only options. Tests should use `_createPassportImpl` directly.
+ */
+export const createPassport = (opts: CreatePassportOptions): Promise<PassportStatic> =>
+	_createPassportImpl(opts);

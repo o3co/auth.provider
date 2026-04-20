@@ -67,13 +67,14 @@ The `:name` path parameter corresponds to the federation key in `config.federati
 function createPassport(options: {
   userRepository: UserRepository;
   federationProviders: ReadonlyMap<string, FederationProvider>;
+  pathResolver?: PathResolver;  // optional; threads through to FederationProvider.setupPassportStrategy
 }): Promise<PassportStatic>;
 ```
 
 Creates and configures a Passport instance.
 
 - **LocalStrategy** — authenticates with `username` and `password` fields.
-- **Federation strategies** — registered for each provider in `federationProviders` by calling `provider.setupPassportStrategy(passport, { verifyUser })`.
+- **Federation strategies** — registered for each provider in `federationProviders` by calling `provider.setupPassportStrategy(passport, { verifyUser, pathResolver })`.
 
 ---
 
@@ -146,11 +147,12 @@ interface FederationProvider {
   readonly scope: readonly string[];
   validateRedirect(url: string): FederationResult<void>;
   resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
-  setupPassportStrategy(passport: PassportStatic, ctx: VerifyUserContext): Promise<void>;
+  setupPassportStrategy(passport: PassportStatic, ctx: SetupPassportContext): Promise<void>;
 }
 
-interface VerifyUserContext {
-  verifyUser: (externalId: string) => Promise<User | undefined>;
+interface SetupPassportContext {
+  verifyUser: (externalId: string) => Promise<User | null>;
+  pathResolver?: (spec: string) => string;  // optional; for Yarn PnP and other non-standard module layouts
 }
 ```
 
@@ -285,12 +287,25 @@ factory.register("microsoft", async (config) => {
   };
 });
 
-// Build the provider map from config
+// Build the provider map from config — mirrors the normalization in module.mts
 const federationProviders = new Map<string, FederationProvider>();
 for (const [name, section] of Object.entries(config.federations)) {
   if (!section.enabled) continue;
-  const type = (section.type as string | undefined) ?? name;
-  const provider = await factory.create({ type, name, ...section });
+
+  const type = (typeof section.type === "string" ? section.type : undefined) ?? name;
+  const subSection = (section as Record<string, unknown>)[type];
+  const isNested =
+    typeof subSection === "object" && subSection !== null && !Array.isArray(subSection);
+
+  const rawBuilderConfig = isNested
+    ? (() => {
+        const { enabled: _e, type: _t, [type]: _sub, ...topLevel } = section as Record<string, unknown>;
+        return { type, ...topLevel, ...(subSection as Record<string, unknown>) };
+      })()
+    : { type, ...(section as Record<string, unknown>) };
+
+  const { enabled: _e2, type: _t2, ...flatConfig } = rawBuilderConfig as Record<string, unknown>;
+  const provider = await factory.create({ type, name, ...flatConfig });
   federationProviders.set(name, provider);
 }
 ```

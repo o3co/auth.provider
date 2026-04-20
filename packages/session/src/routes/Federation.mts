@@ -83,7 +83,9 @@ export const createRouter = (
 				if (err) return res.status(500).json({ message: "Error saving session" });
 				// provider.name is the unique passport strategy identifier registered by
 				// setupPassportStrategy. The :name route param identifies the federation
-				// instance; provider.name is the same value (injected by module.mts).
+				// instance; provider.name is guaranteed to equal the :name route param —
+				// module.mts validates this invariant at build time by asserting the
+				// builder propagated config.name.
 				return passport.authenticate(provider.name, {
 					// Spread readonly to mutable to satisfy passport's AuthenticateOptions type.
 					scope: [...provider.scope],

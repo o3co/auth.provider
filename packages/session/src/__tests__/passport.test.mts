@@ -17,7 +17,7 @@
 import type { UserRepository } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import type { FederationProvider } from "#/federations/types.mjs";
-import { createPassport } from "#/passport.mjs";
+import { _createPassportImpl } from "#/passport.mjs";
 
 /** Minimal passport stub that tracks strategy registrations. */
 function makePassportStub() {
@@ -46,7 +46,7 @@ function makeFederationProvider(name: string): FederationProvider {
 	};
 }
 
-describe("createPassport", () => {
+describe("_createPassportImpl", () => {
 	it("calls setupPassportStrategy on each provider in federationProviders Map", async () => {
 		const passportStub = makePassportStub();
 		const userRepository: UserRepository = {
@@ -64,7 +64,7 @@ describe("createPassport", () => {
 		// pathResolver returns a stub that yields our passportStub
 		const pathResolver = vi.fn((name: string) => name);
 
-		await createPassport({
+		await _createPassportImpl({
 			pathResolver,
 			userRepository,
 			federationProviders,
@@ -95,7 +95,7 @@ describe("createPassport", () => {
 			["google", provider],
 		]);
 
-		await createPassport({
+		await _createPassportImpl({
 			pathResolver: vi.fn((name: string) => name),
 			userRepository,
 			federationProviders,
@@ -128,7 +128,7 @@ describe("createPassport", () => {
 		// resolver reference reaches the provider ctx.
 		const identityPathResolver = vi.fn((spec: string) => spec);
 
-		await createPassport({
+		await _createPassportImpl({
 			pathResolver: identityPathResolver,
 			userRepository,
 			federationProviders: new Map([["google", provider]]),
@@ -148,7 +148,7 @@ describe("createPassport", () => {
 
 		// Should not throw with empty map
 		await expect(
-			createPassport({
+			_createPassportImpl({
 				pathResolver: vi.fn((name: string) => name),
 				userRepository,
 				federationProviders: new Map(),

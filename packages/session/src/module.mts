@@ -46,12 +46,21 @@ const sessionConfigSchema = fullSectionsSchema.pick({
 	cors: true,
 });
 
-export const sessionModule = (params: {
+export type SessionModuleOptions = {
 	userRepository: UserRepository;
 	express?: ExpressLike;
+};
+
+type SessionModuleInternalOptions = SessionModuleOptions & {
 	/** For testing only — inject a pre-configured factory to skip registration. */
 	_federationFactory?: FederationProviderFactory;
-}): Module => ({
+};
+
+/**
+ * Internal implementation — accepts an optional factory override for testing.
+ * Not part of the public API; tests import this directly via the `#/` alias.
+ */
+export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module => ({
 	name: "session",
 	configSchema: sessionConfigSchema,
 	async init(context: ModuleContext): Promise<void> {
@@ -137,6 +146,17 @@ export const sessionModule = (params: {
 				authCallbackUrl,
 				clientUrl,
 			});
+
+			// Invariant guard: the provider's name must equal the config key so that
+			// routes/Federation.mts can look up the provider by the :name route param.
+			// Custom builders must propagate config.name to FederationProvider.name.
+			if (provider.name !== name) {
+				throw new Error(
+					`federations.${name}: provider builder returned name="${provider.name}", expected "${name}". ` +
+						`Custom builders must propagate config.name to FederationProvider.name to preserve the config-key ↔ passport-strategy-name invariant.`,
+				);
+			}
+
 			federationProviders.set(name, provider);
 		}
 
@@ -167,3 +187,10 @@ export const sessionModule = (params: {
 		);
 	},
 });
+
+/**
+ * Top-level session module factory.
+ *
+ * Public API — does not expose test-only options. Tests should use `_sessionModuleImpl` directly.
+ */
+export const sessionModule = (opts: SessionModuleOptions): Module => _sessionModuleImpl(opts);
