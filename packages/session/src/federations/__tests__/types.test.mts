@@ -18,6 +18,7 @@ import type { PassportStatic } from "passport";
 import { describe, expect, it } from "vitest";
 import type {
 	FederationProvider,
+	FederationProviderBase,
 	SetupPassportContext,
 	VerifyUserContext,
 } from "#/federations/types.mjs";
@@ -76,5 +77,18 @@ describe("FederationProvider interface", () => {
 		const ctx: SetupPassportContext = { verifyUser: async () => null };
 		const asLegacy: VerifyUserContext = ctx;
 		expect(typeof asLegacy.verifyUser).toBe("function");
+	});
+});
+
+describe("FederationProviderBase interface (Task 1)", () => {
+	it("FederationProviderBase has the same structural shape as the pre-rename FederationProvider", () => {
+		const provider: FederationProviderBase = {
+			name: "google",
+			scope: ["profile", "email"],
+			validateRedirect: () => ({ ok: true, value: undefined }),
+			resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
+			setupPassportStrategy: async () => {},
+		};
+		expect(provider.name).toBe("google");
 	});
 });
