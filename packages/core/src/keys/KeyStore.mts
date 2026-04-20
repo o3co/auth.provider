@@ -16,6 +16,23 @@
 import { createSecretKey, type KeyObject } from "node:crypto";
 import { importPKCS8, importSPKI } from "jose";
 
+/**
+ * JWT claims per RFC 7519. Standard claims are typed; custom claims are
+ * allowed via index signature. Defined here to keep the KeyStore interface
+ * jose-independent — implementations may use jose, node-jose, fast-jwt, or
+ * direct KMS SDK calls.
+ */
+export interface JWTPayload {
+	iss?: string;
+	sub?: string;
+	aud?: string | string[];
+	jti?: string;
+	nbf?: number;
+	exp?: number;
+	iat?: number;
+	[propName: string]: unknown;
+}
+
 export type KeyLike = CryptoKey | KeyObject | Uint8Array;
 
 export interface ManagedKey {
