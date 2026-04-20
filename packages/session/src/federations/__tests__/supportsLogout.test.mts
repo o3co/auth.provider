@@ -97,3 +97,26 @@ describe("EndSessionResult URL construction (reference implementation behaviour)
 		expect(url.searchParams.has("state")).toBe(false);
 	});
 });
+
+describe("fixture module (packages/session/src/federations/__tests__/fixtures.mts)", () => {
+	it("exports createTestBaseProvider and createTestLogoutProvider", async () => {
+		const fixtures = await import("./fixtures.mjs");
+		expect(typeof fixtures.createTestBaseProvider).toBe("function");
+		expect(typeof fixtures.createTestLogoutProvider).toBe("function");
+	});
+
+	it("createTestLogoutProvider returns a provider that passes supportsLogout()", async () => {
+		const { createTestLogoutProvider } = await import("./fixtures.mjs");
+		const p = createTestLogoutProvider({
+			name: "fixture-idp",
+			endSessionEndpoint: "https://fixture.example/oidc/logout",
+		});
+		expect(supportsLogout(p)).toBe(true);
+	});
+
+	it("createTestBaseProvider returns a provider that fails supportsLogout()", async () => {
+		const { createTestBaseProvider } = await import("./fixtures.mjs");
+		const p = createTestBaseProvider("fixture-plain");
+		expect(supportsLogout(p)).toBe(false);
+	});
+});
