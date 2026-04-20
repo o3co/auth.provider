@@ -79,13 +79,13 @@ describe("nested repositories.* migration: builder-level error self-diagnosis", 
 		// config: `{ type: "http", http: { authenticateUrl: "..." } }` →
 		// `{ type: "http", authenticateUrl: "..." }` before forwarding to the
 		// builder.
-		const nestedClientsUser = {
+		const nestedRepositoriesUser = {
 			type: "http",
 			http: { authenticateUrl: "https://auth.example.com/verify" },
 		};
 		const adapterCfg =
-			(nestedClientsUser[nestedClientsUser.type as "http"] as Record<string, unknown>) ?? {};
-		const flattened = { type: nestedClientsUser.type, ...adapterCfg };
+			(nestedRepositoriesUser[nestedRepositoriesUser.type as "http"] as Record<string, unknown>) ?? {};
+		const flattened = { type: nestedRepositoriesUser.type, ...adapterCfg };
 
 		const repo = await userFactory.create(flattened);
 		expect(repo).toBeDefined();
