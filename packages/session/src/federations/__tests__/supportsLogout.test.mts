@@ -16,11 +16,11 @@
 
 import { describe, expect, it } from "vitest";
 import {
-	supportsLogout,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProviderBase,
 	type SupportsLogout,
+	supportsLogout,
 } from "#/federations/types.mjs";
 
 function makeBaseProvider(name: string): FederationProviderBase {
@@ -62,10 +62,7 @@ describe("supportsLogout()", () => {
 	});
 
 	it("narrows the type so endSession is callable without cast", async () => {
-		const p: FederationProviderBase = makeLogoutProvider(
-			"myidp",
-			"https://myidp.example/logout",
-		);
+		const p: FederationProviderBase = makeLogoutProvider("myidp", "https://myidp.example/logout");
 		if (supportsLogout(p)) {
 			// Inside this branch, TypeScript narrows `p` to `FederationProviderBase & SupportsLogout`.
 			const result = await p.endSession({ idTokenHint: "abc" });
