@@ -14,27 +14,21 @@
  * limitations under the License.
  */
 
+import type { User } from "@o3co/auth-provider-core";
+import type { PassportStatic } from "passport";
+
 export type FederationResult<T> =
 	| { ok: true; value: T }
 	| { ok: false; status: number; error: string; errorDescription: string };
 
-export interface FederationProvider {
-	name: string;
-	strategyName: string;
-	scope: string[];
-	enabled: boolean;
-	validateRedirect(url: string): FederationResult<void>;
-	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
+export interface VerifyUserContext {
+	verifyUser: (externalId: string) => Promise<User | null>;
 }
 
-export class FederationRegistry {
-	private providers = new Map<string, FederationProvider>();
-
-	register(provider: FederationProvider): void {
-		this.providers.set(provider.name, provider);
-	}
-
-	get(name: string): FederationProvider | undefined {
-		return this.providers.get(name);
-	}
+export interface FederationProvider {
+	readonly name: string;
+	readonly scope: readonly string[];
+	validateRedirect(url: string): FederationResult<void>;
+	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
+	setupPassportStrategy(passport: PassportStatic, ctx: VerifyUserContext): Promise<void>;
 }
