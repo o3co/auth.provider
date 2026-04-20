@@ -227,26 +227,23 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 	});
 
 	it("file-path takes priority over inline PEM string when both are supplied", async () => {
-		// Write key A to files, pass key B as inline PEM — file (A) must win.
-		const keyA = await generateTestKeyPair("ES256");
-		const keyB = await generateTestKeyPair("ES256");
+		// Valid keys at the file paths; garbage strings in the inline fields.
+		// If file-path wins, jose receives the real PEM and build succeeds.
+		// If inline won, importPKCS8 / importSPKI would throw on the garbage.
+		const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
 		const privPath = join(tmpDir, "priority-private.pem");
 		const pubPath = join(tmpDir, "priority-public.pem");
-		writeFileSync(privPath, keyA.privateKeyPem);
-		writeFileSync(pubPath, keyA.publicKeyPem);
+		writeFileSync(privPath, await exportPKCS8(privateKey));
+		writeFileSync(pubPath, await exportSPKI(publicKey));
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
-		// If file wins, the store uses keyA keys and can sign+verify correctly.
-		// If inline PEM wins, the store uses mismatched keyB private / keyA public
-		// and verification would fail — but here we just assert it builds without error
-		// (the priority assertion is structural: readKeyValue returns file content first).
 		const keyStore = await factory.create({
 			type: "local",
 			algorithm: "ES256",
 			kid: "pri1",
-			privateKey: keyB.privateKeyPem,
+			privateKey: "NOT A VALID PEM — should be ignored",
 			privateKeyPath: privPath,
-			publicKey: keyB.publicKeyPem,
+			publicKey: "ALSO INVALID PEM — should be ignored",
 			publicKeyPath: pubPath,
 			previousKeys: [],
 		});

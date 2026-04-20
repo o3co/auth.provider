@@ -67,10 +67,9 @@ import { oauthModule } from "@o3co/auth-provider-oauth";
 
 const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
-const keyStore = await keyStoreFactory.create({
-  type: config.oauth.jwt.signingKey.provider,
-  ...(config.oauth.jwt.signingKey.local ?? {}),
-});
+// flatten() はネストされたアダプターサブセクションを { type, ...fields } に正規化する。
+// 完全な定義は packages/core/README.md を参照。
+const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
 
 const { init, router } = createApp(express, {
   config,

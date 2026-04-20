@@ -73,10 +73,9 @@ import { oauthModule } from "@o3co/auth-provider-oauth";
 
 const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
-const keyStore = await keyStoreFactory.create({
-  type: config.oauth.jwt.signingKey.provider,
-  ...(config.oauth.jwt.signingKey.local ?? {}),
-});
+// flatten() normalises the nested adapter sub-section to { type, ...fields }.
+// See packages/core/README.md for the full helper definition.
+const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
 
 const { init, router } = createApp(express, {
   config,
