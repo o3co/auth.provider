@@ -84,7 +84,8 @@ describe("nested repositories.* migration: builder-level error self-diagnosis", 
 			http: { authenticateUrl: "https://auth.example.com/verify" },
 		};
 		const adapterCfg =
-			(nestedRepositoriesUser[nestedRepositoriesUser.type as "http"] as Record<string, unknown>) ?? {};
+			(nestedRepositoriesUser[nestedRepositoriesUser.type as "http"] as Record<string, unknown>) ??
+			{};
 		const flattened = { type: nestedRepositoriesUser.type, ...adapterCfg };
 
 		const repo = await userFactory.create(flattened);

@@ -86,7 +86,9 @@ describe("schema open type", () => {
 		const result = AppConfigSchema.safeParse({
 			http: { port: 3000, trustProxy: false },
 			oauth: {
-				jwt: { signingKey: { provider: "local", local: { algorithm: "HS256", kid: "v0", secret: "s" } } },
+				jwt: {
+					signingKey: { provider: "local", local: { algorithm: "HS256", kid: "v0", secret: "s" } },
+				},
 				accessToken: { expiresIn: 3600 },
 				refreshToken: { expiresIn: 86400 },
 				grants: {
@@ -112,8 +114,8 @@ describe("schema open type", () => {
 			// Legacy key — must fail. The renamed key `repositories` is absent.
 			clients: {
 				client: { type: "yaml", yaml: { path: "./config/clients.yaml" } },
-				user:   { type: "yaml", yaml: { path: "./config/users.yaml" } },
-				code:   { type: "memory" },
+				user: { type: "yaml", yaml: { path: "./config/users.yaml" } },
+				code: { type: "memory" },
 			},
 			endpoints: { login: { url: "/login" } },
 			cors: { allowedOrigins: [] },
