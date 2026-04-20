@@ -32,9 +32,13 @@ import { describe, expect, it } from "vitest";
 describe("nested repositories.* migration: builder-level error self-diagnosis", () => {
 	it("http user builder emits a clear error when authenticateUrl is missing", async () => {
 		// Simulate a caller that forwarded the legacy flat `repositories.user` section
-		// which has only `type` at the top level after the Task 3 schema migration
-		// (the old `authenticateUrl`/`authenticateByTokenUrl` fields were stripped
-		// or never forwarded without flattening).
+		// to the builder without first flattening the nested adapter sub-section.
+		// The schema uses `.passthrough()` on `repositories.user`, so flat fields
+		// like `authenticateUrl` are not stripped at parse time — they're simply
+		// missing from the builder input because the wiring code expects the shape
+		// `{ type, <type>: { ...adapter-specific fields } }` and flattens it.
+		// A legacy flat config (`{ type: "http", authenticateUrl: "..." }`) that
+		// bypasses flattening effectively forwards only `type` to the builder.
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		userFactory.register("http", (config) => {
 			if (typeof config.authenticateUrl !== "string") {
