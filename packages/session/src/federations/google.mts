@@ -13,96 +13,138 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { AppConfig } from "@o3co/auth-provider-core";
+
 import type { FederationProvider, FederationResult } from "./types.mjs";
 
-export const createGoogleProvider = (config: AppConfig): FederationProvider => ({
-	name: "google",
-	strategyName: "google",
-	scope: ["profile", "email"],
-	enabled: config.federations.google.enabled,
+export interface GoogleProviderConfig {
+	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
+	name: string;
+	clientId: string;
+	clientSecret: string;
+	callbackURL: string;
+	/** Cookie / session domain used to validate redirect URLs (e.g. ".example.com"). Optional. */
+	sessionDomain?: string;
+	/** URL of the auth-callback page (used to build the post-login redirect). Optional. */
+	authCallbackUrl?: string;
+	/** Fallback URL for the client app (used when no redirectTo is present). Optional. */
+	clientUrl?: string;
+}
 
-	validateRedirect(url: string): FederationResult<void> {
-		if (url.length > 2048) {
-			return {
-				ok: false,
-				status: 400,
-				error: "invalid_redirect",
-				errorDescription: "Invalid redirect_to",
-			};
-		}
+export const createGoogleProvider = (config: GoogleProviderConfig): FederationProvider => {
+	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
+		throw new Error(
+			`Google federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
+		);
+	}
 
-		let parsed: URL;
-		try {
-			parsed = new URL(url);
-		} catch {
-			return {
-				ok: false,
-				status: 400,
-				error: "invalid_redirect",
-				errorDescription: "Invalid redirect URL",
-			};
-		}
+	return {
+		name: config.name,
+		scope: ["profile", "email"],
 
-		if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-			return {
-				ok: false,
-				status: 400,
-				error: "invalid_redirect",
-				errorDescription: "Invalid redirect URL scheme",
-			};
-		}
-
-		const cookieDomain = config.session.domain;
-		if (cookieDomain) {
-			const normalizedDomain = cookieDomain.replace(/^\./, "");
-			if (
-				parsed.hostname !== normalizedDomain &&
-				!parsed.hostname.endsWith(`.${normalizedDomain}`)
-			) {
+		validateRedirect(url: string): FederationResult<void> {
+			if (url.length > 2048) {
 				return {
 					ok: false,
 					status: 400,
 					error: "invalid_redirect",
-					errorDescription: "Redirect domain not allowed",
+					errorDescription: "Invalid redirect_to",
 				};
 			}
-		}
 
-		return { ok: true, value: undefined };
-	},
+			let parsed: URL;
+			try {
+				parsed = new URL(url);
+			} catch {
+				return {
+					ok: false,
+					status: 400,
+					error: "invalid_redirect",
+					errorDescription: "Invalid redirect URL",
+				};
+			}
 
-	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
-		// authCallback and client are optional in the schema (DID-only deployments
-		// don't need them). When Google federation is enabled, operators must
-		// configure authCallback if redirect_to flows are used.
-		const authCallbackUrl = config.endpoints.authCallback?.url;
-		if (session.redirectTo && authCallbackUrl) {
-			return {
-				ok: true,
-				value: `${authCallbackUrl}?redirect_to=${encodeURIComponent(session.redirectTo)}`,
-			};
-		}
+			if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+				return {
+					ok: false,
+					status: 400,
+					error: "invalid_redirect",
+					errorDescription: "Invalid redirect URL scheme",
+				};
+			}
 
-		if (session.redirectTo && !authCallbackUrl) {
-			return {
-				ok: false,
-				status: 500,
-				error: "misconfiguration",
-				errorDescription: "authCallback URL not configured but redirect_to was requested",
-			};
-		}
+			const cookieDomain = config.sessionDomain;
+			if (cookieDomain) {
+				const normalizedDomain = cookieDomain.replace(/^\./, "");
+				if (
+					parsed.hostname !== normalizedDomain &&
+					!parsed.hostname.endsWith(`.${normalizedDomain}`)
+				) {
+					return {
+						ok: false,
+						status: 400,
+						error: "invalid_redirect",
+						errorDescription: "Redirect domain not allowed",
+					};
+				}
+			}
 
-		const clientUrl = config.endpoints.client?.url;
-		if (!clientUrl) {
-			return {
-				ok: false,
-				status: 500,
-				error: "misconfiguration",
-				errorDescription: "client URL not configured",
-			};
-		}
+			return { ok: true, value: undefined };
+		},
 
-		return { ok: true, value: clientUrl };
-	},
-});
+		resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
+			// authCallbackUrl and clientUrl are optional (DID-only deployments don't need them).
+			// When Google federation is enabled, operators must configure authCallbackUrl
+			// if redirect_to flows are used.
+			const authCallbackUrl = config.authCallbackUrl;
+			if (session.redirectTo && authCallbackUrl) {
+				return {
+					ok: true,
+					value: `${authCallbackUrl}?redirect_to=${encodeURIComponent(session.redirectTo)}`,
+				};
+			}
+
+			if (session.redirectTo && !authCallbackUrl) {
+				return {
+					ok: false,
+					status: 500,
+					error: "misconfiguration",
+					errorDescription: "authCallback URL not configured but redirect_to was requested",
+				};
+			}
+
+			const clientUrl = config.clientUrl;
+			if (!clientUrl) {
+				return {
+					ok: false,
+					status: 500,
+					error: "misconfiguration",
+					errorDescription: "client URL not configured",
+				};
+			}
+
+			return { ok: true, value: clientUrl };
+		},
+
+		async setupPassportStrategy(passport, { verifyUser }) {
+			const { Strategy: GoogleStrategy } = await import("passport-google-oauth20");
+			passport.use(
+				config.name,
+				new GoogleStrategy(
+					{
+						clientID: config.clientId,
+						clientSecret: config.clientSecret,
+						callbackURL: config.callbackURL,
+					},
+					async (_at, _rt, profile, done) => {
+						try {
+							const user = await verifyUser(`google:${profile.id}`);
+							return done(null, user ?? false);
+						} catch (err) {
+							return done(err as Error);
+						}
+					},
+				),
+			);
+		},
+	};
+};
