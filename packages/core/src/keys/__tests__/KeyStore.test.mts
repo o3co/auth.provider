@@ -97,6 +97,11 @@ describe("SymmetricKeyStore", () => {
 		const header = decodeProtectedHeader(token);
 		expect(header.typ).toBe("at+jwt");
 	});
+
+	it("getCurrentKid returns the current signing kid", () => {
+		const ks = createSymmetricKeyStore("x", "my-kid");
+		expect(ks.getCurrentKid()).toBe("my-kid");
+	});
 });
 
 describe("AsymmetricKeyStore", () => {
@@ -289,6 +294,17 @@ describe("AsymmetricKeyStore", () => {
 		const key = store.getVerificationKey("asym-sign-k");
 		const { payload } = await jwtVerify(token, key);
 		expect(payload.sub).toBe("carol");
+	});
+
+	it("getCurrentKid returns the current signing kid", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
+		const store = await createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "k-current-only",
+			privateKeyPem,
+			publicKeyPem,
+		});
+		expect(store.getCurrentKid()).toBe("k-current-only");
 	});
 
 	it("throws for expired kid", async () => {

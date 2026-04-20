@@ -115,6 +115,10 @@ export async function createAsymmetricKeyStore(
 				.sign(privateKey);
 		},
 
+		getCurrentKid(): string {
+			return kid;
+		},
+
 		current: { kid, privateKey, publicKey },
 		previous: resolvedPrevious,
 
@@ -158,6 +162,10 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 					...(header?.typ ? { typ: header.typ } : {}),
 				})
 				.sign(secretKey);
+		},
+
+		getCurrentKid(): string {
+			return kid;
 		},
 
 		current: {
