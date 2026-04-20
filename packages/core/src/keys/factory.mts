@@ -52,7 +52,9 @@ interface PreviousKeyEntry {
 
 /**
  * Narrows config.previousKeys from unknown to a typed array.
- * Returns an empty array if the value is absent, null, or not an array.
+ * Returns an empty array if the value is absent or null (explicit opt-out).
+ * Throws a TypeError if the value is present but not an array (caller bug —
+ * silently dropping would lose previous verification keys during rotation).
  * Throws a descriptive error for entries that are missing required fields.
  */
 function narrowPreviousKeysArray(value: unknown): PreviousKeyEntry[] {

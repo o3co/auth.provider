@@ -63,7 +63,9 @@ For a DID-only deployment (no session, no federation):
 
 ```typescript
 import express from "express";
+import { parseFile, validate } from "@o3co/ts.hocon";
 import {
+  AppConfigSchema,
   createApp,
   createKeyStoreFactory,
   registerBuiltinKeyStores,
@@ -71,13 +73,34 @@ import {
 import { oauthDidModule } from "@o3co/auth-provider-did";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 
+// Load & validate HOCON config (see packages/core/config/application.conf
+// for the nested oauth.jwt.signingKey shape).
+const config = validate(parseFile("./config/application.conf"), AppConfigSchema);
+
+// flatten() normalises the nested adapter sub-section to { type, ...fields }.
+// Accepts both `type` (clients.*, session.storage) and `provider`
+// (oauth.jwt.signingKey) selectors. See packages/core/README.md for the
+// full helper definition.
+const flatten = (section: { type?: string; provider?: string } & Record<string, unknown>) => {
+  const selector = section.type ?? section.provider;
+  if (typeof selector !== "string") throw new TypeError("missing selector");
+  const sub = section[selector];
+  return {
+    type: selector,
+    ...(typeof sub === "object" && sub !== null && !Array.isArray(sub)
+      ? (sub as Record<string, unknown>)
+      : {}),
+  };
+};
+
 const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
-// flatten() normalises the nested adapter sub-section to { type, ...fields }.
-// See packages/core/README.md for the full helper definition.
 const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
 
-const { init, router } = createApp(express, {
+// ... wire up clientRepository / codeRepository / myDidResolver ...
+
+const { init, router } = createApp({
+  express,
   config,
   keyStore,
   modules: [

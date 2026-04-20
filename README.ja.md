@@ -57,7 +57,9 @@ DID のみのデプロイ（セッション/フェデレーション不要）:
 
 ```typescript
 import express from "express";
+import { parseFile, validate } from "@o3co/ts.hocon";
 import {
+  AppConfigSchema,
   createApp,
   createKeyStoreFactory,
   registerBuiltinKeyStores,
@@ -65,13 +67,33 @@ import {
 import { oauthDidModule } from "@o3co/auth-provider-did";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 
+// HOCON 設定を読み込んで検証する（ネストされた oauth.jwt.signingKey シェイプは
+// packages/core/config/application.conf を参照）。
+const config = validate(parseFile("./config/application.conf"), AppConfigSchema);
+
+// flatten() はネストされたアダプターサブセクションを { type, ...fields } に正規化する。
+// `type` (clients.*, session.storage) と `provider` (oauth.jwt.signingKey) の
+// 両方のセレクターを受け付ける。完全な定義は packages/core/README.md を参照。
+const flatten = (section: { type?: string; provider?: string } & Record<string, unknown>) => {
+  const selector = section.type ?? section.provider;
+  if (typeof selector !== "string") throw new TypeError("missing selector");
+  const sub = section[selector];
+  return {
+    type: selector,
+    ...(typeof sub === "object" && sub !== null && !Array.isArray(sub)
+      ? (sub as Record<string, unknown>)
+      : {}),
+  };
+};
+
 const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
-// flatten() はネストされたアダプターサブセクションを { type, ...fields } に正規化する。
-// 完全な定義は packages/core/README.md を参照。
 const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
 
-const { init, router } = createApp(express, {
+// ... clientRepository / codeRepository / myDidResolver をセットアップ ...
+
+const { init, router } = createApp({
+  express,
   config,
   keyStore,
   modules: [
