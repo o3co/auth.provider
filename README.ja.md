@@ -40,7 +40,7 @@ Client                              auth.provider
 - **モジュラー構成** — 必要なモジュールだけを選択。DID のみ？ セッション、フェデレーション、認可コードは丸ごとスキップ可能。
 - **JWT アルゴリズム選択** — HS256, RS256, ES256, EdDSA。非対称アルゴリズムの場合は JWKS エンドポイント (`/.well-known/jwks.json`) を自動公開。
 - **OAuth 2.0 準拠** — PKCE 対応認可コードフロー (RFC 7636)、トークンイントロスペクション (RFC 7662)、リフレッシュトークン
-- **セッション認証** — Passport.js ローカルストラテジー + Google OAuth フェデレーション
+- **セッション認証** — Passport.js ローカルストラテジー + OAuth フェデレーション（Google、GitHub、`FederationProviderFactory` によるカスタムプロバイダー対応）
 - **レート制限** — エンドポイント毎に設定可能
 - **HOCON 設定** — Zod バリデーション + 環境変数オーバーライド
 
@@ -124,7 +124,7 @@ await init();
 - **core** — インターフェース、設定スキーマ、トークンサービス、アプリファクトリ。常に必要。
 - **oauth** — OAuth ルート (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`)。トークン発行に必須。
 - **did** — DID 認証グラント。オプション — DID ベースの認証を使う場合のみ。
-- **session** — セッションログイン + Google フェデレーション。オプション — API のみのデプロイではスキップ可能。
+- **session** — セッションログイン + OAuth フェデレーション（Google、GitHub、拡張可能）。オプション — API のみのデプロイではスキップ可能。
 - **foundation** — 本番向けリポジトリアダプター (Redis コードストア, HTTP ユーザー検索)。オプション。
 
 ## パッケージ構成
@@ -134,7 +134,7 @@ await init();
 | [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | グラントレジストリ、トークンサービス、リポジトリインターフェース、設定スキーマ |
 | [`packages/did`](packages/did/) | `@o3co/auth-provider-did` | プラグイン可能な resolver による DID 認証グラント |
 | [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth ルート: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
-| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | セッションルート, Passport.js, Google フェデレーション |
+| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | セッションルート, Passport.js, OAuth フェデレーション（Google・GitHub・拡張可能） |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Redis コードストア, HTTP ユーザー/クライアントリポジトリ |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |
 | [`create-app`](create-app/) | `create-o3co-auth-provider` | CLI スキャフォルダー |
@@ -190,7 +190,15 @@ oauth.grants.did {
 
 ```hocon
 session { secret = ${SESSION_SECRET} }
-federations { google { enabled = false } }
+
+# ショートハンド: キー名 = プロバイダータイプ (google、github、またはカスタム登録タイプ)
+federations {
+  google {
+    enabled = false
+    # clientId, clientSecret, callbackURL — enabled = true のとき必須
+  }
+  # github { enabled = false }
+}
 ```
 
 完全な設定例: [`templates/standalone/config/application.conf`](templates/standalone/config/application.conf)
