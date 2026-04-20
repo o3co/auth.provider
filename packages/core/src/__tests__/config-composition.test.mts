@@ -232,13 +232,9 @@ describe("AppConfigSchema backward compatibility", () => {
 				google: { enabled: false },
 			},
 			repositories: {
-				client: { type: "yaml", path: "./config/clients.yaml" },
-				user: {
-					type: "yaml",
-					path: "./config/users.yaml",
-					timeout: 5000,
-				},
-				code: { type: "memory", defaultExpiresIn: 600 },
+				client: { type: "yaml", yaml: { path: "./config/clients.yaml" } },
+				user: { type: "yaml", yaml: { path: "./config/users.yaml" } },
+				code: { type: "memory", memory: { defaultExpiresIn: 600 } },
 			},
 			endpoints: {
 				login: {},
