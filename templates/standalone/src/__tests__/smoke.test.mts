@@ -68,7 +68,7 @@ const config: AppConfig = {
 	federations: {
 		google: { enabled: false },
 	},
-	clients: {
+	repositories: {
 		client: { type: "yaml", path: "./config/clients.yaml" },
 		user: { type: "yaml", path: "./config/users.yaml", timeout: 5000 },
 		code: { type: "memory", defaultExpiresIn: 600 },

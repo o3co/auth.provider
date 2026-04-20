@@ -182,7 +182,7 @@ export const fullSectionsSchema = z.object({
 		authorize: rateLimitSchema,
 	}),
 	federations: z.record(z.string(), federationEntrySchema).default({}),
-	clients: z.object({
+	repositories: z.object({
 		client: z
 			.object({
 				type: z.string().default("yaml"),

@@ -18,7 +18,7 @@ import { createAdapterFactory } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 
 /**
- * These tests document the self-diagnosing behaviour of the nested clients.*
+ * These tests document the self-diagnosing behaviour of the nested repositories.*
  * migration. After PR #3 (this spec's Task 3 schema change), wiring code MUST
  * flatten the adapter sub-section before calling factory.create(...). If a
  * caller accidentally forwards a legacy flat config, the adapter-specific
@@ -29,12 +29,16 @@ import { describe, expect, it } from "vitest";
  * that pin the migration's error semantics so future refactors don't erode
  * the operator-facing error message quality.
  */
-describe("nested clients.* migration: builder-level error self-diagnosis", () => {
+describe("nested repositories.* migration: builder-level error self-diagnosis", () => {
 	it("http user builder emits a clear error when authenticateUrl is missing", async () => {
-		// Simulate a caller that forwarded the legacy flat `clients.user` section
-		// which has only `type` at the top level after the Task 3 schema migration
-		// (the old `authenticateUrl`/`authenticateByTokenUrl` fields were stripped
-		// or never forwarded without flattening).
+		// Simulate a caller that forwarded the legacy flat `repositories.user` section
+		// to the builder without first flattening the nested adapter sub-section.
+		// The schema uses `.passthrough()` on `repositories.user`, so flat fields
+		// like `authenticateUrl` are not stripped at parse time — they're simply
+		// missing from the builder input because the wiring code expects the shape
+		// `{ type, <type>: { ...adapter-specific fields } }` and flattens it.
+		// A legacy flat config (`{ type: "http", authenticateUrl: "..." }`) that
+		// bypasses flattening effectively forwards only `type` to the builder.
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		userFactory.register("http", (config) => {
 			if (typeof config.authenticateUrl !== "string") {
@@ -75,17 +79,18 @@ describe("nested clients.* migration: builder-level error self-diagnosis", () =>
 			} as UserRepository;
 		});
 
-		// Simulate the wiring code's flattening of the nested clients.user
+		// Simulate the wiring code's flattening of the nested repositories.user
 		// config: `{ type: "http", http: { authenticateUrl: "..." } }` →
 		// `{ type: "http", authenticateUrl: "..." }` before forwarding to the
 		// builder.
-		const nestedClientsUser = {
+		const nestedRepositoriesUser = {
 			type: "http",
 			http: { authenticateUrl: "https://auth.example.com/verify" },
 		};
 		const adapterCfg =
-			(nestedClientsUser[nestedClientsUser.type as "http"] as Record<string, unknown>) ?? {};
-		const flattened = { type: nestedClientsUser.type, ...adapterCfg };
+			(nestedRepositoriesUser[nestedRepositoriesUser.type as "http"] as Record<string, unknown>) ??
+			{};
+		const flattened = { type: nestedRepositoriesUser.type, ...adapterCfg };
 
 		const repo = await userFactory.create(flattened);
 		expect(repo).toBeDefined();

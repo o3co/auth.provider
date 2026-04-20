@@ -73,17 +73,17 @@ await (async (): Promise<void> => {
 	registerBuiltinAdapters({ userFactory, codeFactory, pathResolver: import.meta.resolve });
 
 	const clientConfig = flattenAdapterConfig(
-		config.clients.client as { type: string } & Record<string, unknown>,
+		config.repositories.client as { type: string } & Record<string, unknown>,
 	);
 	if (typeof clientConfig.path === "string") {
 		clientConfig.path = path.resolve(appDir, "..", clientConfig.path);
 	}
 	const clientRepository = await clientFactory.create(clientConfig);
 	const userRepository = await userFactory.create(
-		flattenAdapterConfig(config.clients.user as { type: string } & Record<string, unknown>),
+		flattenAdapterConfig(config.repositories.user as { type: string } & Record<string, unknown>),
 	);
 	const codeRepository = await codeFactory.create(
-		flattenAdapterConfig(config.clients.code as { type: string } & Record<string, unknown>),
+		flattenAdapterConfig(config.repositories.code as { type: string } & Record<string, unknown>),
 	);
 
 	const app = express();

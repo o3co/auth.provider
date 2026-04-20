@@ -35,7 +35,7 @@ Top-level fields:
 | `session` | Express session — secret, maxAge, secure, sameSite, domain, storage |
 | `rateLimit` | Rate limit config for `login`, `token`, and `authorize` endpoints |
 | `federations` | Federation providers — `z.record(string, { enabled, type?, ...passthrough })`. Built-in types: `"google"`, `"github"`. |
-| `clients` | Repository config for clients, users, and codes |
+| `repositories` | Repository config for clients, users, and codes |
 | `endpoints` | Path overrides for `login`, `client`, and `authCallback` routes |
 | `cors.allowedOrigins` | CORS allowed origins |
 
@@ -394,7 +394,7 @@ import {
 
 const config = AppConfigSchema.parse(rawConfig);
 
-// Both clients.* (uses 'type') and oauth.jwt.signingKey (uses 'provider') follow
+// Both repositories.* (uses 'type') and oauth.jwt.signingKey (uses 'provider') follow
 // the same nested adapter sub-section pattern. flatten() normalises either selector
 // to { type, ...subSectionFields } before forwarding to the factory:
 const flatten = (
@@ -420,9 +420,9 @@ const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKe
 
 const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 
-const clientRepository = await clientFactory.create(flatten(config.clients.client));
-const userRepository = await userFactory.create(flatten(config.clients.user));
-const codeRepository = await codeFactory.create(flatten(config.clients.code));
+const clientRepository = await clientFactory.create(flatten(config.repositories.client));
+const userRepository = await userFactory.create(flatten(config.repositories.user));
+const codeRepository = await codeFactory.create(flatten(config.repositories.code));
 
 const app = createApp(express, {
   config,
