@@ -54,13 +54,13 @@ describe("SymmetricKeyStore", () => {
 		expect(signingKey.privateKey).toBeDefined();
 	});
 
-	it("getVerificationKey returns key for current kid", () => {
-		const key = keyStore.getVerificationKey("v0");
+	it("getVerificationKey returns key for current kid", async () => {
+		const key = await keyStore.getVerificationKey("v0");
 		expect(key).toBeDefined();
 	});
 
-	it("getVerificationKey throws for unknown kid", () => {
-		expect(() => keyStore.getVerificationKey("unknown")).toThrow();
+	it("getVerificationKey throws for unknown kid", async () => {
+		await expect(keyStore.getVerificationKey("unknown")).rejects.toThrow();
 	});
 
 	it("getVerificationKeys returns current key only (no previous keys)", () => {
@@ -83,7 +83,7 @@ describe("SymmetricKeyStore", () => {
 		expect(header.kid).toBe("k-sym");
 
 		// Payload preserves claims
-		const key = ks.getVerificationKey("k-sym");
+		const key = await ks.getVerificationKey("k-sym");
 		const { payload } = await jwtVerify(token, key);
 		expect(payload.sub).toBe("alice");
 	});
@@ -129,7 +129,7 @@ describe("AsymmetricKeyStore", () => {
 			.sign(privateKey);
 
 		// Verify with the verification key
-		const verificationKey = store.getVerificationKey(kid);
+		const verificationKey = await store.getVerificationKey(kid);
 		const { payload } = await jwtVerify(token, verificationKey);
 		expect(payload.sub).toBe("user1");
 	});
@@ -212,7 +212,7 @@ describe("AsymmetricKeyStore", () => {
 		// Verify old token with previous key
 		const header = decodeProtectedHeader(token);
 		if (!header.kid) throw new Error("Expected kid in header");
-		const verificationKey = store.getVerificationKey(header.kid);
+		const verificationKey = await store.getVerificationKey(header.kid);
 		const { payload } = await jwtVerify(token, verificationKey);
 		expect(payload.sub).toBe("user-old");
 	});
@@ -274,7 +274,7 @@ describe("AsymmetricKeyStore", () => {
 			publicKeyPem,
 		});
 
-		expect(() => store.getVerificationKey("unknown")).toThrow("Unknown kid: unknown");
+		await expect(store.getVerificationKey("unknown")).rejects.toThrow("Unknown kid: unknown");
 	});
 
 	it("sign() round-trip works for asymmetric (ES256)", async () => {
@@ -291,7 +291,7 @@ describe("AsymmetricKeyStore", () => {
 		expect(header.alg).toBe("ES256");
 		expect(header.kid).toBe("asym-sign-k");
 
-		const key = store.getVerificationKey("asym-sign-k");
+		const key = await store.getVerificationKey("asym-sign-k");
 		const { payload } = await jwtVerify(token, key);
 		expect(payload.sub).toBe("carol");
 	});
@@ -325,6 +325,6 @@ describe("AsymmetricKeyStore", () => {
 			],
 		});
 
-		expect(() => store.getVerificationKey("k1")).toThrow();
+		await expect(store.getVerificationKey("k1")).rejects.toThrow();
 	});
 });

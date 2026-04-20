@@ -132,7 +132,7 @@ export async function createAsymmetricKeyStore(
 			return [{ kid, publicKey }, ...active];
 		},
 
-		getVerificationKey(requestedKid: string): KeyLike {
+		async getVerificationKey(requestedKid: string): Promise<KeyLike> {
 			if (requestedKid === kid) {
 				return publicKey;
 			}
@@ -145,7 +145,7 @@ export async function createAsymmetricKeyStore(
 			}
 			return prev.publicKey;
 		},
-	};
+	} as unknown as KeyStore;
 }
 
 export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
@@ -183,11 +183,11 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 			return [{ kid, publicKey: secretKey }];
 		},
 
-		getVerificationKey(requestedKid: string): KeyLike {
+		async getVerificationKey(requestedKid: string): Promise<KeyLike> {
 			if (requestedKid !== kid) {
 				throw new Error(`Unknown kid: ${requestedKid}`);
 			}
 			return secretKey;
 		},
-	};
+	} as unknown as KeyStore;
 }
