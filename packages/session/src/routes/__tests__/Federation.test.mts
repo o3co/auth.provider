@@ -19,11 +19,11 @@ import express from "express";
 import type { PassportStatic } from "passport";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { FederationProvider } from "#/federations/types.mjs";
+import type { FederationProviderBase } from "#/federations/types.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
-/** Minimal mock for a FederationProvider */
-function makeMockProvider(name: string, scope: string[]): FederationProvider {
+/** Minimal mock for a FederationProviderBase */
+function makeMockProvider(name: string, scope: string[]): FederationProviderBase {
 	return {
 		name,
 		scope,
@@ -48,7 +48,7 @@ const stubConfig: AppConfig = {
  * real OAuth redirects, so we can assert call arguments.
  */
 function buildApp(
-	federationProviders: ReadonlyMap<string, FederationProvider>,
+	federationProviders: ReadonlyMap<string, FederationProviderBase>,
 	passportStub: {
 		authenticate: ReturnType<typeof vi.fn>;
 	},

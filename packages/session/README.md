@@ -66,8 +66,8 @@ The `:name` path parameter corresponds to the federation key in `config.federati
 ```typescript
 function createPassport(options: {
   userRepository: UserRepository;
-  federationProviders: ReadonlyMap<string, FederationProvider>;
-  pathResolver: PathResolver;  // required; used for dynamic imports of passport/passport-local and threaded through to FederationProvider.setupPassportStrategy
+  federationProviders: ReadonlyMap<string, FederationProviderBase>;
+  pathResolver: PathResolver;  // required; used for dynamic imports of passport/passport-local and threaded through to FederationProviderBase.setupPassportStrategy
 }): Promise<PassportStatic>;
 ```
 
@@ -84,7 +84,7 @@ Creates and configures a Passport instance.
 function createFederationProviderFactory(): FederationProviderFactory;
 ```
 
-Creates an empty `FederationProviderFactory` (an `AdapterFactory<FederationProvider>` with no built-in types registered). Call `registerBuiltinFederations(factory)` to register the built-in `"google"` and `"github"` types, then call `factory.register(type, builder)` to add your own.
+Creates an empty `FederationProviderFactory` (an `AdapterFactory<FederationProviderBase>` with no built-in types registered). Call `registerBuiltinFederations(factory)` to register the built-in `"google"` and `"github"` types, then call `factory.register(type, builder)` to add your own.
 
 ---
 
@@ -114,10 +114,10 @@ function createGoogleProvider(config: {
   sessionDomain?: string;
   authCallbackUrl?: string;
   clientUrl?: string;
-}): FederationProvider;
+}): FederationProviderBase;
 ```
 
-Creates a `FederationProvider` for Google OAuth 2.0. The strategy is registered in Passport under `config.name`, which enables multi-tenant usage (e.g. `google` and `google-work` as separate instances).
+Creates a `FederationProviderBase` for Google OAuth 2.0. The strategy is registered in Passport under `config.name`, which enables multi-tenant usage (e.g. `google` and `google-work` as separate instances).
 
 ---
 
@@ -132,17 +132,17 @@ function createGithubProvider(config: {
   sessionDomain?: string;
   authCallbackUrl?: string;
   clientUrl?: string;
-}): FederationProvider;
+}): FederationProviderBase;
 ```
 
-Creates a `FederationProvider` for GitHub OAuth 2.0. Uses `passport-github2` (optional peer dep — must be installed separately). The default scope is `["read:user", "user:email"]`. The `externalId` format is `"github:" + profile.id`.
+Creates a `FederationProviderBase` for GitHub OAuth 2.0. Uses `passport-github2` (optional peer dep — must be installed separately). The default scope is `["read:user", "user:email"]`. The `externalId` format is `"github:" + profile.id`.
 
 ---
 
-### `FederationProvider` (interface)
+### `FederationProviderBase` (interface)
 
 ```typescript
-interface FederationProvider {
+interface FederationProviderBase {
   readonly name: string;
   readonly scope: readonly string[];
   validateRedirect(url: string): FederationResult<void>;
@@ -156,7 +156,7 @@ interface SetupPassportContext {
 }
 ```
 
-Implement this interface to add a custom OAuth 2.0 / OIDC federation provider.
+Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. Optionally mix in `SupportsLogout` for IdPs that expose an end-session endpoint.
 
 - `name` — unique passport strategy identifier. Used as both the Map key in `federationProviders` and the strategy name passed to `passport.use()`.
 - `scope` — OAuth 2.0 scopes to request.
@@ -166,13 +166,83 @@ Implement this interface to add a custom OAuth 2.0 / OIDC federation provider.
 
 ---
 
+### `SupportsLogout` (optional capability)
+
+Optional capability for providers whose IdP exposes an OIDC RP-Initiated Logout (end-session) endpoint.
+
+```ts
+interface EndSessionRequest {
+  idTokenHint?: string;
+  postLogoutRedirectUri?: string;
+  state?: string;
+}
+
+interface EndSessionResult {
+  url: URL;
+  method: "GET";
+}
+
+interface SupportsLogout {
+  endSession(req: EndSessionRequest): Promise<EndSessionResult>;
+}
+
+function supportsLogout(
+  provider: FederationProviderBase | undefined | null,
+): provider is FederationProviderBase & SupportsLogout;
+```
+
+The built-in `"google"` and `"github"` providers **do not** implement `SupportsLogout`: Google has no public OIDC end-session endpoint, and GitHub is OAuth2-only. External integrations (Microsoft Entra ID, Auth0, Okta, …) can add the capability by mixing it into their custom provider.
+
+Minimum custom provider example:
+
+```ts
+import type {
+  FederationProviderBase,
+  SupportsLogout,
+  EndSessionRequest,
+  EndSessionResult,
+} from "@o3co/auth-provider-session";
+
+function createMyIdPProvider(): FederationProviderBase & SupportsLogout {
+  return {
+    name: "myidp",
+    scope: ["openid"],
+    validateRedirect(url) { /* ... */ },
+    resolveCallbackRedirect(session) { /* ... */ },
+    async setupPassportStrategy(passport, ctx) { /* ... */ },
+    async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
+      const url = new URL("https://myidp.example/oidc/logout");
+      if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
+      if (req.postLogoutRedirectUri) url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
+      if (req.state) url.searchParams.set("state", req.state);
+      return { url, method: "GET" };
+    },
+  };
+}
+```
+
+Consumers detect the capability at the call site:
+
+```ts
+import { supportsLogout } from "@o3co/auth-provider-session";
+
+if (supportsLogout(provider)) {
+  const { url } = await provider.endSession({ idTokenHint, postLogoutRedirectUri, state });
+  res.redirect(url.toString());
+} else {
+  // fall back to local session destroy only
+}
+```
+
+---
+
 ### `FederationProviderFactory` (type)
 
 ```typescript
-type FederationProviderFactory = AdapterFactory<FederationProvider>;
+type FederationProviderFactory = AdapterFactory<FederationProviderBase>;
 ```
 
-An `AdapterFactory<FederationProvider>`. Register custom provider types via `factory.register(type, builder)`.
+An `AdapterFactory<FederationProviderBase>`. Register custom provider types via `factory.register(type, builder)`.
 
 ---
 
@@ -184,7 +254,7 @@ type FederationResult<T> =
   | { ok: false; status: number; error: string; errorDescription: string };
 ```
 
-Discriminated union returned by `FederationProvider` methods. Check `ok` before accessing `value`.
+Discriminated union returned by `FederationProviderBase` methods. Check `ok` before accessing `value`.
 
 ## Usage Example
 
@@ -265,7 +335,7 @@ Mixed shape — top-level fields alongside a nested sub-section — is rejected 
 import {
   createFederationProviderFactory,
   registerBuiltinFederations,
-  type FederationProvider,
+  type FederationProviderBase,
   type FederationProviderFactory,
 } from "@o3co/auth-provider-session";
 
@@ -275,7 +345,7 @@ registerBuiltinFederations(factory);
 
 // Register a custom provider type
 factory.register("microsoft", async (config) => {
-  // build and return a FederationProvider
+  // build and return a FederationProviderBase
   return {
     name: config.name as string,
     scope: ["openid", "profile", "email"],
@@ -288,7 +358,7 @@ factory.register("microsoft", async (config) => {
 });
 
 // Build the provider map from config — mirrors the normalization in module.mts
-const federationProviders = new Map<string, FederationProvider>();
+const federationProviders = new Map<string, FederationProviderBase>();
 for (const [name, section] of Object.entries(config.federations)) {
   if (!section.enabled) continue;
 

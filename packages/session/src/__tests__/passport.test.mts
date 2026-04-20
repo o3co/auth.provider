@@ -16,7 +16,7 @@
 
 import type { UserRepository } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import type { FederationProvider } from "#/federations/types.mjs";
+import type { FederationProviderBase } from "#/federations/types.mjs";
 import { _createPassportImpl } from "#/passport.mjs";
 
 /** Minimal passport stub that tracks strategy registrations. */
@@ -36,7 +36,7 @@ function makePassportStub() {
 	return stub;
 }
 
-function makeFederationProvider(name: string): FederationProvider {
+function makeFederationProvider(name: string): FederationProviderBase {
 	return {
 		name,
 		scope: ["profile"],
@@ -56,7 +56,7 @@ describe("_createPassportImpl", () => {
 
 		const providerA = makeFederationProvider("google");
 		const providerB = makeFederationProvider("github");
-		const federationProviders: ReadonlyMap<string, FederationProvider> = new Map([
+		const federationProviders: ReadonlyMap<string, FederationProviderBase> = new Map([
 			["google", providerA],
 			["github", providerB],
 		]);
@@ -91,7 +91,7 @@ describe("_createPassportImpl", () => {
 			},
 		);
 
-		const federationProviders: ReadonlyMap<string, FederationProvider> = new Map([
+		const federationProviders: ReadonlyMap<string, FederationProviderBase> = new Map([
 			["google", provider],
 		]);
 

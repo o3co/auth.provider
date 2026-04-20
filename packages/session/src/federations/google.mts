@@ -15,7 +15,7 @@
  */
 
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
-import type { FederationProvider, SetupPassportContext } from "./types.mjs";
+import type { FederationProviderBase, SetupPassportContext } from "./types.mjs";
 
 export interface GoogleProviderConfig {
 	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
@@ -31,7 +31,7 @@ export interface GoogleProviderConfig {
 	clientUrl?: string;
 }
 
-export const createGoogleProvider = (config: GoogleProviderConfig): FederationProvider => {
+export const createGoogleProvider = (config: GoogleProviderConfig): FederationProviderBase => {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(
 			`Google federation "${config.name}" requires clientId, clientSecret, and callbackURL`,

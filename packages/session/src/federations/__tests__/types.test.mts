@@ -16,16 +16,12 @@
 
 import type { PassportStatic } from "passport";
 import { describe, expect, it } from "vitest";
-import type {
-	FederationProvider,
-	SetupPassportContext,
-	VerifyUserContext,
-} from "#/federations/types.mjs";
+import type { FederationProviderBase, SetupPassportContext } from "#/federations/types.mjs";
 
-describe("FederationProvider interface", () => {
+describe("FederationProviderBase interface", () => {
 	it("requires name, scope, validateRedirect, resolveCallbackRedirect, setupPassportStrategy — no enabled or strategyName", () => {
 		// Type-only structural test: the literal must type-check under the new shape.
-		const provider: FederationProvider = {
+		const provider: FederationProviderBase = {
 			name: "google",
 			scope: ["profile", "email"],
 			validateRedirect: () => ({ ok: true, value: undefined }),
@@ -41,7 +37,7 @@ describe("FederationProvider interface", () => {
 	it("setupPassportStrategy accepts a PassportStatic and SetupPassportContext", () => {
 		// Type-only: annotate a function with the expected signature so tsc would fail
 		// if setupPassportStrategy's shape were to drift.
-		const setup: FederationProvider["setupPassportStrategy"] = async (
+		const setup: FederationProviderBase["setupPassportStrategy"] = async (
 			_passport: PassportStatic,
 			_ctx: SetupPassportContext,
 		) => {};
@@ -68,13 +64,5 @@ describe("FederationProvider interface", () => {
 		expect(ctx.pathResolver!("passport-google-oauth20")).toBe(
 			"/custom/path/passport-google-oauth20",
 		);
-	});
-
-	it("VerifyUserContext is a type alias for SetupPassportContext (backward compat)", () => {
-		// VerifyUserContext and SetupPassportContext are structurally identical —
-		// a value typed as one is assignable to the other.
-		const ctx: SetupPassportContext = { verifyUser: async () => null };
-		const asLegacy: VerifyUserContext = ctx;
-		expect(typeof asLegacy.verifyUser).toBe("function");
 	});
 });

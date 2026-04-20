@@ -16,7 +16,7 @@
 
 import type { PathResolver, UserRepository } from "@o3co/auth-provider-core";
 import type { PassportStatic } from "passport";
-import type { FederationProvider, SetupPassportContext } from "./federations/types.mjs";
+import type { FederationProviderBase, SetupPassportContext } from "./federations/types.mjs";
 
 declare global {
 	namespace Express {
@@ -27,7 +27,7 @@ declare global {
 export type CreatePassportOptions = {
 	pathResolver: PathResolver;
 	userRepository: UserRepository;
-	federationProviders: ReadonlyMap<string, FederationProvider>;
+	federationProviders: ReadonlyMap<string, FederationProviderBase>;
 };
 
 /**
