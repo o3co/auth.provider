@@ -77,11 +77,11 @@ describe("CoreConfigSchema", () => {
 		}
 	});
 
-	it("does not require clients", () => {
+	it("does not require repositories", () => {
 		const result = CoreConfigSchema.safeParse(minimalDIDConfig);
 		expect(result.success).toBe(true);
 		if (result.success) {
-			expect((result.data as Record<string, unknown>).clients).toBeUndefined();
+			expect((result.data as Record<string, unknown>).repositories).toBeUndefined();
 		}
 	});
 
@@ -231,7 +231,7 @@ describe("AppConfigSchema backward compatibility", () => {
 			federations: {
 				google: { enabled: false },
 			},
-			clients: {
+			repositories: {
 				client: { type: "yaml", path: "./config/clients.yaml" },
 				user: {
 					type: "yaml",

@@ -18,7 +18,7 @@ import { createAdapterFactory } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 
 /**
- * These tests document the self-diagnosing behaviour of the nested clients.*
+ * These tests document the self-diagnosing behaviour of the nested repositories.*
  * migration. After PR #3 (this spec's Task 3 schema change), wiring code MUST
  * flatten the adapter sub-section before calling factory.create(...). If a
  * caller accidentally forwards a legacy flat config, the adapter-specific
@@ -29,9 +29,9 @@ import { describe, expect, it } from "vitest";
  * that pin the migration's error semantics so future refactors don't erode
  * the operator-facing error message quality.
  */
-describe("nested clients.* migration: builder-level error self-diagnosis", () => {
+describe("nested repositories.* migration: builder-level error self-diagnosis", () => {
 	it("http user builder emits a clear error when authenticateUrl is missing", async () => {
-		// Simulate a caller that forwarded the legacy flat `clients.user` section
+		// Simulate a caller that forwarded the legacy flat `repositories.user` section
 		// which has only `type` at the top level after the Task 3 schema migration
 		// (the old `authenticateUrl`/`authenticateByTokenUrl` fields were stripped
 		// or never forwarded without flattening).
@@ -75,7 +75,7 @@ describe("nested clients.* migration: builder-level error self-diagnosis", () =>
 			} as UserRepository;
 		});
 
-		// Simulate the wiring code's flattening of the nested clients.user
+		// Simulate the wiring code's flattening of the nested repositories.user
 		// config: `{ type: "http", http: { authenticateUrl: "..." } }` →
 		// `{ type: "http", authenticateUrl: "..." }` before forwarding to the
 		// builder.
