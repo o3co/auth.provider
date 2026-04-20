@@ -32,12 +32,6 @@ export interface SetupPassportContext {
 }
 
 /**
- * @deprecated Will be removed in Task 8 of this plan. Use {@link SetupPassportContext}.
- * Temporary alias kept while callers are migrated in Tasks 2–7 to avoid a non-building intermediate state.
- */
-export type VerifyUserContext = SetupPassportContext;
-
-/**
  * Minimum contract implemented by every federation provider.
  * Provider-specific optional features are layered via `SupportsX` capability interfaces.
  */
@@ -48,12 +42,6 @@ export interface FederationProviderBase {
 	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
 	setupPassportStrategy(passport: PassportStatic, ctx: SetupPassportContext): Promise<void>;
 }
-
-/**
- * @deprecated Will be removed in Task 8 of this plan. Use {@link FederationProviderBase}.
- * Temporary alias kept while callers are migrated in Tasks 2–7 to avoid a non-building intermediate state.
- */
-export type FederationProvider = FederationProviderBase;
 
 /**
  * Arguments for an OIDC RP-Initiated Logout (end-session) request.
