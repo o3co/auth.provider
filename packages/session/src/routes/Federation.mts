@@ -49,8 +49,8 @@ export const createRouter = (
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
-		.get("/oauth/federation/:provider", (req: Request, res: Response, next) => {
-			const provider = federationProviders.get(String(req.params.provider));
+		.get("/oauth/federation/:name", (req: Request, res: Response, next) => {
+			const provider = federationProviders.get(String(req.params.name));
 			if (!provider) {
 				return res.status(404).json({ message: "NotFound" });
 			}
@@ -81,8 +81,9 @@ export const createRouter = (
 
 			return req.session.save((err: Error | null) => {
 				if (err) return res.status(500).json({ message: "Error saving session" });
-				// provider.name is the passport strategy name (set at setupPassportStrategy time).
-				// Task 9 will migrate :provider param → :name and refine strategy-name lookup.
+				// provider.name is the unique passport strategy identifier registered by
+				// setupPassportStrategy. The :name route param identifies the federation
+				// instance; provider.name is the same value (injected by module.mts).
 				return passport.authenticate(provider.name, {
 					// Spread readonly to mutable to satisfy passport's AuthenticateOptions type.
 					scope: [...provider.scope],
@@ -91,9 +92,9 @@ export const createRouter = (
 			});
 		})
 		.get(
-			"/oauth/federation/:provider/callback",
+			"/oauth/federation/:name/callback",
 			(req: Request, res: Response, next) => {
-				const provider = federationProviders.get(String(req.params.provider));
+				const provider = federationProviders.get(String(req.params.name));
 				if (!provider) {
 					return res.status(404).json({ message: "NotFound" });
 				}
@@ -102,15 +103,15 @@ export const createRouter = (
 					return res.status(400).json({ message: "invalid state" });
 				}
 
-				// provider.name is the passport strategy name registered by setupPassportStrategy.
-				// Task 9 will migrate :provider param → :name and refine strategy-name lookup.
+				// provider.name is the unique passport strategy identifier registered by
+				// setupPassportStrategy.
 				return passport.authenticate(provider.name, {
 					session: false,
 					failureRedirect: config.endpoints.login.url,
 				})(req, res, next);
 			},
 			(req: Request, res: Response) => {
-				const provider = federationProviders.get(String(req.params.provider));
+				const provider = federationProviders.get(String(req.params.name));
 				if (!provider) {
 					return res.status(404).json({ message: "NotFound" });
 				}
