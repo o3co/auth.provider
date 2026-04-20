@@ -72,7 +72,7 @@ import { oauthModule } from "@o3co/auth-provider-oauth";
 const config = validate(parseFile("./config/application.conf"), AppConfigSchema);
 
 // flatten() はネストされたアダプターサブセクションを { type, ...fields } に正規化する。
-// `type` (clients.*, session.storage) と `provider` (oauth.jwt.signingKey) の
+// `type` (repositories.*, session.storage) と `provider` (oauth.jwt.signingKey) の
 // 両方のセレクターを受け付ける。完全な定義は packages/core/README.md を参照。
 const flatten = (section: { type?: string; provider?: string } & Record<string, unknown>) => {
   const selector = section.type ?? section.provider;

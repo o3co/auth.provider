@@ -43,7 +43,7 @@ const minimalConfig = {
 		token: { windowMs: 60000, limit: 10 },
 		authorize: { windowMs: 60000, limit: 10 },
 	},
-	clients: {
+	repositories: {
 		client: {},
 		user: {},
 		code: {},

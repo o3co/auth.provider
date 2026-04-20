@@ -35,7 +35,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `session` | Express セッション設定 — secret、maxAge、secure、sameSite、domain、storage |
 | `rateLimit` | `login`、`token`、`authorize` エンドポイントのレート制限設定 |
 | `federations` | フェデレーションプロバイダー — `z.record(string, { enabled, type?, ...passthrough })`。組み込みタイプ: `"google"`, `"github"`。 |
-| `clients` | client、user、code の Repository 設定 |
+| `repositories` | client、user、code の Repository 設定 |
 | `endpoints` | `login`、`client`、`authCallback` ルートのパスオーバーライド |
 | `cors.allowedOrigins` | CORS 許可オリジン |
 
@@ -394,7 +394,7 @@ import {
 
 const config = AppConfigSchema.parse(rawConfig);
 
-// clients.* は 'type' セレクター、oauth.jwt.signingKey は 'provider' セレクターを使う。
+// repositories.* は 'type' セレクター、oauth.jwt.signingKey は 'provider' セレクターを使う。
 // flatten() はどちらも { type, ...サブセクションフィールド } に正規化してから factory に渡す:
 const flatten = (
   section: ({ type: string } | { provider: string }) & Record<string, unknown>,
@@ -419,9 +419,9 @@ const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKe
 
 const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 
-const clientRepository = await clientFactory.create(flatten(config.clients.client));
-const userRepository = await userFactory.create(flatten(config.clients.user));
-const codeRepository = await codeFactory.create(flatten(config.clients.code));
+const clientRepository = await clientFactory.create(flatten(config.repositories.client));
+const userRepository = await userFactory.create(flatten(config.repositories.user));
+const codeRepository = await codeFactory.create(flatten(config.repositories.code));
 
 const app = createApp(express, {
   config,

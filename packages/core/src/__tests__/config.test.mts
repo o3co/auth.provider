@@ -67,7 +67,7 @@ describe("provider config", () => {
 		// federation entries is tested in federations-schema.test.mts.
 	});
 
-	it("clients.client.type defaults to yaml", () => {
+	it("repositories.client.type defaults to yaml", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
@@ -77,10 +77,10 @@ describe("provider config", () => {
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
-		expect(config.clients.client.type).toBe("yaml");
+		expect(config.repositories.client.type).toBe("yaml");
 	});
 
-	it("clients.user.type defaults to yaml", () => {
+	it("repositories.user.type defaults to yaml", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
@@ -88,10 +88,10 @@ describe("provider config", () => {
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
-		expect(config.clients.user.type).toBe("yaml");
+		expect(config.repositories.user.type).toBe("yaml");
 	});
 
-	it("clients.code.type defaults to memory", () => {
+	it("repositories.code.type defaults to memory", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
@@ -99,7 +99,7 @@ describe("provider config", () => {
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
-		expect(config.clients.code.type).toBe("memory");
+		expect(config.repositories.code.type).toBe("memory");
 	});
 });
 

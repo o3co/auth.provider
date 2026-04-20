@@ -78,7 +78,7 @@ import { oauthModule } from "@o3co/auth-provider-oauth";
 const config = validate(parseFile("./config/application.conf"), AppConfigSchema);
 
 // flatten() normalises the nested adapter sub-section to { type, ...fields }.
-// Accepts both `type` (clients.*, session.storage) and `provider`
+// Accepts both `type` (repositories.*, session.storage) and `provider`
 // (oauth.jwt.signingKey) selectors. See packages/core/README.md for the
 // full helper definition.
 const flatten = (section: { type?: string; provider?: string } & Record<string, unknown>) => {

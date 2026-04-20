@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { fullSectionsSchema } from "#/config/application.schema.mjs";
+import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema.mjs";
 
 describe("schema open type", () => {
 	it("accepts non-builtin session storage type (validated at factory level, not schema)", () => {
@@ -63,8 +63,8 @@ describe("schema open type", () => {
 		}
 	});
 
-	it("accepts non-builtin clients.client.type", () => {
-		const parsed = fullSectionsSchema.shape.clients.parse({
+	it("accepts non-builtin repositories.client.type", () => {
+		const parsed = fullSectionsSchema.shape.repositories.parse({
 			client: { type: "postgres", postgres: { dsn: "..." } },
 			user: { type: "yaml", yaml: { path: "./config/users.yaml" } },
 			code: { type: "memory", memory: {} },
@@ -72,8 +72,8 @@ describe("schema open type", () => {
 		expect(parsed.client.type).toBe("postgres");
 	});
 
-	it("accepts non-builtin clients.user.type and clients.code.type", () => {
-		const parsed = fullSectionsSchema.shape.clients.parse({
+	it("accepts non-builtin repositories.user.type and repositories.code.type", () => {
+		const parsed = fullSectionsSchema.shape.repositories.parse({
 			client: { type: "yaml", yaml: { path: "./clients.yaml" } },
 			user: { type: "ldap", ldap: { url: "ldap://..." } },
 			code: { type: "dynamodb", dynamodb: { region: "us-east-1" } },
@@ -81,11 +81,59 @@ describe("schema open type", () => {
 		expect(parsed.user.type).toBe("ldap");
 		expect(parsed.code.type).toBe("dynamodb");
 	});
+
+	it("rejects legacy top-level `clients` key once renamed to `repositories`", () => {
+		const result = AppConfigSchema.safeParse({
+			http: { port: 3000, trustProxy: false },
+			oauth: {
+				jwt: {
+					signingKey: { provider: "local", local: { algorithm: "HS256", kid: "v0", secret: "s" } },
+				},
+				accessToken: { expiresIn: 3600 },
+				refreshToken: { expiresIn: 86400 },
+				grants: {
+					session: { enabled: true },
+					authorization: { enabled: true, pkce: { requireS256: false } },
+					refresh_token: { enabled: true },
+				},
+			},
+			session: {
+				secret: "x",
+				maxAge: 3600000,
+				secure: true,
+				sameSite: "lax",
+				domain: null,
+				storage: { type: "memory" },
+			},
+			rateLimit: {
+				login: { windowMs: 900000, limit: 20 },
+				token: { windowMs: 60000, limit: 60 },
+				authorize: { windowMs: 60000, limit: 30 },
+			},
+			federations: {},
+			// Legacy key — must fail. The renamed key `repositories` is absent.
+			clients: {
+				client: { type: "yaml", yaml: { path: "./config/clients.yaml" } },
+				user: { type: "yaml", yaml: { path: "./config/users.yaml" } },
+				code: { type: "memory" },
+			},
+			endpoints: { login: { url: "/login" } },
+			cors: { allowedOrigins: [] },
+		});
+
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			// The parse error must mention the missing `repositories` path,
+			// not silently accept the legacy `clients` key.
+			const paths = result.error.issues.map((i) => i.path.join("."));
+			expect(paths).toContain("repositories");
+		}
+	});
 });
 
-describe("schema nested clients", () => {
-	it("accepts nested clients.client.yaml sub-section", () => {
-		const parsed = fullSectionsSchema.shape.clients.parse({
+describe("schema nested repositories", () => {
+	it("accepts nested repositories.client.yaml sub-section", () => {
+		const parsed = fullSectionsSchema.shape.repositories.parse({
 			client: {
 				type: "yaml",
 				yaml: { path: "./config/clients.yaml" },
@@ -104,8 +152,8 @@ describe("schema nested clients", () => {
 		expect(parsed.code.type).toBe("memory");
 	});
 
-	it("accepts nested clients.user.http sub-section with http-specific fields", () => {
-		const parsed = fullSectionsSchema.shape.clients.parse({
+	it("accepts nested repositories.user.http sub-section with http-specific fields", () => {
+		const parsed = fullSectionsSchema.shape.repositories.parse({
 			client: {
 				type: "yaml",
 				yaml: { path: "./config/clients.yaml" },
@@ -125,8 +173,8 @@ describe("schema nested clients", () => {
 		expect(parsed.user.type).toBe("http");
 	});
 
-	it("accepts nested clients.code.redis sub-section", () => {
-		const parsed = fullSectionsSchema.shape.clients.parse({
+	it("accepts nested repositories.code.redis sub-section", () => {
+		const parsed = fullSectionsSchema.shape.repositories.parse({
 			client: {
 				type: "yaml",
 				yaml: { path: "./config/clients.yaml" },
@@ -147,7 +195,7 @@ describe("schema nested clients", () => {
 	});
 
 	it("allows coexistence of multiple adapter sub-sections (operators can swap type without losing config)", () => {
-		const parsed = fullSectionsSchema.shape.clients.parse({
+		const parsed = fullSectionsSchema.shape.repositories.parse({
 			client: {
 				type: "yaml",
 				yaml: { path: "./config/clients.yaml" },
