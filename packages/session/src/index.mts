@@ -15,7 +15,10 @@
  */
 
 export type { FederationProviderFactory } from "./federations/factory.mjs";
-export { createFederationProviderFactory } from "./federations/factory.mjs";
+export {
+	createFederationProviderFactory,
+	registerBuiltinFederations,
+} from "./federations/factory.mjs";
 export type { GithubProviderConfig } from "./federations/github.mjs";
 export { createGithubProvider } from "./federations/github.mjs";
 export { createGoogleProvider } from "./federations/google.mjs";

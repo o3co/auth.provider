@@ -16,7 +16,10 @@
 
 import { AdapterFactoryError } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { createFederationProviderFactory } from "#/federations/factory.mjs";
+import {
+	createFederationProviderFactory,
+	registerBuiltinFederations,
+} from "#/federations/factory.mjs";
 
 describe("createFederationProviderFactory", () => {
 	it("returns an AdapterFactory with no registered types", () => {
@@ -32,5 +35,77 @@ describe("createFederationProviderFactory", () => {
 				err.reason === "unknown" &&
 				err.kind === "FederationProvider",
 		);
+	});
+});
+
+describe("registerBuiltinFederations", () => {
+	it("registers 'google' and 'github' types", () => {
+		const factory = createFederationProviderFactory();
+		registerBuiltinFederations(factory);
+		expect(factory.registeredTypes()).toEqual(expect.arrayContaining(["google", "github"]));
+	});
+
+	it("builds a Google provider via factory.create({ type: 'google', name, clientId, ... })", async () => {
+		const factory = createFederationProviderFactory();
+		registerBuiltinFederations(factory);
+		const provider = await factory.create({
+			type: "google",
+			name: "google",
+			clientId: "id",
+			clientSecret: "secret",
+			callbackURL: "https://example.com/cb",
+		});
+		expect(provider.name).toBe("google");
+		expect(provider.scope).toContain("email");
+	});
+
+	it("builds a GitHub provider via factory.create({ type: 'github', name, ... })", async () => {
+		const factory = createFederationProviderFactory();
+		registerBuiltinFederations(factory);
+		const provider = await factory.create({
+			type: "github",
+			name: "github",
+			clientId: "id",
+			clientSecret: "secret",
+			callbackURL: "https://example.com/cb",
+		});
+		expect(provider.name).toBe("github");
+		expect(provider.scope).toEqual(["read:user", "user:email"]);
+	});
+
+	it("supports multi-tenant instance names (e.g. 'google-work' with type='google')", async () => {
+		const factory = createFederationProviderFactory();
+		registerBuiltinFederations(factory);
+		const provider = await factory.create({
+			type: "google",
+			name: "google-work",
+			clientId: "id",
+			clientSecret: "secret",
+			callbackURL: "https://example.com/cb",
+		});
+		expect(provider.name).toBe("google-work");
+	});
+
+	it("throws when required fields are missing (google)", async () => {
+		const factory = createFederationProviderFactory();
+		registerBuiltinFederations(factory);
+		await expect(
+			factory.create({
+				type: "google",
+				name: "google",
+				// missing clientId, clientSecret, callbackURL
+			}),
+		).rejects.toThrow(/clientId|clientSecret|callbackURL/i);
+	});
+
+	it("throws when required fields are missing (github)", async () => {
+		const factory = createFederationProviderFactory();
+		registerBuiltinFederations(factory);
+		await expect(
+			factory.create({
+				type: "github",
+				name: "github",
+			}),
+		).rejects.toThrow(/clientId|clientSecret|callbackURL/i);
 	});
 });
