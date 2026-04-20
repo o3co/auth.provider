@@ -66,8 +66,8 @@ function sessionModule(params: {
 ```typescript
 function createPassport(options: {
   userRepository: UserRepository;
-  federationProviders: ReadonlyMap<string, FederationProvider>;
-  pathResolver: PathResolver;  // 必須; passport/passport-local の dynamic import に使用され、FederationProvider.setupPassportStrategy にも転送される
+  federationProviders: ReadonlyMap<string, FederationProviderBase>;
+  pathResolver: PathResolver;  // 必須; passport/passport-local の dynamic import に使用され、FederationProviderBase.setupPassportStrategy にも転送される
 }): Promise<PassportStatic>;
 ```
 
@@ -84,7 +84,7 @@ Passport インスタンスを生成・設定する。
 function createFederationProviderFactory(): FederationProviderFactory;
 ```
 
-組み込みタイプが未登録の空の `FederationProviderFactory`（`AdapterFactory<FederationProvider>`）を返す。`registerBuiltinFederations(factory)` を呼び出して組み込みの `"google"` と `"github"` を登録し、`factory.register(type, builder)` で独自タイプを追加できる。
+組み込みタイプが未登録の空の `FederationProviderFactory`（`AdapterFactory<FederationProviderBase>`）を返す。`registerBuiltinFederations(factory)` を呼び出して組み込みの `"google"` と `"github"` を登録し、`factory.register(type, builder)` で独自タイプを追加できる。
 
 ---
 
@@ -114,10 +114,10 @@ function createGoogleProvider(config: {
   sessionDomain?: string;
   authCallbackUrl?: string;
   clientUrl?: string;
-}): FederationProvider;
+}): FederationProviderBase;
 ```
 
-Google OAuth 2.0 用の `FederationProvider` を生成する。ストラテジーは `config.name` の名前で Passport に登録されるため、マルチテナント構成（例: `google` と `google-work` を別インスタンスとして共存）が可能。
+Google OAuth 2.0 用の `FederationProviderBase` を生成する。ストラテジーは `config.name` の名前で Passport に登録されるため、マルチテナント構成（例: `google` と `google-work` を別インスタンスとして共存）が可能。
 
 ---
 
@@ -132,17 +132,17 @@ function createGithubProvider(config: {
   sessionDomain?: string;
   authCallbackUrl?: string;
   clientUrl?: string;
-}): FederationProvider;
+}): FederationProviderBase;
 ```
 
-GitHub OAuth 2.0 用の `FederationProvider` を生成する。`passport-github2`（オプションの peer dep）が必要なため、別途インストールすること。デフォルトのスコープは `["read:user", "user:email"]`。`externalId` のフォーマットは `"github:" + profile.id`。
+GitHub OAuth 2.0 用の `FederationProviderBase` を生成する。`passport-github2`（オプションの peer dep）が必要なため、別途インストールすること。デフォルトのスコープは `["read:user", "user:email"]`。`externalId` のフォーマットは `"github:" + profile.id`。
 
 ---
 
-### `FederationProvider` (interface)
+### `FederationProviderBase` (interface)
 
 ```typescript
-interface FederationProvider {
+interface FederationProviderBase {
   readonly name: string;
   readonly scope: readonly string[];
   validateRedirect(url: string): FederationResult<void>;
@@ -156,7 +156,7 @@ interface SetupPassportContext {
 }
 ```
 
-カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。
+カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。IdP が end-session endpoint を公開している場合は `SupportsLogout` を mix-in できる。
 
 - `name` — Passport ストラテジーの一意な識別子。`federationProviders` の Map キーと `passport.use()` に渡すストラテジー名の両方に使用される。
 - `scope` — OAuth 2.0 スコープ。
@@ -166,13 +166,83 @@ interface SetupPassportContext {
 
 ---
 
+### `SupportsLogout` (オプショナル capability)
+
+IdP が OIDC RP-Initiated Logout (end-session) endpoint を公開している provider 向けのオプショナル capability。
+
+```ts
+interface EndSessionRequest {
+  idTokenHint?: string;
+  postLogoutRedirectUri?: string;
+  state?: string;
+}
+
+interface EndSessionResult {
+  url: URL;
+  method: "GET";
+}
+
+interface SupportsLogout {
+  endSession(req: EndSessionRequest): Promise<EndSessionResult>;
+}
+
+function supportsLogout(
+  provider: FederationProviderBase | undefined | null,
+): provider is FederationProviderBase & SupportsLogout;
+```
+
+組み込みの `"google"` / `"github"` は `SupportsLogout` を **実装しない**。Google は OIDC end-session endpoint を公開しておらず、GitHub は OAuth2 only のため、それぞれ end_session endpoint を持たない。Microsoft Entra ID / Auth0 / Okta 等の integration ではカスタム provider 側で capability を足すことで対応する。
+
+カスタム provider の最小実装例:
+
+```ts
+import type {
+  FederationProviderBase,
+  SupportsLogout,
+  EndSessionRequest,
+  EndSessionResult,
+} from "@o3co/auth-provider-session";
+
+function createMyIdPProvider(): FederationProviderBase & SupportsLogout {
+  return {
+    name: "myidp",
+    scope: ["openid"],
+    validateRedirect(url) { /* ... */ },
+    resolveCallbackRedirect(session) { /* ... */ },
+    async setupPassportStrategy(passport, ctx) { /* ... */ },
+    async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
+      const url = new URL("https://myidp.example/oidc/logout");
+      if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
+      if (req.postLogoutRedirectUri) url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
+      if (req.state) url.searchParams.set("state", req.state);
+      return { url, method: "GET" };
+    },
+  };
+}
+```
+
+Consumer 側は capability の有無を call site で判定する:
+
+```ts
+import { supportsLogout } from "@o3co/auth-provider-session";
+
+if (supportsLogout(provider)) {
+  const { url } = await provider.endSession({ idTokenHint, postLogoutRedirectUri, state });
+  res.redirect(url.toString());
+} else {
+  // local session destroy のみにフォールバック
+}
+```
+
+---
+
 ### `FederationProviderFactory` (type)
 
 ```typescript
-type FederationProviderFactory = AdapterFactory<FederationProvider>;
+type FederationProviderFactory = AdapterFactory<FederationProviderBase>;
 ```
 
-`AdapterFactory<FederationProvider>` の型エイリアス。`factory.register(type, builder)` でカスタムプロバイダータイプを登録できる。
+`AdapterFactory<FederationProviderBase>` の型エイリアス。`factory.register(type, builder)` でカスタムプロバイダータイプを登録できる。
 
 ---
 
@@ -184,7 +254,7 @@ type FederationResult<T> =
   | { ok: false; status: number; error: string; errorDescription: string };
 ```
 
-`FederationProvider` のメソッドが返す判別共用体。`value` にアクセスする前に `ok` を確認すること。
+`FederationProviderBase` のメソッドが返す判別共用体。`value` にアクセスする前に `ok` を確認すること。
 
 ## 使い方
 
@@ -265,7 +335,7 @@ federations {
 import {
   createFederationProviderFactory,
   registerBuiltinFederations,
-  type FederationProvider,
+  type FederationProviderBase,
   type FederationProviderFactory,
 } from "@o3co/auth-provider-session";
 
@@ -275,7 +345,7 @@ registerBuiltinFederations(factory);
 
 // カスタムプロバイダータイプを登録
 factory.register("microsoft", async (config) => {
-  // FederationProvider を構築して返す
+  // FederationProviderBase を構築して返す
   return {
     name: config.name as string,
     scope: ["openid", "profile", "email"],
@@ -288,7 +358,7 @@ factory.register("microsoft", async (config) => {
 });
 
 // config からプロバイダー Map を構築 — module.mts の正規化ロジックを反映
-const federationProviders = new Map<string, FederationProvider>();
+const federationProviders = new Map<string, FederationProviderBase>();
 for (const [name, section] of Object.entries(config.federations)) {
   if (!section.enabled) continue;
 

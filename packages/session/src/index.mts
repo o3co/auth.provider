@@ -23,11 +23,14 @@ export type { GithubProviderConfig } from "./federations/github.mjs";
 export { createGithubProvider } from "./federations/github.mjs";
 export { createGoogleProvider } from "./federations/google.mjs";
 export type {
-	FederationProvider,
+	EndSessionRequest,
+	EndSessionResult,
+	FederationProviderBase,
 	FederationResult,
 	SetupPassportContext,
-	VerifyUserContext,
+	SupportsLogout,
 } from "./federations/types.mjs";
+export { supportsLogout } from "./federations/types.mjs";
 export { sessionModule } from "./module.mjs";
 export { createPassport } from "./passport.mjs";
 export type { SessionStoreFactory } from "./store/factory.mjs";

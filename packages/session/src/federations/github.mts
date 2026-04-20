@@ -16,7 +16,7 @@
 
 import type { PassportStatic } from "passport";
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
-import type { FederationProvider, SetupPassportContext } from "./types.mjs";
+import type { FederationProviderBase, SetupPassportContext } from "./types.mjs";
 
 export interface GithubProviderConfig {
 	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
@@ -32,7 +32,7 @@ export interface GithubProviderConfig {
 	clientUrl?: string;
 }
 
-export function createGithubProvider(config: GithubProviderConfig): FederationProvider {
+export function createGithubProvider(config: GithubProviderConfig): FederationProviderBase {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(
 			`GitHub federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
