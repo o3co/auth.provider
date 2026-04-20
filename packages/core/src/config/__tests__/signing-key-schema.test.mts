@@ -75,3 +75,43 @@ describe("AppConfigSchema exports signingKey shape (integration)", () => {
 		expect(AppConfigSchema).toBeDefined();
 	});
 });
+
+describe("jwtSchema - legacy flat field detection", () => {
+	it("rejects legacy flat oauth.jwt.* fields with migration-guiding error", () => {
+		const result = jwtSchema.safeParse({
+			algorithm: "HS256",
+			secret: "legacy",
+			issuer: "https://auth.example.com",
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const msg = result.error.issues.map((i) => i.message).join("\n");
+			expect(msg).toMatch(/legacy flat fields/i);
+			expect(msg).toMatch(/signingKey\.local/i);
+		}
+	});
+
+	it("includes the offending field name in the error message", () => {
+		const result = jwtSchema.safeParse({
+			kid: "v0",
+			privateKey: "--- BEGIN ---",
+			issuer: "https://auth.example.com",
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const msg = result.error.issues.map((i) => i.message).join("\n");
+			expect(msg).toMatch(/kid|privateKey/i);
+		}
+	});
+
+	it("accepts valid nested signingKey shape without triggering legacy detection", () => {
+		const result = jwtSchema.safeParse({
+			issuer: "https://auth.example.com",
+			signingKey: {
+				provider: "local",
+				local: { algorithm: "HS256", kid: "v0", secret: "s3cret" },
+			},
+		});
+		expect(result.success).toBe(true);
+	});
+});

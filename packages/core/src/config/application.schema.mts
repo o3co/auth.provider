@@ -49,10 +49,47 @@ const signingKeySchema = z
 	})
 	.passthrough();
 
-const jwtSchema = z.object({
+const LEGACY_JWT_FIELDS = [
+	"algorithm",
+	"kid",
+	"secret",
+	"privateKey",
+	"privateKeyPath",
+	"publicKey",
+	"publicKeyPath",
+	"previousKeys",
+] as const;
+
+const jwtSchemaBase = z.object({
 	issuer: z.string().optional(),
 	signingKey: signingKeySchema.default({ provider: "local" }),
 });
+
+/**
+ * jwtSchema wraps the base object schema with a preprocess step that detects
+ * legacy flat oauth.jwt.* fields before zod strips unknown keys.
+ *
+ * Zod's default object behavior strips unknown keys before superRefine sees
+ * the data, so superRefine on the parsed output cannot detect stripped fields.
+ * z.preprocess runs on the raw input and can emit a ZodError early.
+ */
+const jwtSchema = z.preprocess((raw, ctx) => {
+	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+		const rawObj = raw as Record<string, unknown>;
+		const legacyPresent = LEGACY_JWT_FIELDS.filter((field) => field in rawObj);
+		if (legacyPresent.length > 0) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message:
+					`oauth.jwt has legacy flat fields (${legacyPresent.join(", ")}). ` +
+					`Migrate to nested shape: oauth.jwt.signingKey.local.<field>. ` +
+					`See packages/core/README.md for migration guide.`,
+				path: [legacyPresent[0]],
+			});
+		}
+	}
+	return raw;
+}, jwtSchemaBase);
 
 /**
  * Minimal always-required config for the auth provider core.

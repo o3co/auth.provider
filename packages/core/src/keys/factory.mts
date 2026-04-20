@@ -60,7 +60,7 @@ function narrowPreviousKeysArray(value: unknown): PreviousKeyEntry[] {
 		return [];
 	}
 	if (!Array.isArray(value)) {
-		return [];
+		throw new TypeError("previousKeys must be an array (or undefined/null for empty)");
 	}
 	return value.map((entry: unknown, index: number) => {
 		if (typeof entry !== "object" || entry === null) {

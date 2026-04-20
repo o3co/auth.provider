@@ -291,6 +291,22 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 		).rejects.toThrow(/Failed to read key file/i);
 	});
 
+	it("throws when previousKeys is not an array", async () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("RS256");
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "RS256",
+				kid: "v1",
+				privateKey: privateKeyPem,
+				publicKey: publicKeyPem,
+				previousKeys: "not-an-array" as unknown,
+			}),
+		).rejects.toThrow(/previousKeys must be an array/i);
+	});
+
 	it("throws on invalid expiresAt for a previous key", async () => {
 		const current = await generateTestKeyPair("ES256");
 		const prev = await generateTestKeyPair("ES256");
