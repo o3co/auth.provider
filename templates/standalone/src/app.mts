@@ -21,7 +21,8 @@ import {
 	AppConfigSchema,
 	createApp,
 	createDefaultFactories,
-	createKeyStoreFromConfig,
+	createKeyStoreFactory,
+	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import {
@@ -49,14 +50,20 @@ const config: AppConfig = validate(
 );
 
 const flattenAdapterConfig = (
-	section: { type: string } & Record<string, unknown>,
+	section: ({ type: string } | { provider: string }) & Record<string, unknown>,
 ): { type: string } & Record<string, unknown> => {
-	const sub = section[section.type];
+	const selector =
+		(section as { type?: string; provider?: string }).type ??
+		(section as { provider?: string }).provider;
+	if (typeof selector !== "string") {
+		throw new TypeError("flattenAdapterConfig: section requires 'type' or 'provider' string");
+	}
+	const sub = section[selector];
 	const flattenedSub =
 		typeof sub === "object" && sub !== null && !Array.isArray(sub)
 			? (sub as Record<string, unknown>)
 			: {};
-	return { type: section.type, ...flattenedSub };
+	return { type: selector, ...flattenedSub };
 };
 
 await (async (): Promise<void> => {
@@ -121,7 +128,9 @@ await (async (): Promise<void> => {
 	app.use(passport.session());
 
 	// Initialize KeyStore
-	const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
+	const keyStoreFactory = createKeyStoreFactory();
+	registerBuiltinKeyStores(keyStoreFactory);
+	const keyStore = await keyStoreFactory.create(flattenAdapterConfig(config.oauth.jwt.signingKey));
 
 	// Create app with module composition
 	const { init, router, grantRegistry } = createApp({

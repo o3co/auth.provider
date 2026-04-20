@@ -6,13 +6,14 @@ import {
 	createApp,
 	createAsymmetricKeyStore,
 	createDefaultFactories,
-	createKeyStoreFromConfig,
+	createKeyStoreFactory,
 	createSymmetricKeyStore,
 	formatObject,
 	GrantRegistry,
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
+	registerBuiltinKeyStores,
 } from "#/index.mjs";
 
 describe("public API", () => {
@@ -61,8 +62,12 @@ describe("public API", () => {
 		expect(typeof createAsymmetricKeyStore).toBe("function");
 	});
 
-	it("exports createKeyStoreFromConfig function", () => {
-		expect(typeof createKeyStoreFromConfig).toBe("function");
+	it("exports createKeyStoreFactory function", () => {
+		expect(typeof createKeyStoreFactory).toBe("function");
+	});
+
+	it("exports registerBuiltinKeyStores function", () => {
+		expect(typeof registerBuiltinKeyStores).toBe("function");
 	});
 
 	it("exports createApp function", () => {

@@ -28,7 +28,7 @@ Top-level fields:
 | --- | --- |
 | `http.port` | HTTP listen port |
 | `http.trustProxy` | Express trust proxy setting |
-| `oauth.jwt` | JWT signing config — algorithm, kid, keys, issuer, previousKeys |
+| `oauth.jwt` | JWT signing config — issuer, signingKey (provider + per-provider sub-section) |
 | `oauth.accessToken.expiresIn` | Access token lifetime |
 | `oauth.refreshToken.expiresIn` | Refresh token lifetime |
 | `oauth.grants` | Per-grant-type config (`session`, `authorization`, `refresh_token`, and custom keys) |
@@ -190,29 +190,15 @@ interface AsymmetricKeyStoreOptions {
   previousKeys?: Array<{ kid: string; publicKeyPem: string; expiresAt: Date }>;
 }
 
-interface JwtConfig {
-  algorithm: "HS256" | "RS256" | "ES256" | "EdDSA";
-  secret?: string;
-  kid: string;
-  issuer?: string;
-  privateKey?: string;
-  privateKeyPath?: string;
-  publicKey?: string;
-  publicKeyPath?: string;
-  previousKeys: Array<{
-    kid: string;
-    publicKey?: string;
-    publicKeyPath?: string;
-    expiresAt: string;
-  }>;
-}
+type KeyStoreFactory = AdapterFactory<KeyStore>;
 
 function createAsymmetricKeyStore(options: AsymmetricKeyStoreOptions): Promise<KeyStore>;
 function createSymmetricKeyStore(secret: string, kid?: string): KeyStore;
-function createKeyStoreFromConfig(config: JwtConfig): Promise<KeyStore>;
+function createKeyStoreFactory(): KeyStoreFactory;
+function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
 ```
 
-`createKeyStoreFromConfig` is the recommended entry point — it reads `JwtConfig` (which matches `AppConfig.oauth.jwt`) and dispatches to the appropriate factory.
+`createKeyStoreFactory` creates a new factory with no registered types. `registerBuiltinKeyStores` registers the built-in `"local"` provider, which dispatches to `createAsymmetricKeyStore` or `createSymmetricKeyStore` based on `algorithm`. The factory pattern follows the same `AdapterFactory<T>` contract as `ClientRepository`, `UserRepository`, and `CodeRepository` factories.
 
 ### Repositories
 
@@ -401,25 +387,38 @@ import express from "express";
 import {
   AppConfigSchema,
   createApp,
-  createKeyStoreFromConfig,
   createDefaultFactories,
+  createKeyStoreFactory,
+  registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
 const config = AppConfigSchema.parse(rawConfig);
-const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
-const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 
-// The clients.<name> config uses nested adapter sub-sections:
-//   clients.user = { type: "http", http: { authenticateUrl, ... } }
-// Flatten the active sub-section before forwarding to the factory:
-const flatten = (section: { type: string } & Record<string, unknown>) => {
-  const sub = section[section.type];
+// Both clients.* (uses 'type') and oauth.jwt.signingKey (uses 'provider') follow
+// the same nested adapter sub-section pattern. flatten() normalises either selector
+// to { type, ...subSectionFields } before forwarding to the factory:
+const flatten = (
+  section: ({ type: string } | { provider: string }) & Record<string, unknown>,
+) => {
+  const selector =
+    (section as { type?: string; provider?: string }).type
+    ?? (section as { provider?: string }).provider;
+  if (typeof selector !== "string") {
+    throw new TypeError("flatten: section requires 'type' or 'provider' string");
+  }
+  const sub = section[selector];
   const flattenedSub =
     typeof sub === "object" && sub !== null && !Array.isArray(sub)
       ? (sub as Record<string, unknown>)
       : {};
-  return { type: section.type, ...flattenedSub };
+  return { type: selector, ...flattenedSub };
 };
+
+const keyStoreFactory = createKeyStoreFactory();
+registerBuiltinKeyStores(keyStoreFactory);
+const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
+
+const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 
 const clientRepository = await clientFactory.create(flatten(config.clients.client));
 const userRepository = await userFactory.create(flatten(config.clients.user));

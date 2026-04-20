@@ -57,16 +57,16 @@ export type {
 	SessionData,
 	SessionMutation,
 } from "./grants/types.mjs";
+export type { KeyStoreFactory } from "./keys/factory.mjs";
+export { createKeyStoreFactory, registerBuiltinKeyStores } from "./keys/factory.mjs";
 // Keys
 export type {
 	AsymmetricKeyStoreOptions,
-	JwtConfig,
 	KeyStore,
 	ManagedKey,
 } from "./keys/KeyStore.mjs";
 export {
 	createAsymmetricKeyStore,
-	createKeyStoreFromConfig,
 	createSymmetricKeyStore,
 } from "./keys/KeyStore.mjs";
 // Module system

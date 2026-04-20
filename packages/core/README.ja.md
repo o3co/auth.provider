@@ -28,7 +28,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | --- | --- |
 | `http.port` | HTTP リッスンポート |
 | `http.trustProxy` | Express の trust proxy 設定 |
-| `oauth.jwt` | JWT 署名設定 — algorithm、kid、鍵、issuer、previousKeys |
+| `oauth.jwt` | JWT 署名設定 — issuer、signingKey（provider + プロバイダーごとのサブセクション） |
 | `oauth.accessToken.expiresIn` | アクセストークンの有効期間 |
 | `oauth.refreshToken.expiresIn` | リフレッシュトークンの有効期間 |
 | `oauth.grants` | グラントタイプごとの設定（`session`、`authorization`、`refresh_token`、カスタムキー） |
@@ -190,29 +190,15 @@ interface AsymmetricKeyStoreOptions {
   previousKeys?: Array<{ kid: string; publicKeyPem: string; expiresAt: Date }>;
 }
 
-interface JwtConfig {
-  algorithm: "HS256" | "RS256" | "ES256" | "EdDSA";
-  secret?: string;
-  kid: string;
-  issuer?: string;
-  privateKey?: string;
-  privateKeyPath?: string;
-  publicKey?: string;
-  publicKeyPath?: string;
-  previousKeys: Array<{
-    kid: string;
-    publicKey?: string;
-    publicKeyPath?: string;
-    expiresAt: string;
-  }>;
-}
+type KeyStoreFactory = AdapterFactory<KeyStore>;
 
 function createAsymmetricKeyStore(options: AsymmetricKeyStoreOptions): Promise<KeyStore>;
 function createSymmetricKeyStore(secret: string, kid?: string): KeyStore;
-function createKeyStoreFromConfig(config: JwtConfig): Promise<KeyStore>;
+function createKeyStoreFactory(): KeyStoreFactory;
+function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
 ```
 
-`createKeyStoreFromConfig` が推奨のエントリーポイントです。`AppConfig.oauth.jwt` と同じ形状の `JwtConfig` を受け取り、適切なファクトリーに委譲します。
+`createKeyStoreFactory` は登録済みタイプが空の新しいファクトリーを返します。`registerBuiltinKeyStores` は組み込みの `"local"` プロバイダーを登録します。`algorithm` に応じて `createAsymmetricKeyStore` または `createSymmetricKeyStore` に委譲します。ファクトリーパターンは `ClientRepository`、`UserRepository`、`CodeRepository` と同じ `AdapterFactory<T>` 契約に従います。
 
 ### リポジトリ
 
@@ -401,25 +387,37 @@ import express from "express";
 import {
   AppConfigSchema,
   createApp,
-  createKeyStoreFromConfig,
   createDefaultFactories,
+  createKeyStoreFactory,
+  registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
 const config = AppConfigSchema.parse(rawConfig);
-const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
-const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 
-// clients.<name> は nested な adapter sub-section 構造:
-//   clients.user = { type: "http", http: { authenticateUrl, ... } }
-// アクティブな sub-section を flatten してから factory に渡す:
-const flatten = (section: { type: string } & Record<string, unknown>) => {
-  const sub = section[section.type];
+// clients.* は 'type' セレクター、oauth.jwt.signingKey は 'provider' セレクターを使う。
+// flatten() はどちらも { type, ...サブセクションフィールド } に正規化してから factory に渡す:
+const flatten = (
+  section: ({ type: string } | { provider: string }) & Record<string, unknown>,
+) => {
+  const selector =
+    (section as { type?: string; provider?: string }).type
+    ?? (section as { provider?: string }).provider;
+  if (typeof selector !== "string") {
+    throw new TypeError("flatten: section requires 'type' or 'provider' string");
+  }
+  const sub = section[selector];
   const flattenedSub =
     typeof sub === "object" && sub !== null && !Array.isArray(sub)
       ? (sub as Record<string, unknown>)
       : {};
-  return { type: section.type, ...flattenedSub };
+  return { type: selector, ...flattenedSub };
 };
+
+const keyStoreFactory = createKeyStoreFactory();
+registerBuiltinKeyStores(keyStoreFactory);
+const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
+
+const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 
 const clientRepository = await clientFactory.create(flatten(config.clients.client));
 const userRepository = await userFactory.create(flatten(config.clients.user));

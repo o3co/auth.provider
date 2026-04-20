@@ -63,13 +63,46 @@ For a DID-only deployment (no session, no federation):
 
 ```typescript
 import express from "express";
-import { createApp, CoreConfigSchema, createKeyStoreFromConfig } from "@o3co/auth-provider-core";
+import { parseFile, validate } from "@o3co/ts.hocon";
+import {
+  AppConfigSchema,
+  createApp,
+  createKeyStoreFactory,
+  registerBuiltinKeyStores,
+} from "@o3co/auth-provider-core";
 import { oauthDidModule } from "@o3co/auth-provider-did";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 
-const { init, router } = createApp(express, {
+// Load & validate HOCON config (see packages/core/config/application.conf
+// for the nested oauth.jwt.signingKey shape).
+const config = validate(parseFile("./config/application.conf"), AppConfigSchema);
+
+// flatten() normalises the nested adapter sub-section to { type, ...fields }.
+// Accepts both `type` (clients.*, session.storage) and `provider`
+// (oauth.jwt.signingKey) selectors. See packages/core/README.md for the
+// full helper definition.
+const flatten = (section: { type?: string; provider?: string } & Record<string, unknown>) => {
+  const selector = section.type ?? section.provider;
+  if (typeof selector !== "string") throw new TypeError("missing selector");
+  const sub = section[selector];
+  return {
+    type: selector,
+    ...(typeof sub === "object" && sub !== null && !Array.isArray(sub)
+      ? (sub as Record<string, unknown>)
+      : {}),
+  };
+};
+
+const keyStoreFactory = createKeyStoreFactory();
+registerBuiltinKeyStores(keyStoreFactory);
+const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
+
+// ... wire up clientRepository / codeRepository / myDidResolver ...
+
+const { init, router } = createApp({
+  express,
   config,
-  keyStore: createKeyStoreFromConfig(config.oauth.jwt),
+  keyStore,
   modules: [
     oauthModule({ clientRepository, codeRepository }),
     oauthDidModule({ resolver: myDidResolver }),
@@ -135,9 +168,15 @@ HOCON config file with environment variable overrides. The config schema depends
 http { port = 3000 }
 oauth {
   jwt {
-    algorithm = "HS256"       # HS256 | RS256 | ES256 | EdDSA
-    secret = ${OAUTH_JWT_SECRET}
-    # For asymmetric: privateKey, publicKey, or privateKeyPath, publicKeyPath
+    issuer = ${?OAUTH_JWT_ISSUER}
+    signingKey {
+      provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory
+      local {
+        algorithm = "HS256"        # HS256 | RS256 | ES256 | EdDSA
+        secret = ${?OAUTH_JWT_SECRET}
+        # For asymmetric: privateKey/privateKeyPath + publicKey/publicKeyPath
+      }
+    }
   }
   accessToken { expiresIn = 3600 }
   refreshToken { expiresIn = 86400 }
