@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 import type { AppConfig } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import type { PassportStatic } from "passport";
-import type { FederationProvider } from "../federations/types.mjs";
+import type { FederationProviderBase } from "../federations/types.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -41,7 +41,7 @@ export const createRouter = (
 	}: {
 		passport: PassportStatic;
 		config: AppConfig;
-		federationProviders: ReadonlyMap<string, FederationProvider>;
+		federationProviders: ReadonlyMap<string, FederationProviderBase>;
 	},
 ): Router => {
 	const router = express.Router();

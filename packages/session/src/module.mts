@@ -27,7 +27,7 @@ import {
 	type FederationProviderFactory,
 	registerBuiltinFederations,
 } from "./federations/factory.mjs";
-import type { FederationProvider } from "./federations/types.mjs";
+import type { FederationProviderBase } from "./federations/types.mjs";
 import { createPassport } from "./passport.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
@@ -82,7 +82,7 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 			})();
 
 		// Normalize federation config entries and build the provider Map.
-		const federationProviders = new Map<string, FederationProvider>();
+		const federationProviders = new Map<string, FederationProviderBase>();
 		for (const [name, section] of Object.entries(config.federations)) {
 			if (!section.enabled) continue;
 
@@ -149,11 +149,11 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 			// Invariant guard: the provider's name must equal the config key so that
 			// routes/Federation.mts can look up the provider by the :name route param.
-			// Custom builders must propagate config.name to FederationProvider.name.
+			// Custom builders must propagate config.name to FederationProviderBase.name.
 			if (provider.name !== name) {
 				throw new Error(
 					`federations.${name}: provider builder returned name="${provider.name}", expected "${name}". ` +
-						`Custom builders must propagate config.name to FederationProvider.name to preserve the config-key ↔ passport-strategy-name invariant.`,
+						`Custom builders must propagate config.name to FederationProviderBase.name to preserve the config-key ↔ passport-strategy-name invariant.`,
 				);
 			}
 
