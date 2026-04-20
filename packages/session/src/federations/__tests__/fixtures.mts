@@ -33,7 +33,7 @@ export function createTestBaseProvider(name: string): FederationProviderBase {
 		scope: [],
 		validateRedirect: () => ({ ok: true, value: undefined }),
 		resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
-		async setupPassportStrategy() {},
+		async setupPassportStrategy(_passport, _ctx) {},
 	};
 }
 
