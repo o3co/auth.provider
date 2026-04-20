@@ -54,3 +54,54 @@ export interface FederationProviderBase {
  * Temporary alias kept while callers are migrated in Tasks 2–7 to avoid a non-building intermediate state.
  */
 export type FederationProvider = FederationProviderBase;
+
+/**
+ * Arguments for an OIDC RP-Initiated Logout (end-session) request.
+ *
+ * All fields are optional per the OIDC spec. Consumers should generate a `state`
+ * value and verify it on the post-logout redirect to mitigate CSRF.
+ */
+export interface EndSessionRequest {
+	/** ID token previously issued by the IdP, used to identify the session to terminate. */
+	idTokenHint?: string;
+	/** URL the IdP redirects the user agent to after logout completes. */
+	postLogoutRedirectUri?: string;
+	/** Opaque value round-tripped by the IdP for CSRF protection. */
+	state?: string;
+}
+
+/**
+ * Outcome of building an end-session redirect.
+ *
+ * `method` is currently always `"GET"` (OIDC RP-Initiated Logout 1.0). Future extensions
+ * (e.g. POST logout for SAML interop) can widen the union additively.
+ */
+export interface EndSessionResult {
+	/** Fully-qualified end-session URL with all parameters encoded. */
+	url: URL;
+	/** HTTP method the consumer should use when driving the redirect. */
+	method: "GET";
+}
+
+/**
+ * Optional capability: OIDC RP-Initiated Logout (end-session).
+ *
+ * Providers whose IdP exposes an end_session endpoint implement this capability by
+ * returning a redirect URL. Consumers detect the capability with {@link supportsLogout}.
+ */
+export interface SupportsLogout {
+	endSession(req: EndSessionRequest): Promise<EndSessionResult>;
+}
+
+/**
+ * Type guard: does `provider` implement the {@link SupportsLogout} capability?
+ *
+ * Returns `true` when `provider.endSession` is a function. Inside a `true` branch,
+ * TypeScript narrows `provider` to `FederationProviderBase & SupportsLogout`, so
+ * `provider.endSession(...)` is callable without a cast.
+ */
+export function supportsLogout(
+	provider: FederationProviderBase,
+): provider is FederationProviderBase & SupportsLogout {
+	return typeof (provider as { endSession?: unknown }).endSession === "function";
+}
