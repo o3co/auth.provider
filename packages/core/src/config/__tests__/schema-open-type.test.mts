@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { fullSectionsSchema } from "#/config/application.schema.mjs";
+import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema.mjs";
 
 describe("schema open type", () => {
 	it("accepts non-builtin session storage type (validated at factory level, not schema)", () => {
@@ -80,6 +80,52 @@ describe("schema open type", () => {
 		});
 		expect(parsed.user.type).toBe("ldap");
 		expect(parsed.code.type).toBe("dynamodb");
+	});
+
+	it("rejects legacy top-level `clients` key once renamed to `repositories`", () => {
+		const result = AppConfigSchema.safeParse({
+			http: { port: 3000, trustProxy: false },
+			oauth: {
+				jwt: { signingKey: { provider: "local", local: { algorithm: "HS256", kid: "v0", secret: "s" } } },
+				accessToken: { expiresIn: 3600 },
+				refreshToken: { expiresIn: 86400 },
+				grants: {
+					session: { enabled: true },
+					authorization: { enabled: true, pkce: { requireS256: false } },
+					refresh_token: { enabled: true },
+				},
+			},
+			session: {
+				secret: "x",
+				maxAge: 3600000,
+				secure: true,
+				sameSite: "lax",
+				domain: null,
+				storage: { type: "memory" },
+			},
+			rateLimit: {
+				login: { windowMs: 900000, limit: 20 },
+				token: { windowMs: 60000, limit: 60 },
+				authorize: { windowMs: 60000, limit: 30 },
+			},
+			federations: {},
+			// Legacy key — must fail. The renamed key `repositories` is absent.
+			clients: {
+				client: { type: "yaml", yaml: { path: "./config/clients.yaml" } },
+				user:   { type: "yaml", yaml: { path: "./config/users.yaml" } },
+				code:   { type: "memory" },
+			},
+			endpoints: { login: { url: "/login" } },
+			cors: { allowedOrigins: [] },
+		});
+
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			// The parse error must mention the missing `repositories` path,
+			// not silently accept the legacy `clients` key.
+			const paths = result.error.issues.map((i) => i.path.join("."));
+			expect(paths).toContain("repositories");
+		}
 	});
 });
 
