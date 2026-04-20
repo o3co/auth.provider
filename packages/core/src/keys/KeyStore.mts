@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import { createSecretKey, type KeyObject } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { importPKCS8, importSPKI } from "jose";
 
 export type KeyLike = CryptoKey | KeyObject | Uint8Array;
@@ -105,78 +104,6 @@ export async function createAsymmetricKeyStore(
 			return prev.publicKey;
 		},
 	};
-}
-
-export interface JwtConfig {
-	algorithm: "HS256" | "RS256" | "ES256" | "EdDSA";
-	secret?: string;
-	kid: string;
-	issuer?: string;
-	privateKey?: string;
-	privateKeyPath?: string;
-	publicKey?: string;
-	publicKeyPath?: string;
-	previousKeys: Array<{
-		kid: string;
-		publicKey?: string;
-		publicKeyPath?: string;
-		expiresAt: string;
-	}>;
-}
-
-function readKeyValue(pemString?: string, filePath?: string): string | undefined {
-	if (filePath) {
-		try {
-			return readFileSync(filePath, "utf-8");
-		} catch (err) {
-			throw new Error(`Failed to read key file: ${filePath}`, { cause: err });
-		}
-	}
-	return pemString;
-}
-
-export async function createKeyStoreFromConfig(config: JwtConfig): Promise<KeyStore> {
-	if (config.algorithm === "HS256") {
-		if (!config.secret) {
-			throw new Error("secret is required for HS256 algorithm");
-		}
-		return createSymmetricKeyStore(config.secret, config.kid);
-	}
-
-	// Asymmetric algorithms: RS256, ES256, EdDSA
-	const privateKeyPem = readKeyValue(config.privateKey, config.privateKeyPath);
-	if (!privateKeyPem) {
-		throw new Error(`privateKey or privateKeyPath is required for ${config.algorithm} algorithm`);
-	}
-
-	const publicKeyPem = readKeyValue(config.publicKey, config.publicKeyPath);
-	if (!publicKeyPem) {
-		throw new Error(`publicKey or publicKeyPath is required for ${config.algorithm} algorithm`);
-	}
-
-	const previousKeys = config.previousKeys.map((prev) => {
-		const pubPem = readKeyValue(prev.publicKey, prev.publicKeyPath);
-		if (!pubPem) {
-			throw new Error(`publicKey or publicKeyPath is required for previous key ${prev.kid}`);
-		}
-		const expiresAt = new Date(prev.expiresAt);
-		if (Number.isNaN(expiresAt.getTime())) {
-			throw new Error(`Invalid expiresAt for previous key "${prev.kid}": ${prev.expiresAt}`);
-		}
-		return {
-			kid: prev.kid,
-			publicKeyPem: pubPem,
-			expiresAt,
-		};
-	});
-
-	return createAsymmetricKeyStore({
-		algorithm: config.algorithm,
-		kid: config.kid,
-		privateKeyPem,
-		publicKeyPem,
-		previousKeys,
-	});
 }
 
 export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {

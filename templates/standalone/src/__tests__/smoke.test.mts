@@ -17,11 +17,12 @@
 import {
 	type AppConfig,
 	createApp,
-	createKeyStoreFromConfig,
+	createKeyStoreFactory,
 	generateToken,
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
+	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import {
 	oauthAuthorizationModule,
@@ -36,7 +37,17 @@ import { afterAll, describe, expect, it } from "vitest";
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false },
 	oauth: {
-		jwt: { algorithm: "HS256", secret: "test-secret-for-smoke-test", kid: "v0", previousKeys: [] },
+		jwt: {
+			signingKey: {
+				provider: "local",
+				local: {
+					algorithm: "HS256",
+					secret: "test-secret-for-smoke-test",
+					kid: "v0",
+					previousKeys: [],
+				},
+			},
+		},
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {},
@@ -72,14 +83,19 @@ const config: AppConfig = {
 
 describe("standalone smoke test", () => {
 	let grantRegistryRef: Awaited<ReturnType<typeof buildApp>>["grantRegistry"];
-	let appRef: ReturnType<typeof express>;
+	let _appRef: ReturnType<typeof express>;
 
 	async function buildApp() {
 		const clientRepository = new InMemoryClientRepository(new Map());
 		const userRepository = new InMemoryUserRepository(new Map());
 		const codeRepository = new InMemoryCodeRepository();
 
-		const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
+		const keyStoreFactory = createKeyStoreFactory();
+		registerBuiltinKeyStores(keyStoreFactory);
+		const keyStore = await keyStoreFactory.create({
+			type: "local",
+			...(config.oauth.jwt.signingKey.local ?? {}),
+		});
 
 		const { init, router, grantRegistry } = createApp({
 			express,
@@ -108,7 +124,7 @@ describe("standalone smoke test", () => {
 	it("GET /_healthcheck returns 200", async () => {
 		const { app, grantRegistry } = await buildApp();
 		grantRegistryRef = grantRegistry;
-		appRef = app;
+		_appRef = app;
 
 		const res = await request(app).get("/_healthcheck");
 		expect(res.status).toBe(200);
@@ -117,7 +133,7 @@ describe("standalone smoke test", () => {
 	it("POST /oauth/token with unsupported grant_type returns 400", async () => {
 		const { app, grantRegistry } = await buildApp();
 		grantRegistryRef = grantRegistry;
-		appRef = app;
+		_appRef = app;
 
 		const res = await request(app)
 			.post("/oauth/token")
@@ -135,7 +151,7 @@ describe("standalone smoke test", () => {
 		// the introspect test below which exercises the full response path.
 		const { app, grantRegistry } = await buildApp();
 		grantRegistryRef = grantRegistry;
-		appRef = app;
+		_appRef = app;
 
 		// 400 responses must NOT have Cache-Control: no-store
 		const res = await request(app)
@@ -150,9 +166,14 @@ describe("standalone smoke test", () => {
 	it("POST /oauth/introspect returns iat in active token response", async () => {
 		const { app, grantRegistry } = await buildApp();
 		grantRegistryRef = grantRegistry;
-		appRef = app;
+		_appRef = app;
 
-		const keyStore = await createKeyStoreFromConfig(config.oauth.jwt);
+		const ksf = createKeyStoreFactory();
+		registerBuiltinKeyStores(ksf);
+		const keyStore = await ksf.create({
+			type: "local",
+			...(config.oauth.jwt.signingKey.local ?? {}),
+		});
 		const { token } = await generateToken(
 			{},
 			{ keyStore, subject: "u1", expiresIn: 3600, tokenType: "at+jwt" },

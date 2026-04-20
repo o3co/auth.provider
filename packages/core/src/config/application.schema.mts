@@ -20,12 +20,11 @@ const rateLimitSchema = z.object({
 	limit: z.coerce.number(),
 });
 
-const jwtSchema = z
+const signingKeyLocalSchema = z
 	.object({
 		algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]).default("HS256"),
-		secret: z.string().optional(),
-		issuer: z.string().optional(),
 		kid: z.string().default("v0"),
+		secret: z.string().optional(),
 		privateKey: z.string().optional(),
 		privateKeyPath: z.string().optional(),
 		publicKey: z.string().optional(),
@@ -41,42 +40,56 @@ const jwtSchema = z
 			)
 			.default([]),
 	})
-	.superRefine((data, ctx) => {
-		if (data.algorithm === "HS256" && !data.secret) {
+	.passthrough();
+
+const signingKeySchema = z
+	.object({
+		provider: z.string().default("local"),
+		local: signingKeyLocalSchema.optional(),
+	})
+	.passthrough();
+
+const LEGACY_JWT_FIELDS = [
+	"algorithm",
+	"kid",
+	"secret",
+	"privateKey",
+	"privateKeyPath",
+	"publicKey",
+	"publicKeyPath",
+	"previousKeys",
+] as const;
+
+const jwtSchemaBase = z.object({
+	issuer: z.string().optional(),
+	signingKey: signingKeySchema.default({ provider: "local" }),
+});
+
+/**
+ * jwtSchema wraps the base object schema with a preprocess step that detects
+ * legacy flat oauth.jwt.* fields before zod strips unknown keys.
+ *
+ * Zod's default object behavior strips unknown keys before superRefine sees
+ * the data, so superRefine on the parsed output cannot detect stripped fields.
+ * z.preprocess runs on the raw input and can emit a ZodError early.
+ */
+const jwtSchema = z.preprocess((raw, ctx) => {
+	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+		const rawObj = raw as Record<string, unknown>;
+		const legacyPresent = LEGACY_JWT_FIELDS.filter((field) => field in rawObj);
+		if (legacyPresent.length > 0) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
-				message: "secret is required for HS256 algorithm",
-				path: ["secret"],
+				message:
+					`oauth.jwt has legacy flat fields (${legacyPresent.join(", ")}). ` +
+					`Migrate to nested shape: oauth.jwt.signingKey.local.<field>. ` +
+					`See packages/core/README.md for migration guide.`,
+				path: [legacyPresent[0]],
 			});
 		}
-		const isAsymmetric =
-			data.algorithm === "RS256" || data.algorithm === "ES256" || data.algorithm === "EdDSA";
-		if (isAsymmetric) {
-			if (!data.privateKey && !data.privateKeyPath) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: "privateKey or privateKeyPath is required for asymmetric algorithms",
-					path: ["privateKey"],
-				});
-			}
-			if (!data.publicKey && !data.publicKeyPath) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: "publicKey or publicKeyPath is required for asymmetric algorithms",
-					path: ["publicKey"],
-				});
-			}
-		}
-		for (const [i, key] of data.previousKeys.entries()) {
-			if (!key.publicKey && !key.publicKeyPath) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message: "publicKey or publicKeyPath is required for each previousKeys entry",
-					path: ["previousKeys", i, "publicKey"],
-				});
-			}
-		}
-	});
+	}
+	return raw;
+}, jwtSchemaBase);
 
 /**
  * Minimal always-required config for the auth provider core.
