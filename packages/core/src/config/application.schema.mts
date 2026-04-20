@@ -151,40 +151,17 @@ export const fullSectionsSchema = z.object({
 		token: rateLimitSchema,
 		authorize: rateLimitSchema,
 	}),
-	federations: z.object({
-		google: z
-			.object({
-				enabled: z.boolean().default(false),
-				clientId: z.string().optional(),
-				clientSecret: z.string().optional(),
-				callbackURL: z.string().optional(),
-			})
-			.superRefine((data, ctx) => {
-				if (data.enabled) {
-					if (!data.clientId) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: "clientId is required when google federation is enabled",
-							path: ["clientId"],
-						});
-					}
-					if (!data.clientSecret) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: "clientSecret is required when google federation is enabled",
-							path: ["clientSecret"],
-						});
-					}
-					if (!data.callbackURL) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: "callbackURL is required when google federation is enabled",
-							path: ["callbackURL"],
-						});
-					}
-				}
-			}),
-	}),
+	federations: z
+		.record(
+			z.string(),
+			z
+				.object({
+					enabled: z.boolean().default(false),
+					type: z.string().optional(),
+				})
+				.passthrough(),
+		)
+		.default({}),
 	clients: z.object({
 		client: z
 			.object({
