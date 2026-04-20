@@ -187,7 +187,7 @@ interface SupportsLogout {
 }
 
 function supportsLogout(
-  provider: FederationProviderBase,
+  provider: FederationProviderBase | undefined | null,
 ): provider is FederationProviderBase & SupportsLogout;
 ```
 
