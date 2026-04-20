@@ -18,8 +18,10 @@ import { AdapterFactoryError } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
 	createFederationProviderFactory,
+	type FederationProviderFactory,
 	registerBuiltinFederations,
 } from "#/federations/factory.mjs";
+import type { FederationProviderBase } from "#/federations/types.mjs";
 
 describe("createFederationProviderFactory", () => {
 	it("returns an AdapterFactory with no registered types", () => {
@@ -35,6 +37,31 @@ describe("createFederationProviderFactory", () => {
 				err.reason === "unknown" &&
 				err.kind === "FederationProvider",
 		);
+	});
+
+	it("factory element type is exactly FederationProviderBase", async () => {
+		type Elem = Awaited<ReturnType<FederationProviderFactory["create"]>>;
+
+		// Bidirectional assignability: any FederationProviderBase is Elem and vice versa.
+		// A regression that over-narrows the factory's generic (e.g. to
+		// `FederationProviderBase & SupportsLogout`) would break the first direction;
+		// a regression that over-widens (e.g. to `unknown`) would break the second.
+		const baseValue: FederationProviderBase = {
+			name: "stub",
+			scope: [],
+			validateRedirect: () => ({ ok: true, value: undefined }),
+			resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
+			async setupPassportStrategy() {},
+		};
+		const asElem: Elem = baseValue;
+		const asBase: FederationProviderBase = asElem;
+
+		const factory = createFederationProviderFactory();
+		factory.register("stub", async () => baseValue);
+		const created = await factory.create({ type: "stub", name: "stub" });
+
+		expect(asBase.name).toBe("stub");
+		expect(created.name).toBe("stub");
 	});
 });
 
@@ -107,26 +134,5 @@ describe("registerBuiltinFederations", () => {
 				name: "github",
 			}),
 		).rejects.toThrow(/clientId|clientSecret|callbackURL/i);
-	});
-});
-
-describe("FederationProviderBase assignability", () => {
-	it("typed element is FederationProviderBase", async () => {
-		const { createFederationProviderFactory } = await import("#/federations/factory.mjs");
-		const factory = createFederationProviderFactory();
-		// If `create`'s return type is Promise<FederationProviderBase>, this local variable
-		// typed as FederationProviderBase is trivially assignable.
-		factory.register("stub", async () => ({
-			name: "stub",
-			scope: [],
-			validateRedirect: () => ({ ok: true, value: undefined }),
-			resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
-			async setupPassportStrategy() {},
-		}));
-		const base: import("#/federations/types.mjs").FederationProviderBase = await factory.create({
-			type: "stub",
-			name: "stub",
-		});
-		expect(base.name).toBe("stub");
 	});
 });
