@@ -21,7 +21,9 @@ import {
 	jwtVerify,
 } from "jose";
 import { describe, expect, it } from "vitest";
+import type { SignJwtOptions } from "#/keys/KeyStore.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import { createTestKeyStore } from "./fixtures.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -307,5 +309,39 @@ describe("AsymmetricKeyStore", () => {
 		});
 
 		await expect(store.getVerificationKey("k1")).rejects.toThrow();
+	});
+});
+
+describe("KeyStore contract (via fixture)", () => {
+	it("sign() forwards options to the signer", async () => {
+		let received: SignJwtOptions | undefined;
+		const ks = createTestKeyStore({
+			algorithm: "HS256",
+			kid: "fixture-kid",
+			signer: async (opts) => {
+				received = opts;
+				return "fake.jwt.value";
+			},
+			verificationKeys: new Map(),
+		});
+
+		const result = await ks.sign({
+			claims: { sub: "fixture-user" },
+			header: { typ: "at+jwt" },
+		});
+
+		expect(result).toBe("fake.jwt.value");
+		expect(received?.claims.sub).toBe("fixture-user");
+		expect(received?.header?.typ).toBe("at+jwt");
+	});
+
+	it("getVerificationKey throws on unknown kid", async () => {
+		const ks = createTestKeyStore({
+			algorithm: "HS256",
+			kid: "k",
+			signer: async () => "",
+			verificationKeys: new Map(),
+		});
+		await expect(ks.getVerificationKey("missing")).rejects.toThrow("Unknown kid: missing");
 	});
 });
