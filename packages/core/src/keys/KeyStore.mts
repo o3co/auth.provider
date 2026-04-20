@@ -73,15 +73,6 @@ export interface KeyStore {
 	/** Specific kid's public key. Throws on unknown or expired kid. */
 	getVerificationKey(kid: string): Promise<KeyLike>;
 
-	// Legacy API — to be removed in Task 12. Kept temporarily so internal
-	// callers (token.mts, refreshToken.mts, routes.mts) still compile.
-	readonly current: {
-		readonly kid: string;
-		readonly privateKey: KeyLike;
-		readonly publicKey: KeyLike;
-	};
-	readonly previous: readonly ManagedKey[];
-	getSigningKey(): { kid: string; privateKey: KeyLike };
 }
 
 export interface AsymmetricKeyStoreOptions {
@@ -137,13 +128,6 @@ export async function createAsymmetricKeyStore(
 			return kid;
 		},
 
-		current: { kid, privateKey, publicKey },
-		previous: resolvedPrevious,
-
-		getSigningKey() {
-			return { kid, privateKey };
-		},
-
 		async getVerificationKeys(): Promise<ManagedKey[]> {
 			const now = new Date();
 			const active = resolvedPrevious.filter((k) => k.expiresAt > now);
@@ -184,17 +168,6 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 
 		getCurrentKid(): string {
 			return kid;
-		},
-
-		current: {
-			kid,
-			privateKey: secretKey,
-			publicKey: secretKey,
-		},
-		previous: [],
-
-		getSigningKey() {
-			return { kid, privateKey: secretKey };
 		},
 
 		async getVerificationKeys(): Promise<ManagedKey[]> {

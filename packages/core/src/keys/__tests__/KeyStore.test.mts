@@ -19,7 +19,6 @@ import {
 	exportSPKI,
 	generateKeyPair,
 	jwtVerify,
-	SignJWT,
 } from "jose";
 import { describe, expect, it } from "vitest";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
@@ -39,19 +38,9 @@ describe("SymmetricKeyStore", () => {
 		expect(keyStore.algorithm).toBe("HS256");
 	});
 
-	it("has default kid v0", () => {
-		expect(keyStore.current.kid).toBe("v0");
-	});
-
 	it("accepts custom kid", () => {
 		const ks = createSymmetricKeyStore("test-secret", "custom-kid");
-		expect(ks.current.kid).toBe("custom-kid");
-	});
-
-	it("getSigningKey returns kid and privateKey", () => {
-		const signingKey = keyStore.getSigningKey();
-		expect(signingKey.kid).toBe("v0");
-		expect(signingKey.privateKey).toBeDefined();
+		expect(ks.getCurrentKid()).toBe("custom-kid");
 	});
 
 	it("getVerificationKey returns key for current kid", async () => {
@@ -67,10 +56,6 @@ describe("SymmetricKeyStore", () => {
 		const keys = await keyStore.getVerificationKeys();
 		expect(keys).toHaveLength(1);
 		expect(keys[0].kid).toBe("v0");
-	});
-
-	it("current.privateKey and current.publicKey are the same for symmetric", () => {
-		expect(keyStore.current.privateKey).toBe(keyStore.current.publicKey);
 	});
 
 	it("sign() produces a JWT verifiable with getVerificationKey", async () => {
@@ -119,17 +104,13 @@ describe("AsymmetricKeyStore", () => {
 		});
 
 		expect(store.algorithm).toBe(alg);
-		expect(store.current.kid).toBe("k1");
+		expect(store.getCurrentKid()).toBe("k1");
 
-		// Sign a JWT with the signing key
-		const { kid, privateKey } = store.getSigningKey();
-		const token = await new SignJWT({ sub: "user1" })
-			.setProtectedHeader({ alg, kid })
-			.setIssuedAt()
-			.sign(privateKey);
+		const token = await store.sign({ claims: { sub: "user1" } });
+		const header = decodeProtectedHeader(token);
+		expect(header.kid).toBe("k1");
 
-		// Verify with the verification key
-		const verificationKey = await store.getVerificationKey(kid);
+		const verificationKey = await store.getVerificationKey(header.kid as string);
 		const { payload } = await jwtVerify(token, verificationKey);
 		expect(payload.sub).toBe("user1");
 	});
@@ -186,10 +167,10 @@ describe("AsymmetricKeyStore", () => {
 		const oldPair = await generateTestKeyPair("ES256");
 		const newPair = await generateTestKeyPair("ES256");
 
-		// Sign a token with the old key
-		const { importPKCS8 } = await import("jose");
+		// Sign a token with the old key (simulating an external signer, not via KeyStore)
+		const { importPKCS8, SignJWT: JoseSignJWT } = await import("jose");
 		const oldSigningKey = await importPKCS8(oldPair.privateKeyPem, "ES256");
-		const token = await new SignJWT({ sub: "user-old" })
+		const token = await new JoseSignJWT({ sub: "user-old" })
 			.setProtectedHeader({ alg: "ES256", kid: "k-old" })
 			.setIssuedAt()
 			.sign(oldSigningKey);

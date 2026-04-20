@@ -78,7 +78,7 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		expect(header.typ).toBe("at+jwt");
 
 		// Verify the JWT payload using the KeyStore's verification key
-		const verificationKey = keyStore.getVerificationKey(header.kid!);
+		const verificationKey = await keyStore.getVerificationKey(header.kid!);
 		const { payload } = await jwtVerify(token.token, verificationKey, {
 			issuer: "https://auth.example.com",
 			audience: "https://api.example.com",
@@ -121,7 +121,7 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		const oldHeader = decodeProtectedHeader(oldToken.token);
 		expect(oldHeader.kid).toBe("k-old");
 
-		const oldVerificationKey = oldKeyStore.getVerificationKey("k-old");
+		const oldVerificationKey = await oldKeyStore.getVerificationKey("k-old");
 		const { payload: oldPayload } = await jwtVerify(oldToken.token, oldVerificationKey);
 		expect(oldPayload.sub).toBe("user-456");
 
@@ -142,7 +142,7 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		});
 
 		// Step 3: Verify old token still works with new KeyStore
-		const rotatedVerificationKey = newKeyStore.getVerificationKey(oldHeader.kid!);
+		const rotatedVerificationKey = await newKeyStore.getVerificationKey(oldHeader.kid!);
 		const { payload: rotatedPayload } = await jwtVerify(oldToken.token, rotatedVerificationKey);
 		expect(rotatedPayload.sub).toBe("user-456");
 		expect(rotatedPayload.role).toBe("viewer");
@@ -156,7 +156,7 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		const newHeader = decodeProtectedHeader(newToken.token);
 		expect(newHeader.kid).toBe("k-new");
 
-		const newVerificationKey = newKeyStore.getVerificationKey("k-new");
+		const newVerificationKey = await newKeyStore.getVerificationKey("k-new");
 		const { payload: newPayload } = await jwtVerify(newToken.token, newVerificationKey);
 		expect(newPayload.sub).toBe("user-789");
 	});
@@ -198,6 +198,6 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		});
 
 		// Attempting to verify with expired previous key should throw
-		expect(() => newKeyStore.getVerificationKey("r-old")).toThrow("Expired kid: r-old");
+		await expect(newKeyStore.getVerificationKey("r-old")).rejects.toThrow("Expired kid: r-old");
 	});
 });
