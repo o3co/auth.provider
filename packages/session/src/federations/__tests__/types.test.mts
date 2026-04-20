@@ -16,10 +16,7 @@
 
 import type { PassportStatic } from "passport";
 import { describe, expect, it } from "vitest";
-import type {
-	FederationProviderBase,
-	SetupPassportContext,
-} from "#/federations/types.mjs";
+import type { FederationProviderBase, SetupPassportContext } from "#/federations/types.mjs";
 
 describe("FederationProviderBase interface", () => {
 	it("requires name, scope, validateRedirect, resolveCallbackRedirect, setupPassportStrategy — no enabled or strategyName", () => {
