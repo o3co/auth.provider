@@ -72,6 +72,31 @@ describe("SymmetricKeyStore", () => {
 	it("current.privateKey and current.publicKey are the same for symmetric", () => {
 		expect(keyStore.current.privateKey).toBe(keyStore.current.publicKey);
 	});
+
+	it("sign() produces a JWT verifiable with getVerificationKey", async () => {
+		const ks = createSymmetricKeyStore("round-trip-secret", "k-sym");
+		const token = await ks.sign({ claims: { sub: "alice" } });
+
+		// Header has alg + kid injected by KeyStore
+		const header = decodeProtectedHeader(token);
+		expect(header.alg).toBe("HS256");
+		expect(header.kid).toBe("k-sym");
+
+		// Payload preserves claims
+		const key = ks.getVerificationKey("k-sym");
+		const { payload } = await jwtVerify(token, key);
+		expect(payload.sub).toBe("alice");
+	});
+
+	it("sign() injects typ when provided in header options", async () => {
+		const ks = createSymmetricKeyStore("typ-test-secret");
+		const token = await ks.sign({
+			claims: { sub: "bob" },
+			header: { typ: "at+jwt" },
+		});
+		const header = decodeProtectedHeader(token);
+		expect(header.typ).toBe("at+jwt");
+	});
 });
 
 describe("AsymmetricKeyStore", () => {
@@ -245,6 +270,25 @@ describe("AsymmetricKeyStore", () => {
 		});
 
 		expect(() => store.getVerificationKey("unknown")).toThrow("Unknown kid: unknown");
+	});
+
+	it("sign() round-trip works for asymmetric (ES256)", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
+		const store = await createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "asym-sign-k",
+			privateKeyPem,
+			publicKeyPem,
+		});
+
+		const token = await store.sign({ claims: { sub: "carol" } });
+		const header = decodeProtectedHeader(token);
+		expect(header.alg).toBe("ES256");
+		expect(header.kid).toBe("asym-sign-k");
+
+		const key = store.getVerificationKey("asym-sign-k");
+		const { payload } = await jwtVerify(token, key);
+		expect(payload.sub).toBe("carol");
 	});
 
 	it("throws for expired kid", async () => {

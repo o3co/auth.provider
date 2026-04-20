@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { createSecretKey, type KeyObject } from "node:crypto";
-import { importPKCS8, importSPKI } from "jose";
+import { importPKCS8, importSPKI, SignJWT } from "jose";
 
 /**
  * JWT claims per RFC 7519. Standard claims are typed; custom claims are
@@ -104,6 +104,17 @@ export async function createAsymmetricKeyStore(
 
 	return {
 		algorithm,
+
+		async sign({ claims, header }: SignJwtOptions): Promise<string> {
+			return await new SignJWT(claims)
+				.setProtectedHeader({
+					alg: algorithm,
+					kid,
+					...(header?.typ ? { typ: header.typ } : {}),
+				})
+				.sign(privateKey);
+		},
+
 		current: { kid, privateKey, publicKey },
 		previous: resolvedPrevious,
 
@@ -138,6 +149,17 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 
 	return {
 		algorithm: "HS256",
+
+		async sign({ claims, header }: SignJwtOptions): Promise<string> {
+			return await new SignJWT(claims)
+				.setProtectedHeader({
+					alg: "HS256",
+					kid,
+					...(header?.typ ? { typ: header.typ } : {}),
+				})
+				.sign(secretKey);
+		},
+
 		current: {
 			kid,
 			privateKey: secretKey,
