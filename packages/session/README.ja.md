@@ -2,7 +2,7 @@
 
 [auth.provider](../../README.md) 向けセッション・フェデレーションルートモジュール。
 
-ユーザー名/パスワードログイン、ログアウト、OAuth 2.0 フェデレーション（Google およびカスタムプロバイダー）を担当する。内部的には Passport.js を使用してストラテジーを管理する。
+ユーザー名/パスワードログイン、ログアウト、OAuth 2.0 フェデレーション（Google、GitHub、およびカスタムプロバイダー）を担当する。内部的には Passport.js を使用してストラテジーを管理する。
 
 ## インストール
 
@@ -24,7 +24,16 @@ express@^5.0.0
 passport@^0.7.0                (optional)
 passport-local@^1.0.0          (optional)
 passport-google-oauth20@^2.0.0  (optional)
+passport-github2@^0.1.12        (optional — GitHub フェデレーションのみ)
 ```
+
+GitHub フェデレーションには `passport-github2` と `@types/passport-github2` が必要です。オプションの peer dependency のため、利用する場合のみ以下を実行してインストールしてください:
+
+```bash
+pnpm add passport-github2 @types/passport-github2
+```
+
+Google のみ、またはフェデレーション不要のデプロイでは、このパッケージのインストールコストは発生しません。
 
 ## パブリック API
 
@@ -41,12 +50,14 @@ function sessionModule(params: {
 
 マウントされるルート:
 
-| メソッド | パス                                             | 説明                                |
-|---------|--------------------------------------------------|-------------------------------------|
-| POST    | /session/login                                   | ユーザー名 / パスワードログイン       |
-| POST    | /session/logout                                  | セッションログアウト                  |
-| GET     | /session/oauth/federation/:provider              | OAuth フェデレーションフロー開始      |
-| GET     | /session/oauth/federation/:provider/callback     | フェデレーションコールバック           |
+| メソッド | パス | 説明 |
+| --- | --- | --- |
+| POST | /session/login | ユーザー名 / パスワードログイン |
+| POST | /session/logout | セッションログアウト |
+| GET | /session/oauth/federation/:name | OAuth フェデレーションフロー開始 |
+| GET | /session/oauth/federation/:name/callback | フェデレーションコールバック |
+
+`:name` パスパラメーターは `config.federations` のキー（例: `google`、`github`、`google-work`）に対応する。未知の名前は `404` を返す。
 
 ---
 
@@ -54,39 +65,77 @@ function sessionModule(params: {
 
 ```typescript
 function createPassport(options: {
-  pathResolver: PathResolver;
   userRepository: UserRepository;
-  config: AppConfig;
+  federationProviders: ReadonlyMap<string, FederationProvider>;
+  pathResolver: PathResolver;  // 必須; passport/passport-local の dynamic import に使用され、FederationProvider.setupPassportStrategy にも転送される
 }): Promise<PassportStatic>;
 ```
 
 Passport インスタンスを生成・設定する。
 
 - **LocalStrategy** — `username` と `password` フィールドで認証する。
-- **GoogleStrategy** — `config.federations.google.enabled` が `true` のときに登録される。
+- **フェデレーションストラテジー** — `federationProviders` の各プロバイダーに対して `provider.setupPassportStrategy(passport, { verifyUser, pathResolver })` を呼び出して登録する。
+
+---
+
+### `createFederationProviderFactory`
+
+```typescript
+function createFederationProviderFactory(): FederationProviderFactory;
+```
+
+組み込みタイプが未登録の空の `FederationProviderFactory`（`AdapterFactory<FederationProvider>`）を返す。`registerBuiltinFederations(factory)` を呼び出して組み込みの `"google"` と `"github"` を登録し、`factory.register(type, builder)` で独自タイプを追加できる。
+
+---
+
+### `registerBuiltinFederations`
+
+```typescript
+function registerBuiltinFederations(factory: FederationProviderFactory): void;
+```
+
+組み込みフェデレーションアダプターを `factory` に登録する:
+
+| タイプ | プロバイダー | 必要な peer dep |
+| --- | --- | --- |
+| `"google"` | `createGoogleProvider` | `passport-google-oauth20` |
+| `"github"` | `createGithubProvider` | `passport-github2` (optional) |
 
 ---
 
 ### `createGoogleProvider`
 
 ```typescript
-function createGoogleProvider(config: AppConfig): FederationProvider;
+function createGoogleProvider(config: {
+  name: string;
+  clientId: string;
+  clientSecret: string;
+  callbackURL: string;
+  sessionDomain?: string;
+  authCallbackUrl?: string;
+  clientUrl?: string;
+}): FederationProvider;
 ```
 
-Google OAuth 2.0 用の `FederationProvider` を生成する。クライアント ID、クライアントシークレット、コールバック URL は `config` から読み取る。
+Google OAuth 2.0 用の `FederationProvider` を生成する。ストラテジーは `config.name` の名前で Passport に登録されるため、マルチテナント構成（例: `google` と `google-work` を別インスタンスとして共存）が可能。
 
 ---
 
-### `FederationRegistry`
+### `createGithubProvider`
 
 ```typescript
-class FederationRegistry {
-  register(provider: FederationProvider): void;
-  get(name: string): FederationProvider | undefined;
-}
+function createGithubProvider(config: {
+  name: string;
+  clientId: string;
+  clientSecret: string;
+  callbackURL: string;
+  sessionDomain?: string;
+  authCallbackUrl?: string;
+  clientUrl?: string;
+}): FederationProvider;
 ```
 
-フェデレーションプロバイダーのレジストリ。カスタムプロバイダーを登録するには、このインスタンスを `sessionModule` に渡すか、モジュールの初期化前に populate する。
+GitHub OAuth 2.0 用の `FederationProvider` を生成する。`passport-github2`（オプションの peer dep）が必要なため、別途インストールすること。デフォルトのスコープは `["read:user", "user:email"]`。`externalId` のフォーマットは `"github:" + profile.id`。
 
 ---
 
@@ -94,16 +143,36 @@ class FederationRegistry {
 
 ```typescript
 interface FederationProvider {
-  name: string;
-  strategyName: string;
-  scope: string[];
-  enabled: boolean;
+  readonly name: string;
+  readonly scope: readonly string[];
   validateRedirect(url: string): FederationResult<void>;
-  resolveCallbackRedirect(session: unknown): FederationResult<string>;
+  resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
+  setupPassportStrategy(passport: PassportStatic, ctx: SetupPassportContext): Promise<void>;
+}
+
+interface SetupPassportContext {
+  verifyUser: (externalId: string) => Promise<User | null>;
+  pathResolver?: (spec: string) => string;  // optional; Yarn PnP などの非標準モジュールレイアウト向け
 }
 ```
 
 カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。
+
+- `name` — Passport ストラテジーの一意な識別子。`federationProviders` の Map キーと `passport.use()` に渡すストラテジー名の両方に使用される。
+- `scope` — OAuth 2.0 スコープ。
+- `validateRedirect` — フェデレーションフロー開始前にリダイレクト URL を検証する。
+- `resolveCallbackRedirect` — コールバック後のリダイレクト先をセッションから解決する。
+- `setupPassportStrategy` — Passport ストラテジーを登録する。モジュール初期化時に一度呼ばれる。
+
+---
+
+### `FederationProviderFactory` (type)
+
+```typescript
+type FederationProviderFactory = AdapterFactory<FederationProvider>;
+```
+
+`AdapterFactory<FederationProvider>` の型エイリアス。`factory.register(type, builder)` でカスタムプロバイダータイプを登録できる。
 
 ---
 
@@ -118,6 +187,8 @@ type FederationResult<T> =
 `FederationProvider` のメソッドが返す判別共用体。`value` にアクセスする前に `ok` を確認すること。
 
 ## 使い方
+
+### 基本的な使い方
 
 ```typescript
 import express from "express";
@@ -136,16 +207,108 @@ const app = createApp(express, {
 await app.init();
 ```
 
-### FederationRegistry
+`sessionModule` は内部で `createFederationProviderFactory` + `registerBuiltinFederations` を使い、`config.federations` を読み込んでプロバイダーを自動的にセットアップする。
 
-```typescript
-import { FederationRegistry } from "@o3co/auth-provider-session";
+### HOCON フェデレーション設定
 
-const registry = new FederationRegistry();
-registry.register(myCustomProvider);
+**ショートハンド形式（キー名 = プロバイダータイプ）:**
+
+```hocon
+federations {
+  google {
+    enabled = true
+    clientId = ${FEDERATIONS_GOOGLE_CLIENT_ID}
+    clientSecret = ${FEDERATIONS_GOOGLE_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
+  }
+
+  github {
+    enabled = true
+    clientId = ${FEDERATIONS_GITHUB_CLIENT_ID}
+    clientSecret = ${FEDERATIONS_GITHUB_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/github/callback"
+  }
+}
 ```
 
-`FederationRegistry` は `sessionModule` 内部でフェデレーションプロバイダーを管理するために使用されます。組み込みの Google プロバイダーは `config.federations.google.enabled` が `true` の場合に自動的に登録されます。
+**明示的なマルチテナント形式（Google を 2 インスタンス）:**
+
+```hocon
+federations {
+  google-personal {
+    enabled = true
+    type = "google"
+    google {
+      clientId = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_ID}
+      clientSecret = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_SECRET}
+      callbackURL = "https://auth.example.com/session/oauth/federation/google-personal/callback"
+    }
+  }
+
+  google-work {
+    enabled = true
+    type = "google"
+    google {
+      clientId = ${FEDERATIONS_GOOGLE_WORK_CLIENT_ID}
+      clientSecret = ${FEDERATIONS_GOOGLE_WORK_CLIENT_SECRET}
+      callbackURL = "https://auth.example.com/session/oauth/federation/google-work/callback"
+    }
+  }
+}
+```
+
+トップレベルのフィールドとネストされたサブセクションを混在させた形式（mixed shape）は起動時に明確なエラーで拒否される。
+
+### カスタムフェデレーションプロバイダー
+
+```typescript
+import {
+  createFederationProviderFactory,
+  registerBuiltinFederations,
+  type FederationProvider,
+  type FederationProviderFactory,
+} from "@o3co/auth-provider-session";
+
+// ファクトリーを生成して組み込みを登録
+const factory = createFederationProviderFactory();
+registerBuiltinFederations(factory);
+
+// カスタムプロバイダータイプを登録
+factory.register("microsoft", async (config) => {
+  // FederationProvider を構築して返す
+  return {
+    name: config.name as string,
+    scope: ["openid", "profile", "email"],
+    validateRedirect: (url) => ({ ok: true, value: undefined }),
+    resolveCallbackRedirect: (session) => ({ ok: true, value: session.redirectTo ?? "/" }),
+    setupPassportStrategy: async (passport, { verifyUser }) => {
+      // passport-microsoft などを登録する
+    },
+  };
+});
+
+// config からプロバイダー Map を構築 — module.mts の正規化ロジックを反映
+const federationProviders = new Map<string, FederationProvider>();
+for (const [name, section] of Object.entries(config.federations)) {
+  if (!section.enabled) continue;
+
+  const type = (typeof section.type === "string" ? section.type : undefined) ?? name;
+  const subSection = (section as Record<string, unknown>)[type];
+  const isNested =
+    typeof subSection === "object" && subSection !== null && !Array.isArray(subSection);
+
+  const rawBuilderConfig = isNested
+    ? (() => {
+        const { enabled: _e, type: _t, [type]: _sub, ...topLevel } = section as Record<string, unknown>;
+        return { type, ...topLevel, ...(subSection as Record<string, unknown>) };
+      })()
+    : { type, ...(section as Record<string, unknown>) };
+
+  const { enabled: _e2, type: _t2, ...flatConfig } = rawBuilderConfig as Record<string, unknown>;
+  const provider = await factory.create({ type, name, ...flatConfig });
+  federationProviders.set(name, provider);
+}
+```
 
 ## 関連
 

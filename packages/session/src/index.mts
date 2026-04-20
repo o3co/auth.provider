@@ -14,9 +14,20 @@
  * limitations under the License.
  */
 
+export type { FederationProviderFactory } from "./federations/factory.mjs";
+export {
+	createFederationProviderFactory,
+	registerBuiltinFederations,
+} from "./federations/factory.mjs";
+export type { GithubProviderConfig } from "./federations/github.mjs";
+export { createGithubProvider } from "./federations/github.mjs";
 export { createGoogleProvider } from "./federations/google.mjs";
-export type { FederationProvider, FederationResult } from "./federations/types.mjs";
-export { FederationRegistry } from "./federations/types.mjs";
+export type {
+	FederationProvider,
+	FederationResult,
+	SetupPassportContext,
+	VerifyUserContext,
+} from "./federations/types.mjs";
 export { sessionModule } from "./module.mjs";
 export { createPassport } from "./passport.mjs";
 export type { SessionStoreFactory } from "./store/factory.mjs";

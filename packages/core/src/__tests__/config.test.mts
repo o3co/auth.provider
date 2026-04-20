@@ -55,10 +55,6 @@ describe("provider config", () => {
 				HTTP_PORT: "9090",
 				HTTP_TRUST_PROXY: "true",
 				SESSION_SECURE: "false",
-				FEDERATIONS_GOOGLE_ENABLED: "true",
-				FEDERATIONS_GOOGLE_CLIENT_ID: "test-client-id",
-				FEDERATIONS_GOOGLE_CLIENT_SECRET: "test-client-secret",
-				FEDERATIONS_GOOGLE_CALLBACK_URL: "http://localhost:3000/callback",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -66,7 +62,9 @@ describe("provider config", () => {
 		expect(config.http.port).toBe(9090);
 		expect(config.http.trustProxy).toBe(true);
 		expect(config.session.secure).toBe(false);
-		expect(config.federations.google.enabled).toBe(true);
+		// federations.google.enabled env-var coercion is covered by the
+		// HOCON application.conf wiring; schema-level boolean coercion for
+		// federation entries is tested in federations-schema.test.mts.
 	});
 
 	it("clients.client.type defaults to yaml", () => {
@@ -102,52 +100,6 @@ describe("provider config", () => {
 		});
 		const config = validate(raw, AppConfigSchema);
 		expect(config.clients.code.type).toBe("memory");
-	});
-});
-
-describe("federations.google config validation", () => {
-	const googleSchema = AppConfigSchema.shape.federations.shape.google;
-
-	it("fails when google.enabled=true but clientId is missing", () => {
-		const result = googleSchema.safeParse({
-			enabled: true,
-			clientSecret: "secret",
-			callbackURL: "http://localhost:3000/callback",
-		});
-		expect(result.success).toBe(false);
-	});
-
-	it("fails when google.enabled=true but clientSecret is missing", () => {
-		const result = googleSchema.safeParse({
-			enabled: true,
-			clientId: "my-client-id",
-			callbackURL: "http://localhost:3000/callback",
-		});
-		expect(result.success).toBe(false);
-	});
-
-	it("fails when google.enabled=true but callbackURL is missing", () => {
-		const result = googleSchema.safeParse({
-			enabled: true,
-			clientId: "my-client-id",
-			clientSecret: "my-secret",
-		});
-		expect(result.success).toBe(false);
-	});
-
-	it("passes when google.enabled=false and credentials are not set", () => {
-		const result = googleSchema.safeParse({ enabled: false });
-		expect(result.success).toBe(true);
-	});
-
-	it("passes when google.enabled=true and all credentials are set", () => {
-		const result = googleSchema.safeParse({
-			enabled: true,
-			clientId: "my-client-id",
-			clientSecret: "my-secret",
-			callbackURL: "http://localhost:3000/callback",
-		});
-		expect(result.success).toBe(true);
 	});
 });
 

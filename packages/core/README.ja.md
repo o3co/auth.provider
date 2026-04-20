@@ -34,7 +34,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `oauth.grants` | グラントタイプごとの設定（`session`、`authorization`、`refresh_token`、カスタムキー） |
 | `session` | Express セッション設定 — secret、maxAge、secure、sameSite、domain、storage |
 | `rateLimit` | `login`、`token`、`authorize` エンドポイントのレート制限設定 |
-| `federations.google` | Google フェデレーション設定 |
+| `federations` | フェデレーションプロバイダー — `z.record(string, { enabled, type?, ...passthrough })`。組み込みタイプ: `"google"`, `"github"`。 |
 | `clients` | client、user、code の Repository 設定 |
 | `endpoints` | `login`、`client`、`authCallback` ルートのパスオーバーライド |
 | `cors.allowedOrigins` | CORS 許可オリジン |

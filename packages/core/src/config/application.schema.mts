@@ -127,6 +127,36 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	return schema;
 }
 
+/**
+ * Env-var-safe boolean coercion for federation `enabled` fields.
+ *
+ * z.coerce.boolean() calls JavaScript's Boolean(value), so any non-empty string
+ * (including "false", "no", "0") coerces to true. This is unsafe for env-var
+ * overrides where operators set FEDERATIONS_*_ENABLED=false to disable a federation.
+ *
+ * This preprocess explicitly maps the common string representations:
+ *   "true" | "1"        → true
+ *   "false" | "0" | ""  → false
+ *   boolean             → pass-through unchanged
+ *   other values        → forwarded to z.boolean() which rejects with a type error
+ */
+const coerceBooleanFromEnv = z.preprocess((val) => {
+	if (typeof val === "boolean") return val;
+	if (typeof val === "string") {
+		const normalized = val.trim().toLowerCase();
+		if (normalized === "true" || normalized === "1") return true;
+		if (normalized === "false" || normalized === "0" || normalized === "") return false;
+	}
+	return val; // zod rejects with a type error for other values
+}, z.boolean().default(false));
+
+const federationEntrySchema = z
+	.object({
+		enabled: coerceBooleanFromEnv,
+		type: z.string().optional(),
+	})
+	.passthrough();
+
 export const fullSectionsSchema = z.object({
 	session: z.object({
 		secret: z.string(),
@@ -151,40 +181,7 @@ export const fullSectionsSchema = z.object({
 		token: rateLimitSchema,
 		authorize: rateLimitSchema,
 	}),
-	federations: z.object({
-		google: z
-			.object({
-				enabled: z.boolean().default(false),
-				clientId: z.string().optional(),
-				clientSecret: z.string().optional(),
-				callbackURL: z.string().optional(),
-			})
-			.superRefine((data, ctx) => {
-				if (data.enabled) {
-					if (!data.clientId) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: "clientId is required when google federation is enabled",
-							path: ["clientId"],
-						});
-					}
-					if (!data.clientSecret) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: "clientSecret is required when google federation is enabled",
-							path: ["clientSecret"],
-						});
-					}
-					if (!data.callbackURL) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: "callbackURL is required when google federation is enabled",
-							path: ["callbackURL"],
-						});
-					}
-				}
-			}),
-	}),
+	federations: z.record(z.string(), federationEntrySchema).default({}),
 	clients: z.object({
 		client: z
 			.object({
