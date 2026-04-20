@@ -33,6 +33,16 @@ export interface JWTPayload {
 	[propName: string]: unknown;
 }
 
+/**
+ * Input to `KeyStore.sign()`. The KeyStore self-injects `alg` and `kid` into
+ * the protected header; callers may only set `typ`. This keeps adapter
+ * contracts stable under alg / kid rotation and remote-sign (KMS/HSM) backends.
+ */
+export interface SignJwtOptions {
+	claims: JWTPayload;
+	header?: { typ?: string };
+}
+
 export type KeyLike = CryptoKey | KeyObject | Uint8Array;
 
 export interface ManagedKey {
