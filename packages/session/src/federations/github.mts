@@ -14,10 +14,11 @@
  * limitations under the License.
  */
 
+import type { PassportStatic } from "passport";
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
-import type { FederationProvider } from "./types.mjs";
+import type { FederationProvider, VerifyUserContext } from "./types.mjs";
 
-export interface GoogleProviderConfig {
+export interface GithubProviderConfig {
 	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
 	name: string;
 	clientId: string;
@@ -31,41 +32,57 @@ export interface GoogleProviderConfig {
 	clientUrl?: string;
 }
 
-export const createGoogleProvider = (config: GoogleProviderConfig): FederationProvider => {
+export function createGithubProvider(config: GithubProviderConfig): FederationProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(
-			`Google federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
+			`GitHub federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
 		);
 	}
 
+	const scope = ["read:user", "user:email"] as const;
+
 	return {
 		name: config.name,
-		scope: ["profile", "email"],
+		scope,
 
 		validateRedirect(url: string) {
 			return validateRedirect(url, config);
 		},
 
 		resolveCallbackRedirect(session: { redirectTo?: string }) {
-			// authCallbackUrl and clientUrl are optional (DID-only deployments don't need them).
-			// When Google federation is enabled, operators must configure authCallbackUrl
-			// if redirect_to flows are used.
 			return resolveCallbackRedirect(session, config);
 		},
 
-		async setupPassportStrategy(passport, { verifyUser }) {
-			const { Strategy: GoogleStrategy } = await import("passport-google-oauth20");
+		async setupPassportStrategy(
+			passport: PassportStatic,
+			{ verifyUser }: VerifyUserContext,
+		): Promise<void> {
+			let GithubStrategy: typeof import("passport-github2").Strategy;
+			try {
+				({ Strategy: GithubStrategy } = await import("passport-github2"));
+			} catch (err) {
+				throw new Error(
+					"GitHub federation requires passport-github2. Run: pnpm add passport-github2 @types/passport-github2",
+					{ cause: err },
+				);
+			}
 			passport.use(
 				config.name,
-				new GoogleStrategy(
+				new GithubStrategy(
 					{
 						clientID: config.clientId,
 						clientSecret: config.clientSecret,
 						callbackURL: config.callbackURL,
+						scope: [...scope],
 					},
-					async (_at, _rt, profile, done) => {
+					async (
+						_at: string,
+						_rt: string,
+						profile: { id: string },
+						done: (err: Error | null, user?: unknown) => void,
+					) => {
 						try {
-							const user = await verifyUser(`google:${profile.id}`);
+							const user = await verifyUser(`github:${profile.id}`);
 							return done(null, user ?? false);
 						} catch (err) {
 							return done(err as Error);
@@ -75,4 +92,4 @@ export const createGoogleProvider = (config: GoogleProviderConfig): FederationPr
 			);
 		},
 	};
-};
+}
