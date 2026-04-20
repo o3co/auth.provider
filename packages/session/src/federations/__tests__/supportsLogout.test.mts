@@ -71,6 +71,14 @@ describe("supportsLogout()", () => {
 			throw new Error("expected supportsLogout to narrow to true");
 		}
 	});
+
+	it("returns false for undefined (no throw)", () => {
+		expect(supportsLogout(undefined)).toBe(false);
+	});
+
+	it("returns false for null (no throw)", () => {
+		expect(supportsLogout(null)).toBe(false);
+	});
 });
 
 describe("EndSessionResult URL construction (reference implementation behaviour)", () => {

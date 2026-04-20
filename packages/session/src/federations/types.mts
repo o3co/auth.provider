@@ -84,12 +84,15 @@ export interface SupportsLogout {
 /**
  * Type guard: does `provider` implement the {@link SupportsLogout} capability?
  *
- * Returns `true` when `provider.endSession` is a function. Inside a `true` branch,
- * TypeScript narrows `provider` to `FederationProviderBase & SupportsLogout`, so
- * `provider.endSession(...)` is callable without a cast.
+ * Returns `false` for `null` / `undefined` so consumers can call this directly on
+ * `Map.get(name)` results without an explicit existence check. When `provider` is
+ * non-null, returns `true` when `provider.endSession` is a function. Inside a `true`
+ * branch, TypeScript narrows `provider` to `FederationProviderBase & SupportsLogout`,
+ * so `provider.endSession(...)` is callable without a cast.
  */
 export function supportsLogout(
-	provider: FederationProviderBase,
+	provider: FederationProviderBase | undefined | null,
 ): provider is FederationProviderBase & SupportsLogout {
+	if (provider == null) return false;
 	return typeof (provider as { endSession?: unknown }).endSession === "function";
 }
