@@ -126,7 +126,7 @@ export async function createAsymmetricKeyStore(
 			return { kid, privateKey };
 		},
 
-		getVerificationKeys(): ManagedKey[] {
+		async getVerificationKeys(): Promise<ManagedKey[]> {
 			const now = new Date();
 			const active = resolvedPrevious.filter((k) => k.expiresAt > now);
 			return [{ kid, publicKey }, ...active];
@@ -179,7 +179,7 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 			return { kid, privateKey: secretKey };
 		},
 
-		getVerificationKeys(): ManagedKey[] {
+		async getVerificationKeys(): Promise<ManagedKey[]> {
 			return [{ kid, publicKey: secretKey }];
 		},
 

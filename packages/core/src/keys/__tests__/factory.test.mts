@@ -201,7 +201,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 			],
 		});
 		expect(keyStore.algorithm).toBe("RS256");
-		const keys = keyStore.getVerificationKeys();
+		const keys = await keyStore.getVerificationKeys();
 		expect(keys.map((k) => k.kid)).toContain("v1");
 		expect(keys.map((k) => k.kid)).toContain("v2");
 	});
@@ -272,7 +272,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 				},
 			],
 		});
-		const keys = keyStore.getVerificationKeys();
+		const keys = await keyStore.getVerificationKeys();
 		expect(keys.map((k) => k.kid)).toContain("v2");
 	});
 

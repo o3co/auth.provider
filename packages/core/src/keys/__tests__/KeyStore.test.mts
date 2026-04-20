@@ -63,8 +63,8 @@ describe("SymmetricKeyStore", () => {
 		await expect(keyStore.getVerificationKey("unknown")).rejects.toThrow();
 	});
 
-	it("getVerificationKeys returns current key only (no previous keys)", () => {
-		const keys = keyStore.getVerificationKeys();
+	it("getVerificationKeys returns current key only (no previous keys)", async () => {
+		const keys = await keyStore.getVerificationKeys();
 		expect(keys).toHaveLength(1);
 		expect(keys[0].kid).toBe("v0");
 	});
@@ -152,7 +152,7 @@ describe("AsymmetricKeyStore", () => {
 			],
 		});
 
-		const keys = store.getVerificationKeys();
+		const keys = await store.getVerificationKeys();
 		expect(keys).toHaveLength(2);
 		expect(keys.map((k) => k.kid)).toContain("k1");
 		expect(keys.map((k) => k.kid)).toContain("k2");
@@ -176,7 +176,7 @@ describe("AsymmetricKeyStore", () => {
 			],
 		});
 
-		const keys = store.getVerificationKeys();
+		const keys = await store.getVerificationKeys();
 		expect(keys).toHaveLength(1);
 		expect(keys[0].kid).toBe("k2");
 	});
