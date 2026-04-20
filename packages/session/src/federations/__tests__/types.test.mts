@@ -16,7 +16,11 @@
 
 import type { PassportStatic } from "passport";
 import { describe, expect, it } from "vitest";
-import type { FederationProvider, VerifyUserContext } from "#/federations/types.mjs";
+import type {
+	FederationProvider,
+	SetupPassportContext,
+	VerifyUserContext,
+} from "#/federations/types.mjs";
 
 describe("FederationProvider interface", () => {
 	it("requires name, scope, validateRedirect, resolveCallbackRedirect, setupPassportStrategy — no enabled or strategyName", () => {
@@ -34,23 +38,43 @@ describe("FederationProvider interface", () => {
 		expect(provider.scope).toEqual(["profile", "email"]);
 	});
 
-	it("setupPassportStrategy accepts a PassportStatic and VerifyUserContext", () => {
+	it("setupPassportStrategy accepts a PassportStatic and SetupPassportContext", () => {
 		// Type-only: annotate a function with the expected signature so tsc would fail
 		// if setupPassportStrategy's shape were to drift.
 		const setup: FederationProvider["setupPassportStrategy"] = async (
 			_passport: PassportStatic,
-			_ctx: VerifyUserContext,
+			_ctx: SetupPassportContext,
 		) => {};
 		expect(typeof setup).toBe("function");
 	});
 
-	it("VerifyUserContext has verifyUser(externalId): Promise<User | null>", () => {
-		const ctx: VerifyUserContext = {
+	it("SetupPassportContext has verifyUser(externalId): Promise<User | null>", () => {
+		const ctx: SetupPassportContext = {
 			verifyUser: async (externalId: string) => {
 				expect(externalId).toMatch(/^\w+:/);
 				return null;
 			},
 		};
 		expect(typeof ctx.verifyUser).toBe("function");
+	});
+
+	it("SetupPassportContext has optional pathResolver(spec: string): string", () => {
+		const ctx: SetupPassportContext = {
+			verifyUser: async () => null,
+			pathResolver: (spec) => `/custom/path/${spec}`,
+		};
+		expect(typeof ctx.pathResolver).toBe("function");
+		// biome-ignore lint/style/noNonNullAssertion: pathResolver set above
+		expect(ctx.pathResolver!("passport-google-oauth20")).toBe(
+			"/custom/path/passport-google-oauth20",
+		);
+	});
+
+	it("VerifyUserContext is a type alias for SetupPassportContext (backward compat)", () => {
+		// VerifyUserContext and SetupPassportContext are structurally identical —
+		// a value typed as one is assignable to the other.
+		const ctx: SetupPassportContext = { verifyUser: async () => null };
+		const asLegacy: VerifyUserContext = ctx;
+		expect(typeof asLegacy.verifyUser).toBe("function");
 	});
 });

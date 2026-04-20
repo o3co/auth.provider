@@ -16,7 +16,7 @@
 
 import type { PassportStatic } from "passport";
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
-import type { FederationProvider, VerifyUserContext } from "./types.mjs";
+import type { FederationProvider, SetupPassportContext } from "./types.mjs";
 
 export interface GithubProviderConfig {
 	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
@@ -55,11 +55,14 @@ export function createGithubProvider(config: GithubProviderConfig): FederationPr
 
 		async setupPassportStrategy(
 			passport: PassportStatic,
-			{ verifyUser }: VerifyUserContext,
+			{ verifyUser, pathResolver }: SetupPassportContext,
 		): Promise<void> {
 			let GithubStrategy: typeof import("passport-github2").Strategy;
 			try {
-				({ Strategy: GithubStrategy } = await import("passport-github2"));
+				const modSpec = pathResolver ? pathResolver("passport-github2") : "passport-github2";
+				({ Strategy: GithubStrategy } = (await import(
+					modSpec
+				)) as typeof import("passport-github2"));
 			} catch (err) {
 				throw new Error(
 					"GitHub federation requires passport-github2. Run: pnpm add passport-github2 @types/passport-github2",

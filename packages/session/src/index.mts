@@ -25,6 +25,7 @@ export { createGoogleProvider } from "./federations/google.mjs";
 export type {
 	FederationProvider,
 	FederationResult,
+	SetupPassportContext,
 	VerifyUserContext,
 } from "./federations/types.mjs";
 export { sessionModule } from "./module.mjs";

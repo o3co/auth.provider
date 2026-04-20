@@ -16,7 +16,7 @@
 
 import type { PathResolver, UserRepository } from "@o3co/auth-provider-core";
 import type { PassportStatic } from "passport";
-import type { FederationProvider } from "./federations/types.mjs";
+import type { FederationProvider, SetupPassportContext } from "./federations/types.mjs";
 
 declare global {
 	namespace Express {
@@ -84,12 +84,17 @@ export const createPassport = async ({
 		),
 	);
 
-	// verifyUser: delegates to userRepository so federation providers don't depend on the repo directly.
-	const verifyUser = (externalId: string) => userRepository.authenticateByToken(externalId);
+	// Build the setup context once: verifyUser delegates to userRepository so federation
+	// providers don't depend on the repo directly; pathResolver is forwarded for
+	// non-standard module layouts (Yarn PnP, custom require hooks).
+	const ctx: SetupPassportContext = {
+		verifyUser: (externalId: string) => userRepository.authenticateByToken(externalId),
+		pathResolver,
+	};
 
 	// Register each enabled federation provider's passport strategy.
 	for (const provider of federationProviders.values()) {
-		await provider.setupPassportStrategy(passport, { verifyUser });
+		await provider.setupPassportStrategy(passport, ctx);
 	}
 
 	return passport;

@@ -25,52 +25,49 @@ export function createFederationProviderFactory(): FederationProviderFactory {
 	return createAdapterFactory<FederationProvider>("FederationProvider");
 }
 
+/**
+ * Narrows a raw Record<string, unknown> builder config to the typed fields
+ * required by all built-in federation providers. Throws with a provider-specific
+ * label if any required field is absent or has the wrong type.
+ *
+ * Not exported — internal to this module only.
+ */
+function narrowFederationConfig(
+	config: Record<string, unknown>,
+	providerLabel: string,
+): {
+	name: string;
+	clientId: string;
+	clientSecret: string;
+	callbackURL: string;
+	sessionDomain?: string;
+	authCallbackUrl?: string;
+	clientUrl?: string;
+} {
+	const name = typeof config.name === "string" ? config.name : undefined;
+	const clientId = typeof config.clientId === "string" ? config.clientId : undefined;
+	const clientSecret = typeof config.clientSecret === "string" ? config.clientSecret : undefined;
+	const callbackURL = typeof config.callbackURL === "string" ? config.callbackURL : undefined;
+	if (!name || !clientId || !clientSecret || !callbackURL) {
+		throw new Error(
+			`${providerLabel} federation requires name, clientId, clientSecret, and callbackURL`,
+		);
+	}
+	const sessionDomain = typeof config.sessionDomain === "string" ? config.sessionDomain : undefined;
+	const authCallbackUrl =
+		typeof config.authCallbackUrl === "string" ? config.authCallbackUrl : undefined;
+	const clientUrl = typeof config.clientUrl === "string" ? config.clientUrl : undefined;
+	return { name, clientId, clientSecret, callbackURL, sessionDomain, authCallbackUrl, clientUrl };
+}
+
 export function registerBuiltinFederations(factory: FederationProviderFactory): void {
 	factory.register("google", async (config) => {
-		const name = typeof config.name === "string" ? config.name : undefined;
-		const clientId = typeof config.clientId === "string" ? config.clientId : undefined;
-		const clientSecret = typeof config.clientSecret === "string" ? config.clientSecret : undefined;
-		const callbackURL = typeof config.callbackURL === "string" ? config.callbackURL : undefined;
-		if (!name || !clientId || !clientSecret || !callbackURL) {
-			throw new Error("Google federation requires name, clientId, clientSecret, and callbackURL");
-		}
-		const sessionDomain =
-			typeof config.sessionDomain === "string" ? config.sessionDomain : undefined;
-		const authCallbackUrl =
-			typeof config.authCallbackUrl === "string" ? config.authCallbackUrl : undefined;
-		const clientUrl = typeof config.clientUrl === "string" ? config.clientUrl : undefined;
-		return createGoogleProvider({
-			name,
-			clientId,
-			clientSecret,
-			callbackURL,
-			sessionDomain,
-			authCallbackUrl,
-			clientUrl,
-		});
+		const narrowed = narrowFederationConfig(config, "Google");
+		return createGoogleProvider(narrowed);
 	});
 
 	factory.register("github", async (config) => {
-		const name = typeof config.name === "string" ? config.name : undefined;
-		const clientId = typeof config.clientId === "string" ? config.clientId : undefined;
-		const clientSecret = typeof config.clientSecret === "string" ? config.clientSecret : undefined;
-		const callbackURL = typeof config.callbackURL === "string" ? config.callbackURL : undefined;
-		if (!name || !clientId || !clientSecret || !callbackURL) {
-			throw new Error("GitHub federation requires name, clientId, clientSecret, and callbackURL");
-		}
-		const sessionDomain =
-			typeof config.sessionDomain === "string" ? config.sessionDomain : undefined;
-		const authCallbackUrl =
-			typeof config.authCallbackUrl === "string" ? config.authCallbackUrl : undefined;
-		const clientUrl = typeof config.clientUrl === "string" ? config.clientUrl : undefined;
-		return createGithubProvider({
-			name,
-			clientId,
-			clientSecret,
-			callbackURL,
-			sessionDomain,
-			authCallbackUrl,
-			clientUrl,
-		});
+		const narrowed = narrowFederationConfig(config, "GitHub");
+		return createGithubProvider(narrowed);
 	});
 }

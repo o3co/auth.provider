@@ -95,11 +95,28 @@ export const sessionModule = (params: {
 			}
 
 			const rawBuilderConfig = isNested
-				? { type, ...(subSection as Record<string, unknown>) }
+				? (() => {
+						// Nested: start from top-level passthrough fields, then overlay the sub-section.
+						// Exclude control fields (enabled/type) AND the nested sub-section key itself
+						// so they don't appear twice or shadow sub-section fields.
+						const {
+							enabled: _e,
+							type: _t,
+							[type]: _sub,
+							...topLevel
+						} = section as Record<string, unknown>;
+						return { type, ...topLevel, ...(subSection as Record<string, unknown>) };
+					})()
 				: { type, ...(section as Record<string, unknown>) };
 
 			// Strip control fields that must not be forwarded to the builder.
-			const { enabled: _e, type: _t, ...flatConfig } = rawBuilderConfig as Record<string, unknown>;
+			// For nested shape, enabled/type were already stripped inside the IIFE above;
+			// for flat shape we strip them here. Using distinct names avoids shadowing.
+			const {
+				enabled: _enabled,
+				type: _type,
+				...flatConfig
+			} = rawBuilderConfig as Record<string, unknown>;
 
 			// Inject context fields from AppConfig that provider builders need for redirect validation.
 			const sessionDomain =

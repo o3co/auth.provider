@@ -134,6 +134,23 @@ describe("setupPassportStrategy", () => {
 		await provider.setupPassportStrategy(mockPassport, { verifyUser: async () => null });
 		expect(mockPassport.use).toHaveBeenCalledWith("google-work", expect.any(Object));
 	});
+
+	it("uses ctx.pathResolver when provided to resolve passport-google-oauth20", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const provider = createGoogleProvider(baseConfig);
+		// pathResolver records what spec was requested and returns the real module path
+		// so the dynamic import actually succeeds in this test environment.
+		const resolved: string[] = [];
+		const pathResolver = (spec: string) => {
+			resolved.push(spec);
+			return spec; // fall through to real module resolution
+		};
+		await provider.setupPassportStrategy(mockPassport, {
+			verifyUser: async () => null,
+			pathResolver,
+		});
+		expect(resolved).toContain("passport-google-oauth20");
+	});
 });
 
 describe("createGoogleProvider validation", () => {

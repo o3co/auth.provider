@@ -108,6 +108,37 @@ describe("createPassport", () => {
 		expect(authenticateByToken).toHaveBeenCalledWith("google:abc123");
 	});
 
+	it("propagates pathResolver into each provider's setupPassportStrategy ctx", async () => {
+		const passportStub = makePassportStub();
+		const userRepository: UserRepository = {
+			authenticate: vi.fn(),
+			authenticateByToken: vi.fn().mockResolvedValue(null),
+		} as unknown as UserRepository;
+
+		let capturedCtx: { pathResolver?: (spec: string) => string } | undefined;
+		const provider = makeFederationProvider("google");
+		(provider.setupPassportStrategy as ReturnType<typeof vi.fn>).mockImplementation(
+			async (_passport: unknown, ctx: { pathResolver?: (spec: string) => string }) => {
+				capturedCtx = ctx;
+			},
+		);
+
+		// Identity resolver: records calls but returns spec unchanged so passport-local
+		// and other internal imports resolve normally. We only need to verify the same
+		// resolver reference reaches the provider ctx.
+		const identityPathResolver = vi.fn((spec: string) => spec);
+
+		await createPassport({
+			pathResolver: identityPathResolver,
+			userRepository,
+			federationProviders: new Map([["google", provider]]),
+			_passportOverride: passportStub as unknown as import("passport").PassportStatic,
+		});
+
+		expect(capturedCtx).toBeDefined();
+		expect(capturedCtx?.pathResolver).toBe(identityPathResolver);
+	});
+
 	it("uses an empty Map when no federationProviders are given", async () => {
 		const passportStub = makePassportStub();
 		const userRepository: UserRepository = {

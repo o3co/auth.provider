@@ -132,4 +132,21 @@ describe("federations schema — open to z.record with passthrough", () => {
 			}),
 		).not.toThrow();
 	});
+
+	it("coerces enabled from string 'true' to boolean true (env var path via z.coerce.boolean)", () => {
+		// FEDERATIONS_GOOGLE_ENABLED=true arrives as the string "true" from ts.hocon env-var
+		// substitution when the z.record wrapper prevents hocon-level coerce traversal.
+		// z.coerce.boolean() handles this: Boolean("true") === true.
+		const parsed = federationsSchema.parse({
+			google: { enabled: "true" },
+		});
+		expect(parsed.google.enabled).toBe(true);
+	});
+
+	it("coerces enabled from boolean true to boolean true (non-env path stays working)", () => {
+		const parsed = federationsSchema.parse({
+			google: { enabled: true },
+		});
+		expect(parsed.google.enabled).toBe(true);
+	});
 });

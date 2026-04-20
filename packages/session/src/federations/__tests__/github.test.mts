@@ -140,6 +140,23 @@ describe("setupPassportStrategy", () => {
 		expect(mockPassport.use).toHaveBeenCalledWith("github-enterprise", expect.any(Object));
 	});
 
+	it("uses ctx.pathResolver when provided to resolve passport-github2", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const provider = createGithubProvider(baseConfig);
+		// pathResolver records what spec was requested and returns the real module path
+		// so the dynamic import actually succeeds in this test environment.
+		const resolved: string[] = [];
+		const pathResolver = (spec: string) => {
+			resolved.push(spec);
+			return spec; // fall through to real module resolution
+		};
+		await provider.setupPassportStrategy(mockPassport, {
+			verifyUser: async () => null,
+			pathResolver,
+		});
+		expect(resolved).toContain("passport-github2");
+	});
+
 	it.skip("throws a clear error when passport-github2 is not installed (TODO: test via dynamic import mock — verify manually with package uninstalled)", () => {
 		// Manual verification: uninstall passport-github2 and call setupPassportStrategy.
 		// Expect: Error matching /GitHub federation requires passport-github2/i

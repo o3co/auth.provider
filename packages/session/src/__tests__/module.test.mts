@@ -229,6 +229,59 @@ describe("sessionModule", () => {
 		expect(factory.create).not.toHaveBeenCalled();
 	});
 
+	it("preserves top-level passthrough fields when config is nested", async () => {
+		// Arrange: a custom type with both a nested sub-section AND a top-level passthrough field.
+		// Example: federations.corp { type="custom", audience="...", custom { issuer="..." } }
+		// The 'audience' field lives at the top level of the federation section and must be
+		// forwarded to the builder, not dropped when we extract the nested sub-section.
+		let receivedConfig: Record<string, unknown> | undefined;
+		const factory = {
+			create: vi.fn().mockImplementation(async (cfg: Record<string, unknown>) => {
+				receivedConfig = cfg;
+				return {
+					name: cfg.name as string,
+					scope: [],
+					validateRedirect: vi.fn(),
+					resolveCallbackRedirect: vi.fn(),
+					setupPassportStrategy: vi.fn().mockResolvedValue(undefined),
+				};
+			}),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				corp: {
+					enabled: true,
+					type: "custom",
+					// top-level passthrough field — must survive normalization
+					audience: "api://my-corp",
+					// nested adapter-specific sub-section
+					custom: { issuer: "https://idp.corp.example" },
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			_federationFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		await module.init(ctx);
+
+		expect(factory.create).toHaveBeenCalledTimes(1);
+		expect(receivedConfig).toMatchObject({
+			type: "custom",
+			name: "corp",
+			audience: "api://my-corp", // top-level passthrough preserved
+			issuer: "https://idp.corp.example", // nested sub-section merged
+		});
+	});
+
 	it("injects name and context fields into builder config", async () => {
 		const factory = {
 			create: vi.fn().mockResolvedValue({

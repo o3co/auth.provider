@@ -54,7 +54,7 @@ Routes mounted:
 |--------|---------------------------------------------------|---------------------------------|
 | POST   | /session/login                                    | Username / password login       |
 | POST   | /session/logout                                   | Session logout                  |
-| GET    | /session/oauth/federation/:name/authenticate      | Initiate OAuth federation flow  |
+| GET    | /session/oauth/federation/:name                   | Initiate OAuth federation flow  |
 | GET    | /session/oauth/federation/:name/callback          | Federation callback             |
 
 The `:name` path parameter corresponds to the federation key in `config.federations` (e.g. `google`, `github`, `google-work`). Unknown names return `404`.

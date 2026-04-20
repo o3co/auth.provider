@@ -21,14 +21,23 @@ export type FederationResult<T> =
 	| { ok: true; value: T }
 	| { ok: false; status: number; error: string; errorDescription: string };
 
-export interface VerifyUserContext {
+export interface SetupPassportContext {
 	verifyUser: (externalId: string) => Promise<User | null>;
+	/**
+	 * Optional module resolver used for dynamic imports of passport strategies.
+	 * Deployments with non-standard module layouts (Yarn PnP, custom require hooks)
+	 * can pass a resolver; standard Node/npm deployments omit it.
+	 */
+	pathResolver?: (spec: string) => string;
 }
+
+/** @deprecated Use SetupPassportContext instead. */
+export type VerifyUserContext = SetupPassportContext;
 
 export interface FederationProvider {
 	readonly name: string;
 	readonly scope: readonly string[];
 	validateRedirect(url: string): FederationResult<void>;
 	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
-	setupPassportStrategy(passport: PassportStatic, ctx: VerifyUserContext): Promise<void>;
+	setupPassportStrategy(passport: PassportStatic, ctx: SetupPassportContext): Promise<void>;
 }

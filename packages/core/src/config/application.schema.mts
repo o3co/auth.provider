@@ -156,7 +156,10 @@ export const fullSectionsSchema = z.object({
 			z.string(),
 			z
 				.object({
-					enabled: z.boolean().default(false),
+					// z.coerce.boolean() so that env-var strings like "true"/"false" are accepted.
+					// Note: any truthy value (e.g. the string "false") coerces to true — same
+					// behavior as rateLimitSchema which uses z.coerce.number() for parity.
+					enabled: z.coerce.boolean().default(false),
 					type: z.string().optional(),
 				})
 				.passthrough(),

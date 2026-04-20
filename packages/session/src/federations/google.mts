@@ -15,7 +15,7 @@
  */
 
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
-import type { FederationProvider } from "./types.mjs";
+import type { FederationProvider, SetupPassportContext } from "./types.mjs";
 
 export interface GoogleProviderConfig {
 	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
@@ -53,8 +53,13 @@ export const createGoogleProvider = (config: GoogleProviderConfig): FederationPr
 			return resolveCallbackRedirect(session, config);
 		},
 
-		async setupPassportStrategy(passport, { verifyUser }) {
-			const { Strategy: GoogleStrategy } = await import("passport-google-oauth20");
+		async setupPassportStrategy(passport, { verifyUser, pathResolver }: SetupPassportContext) {
+			const modSpec = pathResolver
+				? pathResolver("passport-google-oauth20")
+				: "passport-google-oauth20";
+			const { Strategy: GoogleStrategy } = (await import(
+				modSpec
+			)) as typeof import("passport-google-oauth20");
 			passport.use(
 				config.name,
 				new GoogleStrategy(

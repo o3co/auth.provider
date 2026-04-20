@@ -54,7 +54,7 @@ function sessionModule(params: {
 | --- | --- | --- |
 | POST | /session/login | ユーザー名 / パスワードログイン |
 | POST | /session/logout | セッションログアウト |
-| GET | /session/oauth/federation/:name/authenticate | OAuth フェデレーションフロー開始 |
+| GET | /session/oauth/federation/:name | OAuth フェデレーションフロー開始 |
 | GET | /session/oauth/federation/:name/callback | フェデレーションコールバック |
 
 `:name` パスパラメーターは `config.federations` のキー（例: `google`、`github`、`google-work`）に対応する。未知の名前は `404` を返す。
