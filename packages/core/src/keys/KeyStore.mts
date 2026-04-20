@@ -55,6 +55,26 @@ export type Algorithm = "HS256" | "RS256" | "ES256" | "EdDSA";
 
 export interface KeyStore {
 	readonly algorithm: Algorithm;
+	/**
+	 * Sign claims and return a compact JWT. The KeyStore self-injects `alg`
+	 * and `kid` into the protected header; callers may set only `typ`.
+	 * Remote-sign adapters (KMS/HSM) perform the remote call here.
+	 */
+	sign(options: SignJwtOptions): Promise<string>;
+	/**
+	 * Current signing kid. Intended as a fallback for verifying
+	 * legacy/malformed tokens missing a `kid` header. **Do not use for
+	 * rotation-safe lookup** — for rotation, pass the token's own `kid` to
+	 * `getVerificationKey(kid)`. Cheap, sync, does not expose any private key.
+	 */
+	getCurrentKid(): string;
+	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */
+	getVerificationKeys(): Promise<ManagedKey[]>;
+	/** Specific kid's public key. Throws on unknown or expired kid. */
+	getVerificationKey(kid: string): Promise<KeyLike>;
+
+	// Legacy API — to be removed in Task 12. Kept temporarily so internal
+	// callers (token.mts, refreshToken.mts, routes.mts) still compile.
 	readonly current: {
 		readonly kid: string;
 		readonly privateKey: KeyLike;
@@ -62,8 +82,6 @@ export interface KeyStore {
 	};
 	readonly previous: readonly ManagedKey[];
 	getSigningKey(): { kid: string; privateKey: KeyLike };
-	getVerificationKeys(): ManagedKey[];
-	getVerificationKey(kid: string): KeyLike;
 }
 
 export interface AsymmetricKeyStoreOptions {
@@ -145,7 +163,7 @@ export async function createAsymmetricKeyStore(
 			}
 			return prev.publicKey;
 		},
-	} as unknown as KeyStore;
+	};
 }
 
 export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
@@ -189,5 +207,5 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 			}
 			return secretKey;
 		},
-	} as unknown as KeyStore;
+	};
 }
