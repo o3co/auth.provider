@@ -34,7 +34,7 @@ Top-level fields:
 | `oauth.grants` | Per-grant-type config (`session`, `authorization`, `refresh_token`, and custom keys) |
 | `session` | Express session — secret, maxAge, secure, sameSite, domain, storage |
 | `rateLimit` | Rate limit config for `login`, `token`, and `authorize` endpoints |
-| `federations.google` | Google federation config |
+| `federations` | Federation providers — `z.record(string, { enabled, type?, ...passthrough })`. Built-in types: `"google"`, `"github"`. |
 | `clients` | Repository config for clients, users, and codes |
 | `endpoints` | Path overrides for `login`, `client`, and `authCallback` routes |
 | `cors.allowedOrigins` | CORS allowed origins |

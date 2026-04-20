@@ -2,7 +2,7 @@
 
 Session and federation routes module for [auth.provider](../../README.md).
 
-Handles username/password login, logout, and OAuth 2.0 federation (Google, and any provider registered via `FederationRegistry`). Uses Passport.js internally for strategy management.
+Handles username/password login, logout, and OAuth 2.0 federation (Google, GitHub, and any provider registered via `FederationProviderFactory`). Uses Passport.js internally for strategy management.
 
 ## Install
 
@@ -24,7 +24,16 @@ express@^5.0.0
 passport@^0.7.0               (optional)
 passport-local@^1.0.0         (optional)
 passport-google-oauth20@^2.0.0 (optional)
+passport-github2@^0.1.12      (optional — GitHub federation only)
 ```
+
+GitHub federation requires `passport-github2` and `@types/passport-github2` to be installed separately. Since they are optional peer dependencies, you opt in by running:
+
+```bash
+pnpm add passport-github2 @types/passport-github2
+```
+
+Google-only or federation-less deployments pay no install cost for this package.
 
 ## Public API
 
@@ -45,8 +54,10 @@ Routes mounted:
 |--------|---------------------------------------------------|---------------------------------|
 | POST   | /session/login                                    | Username / password login       |
 | POST   | /session/logout                                   | Session logout                  |
-| GET    | /session/oauth/federation/:provider               | Initiate OAuth federation flow  |
-| GET    | /session/oauth/federation/:provider/callback      | Federation callback             |
+| GET    | /session/oauth/federation/:name                   | Initiate OAuth federation flow  |
+| GET    | /session/oauth/federation/:name/callback          | Federation callback             |
+
+The `:name` path parameter corresponds to the federation key in `config.federations` (e.g. `google`, `github`, `google-work`). Unknown names return `404`.
 
 ---
 
@@ -54,39 +65,77 @@ Routes mounted:
 
 ```typescript
 function createPassport(options: {
-  pathResolver: PathResolver;
   userRepository: UserRepository;
-  config: AppConfig;
+  federationProviders: ReadonlyMap<string, FederationProvider>;
+  pathResolver: PathResolver;  // required; used for dynamic imports of passport/passport-local and threaded through to FederationProvider.setupPassportStrategy
 }): Promise<PassportStatic>;
 ```
 
 Creates and configures a Passport instance.
 
 - **LocalStrategy** — authenticates with `username` and `password` fields.
-- **GoogleStrategy** — registered when `config.federations.google.enabled` is `true`.
+- **Federation strategies** — registered for each provider in `federationProviders` by calling `provider.setupPassportStrategy(passport, { verifyUser, pathResolver })`.
+
+---
+
+### `createFederationProviderFactory`
+
+```typescript
+function createFederationProviderFactory(): FederationProviderFactory;
+```
+
+Creates an empty `FederationProviderFactory` (an `AdapterFactory<FederationProvider>` with no built-in types registered). Call `registerBuiltinFederations(factory)` to register the built-in `"google"` and `"github"` types, then call `factory.register(type, builder)` to add your own.
+
+---
+
+### `registerBuiltinFederations`
+
+```typescript
+function registerBuiltinFederations(factory: FederationProviderFactory): void;
+```
+
+Registers the built-in federation adapters into `factory`:
+
+| Type       | Provider               | Required peer dep              |
+|------------|------------------------|--------------------------------|
+| `"google"` | `createGoogleProvider` | `passport-google-oauth20`      |
+| `"github"` | `createGithubProvider` | `passport-github2` (optional)  |
 
 ---
 
 ### `createGoogleProvider`
 
 ```typescript
-function createGoogleProvider(config: AppConfig): FederationProvider;
+function createGoogleProvider(config: {
+  name: string;
+  clientId: string;
+  clientSecret: string;
+  callbackURL: string;
+  sessionDomain?: string;
+  authCallbackUrl?: string;
+  clientUrl?: string;
+}): FederationProvider;
 ```
 
-Creates a `FederationProvider` for Google OAuth 2.0. The provider reads its client ID, client secret, and callback URL from `config`.
+Creates a `FederationProvider` for Google OAuth 2.0. The strategy is registered in Passport under `config.name`, which enables multi-tenant usage (e.g. `google` and `google-work` as separate instances).
 
 ---
 
-### `FederationRegistry`
+### `createGithubProvider`
 
 ```typescript
-class FederationRegistry {
-  register(provider: FederationProvider): void;
-  get(name: string): FederationProvider | undefined;
-}
+function createGithubProvider(config: {
+  name: string;
+  clientId: string;
+  clientSecret: string;
+  callbackURL: string;
+  sessionDomain?: string;
+  authCallbackUrl?: string;
+  clientUrl?: string;
+}): FederationProvider;
 ```
 
-Registry for federation providers. Pass an instance to `sessionModule` (or populate it before the module initializes) to enable custom providers alongside or instead of the built-in Google provider.
+Creates a `FederationProvider` for GitHub OAuth 2.0. Uses `passport-github2` (optional peer dep — must be installed separately). The default scope is `["read:user", "user:email"]`. The `externalId` format is `"github:" + profile.id`.
 
 ---
 
@@ -94,16 +143,36 @@ Registry for federation providers. Pass an instance to `sessionModule` (or popul
 
 ```typescript
 interface FederationProvider {
-  name: string;
-  strategyName: string;
-  scope: string[];
-  enabled: boolean;
+  readonly name: string;
+  readonly scope: readonly string[];
   validateRedirect(url: string): FederationResult<void>;
-  resolveCallbackRedirect(session: unknown): FederationResult<string>;
+  resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
+  setupPassportStrategy(passport: PassportStatic, ctx: SetupPassportContext): Promise<void>;
+}
+
+interface SetupPassportContext {
+  verifyUser: (externalId: string) => Promise<User | null>;
+  pathResolver?: (spec: string) => string;  // optional; for Yarn PnP and other non-standard module layouts
 }
 ```
 
 Implement this interface to add a custom OAuth 2.0 / OIDC federation provider.
+
+- `name` — unique passport strategy identifier. Used as both the Map key in `federationProviders` and the strategy name passed to `passport.use()`.
+- `scope` — OAuth 2.0 scopes to request.
+- `validateRedirect` — validates whether a redirect URL is permitted before initiating the federation flow.
+- `resolveCallbackRedirect` — resolves the post-callback redirect target from the session.
+- `setupPassportStrategy` — registers the Passport strategy. Called once during module initialization.
+
+---
+
+### `FederationProviderFactory` (type)
+
+```typescript
+type FederationProviderFactory = AdapterFactory<FederationProvider>;
+```
+
+An `AdapterFactory<FederationProvider>`. Register custom provider types via `factory.register(type, builder)`.
 
 ---
 
@@ -118,6 +187,8 @@ type FederationResult<T> =
 Discriminated union returned by `FederationProvider` methods. Check `ok` before accessing `value`.
 
 ## Usage Example
+
+### Basic usage
 
 ```typescript
 import express from "express";
@@ -136,16 +207,108 @@ const app = createApp(express, {
 await app.init();
 ```
 
-### FederationRegistry
+The `sessionModule` reads `config.federations` and wires up providers automatically using `createFederationProviderFactory` + `registerBuiltinFederations` internally.
 
-```typescript
-import { FederationRegistry } from "@o3co/auth-provider-session";
+### HOCON federation configuration
 
-const registry = new FederationRegistry();
-registry.register(myCustomProvider);
+**Shorthand (key name = provider type):**
+
+```hocon
+federations {
+  google {
+    enabled = true
+    clientId = ${FEDERATIONS_GOOGLE_CLIENT_ID}
+    clientSecret = ${FEDERATIONS_GOOGLE_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
+  }
+
+  github {
+    enabled = true
+    clientId = ${FEDERATIONS_GITHUB_CLIENT_ID}
+    clientSecret = ${FEDERATIONS_GITHUB_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/github/callback"
+  }
+}
 ```
 
-`FederationRegistry` is used internally by `sessionModule` to manage federation providers. The built-in Google provider is registered automatically when `config.federations.google.enabled` is `true`.
+**Explicit multi-tenant (two Google instances):**
+
+```hocon
+federations {
+  google-personal {
+    enabled = true
+    type = "google"
+    google {
+      clientId = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_ID}
+      clientSecret = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_SECRET}
+      callbackURL = "https://auth.example.com/session/oauth/federation/google-personal/callback"
+    }
+  }
+
+  google-work {
+    enabled = true
+    type = "google"
+    google {
+      clientId = ${FEDERATIONS_GOOGLE_WORK_CLIENT_ID}
+      clientSecret = ${FEDERATIONS_GOOGLE_WORK_CLIENT_SECRET}
+      callbackURL = "https://auth.example.com/session/oauth/federation/google-work/callback"
+    }
+  }
+}
+```
+
+Mixed shape — top-level fields alongside a nested sub-section — is rejected with a clear error at startup.
+
+### Custom federation provider
+
+```typescript
+import {
+  createFederationProviderFactory,
+  registerBuiltinFederations,
+  type FederationProvider,
+  type FederationProviderFactory,
+} from "@o3co/auth-provider-session";
+
+// Create factory and register built-ins
+const factory = createFederationProviderFactory();
+registerBuiltinFederations(factory);
+
+// Register a custom provider type
+factory.register("microsoft", async (config) => {
+  // build and return a FederationProvider
+  return {
+    name: config.name as string,
+    scope: ["openid", "profile", "email"],
+    validateRedirect: (url) => ({ ok: true, value: undefined }),
+    resolveCallbackRedirect: (session) => ({ ok: true, value: session.redirectTo ?? "/" }),
+    setupPassportStrategy: async (passport, { verifyUser }) => {
+      // register passport-microsoft or similar
+    },
+  };
+});
+
+// Build the provider map from config — mirrors the normalization in module.mts
+const federationProviders = new Map<string, FederationProvider>();
+for (const [name, section] of Object.entries(config.federations)) {
+  if (!section.enabled) continue;
+
+  const type = (typeof section.type === "string" ? section.type : undefined) ?? name;
+  const subSection = (section as Record<string, unknown>)[type];
+  const isNested =
+    typeof subSection === "object" && subSection !== null && !Array.isArray(subSection);
+
+  const rawBuilderConfig = isNested
+    ? (() => {
+        const { enabled: _e, type: _t, [type]: _sub, ...topLevel } = section as Record<string, unknown>;
+        return { type, ...topLevel, ...(subSection as Record<string, unknown>) };
+      })()
+    : { type, ...(section as Record<string, unknown>) };
+
+  const { enabled: _e2, type: _t2, ...flatConfig } = rawBuilderConfig as Record<string, unknown>;
+  const provider = await factory.create({ type, name, ...flatConfig });
+  federationProviders.set(name, provider);
+}
+```
 
 ## See Also
 

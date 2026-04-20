@@ -14,27 +14,30 @@
  * limitations under the License.
  */
 
+import type { User } from "@o3co/auth-provider-core";
+import type { PassportStatic } from "passport";
+
 export type FederationResult<T> =
 	| { ok: true; value: T }
 	| { ok: false; status: number; error: string; errorDescription: string };
 
-export interface FederationProvider {
-	name: string;
-	strategyName: string;
-	scope: string[];
-	enabled: boolean;
-	validateRedirect(url: string): FederationResult<void>;
-	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
+export interface SetupPassportContext {
+	verifyUser: (externalId: string) => Promise<User | null>;
+	/**
+	 * Optional module resolver used for dynamic imports of passport strategies.
+	 * Deployments with non-standard module layouts (Yarn PnP, custom require hooks)
+	 * can pass a resolver; standard Node/npm deployments omit it.
+	 */
+	pathResolver?: (spec: string) => string;
 }
 
-export class FederationRegistry {
-	private providers = new Map<string, FederationProvider>();
+/** @deprecated Use SetupPassportContext instead. */
+export type VerifyUserContext = SetupPassportContext;
 
-	register(provider: FederationProvider): void {
-		this.providers.set(provider.name, provider);
-	}
-
-	get(name: string): FederationProvider | undefined {
-		return this.providers.get(name);
-	}
+export interface FederationProvider {
+	readonly name: string;
+	readonly scope: readonly string[];
+	validateRedirect(url: string): FederationResult<void>;
+	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
+	setupPassportStrategy(passport: PassportStatic, ctx: SetupPassportContext): Promise<void>;
 }

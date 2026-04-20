@@ -46,7 +46,7 @@ The `DidDocumentResolver` interface is pluggable — implement it for your DID m
 - **Modular composition** — Pick only the modules you need. DID-only? Skip session, federation, authorization code entirely.
 - **JWT algorithm selection** — HS256, RS256, ES256, EdDSA. JWKS endpoint (`/.well-known/jwks.json`) for asymmetric algorithms.
 - **OAuth 2.0 compliance** — Authorization code flow with PKCE (RFC 7636), token introspection (RFC 7662), refresh tokens
-- **Session authentication** — Passport.js local strategy + Google OAuth federation
+- **Session authentication** — Passport.js local strategy + OAuth federation (Google, GitHub, and custom providers via `FederationProviderFactory`)
 - **Rate limiting** — Per-endpoint configurable limits
 - **HOCON configuration** — Type-safe config with Zod validation and environment variable overrides
 
@@ -131,7 +131,7 @@ await init();
 - **core** — Interfaces, config schemas, token service, app factory. Always required.
 - **oauth** — OAuth routes (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`). Required for any token issuance.
 - **did** — DID authentication grant. Optional — only needed if you use DID-based auth.
-- **session** — Session login + Google federation. Optional — skip for API-only deployments.
+- **session** — Session login + OAuth federation (Google, GitHub, extensible). Optional — skip for API-only deployments.
 - **foundation** — Production repository adapters (Redis code store, HTTP user lookup). Optional.
 
 ## Packages
@@ -141,7 +141,7 @@ await init();
 | [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | Grant registry, token service, repository interfaces, config schemas |
 | [`packages/did`](packages/did/) | `@o3co/auth-provider-did` | DID authentication grant with pluggable resolver |
 | [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth routes: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
-| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session routes, Passport.js, Google federation |
+| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session routes, Passport.js, OAuth federation (Google, GitHub, extensible) |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Redis code store, HTTP user/client repositories |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
 | [`create-app`](create-app/) | `create-o3co-auth-provider` | CLI scaffolder |
@@ -208,7 +208,15 @@ oauth.grants.authorization {
 
 ```hocon
 session { secret = ${SESSION_SECRET} }
-federations { google { enabled = false } }
+
+# Shorthand: key name = provider type (google, github, or any registered custom type)
+federations {
+  google {
+    enabled = false
+    # clientId, clientSecret, callbackURL — required when enabled = true
+  }
+  # github { enabled = false }
+}
 ```
 
 See [`templates/standalone/config/application.conf`](templates/standalone/config/application.conf) for a complete example.
