@@ -109,3 +109,24 @@ describe("registerBuiltinFederations", () => {
 		).rejects.toThrow(/clientId|clientSecret|callbackURL/i);
 	});
 });
+
+describe("FederationProviderBase assignability", () => {
+	it("typed element is FederationProviderBase", async () => {
+		const { createFederationProviderFactory } = await import("#/federations/factory.mjs");
+		const factory = createFederationProviderFactory();
+		// If `create`'s return type is Promise<FederationProviderBase>, this local variable
+		// typed as FederationProviderBase is trivially assignable.
+		factory.register("stub", async () => ({
+			name: "stub",
+			scope: [],
+			validateRedirect: () => ({ ok: true, value: undefined }),
+			resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
+			async setupPassportStrategy() {},
+		}));
+		const base: import("#/federations/types.mjs").FederationProviderBase = await factory.create({
+			type: "stub",
+			name: "stub",
+		});
+		expect(base.name).toBe("stub");
+	});
+});
