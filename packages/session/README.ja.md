@@ -67,7 +67,7 @@ function sessionModule(params: {
 function createPassport(options: {
   userRepository: UserRepository;
   federationProviders: ReadonlyMap<string, FederationProvider>;
-  pathResolver?: PathResolver;  // optional; FederationProvider.setupPassportStrategy に転送される
+  pathResolver: PathResolver;  // 必須; passport/passport-local の dynamic import に使用され、FederationProvider.setupPassportStrategy にも転送される
 }): Promise<PassportStatic>;
 ```
 

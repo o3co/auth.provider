@@ -67,7 +67,7 @@ The `:name` path parameter corresponds to the federation key in `config.federati
 function createPassport(options: {
   userRepository: UserRepository;
   federationProviders: ReadonlyMap<string, FederationProvider>;
-  pathResolver?: PathResolver;  // optional; threads through to FederationProvider.setupPassportStrategy
+  pathResolver: PathResolver;  // required; used for dynamic imports of passport/passport-local and threaded through to FederationProvider.setupPassportStrategy
 }): Promise<PassportStatic>;
 ```
 
