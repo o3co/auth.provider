@@ -22,8 +22,12 @@ import {
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
-import { createGoogleProvider } from "./federations/google.mjs";
-import { FederationRegistry } from "./federations/types.mjs";
+import {
+	createFederationProviderFactory,
+	type FederationProviderFactory,
+	registerBuiltinFederations,
+} from "./federations/factory.mjs";
+import type { FederationProvider } from "./federations/types.mjs";
 import { createPassport } from "./passport.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
@@ -45,6 +49,8 @@ const sessionConfigSchema = fullSectionsSchema.pick({
 export const sessionModule = (params: {
 	userRepository: UserRepository;
 	express?: ExpressLike;
+	/** For testing only — inject a pre-configured factory to skip registration. */
+	_federationFactory?: FederationProviderFactory;
 }): Module => ({
 	name: "session",
 	configSchema: sessionConfigSchema,
@@ -57,16 +63,72 @@ export const sessionModule = (params: {
 			})());
 		const config = context.config as AppConfig;
 
+		// Build federation provider factory (or use injected stub in tests).
+		const factory: FederationProviderFactory =
+			params._federationFactory ??
+			(() => {
+				const f = createFederationProviderFactory();
+				registerBuiltinFederations(f);
+				return f;
+			})();
+
+		// Normalize federation config entries and build the provider Map.
+		const federationProviders = new Map<string, FederationProvider>();
+		for (const [name, section] of Object.entries(config.federations)) {
+			if (!section.enabled) continue;
+
+			const type = (typeof section.type === "string" ? section.type : undefined) ?? name;
+			const subSection = (section as Record<string, unknown>)[type];
+			const isNested =
+				typeof subSection === "object" && subSection !== null && !Array.isArray(subSection);
+
+			// Reject mixed shape: both top-level credential fields and a nested sub-section present.
+			if (isNested) {
+				const flatFieldsPresent = ["clientId", "clientSecret", "callbackURL"].filter(
+					(k) => k in (section as Record<string, unknown>),
+				);
+				if (flatFieldsPresent.length > 0) {
+					throw new Error(
+						`federations.${name}: mixed shape — remove top-level ${flatFieldsPresent.join("/")} OR the ${type} { ... } sub-section`,
+					);
+				}
+			}
+
+			const rawBuilderConfig = isNested
+				? { type, ...(subSection as Record<string, unknown>) }
+				: { type, ...(section as Record<string, unknown>) };
+
+			// Strip control fields that must not be forwarded to the builder.
+			const { enabled: _e, type: _t, ...flatConfig } = rawBuilderConfig as Record<string, unknown>;
+
+			// Inject context fields from AppConfig that provider builders need for redirect validation.
+			const sessionDomain =
+				// config.session.domain: string | null — pass through when non-null
+				typeof config.session.domain === "string" ? config.session.domain : undefined;
+			const authCallbackUrl =
+				// config.endpoints.authCallback: optional section — used to build post-login redirect
+				config.endpoints.authCallback?.url ?? undefined;
+			const clientUrl =
+				// config.endpoints.client: optional section — fallback URL when no redirectTo in session
+				config.endpoints.client?.url ?? undefined;
+
+			const provider = await factory.create({
+				type,
+				name,
+				...flatConfig,
+				sessionDomain,
+				authCallbackUrl,
+				clientUrl,
+			});
+			federationProviders.set(name, provider);
+		}
+
 		// Initialize passport with pathResolver
 		const passport = await createPassport({
 			pathResolver: context.pathResolver,
 			userRepository: params.userRepository,
-			config,
+			federationProviders,
 		});
-
-		// Build federation registry
-		const federationRegistry = new FederationRegistry();
-		federationRegistry.register(createGoogleProvider(config));
 
 		// Mount session routes
 		context.router.use(
@@ -83,7 +145,7 @@ export const sessionModule = (params: {
 			federationRoutes.createRouter(express, {
 				passport,
 				config,
-				federationRegistry,
+				federationProviders,
 			}),
 		);
 	},

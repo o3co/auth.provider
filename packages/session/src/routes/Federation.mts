@@ -17,7 +17,7 @@ import crypto from "node:crypto";
 import type { AppConfig } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import type { PassportStatic } from "passport";
-import type { FederationRegistry } from "../federations/types.mjs";
+import type { FederationProvider } from "../federations/types.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -37,8 +37,12 @@ export const createRouter = (
 	{
 		passport,
 		config,
-		federationRegistry,
-	}: { passport: PassportStatic; config: AppConfig; federationRegistry: FederationRegistry },
+		federationProviders,
+	}: {
+		passport: PassportStatic;
+		config: AppConfig;
+		federationProviders: ReadonlyMap<string, FederationProvider>;
+	},
 ): Router => {
 	const router = express.Router();
 
@@ -46,8 +50,8 @@ export const createRouter = (
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
 		.get("/oauth/federation/:provider", (req: Request, res: Response, next) => {
-			const provider = federationRegistry.get(String(req.params.provider));
-			if (!provider?.enabled) {
+			const provider = federationProviders.get(String(req.params.provider));
+			if (!provider) {
 				return res.status(404).json({ message: "NotFound" });
 			}
 
@@ -77,8 +81,11 @@ export const createRouter = (
 
 			return req.session.save((err: Error | null) => {
 				if (err) return res.status(500).json({ message: "Error saving session" });
-				return passport.authenticate(provider.strategyName, {
-					scope: provider.scope,
+				// provider.name is the passport strategy name (set at setupPassportStrategy time).
+				// Task 9 will migrate :provider param → :name and refine strategy-name lookup.
+				return passport.authenticate(provider.name, {
+					// Spread readonly to mutable to satisfy passport's AuthenticateOptions type.
+					scope: [...provider.scope],
 					state: csrfState,
 				})(req, res, next);
 			});
@@ -86,8 +93,8 @@ export const createRouter = (
 		.get(
 			"/oauth/federation/:provider/callback",
 			(req: Request, res: Response, next) => {
-				const provider = federationRegistry.get(String(req.params.provider));
-				if (!provider?.enabled) {
+				const provider = federationProviders.get(String(req.params.provider));
+				if (!provider) {
 					return res.status(404).json({ message: "NotFound" });
 				}
 
@@ -95,14 +102,16 @@ export const createRouter = (
 					return res.status(400).json({ message: "invalid state" });
 				}
 
-				return passport.authenticate(provider.strategyName, {
+				// provider.name is the passport strategy name registered by setupPassportStrategy.
+				// Task 9 will migrate :provider param → :name and refine strategy-name lookup.
+				return passport.authenticate(provider.name, {
 					session: false,
 					failureRedirect: config.endpoints.login.url,
 				})(req, res, next);
 			},
 			(req: Request, res: Response) => {
-				const provider = federationRegistry.get(String(req.params.provider));
-				if (!provider?.enabled) {
+				const provider = federationProviders.get(String(req.params.provider));
+				if (!provider) {
 					return res.status(404).json({ message: "NotFound" });
 				}
 

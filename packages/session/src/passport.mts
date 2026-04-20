@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 
-import type { AppConfig, PathResolver, UserRepository } from "@o3co/auth-provider-core";
+import type { PathResolver, UserRepository } from "@o3co/auth-provider-core";
 import type { PassportStatic } from "passport";
+import type { FederationProvider } from "./federations/types.mjs";
 
 declare global {
 	namespace Express {
@@ -26,15 +27,22 @@ declare global {
 export const createPassport = async ({
 	pathResolver,
 	userRepository,
-	config,
+	federationProviders,
+	_passportOverride,
 }: {
 	pathResolver: PathResolver;
 	userRepository: UserRepository;
-	config: AppConfig;
+	federationProviders: ReadonlyMap<string, FederationProvider>;
+	/** For testing only — inject a passport stub to skip dynamic import. */
+	_passportOverride?: PassportStatic;
 }): Promise<PassportStatic> => {
-	const { default: passport } = (await import(pathResolver("passport"))) as {
-		default: PassportStatic;
-	};
+	const passport: PassportStatic =
+		_passportOverride ??
+		(
+			(await import(pathResolver("passport"))) as {
+				default: PassportStatic;
+			}
+		).default;
 
 	const { Strategy: LocalStrategy } = (await import(pathResolver("passport-local"))) as {
 		Strategy: new (
@@ -76,38 +84,12 @@ export const createPassport = async ({
 		),
 	);
 
-	if (config.federations.google.enabled) {
-		const { Strategy: GoogleStrategy } = (await import(
-			pathResolver("passport-google-oauth20")
-		)) as {
-			Strategy: new (
-				options: { clientID: string; clientSecret: string; callbackURL: string },
-				verify: (
-					accessToken: string,
-					refreshToken: string,
-					profile: { id: string },
-					done: (err: Error | null, user?: unknown) => void,
-				) => void,
-			) => import("passport").Strategy;
-		};
+	// verifyUser: delegates to userRepository so federation providers don't depend on the repo directly.
+	const verifyUser = (externalId: string) => userRepository.authenticateByToken(externalId);
 
-		passport.use(
-			new GoogleStrategy(
-				{
-					clientID: config.federations.google.clientId ?? "",
-					clientSecret: config.federations.google.clientSecret ?? "",
-					callbackURL: config.federations.google.callbackURL ?? "",
-				},
-				async (_accessToken, _refreshToken, profile, done) => {
-					try {
-						const user = await userRepository.authenticateByToken(`google:${profile.id}`);
-						return done(null, user as Express.User);
-					} catch (cause) {
-						return done(cause as Error);
-					}
-				},
-			),
-		);
+	// Register each enabled federation provider's passport strategy.
+	for (const provider of federationProviders.values()) {
+		await provider.setupPassportStrategy(passport, { verifyUser });
 	}
 
 	return passport;
