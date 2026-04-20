@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+export type { FederationProviderFactory } from "./federations/factory.mjs";
+export { createFederationProviderFactory } from "./federations/factory.mjs";
 export { createGoogleProvider } from "./federations/google.mjs";
 export type { FederationProvider, FederationResult } from "./federations/types.mjs";
 export { FederationRegistry } from "./federations/types.mjs";
