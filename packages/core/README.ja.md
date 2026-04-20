@@ -158,7 +158,7 @@ function formatObject<T extends object>(data: T): Partial<T>;
 
 ### キーストア
 
-`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を抽象化し、`previousKeys` によるキーローテーションをサポートします。
+`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を抽象化し、`previousKeys` によるキーローテーションをサポートします。`sign(options)` は compact JWT を返す。protected header の `alg` / `kid` は KeyStore 側で自動注入されるため、caller からの上書き不可。この契約により、private key を露出せずに remote-sign adapter (KMS/HSM) が `sign()` を実装できる。`getCurrentKid()` は `kid` header が欠落した legacy/malformed token の verify 用 fallback accessor。rotation-safe lookup には使わないこと (rotation 時は token 側の `kid` をそのまま `getVerificationKey(kid)` に渡す)。
 
 ```typescript
 type KeyLike = CryptoKey | KeyObject | Uint8Array;
@@ -169,17 +169,28 @@ interface ManagedKey {
   expiresAt?: Date;
 }
 
+interface JWTPayload {
+  iss?: string;
+  sub?: string;
+  aud?: string | string[];
+  jti?: string;
+  nbf?: number;
+  exp?: number;
+  iat?: number;
+  [propName: string]: unknown;
+}
+
+interface SignJwtOptions {
+  claims: JWTPayload;      // RFC 7519 claims
+  header?: { typ?: string }; // alg / kid are KeyStore-injected; caller cannot override
+}
+
 interface KeyStore {
   readonly algorithm: "HS256" | "RS256" | "ES256" | "EdDSA";
-  readonly current: {
-    readonly kid: string;
-    readonly privateKey: KeyLike;
-    readonly publicKey: KeyLike;
-  };
-  readonly previous: readonly ManagedKey[];
-  getSigningKey(): { kid: string; privateKey: KeyLike };
-  getVerificationKeys(): ManagedKey[];
-  getVerificationKey(kid: string): KeyLike;
+  sign(options: SignJwtOptions): Promise<string>;
+  getCurrentKid(): string;
+  getVerificationKeys(): Promise<ManagedKey[]>;
+  getVerificationKey(kid: string): Promise<KeyLike>;
 }
 
 interface AsymmetricKeyStoreOptions {
