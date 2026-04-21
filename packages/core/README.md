@@ -536,6 +536,15 @@ Five extension points introduced in v0.4.0 (see
 
 All five adapters are optional — absence = no-op default.
 
+### UserSessionStore / FederationTokenStore (TODO-F)
+
+Two new optional `AppOptions` fields introduced for federation + OIDC support:
+
+- `userSessionStore`: sid-keyed session metadata (auth_time, active RPs, family IDs, OIDC claims). Built-in adapters: `memory`, `redis`.
+- `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens. Built-in adapters: `memory`, `redis` (with mandatory AES-256-GCM encryption of refresh_token; `allow-plaintext` is opt-in and emits a warning).
+
+Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_token + /userinfo), F-5 (logout), and F-6 (/oauth/federation/:name/token). This plan (F-1) only adds the plumbing. See [the TODO-F spec](../../.claude/superpowers/specs/2026-04-21-todo-f-federation-token-lifecycle-design.md) for the full interface + encryption contract.
+
 ## See Also
 
 - Root [README](../../README.md) — architecture overview, configuration reference, Docker setup
