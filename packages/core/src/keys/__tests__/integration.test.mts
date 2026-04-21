@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
 import { generateToken } from "#/grants/token.mjs";
@@ -200,6 +202,14 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 
 		// Attempting to verify with expired previous key should throw
 		await expect(newKeyStore.getVerificationKey("r-old")).rejects.toThrow("Expired kid: r-old");
+	});
+
+	it("generateToken does not reference any audit sink (contract pin)", () => {
+		const src = readFileSync(
+			fileURLToPath(new URL("../../grants/token.mts", import.meta.url)),
+			"utf-8",
+		);
+		expect(src).not.toMatch(/emitAuditEvent|auditSink/);
 	});
 
 	it("generateToken overwrites caller-supplied jti with a fresh UUID", async () => {
