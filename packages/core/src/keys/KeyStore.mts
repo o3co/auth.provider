@@ -65,7 +65,11 @@ export interface KeyStore {
 	 * Current signing kid. Intended as a fallback for verifying
 	 * legacy/malformed tokens missing a `kid` header. **Do not use for
 	 * rotation-safe lookup** — for rotation, pass the token's own `kid` to
-	 * `getVerificationKey(kid)`. Cheap, sync, does not expose any private key.
+	 * `getVerificationKey(kid)`.
+	 *
+	 * **MUST be synchronous and cheap**. Remote-sign adapters (KMS/HSM)
+	 * must cache the current kid locally and return it without any remote
+	 * call. Never exposes private key material.
 	 */
 	getCurrentKid(): string;
 	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */
