@@ -21,7 +21,12 @@ export function encryptTokenField(plaintext: string, key: Buffer): string {
 	const cipher = createCipheriv(ALGO, key, iv);
 	const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 	const tag = cipher.getAuthTag();
-	return [VERSION, iv.toString("base64url"), ct.toString("base64url"), tag.toString("base64url")].join(".");
+	return [
+		VERSION,
+		iv.toString("base64url"),
+		ct.toString("base64url"),
+		tag.toString("base64url"),
+	].join(".");
 }
 
 export function decryptTokenField(envelope: string, key: Buffer): string {

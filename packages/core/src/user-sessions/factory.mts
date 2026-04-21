@@ -25,9 +25,10 @@ export function registerBuiltinUserSessionStores(factory: UserSessionStoreFactor
 				`userSessionStore.redis: 'client' option is required. Pass a connected 'redis' v5 client via AppOptions wiring.`,
 			);
 		}
-		const keyPrefix = typeof (config as { keyPrefix?: unknown }).keyPrefix === "string"
-			? ((config as { keyPrefix: string }).keyPrefix)
-			: undefined;
+		const keyPrefix =
+			typeof (config as { keyPrefix?: unknown }).keyPrefix === "string"
+				? (config as { keyPrefix: string }).keyPrefix
+				: undefined;
 		const { createRedisUserSessionStore } = await import("./adapters/redis.mjs");
 		return createRedisUserSessionStore({
 			client: client as Parameters<typeof createRedisUserSessionStore>[0]["client"],

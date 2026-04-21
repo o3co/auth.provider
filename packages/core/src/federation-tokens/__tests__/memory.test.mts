@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createInMemoryFederationTokenStore } from "../adapters/memory.mjs";
 import type { FederationTokenStoreBase, FederationTokens } from "../types.mjs";
 

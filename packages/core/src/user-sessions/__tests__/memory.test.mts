@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { createInMemoryUserSessionStore } from "../adapters/memory.mjs";
 import type { UserSessionStoreBase } from "../types.mjs";
 
@@ -92,7 +92,9 @@ describe("in-memory UserSessionStore", () => {
 	});
 
 	it("operations on missing sid are no-ops for idempotent ones", async () => {
-		await expect(store.registerRP("missing", { clientId: "rp", registeredAt: new Date() })).resolves.toBeUndefined();
+		await expect(
+			store.registerRP("missing", { clientId: "rp", registeredAt: new Date() }),
+		).resolves.toBeUndefined();
 		await expect(store.linkFamily("missing", "fam")).resolves.toBeUndefined();
 		await expect(store.updateClaims("missing", { email: "x" })).resolves.toBeUndefined();
 		await expect(store.removeFederation("missing", "google")).resolves.toBeUndefined();

@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRedisUserSessionStore } from "../adapters/redis.mjs";
 import type { UserSessionStoreBase } from "../types.mjs";
 
@@ -62,7 +62,8 @@ describe("redis UserSessionStore", () => {
 			expect.any(String),
 			expect.objectContaining({ PX: expect.any(Number), NX: true }),
 		);
-		const [, , opts] = redis.set.mock.calls[0]!;
+		expect(redis.set.mock.calls).toHaveLength(1);
+		const [, , opts] = redis.set.mock.calls[0] ?? [];
 		const expected = base.expiresAt.getTime() - Date.now();
 		expect(opts?.PX).toBeGreaterThan(expected - 2000);
 		expect(opts?.PX).toBeLessThanOrEqual(expected + 100);

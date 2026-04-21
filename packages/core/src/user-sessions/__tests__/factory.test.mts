@@ -9,10 +9,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import {
-	createUserSessionStoreFactory,
-	registerBuiltinUserSessionStores,
-} from "../factory.mjs";
+import { createUserSessionStoreFactory, registerBuiltinUserSessionStores } from "../factory.mjs";
 
 describe("UserSessionStoreFactory", () => {
 	it("registerBuiltinUserSessionStores registers the 'memory' type", () => {

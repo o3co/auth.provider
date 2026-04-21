@@ -13,9 +13,7 @@ export interface RedisLikeClient {
 	keys(pattern: string): Promise<string[]>;
 }
 
-export type EncryptionConfig =
-	| { mode: "required"; key: Buffer }
-	| { mode: "allow-plaintext" };
+export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
 export interface RedisFederationTokenStoreOptions {
 	client: RedisLikeClient;
@@ -78,7 +76,11 @@ export function createRedisFederationTokenStore(
 	const writeEnv = async (sid: string, name: string, env: Envelope) => {
 		const remaining = env.expiresAtMs - Date.now();
 		const px = remaining > 0 ? remaining : undefined;
-		await opts.client.set(k(sid, name), JSON.stringify(env), px !== undefined ? { PX: px } : undefined);
+		await opts.client.set(
+			k(sid, name),
+			JSON.stringify(env),
+			px !== undefined ? { PX: px } : undefined,
+		);
 	};
 
 	return {

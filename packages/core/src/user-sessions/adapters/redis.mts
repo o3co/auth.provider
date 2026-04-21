@@ -17,11 +17,7 @@ import type {
  */
 export interface RedisLikeClient {
 	get(key: string): Promise<string | null>;
-	set(
-		key: string,
-		value: string,
-		opts?: { PX?: number; NX?: boolean },
-	): Promise<string | null>;
+	set(key: string, value: string, opts?: { PX?: number; NX?: boolean }): Promise<string | null>;
 	del(key: string): Promise<number>;
 }
 
@@ -37,7 +33,12 @@ interface Envelope {
 	createdAtMs: number;
 	expiresAtMs: number;
 	federations: string[];
-	activeRPs: { clientId: string; backchannelLogoutUri?: string; frontchannelLogoutUri?: string; registeredAtMs: number }[];
+	activeRPs: {
+		clientId: string;
+		backchannelLogoutUri?: string;
+		frontchannelLogoutUri?: string;
+		registeredAtMs: number;
+	}[];
 	familyIds: string[];
 	claims: Record<string, unknown>;
 }
@@ -76,7 +77,9 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	claims: e.claims as UserSessionClaims,
 });
 
-export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions): UserSessionStoreBase {
+export function createRedisUserSessionStore(
+	opts: RedisUserSessionStoreOptions,
+): UserSessionStoreBase {
 	const prefix = opts.keyPrefix ?? "us:";
 	const k = (sid: string) => `${prefix}${sid}`;
 

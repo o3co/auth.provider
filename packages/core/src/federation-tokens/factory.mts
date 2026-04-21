@@ -28,7 +28,7 @@ export function registerBuiltinFederationTokenStores(factory: FederationTokenSto
 		if (!cfg.client) {
 			throw new Error("federationTokenStore.redis: 'client' option is required");
 		}
-		if (!cfg.encryption || !cfg.encryption.mode) {
+		if (!cfg.encryption?.mode) {
 			throw new Error(
 				"federationTokenStore.redis: 'encryption.mode' is required ('required' or 'allow-plaintext')",
 			);
@@ -37,7 +37,11 @@ export function registerBuiltinFederationTokenStores(factory: FederationTokenSto
 		if (cfg.encryption.mode === "required") {
 			const rawKey = cfg.encryption.key;
 			const keyBuf =
-				typeof rawKey === "string" ? Buffer.from(rawKey, "base64") : rawKey instanceof Buffer ? rawKey : Buffer.alloc(0);
+				typeof rawKey === "string"
+					? Buffer.from(rawKey, "base64")
+					: rawKey instanceof Buffer
+						? rawKey
+						: Buffer.alloc(0);
 			if (keyBuf.length !== 32) {
 				throw new Error(
 					"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256)",

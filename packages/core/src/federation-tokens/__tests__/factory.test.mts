@@ -23,7 +23,12 @@ describe("FederationTokenStoreFactory", () => {
 		await expect(
 			f.create({
 				type: "redis",
-				client: { get: async () => null, set: async () => "OK", del: async () => 0, keys: async () => [] },
+				client: {
+					get: async () => null,
+					set: async () => "OK",
+					del: async () => 0,
+					keys: async () => [],
+				},
 				// encryption omitted intentionally
 			}),
 		).rejects.toThrow(/encryption/i);
@@ -35,7 +40,12 @@ describe("FederationTokenStoreFactory", () => {
 		await expect(
 			f.create({
 				type: "redis",
-				client: { get: async () => null, set: async () => "OK", del: async () => 0, keys: async () => [] },
+				client: {
+					get: async () => null,
+					set: async () => "OK",
+					del: async () => 0,
+					keys: async () => [],
+				},
 				encryption: { mode: "required", key: Buffer.alloc(16) },
 			}),
 		).rejects.toThrow(/32 bytes/);
@@ -50,7 +60,12 @@ describe("FederationTokenStoreFactory", () => {
 			registerBuiltinFederationTokenStores(f);
 			const store = await f.create({
 				type: "redis",
-				client: { get: async () => null, set: async () => "OK", del: async () => 0, keys: async () => [] },
+				client: {
+					get: async () => null,
+					set: async () => "OK",
+					del: async () => 0,
+					keys: async () => [],
+				},
 				encryption: { mode: "allow-plaintext" },
 			});
 			expect(store.kind).toBe("redis");

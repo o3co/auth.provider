@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRedisFederationTokenStore, type RedisLikeClient } from "../adapters/redis.mjs";
 import type { FederationTokens } from "../types.mjs";
 
