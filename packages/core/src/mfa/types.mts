@@ -103,6 +103,12 @@ export interface MfaPendingTransaction {
 
 export interface MfaTransactionStore {
 	save(tx: MfaPendingTransaction): Promise<void>;
+	/**
+	 * Load a pending transaction by id. Implementations MAY filter expired
+	 * transactions (return null when `expiresAt <= now`); core also rejects
+	 * expired transactions post-load as defense in depth. Either behavior is
+	 * acceptable.
+	 */
 	load(transactionId: string): Promise<MfaPendingTransaction | null>;
 	delete(transactionId: string): Promise<void>;
 }

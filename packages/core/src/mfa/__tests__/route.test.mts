@@ -113,6 +113,55 @@ describe("/auth/mfa/verify", () => {
 		expect(await store.load("tx-retry")).not.toBeNull();
 	});
 
+	it("rejects expired transaction even when store returns it (S-3)", async () => {
+		const factory = createMfaProviderFactory();
+		factory.register("totp", () =>
+			createTestMfaProvider({
+				kind: "totp",
+				onVerify: async () => ({ success: true }),
+			}),
+		);
+		// Store that does NOT filter expired — core must enforce expiry itself.
+		const expiredTx = {
+			transactionId: "tx-expired",
+			flow: "login" as const,
+			subject: "user-z",
+			providerKind: "totp",
+			challengeId: "ch-z",
+			expiresAt: new Date(Date.now() - 60_000),
+			resumeState: { flow: "login" as const },
+		};
+		const deleteSpy = vi.fn(async () => {});
+		const unfilteringStore = {
+			async save() {},
+			async load() {
+				return expiredTx;
+			},
+			delete: deleteSpy,
+		};
+
+		const app = express();
+		app.use(express.json());
+		app.use(
+			createMfaRouter(express as unknown as { Router: () => express.Router }, {
+				providerFactory: factory,
+				transactionStore: unfilteringStore,
+				onAuthorizeResume: async () => {},
+				onFederationResume: async () => {},
+				onLoginResume: async () => {},
+			}),
+		);
+
+		const res = await request(app)
+			.post("/auth/mfa/verify")
+			.send({ transaction_id: "tx-expired", proof: { code: "any" } });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_grant");
+		// Expired tx is deleted to prevent future accidental replay
+		expect(deleteSpy).toHaveBeenCalledWith("tx-expired");
+	});
+
 	it("returns invalid_grant for unknown/expired transaction", async () => {
 		const factory = createMfaProviderFactory();
 		const store = createInMemoryTransactionStore();

@@ -176,7 +176,9 @@ describe("createAuthorizationGrant", () => {
 
 			expect(result.status).toBe(200);
 			if (!("tokens" in result)) throw new Error("expected tokens");
-			const decoded = decodeJwt(result.tokens.refresh_token) as Record<string, unknown>;
+			const refreshToken = result.tokens.refresh_token;
+			if (typeof refreshToken !== "string") throw new Error("expected refresh_token string");
+			const decoded = decodeJwt(refreshToken) as Record<string, unknown>;
 			expect(typeof decoded.family_id).toBe("string");
 			// UUID v4 shape: 8-4-4-4-12 hex, version nibble = 4
 			expect(decoded.family_id as string).toMatch(

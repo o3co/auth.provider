@@ -55,6 +55,15 @@ export function createMfaRouter(express: { Router: () => Router }, deps: MfaRout
 				error_description: "unknown or expired transaction",
 			});
 		}
+		// Defense in depth: reject expired transactions even if the store implementation
+		// did not filter them on load. Implementations MAY filter; core enforces regardless.
+		if (tx.expiresAt.getTime() <= Date.now()) {
+			await deps.transactionStore.delete(transactionId);
+			return res.status(400).json({
+				error: "invalid_grant",
+				error_description: "unknown or expired transaction",
+			});
+		}
 		const provider = await deps.providerFactory.create({ type: tx.providerKind });
 		if (provider.kind !== tx.providerKind) {
 			return res

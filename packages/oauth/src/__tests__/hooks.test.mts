@@ -206,7 +206,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			const clientRepo: ClientRepository = {
 				findById: async () => ({
-					id: "client-42",
+					clientId: "client-42",
 					allowedRedirectUris: ["https://example.test/cb"],
 					allowedScopes: ["read"],
 				}),
