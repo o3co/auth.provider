@@ -19,5 +19,5 @@ clean:
 	pnpm -r exec rimraf dist
 
 .PHONY: test
-test:
+test: build
 	pnpm -r run test
