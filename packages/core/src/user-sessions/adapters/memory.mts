@@ -23,6 +23,21 @@ type Stored = {
 	claims: Record<string, unknown>;
 };
 
+/**
+ * Deep-copy known array-valued standard claims so callers cannot mutate
+ * in-store state by holding onto the original array reference. `groups` is
+ * the only known array-valued claim in UserSessionClaims v1; extend this
+ * helper when new array-valued claims are added.
+ */
+const cloneClaims = (c: UserSessionClaims | Record<string, unknown>): Record<string, unknown> => {
+	const out: Record<string, unknown> = { ...c };
+	const groups = (c as { groups?: unknown }).groups;
+	if (Array.isArray(groups)) {
+		out.groups = [...groups];
+	}
+	return out;
+};
+
 export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 	const sessions = new Map<string, Stored>();
 
@@ -55,7 +70,7 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 				federations: [...(input.federations ?? [])],
 				activeRPs: [],
 				familyIds: [],
-				claims: { ...input.claims },
+				claims: cloneClaims(input.claims),
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {
@@ -79,7 +94,7 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 					registeredAt: new Date(r.registeredAt.getTime()),
 				})),
 				familyIds: [...s.familyIds],
-				claims: { ...s.claims } as UserSessionClaims,
+				claims: cloneClaims(s.claims) as UserSessionClaims,
 			};
 		},
 		async registerRP(sid: string, rp: RegisteredRP) {
@@ -104,7 +119,9 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 		async updateClaims(sid: string, claims: Partial<UserSessionClaims>) {
 			const s = readLive(sid);
 			if (!s) return;
-			s.claims = { ...s.claims, ...claims };
+			// Clone the incoming patch too — if the caller passes { groups: [...] }
+			// and later mutates that array, the store must not see the mutation.
+			s.claims = cloneClaims({ ...s.claims, ...claims });
 		},
 		async removeFederation(sid: string, federationName: string) {
 			const s = readLive(sid);

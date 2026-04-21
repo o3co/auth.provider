@@ -73,16 +73,22 @@ export function createApp(options: AppOptions): AppResult {
 
 	// Spec Section 10.1 — federations configured means stores are required.
 	// This runs BEFORE zod parsing, so `enabled` may still be a string from
-	// env-var overrides (HOCON substitutions emit `"true"`/`"1"`/etc.). Mirror
-	// `coerceBooleanFromEnv` semantics (Plan #3 schema) so the check does not
-	// miss federations that zod will later coerce to boolean true.
+	// env-var overrides (HOCON substitutions emit `"true"`/`"1"`). We MUST
+	// accept exactly the strings that Plan #3's `coerceBooleanFromEnv`
+	// zod-preprocess coerces to true, so this pre-parse check neither
+	// (a) lets a schema-enabled federation slip through unchecked nor
+	// (b) rejects a config that zod would later reject anyway (false
+	// positive, mask the real schema error).
+	//
+	// Matches schema behavior: only `"true"` and `"1"` coerce to true.
+	// Arbitrary strings like "yes"/"on" are rejected by the schema, so
+	// treating them as truthy here would fire the stores-missing error
+	// before the real validation message.
 	const isEnabledTruthy = (v: unknown): boolean => {
 		if (v === true) return true;
 		if (typeof v !== "string") return false;
 		const normalized = v.trim().toLowerCase();
-		return (
-			normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on"
-		);
+		return normalized === "true" || normalized === "1";
 	};
 	const federationsCfg = (config as { federations?: Record<string, { enabled?: unknown }> })
 		.federations;

@@ -152,6 +152,35 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(raw).toContain("rt-secret");
 		expect(await store.get("sid-1", "google")).toEqual(tokens);
 	});
+
+	it("get() self-heals corrupt JSON by deleting the key (Copilot round 3 #5)", async () => {
+		const store = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "allow-plaintext" },
+		});
+		redis.data.set("ft:sid-1:google", "{not-json");
+		expect(await store.get("sid-1", "google")).toBeNull();
+		expect(redis.del).toHaveBeenCalledWith("ft:sid-1:google");
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+	});
+
+	it("get() self-heals when decryption fails (wrong / rotated encryption key)", async () => {
+		const keyA = Buffer.alloc(32, 1);
+		const keyB = Buffer.alloc(32, 2);
+		// Encrypt with keyA, try to read with keyB.
+		const writer = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "required", key: keyA },
+		});
+		await writer.attach("sid-1", "google", tokens);
+		const reader = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "required", key: keyB },
+		});
+		expect(await reader.get("sid-1", "google")).toBeNull();
+		// The corrupt key is now gone so the next get also returns null naturally.
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+	});
 });
 
 describe("redis FederationTokenStore TTL is independent of access_token expiry", () => {

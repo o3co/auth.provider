@@ -113,11 +113,18 @@ export function createRedisFederationTokenStore(
 			await writeEnv(sid, name, toEnvelope(tokens));
 		},
 		async get(sid, name) {
-			const v = await opts.client.get(k(sid, name));
+			const key = k(sid, name);
+			const v = await opts.client.get(key);
 			if (!v) return null;
 			try {
 				return fromEnvelope(JSON.parse(v) as Envelope);
 			} catch {
+				// Corrupt JSON or decrypt failure (e.g. rotated encryption key):
+				// self-heal by deleting the key, mirroring UserSessionStore redis
+				// adapter. Otherwise operators see repeated silent failures and
+				// key/crypto mismatches surface as "missing tokens" — hard to
+				// debug. Returning null after delete signals re_authentication.
+				await opts.client.del(key);
 				return null;
 			}
 		},

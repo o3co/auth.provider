@@ -122,4 +122,30 @@ describe("in-memory UserSessionStore", () => {
 		// And the fresh record's expiresAt is in the future (not the stale past one).
 		expect(s?.expiresAt.getTime()).toBeGreaterThan(Date.now());
 	});
+
+	it("create clones claims.groups so caller cannot mutate stored state (Copilot round 3 #1)", async () => {
+		const groups = ["admins", "engineers"];
+		await store.create({ ...baseInput, claims: { email: "a@b.com", groups } });
+		groups.push("hijacked"); // mutate the array held by the caller
+		const s = await store.get("sid-1");
+		expect(s?.claims.groups).toEqual(["admins", "engineers"]);
+	});
+
+	it("get returns a cloned claims.groups that does not leak to the store (Copilot round 3 #2)", async () => {
+		await store.create({ ...baseInput, claims: { groups: ["admins"] } });
+		const first = await store.get("sid-1");
+		expect(first?.claims.groups).toEqual(["admins"]);
+		(first?.claims.groups as string[])?.push("hijacked"); // mutate the returned array
+		const second = await store.get("sid-1");
+		expect(second?.claims.groups).toEqual(["admins"]);
+	});
+
+	it("updateClaims clones incoming groups patch (defense-in-depth)", async () => {
+		await store.create(baseInput);
+		const incoming = ["a", "b"];
+		await store.updateClaims("sid-1", { groups: incoming });
+		incoming.push("hijacked");
+		const s = await store.get("sid-1");
+		expect(s?.claims.groups).toEqual(["a", "b"]);
+	});
 });

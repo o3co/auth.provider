@@ -354,4 +354,26 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 			}),
 		).not.toThrow();
 	});
+
+	it('does NOT treat non-schema strings like "yes" as enabled (schema-alignment, Copilot round 3 #6)', () => {
+		// Schema coerces only "true"/"1" to true; "yes" is rejected at parse.
+		// The pre-parse check must NOT fire the stores-missing error on "yes"
+		// or it would mask the real schema validation error that the user
+		// needs to see.
+		const configWithYes = {
+			...mockConfig,
+			federations: {
+				google: { enabled: "yes", clientId: "x", clientSecret: "y", callbackURL: "z" },
+			},
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithYes,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				// Stores omitted — should NOT throw here; schema parse at init() will flag it.
+			}),
+		).not.toThrow();
+	});
 });

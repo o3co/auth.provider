@@ -17,7 +17,7 @@ describe("FederationTokenStoreFactory", () => {
 		expect(store.kind).toBe("memory");
 	});
 
-	it("redis requires an encryption config", async () => {
+	it("redis defaults encryption.mode to 'required' when omitted; missing key throws", async () => {
 		const f = createFederationTokenStoreFactory();
 		registerBuiltinFederationTokenStores(f);
 		await expect(
@@ -29,9 +29,38 @@ describe("FederationTokenStoreFactory", () => {
 					del: async () => 0,
 					scanIterator: async function* () {},
 				},
-				// encryption omitted intentionally
+				// encryption omitted — should default to mode: "required".
 			}),
-		).rejects.toThrow(/encryption/i);
+		).rejects.toThrow(/32 bytes/);
+	});
+
+	it("redis rejects an incompatible client (missing scanIterator)", async () => {
+		const f = createFederationTokenStoreFactory();
+		registerBuiltinFederationTokenStores(f);
+		await expect(
+			f.create({
+				type: "redis",
+				client: {
+					get: async () => null,
+					set: async () => "OK",
+					del: async () => 0,
+					// scanIterator missing
+				},
+				encryption: { mode: "allow-plaintext" },
+			}),
+		).rejects.toThrow(/scanIterator/);
+	});
+
+	it("redis rejects a client missing multiple methods with a combined message", async () => {
+		const f = createFederationTokenStoreFactory();
+		registerBuiltinFederationTokenStores(f);
+		await expect(
+			f.create({
+				type: "redis",
+				client: { get: async () => null }, // missing set, del, scanIterator
+				encryption: { mode: "allow-plaintext" },
+			}),
+		).rejects.toThrow(/set.*del.*scanIterator/);
 	});
 
 	it("redis with mode=required needs a 32-byte key", async () => {
