@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isValidDirName, isValidProjectName, scaffold } from "../index.mjs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isValidDirName, isValidProjectName, main, scaffold } from "../index.mjs";
 
 describe("scaffold", () => {
 	let tempDir: string;
@@ -120,5 +120,131 @@ describe("isValidDirName", () => {
 		["a".repeat(215)],
 	])("rejects %s", (name) => {
 		expect(isValidDirName(name)).toBe(false);
+	});
+});
+
+describe("main (argv parsing and directory derivation)", () => {
+	let cwdBackup: string;
+	let workdir: string;
+	let argvBackup: string[];
+
+	beforeEach(() => {
+		cwdBackup = process.cwd();
+		workdir = mkdtempSync(join(tmpdir(), "create-auth-provider-main-"));
+		process.chdir(workdir);
+		argvBackup = process.argv;
+	});
+
+	afterEach(() => {
+		process.chdir(cwdBackup);
+		process.argv = argvBackup;
+		rmSync(workdir, { recursive: true, force: true });
+	});
+
+	const runMain = (args: string[]): { exitCode: number | null; stderr: string } => {
+		process.argv = ["node", "cli", ...args];
+		const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
+			throw new Error(`__exit__:${code ?? 0}`);
+		}) as never);
+		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+		let exitCode: number | null = 0;
+		try {
+			main();
+		} catch (e) {
+			const m = /__exit__:(\d+)/.exec((e as Error).message);
+			exitCode = m ? Number(m[1]) : null;
+		}
+		const stderr = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+		exitSpy.mockRestore();
+		errSpy.mockRestore();
+		logSpy.mockRestore();
+		return { exitCode, stderr };
+	};
+
+	// Positive: unscoped, no --dir
+	it("unscoped name: dir = name, pkg.name = name", () => {
+		const r = runMain(["my-auth"]);
+		expect(r.exitCode).toBe(0);
+		const pkg = JSON.parse(readFileSync(join(workdir, "my-auth", "package.json"), "utf-8"));
+		expect(pkg.name).toBe("my-auth");
+	});
+
+	// Positive: scoped, no --dir
+	it("scoped name: dir = pkg part, pkg.name = full scoped", () => {
+		const r = runMain(["@piratis-blossoms/auth.provider"]);
+		expect(r.exitCode).toBe(0);
+		const pkg = JSON.parse(
+			readFileSync(join(workdir, "auth.provider", "package.json"), "utf-8"),
+		);
+		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
+	});
+
+	// Positive: scoped + --dir space
+	it("scoped name with --dir <val>: dir = val, pkg.name = full scoped", () => {
+		const r = runMain(["@piratis-blossoms/auth.provider", "--dir", "provider"]);
+		expect(r.exitCode).toBe(0);
+		const pkg = JSON.parse(readFileSync(join(workdir, "provider", "package.json"), "utf-8"));
+		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
+	});
+
+	// Positive: scoped + --dir= equals form
+	it("scoped name with --dir=<val>: dir = val, pkg.name = full scoped", () => {
+		const r = runMain(["@piratis-blossoms/auth.provider", "--dir=provider2"]);
+		expect(r.exitCode).toBe(0);
+		const pkg = JSON.parse(
+			readFileSync(join(workdir, "provider2", "package.json"), "utf-8"),
+		);
+		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
+	});
+
+	// Positive: unscoped + --dir
+	it("unscoped name with --dir <val>: dir = val, pkg.name = unscoped", () => {
+		const r = runMain(["my-auth", "--dir", "custom"]);
+		expect(r.exitCode).toBe(0);
+		const pkg = JSON.parse(readFileSync(join(workdir, "custom", "package.json"), "utf-8"));
+		expect(pkg.name).toBe("my-auth");
+	});
+
+	// Positive: flags may come before the positional
+	it("flags before positional: --dir custom my-auth", () => {
+		const r = runMain(["--dir", "custom", "my-auth"]);
+		expect(r.exitCode).toBe(0);
+		const pkg = JSON.parse(readFileSync(join(workdir, "custom", "package.json"), "utf-8"));
+		expect(pkg.name).toBe("my-auth");
+	});
+
+	// Negative cases
+	it.each([
+		{ case: "no args", args: [] },
+		{ case: "two positionals", args: ["foo", "bar"] },
+		{ case: "dot", args: ["."] },
+		{ case: "dotdot", args: [".."] },
+		{ case: "backslash in name", args: ["back\\slash"] },
+		{ case: "empty scope", args: ["@/pkg"] },
+		{ case: "empty pkg", args: ["@scope/"] },
+		{ case: "double slash", args: ["@scope//pkg"] },
+		{ case: "name too long", args: ["a".repeat(215)] },
+		{ case: "--dir invalid (dot)", args: ["foo", "--dir", "."] },
+		{ case: "--dir invalid (slash)", args: ["foo", "--dir", "a/b"] },
+		{ case: "--dir invalid (at)", args: ["foo", "--dir", "@foo"] },
+		{ case: "--dir invalid (back)", args: ["foo", "--dir", "a\\b"] },
+		{ case: "--dir empty space form", args: ["foo", "--dir", ""] },
+		{ case: "--dir empty equals form", args: ["foo", "--dir="] },
+		{ case: "--dir missing value", args: ["foo", "--dir"] },
+		{ case: "--dir duplicated", args: ["foo", "--dir", "a", "--dir", "b"] },
+		{ case: "unknown flag", args: ["foo", "--unknown"] },
+		{ case: "literal double-dash", args: ["foo", "--"] },
+	])("rejects: $case", ({ args }) => {
+		const r = runMain(args);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr.length).toBeGreaterThan(0);
+	});
+
+	it("target directory already exists", () => {
+		mkdirSync(join(workdir, "foo"));
+		const r = runMain(["foo"]);
+		expect(r.exitCode).toBe(1);
+		expect(r.stderr.length).toBeGreaterThan(0);
 	});
 });
