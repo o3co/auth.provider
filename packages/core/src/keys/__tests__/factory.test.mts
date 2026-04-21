@@ -66,7 +66,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 			previousKeys: [],
 		});
 		expect(keyStore.algorithm).toBe("HS256");
-		expect(keyStore.current.kid).toBe("v1");
+		expect(keyStore.getSigningKidFallback()).toBe("v1");
 	});
 
 	it("throws clear error when HS256 secret is missing", async () => {
@@ -116,7 +116,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 			previousKeys: [],
 		});
 		expect(keyStore.algorithm).toBe("RS256");
-		expect(keyStore.current.kid).toBe("v1");
+		expect(keyStore.getSigningKidFallback()).toBe("v1");
 	});
 
 	it("builds ES256 KeyStore from PEM strings", async () => {
@@ -132,7 +132,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 			previousKeys: [],
 		});
 		expect(keyStore.algorithm).toBe("ES256");
-		expect(keyStore.current.kid).toBe("v1");
+		expect(keyStore.getSigningKidFallback()).toBe("v1");
 	});
 
 	it("builds EdDSA KeyStore from PEM strings", async () => {
@@ -148,7 +148,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 			previousKeys: [],
 		});
 		expect(keyStore.algorithm).toBe("EdDSA");
-		expect(keyStore.current.kid).toBe("v1");
+		expect(keyStore.getSigningKidFallback()).toBe("v1");
 	});
 
 	it("throws when asymmetric privateKey/privateKeyPath is missing", async () => {
@@ -201,7 +201,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 			],
 		});
 		expect(keyStore.algorithm).toBe("RS256");
-		const keys = keyStore.getVerificationKeys();
+		const keys = await keyStore.getVerificationKeys();
 		expect(keys.map((k) => k.kid)).toContain("v1");
 		expect(keys.map((k) => k.kid)).toContain("v2");
 	});
@@ -223,7 +223,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 			previousKeys: [],
 		});
 		expect(keyStore.algorithm).toBe("ES256");
-		expect(keyStore.current.kid).toBe("fp1");
+		expect(keyStore.getSigningKidFallback()).toBe("fp1");
 	});
 
 	it("file-path takes priority over inline PEM string when both are supplied", async () => {
@@ -248,7 +248,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 			previousKeys: [],
 		});
 		expect(keyStore.algorithm).toBe("ES256");
-		expect(keyStore.current.kid).toBe("pri1");
+		expect(keyStore.getSigningKidFallback()).toBe("pri1");
 	});
 
 	it("previousKeys entry reads publicKey from file path", async () => {
@@ -272,7 +272,7 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 				},
 			],
 		});
-		const keys = keyStore.getVerificationKeys();
+		const keys = await keyStore.getVerificationKeys();
 		expect(keys.map((k) => k.kid)).toContain("v2");
 	});
 

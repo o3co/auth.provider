@@ -24,7 +24,7 @@ export const createRouter = (express: { Router: () => Router }, keyStore: KeySto
 		if (keyStore.algorithm === "HS256") {
 			return res.sendStatus(404);
 		}
-		const managedKeys = keyStore.getVerificationKeys();
+		const managedKeys = await keyStore.getVerificationKeys();
 		const keys = await Promise.all(
 			managedKeys.map(async (mk) => {
 				const jwk = await exportJWK(mk.publicKey);

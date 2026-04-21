@@ -158,7 +158,7 @@ function formatObject<T extends object>(data: T): Partial<T>;
 
 ### Key Store
 
-The `KeyStore` interface abstracts over symmetric (HS256) and asymmetric (RS256, ES256, EdDSA) signing keys, including key rotation via `previousKeys`.
+The `KeyStore` interface abstracts over symmetric (HS256) and asymmetric (RS256, ES256, EdDSA) signing keys, including key rotation via `previousKeys`. `sign(options)` returns a compact JWT; the KeyStore self-injects the `alg` and `kid` protected header fields, so callers cannot override them. This contract lets remote-sign adapters (KMS/HSM) implement `sign()` without exposing private key material. `getSigningKidFallback()` is a cheap accessor returning the current signing kid for verifying legacy/malformed tokens that lack a `kid` header. Do not use it for rotation-safe lookup.
 
 ```typescript
 type KeyLike = CryptoKey | KeyObject | Uint8Array;
@@ -169,17 +169,28 @@ interface ManagedKey {
   expiresAt?: Date;
 }
 
+interface JWTPayload {
+  iss?: string;
+  sub?: string;
+  aud?: string | string[];
+  jti?: string;
+  nbf?: number;
+  exp?: number;
+  iat?: number;
+  [propName: string]: unknown;
+}
+
+interface SignJwtOptions {
+  claims: JWTPayload;      // RFC 7519 claims
+  header?: { typ?: string }; // alg / kid are KeyStore-injected; caller cannot override
+}
+
 interface KeyStore {
   readonly algorithm: "HS256" | "RS256" | "ES256" | "EdDSA";
-  readonly current: {
-    readonly kid: string;
-    readonly privateKey: KeyLike;
-    readonly publicKey: KeyLike;
-  };
-  readonly previous: readonly ManagedKey[];
-  getSigningKey(): { kid: string; privateKey: KeyLike };
-  getVerificationKeys(): ManagedKey[];
-  getVerificationKey(kid: string): KeyLike;
+  sign(options: SignJwtOptions): Promise<string>;
+  getSigningKidFallback(): string;
+  getVerificationKeys(): Promise<ManagedKey[]>;
+  getVerificationKey(kid: string): Promise<KeyLike>;
 }
 
 interface AsymmetricKeyStoreOptions {

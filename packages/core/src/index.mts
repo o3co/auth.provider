@@ -61,9 +61,13 @@ export type { KeyStoreFactory } from "./keys/factory.mjs";
 export { createKeyStoreFactory, registerBuiltinKeyStores } from "./keys/factory.mjs";
 // Keys
 export type {
+	Algorithm,
 	AsymmetricKeyStoreOptions,
+	JWTPayload,
+	KeyLike,
 	KeyStore,
 	ManagedKey,
+	SignJwtOptions,
 } from "./keys/KeyStore.mjs";
 export {
 	createAsymmetricKeyStore,

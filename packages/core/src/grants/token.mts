@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 import { randomUUID } from "node:crypto";
-import { SignJWT } from "jose";
-import type { KeyStore } from "../keys/KeyStore.mjs";
+import type { JWTPayload, KeyStore } from "../keys/KeyStore.mjs";
 
 export const formatObject = <T extends object>(data: T): Partial<T> => {
 	return Object.fromEntries(
@@ -85,31 +84,23 @@ export const generateToken = async (
 		tokenType = undefined,
 	}: GenerateTokenOptions,
 ): Promise<Token> => {
-	const { kid, privateKey } = keyStore.getSigningKey();
-
-	let builder = new SignJWT({
-		...data,
+	const now = Math.floor(Date.now() / 1000);
+	const claims: JWTPayload = {
+		...(data as Record<string, unknown>),
 		...(authorizedParty ? { azp: authorizedParty } : {}),
 		...(scope ? { scope } : {}),
-	})
-		.setProtectedHeader({ alg: keyStore.algorithm, kid, ...(tokenType ? { typ: tokenType } : {}) })
-		.setIssuedAt()
-		.setJti(randomUUID());
+		iat: now,
+		jti: randomUUID(),
+		...(expiresIn !== undefined ? { exp: now + expiresIn } : {}),
+		...(issuer != null ? { iss: issuer } : {}),
+		...(audience != null ? { aud: audience } : {}),
+		...(subject != null ? { sub: subject } : {}),
+	};
 
-	if (expiresIn !== undefined) {
-		builder = builder.setExpirationTime(`${expiresIn}s`);
-	}
-	if (issuer != null) {
-		builder = builder.setIssuer(issuer);
-	}
-	if (audience != null) {
-		builder = builder.setAudience(audience);
-	}
-	if (subject != null) {
-		builder = builder.setSubject(subject);
-	}
-
-	const token = await builder.sign(privateKey);
+	const token = await keyStore.sign({
+		claims,
+		...(tokenType ? { header: { typ: tokenType } } : {}),
+	});
 
 	const result: Token = { token };
 

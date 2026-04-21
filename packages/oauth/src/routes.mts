@@ -147,7 +147,7 @@ export const createOAuthRouter = async (
 					}
 					try {
 						const { kid } = decodeProtectedHeader(bearerToken);
-						const key = keyStore.getVerificationKey(kid ?? keyStore.current.kid);
+						const key = await keyStore.getVerificationKey(kid ?? keyStore.getSigningKidFallback());
 						await jwtVerify(bearerToken, key);
 						return next();
 					} catch {
@@ -163,7 +163,9 @@ export const createOAuthRouter = async (
 				}
 				try {
 					const header = decodeProtectedHeader(token);
-					const key = keyStore.getVerificationKey(header.kid ?? keyStore.current.kid);
+					const key = await keyStore.getVerificationKey(
+						header.kid ?? keyStore.getSigningKidFallback(),
+					);
 					const { payload } = await jwtVerify(token, key);
 					const { exp, iat, iss, aud, sub } = payload;
 					const claims = payload as Record<string, unknown>;

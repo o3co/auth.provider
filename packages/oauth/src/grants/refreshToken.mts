@@ -55,7 +55,9 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			try {
 				const header = decodeProtectedHeader(refreshTokenValue);
 				typ = header.typ;
-				const key = keyStore.getVerificationKey(header.kid ?? keyStore.current.kid);
+				const key = await keyStore.getVerificationKey(
+					header.kid ?? keyStore.getSigningKidFallback(),
+				);
 				const { payload } = await jwtVerify(refreshTokenValue, key);
 				tokenPayload = payload;
 			} catch {

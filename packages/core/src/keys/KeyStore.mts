@@ -14,7 +14,34 @@
  * limitations under the License.
  */
 import { createSecretKey, type KeyObject } from "node:crypto";
-import { importPKCS8, importSPKI } from "jose";
+import { importPKCS8, importSPKI, SignJWT } from "jose";
+
+/**
+ * JWT claims per RFC 7519. Standard claims are typed; custom claims are
+ * allowed via index signature. Defined here to keep the KeyStore interface
+ * jose-independent — implementations may use jose, node-jose, fast-jwt, or
+ * direct KMS SDK calls.
+ */
+export interface JWTPayload {
+	iss?: string;
+	sub?: string;
+	aud?: string | string[];
+	jti?: string;
+	nbf?: number;
+	exp?: number;
+	iat?: number;
+	[propName: string]: unknown;
+}
+
+/**
+ * Input to `KeyStore.sign()`. The KeyStore self-injects `alg` and `kid` into
+ * the protected header; callers may only set `typ`. This keeps adapter
+ * contracts stable under alg / kid rotation and remote-sign (KMS/HSM) backends.
+ */
+export interface SignJwtOptions {
+	claims: JWTPayload;
+	header?: { typ?: string };
+}
 
 export type KeyLike = CryptoKey | KeyObject | Uint8Array;
 
@@ -28,15 +55,27 @@ export type Algorithm = "HS256" | "RS256" | "ES256" | "EdDSA";
 
 export interface KeyStore {
 	readonly algorithm: Algorithm;
-	readonly current: {
-		readonly kid: string;
-		readonly privateKey: KeyLike;
-		readonly publicKey: KeyLike;
-	};
-	readonly previous: readonly ManagedKey[];
-	getSigningKey(): { kid: string; privateKey: KeyLike };
-	getVerificationKeys(): ManagedKey[];
-	getVerificationKey(kid: string): KeyLike;
+	/**
+	 * Sign claims and return a compact JWT. The KeyStore self-injects `alg`
+	 * and `kid` into the protected header; callers may set only `typ`.
+	 * Remote-sign adapters (KMS/HSM) perform the remote call here.
+	 */
+	sign(options: SignJwtOptions): Promise<string>;
+	/**
+	 * Returns the current signing kid as a fallback for verifying
+	 * legacy/malformed tokens that lack a `kid` header. **Do not use for
+	 * rotation-safe lookup** — for rotation, pass the token's own `kid` to
+	 * `getVerificationKey(kid)`.
+	 *
+	 * **MUST be synchronous and cheap**. Remote-sign adapters (KMS/HSM)
+	 * must cache the current kid locally and return it without any remote
+	 * call. Never exposes private key material.
+	 */
+	getSigningKidFallback(): string;
+	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */
+	getVerificationKeys(): Promise<ManagedKey[]>;
+	/** Specific kid's public key. Throws on unknown or expired kid. */
+	getVerificationKey(kid: string): Promise<KeyLike>;
 }
 
 export interface AsymmetricKeyStoreOptions {
@@ -77,20 +116,28 @@ export async function createAsymmetricKeyStore(
 
 	return {
 		algorithm,
-		current: { kid, privateKey, publicKey },
-		previous: resolvedPrevious,
 
-		getSigningKey() {
-			return { kid, privateKey };
+		async sign({ claims, header }: SignJwtOptions): Promise<string> {
+			return await new SignJWT(claims)
+				.setProtectedHeader({
+					alg: algorithm,
+					kid,
+					...(header?.typ ? { typ: header.typ } : {}),
+				})
+				.sign(privateKey);
 		},
 
-		getVerificationKeys(): ManagedKey[] {
+		getSigningKidFallback(): string {
+			return kid;
+		},
+
+		async getVerificationKeys(): Promise<ManagedKey[]> {
 			const now = new Date();
 			const active = resolvedPrevious.filter((k) => k.expiresAt > now);
 			return [{ kid, publicKey }, ...active];
 		},
 
-		getVerificationKey(requestedKid: string): KeyLike {
+		async getVerificationKey(requestedKid: string): Promise<KeyLike> {
 			if (requestedKid === kid) {
 				return publicKey;
 			}
@@ -111,22 +158,26 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 
 	return {
 		algorithm: "HS256",
-		current: {
-			kid,
-			privateKey: secretKey,
-			publicKey: secretKey,
-		},
-		previous: [],
 
-		getSigningKey() {
-			return { kid, privateKey: secretKey };
+		async sign({ claims, header }: SignJwtOptions): Promise<string> {
+			return await new SignJWT(claims)
+				.setProtectedHeader({
+					alg: "HS256",
+					kid,
+					...(header?.typ ? { typ: header.typ } : {}),
+				})
+				.sign(secretKey);
 		},
 
-		getVerificationKeys(): ManagedKey[] {
+		getSigningKidFallback(): string {
+			return kid;
+		},
+
+		async getVerificationKeys(): Promise<ManagedKey[]> {
 			return [{ kid, publicKey: secretKey }];
 		},
 
-		getVerificationKey(requestedKid: string): KeyLike {
+		async getVerificationKey(requestedKid: string): Promise<KeyLike> {
 			if (requestedKid !== kid) {
 				throw new Error(`Unknown kid: ${requestedKid}`);
 			}
