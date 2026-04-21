@@ -174,21 +174,19 @@ describe("fullSectionsSchema endpoints optionality", () => {
 	});
 
 	it("accepts rateLimit + endpoints without client or authCallback", () => {
-		const oauthModuleConfig = {
+		const sessionModuleConfig = {
 			rateLimit: {
 				login: { windowMs: 60000, limit: 10 },
-				token: { windowMs: 60000, limit: 10 },
-				authorize: { windowMs: 60000, limit: 10 },
 			},
 			endpoints: {
 				login: { url: "/login" },
 			},
 		};
-		const oauthConfigSchema = fullSectionsSchema.pick({
+		const sessionConfigSchema = fullSectionsSchema.pick({
 			rateLimit: true,
 			endpoints: true,
 		});
-		const result = oauthConfigSchema.safeParse(oauthModuleConfig);
+		const result = sessionConfigSchema.safeParse(sessionModuleConfig);
 		expect(result.success).toBe(true);
 	});
 });
@@ -225,8 +223,6 @@ describe("AppConfigSchema backward compatibility", () => {
 			},
 			rateLimit: {
 				login: { windowMs: 60000, limit: 10 },
-				token: { windowMs: 60000, limit: 10 },
-				authorize: { windowMs: 60000, limit: 10 },
 			},
 			federations: {
 				google: { enabled: false },

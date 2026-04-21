@@ -36,4 +36,6 @@ export interface CodeData {
 export interface Code extends CodeData {
 	code: string;
 	expiresIn?: number;
+	grantedScope?: readonly string[];
+	grantedAudience?: readonly string[];
 }

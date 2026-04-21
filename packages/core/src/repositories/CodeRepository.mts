@@ -22,6 +22,8 @@ export interface CodeRepository {
 		code_challenge_method?: string;
 		redirect_uri?: string;
 		expiresIn?: number;
+		grantedScope?: readonly string[];
+		grantedAudience?: readonly string[];
 	}): Promise<Code>;
 	getByCode(code: string): Promise<Code | null>;
 	consumeByCode(code: string): Promise<Code | null>;

@@ -19,8 +19,10 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type GrantPolicyHookBase,
 	GrantRegistry,
 	type ModuleContext,
+	type RefreshTokenStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import { describe, expect, it, vi } from "vitest";
@@ -94,6 +96,70 @@ describe("oauthAuthorizationModule", () => {
 		await module.init(ctx);
 
 		expect(ctx.grantRegistry.get("authorization")).toBeUndefined();
+		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
+	});
+
+	it("forwards context.refreshTokenStore to refresh_token grant handler", async () => {
+		const rotateSpy = vi.fn().mockResolvedValue({ outcome: "rotated" });
+		const refreshTokenStore: RefreshTokenStoreBase = {
+			kind: "spy",
+			rotate: rotateSpy,
+			isFamilyRevoked: async () => false,
+			revokeFamily: async () => {},
+		};
+		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
+		const ctx = makeContext({ refreshTokenStore, keyStore });
+		const module = oauthAuthorizationModule({
+			codeRepository: {} as CodeRepository,
+			clientRepository: mockClientRepository,
+		});
+
+		await module.init(ctx);
+
+		const handler = ctx.grantRegistry.get("refresh_token");
+		expect(handler).toBeDefined();
+		if (!handler) return;
+
+		// Build a real refresh token so rotate() is reached
+		const { generateToken } = await import("@o3co/auth-provider-core");
+		const rt = await generateToken(
+			{ family_id: "fam-1" },
+			{
+				expiresIn: 3600,
+				keyStore,
+				issuer: "test-issuer",
+				audience: "client-1",
+				subject: "user-1",
+				authorizedParty: "client-1",
+				scope: null,
+				tokenType: "rt+jwt",
+			},
+		);
+
+		await handler.handle({
+			body: { refresh_token: rt.token, client_id: "client-1" },
+			session: {},
+			issuer: "test-issuer",
+			metadata: {},
+		});
+
+		expect(rotateSpy).toHaveBeenCalled();
+	});
+
+	it("forwards context.grantPolicy to authorization and refresh_token grants", async () => {
+		const grantPolicy: GrantPolicyHookBase = {
+			kind: "spy",
+			evaluate: vi.fn().mockResolvedValue({ outcome: "allow" }),
+		};
+		const ctx = makeContext({ grantPolicy });
+		const module = oauthAuthorizationModule({
+			codeRepository: {} as CodeRepository,
+			clientRepository: mockClientRepository,
+		});
+
+		await module.init(ctx);
+
+		expect(ctx.grantRegistry.get("authorization")).toBeDefined();
 		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
 	});
 

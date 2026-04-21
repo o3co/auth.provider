@@ -157,6 +157,184 @@ describe("createAuthorizationGrant", () => {
 			expect(sessionMutation?.clear).toContain("granted_scopes");
 		});
 
+		it("registers initial rt+jwt via refreshTokenStore.rotate(null, ...) (CP-2)", async () => {
+			const rotateSpy = vi.fn(
+				async (_prev: string | null, _next: string, _fam: string, _exp: Date) =>
+					({ outcome: "rotated" }) as const,
+			);
+			const refreshTokenStore = {
+				kind: "spy",
+				rotate: rotateSpy,
+				async isFamilyRevoked() {
+					return false;
+				},
+				async revokeFamily() {},
+			};
+			const deps = {
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc" })),
+				refreshTokenStore,
+			};
+			const handler = createAuthorizationGrant(deps);
+			const ctx: GrantContext = {
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect(rotateSpy).toHaveBeenCalledTimes(1);
+			const [previousJti, newJti, familyId, expiresAt] = rotateSpy.mock.calls[0] as [
+				string | null,
+				string,
+				string,
+				Date,
+			];
+			expect(previousJti).toBeNull();
+			expect(typeof newJti).toBe("string");
+			expect(newJti.length).toBeGreaterThan(0);
+			expect(familyId).toMatch(
+				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+			);
+			expect(expiresAt).toBeInstanceOf(Date);
+		});
+
+		it("returns 503 temporarily_unavailable when initial rotate throws (CP-16)", async () => {
+			const throwingStore = {
+				kind: "broken",
+				async rotate() {
+					throw new Error("store down");
+				},
+				async isFamilyRevoked() {
+					return false;
+				},
+				async revokeFamily() {},
+			};
+			const deps = {
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc" })),
+				refreshTokenStore: throwingStore,
+			};
+			const handler = createAuthorizationGrant(deps);
+
+			const { result } = await handler.handle({
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			});
+
+			expect(result.status).toBe(503);
+			if (!("error" in result)) throw new Error("expected error");
+			expect(result.error).toBe("temporarily_unavailable");
+		});
+
+		it("skips initial-register when no refreshTokenStore is configured (CP-2 graceful)", async () => {
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const handler = createAuthorizationGrant(deps);
+			const { result } = await handler.handle({
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			});
+			expect(result.status).toBe(200);
+		});
+
+		it("issues an initial rt+jwt carrying a new family_id (C-3)", async () => {
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const handler = createAuthorizationGrant(deps);
+			const ctx: GrantContext = {
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			const refreshToken = result.tokens.refresh_token;
+			if (typeof refreshToken !== "string") throw new Error("expected refresh_token string");
+			const decoded = decodeJwt(refreshToken) as Record<string, unknown>;
+			expect(typeof decoded.family_id).toBe("string");
+			// UUID v4 shape: 8-4-4-4-12 hex, version nibble = 4
+			expect(decoded.family_id as string).toMatch(
+				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+			);
+		});
+
+		it("omits scope from token response when granted scopes is empty (CP-12)", async () => {
+			// Code has neither grantedScope nor session.granted_scopes.
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const handler = createAuthorizationGrant(deps);
+			const ctx: GrantContext = {
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					// granted_scopes intentionally omitted
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			// Response must NOT carry scope: ""; it should be undefined / omitted
+			expect(result.tokens.scope === "" ? "empty-string" : "ok").toBe("ok");
+			const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect(decoded.scope).toBeUndefined();
+		});
+
+		it("omits scope when Code.grantedScope is explicitly empty (CP-12)", async () => {
+			// Even if persisted as [], code exchange must not emit `scope: ""`.
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", grantedScope: [] as readonly string[] }),
+			);
+			const handler = createAuthorizationGrant(deps);
+			const { result } = await handler.handle({
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			});
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect(decoded.scope).toBeUndefined();
+		});
+
 		it("returns 400 when PKCE is required but code_verifier is missing", async () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { randomUUID } from "node:crypto";
 import {
 	type GrantContext,
 	type GrantDependencies,
@@ -23,6 +24,7 @@ import {
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
 import { decodeProtectedHeader, type JWTPayload, jwtVerify } from "jose";
+import { decodeJwtPayload } from "./_jwtPayload.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
@@ -143,36 +145,166 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				grantedScope = requested.join(" ");
 			}
 
+			let finalScope = grantedScope;
+			let finalAudience: string | null = tokenAud ?? client_id ?? null;
+
+			if (deps.grantPolicy) {
+				// CP-18: fail-closed. grantPolicy is a security boundary (it
+				// narrows scope/audience); if it throws we cannot know what
+				// the narrowed decision would have been. Failing open would
+				// effectively grant the pre-policy scope ceiling, which is
+				// exactly what policy exists to prevent.
+				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
+				try {
+					decision = await deps.grantPolicy.evaluate(
+						{
+							grantType: "refresh_token",
+							clientId: client_id,
+							subject: subjectStr,
+							requestedScope: requestedScope
+								? [...new Set(requestedScope.split(" ").filter(Boolean))]
+								: undefined,
+							originalScope: scopeStr ? scopeStr.split(" ") : undefined,
+						},
+						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "policy evaluation unavailable",
+						},
+					};
+				}
+				if (decision.outcome === "deny") {
+					return {
+						result: {
+							status: 400,
+							error: decision.error,
+							errorDescription: decision.errorDescription,
+						},
+					};
+				}
+				if (decision.grantedScope) {
+					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed
+					// the scope of the original grant. Re-enforce after policy
+					// so a buggy/compromised policy cannot expand privileges
+					// beyond what the refresh token originally carried.
+					const originalSet = scopeStr ? scopeStr.split(" ") : [];
+					const exceeded = decision.grantedScope.filter((s) => !originalSet.includes(s));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_scope",
+								errorDescription: `policy returned scopes exceeding original grant: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// CP-15: empty array → null so response omits scope.
+					finalScope = decision.grantedScope.length > 0 ? decision.grantedScope.join(" ") : null;
+				}
+				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
+					// generateToken carries a single `aud` claim; policy may narrow
+					// to multiple audiences, but we flatten to the first one here.
+					// Multi-audience tokens are out of scope for this grant path.
+					finalAudience = decision.grantedAudience[0];
+				}
+			}
+
+			const familyId =
+				((tokenPayload as Record<string, unknown>).family_id as string | undefined) ?? null;
+			const previousJti =
+				((tokenPayload as Record<string, unknown>).jti as string | undefined) ?? null;
+			const newFamilyId = familyId ?? randomUUID();
+
+			// CP-15: empty string (e.g. requested=" ") normalizes to null so the
+			// token response omits scope rather than emitting `scope: ""`.
+			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
+
+			const newAccessToken = await generateToken(
+				{},
+				{
+					expiresIn: config.oauth.accessToken.expiresIn,
+					keyStore,
+					issuer,
+					audience: finalAudience,
+					subject: subjectStr ?? null,
+					authorizedParty: azpStr ?? null,
+					scope: scopeClaim,
+					tokenType: "at+jwt",
+				},
+			);
+
+			const newRefreshToken = await generateToken(
+				{ family_id: newFamilyId },
+				{
+					expiresIn: config.oauth.refreshToken.expiresIn,
+					keyStore,
+					issuer,
+					audience: finalAudience,
+					subject: subjectStr ?? null,
+					authorizedParty: azpStr ?? null,
+					scope: scopeClaim,
+					tokenType: "rt+jwt",
+				},
+			);
+
+			if (deps.refreshTokenStore && previousJti !== null) {
+				const newRefreshPayload = decodeJwtPayload(newRefreshToken.token);
+				const newJti = newRefreshPayload.jti as string | undefined;
+				const newExp = newRefreshPayload.exp as number | undefined;
+				if (typeof newJti === "string" && typeof newExp === "number") {
+					// CP-17: fail-closed when the store is unavailable. Same
+					// rationale as CP-16 — we cannot atomically consume the old
+					// jti and register the new one, so replay detection cannot
+					// be guaranteed. Return 503 so the client retries rather
+					// than bubbling an unhandled 500 HTML from express.
+					let rotateResult: Awaited<ReturnType<typeof deps.refreshTokenStore.rotate>>;
+					try {
+						rotateResult = await deps.refreshTokenStore.rotate(
+							previousJti,
+							newJti,
+							newFamilyId,
+							new Date(newExp * 1000),
+						);
+					} catch {
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "refresh token store unavailable",
+							},
+						};
+					}
+					if (rotateResult.outcome === "replayed") {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "replay_detected",
+							},
+						};
+					}
+					if (rotateResult.outcome === "revoked") {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "family_revoked",
+							},
+						};
+					}
+				}
+			}
+
 			return {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken(
-							{},
-							{
-								expiresIn: config.oauth.accessToken.expiresIn,
-								keyStore,
-								issuer,
-								audience: tokenAud ?? client_id ?? null,
-								subject: subjectStr ?? null,
-								authorizedParty: azpStr ?? null,
-								scope: grantedScope,
-								tokenType: "at+jwt",
-							},
-						),
-						refreshToken: await generateToken(
-							{},
-							{
-								expiresIn: config.oauth.refreshToken.expiresIn,
-								keyStore,
-								issuer,
-								audience: tokenAud ?? client_id ?? null,
-								subject: subjectStr ?? null,
-								authorizedParty: azpStr ?? null,
-								scope: grantedScope,
-								tokenType: "rt+jwt",
-							},
-						),
+						accessToken: newAccessToken,
+						refreshToken: newRefreshToken,
 					}),
 				},
 			};

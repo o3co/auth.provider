@@ -34,7 +34,6 @@
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
-		"express-rate-limit": "^8.3.1",
 		"jose": "^6.2.2"
 	},
 	"peerDependencies": {
@@ -55,9 +54,11 @@
 		"@types/express-session": "^1",
 		"@types/passport": "^1",
 		"@types/passport-oauth2-client-password": "^0.1.6",
+		"@types/supertest": "^7.2.0",
 		"express": "^5.2.1",
 		"passport": "^0.7.0",
 		"passport-oauth2-client-password": "^0.1.2",
+		"supertest": "^7.2.2",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.2"
 	}

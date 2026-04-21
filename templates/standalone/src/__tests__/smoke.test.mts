@@ -62,8 +62,6 @@ const config: AppConfig = {
 	},
 	rateLimit: {
 		login: { windowMs: 60000, limit: 10 },
-		token: { windowMs: 60000, limit: 10 },
-		authorize: { windowMs: 60000, limit: 10 },
 	},
 	federations: {
 		google: { enabled: false },

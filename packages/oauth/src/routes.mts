@@ -16,15 +16,18 @@
 
 import {
 	type AppConfig,
+	type AuditSinkBase,
 	type ClientRepository,
 	type CodeRepository,
+	emitAuditEvent,
 	formatObject,
+	type GrantPolicyHookBase,
 	type GrantRegistry,
 	type KeyStore,
 	type PublicClient,
+	type RateLimiterBase,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import rateLimit from "express-rate-limit";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import type { PassportStatic } from "passport";
 
@@ -54,6 +57,9 @@ export const createOAuthRouter = async (
 		clientRepository,
 		codeRepository,
 		keyStore,
+		rateLimiter,
+		auditSink,
+		grantPolicy,
 	}: {
 		passport: PassportStatic;
 		registry: GrantRegistry;
@@ -61,32 +67,69 @@ export const createOAuthRouter = async (
 		clientRepository: ClientRepository;
 		codeRepository: CodeRepository;
 		keyStore: KeyStore;
+		rateLimiter?: RateLimiterBase;
+		auditSink?: AuditSinkBase;
+		grantPolicy?: GrantPolicyHookBase;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
 
-	const tokenRateLimit = rateLimit({
-		windowMs: config.rateLimit.token.windowMs,
-		limit: config.rateLimit.token.limit,
-		standardHeaders: true,
-		legacyHeaders: false,
-	});
-
-	const authorizeRateLimit = rateLimit({
-		windowMs: config.rateLimit.authorize.windowMs,
-		limit: config.rateLimit.authorize.limit,
-		standardHeaders: true,
-		legacyHeaders: false,
-	});
+	async function checkRateLimit(req: Request, res: Response, tag: string): Promise<boolean> {
+		if (!rateLimiter) return true;
+		const ip = req.ip ?? "unknown";
+		const key = `${tag}:ip:${ip}`;
+		let decision: Awaited<ReturnType<typeof rateLimiter.check>>;
+		try {
+			// CP-10: pass the same normalized ip into the check context as the
+			// key derivation uses, so limiters that re-use ctx.ip for logging
+			// or secondary keying observe the same value.
+			decision = await rateLimiter.check(key, {
+				ip,
+				userAgent: req.get("user-agent"),
+			});
+		} catch (cause) {
+			// Fail-open: if the limiter backend is unavailable we prefer to serve
+			// the auth flow over 5xx-ing every request. Operators see the outage
+			// via the audit event below and via their limiter's own telemetry.
+			emitAuditEvent(auditSink, {
+				timestamp: new Date(),
+				type: "rate_limit.unavailable",
+				ip,
+				userAgent: req.get("user-agent"),
+				details: {
+					tag,
+					error: cause instanceof Error ? cause.message : String(cause),
+				},
+			});
+			return true;
+		}
+		if (!decision.allowed) {
+			if (decision.resetAt) {
+				const secs = Math.max(0, Math.ceil((decision.resetAt.getTime() - Date.now()) / 1000));
+				res.setHeader("Retry-After", String(secs));
+			}
+			res.status(429).json({ error: "rate_limited", reason: decision.reason });
+			return false;
+		}
+		return true;
+	}
 
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
-		.post("/token", tokenRateLimit, async (req: Request, res: Response) => {
+		.post("/token", async (req: Request, res: Response) => {
+			if (!(await checkRateLimit(req, res, "token"))) return;
 			const { grant_type } = req.body;
 			const issuer = config.oauth.jwt.issuer ?? req.get("host");
 
 			if (typeof grant_type !== "string" || grant_type === "") {
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "token.issued.failure",
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { reason: "missing_grant_type" },
+				});
 				return res.status(400).json({
 					error: "unsupported_grant_type",
 					error_description: "grant_type must be a non-empty string",
@@ -95,6 +138,13 @@ export const createOAuthRouter = async (
 
 			const handler = registry.get(grant_type);
 			if (!handler) {
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "token.issued.failure",
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { reason: "unsupported_grant_type", grant_type },
+				});
 				return res.status(400).json({
 					error: "unsupported_grant_type",
 					error_description: `grant_type "${grant_type}" is not supported`,
@@ -106,6 +156,8 @@ export const createOAuthRouter = async (
 				session: req.session,
 				issuer,
 				metadata: { ip: req.ip },
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
 			};
 			const { result, sessionMutation } = await handler.handle(ctx);
 
@@ -121,6 +173,14 @@ export const createOAuthRouter = async (
 			if ("tokens" in result) {
 				res.set("Cache-Control", "no-store");
 				res.set("Pragma", "no-cache");
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "token.issued",
+					clientId: typeof req.body.client_id === "string" ? req.body.client_id : undefined,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { grant_type },
+				});
 				return res.status(result.status).json(result.tokens);
 			}
 			const errorBody: Record<string, unknown> = { error: result.error };
@@ -128,13 +188,21 @@ export const createOAuthRouter = async (
 			if (result.status === 401) {
 				res.set("WWW-Authenticate", "Bearer");
 			}
+			await emitAuditEvent(auditSink, {
+				timestamp: new Date(),
+				type: "token.issued.failure",
+				clientId: typeof req.body.client_id === "string" ? req.body.client_id : undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { grant_type, error: result.error },
+			});
 			return res.status(result.status).json(errorBody);
 		})
 		// RFC 7662: Token Introspection
 		.post(
 			"/introspect",
-			tokenRateLimit,
 			async (req: Request, res: Response, next) => {
+				if (!(await checkRateLimit(req, res, "introspect"))) return;
 				const auth = req.headers.authorization;
 				if (auth?.startsWith("Bearer ")) {
 					const bearerToken = auth.slice(7);
@@ -189,7 +257,8 @@ export const createOAuthRouter = async (
 				}
 			},
 		)
-		.get("/authorize", authorizeRateLimit, async (req: Request, res: Response) => {
+		.get("/authorize", async (req: Request, res: Response) => {
+			if (!(await checkRateLimit(req, res, "authorize"))) return;
 			if (!req.session.isAuthenticated) {
 				return res.redirect(
 					`${config.endpoints.login.url}?redirect_to=${encodeURIComponent(`${req.protocol}://${req.get("host")}${req.originalUrl}`)}`,
@@ -299,10 +368,84 @@ export const createOAuthRouter = async (
 				}
 
 				const requestedScopes = toStr(scope)?.split(" ").filter(Boolean) ?? [];
-				const grantedScopes =
+				const allowedFilteredScopes =
 					requestedScopes.length > 0
 						? requestedScopes.filter((s) => allowedScopes.includes(s))
 						: allowedScopes;
+
+				// C-2: policy evaluation at /authorize (evaluate-once, persist on Code).
+				// The code exchange MUST NOT re-evaluate — it reads the narrowed values off
+				// Code.grantedScope / Code.grantedAudience. This prevents scope escalation
+				// via a crafted /token request after /authorize decided the narrow.
+				let grantedScopes: readonly string[] = allowedFilteredScopes;
+				let grantedAudience: readonly string[] | undefined;
+				const subjectForPolicy =
+					typeof (req.session.user as Record<string, unknown> | undefined)?.id === "string"
+						? ((req.session.user as Record<string, unknown>).id as string)
+						: undefined;
+				if (grantPolicy) {
+					// CP-11: issuer must NOT be request-derived (Host header is
+					// attacker-controlled in many deployments). Prefer the
+					// configured jwt.issuer so policy decisions match the issuer
+					// claim on minted tokens.
+					const trustedIssuer = config.oauth.jwt.issuer ?? "";
+					// CP-18 (authorize side): fail-closed on policy throw. Same
+					// rationale as the refresh_token path — policy is a security
+					// boundary and failing open would hand out the pre-policy
+					// scope ceiling.
+					let decision: Awaited<ReturnType<typeof grantPolicy.evaluate>>;
+					try {
+						decision = await grantPolicy.evaluate(
+							{
+								grantType: "authorization",
+								clientId: client_id,
+								subject: subjectForPolicy,
+								requestedScope: requestedScopes.length > 0 ? requestedScopes : undefined,
+								originalScope: allowedScopes,
+							},
+							{
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								issuer: trustedIssuer,
+							},
+						);
+					} catch {
+						return redirectError(
+							redirect_uri,
+							"temporarily_unavailable",
+							"policy evaluation unavailable",
+							toStr(state),
+						);
+					}
+					if (decision.outcome === "deny") {
+						return redirectError(
+							redirect_uri,
+							decision.error,
+							decision.errorDescription ?? "policy denied",
+							toStr(state),
+						);
+					}
+					if (decision.grantedScope) {
+						// CP-13: policy MUST NOT expand the client's scope ceiling.
+						// Enforce grantedScope ⊆ allowedFilteredScopes (the
+						// pre-policy-narrowed set) — a policy returning a scope
+						// outside this is a bug or a compromised policy, and we
+						// fail closed with invalid_scope per RFC 6749.
+						const invalidFromPolicy = decision.grantedScope.filter(
+							(s) => !allowedFilteredScopes.includes(s),
+						);
+						if (invalidFromPolicy.length > 0) {
+							return redirectError(
+								redirect_uri,
+								"invalid_scope",
+								`policy returned scopes outside client allowance: ${invalidFromPolicy.join(" ")}`,
+								toStr(state),
+							);
+						}
+						grantedScopes = decision.grantedScope;
+					}
+					if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
+				}
 
 				// B-7: resolve code_challenge_method — use provided value or defaultMethod
 				let resolvedMethod: string | undefined;
@@ -322,12 +465,22 @@ export const createOAuthRouter = async (
 					resolvedMethod = undefined;
 				}
 
+				// CP-14: persist `undefined` when no scopes/audiences survived —
+				// an empty array would later stringify to `scope: ""` in the
+				// token response, which is indistinguishable from "scope claim
+				// omitted" and surprises consumers.
+				const scopeForPersist = grantedScopes.length > 0 ? grantedScopes : undefined;
+				const audienceForPersist =
+					grantedAudience && grantedAudience.length > 0 ? grantedAudience : undefined;
+
 				let issue: Awaited<ReturnType<typeof codeRepository.createCode>>;
 				try {
 					issue = await codeRepository.createCode({
 						code_challenge: toStr(code_challenge),
 						code_challenge_method: resolvedMethod,
 						redirect_uri,
+						grantedScope: scopeForPersist,
+						grantedAudience: audienceForPersist,
 					});
 				} catch {
 					return redirectError(
@@ -341,7 +494,7 @@ export const createOAuthRouter = async (
 				req.session.code = issue.code;
 				req.session.code_client_id = client_id;
 				req.session.code_redirect_uri = redirect_uri;
-				req.session.granted_scopes = grantedScopes.length > 0 ? grantedScopes : undefined;
+				req.session.granted_scopes = grantedScopes.length > 0 ? [...grantedScopes] : undefined;
 
 				const url = new URL(redirect_uri);
 				url.searchParams.append("code", issue.code);
@@ -349,6 +502,15 @@ export const createOAuthRouter = async (
 					url.searchParams.append("state", state);
 				}
 
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "login.success",
+					subject: typeof req.session.user?.id === "string" ? req.session.user.id : undefined,
+					clientId: client_id,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { response_type: "code" },
+				});
 				return res.redirect(url.toString());
 			}
 

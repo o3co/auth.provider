@@ -107,8 +107,6 @@ describe("schema open type", () => {
 			},
 			rateLimit: {
 				login: { windowMs: 900000, limit: 20 },
-				token: { windowMs: 60000, limit: 60 },
-				authorize: { windowMs: 60000, limit: 30 },
 			},
 			federations: {},
 			// Legacy key — must fail. The renamed key `repositories` is absent.
