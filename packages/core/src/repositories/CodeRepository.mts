@@ -24,6 +24,9 @@ export interface CodeRepository {
 		expiresIn?: number;
 		grantedScope?: readonly string[];
 		grantedAudience?: readonly string[];
+		// NEW (TODO-F-3): OIDC authorize → token round-trip state.
+		nonce?: string;
+		sid?: string;
 	}): Promise<Code>;
 	getByCode(code: string): Promise<Code | null>;
 	consumeByCode(code: string): Promise<Code | null>;
