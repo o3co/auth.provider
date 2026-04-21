@@ -18,6 +18,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	type GrantPolicyHookBase,
 	type RefreshTokenRotateOutcome,
 	type RefreshTokenStoreBase,
 } from "@o3co/auth-provider-core";
@@ -394,6 +395,64 @@ describe("createRefreshTokenGrant", () => {
 			if ("error" in result) {
 				expect(result.error).toBe("invalid_grant");
 				expect(result.errorDescription).toBe("family_revoked");
+			} else {
+				expect.fail("Expected error in result");
+			}
+		});
+	});
+
+	describe("refresh_token grant — grantPolicy hook", () => {
+		function createStubPolicy(evaluate: GrantPolicyHookBase["evaluate"]): GrantPolicyHookBase {
+			return { kind: "stub", evaluate };
+		}
+
+		it("narrows scope when policy returns allow with grantedScope", async () => {
+			const token = await makeRefreshToken({ scope: "read write" });
+			const policy = createStubPolicy(async () => ({
+				outcome: "allow",
+				grantedScope: ["read"],
+			}));
+			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const handler = createRefreshTokenGrant(depsWithPolicy);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if ("tokens" in result) {
+				expect(result.tokens.scope).toBe("read");
+			} else {
+				expect.fail("Expected tokens in result");
+			}
+		});
+
+		it("denies with policy-provided error", async () => {
+			const token = await makeRefreshToken({ scope: "read write" });
+			const policy = createStubPolicy(async () => ({
+				outcome: "deny",
+				error: "access_denied",
+				errorDescription: "policy",
+			}));
+			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const handler = createRefreshTokenGrant(depsWithPolicy);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			if ("error" in result) {
+				expect(result.error).toBe("access_denied");
+				expect(result.errorDescription).toBe("policy");
 			} else {
 				expect.fail("Expected error in result");
 			}

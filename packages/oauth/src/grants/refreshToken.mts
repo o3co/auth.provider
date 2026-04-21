@@ -157,6 +157,40 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				grantedScope = requested.join(" ");
 			}
 
+			let finalScope = grantedScope;
+			let finalAudience: string | string[] | null = tokenAud ?? client_id ?? null;
+
+			if (deps.grantPolicy) {
+				const decision = await deps.grantPolicy.evaluate(
+					{
+						grantType: "refresh_token",
+						clientId: client_id,
+						subject: subjectStr,
+						requestedScope: requestedScope
+							? [...new Set(requestedScope.split(" ").filter(Boolean))]
+							: undefined,
+						originalScope: scopeStr ? scopeStr.split(" ") : undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+				);
+				if (decision.outcome === "deny") {
+					return {
+						result: {
+							status: 400,
+							error: decision.error,
+							errorDescription: decision.errorDescription,
+						},
+					};
+				}
+				if (decision.grantedScope) finalScope = decision.grantedScope.join(" ");
+				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
+					finalAudience =
+						decision.grantedAudience.length === 1
+							? decision.grantedAudience[0]
+							: [...decision.grantedAudience];
+				}
+			}
+
 			const familyId =
 				((tokenPayload as Record<string, unknown>).family_id as string | undefined) ?? null;
 			const previousJti =
@@ -169,10 +203,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					expiresIn: config.oauth.accessToken.expiresIn,
 					keyStore,
 					issuer,
-					audience: tokenAud ?? client_id ?? null,
+					audience: finalAudience,
 					subject: subjectStr ?? null,
 					authorizedParty: azpStr ?? null,
-					scope: grantedScope,
+					scope: finalScope,
 					tokenType: "at+jwt",
 				},
 			);
@@ -183,10 +217,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					expiresIn: config.oauth.refreshToken.expiresIn,
 					keyStore,
 					issuer,
-					audience: tokenAud ?? client_id ?? null,
+					audience: finalAudience,
 					subject: subjectStr ?? null,
 					authorizedParty: azpStr ?? null,
-					scope: grantedScope,
+					scope: finalScope,
 					tokenType: "rt+jwt",
 				},
 			);

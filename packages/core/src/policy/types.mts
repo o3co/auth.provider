@@ -49,10 +49,7 @@ export type GrantPolicyDecision =
 
 export interface GrantPolicyHookBase {
 	readonly kind: string;
-	evaluate(
-		request: GrantPolicyRequest,
-		ctx: GrantPolicyContext,
-	): Promise<GrantPolicyDecision>;
+	evaluate(request: GrantPolicyRequest, ctx: GrantPolicyContext): Promise<GrantPolicyDecision>;
 }
 
 export type GrantPolicyHookFactory = AdapterFactory<GrantPolicyHookBase>;

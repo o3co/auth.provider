@@ -18,6 +18,7 @@ import type { z } from "zod";
 import type { CoreConfig } from "../config/application.schema.mjs";
 import type { KeyStore } from "../keys/KeyStore.mjs";
 import type { PathResolver } from "../modules/types.mjs";
+import type { GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
 
 export interface SessionData {
@@ -35,6 +36,8 @@ export interface GrantContext {
 	session: SessionData;
 	issuer?: string;
 	metadata: Record<string, unknown>;
+	ip?: string;
+	userAgent?: string;
 }
 
 export interface GrantSuccess {
@@ -70,6 +73,7 @@ export interface GrantDependencies {
 	keyStore: KeyStore;
 	pathResolver?: PathResolver;
 	refreshTokenStore?: RefreshTokenStoreBase;
+	grantPolicy?: GrantPolicyHookBase;
 }
 
 /**

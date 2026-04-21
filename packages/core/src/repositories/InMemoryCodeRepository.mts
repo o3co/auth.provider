@@ -21,6 +21,8 @@ import type { Code } from "./types.mjs";
 interface StoredCode extends Code {
 	expiresAt: number;
 	redirect_uri?: string;
+	grantedScope?: readonly string[];
+	grantedAudience?: readonly string[];
 }
 
 export class InMemoryCodeRepository implements CodeRepository {
@@ -44,6 +46,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 		code_challenge_method?: string;
 		redirect_uri?: string;
 		expiresIn?: number;
+		grantedScope?: readonly string[];
+		grantedAudience?: readonly string[];
 	}): Promise<Code> {
 		const code = crypto.randomBytes(32).toString("base64url");
 		const expiresIn = params.expiresIn ?? this.defaultExpiresIn;
@@ -54,6 +58,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			redirect_uri: params.redirect_uri,
 			expiresIn,
 			expiresAt: Date.now() + expiresIn * 1000,
+			grantedScope: params.grantedScope,
+			grantedAudience: params.grantedAudience,
 		};
 		this.codes.set(code, stored);
 		return {
@@ -62,6 +68,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			code_challenge_method: params.code_challenge_method,
 			redirect_uri: params.redirect_uri,
 			expiresIn,
+			grantedScope: params.grantedScope,
+			grantedAudience: params.grantedAudience,
 		};
 	}
 
@@ -78,6 +86,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			code_challenge_method: stored.code_challenge_method,
 			redirect_uri: stored.redirect_uri,
 			expiresIn: stored.expiresIn,
+			grantedScope: stored.grantedScope,
+			grantedAudience: stored.grantedAudience,
 		};
 	}
 
@@ -92,6 +102,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			code_challenge_method: stored.code_challenge_method,
 			redirect_uri: stored.redirect_uri,
 			expiresIn: stored.expiresIn,
+			grantedScope: stored.grantedScope,
+			grantedAudience: stored.grantedAudience,
 		};
 	}
 

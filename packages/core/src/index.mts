@@ -75,6 +75,15 @@ export {
 } from "./keys/KeyStore.mjs";
 // Module system
 export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
+// Grant policy hook (partial exports — full export set lands in Task 24)
+export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
+export type {
+	GrantPolicyContext,
+	GrantPolicyDecision,
+	GrantPolicyHookBase,
+	GrantPolicyHookFactory,
+	GrantPolicyRequest,
+} from "./policy/types.mjs";
 // Refresh token store (Task 24 will finalize the full export set; partial exports pulled forward here for Task 16)
 export { createRefreshTokenStoreFactory } from "./refresh/factory.mjs";
 export type {
