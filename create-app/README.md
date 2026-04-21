@@ -5,10 +5,12 @@ CLI scaffolder for auth.provider. Generates a new project from the standalone te
 ## Usage
 
 ```bash
-npx create-o3co-auth-provider <project-name>
+npx create-o3co-auth-provider <project-name> [--dir <dir-name>]
 ```
 
-Example:
+`<project-name>` may be either a scoped npm name (`@scope/pkg`) or an unscoped name (`pkg`).
+
+Unscoped example:
 
 ```bash
 npx create-o3co-auth-provider my-auth-server
@@ -17,24 +19,49 @@ npm install
 npm run debug
 ```
 
+Scoped example (directory defaults to the package portion `auth.provider`):
+
+```bash
+npx create-o3co-auth-provider @my-org/auth.provider
+cd auth.provider
+npm install
+npm run debug
+```
+
+Override the directory name with `--dir`:
+
+```bash
+npx create-o3co-auth-provider @my-org/auth.provider --dir provider
+cd provider
+```
+
 ## What It Does
 
-1. Validates the project name.
-2. Resolves the target directory as `<cwd>/<project-name>`.
-3. Errors if the directory already exists.
-4. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
-5. Rewrites `package.json` in the generated directory:
-   - Sets `name` to the given project name.
+1. Validates `<project-name>` (see Validation Rules).
+2. Derives the target directory name: `--dir <value>` if given, else the unscoped part of a scoped name, else the name itself.
+3. Resolves the target directory as `<cwd>/<dir-name>`.
+4. Errors if the directory already exists.
+5. Copies `templates/standalone/` to the target directory, excluding `node_modules/` and `dist/`.
+6. Rewrites `package.json` in the generated directory:
+   - Sets `name` to `<project-name>` verbatim (scope-preserving).
    - Removes the `private` field.
    - Replaces all `workspace:*` version references with published semver versions from `versions.json`.
-6. Prints next-step instructions.
+7. Prints next-step instructions.
 
 ## Validation Rules
 
-The project name must satisfy all of the following:
+`<project-name>` must match one of:
 
-- Must not be `.` or `..`
-- Must not contain path separators (`/` or `\`)
+- Unscoped: `^[a-z0-9][a-z0-9-._~]*$`
+- Scoped: `^@[a-z0-9][a-z0-9-._~]*/[a-z0-9][a-z0-9-._~]*$`
+
+Both forms must be non-empty, not `.` or `..`, and ≤ 214 characters.
+
+`--dir <value>` must match the unscoped pattern above (same constraints).
+
+## Known Limitations
+
+The bundled template's `README.md` / `README.ja.md` still carry the upstream title `@o3co/auth-provider-standalone`. When generating a scoped project, that title will not match your `package.json` name; edit it manually if it matters for your use case.
 
 ## Generated Structure
 
