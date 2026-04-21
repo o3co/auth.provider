@@ -552,6 +552,74 @@ Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_to
 
 The `CodeRepository.createCode` params and `InMemoryCodeRepository` accept `nonce`, `sid`, and `grantedScope` in the same call. Consumers (the `authorization_code` grant) read `codeData.grantedScope` (set by `GrantPolicyHook` at `/oauth/authorize`) as the authoritative scope for token minting instead of `session.granted_scopes`.
 
+### OIDC id_token + claim filter (TODO-F-4)
+
+Two low-level helpers used by the `authorization_code` grant and the `/oauth/userinfo` endpoint.
+
+#### `generateIdToken`
+
+```typescript
+interface GenerateIdTokenOptions {
+  readonly sub: string;
+  readonly aud: string;
+  readonly azp?: string;
+  readonly authTime: Date;
+  readonly nonce?: string;
+  readonly sid: string;
+  readonly scopes: ReadonlyArray<string>;
+  readonly userClaims: UserSessionClaims;
+  readonly keyStore: KeyStore;
+  readonly issuer: string;
+  readonly expiresIn?: number; // default 3600 s
+}
+
+function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token>;
+```
+
+Signs and returns an OIDC id_token JWT (OIDC Core §2). Claim composition:
+
+- `iss`, `sub`, `aud`, `exp`, `iat`, `jti` — standard JWT claims
+- `auth_time` — seconds since epoch, from `opts.authTime`
+- `sid` — session identifier for back-channel logout (TODO-F-5)
+- `azp` — authorized party, included when provided
+- `nonce` — reflected verbatim from the authorization request when provided
+- scope-filtered user claims via `filterClaimsByScope`
+
+Header uses `typ: "id+jwt"` as an introspection convenience hint.
+
+#### `filterClaimsByScope`
+
+```typescript
+function filterClaimsByScope(
+  claims: UserSessionClaims,
+  scopes: ReadonlyArray<string>,
+): Record<string, unknown>;
+```
+
+Maps `UserSessionClaims` to the JWT-shaped claim subset that the granted scopes authorize. Strict whitelist — only the mappings in the table below are emitted; any other `UserSessionClaims` fields (e.g. provider-specific fields like `hd`) are never forwarded.
+
+| Scope | Emitted claims |
+| --- | --- |
+| `openid` | *(no claims — governs id_token issuance; `sub` is added by `generateIdToken`)* |
+| `profile` | `name`, `picture` |
+| `email` | `email`, `email_verified` |
+| `groups` | `groups` |
+
+#### `/.well-known/openid-configuration`
+
+OIDC Discovery 1.0 metadata endpoint. Registered by the OAuth module (`@o3co/auth-provider-oauth`) when `config.oauth.jwt.issuer` is configured. When registered, it returns a JSON document advertising:
+
+- `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `introspection_endpoint`
+- `jwks_uri` — only advertised when at least one asymmetric signing alg is configured (omitted for HS256-only deployments since the JWKS route returns 404 for symmetric keys)
+- `response_types_supported: ["code"]`
+- `subject_types_supported: ["public"]`
+- `id_token_signing_alg_values_supported` — derived from the configured `KeyStore.algorithm`
+- `scopes_supported: ["openid", "profile", "email", "groups"]`
+- `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`
+- `code_challenge_methods_supported: ["S256"]`
+
+Fields that require additional endpoints (`revocation_endpoint`, `end_session_endpoint`, back/front-channel logout) are omitted in F-4 and will be added in TODO-F-5.
+
 ## See Also
 
 - Root [README](../../README.md) — architecture overview, configuration reference, Docker setup

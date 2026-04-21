@@ -24,6 +24,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
 import type { PassportStatic } from "passport";
+import * as oidcConfig from "./routes/OpenidConfiguration.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 
 type ExpressLike = {
@@ -105,8 +106,28 @@ export const oauthModule = (params: {
 			auditSink: context.auditSink,
 			grantPolicy: context.grantPolicy,
 			refreshTokenStore: context.refreshTokenStore,
+			userSessionStore: context.userSessionStore,
 		});
 
 		context.router.use("/oauth", oauthRouter);
+
+		// OIDC discovery — mount only when issuer is configured. The module
+		// owns the OAuth endpoints this document advertises (/oauth/authorize,
+		// /oauth/token, /oauth/userinfo, /oauth/introspect), so discovery
+		// belongs here and not in createApp: a deployment that excludes the
+		// OAuth module must not publish a discovery doc pointing at endpoints
+		// that do not exist.
+		const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
+		if (typeof issuer === "string" && issuer.length > 0) {
+			// Advertise only the algorithm the configured KeyStore actually signs
+			// with. Hardcoding the full union would mislead clients to fetch JWKS
+			// expecting a key that is not there (OIDC Core §10.1 + RFC 8414 §2).
+			context.router.use(
+				oidcConfig.createRouter(express, {
+					issuer,
+					signingAlgs: [context.keyStore.algorithm],
+				}),
+			);
+		}
 	},
 });

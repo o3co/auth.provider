@@ -111,6 +111,56 @@ const app = createApp(express, {
 await app.init();
 ```
 
+## TODO-F-4 の変更点
+
+### `authorization_code` グラント — id_token 発行
+
+付与スコープに `openid` が含まれており、かつ `UserSessionStore` が設定されている場合、`authorization_code` グラントはアクセストークン・リフレッシュトークンと合わせて `id_token` を発行する。`id_token` は `@o3co/auth-provider-core` の `generateIdToken` が生成する署名済み JWT で、トークンレスポンスの `id_token` フィールドとして付与される。
+
+id_token が発行される条件:
+
+- 付与スコープに `openid` が含まれること（`/oauth/authorize` 時に `GrantPolicyHook` が設定）
+- `AppOptions.userSessionStore` が設定されていること（ユーザークレームのソースとして使用）
+- コードレコードに `sid` が含まれること（authorize 時にログイン/federation wiring が書き込む）
+- `AppOptions.config.oauth.jwt.issuer` が設定されていること（`iss: ""` の非準拠 JWT を防ぐ）
+
+いずれかの条件が満たされない場合、`id_token` はレスポンスから省略される。その場合も `access_token` と `refresh_token` は通常どおり返される。
+
+発行される `id_token` のクレーム構成:
+
+- `iss`、`sub`、`aud`、`exp`、`iat`、`jti`、`auth_time`、`sid`、`azp` — OIDC Core §2 標準クレーム
+- `nonce` — コードレコードに含まれる場合、そのまま反映（OIDC Core §3.1.3.7）
+- スコープフィルター済みユーザークレーム（下表参照）
+
+### `/oauth/userinfo` — OIDC Core §5.3
+
+```http
+GET /oauth/userinfo
+Authorization: Bearer <access_token>
+```
+
+永続化された `UserSession` を元に、スコープフィルター済みクレームを返す。`oauthModule` が `/oauth/token`・`/oauth/introspect`・`/oauth/authorize` と同じルーターにマウントする。
+
+| 条件 | レスポンス |
+| --- | --- |
+| Bearer トークン未指定または形式不正 | `401`（`WWW-Authenticate: Bearer realm="userinfo"` 付き） |
+| JWT 署名検証失敗 | `401 invalid_token` |
+| `family_id` クレームが失効済み（F-3 cascade） | `401 invalid_token` |
+| セッション未発見またはストアエラー | `401 invalid_token`（フェイルクローズ） |
+| `userSessionStore` 未設定、または `sid` クレームなし | `200 { sub }`（sub のみ、永続クレームなし） |
+| セッションがアクティブ | `200 { sub, ...スコープフィルター済みクレーム }` |
+
+すべてのレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付与する（RFC 6750 §5.3）。
+
+スコープ→クレームマッピング（OIDC Core §5.4 標準スコープ）:
+
+| スコープ | 出力されるクレーム |
+| --- | --- |
+| `openid` | *(id_token 発行の可否を制御; `sub` は常に userinfo レスポンスに含まれる)* |
+| `profile` | `name`、`picture` |
+| `email` | `email`、`email_verified` |
+| `groups` | `groups` |
+
 ## TODO-F-3 の変更点
 
 - **`/oauth/introspect` によるカスケード失効。** アクセストークンに `family_id` クレームが含まれ、`AppOptions.refreshTokenStore` が設定されている場合、イントロスペクトエンドポイントはアクティブレスポンスを返す前に `RefreshTokenStore.isFamilyRevoked(familyId)` を呼び出す。ファミリーが失効済み、またはストアに到達できない場合は `{ active: false }` を返す（フェイルクローズ、RFC 7009 §2.1 SHOULD 準拠）。`family_id` クレームを持たない F-3 以前発行のトークンはこのチェックをスキップし、署名のみで検証される。

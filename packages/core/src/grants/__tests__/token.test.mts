@@ -235,3 +235,19 @@ describe("generateTokenResponse", () => {
 		expect(response.refresh_token).toBe(refreshToken.token);
 	});
 });
+
+describe("generateTokenResponse with id_token", () => {
+	it("includes id_token in the response when provided", () => {
+		const resp = generateTokenResponse({
+			accessToken: { token: "at", expiresIn: 3600 },
+			refreshToken: { token: "rt" },
+			idToken: { token: "it" },
+		});
+		expect(resp.id_token).toBe("it");
+	});
+
+	it("omits id_token when not provided (backward compat)", () => {
+		const resp = generateTokenResponse({ accessToken: { token: "at", expiresIn: 3600 } });
+		expect(resp.id_token).toBeUndefined();
+	});
+});
