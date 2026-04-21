@@ -128,3 +128,48 @@ export function resolveCallbackRedirect(
 
 	return { ok: true, value: clientUrl };
 }
+
+export interface GithubEmailResult {
+	readonly email: string;
+	readonly verified: boolean;
+}
+
+/**
+ * Fetches the authenticated user's email list from the GitHub REST API and
+ * returns the primary verified email (or first verified if no primary is set).
+ * Used by the GitHub federation provider's claim mapping — the passport profile
+ * does not carry email for most users because they keep it private.
+ *
+ * Non-2xx responses resolve to null (consumer treats as "no email available"),
+ * never throw, so a transient GitHub API failure does not kill federation login.
+ *
+ * Requires `user:email` scope, which the built-in GitHub provider already requests.
+ */
+export async function fetchGithubPrimaryEmail(
+	accessToken: string,
+	fetchImpl: typeof fetch = fetch,
+): Promise<GithubEmailResult | null> {
+	try {
+		const res = await fetchImpl("https://api.github.com/user/emails", {
+			headers: {
+				Authorization: `Bearer ${accessToken}`,
+				"User-Agent": "o3co-auth-provider",
+				Accept: "application/vnd.github+json",
+			},
+		});
+		if (!res.ok) return null;
+		const rows = (await res.json()) as Array<{
+			email?: unknown;
+			primary?: unknown;
+			verified?: unknown;
+		}>;
+		if (!Array.isArray(rows)) return null;
+		const verified = rows.filter((r) => r.verified === true && typeof r.email === "string");
+		const primary = verified.find((r) => r.primary === true);
+		const chosen = primary ?? verified[0];
+		if (!chosen || typeof chosen.email !== "string") return null;
+		return { email: chosen.email, verified: true };
+	} catch {
+		return null;
+	}
+}
