@@ -21,19 +21,32 @@ const key = (sid: string, name: string) => `${sid}\u0000${name}`;
  * calls `deleteBySession(sid)` when a session ends. For process longevity
  * consider redis instead (production-grade TTL + cross-instance replication).
  */
+const cloneTokens = (t: FederationTokens): FederationTokens => ({
+	accessToken: t.accessToken,
+	refreshToken: t.refreshToken,
+	idToken: t.idToken,
+	// Copy Date so caller-held references can't mutate stored state.
+	expiresAt: new Date(t.expiresAt.getTime()),
+	tokenType: t.tokenType,
+	scope: t.scope,
+	// Shallow-copy rawParams; sufficient since consumers treat it as read-only.
+	rawParams: t.rawParams ? { ...t.rawParams } : undefined,
+});
+
 export function createInMemoryFederationTokenStore(): FederationTokenStoreBase {
 	const store = new Map<string, FederationTokens>();
 
 	return {
 		kind: "memory",
 		async attach(sid, name, tokens) {
-			store.set(key(sid, name), { ...tokens });
+			store.set(key(sid, name), cloneTokens(tokens));
 		},
 		async get(sid, name) {
-			return store.get(key(sid, name)) ?? null;
+			const t = store.get(key(sid, name));
+			return t ? cloneTokens(t) : null;
 		},
 		async update(sid, name, tokens) {
-			store.set(key(sid, name), { ...tokens });
+			store.set(key(sid, name), cloneTokens(tokens));
 		},
 		async deleteBySession(sid) {
 			for (const k of [...store.keys()]) {

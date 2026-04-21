@@ -24,9 +24,13 @@ export interface FederationTokenStoreBase {
 	readonly kind: string;
 
 	/**
-	 * Persist tokens for a session + federation. Implementations MUST encrypt
-	 * refreshToken at rest. Plaintext persistence of refresh_token is a
-	 * REJECTED implementation. See spec Section 5.
+	 * Persist tokens for a session + federation. Production implementations
+	 * MUST encrypt refreshToken at rest. Plaintext persistence is supported
+	 * only as an explicit opt-in — the built-in redis adapter exposes this via
+	 * `encryption.mode = "allow-plaintext"` (with a startup warning), and the
+	 * built-in in-memory adapter is plaintext by design because the process
+	 * boundary already contains it. Both opt-outs are intended for
+	 * development / testing use only. See spec Section 5.
 	 */
 	attach(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
 

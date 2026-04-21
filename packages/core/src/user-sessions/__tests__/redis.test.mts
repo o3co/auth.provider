@@ -116,4 +116,20 @@ describe("redis UserSessionStore", () => {
 		const s = await store.get("sid-1");
 		expect(s?.federations).toEqual([]);
 	});
+
+	it("get() self-heals corrupt (non-JSON) payload by deleting the key", async () => {
+		// Match the fakeRedis envelope shape ({ value, px, addedAt }).
+		redis.data.set("us:corrupt", { value: "{not-json", addedAt: Date.now() });
+		expect(await store.get("corrupt")).toBeNull();
+		expect(redis.del).toHaveBeenCalledWith("us:corrupt");
+		// Subsequent create with the same sid must succeed (previously NX would
+		// fail with a misleading "already exists" error).
+		await expect(store.create({ ...base, sid: "corrupt" })).resolves.toBeUndefined();
+	});
+
+	it("create rejects expiresAt in the past with a clear message (not 'already exists')", async () => {
+		await expect(store.create({ ...base, expiresAt: new Date(Date.now() - 1000) })).rejects.toThrow(
+			/expiresAt is in the past/,
+		);
+	});
 });

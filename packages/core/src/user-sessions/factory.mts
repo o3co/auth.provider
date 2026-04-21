@@ -13,7 +13,7 @@ import { createInMemoryUserSessionStore } from "./adapters/memory.mjs";
 import type { UserSessionStoreBase, UserSessionStoreFactory } from "./types.mjs";
 
 export function createUserSessionStoreFactory(): UserSessionStoreFactory {
-	return createAdapterFactory<UserSessionStoreBase>("userSessionStore");
+	return createAdapterFactory<UserSessionStoreBase>("UserSessionStore");
 }
 
 export function registerBuiltinUserSessionStores(factory: UserSessionStoreFactory): void {

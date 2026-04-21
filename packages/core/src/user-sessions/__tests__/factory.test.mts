@@ -28,7 +28,7 @@ describe("UserSessionStoreFactory", () => {
 	it("unknown type throws AdapterFactoryError with UserSessionStore context", async () => {
 		const f = createUserSessionStoreFactory();
 		registerBuiltinUserSessionStores(f);
-		await expect(f.create({ type: "unknown" })).rejects.toThrow(/userSessionStore/);
+		await expect(f.create({ type: "unknown" })).rejects.toThrow(/UserSessionStore/);
 	});
 
 	it("built-in redis adapter is registered and creates instance", async () => {

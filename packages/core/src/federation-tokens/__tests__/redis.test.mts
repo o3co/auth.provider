@@ -24,9 +24,12 @@ function createFakeRedis() {
 			for (const k of keys) if (data.delete(k)) n += 1;
 			return n;
 		}),
-		keys: vi.fn(async (pattern: string) => {
-			const prefix = pattern.endsWith("*") ? pattern.slice(0, -1) : pattern;
-			return [...data.keys()].filter((k) => k.startsWith(prefix));
+		scanIterator: vi.fn((opts: { MATCH: string; COUNT?: number }) => {
+			const prefix = opts.MATCH.endsWith("*") ? opts.MATCH.slice(0, -1) : opts.MATCH;
+			const matched = [...data.keys()].filter((k) => k.startsWith(prefix));
+			return (async function* () {
+				for (const k of matched) yield k;
+			})();
 		}),
 	} satisfies RedisLikeClient & { data: Map<string, string>; ttls: Map<string, number> };
 }

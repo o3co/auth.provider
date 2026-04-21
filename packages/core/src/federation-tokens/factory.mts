@@ -8,7 +8,7 @@ import { createInMemoryFederationTokenStore } from "./adapters/memory.mjs";
 import type { FederationTokenStoreBase, FederationTokenStoreFactory } from "./types.mjs";
 
 export function createFederationTokenStoreFactory(): FederationTokenStoreFactory {
-	return createAdapterFactory<FederationTokenStoreBase>("federationTokenStore");
+	return createAdapterFactory<FederationTokenStoreBase>("FederationTokenStore");
 }
 
 export function registerBuiltinFederationTokenStores(factory: FederationTokenStoreFactory): void {

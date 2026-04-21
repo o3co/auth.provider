@@ -27,7 +27,7 @@ describe("FederationTokenStoreFactory", () => {
 					get: async () => null,
 					set: async () => "OK",
 					del: async () => 0,
-					keys: async () => [],
+					scanIterator: async function* () {},
 				},
 				// encryption omitted intentionally
 			}),
@@ -44,7 +44,7 @@ describe("FederationTokenStoreFactory", () => {
 					get: async () => null,
 					set: async () => "OK",
 					del: async () => 0,
-					keys: async () => [],
+					scanIterator: async function* () {},
 				},
 				encryption: { mode: "required", key: Buffer.alloc(16) },
 			}),
@@ -64,7 +64,7 @@ describe("FederationTokenStoreFactory", () => {
 					get: async () => null,
 					set: async () => "OK",
 					del: async () => 0,
-					keys: async () => [],
+					scanIterator: async function* () {},
 				},
 				encryption: { mode: "allow-plaintext" },
 			});

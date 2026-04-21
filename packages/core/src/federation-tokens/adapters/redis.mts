@@ -10,7 +10,13 @@ export interface RedisLikeClient {
 	get(key: string): Promise<string | null>;
 	set(key: string, value: string, opts?: { PX?: number }): Promise<string | null>;
 	del(...keys: string[]): Promise<number>;
-	keys(pattern: string): Promise<string[]>;
+	/**
+	 * Non-blocking alternative to Redis KEYS — matches redis v5 client's
+	 * `scanIterator({ MATCH, COUNT })`. Cursor-based, yields matching keys in
+	 * batches without blocking the server. Required for `deleteBySession` to
+	 * be safe in production.
+	 */
+	scanIterator(opts: { MATCH: string; COUNT?: number }): AsyncIterable<string>;
 }
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
@@ -115,8 +121,17 @@ export function createRedisFederationTokenStore(
 			await writeEnv(sid, name, toEnvelope(tokens));
 		},
 		async deleteBySession(sid) {
-			const keys = await opts.client.keys(sidPattern(sid));
-			if (keys.length > 0) await opts.client.del(...keys);
+			// Use SCAN (non-blocking) instead of KEYS (O(N), blocking). Each
+			// batch of scanned keys is deleted before we await the next batch.
+			const keysBatch: string[] = [];
+			for await (const key of opts.client.scanIterator({ MATCH: sidPattern(sid), COUNT: 100 })) {
+				keysBatch.push(key);
+				if (keysBatch.length >= 100) {
+					await opts.client.del(...keysBatch);
+					keysBatch.length = 0;
+				}
+			}
+			if (keysBatch.length > 0) await opts.client.del(...keysBatch);
 		},
 		async delete(sid, name) {
 			await opts.client.del(k(sid, name));

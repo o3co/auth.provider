@@ -48,9 +48,10 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 			sessions.set(input.sid, {
 				sid: input.sid,
 				sub: input.sub,
-				authTime: input.authTime,
+				// Copy Dates so caller-held references cannot mutate stored state.
+				authTime: new Date(input.authTime.getTime()),
 				createdAt: new Date(),
-				expiresAt: input.expiresAt,
+				expiresAt: new Date(input.expiresAt.getTime()),
 				federations: [...(input.federations ?? [])],
 				activeRPs: [],
 				familyIds: [],
@@ -60,12 +61,38 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 		async get(sid: string): Promise<UserSession | null> {
 			const s = readLive(sid);
 			if (!s) return null;
-			return { ...s, claims: { ...s.claims } as UserSessionClaims };
+			// Deep-copy every field that the public `readonly` types promise not to
+			// mutate: Dates, array references, and claim object. Without this, a
+			// caller doing `(await store.get()).federations.push(...)` (even with
+			// a `readonly` cast escape hatch) would mutate the in-store record.
+			return {
+				sid: s.sid,
+				sub: s.sub,
+				authTime: new Date(s.authTime.getTime()),
+				createdAt: new Date(s.createdAt.getTime()),
+				expiresAt: new Date(s.expiresAt.getTime()),
+				federations: [...s.federations],
+				activeRPs: s.activeRPs.map((r) => ({
+					clientId: r.clientId,
+					backchannelLogoutUri: r.backchannelLogoutUri,
+					frontchannelLogoutUri: r.frontchannelLogoutUri,
+					registeredAt: new Date(r.registeredAt.getTime()),
+				})),
+				familyIds: [...s.familyIds],
+				claims: { ...s.claims } as UserSessionClaims,
+			};
 		},
 		async registerRP(sid: string, rp: RegisteredRP) {
 			const s = readLive(sid);
 			if (!s) return;
-			s.activeRPs = [...s.activeRPs.filter((r) => r.clientId !== rp.clientId), rp];
+			// Copy the RP record so caller cannot mutate stored state via its reference.
+			const rpCopy: RegisteredRP = {
+				clientId: rp.clientId,
+				backchannelLogoutUri: rp.backchannelLogoutUri,
+				frontchannelLogoutUri: rp.frontchannelLogoutUri,
+				registeredAt: new Date(rp.registeredAt.getTime()),
+			};
+			s.activeRPs = [...s.activeRPs.filter((r) => r.clientId !== rp.clientId), rpCopy];
 		},
 		async linkFamily(sid: string, familyId: string) {
 			const s = readLive(sid);

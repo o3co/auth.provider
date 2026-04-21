@@ -89,6 +89,10 @@ export function createRedisUserSessionStore(
 		try {
 			return JSON.parse(v) as Envelope;
 		} catch {
+			// Corrupt/non-JSON payload: self-heal by deleting the key so subsequent
+			// create(sid) doesn't fail NX with a misleading "already exists" error,
+			// and subsequent get(sid) stays consistently null.
+			await opts.client.del(k(sid));
 			return null;
 		}
 	};
@@ -102,6 +106,14 @@ export function createRedisUserSessionStore(
 	return {
 		kind: "redis",
 		async create(input: CreateUserSessionInput) {
+			// Validate expiresAt up-front so an already-expired input fails with a
+			// clear message rather than being misdiagnosed as a duplicate-sid error
+			// when writeEnvelope returns null for non-positive TTL.
+			if (input.expiresAt.getTime() <= Date.now()) {
+				throw new Error(
+					`UserSession ${input.sid}: expiresAt is in the past (TTL must be positive)`,
+				);
+			}
 			const session: UserSession = {
 				sid: input.sid,
 				sub: input.sub,
