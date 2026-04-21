@@ -88,26 +88,87 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
+interface ParsedArgs {
+	projectName: string;
+	dir: string | undefined;
+}
+
+const parseArgs = (args: string[]): ParsedArgs => {
+	const positionals: string[] = [];
+	let dir: string | undefined;
+	let dirSeen = false;
+
+	for (let i = 0; i < args.length; i++) {
+		const a = args[i];
+		if (a === "--dir") {
+			if (dirSeen) throw new Error("--dir specified more than once");
+			if (i + 1 >= args.length) throw new Error("--dir requires a value");
+			dir = args[i + 1];
+			dirSeen = true;
+			i++;
+		} else if (a.startsWith("--dir=")) {
+			if (dirSeen) throw new Error("--dir specified more than once");
+			dir = a.slice("--dir=".length);
+			dirSeen = true;
+		} else if (a.startsWith("-")) {
+			// Treats `--` and any --unknown as an unknown flag.
+			throw new Error(`unknown flag: ${a}`);
+		} else {
+			positionals.push(a);
+		}
+	}
+
+	if (positionals.length === 0) throw new Error("missing <project-name>");
+	if (positionals.length > 1) throw new Error("too many positional arguments");
+
+	return { projectName: positionals[0], dir };
+};
+
+const deriveDirName = (projectName: string, dir: string | undefined): string => {
+	if (dir !== undefined) return dir;
+	if (projectName.startsWith("@")) return projectName.split("/")[1];
+	return projectName;
+};
+
 // CLI entry point
 export const main = (): void => {
 	const args = process.argv.slice(2);
-	const projectName = args[0];
 
-	if (!projectName) {
-		console.error("Usage: create-o3co-auth-provider <project-name>");
+	let parsed: ParsedArgs;
+	try {
+		parsed = parseArgs(args);
+	} catch (e) {
+		console.error(`Error: ${(e as Error).message}`);
+		console.error(
+			"Usage: create-o3co-auth-provider <project-name> [--dir <dir-name>]",
+		);
+		console.error(
+			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
+		);
 		process.exit(1);
 	}
 
-	// Reject path separators and dot segments to prevent directory traversal
-	if (/[/\\]/.test(projectName) || projectName === "." || projectName === "..") {
-		console.error("Error: Project name must not contain path separators or be '.' / '..'.");
+	const { projectName, dir } = parsed;
+
+	if (!isValidProjectName(projectName)) {
+		console.error(
+			"Error: <project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped; max 214 chars; no path separators).",
+		);
 		process.exit(1);
 	}
 
-	const targetDir = resolve(process.cwd(), projectName);
+	if (dir !== undefined && !isValidDirName(dir)) {
+		console.error(
+			"Error: --dir must be a valid unscoped package name (no '/', '\\\\', '@'; not '.' or '..'; max 214 chars).",
+		);
+		process.exit(1);
+	}
+
+	const dirName = deriveDirName(projectName, dir);
+	const targetDir = resolve(process.cwd(), dirName);
 
 	if (existsSync(targetDir)) {
-		console.error(`Error: Directory '${projectName}' already exists.`);
+		console.error(`Error: Directory '${dirName}' already exists.`);
 		process.exit(1);
 	}
 
@@ -116,7 +177,7 @@ export const main = (): void => {
 
 	console.log(`\nDone! Created ${projectName} at ${targetDir}`);
 	console.log(`\nNext steps:`);
-	console.log(`  cd ${projectName}`);
+	console.log(`  cd ${dirName}`);
 	console.log("  npm install");
 	console.log("  npm run debug");
 };
