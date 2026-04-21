@@ -37,7 +37,11 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 		// asymmetric alg is configured.
 		const hasAsymmetricAlg = opts.signingAlgs.some((alg) => alg !== "HS256");
 		return res.status(200).json({
-			issuer: opts.issuer,
+			// Return the normalized issuer so it matches the `iss` claim minted
+			// on tokens (both use trailing-slash-stripped form). Returning the
+			// raw opts.issuer would cause RPs to reject tokens when iss differs
+			// from discovery.issuer by a trailing slash.
+			issuer: iss,
 			authorization_endpoint: `${iss}/oauth/authorize`,
 			token_endpoint: `${iss}/oauth/token`,
 			userinfo_endpoint: `${iss}/oauth/userinfo`,

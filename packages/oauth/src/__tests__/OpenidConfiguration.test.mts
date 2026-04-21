@@ -95,11 +95,14 @@ describe("GET /.well-known/openid-configuration", () => {
 		expect(body.backchannel_logout_supported).toBeUndefined();
 	});
 
-	it("strips trailing slashes from issuer when building endpoint URLs", async () => {
+	it("strips trailing slashes from issuer in both the issuer field and endpoint URLs", async () => {
 		const body = await callRoute({
 			issuer: "https://auth.example.com///",
 			signingAlgs: ["RS256"],
 		});
+		// Normalized form is used for both endpoints and the issuer field so
+		// discovery.issuer matches the iss claim on issued tokens.
+		expect(body.issuer).toBe("https://auth.example.com");
 		expect(body.authorization_endpoint).toBe("https://auth.example.com/oauth/authorize");
 		expect(body.token_endpoint).toBe("https://auth.example.com/oauth/token");
 	});

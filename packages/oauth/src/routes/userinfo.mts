@@ -112,7 +112,8 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			}
 		}
 
-		// Require sub and sid in payload
+		// sub is required; sid is optional (needed for session-backed claims —
+		// when absent or no userSessionStore wired, we return {sub} only).
 		const sub = typeof payload.sub === "string" ? payload.sub : null;
 		const sid = typeof payload.sid === "string" ? payload.sid : null;
 		if (!sub) {
