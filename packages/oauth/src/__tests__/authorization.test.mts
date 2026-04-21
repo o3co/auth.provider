@@ -893,6 +893,7 @@ describe("createAuthorizationGrant", () => {
 				if (typeof idTokenStr !== "string") throw new Error("expected id_token string");
 
 				const idPayload = decodeJwt(idTokenStr) as Record<string, unknown>;
+				expect(idPayload.iss).toBe("https://auth.example.com");
 				expect(idPayload.sub).toBe("u-1");
 				expect(idPayload.aud).toBe("client1");
 				expect(idPayload.azp).toBe("client1");
@@ -901,6 +902,39 @@ describe("createAuthorizationGrant", () => {
 				expect(idPayload.email).toBe("a@b.com");
 				// profile scope not granted — name must NOT appear
 				expect(idPayload.name).toBeUndefined();
+			});
+
+			it("does NOT include id_token when issuer is absent (avoids OIDC-noncompliant iss:'')", async () => {
+				const authTime = new Date("2026-04-21T00:00:00Z");
+				const userSessionStore = makeUserSessionStore({
+					sid: "sid-noiss",
+					sub: "u-noiss",
+					authTime,
+					claims: { email: "c@b.com", emailVerified: true },
+				});
+				const deps = {
+					...makeDeps(
+						vi.fn().mockResolvedValue({
+							code: "c-noiss",
+							sid: "sid-noiss",
+							grantedScope: ["openid", "email"],
+							nonce: "client-nonce",
+						}),
+					),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "c-noiss", client_id: "client1" },
+					session: { code: "c-noiss", code_client_id: "client1" },
+					// issuer intentionally omitted
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				expect(typeof result.tokens.access_token).toBe("string");
+				expect(result.tokens.id_token).toBeUndefined();
 			});
 
 			it("does NOT include id_token when scope lacks openid (F-4-2)", async () => {
@@ -931,6 +965,7 @@ describe("createAuthorizationGrant", () => {
 
 				expect(result.status).toBe(200);
 				if (!("tokens" in result)) throw new Error("expected tokens");
+				expect(typeof result.tokens.access_token).toBe("string");
 				expect(result.tokens.id_token).toBeUndefined();
 			});
 
@@ -953,6 +988,7 @@ describe("createAuthorizationGrant", () => {
 
 				expect(result.status).toBe(200);
 				if (!("tokens" in result)) throw new Error("expected tokens");
+				expect(typeof result.tokens.access_token).toBe("string");
 				expect(result.tokens.id_token).toBeUndefined();
 			});
 		});

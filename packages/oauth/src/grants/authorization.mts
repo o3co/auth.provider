@@ -226,7 +226,7 @@ export const createAuthorizationGrant = (
 			const sid = codeData.sid;
 			// TODO-F-4: nonce from the code record — written at /authorize time and
 			// must be reflected verbatim in the id_token per OIDC Core §2.
-			const nonce = codeData.nonce as string | undefined;
+			const nonce = codeData.nonce;
 			if (deps.userSessionStore && !sid) {
 				return {
 					result: {
@@ -387,14 +387,18 @@ export const createAuthorizationGrant = (
 			}
 
 			// TODO-F-4: issue id_token when the openid scope was granted and the
-			// session is available. The condition naturally handles all three cases:
+			// session is available. The condition naturally handles all cases:
 			//   F-4-1: openid scope + userSession wired  → id_token issued
 			//   F-4-2: no openid scope                   → id_token omitted
 			//   F-4-3: no userSessionStore               → userSession is null → omitted
+			//   no issuer configured                     → id_token omitted
+			//     (avoids emitting an OIDC-noncompliant `iss: ""` claim; the adapter
+			//      usually falls back to req.get("host"), so this only bites custom
+			//      adapters that pass ctx.issuer = undefined)
 			// userSession truthy implies (deps.userSessionStore && sid) were both truthy
 			// earlier, so the `&& sid` guard below is defensive rather than redundant.
 			let idToken: Token | undefined;
-			if (grantedScopes?.includes("openid") && userSession && sid) {
+			if (grantedScopes?.includes("openid") && userSession && sid && issuer) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
 					aud: client_id,
@@ -405,7 +409,7 @@ export const createAuthorizationGrant = (
 					scopes: grantedScopes,
 					userClaims: userSession.claims,
 					keyStore,
-					issuer: issuer ?? "",
+					issuer,
 				});
 			}
 
