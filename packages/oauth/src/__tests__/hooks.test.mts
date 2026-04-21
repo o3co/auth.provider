@@ -19,8 +19,10 @@ import {
 	type AuditEvent,
 	type AuditSinkBase,
 	type ClientRepository,
+	type Code,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type GrantPolicyHookBase,
 	GrantRegistry,
 	type RateLimiterBase,
 } from "@o3co/auth-provider-core";
@@ -239,6 +241,209 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			const ev = events.find((e) => e.type === "login.success");
 			expect(ev).toBeDefined();
 			expect(ev?.subject).toBe("user-42");
+		});
+	});
+
+	describe("grantPolicy hook (C-2)", () => {
+		function buildAuthorizeApp(opts: {
+			grantPolicy?: GrantPolicyHookBase;
+			captureCode?: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
+			allowedScopes?: string[];
+		}) {
+			const app = express();
+			app.set("trust proxy", 1);
+			app.use(express.json());
+			app.use(express.urlencoded({ extended: false }));
+			app.use((req, _res, next) => {
+				(req as unknown as { session: Record<string, unknown> }).session = {
+					isAuthenticated: true,
+					user: { id: "user-1" },
+				};
+				next();
+			});
+
+			const clientRepo: ClientRepository = {
+				findById: async () => ({
+					clientId: "client-1",
+					allowedRedirectUris: ["https://example.test/cb"],
+					allowedScopes: opts.allowedScopes ?? ["read", "write"],
+				}),
+				authenticate: async () => null,
+			};
+			const codeRepo: CodeRepository = {
+				createCode: async (params) => {
+					opts.captureCode?.(params);
+					return {
+						code: "code-1",
+						redirect_uri: params.redirect_uri,
+						grantedScope: params.grantedScope,
+						grantedAudience: params.grantedAudience,
+					};
+				},
+				getByCode: async () => null,
+				consumeByCode: async () => null,
+				removeByCode: async () => {},
+			};
+
+			return { app, clientRepo, codeRepo };
+		}
+
+		it("evaluates grantPolicy at /authorize and persists narrowed scope on Code", async () => {
+			let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
+				captureCode: (p) => {
+					captured = p;
+				},
+			});
+			const grantPolicy: GrantPolicyHookBase = {
+				kind: "spy",
+				async evaluate(request) {
+					expect(request.grantType).toBe("authorization");
+					expect(request.clientId).toBe("client-1");
+					expect(request.subject).toBe("user-1");
+					return {
+						outcome: "allow",
+						grantedScope: ["read"],
+						grantedAudience: ["aud-1"],
+					};
+				},
+			};
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				scope: "read write",
+			});
+
+			expect(captured).toBeDefined();
+			expect(captured?.grantedScope).toEqual(["read"]);
+			expect(captured?.grantedAudience).toEqual(["aud-1"]);
+		});
+
+		it("redirects with error when grantPolicy denies at /authorize", async () => {
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
+			const grantPolicy: GrantPolicyHookBase = {
+				kind: "deny",
+				async evaluate() {
+					return {
+						outcome: "deny",
+						error: "access_denied",
+						errorDescription: "policy refused",
+					};
+				},
+			};
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			const res = await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				scope: "read",
+			});
+
+			expect(res.status).toBe(302);
+			expect(res.headers.location).toContain("error=access_denied");
+			expect(res.headers.location).toContain("policy");
+		});
+
+		it("persists undefined scope when no grantPolicy is configured (falls back to client-filtered)", async () => {
+			let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
+				captureCode: (p) => {
+					captured = p;
+				},
+			});
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+			});
+			app.use("/oauth", router);
+
+			await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				scope: "read",
+			});
+
+			// Without grantPolicy, Code.grantedScope is the requested-intersected-allowed set
+			expect(captured?.grantedScope).toEqual(["read"]);
+			expect(captured?.grantedAudience).toBeUndefined();
+		});
+
+		it("authorization grant reads Code.grantedScope (not session.granted_scopes)", async () => {
+			// Simulate that /authorize ran earlier and persisted ["read"] on the Code,
+			// but the session got tampered to ["write"]. Code must win.
+			const persistedCode: Code = {
+				code: "code-xyz",
+				redirect_uri: "https://example.test/cb",
+				grantedScope: ["read"],
+			};
+			const codeRepo: CodeRepository = {
+				createCode: async () => persistedCode,
+				getByCode: async () => persistedCode,
+				consumeByCode: async () => persistedCode,
+				removeByCode: async () => {},
+			};
+			const { createAuthorizationGrant } = await import("#/grants/authorization.mjs");
+			const deps = {
+				config: mockConfig,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				codeRepository: codeRepo,
+				clientRepository: {
+					findById: async () => null,
+					authenticate: async () => null,
+				},
+			};
+			const handler = createAuthorizationGrant(deps);
+
+			const { result } = await handler.handle({
+				body: {
+					code: "code-xyz",
+					client_id: "client-1",
+					redirect_uri: "https://example.test/cb",
+				},
+				session: {
+					code: "code-xyz",
+					code_client_id: "client-1",
+					granted_scopes: ["write"],
+					user: { id: "u1" },
+				},
+				issuer: "https://auth.example",
+				metadata: {},
+			});
+
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			const { decodeJwt } = await import("jose");
+			const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect(decoded.scope).toBe("read");
 		});
 	});
 });

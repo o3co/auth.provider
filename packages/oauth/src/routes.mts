@@ -21,6 +21,7 @@ import {
 	type CodeRepository,
 	emitAuditEvent,
 	formatObject,
+	type GrantPolicyHookBase,
 	type GrantRegistry,
 	type KeyStore,
 	type PublicClient,
@@ -58,6 +59,7 @@ export const createOAuthRouter = async (
 		keyStore,
 		rateLimiter,
 		auditSink,
+		grantPolicy,
 	}: {
 		passport: PassportStatic;
 		registry: GrantRegistry;
@@ -67,6 +69,7 @@ export const createOAuthRouter = async (
 		keyStore: KeyStore;
 		rateLimiter?: RateLimiterBase;
 		auditSink?: AuditSinkBase;
+		grantPolicy?: GrantPolicyHookBase;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
@@ -342,10 +345,47 @@ export const createOAuthRouter = async (
 				}
 
 				const requestedScopes = toStr(scope)?.split(" ").filter(Boolean) ?? [];
-				const grantedScopes =
+				const allowedFilteredScopes =
 					requestedScopes.length > 0
 						? requestedScopes.filter((s) => allowedScopes.includes(s))
 						: allowedScopes;
+
+				// C-2: policy evaluation at /authorize (evaluate-once, persist on Code).
+				// The code exchange MUST NOT re-evaluate — it reads the narrowed values off
+				// Code.grantedScope / Code.grantedAudience. This prevents scope escalation
+				// via a crafted /token request after /authorize decided the narrow.
+				let grantedScopes: readonly string[] = allowedFilteredScopes;
+				let grantedAudience: readonly string[] | undefined;
+				const subjectForPolicy =
+					typeof (req.session.user as Record<string, unknown> | undefined)?.id === "string"
+						? ((req.session.user as Record<string, unknown>).id as string)
+						: undefined;
+				if (grantPolicy) {
+					const decision = await grantPolicy.evaluate(
+						{
+							grantType: "authorization",
+							clientId: client_id,
+							subject: subjectForPolicy,
+							requestedScope: requestedScopes.length > 0 ? requestedScopes : undefined,
+							originalScope: allowedScopes,
+						},
+						{
+							ip: req.ip,
+							userAgent: req.get("user-agent"),
+							issuer: `${req.protocol}://${req.get("host") ?? ""}`,
+						},
+					);
+					if (decision.outcome === "deny") {
+						return redirectError(
+							redirect_uri,
+							decision.error,
+							decision.errorDescription ?? "policy denied",
+							toStr(state),
+						);
+					}
+					if (decision.grantedScope) grantedScopes = decision.grantedScope;
+					if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
+				}
 
 				// B-7: resolve code_challenge_method — use provided value or defaultMethod
 				let resolvedMethod: string | undefined;
@@ -371,6 +411,8 @@ export const createOAuthRouter = async (
 						code_challenge: toStr(code_challenge),
 						code_challenge_method: resolvedMethod,
 						redirect_uri,
+						grantedScope: grantedScopes,
+						grantedAudience,
 					});
 				} catch {
 					return redirectError(
@@ -384,7 +426,7 @@ export const createOAuthRouter = async (
 				req.session.code = issue.code;
 				req.session.code_client_id = client_id;
 				req.session.code_redirect_uri = redirect_uri;
-				req.session.granted_scopes = grantedScopes.length > 0 ? grantedScopes : undefined;
+				req.session.granted_scopes = grantedScopes.length > 0 ? [...grantedScopes] : undefined;
 
 				const url = new URL(redirect_uri);
 				url.searchParams.append("code", issue.code);

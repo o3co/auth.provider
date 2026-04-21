@@ -103,6 +103,7 @@ export const oauthModule = (params: {
 			keyStore: context.keyStore,
 			rateLimiter: context.rateLimiter,
 			auditSink: context.auditSink,
+			grantPolicy: context.grantPolicy,
 		});
 
 		context.router.use("/oauth", oauthRouter);

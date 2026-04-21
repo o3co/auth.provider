@@ -125,7 +125,12 @@ export const createAuthorizationGrant = (
 				}
 			}
 
-			const grantedScopes = session.granted_scopes;
+			// C-2: prefer narrowed values persisted on Code at /authorize time; fall back
+			// to session for pre-C-2 codes and tests that bypass the authorize endpoint.
+			// Do NOT re-run grantPolicy here — evaluate-once-at-authorize is the contract.
+			const grantedScopes: readonly string[] | undefined =
+				codeData.grantedScope ?? session.granted_scopes;
+			const grantedAudiencesFromCode = codeData.grantedAudience;
 
 			// B-8: PKCE required check at token endpoint
 			if (pkceRequired && !codeData.code_challenge_method) {
@@ -215,6 +220,14 @@ export const createAuthorizationGrant = (
 			// family_id; revoking the family revokes every descendant.
 			const familyId = crypto.randomUUID();
 
+			// generateToken carries a single `aud` claim; if policy narrowed to multiple
+			// audiences we flatten to the first. Multi-audience tokens are out of scope
+			// for the authorization code grant.
+			const audience =
+				grantedAudiencesFromCode && grantedAudiencesFromCode.length > 0
+					? grantedAudiencesFromCode[0]
+					: client_id;
+
 			return {
 				result: {
 					status: 200,
@@ -225,7 +238,7 @@ export const createAuthorizationGrant = (
 								expiresIn: config.oauth.accessToken.expiresIn,
 								keyStore,
 								issuer,
-								audience: client_id,
+								audience,
 								subject: userId ?? null,
 								authorizedParty: client_id ?? null,
 								scope: grantedScopes?.join(" ") ?? null,
@@ -238,7 +251,7 @@ export const createAuthorizationGrant = (
 								expiresIn: config.oauth.refreshToken.expiresIn,
 								keyStore,
 								issuer,
-								audience: client_id,
+								audience,
 								subject: userId ?? null,
 								authorizedParty: client_id ?? null,
 								scope: grantedScopes?.join(" ") ?? null,
