@@ -19,6 +19,7 @@ import {
 	extractUserClaims,
 	type FederationTokenStoreBase,
 	type PathResolver,
+	type User,
 	type UserRepository,
 	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
@@ -118,10 +119,10 @@ export const _createPassportImpl = async ({
 	const onFederationCallback =
 		userSessionStore && federationTokenStore
 			? async (params: {
-					federationName: string;
-					profile: FederationProfile;
-					req: import("express").Request;
-					done: (err: Error | null, user: unknown) => void;
+					readonly federationName: string;
+					readonly profile: FederationProfile;
+					readonly req: import("express").Request;
+					readonly done: (err: Error | null, user: User | false) => void;
 				}) => {
 					try {
 						const provider = federationProviders.get(params.federationName);
@@ -152,9 +153,9 @@ export const _createPassportImpl = async ({
 								expiresAt: new Date(Date.now() + (params.profile.expiresIn ?? 3600) * 1000),
 							});
 						}
-						const session = params.req.session as Record<string, unknown> | undefined;
+						const session = params.req.session as unknown as Record<string, unknown> | undefined;
 						if (session) session.sid = sid;
-						params.done(null, user as Record<string, unknown>);
+						params.done(null, user);
 					} catch (err) {
 						params.done(err as Error, false);
 					}
