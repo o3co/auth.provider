@@ -15,18 +15,15 @@
  */
 
 export {
-	type BroadcastBackchannelLogger,
 	type BroadcastBackchannelLogoutOptions,
 	type BroadcastRP,
 	broadcastBackchannelLogout,
 } from "./logout/broadcastBackchannel.mjs";
 export type {
-	CascadeLogoutLogger,
 	CascadeLogoutOptions,
 	CascadeLogoutResult,
 } from "./logout/cascadeLogout.mjs";
 export { cascadeLogout } from "./logout/cascadeLogout.mjs";
-export type { LogoutLogger } from "./logout/types.mjs";
 export { oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
 export { oauthSessionModule } from "./oauthSession.mjs";

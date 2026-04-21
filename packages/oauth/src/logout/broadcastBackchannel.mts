@@ -13,10 +13,7 @@
  * limitations under the License.
  */
 
-import { generateLogoutToken, type KeyStore } from "@o3co/auth-provider-core";
-import type { LogoutLogger } from "./types.mjs";
-
-export type { LogoutLogger } from "./types.mjs";
+import { generateLogoutToken, type KeyStore, type Logger } from "@o3co/auth-provider-core";
 
 export interface BroadcastRP {
 	readonly clientId: string;
@@ -42,11 +39,8 @@ export interface BroadcastBackchannelLogoutOptions {
 	/** Per-request timeout in milliseconds. Defaults to 5000ms. */
 	readonly timeoutMs?: number;
 	/** Optional structured logger. Defaults to `console`. */
-	readonly logger?: LogoutLogger;
+	readonly logger?: Logger;
 }
-
-/** Re-export for consumers that need the logger interface by its broadcast-specific name. */
-export type BroadcastBackchannelLogger = LogoutLogger;
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 

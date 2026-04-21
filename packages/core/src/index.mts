@@ -102,6 +102,8 @@ export {
 	createAsymmetricKeyStore,
 	createSymmetricKeyStore,
 } from "./keys/KeyStore.mjs";
+// Logging
+export type { Logger } from "./logging/Logger.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";
 export type { MfaRouteDeps } from "./mfa/route.mjs";
 export { createMfaRouter } from "./mfa/route.mjs";
