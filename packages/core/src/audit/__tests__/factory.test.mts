@@ -15,7 +15,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createAuditSinkFactory, registerBuiltinAuditSinks } from "#/audit/factory.mjs";
+import { createAuditSinkFactory, emitAuditEvent, registerBuiltinAuditSinks } from "#/audit/factory.mjs";
+import type { AuditSinkBase } from "#/audit/types.mjs";
 
 describe("createAuditSinkFactory", () => {
 	it("creates an adapter factory and resolves registered sinks", async () => {
@@ -26,6 +27,32 @@ describe("createAuditSinkFactory", () => {
 		}));
 		const sink = await factory.create({ type: "testsink" });
 		expect(sink.kind).toBe("testsink");
+	});
+});
+
+describe("emitAuditEvent", () => {
+	it("swallows thrown errors from sink.record", async () => {
+		const throwingSink: AuditSinkBase = {
+			kind: "boom",
+			async record() {
+				throw new Error("sink down");
+			},
+		};
+		await expect(
+			emitAuditEvent(throwingSink, {
+				timestamp: new Date(),
+				type: "test",
+			}),
+		).resolves.toBeUndefined();
+	});
+
+	it("is a no-op when sink is undefined", async () => {
+		await expect(
+			emitAuditEvent(undefined, {
+				timestamp: new Date(),
+				type: "test",
+			}),
+		).resolves.toBeUndefined();
 	});
 });
 

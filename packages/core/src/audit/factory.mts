@@ -15,7 +15,7 @@
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { AuditSinkBase, AuditSinkFactory } from "./types.mjs";
+import type { AuditEvent, AuditSinkBase, AuditSinkFactory } from "./types.mjs";
 
 export function createAuditSinkFactory(): AuditSinkFactory {
 	return createAdapterFactory<AuditSinkBase>("AuditSink");
@@ -28,4 +28,20 @@ export function registerBuiltinAuditSinks(factory: AuditSinkFactory): void {
 			process.stdout.write(`${JSON.stringify(event)}\n`);
 		},
 	}));
+}
+
+/**
+ * Fire-and-forget audit emitter. Swallows errors so audit failures never
+ * block the auth flow. No-op when sink is undefined.
+ */
+export async function emitAuditEvent(
+	sink: AuditSinkBase | undefined,
+	event: AuditEvent,
+): Promise<void> {
+	if (!sink) return;
+	try {
+		await sink.record(event);
+	} catch {
+		// intentionally swallowed (spec Section 2.2)
+	}
 }
