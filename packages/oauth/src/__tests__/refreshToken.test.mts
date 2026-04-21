@@ -21,6 +21,7 @@ import {
 	type GrantPolicyHookBase,
 	type RefreshTokenRotateOutcome,
 	type RefreshTokenStoreBase,
+	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
@@ -579,6 +580,129 @@ describe("createRefreshTokenGrant", () => {
 			if (!("tokens" in result)) expect.fail("expected tokens");
 			// Response MUST NOT include scope: "". decodeJwt scope field is also absent.
 			expect(result.tokens.scope).toBeUndefined();
+		});
+	});
+
+	describe("sid claim propagation and userSessionStore integration (TODO-F-3 task 4)", () => {
+		function decodeTokenPayload(token: string): Record<string, unknown> {
+			const parts = token.split(".");
+			return JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf-8")) as Record<
+				string,
+				unknown
+			>;
+		}
+
+		function createStubUserSessionStore(
+			get: (sid: string) => Promise<import("@o3co/auth-provider-core").UserSession | null>,
+		): UserSessionStoreBase {
+			return {
+				kind: "stub",
+				get,
+				async create() {},
+				async registerRP() {},
+				async linkFamily() {},
+				async updateClaims() {},
+				async removeFederation() {},
+				async delete() {},
+			};
+		}
+
+		it("preserves family_id and sid on both minted tokens (F-3-4-1)", async () => {
+			const token = await makeRefreshToken({ family_id: "fam-1", sid: "sid-1" });
+			const store = createStubUserSessionStore(async (_sid) => ({
+				sid: "sid-1",
+				sub: "u1",
+				authTime: new Date(),
+				createdAt: new Date(),
+				expiresAt: new Date(Date.now() + 3600_000),
+				federations: [],
+				activeRPs: [],
+				familyIds: [],
+				claims: {},
+			}));
+			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
+			const handler = createRefreshTokenGrant(deps);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			});
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+
+			const atPayload = decodeTokenPayload(result.tokens.access_token as string);
+			expect(atPayload.family_id).toBe("fam-1");
+			expect(atPayload.sid).toBe("sid-1");
+
+			const rtPayload = decodeTokenPayload(result.tokens.refresh_token as string);
+			expect(rtPayload.family_id).toBe("fam-1");
+			expect(rtPayload.sid).toBe("sid-1");
+		});
+
+		it("returns 400 invalid_grant when userSessionStore.get returns null (F-3-4-2)", async () => {
+			const token = await makeRefreshToken({ sid: "sid-dead" });
+			const store = createStubUserSessionStore(async (_sid) => null);
+			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
+			const handler = createRefreshTokenGrant(deps);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			});
+
+			expect(result.status).toBe(400);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("invalid_grant");
+			expect(result.errorDescription).toMatch(/session/i);
+		});
+
+		it("returns 503 temporarily_unavailable when userSessionStore.get throws (F-3-4-3)", async () => {
+			const token = await makeRefreshToken({ sid: "sid-boom" });
+			const store = createStubUserSessionStore(async (_sid) => {
+				throw new Error("redis down");
+			});
+			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
+			const handler = createRefreshTokenGrant(deps);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			});
+
+			expect(result.status).toBe(503);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("temporarily_unavailable");
+		});
+
+		it("succeeds without sid on minted tokens when legacy token has no sid claim (F-3-4-4)", async () => {
+			// Token minted before F-3: only family_id, no sid
+			const token = await makeRefreshToken({ family_id: "fam-legacy" });
+			const handler = createRefreshTokenGrant(mockDeps);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			});
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+
+			const atPayload = decodeTokenPayload(result.tokens.access_token as string);
+			expect(atPayload.family_id).toBe("fam-legacy");
+			expect(Object.hasOwn(atPayload, "sid")).toBe(false);
+
+			const rtPayload = decodeTokenPayload(result.tokens.refresh_token as string);
+			expect(rtPayload.family_id).toBe("fam-legacy");
+			expect(Object.hasOwn(rtPayload, "sid")).toBe(false);
 		});
 	});
 });
