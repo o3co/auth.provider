@@ -33,7 +33,6 @@ type ExpressLike = {
 };
 
 const oauthConfigSchema = fullSectionsSchema.pick({
-	rateLimit: true,
 	endpoints: true,
 });
 

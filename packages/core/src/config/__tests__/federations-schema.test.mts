@@ -40,8 +40,6 @@ const minimalConfig = {
 	},
 	rateLimit: {
 		login: { windowMs: 60000, limit: 10 },
-		token: { windowMs: 60000, limit: 10 },
-		authorize: { windowMs: 60000, limit: 10 },
 	},
 	repositories: {
 		client: {},

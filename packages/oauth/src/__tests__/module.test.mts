@@ -33,10 +33,6 @@ const mockConfig = {
 		refreshToken: { expiresIn: 86400 },
 		grants: {},
 	},
-	rateLimit: {
-		token: { windowMs: 60000, limit: 100 },
-		authorize: { windowMs: 60000, limit: 100 },
-	},
 	endpoints: {
 		login: { url: "/login" },
 	},

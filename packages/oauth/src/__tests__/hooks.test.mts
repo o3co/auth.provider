@@ -31,10 +31,6 @@ import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 
 const mockConfig = {
-	rateLimit: {
-		token: { windowMs: 60000, limit: 100 },
-		authorize: { windowMs: 60000, limit: 100 },
-	},
 	oauth: {
 		jwt: { issuer: "https://auth.example" },
 		accessToken: { expiresIn: 3600 },

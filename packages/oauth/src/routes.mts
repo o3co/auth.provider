@@ -27,7 +27,6 @@ import {
 	type RateLimiterBase,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import rateLimit from "express-rate-limit";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import type { PassportStatic } from "passport";
 
@@ -91,24 +90,10 @@ export const createOAuthRouter = async (
 		return true;
 	}
 
-	const tokenRateLimit = rateLimit({
-		windowMs: config.rateLimit.token.windowMs,
-		limit: config.rateLimit.token.limit,
-		standardHeaders: true,
-		legacyHeaders: false,
-	});
-
-	const authorizeRateLimit = rateLimit({
-		windowMs: config.rateLimit.authorize.windowMs,
-		limit: config.rateLimit.authorize.limit,
-		standardHeaders: true,
-		legacyHeaders: false,
-	});
-
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
-		.post("/token", tokenRateLimit, async (req: Request, res: Response) => {
+		.post("/token", async (req: Request, res: Response) => {
 			if (!(await checkRateLimit(req, res, "token"))) return;
 			const { grant_type } = req.body;
 			const issuer = config.oauth.jwt.issuer ?? req.get("host");
@@ -190,7 +175,6 @@ export const createOAuthRouter = async (
 		// RFC 7662: Token Introspection
 		.post(
 			"/introspect",
-			tokenRateLimit,
 			async (req: Request, res: Response, next) => {
 				if (!(await checkRateLimit(req, res, "introspect"))) return;
 				const auth = req.headers.authorization;
@@ -247,7 +231,7 @@ export const createOAuthRouter = async (
 				}
 			},
 		)
-		.get("/authorize", authorizeRateLimit, async (req: Request, res: Response) => {
+		.get("/authorize", async (req: Request, res: Response) => {
 			if (!(await checkRateLimit(req, res, "authorize"))) return;
 			if (!req.session.isAuthenticated) {
 				return res.redirect(

@@ -34,7 +34,6 @@
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
-		"express-rate-limit": "^8.3.1",
 		"jose": "^6.2.2"
 	},
 	"peerDependencies": {
