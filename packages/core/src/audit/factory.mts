@@ -20,3 +20,12 @@ import type { AuditSinkBase, AuditSinkFactory } from "./types.mjs";
 export function createAuditSinkFactory(): AuditSinkFactory {
 	return createAdapterFactory<AuditSinkBase>("AuditSink");
 }
+
+export function registerBuiltinAuditSinks(factory: AuditSinkFactory): void {
+	factory.register("console", () => ({
+		kind: "console",
+		async record(event) {
+			process.stdout.write(`${JSON.stringify(event)}\n`);
+		},
+	}));
+}
