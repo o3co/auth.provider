@@ -105,4 +105,17 @@ describe("in-memory UserSessionStore", () => {
 		await store.create(baseInput);
 		await expect(store.create(baseInput)).rejects.toThrow(/already exists/);
 	});
+
+	it("create succeeds when an expired entry exists for the same sid (GC before duplicate check)", async () => {
+		// Put an expired entry in the map first.
+		await store.create({ ...baseInput, expiresAt: new Date(Date.now() - 1000) });
+		// get() returns null (GC on read).
+		expect(await store.get("sid-1")).toBeNull();
+		// create() should ALSO see the entry as gone and succeed.
+		await expect(
+			store.create({ ...baseInput, expiresAt: new Date(Date.now() + 3600_000) }),
+		).resolves.toBeUndefined();
+		const s = await store.get("sid-1");
+		expect(s).not.toBeNull();
+	});
 });

@@ -39,7 +39,10 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 	return {
 		kind: "memory",
 		async create(input: CreateUserSessionInput) {
-			if (sessions.has(input.sid)) {
+			// GC any expired entry first so duplicate-check semantics match
+			// `get()` (which GCs on read). Otherwise a stale expired record
+			// would cause create() to throw right after get() returned null.
+			if (readLive(input.sid) !== null) {
 				throw new Error(`UserSession ${input.sid} already exists`);
 			}
 			sessions.set(input.sid, {

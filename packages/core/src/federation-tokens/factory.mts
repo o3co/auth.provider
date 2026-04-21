@@ -24,6 +24,7 @@ export function registerBuiltinFederationTokenStores(factory: FederationTokenSto
 			client?: unknown;
 			encryption?: { mode?: "required" | "allow-plaintext"; key?: Buffer | string };
 			keyPrefix?: string;
+			ttl?: number;
 		};
 		if (!cfg.client) {
 			throw new Error("federationTokenStore.redis: 'client' option is required");
@@ -60,6 +61,7 @@ export function registerBuiltinFederationTokenStores(factory: FederationTokenSto
 			client: cfg.client as Parameters<typeof createRedisFederationTokenStore>[0]["client"],
 			encryption,
 			keyPrefix: cfg.keyPrefix,
+			ttl: cfg.ttl,
 		});
 	});
 }

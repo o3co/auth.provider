@@ -19,7 +19,22 @@ export interface RedisFederationTokenStoreOptions {
 	client: RedisLikeClient;
 	encryption: EncryptionConfig;
 	keyPrefix?: string;
+	/**
+	 * Redis key TTL in seconds. This is the upper bound on how long a federation
+	 * token record persists; it MUST exceed the upstream federation refresh_token
+	 * lifetime so that refresh flows (F-6) can still retrieve the refresh_token
+	 * after the access_token has expired.
+	 *
+	 * Do NOT tie this TTL to `tokens.expiresAt` (the access_token expiry) —
+	 * access_token expiry is kept inside the envelope for F-6 to consult at
+	 * retrieval time, but the record itself lives until this store TTL elapses.
+	 *
+	 * Default: 86400 seconds (24 hours). Spec Section 5.2.
+	 */
+	ttl?: number;
 }
+
+const DEFAULT_TTL_SECONDS = 86400;
 
 interface Envelope {
 	accessToken: string;
@@ -38,6 +53,7 @@ export function createRedisFederationTokenStore(
 		throw new Error("FederationTokenStore redis: encryption key must be 32 bytes");
 	}
 	const prefix = opts.keyPrefix ?? "ft:";
+	const storeTtlMs = (opts.ttl ?? DEFAULT_TTL_SECONDS) * 1000;
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
 	const sidPattern = (sid: string) => `${prefix}${sid}:*`;
 
@@ -74,13 +90,11 @@ export function createRedisFederationTokenStore(
 	});
 
 	const writeEnv = async (sid: string, name: string, env: Envelope) => {
-		const remaining = env.expiresAtMs - Date.now();
-		const px = remaining > 0 ? remaining : undefined;
-		await opts.client.set(
-			k(sid, name),
-			JSON.stringify(env),
-			px !== undefined ? { PX: px } : undefined,
-		);
+		// Redis TTL is the store lifetime (session upper bound), NOT the access
+		// token's expiresAt. The access token's expiry is preserved inside the
+		// envelope so F-6 consumers can decide to refresh; the record itself
+		// must outlive the access_token so the refresh_token remains available.
+		await opts.client.set(k(sid, name), JSON.stringify(env), { PX: storeTtlMs });
 	};
 
 	return {
