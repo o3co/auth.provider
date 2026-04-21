@@ -40,6 +40,16 @@ export {
 	composeConfigSchema,
 	fullSectionsSchema,
 } from "./config/application.schema.mjs";
+export {
+	createFederationTokenStoreFactory,
+	registerBuiltinFederationTokenStores,
+} from "./federation-tokens/factory.mjs";
+// FederationTokenStore — TODO-F-1
+export type {
+	FederationTokenStoreBase,
+	FederationTokenStoreFactory,
+	FederationTokens,
+} from "./federation-tokens/types.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
@@ -150,3 +160,17 @@ export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
+export { extractUserClaims } from "./user-sessions/claims.mjs";
+export {
+	createUserSessionStoreFactory,
+	registerBuiltinUserSessionStores,
+} from "./user-sessions/factory.mjs";
+// UserSessionStore — TODO-F-1
+export type {
+	CreateUserSessionInput,
+	RegisteredRP,
+	UserSession,
+	UserSessionClaims,
+	UserSessionStoreBase,
+	UserSessionStoreFactory,
+} from "./user-sessions/types.mjs";

@@ -17,9 +17,11 @@ import type { Router } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "#/app.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
+import { createInMemoryFederationTokenStore } from "#/federation-tokens/adapters/memory.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "#/mfa/types.mjs";
 import type { GrantPolicyHookBase } from "#/policy/types.mjs";
+import { createInMemoryUserSessionStore } from "#/user-sessions/adapters/memory.mjs";
 
 const mockExpress = {
 	Router: () =>
@@ -226,6 +228,151 @@ describe("createApp — grantPolicy / jwt.issuer consistency guard (CP-20)", () 
 				config: configWithoutIssuer,
 				keyStore: createSymmetricKeyStore("test-secret"),
 				modules: [],
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("createApp — TODO-F-1 federation store plumbing", () => {
+	const configWithFederations = {
+		...mockConfig,
+		federations: {
+			google: { enabled: true, clientId: "x", clientSecret: "y", callbackURL: "z" },
+		},
+	} as unknown as AppConfig;
+
+	const configWithoutFederations = {
+		...mockConfig,
+		federations: {},
+	} as unknown as AppConfig;
+
+	it("throws when federations configured without federationTokenStore", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+			}),
+		).toThrow(/federationTokenStore/);
+	});
+
+	it("throws when federations configured without userSessionStore", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				federationTokenStore: createInMemoryFederationTokenStore(),
+			}),
+		).toThrow(/userSessionStore/);
+	});
+
+	it("accepts federation config when both stores are wired", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts no stores when no federations are configured", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithoutFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts no stores when federations config is entirely absent", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: mockConfig,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).not.toThrow();
+	});
+
+	it('treats env-var string "true" as enabled and requires stores (pre-zod-coerce robustness)', () => {
+		const configWithEnvString = {
+			...mockConfig,
+			federations: {
+				google: { enabled: "true", clientId: "x", clientSecret: "y", callbackURL: "z" },
+			},
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithEnvString,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				// Both stores omitted — should throw.
+			}),
+		).toThrow(/federationTokenStore|userSessionStore/);
+	});
+
+	it('treats env-var string "1" as enabled', () => {
+		const configWithEnvOne = {
+			...mockConfig,
+			federations: { google: { enabled: "1", clientId: "x", clientSecret: "y", callbackURL: "z" } },
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithEnvOne,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).toThrow();
+	});
+
+	it('treats env-var string "false" as disabled (no stores required)', () => {
+		const configWithEnvFalse = {
+			...mockConfig,
+			federations: {
+				google: { enabled: "false", clientId: "x", clientSecret: "y", callbackURL: "z" },
+			},
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithEnvFalse,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).not.toThrow();
+	});
+
+	it('does NOT treat non-schema strings like "yes" as enabled (schema-alignment, Copilot round 3 #6)', () => {
+		// Schema coerces only "true"/"1" to true; "yes" is rejected at parse.
+		// The pre-parse check must NOT fire the stores-missing error on "yes"
+		// or it would mask the real schema validation error that the user
+		// needs to see.
+		const configWithYes = {
+			...mockConfig,
+			federations: {
+				google: { enabled: "yes", clientId: "x", clientSecret: "y", callbackURL: "z" },
+			},
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithYes,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				// Stores omitted — should NOT throw here; schema parse at init() will flag it.
 			}),
 		).not.toThrow();
 	});

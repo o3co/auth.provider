@@ -18,6 +18,7 @@ import type { z } from "zod";
 import type { AuditSinkBase } from "./audit/types.mjs";
 import type { CoreConfig } from "./config/application.schema.mjs";
 import { composeConfigSchema } from "./config/application.schema.mjs";
+import type { FederationTokenStoreBase } from "./federation-tokens/types.mjs";
 import { GrantRegistry } from "./grants/registry.mjs";
 import type { KeyStore } from "./keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "./mfa/types.mjs";
@@ -27,6 +28,7 @@ import type { RateLimiterBase } from "./ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
 import * as healthcheck from "./routes/Healthcheck.mjs";
 import * as jwks from "./routes/Jwks.mjs";
+import type { UserSessionStoreBase } from "./user-sessions/types.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -47,6 +49,8 @@ export interface AppOptions {
 	rateLimiter?: RateLimiterBase;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
+	userSessionStore?: UserSessionStoreBase;
+	federationTokenStore?: FederationTokenStoreBase;
 }
 
 export interface AppResult {
@@ -65,6 +69,45 @@ export function createApp(options: AppOptions): AppResult {
 		if (!options.mfaTransactionStore) {
 			throw new Error("createApp: mfaTransactionStore is required when mfaCoordinator is set");
 		}
+	}
+
+	// Spec Section 10.1 — federations configured means stores are required.
+	// This runs BEFORE zod parsing, so `enabled` may still be a string from
+	// env-var overrides (HOCON substitutions emit `"true"`/`"1"`). We MUST
+	// accept exactly the strings that Plan #3's `coerceBooleanFromEnv`
+	// zod-preprocess coerces to true, so this pre-parse check neither
+	// (a) lets a schema-enabled federation slip through unchecked nor
+	// (b) rejects a config that zod would later reject anyway (false
+	// positive, mask the real schema error).
+	//
+	// Matches schema behavior: only `"true"` and `"1"` coerce to true.
+	// Arbitrary strings like "yes"/"on" are rejected by the schema, so
+	// treating them as truthy here would fire the stores-missing error
+	// before the real validation message.
+	const isEnabledTruthy = (v: unknown): boolean => {
+		if (v === true) return true;
+		if (typeof v !== "string") return false;
+		const normalized = v.trim().toLowerCase();
+		return normalized === "true" || normalized === "1";
+	};
+	const federationsCfg = (config as { federations?: Record<string, { enabled?: unknown }> })
+		.federations;
+	const federationsConfigured =
+		typeof federationsCfg === "object" &&
+		federationsCfg !== null &&
+		Object.values(federationsCfg).some((f) => f != null && isEnabledTruthy(f.enabled));
+
+	if (federationsConfigured && !options.federationTokenStore) {
+		throw new Error(
+			"createApp: federations are configured but federationTokenStore was not provided. " +
+				"Register a FederationTokenStore adapter in AppOptions.",
+		);
+	}
+	if (federationsConfigured && !options.userSessionStore) {
+		throw new Error(
+			"createApp: federations are configured but userSessionStore was not provided. " +
+				"Register a UserSessionStore adapter in AppOptions.",
+		);
 	}
 
 	// CP-20: when grantPolicy is configured, config.oauth.jwt.issuer MUST be
@@ -109,6 +152,8 @@ export function createApp(options: AppOptions): AppResult {
 		rateLimiter: options.rateLimiter,
 		refreshTokenStore: options.refreshTokenStore,
 		grantPolicy: options.grantPolicy,
+		userSessionStore: options.userSessionStore,
+		federationTokenStore: options.federationTokenStore,
 	};
 
 	async function init(): Promise<void> {

@@ -1,0 +1,49 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
+
+export interface FederationTokens {
+	readonly accessToken: string;
+	readonly refreshToken?: string;
+	readonly idToken?: string;
+	readonly expiresAt: Date;
+	readonly tokenType?: string;
+	readonly scope?: string;
+	readonly rawParams?: Readonly<Record<string, unknown>>;
+}
+
+export interface FederationTokenStoreBase {
+	readonly kind: string;
+
+	/**
+	 * Persist tokens for a session + federation. Production implementations
+	 * MUST encrypt refreshToken at rest. Plaintext persistence is supported
+	 * only as an explicit opt-in — the built-in redis adapter exposes this via
+	 * `encryption.mode = "allow-plaintext"` (with a startup warning), and the
+	 * built-in in-memory adapter is plaintext by design because the process
+	 * boundary already contains it. Both opt-outs are intended for
+	 * development / testing use only. See spec Section 5.
+	 */
+	attach(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
+
+	get(sid: string, federationName: string): Promise<FederationTokens | null>;
+
+	/** Atomic replace. Called after a successful federation refresh. */
+	update(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
+
+	/** Delete all federation entries for a session. Idempotent. */
+	deleteBySession(sid: string): Promise<void>;
+
+	/** Delete a specific (sid, federationName) entry. Idempotent. */
+	delete(sid: string, federationName: string): Promise<void>;
+}
+
+export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStoreBase>;
