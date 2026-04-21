@@ -109,13 +109,17 @@ describe("in-memory UserSessionStore", () => {
 	it("create succeeds when an expired entry exists for the same sid (GC before duplicate check)", async () => {
 		// Put an expired entry in the map first.
 		await store.create({ ...baseInput, expiresAt: new Date(Date.now() - 1000) });
-		// get() returns null (GC on read).
-		expect(await store.get("sid-1")).toBeNull();
-		// create() should ALSO see the entry as gone and succeed.
+		// DO NOT call store.get() here — it would GC the expired entry via
+		// readLive() and then the duplicate-check inside create() would trivially
+		// pass under any implementation (including the old `sessions.has()` check).
+		// We want the regression guarantee to rest on create() itself invoking
+		// readLive() before deciding whether a duplicate exists.
 		await expect(
 			store.create({ ...baseInput, expiresAt: new Date(Date.now() + 3600_000) }),
 		).resolves.toBeUndefined();
 		const s = await store.get("sid-1");
 		expect(s).not.toBeNull();
+		// And the fresh record's expiresAt is in the future (not the stale past one).
+		expect(s?.expiresAt.getTime()).toBeGreaterThan(Date.now());
 	});
 });
