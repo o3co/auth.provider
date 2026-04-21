@@ -606,13 +606,14 @@ function filterClaimsByScope(
 
 #### `/.well-known/openid-configuration`
 
-OIDC Discovery 1.0 メタデータエンドポイント。`createApp` が `/health`・`/.well-known/jwks.json` と同様に無条件で登録する。以下を含む JSON ドキュメントを返す:
+OIDC Discovery 1.0 メタデータエンドポイント。OAuth モジュール（`@o3co/auth-provider-oauth`）が `config.oauth.jwt.issuer` が設定されている場合にのみ登録する。登録された場合、以下を含む JSON ドキュメントを返す:
 
-- `issuer`、`authorization_endpoint`、`token_endpoint`、`userinfo_endpoint`、`jwks_uri`、`introspection_endpoint`
+- `issuer`、`authorization_endpoint`、`token_endpoint`、`userinfo_endpoint`、`introspection_endpoint`
+- `jwks_uri` — 非対称な署名アルゴリズムが 1 つ以上設定されている場合のみ広告する（HS256 のみの構成では JWKS ルートが 404 を返すため省略）
 - `response_types_supported: ["code"]`
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — 設定された `KeyStore.algorithm` から導出
-- `scopes_supported: ["openid", "profile", "email"]`
+- `scopes_supported: ["openid", "profile", "email", "groups"]`
 - `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`
 - `code_challenge_methods_supported: ["S256"]`
 

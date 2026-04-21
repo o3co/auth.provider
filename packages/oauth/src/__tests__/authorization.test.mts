@@ -829,6 +829,40 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		describe("TODO-F-4: id_token issuance on openid scope", () => {
+			// F-4 reads config.oauth.jwt.issuer directly (not ctx.issuer) for
+			// id_token issuance to avoid using the request-derived host fallback
+			// as an OIDC iss claim. Tests must supply a configured issuer.
+			const mockConfigWithIssuer = {
+				oauth: {
+					jwt: { secret: "test-secret", issuer: "https://auth.example.com" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					grants: {
+						session: { enabled: true },
+						authorization: { enabled: true },
+						refresh_token: { enabled: true },
+						did: { enabled: true, messageMaxAgeSec: 300 },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			function makeDepsWithIssuer(
+				consumeByCodeImpl: CodeRepository["consumeByCode"],
+				clientRepository?: ClientRepository,
+			) {
+				return {
+					config: mockConfigWithIssuer,
+					keyStore: createSymmetricKeyStore("test-secret"),
+					codeRepository: {
+						consumeByCode: consumeByCodeImpl,
+						createCode: vi.fn(),
+						getByCode: vi.fn(),
+						removeByCode: vi.fn(),
+					} as unknown as CodeRepository,
+					clientRepository: clientRepository ?? mockClientRepository,
+				};
+			}
+
 			function makeUserSessionStore(session: {
 				sid: string;
 				sub: string;
@@ -869,7 +903,7 @@ describe("createAuthorizationGrant", () => {
 					claims: { email: "a@b.com", emailVerified: true, name: "Alice" },
 				});
 				const deps = {
-					...makeDeps(
+					...makeDepsWithIssuer(
 						vi.fn().mockResolvedValue({
 							code: "c1",
 							sid: "sid-1",
@@ -946,7 +980,7 @@ describe("createAuthorizationGrant", () => {
 					claims: { email: "b@b.com", emailVerified: true, name: "Bob" },
 				});
 				const deps = {
-					...makeDeps(
+					...makeDepsWithIssuer(
 						vi.fn().mockResolvedValue({
 							code: "c2",
 							sid: "sid-2",
@@ -971,7 +1005,7 @@ describe("createAuthorizationGrant", () => {
 
 			it("does NOT include id_token when userSessionStore is not wired (backward compat, F-4-3)", async () => {
 				// No userSessionStore — cannot resolve claims, so id_token is skipped.
-				const deps = makeDeps(
+				const deps = makeDepsWithIssuer(
 					vi.fn().mockResolvedValue({
 						code: "c3",
 						sid: "sid-3",

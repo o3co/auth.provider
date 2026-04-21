@@ -28,7 +28,6 @@ import type { RateLimiterBase } from "./ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
 import * as healthcheck from "./routes/Healthcheck.mjs";
 import * as jwks from "./routes/Jwks.mjs";
-import * as oidcConfig from "./routes/OpenidConfiguration.mjs";
 import type { UserSessionStoreBase } from "./user-sessions/types.mjs";
 
 type ExpressLike = {
@@ -140,15 +139,8 @@ export function createApp(options: AppOptions): AppResult {
 	// Wire core infrastructure routes (pure — no external deps)
 	router.use(healthcheck.createRouter(express)).use(jwks.createRouter(express, keyStore));
 
-	// Mount OIDC discovery only when issuer is configured (without an issuer
-	// URL the discovery document would be invalid and misleading).
-	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
-	if (typeof issuer === "string" && issuer.length > 0) {
-		// Advertise only the algorithm the configured KeyStore actually signs
-		// with. Hardcoding the full union would mislead clients to fetch JWKS
-		// expecting a key that is not there (OIDC Core §10.1 + RFC 8414 §2).
-		router.use(oidcConfig.createRouter(express, { issuer, signingAlgs: [keyStore.algorithm] }));
-	}
+	// OIDC discovery is mounted by the oauth module (when the OAuth endpoints
+	// it advertises actually exist). See packages/oauth/src/module.mts.
 
 	const context: ModuleContext = {
 		pathResolver,

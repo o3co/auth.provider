@@ -54,4 +54,15 @@ describe("filterClaimsByScope", () => {
 	it("provider-specific claims are never emitted (strict whitelist)", () => {
 		expect(filterClaimsByScope({ hd: "example.com" }, ["openid", "profile", "email"])).toEqual({});
 	});
+
+	it("filters non-string elements from groups array (security)", () => {
+		// UserSessionClaims has an index signature, so upstream code may put
+		// arbitrary values in. Ensure only strings leak through.
+		const mixed = {
+			groups: ["admins", 42, { nested: "obj" }, null, "editors"] as unknown[],
+		};
+		expect(filterClaimsByScope(mixed, ["openid", "groups"])).toEqual({
+			groups: ["admins", "editors"],
+		});
+	});
 });

@@ -35,7 +35,12 @@ export function filterClaimsByScope(
 		if (typeof claims.emailVerified === "boolean") out.email_verified = claims.emailVerified;
 	}
 	if (scopeSet.has("groups")) {
-		if (Array.isArray(claims.groups)) out.groups = claims.groups;
+		// UserSessionClaims has an index signature allowing unknown custom fields;
+		// filter to string members only so non-string elements (objects, numbers,
+		// etc.) cannot leak into JWT/userinfo responses.
+		if (Array.isArray(claims.groups)) {
+			out.groups = claims.groups.filter((g): g is string => typeof g === "string");
+		}
 	}
 	return out;
 }

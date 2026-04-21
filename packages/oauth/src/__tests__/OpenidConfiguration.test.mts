@@ -81,7 +81,7 @@ describe("GET /.well-known/openid-configuration", () => {
 			"EdDSA",
 			"HS256",
 		]);
-		expect(body.scopes_supported).toEqual(["openid", "profile", "email"]);
+		expect(body.scopes_supported).toEqual(["openid", "profile", "email", "groups"]);
 		expect(body.code_challenge_methods_supported).toEqual(["S256"]);
 		expect(body.token_endpoint_auth_methods_supported).toEqual(
 			expect.arrayContaining(["client_secret_basic", "client_secret_post", "none"]),
@@ -98,9 +98,22 @@ describe("GET /.well-known/openid-configuration", () => {
 	it("strips trailing slashes from issuer when building endpoint URLs", async () => {
 		const body = await callRoute({
 			issuer: "https://auth.example.com///",
-			signingAlgs: [],
+			signingAlgs: ["RS256"],
 		});
 		expect(body.authorization_endpoint).toBe("https://auth.example.com/oauth/authorize");
 		expect(body.token_endpoint).toBe("https://auth.example.com/oauth/token");
+	});
+
+	it("omits jwks_uri for HS256-only deployments (JWKS route returns 404 for symmetric keys)", async () => {
+		const body = await callRoute({ issuer: "https://auth.example.com", signingAlgs: ["HS256"] });
+		expect(body.jwks_uri).toBeUndefined();
+	});
+
+	it("advertises jwks_uri when any asymmetric alg is configured (RS256 alongside HS256)", async () => {
+		const body = await callRoute({
+			issuer: "https://auth.example.com",
+			signingAlgs: ["RS256", "HS256"],
+		});
+		expect(body.jwks_uri).toBe("https://auth.example.com/.well-known/jwks.json");
 	});
 });

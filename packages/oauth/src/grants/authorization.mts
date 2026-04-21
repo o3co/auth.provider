@@ -39,6 +39,17 @@ export const createAuthorizationGrant = (
 	const authorizationConfig = grantsConfig?.authorization as Record<string, unknown> | undefined;
 	const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
 
+	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it
+	// directly from config (not ctx.issuer) because the express adapter falls
+	// back to `req.get("host")` — which is a host string, not an issuer URL —
+	// when config.oauth.jwt.issuer is unset. Emitting a request-derived `iss`
+	// in id_tokens would violate OIDC Core §2 (iss MUST be a URL).
+	const configuredIssuer: string | undefined = (() => {
+		const jwt = (config.oauth as { jwt?: { issuer?: unknown } } | undefined)?.jwt;
+		const value = jwt?.issuer;
+		return typeof value === "string" && value.length > 0 ? value : undefined;
+	})();
+
 	// B-7: structured pkce config (supportedMethods, defaultMethod, required)
 	// Fall back to legacy requireS256 for backward compatibility
 	const supportedMethods: string[] = Array.isArray(pkceConfig?.supportedMethods)
@@ -391,14 +402,16 @@ export const createAuthorizationGrant = (
 			//   F-4-1: openid scope + userSession wired  → id_token issued
 			//   F-4-2: no openid scope                   → id_token omitted
 			//   F-4-3: no userSessionStore               → userSession is null → omitted
-			//   no issuer configured                     → id_token omitted
-			//     (avoids emitting an OIDC-noncompliant `iss: ""` claim; the adapter
-			//      usually falls back to req.get("host"), so this only bites custom
-			//      adapters that pass ctx.issuer = undefined)
+			//   no configured issuer                     → id_token omitted
+			//     We gate on `configuredIssuer` (read directly from
+			//     config.oauth.jwt.issuer at factory time) rather than ctx.issuer,
+			//     because the express adapter falls back to `req.get("host")` when
+			//     config is unset — that is a host string, not an OIDC-compliant
+			//     URL, and using it as `iss` would violate OIDC Core §2.
 			// userSession truthy implies (deps.userSessionStore && sid) were both truthy
 			// earlier, so the `&& sid` guard below is defensive rather than redundant.
 			let idToken: Token | undefined;
-			if (grantedScopes?.includes("openid") && userSession && sid && issuer) {
+			if (grantedScopes?.includes("openid") && userSession && sid && configuredIssuer) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
 					aud: client_id,
@@ -409,7 +422,7 @@ export const createAuthorizationGrant = (
 					scopes: grantedScopes,
 					userClaims: userSession.claims,
 					keyStore,
-					issuer,
+					issuer: configuredIssuer,
 				});
 			}
 

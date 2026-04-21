@@ -607,13 +607,14 @@ Maps `UserSessionClaims` to the JWT-shaped claim subset that the granted scopes 
 
 #### `/.well-known/openid-configuration`
 
-OIDC Discovery 1.0 metadata endpoint. Registered unconditionally by `createApp` alongside `/health` and `/.well-known/jwks.json`. Returns a JSON document advertising:
+OIDC Discovery 1.0 metadata endpoint. Registered by the OAuth module (`@o3co/auth-provider-oauth`) when `config.oauth.jwt.issuer` is configured. When registered, it returns a JSON document advertising:
 
-- `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri`, `introspection_endpoint`
+- `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `introspection_endpoint`
+- `jwks_uri` — only advertised when at least one asymmetric signing alg is configured (omitted for HS256-only deployments since the JWKS route returns 404 for symmetric keys)
 - `response_types_supported: ["code"]`
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — derived from the configured `KeyStore.algorithm`
-- `scopes_supported: ["openid", "profile", "email"]`
+- `scopes_supported: ["openid", "profile", "email", "groups"]`
 - `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`
 - `code_challenge_methods_supported: ["S256"]`
 
