@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 
-import type { AppConfig } from "@o3co/auth-provider-core";
+import { randomUUID } from "node:crypto";
+import {
+	type AppConfig,
+	extractUserClaims,
+	type User,
+	type UserSessionStoreBase,
+} from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
 import type { PassportStatic } from "passport";
@@ -27,13 +33,26 @@ declare module "express-session" {
 	}
 }
 
+const DEFAULT_SESSION_TTL_MS = 86400_000;
+
 export const createRouter = (
 	express: {
 		Router: () => Router;
 		json: () => RequestHandler;
 		urlencoded: (opts: { extended: boolean }) => RequestHandler;
 	},
-	{ passport, config }: { passport: PassportStatic; config: AppConfig },
+	{
+		passport,
+		config,
+		userSessionStore,
+		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
+	}: {
+		passport: PassportStatic;
+		config: AppConfig;
+		userSessionStore?: UserSessionStoreBase;
+		/** Session TTL in milliseconds. Default: 24h. */
+		sessionTtlMs?: number;
+	},
 ): Router => {
 	const router = express.Router();
 
@@ -112,9 +131,28 @@ export const createRouter = (
 			passport.authenticate("local", {
 				session: true,
 			}),
-			(req: Request, res: Response) => {
+			async (req: Request, res: Response) => {
 				const user = req.user;
 				const redirectTo = req.body.redirect_to as string | undefined;
+
+				// Generate sid and create UserSession before regenerating the browser session,
+				// so we can restore the sid on the new session afterwards.
+				let sid: string | undefined;
+				if (userSessionStore && user) {
+					const userObj = user as User;
+					const claims = extractUserClaims(userObj);
+					const now = new Date();
+					sid = randomUUID();
+					await userSessionStore.create({
+						sid,
+						sub: userObj.id,
+						authTime: now,
+						expiresAt: new Date(now.getTime() + sessionTtlMs),
+						federations: [],
+						claims,
+					});
+				}
+
 				req.session.regenerate((err: Error | null) => {
 					if (err) {
 						return res.status(500).json({ message: "Error regenerating session" });
@@ -123,6 +161,10 @@ export const createRouter = (
 					req.session.user = user as Record<string, unknown> | undefined;
 					if (redirectTo) {
 						req.session.redirectTo = redirectTo;
+					}
+					// Restore sid on the new session so downstream (token/introspect) can read it.
+					if (sid) {
+						req.session.sid = sid;
 					}
 					return res.status(200).json({ message: "Logged in successfully" });
 				});
