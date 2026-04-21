@@ -22,13 +22,25 @@ export type FederationResult<T> =
 	| { ok: false; status: number; error: string; errorDescription: string };
 
 export interface SetupPassportContext {
-	verifyUser: (externalId: string) => Promise<User | null>;
+	readonly verifyUser: (externalId: string) => Promise<User | null>;
 	/**
 	 * Optional module resolver used for dynamic imports of passport strategies.
 	 * Deployments with non-standard module layouts (Yarn PnP, custom require hooks)
 	 * can pass a resolver; standard Node/npm deployments omit it.
 	 */
-	pathResolver?: (spec: string) => string;
+	readonly pathResolver?: (spec: string) => string;
+	/**
+	 * Optional hook called by federation provider passport strategies after
+	 * successful OAuth code exchange. Built-in implementations (in session
+	 * module) orchestrate UserSessionStore + FederationTokenStore; custom
+	 * deployments can wire their own. When absent, providers fall back to
+	 * the legacy single-parameter `verifyUser(externalId)` flow.
+	 */
+	readonly onFederationCallback?: (params: {
+		federationName: string;
+		profile: FederationProfile;
+		done: (err: Error | null, user: User | false) => void;
+	}) => Promise<void>;
 }
 
 /**
@@ -95,4 +107,60 @@ export function supportsLogout(
 ): provider is FederationProviderBase & SupportsLogout {
 	if (provider == null) return false;
 	return typeof (provider as { endSession?: unknown }).endSession === "function";
+}
+
+/**
+ * OIDC-standard claims mapped from a federation profile. `[key: string]: unknown`
+ * allows providers to add non-standard claims (e.g. Google's `hd` hosted domain).
+ */
+export interface MappedClaims {
+	readonly email?: string;
+	readonly emailVerified?: boolean;
+	readonly name?: string;
+	readonly picture?: string;
+	readonly groups?: ReadonlyArray<string>;
+	readonly [key: string]: unknown;
+}
+
+/**
+ * Snapshot of a successful federation callback: provider-internal id + the raw
+ * passport profile payload + the tokens the IdP returned. Consumed by the
+ * `onFederationCallback` hook (see {@link SetupPassportContext}).
+ */
+export interface FederationProfile {
+	readonly id: string;
+	readonly raw: Readonly<Record<string, unknown>>;
+	readonly accessToken?: string;
+	readonly refreshToken?: string;
+	readonly idToken?: string;
+	readonly expiresIn?: number;
+}
+
+export interface SupportsClaimMapping {
+	mapClaims(profile: FederationProfile): MappedClaims;
+}
+
+export function supportsClaimMapping(
+	p: FederationProviderBase | undefined | null,
+): p is FederationProviderBase & SupportsClaimMapping {
+	if (p == null) return false;
+	return typeof (p as { mapClaims?: unknown }).mapClaims === "function";
+}
+
+export interface RefreshedTokens {
+	readonly accessToken: string;
+	readonly refreshToken?: string;
+	readonly idToken?: string;
+	readonly expiresAt: Date;
+}
+
+export interface SupportsRefresh {
+	refreshFederationToken(refreshToken: string): Promise<RefreshedTokens>;
+}
+
+export function supportsRefresh(
+	p: FederationProviderBase | undefined | null,
+): p is FederationProviderBase & SupportsRefresh {
+	if (p == null) return false;
+	return typeof (p as { refreshFederationToken?: unknown }).refreshFederationToken === "function";
 }
