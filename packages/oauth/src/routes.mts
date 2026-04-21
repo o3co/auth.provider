@@ -41,6 +41,8 @@ declare module "express-session" {
 		code_redirect_uri?: string;
 		granted_scopes?: string[];
 		isAuthenticated?: boolean;
+		/** UserSession ID — set by the federation callback hook and preserved across session regeneration. */
+		sid?: string;
 	}
 }
 
@@ -481,6 +483,9 @@ export const createOAuthRouter = async (
 						redirect_uri,
 						grantedScope: scopeForPersist,
 						grantedAudience: audienceForPersist,
+						// NEW (TODO-F-3): OIDC round-trip state on the code record.
+						nonce: typeof req.query.nonce === "string" ? req.query.nonce : undefined,
+						sid: typeof req.session?.sid === "string" ? req.session.sid : undefined,
 					});
 				} catch {
 					return redirectError(

@@ -25,8 +25,84 @@ import {
 	type RefreshTokenStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
+import express from "express";
+import type { PassportStatic } from "passport";
+import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+import { createOAuthRouter } from "#/routes.mjs";
+
+// ---------------------------------------------------------------------------
+// Helpers shared by the authorize-captures-nonce-sid suite
+// ---------------------------------------------------------------------------
+
+const authorizeConfig = {
+	oauth: {
+		jwt: { issuer: "https://auth.example" },
+		accessToken: { expiresIn: 3600 },
+		refreshToken: { expiresIn: 86400 },
+	},
+	endpoints: {
+		login: { url: "/login" },
+	},
+} as unknown as AppConfig;
+
+const authorizePassport = {
+	authenticate: () => (_req: unknown, _res: unknown, next: () => void) => next(),
+} as unknown as PassportStatic;
+
+const authorizeClientRepo: ClientRepository = {
+	findById: async () => ({
+		clientId: "client-1",
+		allowedRedirectUris: ["https://example.test/cb"],
+		allowedScopes: ["openid", "profile"],
+	}),
+	authenticate: async () => null,
+};
+
+/**
+ * Build a minimal express app wired to createOAuthRouter.
+ * The session middleware injects the provided session fields into req.session.
+ */
+async function buildAuthorizeApp(opts: {
+	sessionFields: Record<string, unknown>;
+	captureCode: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
+}) {
+	const app = express();
+	app.use(express.json());
+	app.use(express.urlencoded({ extended: false }));
+
+	// Inline session substitute — minimal surface needed by the /authorize route.
+	app.use((req, _res, next) => {
+		(req as unknown as { session: Record<string, unknown> }).session = {
+			isAuthenticated: true,
+			user: { id: "user-1" },
+			...opts.sessionFields,
+		};
+		next();
+	});
+
+	const codeRepo: CodeRepository = {
+		createCode: async (params) => {
+			opts.captureCode(params);
+			return { code: "auth-code" };
+		},
+		getByCode: async () => null,
+		consumeByCode: async () => null,
+		removeByCode: async () => {},
+	};
+
+	const { router } = await createOAuthRouter(express, {
+		passport: authorizePassport,
+		registry: new GrantRegistry(),
+		config: authorizeConfig,
+		clientRepository: authorizeClientRepo,
+		codeRepository: codeRepo,
+		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+	});
+	app.use("/oauth", router);
+	return app;
+}
 
 const mockClientRepository: ClientRepository = {
 	findById: vi.fn().mockResolvedValue(null),
@@ -188,5 +264,52 @@ describe("oauthAuthorizationModule", () => {
 		});
 
 		expect(result.status).toBe(400);
+	});
+});
+
+describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", () => {
+	it("captures nonce + sid on createCode when both are present", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-abc" },
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+
+		await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			nonce: "nonce-xyz",
+		});
+
+		expect(captured).toBeDefined();
+		expect(captured?.nonce).toBe("nonce-xyz");
+		expect(captured?.sid).toBe("sid-abc");
+	});
+
+	it("omits nonce on createCode when query.nonce is not provided", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+
+		await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			// no nonce
+		});
+
+		expect(captured).toBeDefined();
+		expect(captured?.nonce).toBeUndefined();
+		// sid is still captured even without nonce
+		expect(captured?.sid).toBe("sid-1");
 	});
 });
