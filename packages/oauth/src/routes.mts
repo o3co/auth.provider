@@ -16,12 +16,15 @@
 
 import {
 	type AppConfig,
+	type AuditSinkBase,
 	type ClientRepository,
 	type CodeRepository,
+	emitAuditEvent,
 	formatObject,
 	type GrantRegistry,
 	type KeyStore,
 	type PublicClient,
+	type RateLimiterBase,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
@@ -54,6 +57,8 @@ export const createOAuthRouter = async (
 		clientRepository,
 		codeRepository,
 		keyStore,
+		rateLimiter,
+		auditSink,
 	}: {
 		passport: PassportStatic;
 		registry: GrantRegistry;
@@ -61,9 +66,30 @@ export const createOAuthRouter = async (
 		clientRepository: ClientRepository;
 		codeRepository: CodeRepository;
 		keyStore: KeyStore;
+		rateLimiter?: RateLimiterBase;
+		auditSink?: AuditSinkBase;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
+
+	async function checkRateLimit(req: Request, res: Response, tag: string): Promise<boolean> {
+		if (!rateLimiter) return true;
+		const ip = req.ip ?? "unknown";
+		const key = `${tag}:ip:${ip}`;
+		const decision = await rateLimiter.check(key, {
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+		});
+		if (!decision.allowed) {
+			if (decision.resetAt) {
+				const secs = Math.max(0, Math.ceil((decision.resetAt.getTime() - Date.now()) / 1000));
+				res.setHeader("Retry-After", String(secs));
+			}
+			res.status(429).json({ error: "rate_limited", reason: decision.reason });
+			return false;
+		}
+		return true;
+	}
 
 	const tokenRateLimit = rateLimit({
 		windowMs: config.rateLimit.token.windowMs,
@@ -83,10 +109,18 @@ export const createOAuthRouter = async (
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
 		.post("/token", tokenRateLimit, async (req: Request, res: Response) => {
+			if (!(await checkRateLimit(req, res, "token"))) return;
 			const { grant_type } = req.body;
 			const issuer = config.oauth.jwt.issuer ?? req.get("host");
 
 			if (typeof grant_type !== "string" || grant_type === "") {
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "token.issued.failure",
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { reason: "missing_grant_type" },
+				});
 				return res.status(400).json({
 					error: "unsupported_grant_type",
 					error_description: "grant_type must be a non-empty string",
@@ -95,6 +129,13 @@ export const createOAuthRouter = async (
 
 			const handler = registry.get(grant_type);
 			if (!handler) {
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "token.issued.failure",
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { reason: "unsupported_grant_type", grant_type },
+				});
 				return res.status(400).json({
 					error: "unsupported_grant_type",
 					error_description: `grant_type "${grant_type}" is not supported`,
@@ -121,6 +162,14 @@ export const createOAuthRouter = async (
 			if ("tokens" in result) {
 				res.set("Cache-Control", "no-store");
 				res.set("Pragma", "no-cache");
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "token.issued",
+					clientId: typeof req.body.client_id === "string" ? req.body.client_id : undefined,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { grant_type },
+				});
 				return res.status(result.status).json(result.tokens);
 			}
 			const errorBody: Record<string, unknown> = { error: result.error };
@@ -128,6 +177,14 @@ export const createOAuthRouter = async (
 			if (result.status === 401) {
 				res.set("WWW-Authenticate", "Bearer");
 			}
+			await emitAuditEvent(auditSink, {
+				timestamp: new Date(),
+				type: "token.issued.failure",
+				clientId: typeof req.body.client_id === "string" ? req.body.client_id : undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { grant_type, error: result.error },
+			});
 			return res.status(result.status).json(errorBody);
 		})
 		// RFC 7662: Token Introspection
@@ -135,6 +192,7 @@ export const createOAuthRouter = async (
 			"/introspect",
 			tokenRateLimit,
 			async (req: Request, res: Response, next) => {
+				if (!(await checkRateLimit(req, res, "introspect"))) return;
 				const auth = req.headers.authorization;
 				if (auth?.startsWith("Bearer ")) {
 					const bearerToken = auth.slice(7);
@@ -190,6 +248,7 @@ export const createOAuthRouter = async (
 			},
 		)
 		.get("/authorize", authorizeRateLimit, async (req: Request, res: Response) => {
+			if (!(await checkRateLimit(req, res, "authorize"))) return;
 			if (!req.session.isAuthenticated) {
 				return res.redirect(
 					`${config.endpoints.login.url}?redirect_to=${encodeURIComponent(`${req.protocol}://${req.get("host")}${req.originalUrl}`)}`,
@@ -349,6 +408,15 @@ export const createOAuthRouter = async (
 					url.searchParams.append("state", state);
 				}
 
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "login.success",
+					subject: typeof req.session.user?.sub === "string" ? req.session.user.sub : undefined,
+					clientId: client_id,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { response_type: "code" },
+				});
 				return res.redirect(url.toString());
 			}
 

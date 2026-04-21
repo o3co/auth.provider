@@ -24,6 +24,13 @@ export {
 } from "./adapters/AdapterFactory.mjs";
 // App factory
 export { type AppOptions, type AppResult, createApp } from "./app.mjs";
+// Audit sink (partial exports — full export set lands in Task 24)
+export {
+	createAuditSinkFactory,
+	emitAuditEvent,
+	registerBuiltinAuditSinks,
+} from "./audit/factory.mjs";
+export type { AuditEvent, AuditSinkBase, AuditSinkFactory } from "./audit/types.mjs";
 // Configuration
 export {
 	type AppConfig,
@@ -84,6 +91,15 @@ export type {
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
+// Rate limiter (partial exports — full export set lands in Task 24)
+export { createRateLimiterFactory, registerBuiltinRateLimiters } from "./ratelimit/factory.mjs";
+export type {
+	RateLimitContext,
+	RateLimitDecision,
+	RateLimiterBase,
+	RateLimiterFactory,
+	RateLimitSpec,
+} from "./ratelimit/types.mjs";
 // Refresh token store (Task 24 will finalize the full export set; partial exports pulled forward here for Task 16)
 export { createRefreshTokenStoreFactory } from "./refresh/factory.mjs";
 export type {
