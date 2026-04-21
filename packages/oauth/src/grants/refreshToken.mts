@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { randomUUID } from "node:crypto";
 import {
 	type GrantContext,
 	type GrantDependencies,
@@ -23,6 +24,19 @@ import {
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
 import { decodeProtectedHeader, type JWTPayload, jwtVerify } from "jose";
+
+function decodeJwtPayload(token: string): Record<string, unknown> {
+	const parts = token.split(".");
+	if (parts.length < 2) return {};
+	try {
+		return JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf-8")) as Record<
+			string,
+			unknown
+		>;
+	} catch {
+		return {};
+	}
+}
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
@@ -143,36 +157,78 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				grantedScope = requested.join(" ");
 			}
 
+			const familyId =
+				((tokenPayload as Record<string, unknown>).family_id as string | undefined) ?? null;
+			const previousJti =
+				((tokenPayload as Record<string, unknown>).jti as string | undefined) ?? null;
+			const newFamilyId = familyId ?? randomUUID();
+
+			const newAccessToken = await generateToken(
+				{},
+				{
+					expiresIn: config.oauth.accessToken.expiresIn,
+					keyStore,
+					issuer,
+					audience: tokenAud ?? client_id ?? null,
+					subject: subjectStr ?? null,
+					authorizedParty: azpStr ?? null,
+					scope: grantedScope,
+					tokenType: "at+jwt",
+				},
+			);
+
+			const newRefreshToken = await generateToken(
+				{ family_id: newFamilyId },
+				{
+					expiresIn: config.oauth.refreshToken.expiresIn,
+					keyStore,
+					issuer,
+					audience: tokenAud ?? client_id ?? null,
+					subject: subjectStr ?? null,
+					authorizedParty: azpStr ?? null,
+					scope: grantedScope,
+					tokenType: "rt+jwt",
+				},
+			);
+
+			if (deps.refreshTokenStore && previousJti !== null) {
+				const newRefreshPayload = decodeJwtPayload(newRefreshToken.token);
+				const newJti = newRefreshPayload.jti as string | undefined;
+				const newExp = newRefreshPayload.exp as number | undefined;
+				if (typeof newJti === "string" && typeof newExp === "number") {
+					const rotateResult = await deps.refreshTokenStore.rotate(
+						previousJti,
+						newJti,
+						newFamilyId,
+						new Date(newExp * 1000),
+					);
+					if (rotateResult.outcome === "replayed") {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "replay_detected",
+							},
+						};
+					}
+					if (rotateResult.outcome === "revoked") {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "family_revoked",
+							},
+						};
+					}
+				}
+			}
+
 			return {
 				result: {
 					status: 200,
 					tokens: generateTokenResponse({
-						accessToken: await generateToken(
-							{},
-							{
-								expiresIn: config.oauth.accessToken.expiresIn,
-								keyStore,
-								issuer,
-								audience: tokenAud ?? client_id ?? null,
-								subject: subjectStr ?? null,
-								authorizedParty: azpStr ?? null,
-								scope: grantedScope,
-								tokenType: "at+jwt",
-							},
-						),
-						refreshToken: await generateToken(
-							{},
-							{
-								expiresIn: config.oauth.refreshToken.expiresIn,
-								keyStore,
-								issuer,
-								audience: tokenAud ?? client_id ?? null,
-								subject: subjectStr ?? null,
-								authorizedParty: azpStr ?? null,
-								scope: grantedScope,
-								tokenType: "rt+jwt",
-							},
-						),
+						accessToken: newAccessToken,
+						refreshToken: newRefreshToken,
 					}),
 				},
 			};

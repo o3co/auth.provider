@@ -18,6 +18,8 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	type RefreshTokenRotateOutcome,
+	type RefreshTokenStoreBase,
 } from "@o3co/auth-provider-core";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
@@ -288,6 +290,113 @@ describe("createRefreshTokenGrant", () => {
 			const { sessionMutation } = await handler.handle(ctx);
 
 			expect(sessionMutation).toBeUndefined();
+		});
+	});
+
+	describe("family_id and refreshTokenStore integration", () => {
+		function createStubRefreshTokenStore(
+			onRotate: (previousJti: string | null) => RefreshTokenRotateOutcome,
+		): RefreshTokenStoreBase {
+			return {
+				kind: "stub",
+				async rotate(previousJti) {
+					return onRotate(previousJti);
+				},
+				async isFamilyRevoked() {
+					return false;
+				},
+				async revokeFamily() {},
+			};
+		}
+
+		it("emits family_id in the new rt+jwt (generated when absent from input)", async () => {
+			// Input token has no family_id claim — the grant should generate a fresh UUID
+			const token = await makeRefreshToken();
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if ("tokens" in result) {
+				const rtToken = result.tokens.refresh_token as string;
+				// Decode the payload from the returned rt+jwt
+				const parts = rtToken.split(".");
+				const payload = JSON.parse(
+					Buffer.from(parts[1] ?? "", "base64url").toString("utf-8"),
+				) as Record<string, unknown>;
+				expect(typeof payload.family_id).toBe("string");
+				// Should be a UUID-shaped string (8-4-4-4-12)
+				expect(payload.family_id as string).toMatch(
+					/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+				);
+			} else {
+				expect.fail("Expected tokens in result");
+			}
+		});
+
+		it("returns invalid_grant/replay_detected when the store reports 'replayed'", async () => {
+			const stub = createStubRefreshTokenStore((_prev) => ({
+				outcome: "replayed",
+				familyId: "test-family",
+			}));
+			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenStore: stub };
+			// Token must include a jti so that previousJti !== null and rotate() is called
+			const token = await new SignJWT({ sub: "u1", scope: "read write" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setExpirationTime("24h")
+				.setJti("prev-jti-replay")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(depsWithStore);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			if ("error" in result) {
+				expect(result.error).toBe("invalid_grant");
+				expect(result.errorDescription).toBe("replay_detected");
+			} else {
+				expect.fail("Expected error in result");
+			}
+		});
+
+		it("returns invalid_grant/family_revoked when the store reports 'revoked'", async () => {
+			const stub = createStubRefreshTokenStore((_prev) => ({ outcome: "revoked" }));
+			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenStore: stub };
+			// Token must include a jti so that previousJti !== null and rotate() is called
+			const token = await new SignJWT({ sub: "u1", scope: "read write" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setExpirationTime("24h")
+				.setJti("prev-jti-revoked")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(depsWithStore);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			if ("error" in result) {
+				expect(result.error).toBe("invalid_grant");
+				expect(result.errorDescription).toBe("family_revoked");
+			} else {
+				expect.fail("Expected error in result");
+			}
 		});
 	});
 });

@@ -75,6 +75,13 @@ export {
 } from "./keys/KeyStore.mjs";
 // Module system
 export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
+// Refresh token store (Task 24 will finalize the full export set; partial exports pulled forward here for Task 16)
+export { createRefreshTokenStoreFactory } from "./refresh/factory.mjs";
+export type {
+	RefreshTokenRotateOutcome,
+	RefreshTokenStoreBase,
+	RefreshTokenStoreFactory,
+} from "./refresh/types.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
