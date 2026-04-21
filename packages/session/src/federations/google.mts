@@ -126,7 +126,10 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 						return;
 					}
 					try {
-						const user = await ctx.verifyUser(`google:${profile.id}`);
+						if (!profile.id) {
+							return done(null, false);
+						}
+						const user = await ctx.verifyUser(`${config.name}:${profile.id}`);
 						return done(null, user ?? false);
 					} catch (err) {
 						return done(err as Error);

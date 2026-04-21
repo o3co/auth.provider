@@ -49,7 +49,7 @@ const sessionConfigSchema = fullSectionsSchema.pick({
 export type SessionModuleOptions = {
 	userRepository: UserRepository;
 	express?: ExpressLike;
-	/** Session TTL in milliseconds for new UserSessions (federation + local login). Default 24h. */
+	/** Session TTL in milliseconds for new federation-created UserSessions. Default 24h. */
 	sessionTtlMs?: number;
 };
 

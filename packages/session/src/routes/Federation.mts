@@ -25,6 +25,8 @@ declare module "express-session" {
 		oauth_csrf_state?: string;
 		isAuthenticated?: boolean;
 		user?: Record<string, unknown>;
+		/** UserSession ID — set by the built-in onFederationCallback hook and preserved across session regeneration. */
+		sid?: string;
 	}
 }
 
@@ -121,7 +123,7 @@ export const createRouter = (
 				const user = req.user;
 				const { redirectTo } = req.session;
 				// Capture sid before regeneration — it was set by the built-in onFederationCallback.
-				const sid = (req.session as unknown as { sid?: string }).sid;
+				const sid = req.session.sid;
 
 				req.session.regenerate((err: Error | null) => {
 					if (err) return res.status(500).json({ message: "Error regenerating session" });
@@ -129,7 +131,7 @@ export const createRouter = (
 					req.session.isAuthenticated = true;
 					req.session.user = user as Record<string, unknown> | undefined;
 					// Restore sid on the new session so F-3's access_token claim has a source.
-					if (sid) (req.session as unknown as { sid: string }).sid = sid;
+					if (sid) req.session.sid = sid;
 
 					const redirectResult = provider.resolveCallbackRedirect({ redirectTo });
 					if (!redirectResult.ok) {

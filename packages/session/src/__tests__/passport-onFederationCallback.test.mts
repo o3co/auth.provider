@@ -29,11 +29,13 @@ function makePassportStub() {
 	} as unknown as import("passport").PassportStatic;
 }
 
-function makeUserSessionStore(): UserSessionStoreBase & { _saved: unknown[] } {
+function makeUserSessionStore(): UserSessionStoreBase & { _saved: unknown[]; _deleted: string[] } {
 	const saved: unknown[] = [];
+	const deleted: string[] = [];
 	return {
 		kind: "memory",
 		_saved: saved,
+		_deleted: deleted,
 		async create(input) {
 			saved.push(input);
 		},
@@ -44,8 +46,10 @@ function makeUserSessionStore(): UserSessionStoreBase & { _saved: unknown[] } {
 		async linkFamily() {},
 		async updateClaims() {},
 		async removeFederation() {},
-		async delete() {},
-	} as UserSessionStoreBase & { _saved: unknown[] };
+		async delete(sid: string) {
+			deleted.push(sid);
+		},
+	} as UserSessionStoreBase & { _saved: unknown[]; _deleted: string[] };
 }
 
 function makeFederationTokenStore(): FederationTokenStoreBase & { _attached: unknown[] } {
@@ -337,5 +341,54 @@ describe("_createPassportImpl onFederationCallback wiring", () => {
 		expect(doneResults).toHaveLength(1);
 		expect(doneResults[0]?.err).toBe(boom);
 		expect(doneResults[0]?.user).toBe(false);
+	});
+
+	it("rolls back UserSession (delete) when federationTokenStore.attach throws post-create", async () => {
+		const doneResults: DoneRecord[] = [];
+		const us = makeUserSessionStore();
+		const attachError = new Error("attach failure");
+		const ft: FederationTokenStoreBase & { _attached: unknown[] } = {
+			kind: "memory",
+			_attached: [],
+			async attach() {
+				throw attachError;
+			},
+			async get() {
+				return null;
+			},
+			async update() {},
+			async deleteBySession() {},
+			async delete() {},
+		} as FederationTokenStoreBase & { _attached: unknown[] };
+
+		const provider = makeProvider("google", { id: "gid-rollback", accessToken: "at" }, doneResults);
+		const userRepo = {
+			authenticate: async () => null,
+			authenticateByToken: vi.fn().mockResolvedValue(fakeUser),
+		};
+
+		await _createPassportImpl({
+			pathResolver: (s) => s,
+			userRepository: userRepo as unknown as Parameters<
+				typeof _createPassportImpl
+			>[0]["userRepository"],
+			federationProviders: new Map([["google", provider]]),
+			userSessionStore: us,
+			federationTokenStore: ft,
+			_passportOverride: makePassportStub(),
+		});
+
+		// UserSession was created
+		expect(us._saved).toHaveLength(1);
+		const saved = us._saved[0] as { sid: string };
+
+		// done was called with the attach error
+		expect(doneResults).toHaveLength(1);
+		expect(doneResults[0]?.err).toBe(attachError);
+		expect(doneResults[0]?.user).toBe(false);
+
+		// UserSession was rolled back (delete called with the generated sid)
+		expect(us._deleted).toHaveLength(1);
+		expect(us._deleted[0]).toBe(saved.sid);
 	});
 });

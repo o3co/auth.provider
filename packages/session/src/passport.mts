@@ -145,32 +145,45 @@ export const _createPassportImpl = async ({
 							federations: [params.federationName],
 							claims,
 						});
-						if (params.profile.accessToken) {
-							await federationTokenStore.attach(sid, params.federationName, {
-								accessToken: params.profile.accessToken,
-								refreshToken: params.profile.refreshToken,
-								idToken: params.profile.idToken,
-								expiresAt: new Date(Date.now() + (params.profile.expiresIn ?? 3600) * 1000),
-							});
-						}
-						const session = params.req.session as unknown as
-							| (Record<string, unknown> & {
-									save?: (cb: (err: unknown) => void) => void;
-							  })
-							| undefined;
-						if (session) {
-							session.sid = sid;
-							if (typeof session.save === "function") {
-								await new Promise<void>((resolve, reject) => {
-									// session.save is guaranteed by the typeof check above; call it.
-									(session.save as (cb: (err: unknown) => void) => void)((err) => {
-										if (err) reject(err as Error);
-										else resolve();
-									});
+						// Post-create operations: any failure here orphans the UserSession,
+						// so we roll back with a best-effort delete before calling done(err).
+						try {
+							if (params.profile.accessToken) {
+								await federationTokenStore.attach(sid, params.federationName, {
+									accessToken: params.profile.accessToken,
+									refreshToken: params.profile.refreshToken,
+									idToken: params.profile.idToken,
+									expiresAt: new Date(Date.now() + (params.profile.expiresIn ?? 3600) * 1000),
 								});
 							}
+							const session = params.req.session as unknown as
+								| (Record<string, unknown> & {
+										save?: (cb: (err: unknown) => void) => void;
+								  })
+								| undefined;
+							if (session) {
+								session.sid = sid;
+								if (typeof session.save === "function") {
+									await new Promise<void>((resolve, reject) => {
+										// session.save is guaranteed by the typeof check above; call it.
+										(session.save as (cb: (err: unknown) => void) => void)((err) => {
+											if (err) reject(err as Error);
+											else resolve();
+										});
+									});
+								}
+							}
+							params.done(null, user);
+						} catch (postCreateErr) {
+							// Best-effort rollback: delete the orphan UserSession. If delete itself
+							// throws, swallow it — the original error is what matters for the caller.
+							try {
+								await userSessionStore.delete(sid);
+							} catch {
+								// ignore
+							}
+							params.done(postCreateErr as Error, false);
 						}
-						params.done(null, user);
 					} catch (err) {
 						params.done(err as Error, false);
 					}

@@ -113,7 +113,7 @@ describe("setupPassportStrategy", () => {
 		expect(mockPassport.use).toHaveBeenCalledWith("google", expect.any(Object));
 	});
 
-	it("verify callback builds externalId as 'google:' + profile.id", async () => {
+	it("verify callback builds externalId as config.name + ':' + profile.id (default name='google')", async () => {
 		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
 		const verifyUser = vi.fn(async () => null);
 		const provider = createGoogleProvider(baseConfig);
@@ -126,7 +126,35 @@ describe("setupPassportStrategy", () => {
 		const done = vi.fn();
 		const reqStub = { session: {} } as unknown as import("express").Request;
 		await verifyCallback(reqStub, "at", "rt", {}, { id: "12345" }, done);
-		expect(verifyUser).toHaveBeenCalledWith("google:12345");
+		expect(verifyUser).toHaveBeenCalledWith(`${baseConfig.name}:12345`);
+	});
+
+	it("verify callback uses config.name in externalId for multi-tenant (google-work)", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const verifyUser = vi.fn(async () => null);
+		const multiTenantConfig = { ...baseConfig, name: "google-work" };
+		const provider = createGoogleProvider(multiTenantConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "12345" }, done);
+		expect(verifyUser).toHaveBeenCalledWith("google-work:12345");
+	});
+
+	it("verify callback calls done(null, false) when profile.id is empty", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const verifyUser = vi.fn(async () => null);
+		const provider = createGoogleProvider(baseConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "" }, done);
+		expect(done).toHaveBeenCalledWith(null, false);
+		expect(verifyUser).not.toHaveBeenCalled();
 	});
 
 	it("verify callback passes id_token and expires_in from params to FederationProfile", async () => {

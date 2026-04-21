@@ -135,7 +135,7 @@ function createGithubProvider(config: {
 }): FederationProviderBase;
 ```
 
-GitHub OAuth 2.0 用の `FederationProviderBase` を生成する。`passport-github2`（オプションの peer dep）が必要なため、別途インストールすること。デフォルトのスコープは `["read:user", "user:email"]`。`externalId` のフォーマットは `"github:" + profile.id`。
+GitHub OAuth 2.0 用の `FederationProviderBase` を生成する。`passport-github2`（オプションの peer dep）が必要なため、別途インストールすること。デフォルトのスコープは `["read:user", "user:email"]`。`externalId` のフォーマットは `${federationName}:${profile.id}`（`federationName` はプロバイダーに設定した `name`。例: デフォルトは `"github"`、カスタムテナントの場合は `"github-enterprise"` など）。
 
 ---
 
@@ -351,7 +351,7 @@ readonly onFederationCallback?: (params: {
 
 - デフォルトスコープは `["read:user", "user:email"]`。
 - プロファイルオブジェクトに `email` フィールドが含まれない場合、GitHub `/user/emails` API を呼び出してプライマリの確認済みメールアドレスを取得することでプロファイルを補完する。
-- `externalId` フォーマット: `"github:" + profile.id`。
+- `externalId` フォーマット: `${federationName}:${profile.id}`（`federationName` は設定した `name`。例: デフォルトは `"github"`、カスタムテナントの場合は `"github-enterprise"`）。
 
 ---
 

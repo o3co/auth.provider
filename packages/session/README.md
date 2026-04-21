@@ -135,7 +135,7 @@ function createGithubProvider(config: {
 }): FederationProviderBase;
 ```
 
-Creates a `FederationProviderBase` for GitHub OAuth 2.0. Uses `passport-github2` (optional peer dep — must be installed separately). The default scope is `["read:user", "user:email"]`. The `externalId` format is `"github:" + profile.id`.
+Creates a `FederationProviderBase` for GitHub OAuth 2.0. Uses `passport-github2` (optional peer dep — must be installed separately). The default scope is `["read:user", "user:email"]`. The `externalId` format is `${federationName}:${profile.id}` where `federationName` is the configured `name` on the provider (e.g. `"github"` by default, or `"github-enterprise"` if you customize).
 
 ---
 
@@ -351,7 +351,7 @@ Custom providers never need to implement this hook — they receive it via `Setu
 
 - Default scope is `["read:user", "user:email"]`.
 - When the primary profile object omits an `email` field, the provider enriches the profile by calling the GitHub `/user/emails` API to retrieve the primary verified email.
-- `externalId` format: `"github:" + profile.id`.
+- `externalId` format: `${federationName}:${profile.id}` where `federationName` equals the configured `name` (e.g. `"github"` by default, or `"github-enterprise"` for a custom tenant).
 
 ---
 

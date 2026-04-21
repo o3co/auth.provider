@@ -131,7 +131,10 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 					return;
 				}
 				try {
-					const user = await ctx.verifyUser(`github:${profile.id}`);
+					if (!profile.id) {
+						return done(null, false);
+					}
+					const user = await ctx.verifyUser(`${config.name}:${profile.id}`);
 					return done(null, user ?? false);
 				} catch (err) {
 					return done(err as Error);
