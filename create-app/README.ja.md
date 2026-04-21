@@ -5,10 +5,12 @@ auth.provider 用の CLI スキャフォルダーです。standalone テンプ�
 ## 使い方
 
 ```bash
-npx create-o3co-auth-provider <プロジェクト名>
+npx create-o3co-auth-provider <project-name> [--dir <dir-name>]
 ```
 
-例:
+`<project-name>` はスコープ付き npm 名 (`@scope/pkg`) とスコープなしの名前 (`pkg`) のどちらでも指定できます。
+
+スコープなしの例:
 
 ```bash
 npx create-o3co-auth-provider my-auth-server
@@ -17,24 +19,49 @@ npm install
 npm run debug
 ```
 
+スコープ付きの例（ディレクトリ名はパッケージ部分 `auth.provider` がデフォルト）:
+
+```bash
+npx create-o3co-auth-provider @my-org/auth.provider
+cd auth.provider
+npm install
+npm run debug
+```
+
+`--dir` でディレクトリ名を明示指定:
+
+```bash
+npx create-o3co-auth-provider @my-org/auth.provider --dir provider
+cd provider
+```
+
 ## 動作内容
 
-1. プロジェクト名を検証する。
-2. ターゲットディレクトリを `<cwd>/<プロジェクト名>` として解決する。
-3. ディレクトリがすでに存在する場合はエラーを出力して終了する。
-4. `templates/standalone/` をターゲットディレクトリにコピーする（`node_modules/` と `dist/` は除外）。
-5. 生成されたディレクトリの `package.json` を書き換える:
-   - `name` を指定したプロジェクト名に設定する。
+1. `<project-name>` を検証する（検証ルール参照）。
+2. 生成先ディレクトリ名を決定する: `--dir <value>` が指定されていればその値、そうでなければスコープ付き名のパッケージ部分、最終的には入力値そのもの。
+3. 生成先ディレクトリを `<cwd>/<dir-name>` として解決する。
+4. ディレクトリがすでに存在する場合はエラーを出力して終了する。
+5. `templates/standalone/` を生成先ディレクトリにコピーする（`node_modules/` と `dist/` は除外）。
+6. 生成されたディレクトリの `package.json` を書き換える:
+   - `name` を `<project-name>` をそのまま設定する（スコープを保持）。
    - `private` フィールドを削除する。
    - すべての `workspace:*` バージョン参照を `versions.json` の公開 semver バージョンに置き換える。
-6. 次のステップを出力する。
+7. 次のステップを出力する。
 
-## バリデーションルール
+## 検証ルール
 
-プロジェクト名は以下の条件をすべて満たす必要があります。
+`<project-name>` は以下のいずれかに一致する必要があります:
 
-- `.` または `..` でないこと
-- パス区切り文字（`/` または `\`）を含まないこと
+- スコープなし: `^[a-z0-9][a-z0-9-._~]*$`
+- スコープ付き: `^@[a-z0-9][a-z0-9-._~]*/[a-z0-9][a-z0-9-._~]*$`
+
+いずれも空文字・`.`・`..` は不可、最大 214 文字。
+
+`--dir <value>` はスコープなしのパターンと同じ制約です。
+
+## 既知の制約
+
+内包されているテンプレートの `README.md` / `README.ja.md` の見出しは `@o3co/auth-provider-standalone` のままです。スコープ付きでプロジェクトを生成した場合、この見出しは生成された `package.json` の `name` と一致しません。必要に応じて手動で修正してください。
 
 ## 生成される構造
 
