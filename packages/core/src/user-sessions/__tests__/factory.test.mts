@@ -33,4 +33,21 @@ describe("UserSessionStoreFactory", () => {
 		registerBuiltinUserSessionStores(f);
 		await expect(f.create({ type: "unknown" })).rejects.toThrow(/userSessionStore/);
 	});
+
+	it("built-in redis adapter is registered and creates instance", async () => {
+		const f = createUserSessionStoreFactory();
+		registerBuiltinUserSessionStores(f);
+		// Provide an already-connected client to avoid dynamic import in tests.
+		const fakeClient = {
+			get: async () => null,
+			set: async () => "OK",
+			del: async () => 0,
+		};
+		const store = await f.create({
+			type: "redis",
+			client: fakeClient,
+			keyPrefix: "x:",
+		});
+		expect(store.kind).toBe("redis");
+	});
 });
