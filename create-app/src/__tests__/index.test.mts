@@ -60,4 +60,12 @@ describe("scaffold", () => {
 		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
 		expect(pkg.private).toBeUndefined();
 	});
+
+	it("writes scoped project name verbatim into package.json", () => {
+		const targetDir = join(tempDir, "auth.provider");
+		scaffold(targetDir, "@piratis-blossoms/auth.provider");
+
+		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
+		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
+	});
 });
