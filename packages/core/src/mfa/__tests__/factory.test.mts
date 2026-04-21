@@ -16,7 +16,8 @@
 
 import { describe, expect, it } from "vitest";
 import { createMfaProviderFactory } from "#/mfa/factory.mjs";
-import { createTestMfaProvider } from "./fixtures.mjs";
+import { supportsEnrollment, supportsRevocation } from "#/mfa/types.mjs";
+import { createTestMfaProvider, createTestMfaProviderWithCapabilities } from "./fixtures.mjs";
 
 describe("createMfaProviderFactory", () => {
 	it("creates an adapter factory and resolves registered providers", async () => {
@@ -29,5 +30,40 @@ describe("createMfaProviderFactory", () => {
 	it("throws on unknown kind via AdapterFactoryError", async () => {
 		const factory = createMfaProviderFactory();
 		await expect(factory.create({ type: "missing" })).rejects.toThrow();
+	});
+});
+
+describe("MfaProviderBase contract", () => {
+	it("verify returns success/failureReason without throwing on invalid proof", async () => {
+		const provider = createTestMfaProvider({
+			kind: "totp",
+			onVerify: async (_id, proof) => {
+				if (typeof proof !== "object" || proof === null || !("code" in proof)) {
+					return { success: false, failureReason: "invalid" };
+				}
+				return { success: true };
+			},
+		});
+		const result1 = await provider.verify("cid", "not-an-object");
+		expect(result1.success).toBe(false);
+		expect(result1.failureReason).toBe("invalid");
+		const result2 = await provider.verify("cid", { code: "123456" });
+		expect(result2.success).toBe(true);
+	});
+
+	it("supportsEnrollment / supportsRevocation detect capability presence", () => {
+		const base = createTestMfaProvider({ kind: "base" });
+		expect(supportsEnrollment(base)).toBe(false);
+		expect(supportsRevocation(base)).toBe(false);
+		const cap = createTestMfaProviderWithCapabilities({ kind: "full" });
+		expect(supportsEnrollment(cap)).toBe(true);
+		expect(supportsRevocation(cap)).toBe(true);
+	});
+
+	it("supportsEnrollment / supportsRevocation safely reject null / undefined", () => {
+		expect(supportsEnrollment(null)).toBe(false);
+		expect(supportsEnrollment(undefined)).toBe(false);
+		expect(supportsRevocation(null)).toBe(false);
+		expect(supportsRevocation(undefined)).toBe(false);
 	});
 });
