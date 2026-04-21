@@ -105,6 +105,7 @@ export const oauthModule = (params: {
 			auditSink: context.auditSink,
 			grantPolicy: context.grantPolicy,
 			refreshTokenStore: context.refreshTokenStore,
+			userSessionStore: context.userSessionStore,
 		});
 
 		context.router.use("/oauth", oauthRouter);

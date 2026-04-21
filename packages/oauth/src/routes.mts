@@ -27,10 +27,12 @@ import {
 	type PublicClient,
 	type RateLimiterBase,
 	type RefreshTokenStoreBase,
+	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import type { PassportStatic } from "passport";
+import * as userinfo from "./routes/userinfo.mjs";
 
 // Session data type augmentation
 declare module "express-session" {
@@ -64,6 +66,7 @@ export const createOAuthRouter = async (
 		auditSink,
 		grantPolicy,
 		refreshTokenStore,
+		userSessionStore,
 	}: {
 		passport: PassportStatic;
 		registry: GrantRegistry;
@@ -75,6 +78,7 @@ export const createOAuthRouter = async (
 		auditSink?: AuditSinkBase;
 		grantPolicy?: GrantPolicyHookBase;
 		refreshTokenStore?: RefreshTokenStoreBase;
+		userSessionStore?: UserSessionStoreBase;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
@@ -571,6 +575,9 @@ export const createOAuthRouter = async (
 				error_description: `response_type "${req.query.response_type}" is not supported`,
 			});
 		});
+
+	// OIDC Core §5.3 — UserInfo endpoint
+	router.use(userinfo.createRouter(express, { keyStore, userSessionStore, refreshTokenStore }));
 
 	return { router, registry };
 };

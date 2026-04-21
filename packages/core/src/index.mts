@@ -165,6 +165,7 @@ export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
+export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export { extractUserClaims } from "./user-sessions/claims.mjs";
 export {
 	createUserSessionStoreFactory,
