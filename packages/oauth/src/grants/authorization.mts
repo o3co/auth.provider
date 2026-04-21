@@ -22,8 +22,11 @@ import {
 	type GrantDependencies,
 	type GrantHandler,
 	type GrantHandlerResult,
+	generateIdToken,
 	generateToken,
 	generateTokenResponse,
+	type Token,
+	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
 
@@ -35,6 +38,17 @@ export const createAuthorizationGrant = (
 	const grantsConfig = config.oauth.grants as Record<string, Record<string, unknown>> | undefined;
 	const authorizationConfig = grantsConfig?.authorization as Record<string, unknown> | undefined;
 	const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
+
+	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it
+	// directly from config (not ctx.issuer) because the express adapter falls
+	// back to `req.get("host")` — which is a host string, not an issuer URL —
+	// when config.oauth.jwt.issuer is unset. Emitting a request-derived `iss`
+	// in id_tokens would violate OIDC Core §2 (iss MUST be a URL).
+	const configuredIssuer: string | undefined = (() => {
+		const jwt = (config.oauth as { jwt?: { issuer?: unknown } } | undefined)?.jwt;
+		const value = jwt?.issuer;
+		return typeof value === "string" && value.length > 0 ? value : undefined;
+	})();
 
 	// B-7: structured pkce config (supportedMethods, defaultMethod, required)
 	// Fall back to legacy requireS256 for backward compatibility
@@ -221,6 +235,9 @@ export const createAuthorizationGrant = (
 			// backward-compat regression. When the store IS wired, sid is mandatory
 			// so subsequent linkFamily / registerRP can execute.
 			const sid = codeData.sid;
+			// TODO-F-4: nonce from the code record — written at /authorize time and
+			// must be reflected verbatim in the id_token per OIDC Core §2.
+			const nonce = codeData.nonce;
 			if (deps.userSessionStore && !sid) {
 				return {
 					result: {
@@ -321,13 +338,16 @@ export const createAuthorizationGrant = (
 			// are invisible to logout orchestration.
 			// sid is guaranteed non-null here when deps.userSessionStore is set because
 			// the earlier guard (deps.userSessionStore && !sid) already rejected that case.
+			// TODO-F-4: userSession is lifted outside the block so id_token generation
+			// (below) can use it after the block completes.
+			let userSession: UserSession | null = null;
 			if (deps.userSessionStore && sid) {
 				// Fix I1: validate session still exists (mirrors refresh_token grant pattern).
 				// A session deleted between /authorize and /token exchange must not produce
 				// tokens — they would be orphaned from logout orchestration.
-				let session: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
+				let fetchedSession: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
 				try {
-					session = await deps.userSessionStore.get(sid);
+					fetchedSession = await deps.userSessionStore.get(sid);
 				} catch {
 					return {
 						result: {
@@ -337,7 +357,7 @@ export const createAuthorizationGrant = (
 						},
 					};
 				}
-				if (!session) {
+				if (!fetchedSession) {
 					return {
 						result: {
 							status: 400,
@@ -346,6 +366,7 @@ export const createAuthorizationGrant = (
 						},
 					};
 				}
+				userSession = fetchedSession;
 				// Fix I2: clientRepository.findById is fallible — move inside try/catch
 				// so a throw here returns a controlled 503 instead of propagating to the
 				// express default handler as an unhandled HTML 500.
@@ -376,10 +397,39 @@ export const createAuthorizationGrant = (
 				}
 			}
 
+			// TODO-F-4: issue id_token when the openid scope was granted and the
+			// session is available. The condition naturally handles all cases:
+			//   F-4-1: openid scope + userSession wired  → id_token issued
+			//   F-4-2: no openid scope                   → id_token omitted
+			//   F-4-3: no userSessionStore               → userSession is null → omitted
+			//   no configured issuer                     → id_token omitted
+			//     We gate on `configuredIssuer` (read directly from
+			//     config.oauth.jwt.issuer at factory time) rather than ctx.issuer,
+			//     because the express adapter falls back to `req.get("host")` when
+			//     config is unset — that is a host string, not an OIDC-compliant
+			//     URL, and using it as `iss` would violate OIDC Core §2.
+			// userSession truthy implies (deps.userSessionStore && sid) were both truthy
+			// earlier, so the `&& sid` guard below is defensive rather than redundant.
+			let idToken: Token | undefined;
+			if (grantedScopes?.includes("openid") && userSession && sid && configuredIssuer) {
+				idToken = await generateIdToken({
+					sub: userSession.sub,
+					aud: client_id,
+					azp: client_id,
+					authTime: userSession.authTime,
+					...(nonce ? { nonce } : {}),
+					sid,
+					scopes: grantedScopes,
+					userClaims: userSession.claims,
+					keyStore,
+					issuer: configuredIssuer,
+				});
+			}
+
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken, refreshToken }),
+					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }),
 				},
 				sessionMutation: {
 					clear: ["code", "code_client_id", "code_redirect_uri", "granted_scopes"],

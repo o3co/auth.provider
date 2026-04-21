@@ -139,6 +139,9 @@ export function createApp(options: AppOptions): AppResult {
 	// Wire core infrastructure routes (pure — no external deps)
 	router.use(healthcheck.createRouter(express)).use(jwks.createRouter(express, keyStore));
 
+	// OIDC discovery is mounted by the oauth module (when the OAuth endpoints
+	// it advertises actually exist). See packages/oauth/src/module.mts.
+
 	const context: ModuleContext = {
 		pathResolver,
 		config,

@@ -35,6 +35,7 @@ export interface Token {
 export interface IntermediateToken {
 	accessToken: Token;
 	refreshToken?: Token;
+	idToken?: Token;
 }
 
 export interface TokenResponse {
@@ -43,11 +44,13 @@ export interface TokenResponse {
 	scope?: string;
 	refresh_token?: string | null;
 	expires_in?: number;
+	id_token?: string;
 }
 
 export const generateTokenResponse = ({
 	accessToken,
 	refreshToken = undefined,
+	idToken = undefined,
 }: IntermediateToken): TokenResponse => {
 	return {
 		access_token: accessToken.token,
@@ -56,6 +59,7 @@ export const generateTokenResponse = ({
 			scope: accessToken.scope,
 			refresh_token: refreshToken ? refreshToken.token : null,
 			expires_in: accessToken.expiresIn,
+			id_token: idToken ? idToken.token : undefined,
 		}),
 	};
 };

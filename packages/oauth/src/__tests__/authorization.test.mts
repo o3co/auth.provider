@@ -828,6 +828,205 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
+		describe("TODO-F-4: id_token issuance on openid scope", () => {
+			// F-4 reads config.oauth.jwt.issuer directly (not ctx.issuer) for
+			// id_token issuance to avoid using the request-derived host fallback
+			// as an OIDC iss claim. Tests must supply a configured issuer.
+			const mockConfigWithIssuer = {
+				oauth: {
+					jwt: { secret: "test-secret", issuer: "https://auth.example.com" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					grants: {
+						session: { enabled: true },
+						authorization: { enabled: true },
+						refresh_token: { enabled: true },
+						did: { enabled: true, messageMaxAgeSec: 300 },
+					},
+				},
+			} as unknown as GrantDependencies["config"];
+
+			function makeDepsWithIssuer(
+				consumeByCodeImpl: CodeRepository["consumeByCode"],
+				clientRepository?: ClientRepository,
+			) {
+				return {
+					config: mockConfigWithIssuer,
+					keyStore: createSymmetricKeyStore("test-secret"),
+					codeRepository: {
+						consumeByCode: consumeByCodeImpl,
+						createCode: vi.fn(),
+						getByCode: vi.fn(),
+						removeByCode: vi.fn(),
+					} as unknown as CodeRepository,
+					clientRepository: clientRepository ?? mockClientRepository,
+				};
+			}
+
+			function makeUserSessionStore(session: {
+				sid: string;
+				sub: string;
+				authTime: Date;
+				claims: Record<string, unknown>;
+			}) {
+				return {
+					kind: "spy",
+					linkFamily: vi.fn(async (_sid: string, _fam: string) => {}),
+					registerRP: vi.fn(async (_sid: string, _rp: unknown) => {}),
+					async create() {},
+					async get(querySid: string) {
+						if (querySid !== session.sid) return null;
+						return {
+							sid: session.sid,
+							sub: session.sub,
+							authTime: session.authTime,
+							createdAt: new Date(),
+							expiresAt: new Date(Date.now() + 3600_000),
+							federations: [] as ReadonlyArray<string>,
+							activeRPs: [] as ReadonlyArray<{ clientId: string; registeredAt: Date }>,
+							familyIds: [] as ReadonlyArray<string>,
+							claims: session.claims,
+						};
+					},
+					async updateClaims() {},
+					async removeFederation() {},
+					async delete() {},
+				};
+			}
+
+			it("includes id_token in response when scope contains 'openid' and userSessionStore is wired (F-4-1)", async () => {
+				const authTime = new Date("2026-04-21T00:00:00Z");
+				const userSessionStore = makeUserSessionStore({
+					sid: "sid-1",
+					sub: "u-1",
+					authTime,
+					claims: { email: "a@b.com", emailVerified: true, name: "Alice" },
+				});
+				const deps = {
+					...makeDepsWithIssuer(
+						vi.fn().mockResolvedValue({
+							code: "c1",
+							sid: "sid-1",
+							nonce: "client-nonce",
+							grantedScope: ["openid", "email"],
+						}),
+					),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "c1", client_id: "client1" },
+					session: { code: "c1", code_client_id: "client1" },
+					issuer: "https://auth.example.com",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				const idTokenStr = result.tokens.id_token;
+				if (typeof idTokenStr !== "string") throw new Error("expected id_token string");
+
+				const idPayload = decodeJwt(idTokenStr) as Record<string, unknown>;
+				expect(idPayload.iss).toBe("https://auth.example.com");
+				expect(idPayload.sub).toBe("u-1");
+				expect(idPayload.aud).toBe("client1");
+				expect(idPayload.azp).toBe("client1");
+				expect(idPayload.sid).toBe("sid-1");
+				expect(idPayload.nonce).toBe("client-nonce");
+				expect(idPayload.email).toBe("a@b.com");
+				// profile scope not granted — name must NOT appear
+				expect(idPayload.name).toBeUndefined();
+			});
+
+			it("does NOT include id_token when issuer is absent (avoids OIDC-noncompliant iss:'')", async () => {
+				const authTime = new Date("2026-04-21T00:00:00Z");
+				const userSessionStore = makeUserSessionStore({
+					sid: "sid-noiss",
+					sub: "u-noiss",
+					authTime,
+					claims: { email: "c@b.com", emailVerified: true },
+				});
+				const deps = {
+					...makeDeps(
+						vi.fn().mockResolvedValue({
+							code: "c-noiss",
+							sid: "sid-noiss",
+							grantedScope: ["openid", "email"],
+							nonce: "client-nonce",
+						}),
+					),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "c-noiss", client_id: "client1" },
+					session: { code: "c-noiss", code_client_id: "client1" },
+					// issuer intentionally omitted
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				expect(typeof result.tokens.access_token).toBe("string");
+				expect(result.tokens.id_token).toBeUndefined();
+			});
+
+			it("does NOT include id_token when scope lacks openid (F-4-2)", async () => {
+				const authTime = new Date("2026-04-21T00:00:00Z");
+				const userSessionStore = makeUserSessionStore({
+					sid: "sid-2",
+					sub: "u-2",
+					authTime,
+					claims: { email: "b@b.com", emailVerified: true, name: "Bob" },
+				});
+				const deps = {
+					...makeDepsWithIssuer(
+						vi.fn().mockResolvedValue({
+							code: "c2",
+							sid: "sid-2",
+							grantedScope: ["profile", "email"],
+						}),
+					),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "c2", client_id: "client1" },
+					session: { code: "c2", code_client_id: "client1" },
+					issuer: "https://auth.example.com",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				expect(typeof result.tokens.access_token).toBe("string");
+				expect(result.tokens.id_token).toBeUndefined();
+			});
+
+			it("does NOT include id_token when userSessionStore is not wired (backward compat, F-4-3)", async () => {
+				// No userSessionStore — cannot resolve claims, so id_token is skipped.
+				const deps = makeDepsWithIssuer(
+					vi.fn().mockResolvedValue({
+						code: "c3",
+						sid: "sid-3",
+						grantedScope: ["openid"],
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "c3", client_id: "client1" },
+					session: { code: "c3", code_client_id: "client1" },
+					issuer: "https://auth.example.com",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				expect(typeof result.tokens.access_token).toBe("string");
+				expect(result.tokens.id_token).toBeUndefined();
+			});
+		});
+
 		describe("TODO-F-3: family_id + sid claims, RP registration", () => {
 			it("happy path: access_token and refresh_token both carry family_id and sid claims (F-3-1)", async () => {
 				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" }));

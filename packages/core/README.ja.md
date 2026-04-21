@@ -551,6 +551,74 @@ Federation + OIDC 対応のために `AppOptions` に追加された 2 つのオ
 
 `CodeRepository.createCode` のパラメーターと `InMemoryCodeRepository` は同一の呼び出しで `nonce`、`sid`、`grantedScope` を受け付ける。consumer（`authorization_code` grant）は、`session.granted_scopes` の代わりに、`/oauth/authorize` 時に `GrantPolicyHook` が設定した `codeData.grantedScope` をトークン発行のスコープとして使用する。
 
+### OIDC id_token + クレームフィルター (TODO-F-4)
+
+`authorization_code` グラントと `/oauth/userinfo` エンドポイントが使用する低レベルヘルパー。
+
+#### `generateIdToken`
+
+```typescript
+interface GenerateIdTokenOptions {
+  readonly sub: string;
+  readonly aud: string;
+  readonly azp?: string;
+  readonly authTime: Date;
+  readonly nonce?: string;
+  readonly sid: string;
+  readonly scopes: ReadonlyArray<string>;
+  readonly userClaims: UserSessionClaims;
+  readonly keyStore: KeyStore;
+  readonly issuer: string;
+  readonly expiresIn?: number; // デフォルト 3600 秒
+}
+
+function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token>;
+```
+
+OIDC id_token JWT（OIDC Core §2）に署名して返す。クレーム構成:
+
+- `iss`、`sub`、`aud`、`exp`、`iat`、`jti` — 標準 JWT クレーム
+- `auth_time` — `opts.authTime` をエポック秒に変換した値
+- `sid` — バックチャネルログアウト用セッション識別子（TODO-F-5）
+- `azp` — authorized party、指定された場合のみ付与
+- `nonce` — 認可リクエストから転送し、そのまま反映
+- `filterClaimsByScope` によるスコープフィルター済みユーザークレーム
+
+ヘッダーは `typ: "id+jwt"` を使用する（イントロスペクション向けのヒント）。
+
+#### `filterClaimsByScope`
+
+```typescript
+function filterClaimsByScope(
+  claims: UserSessionClaims,
+  scopes: ReadonlyArray<string>,
+): Record<string, unknown>;
+```
+
+`UserSessionClaims` を、付与されたスコープが許可するクレームのサブセットにマッピングする。厳格なホワイトリスト制 — 下表のマッピングのみを出力し、それ以外のフィールド（例: Google の `hd` など）は一切転送しない。
+
+| スコープ | 出力されるクレーム |
+| --- | --- |
+| `openid` | *(クレームなし — id_token 発行の可否を制御; `sub` は `generateIdToken` が付与)* |
+| `profile` | `name`、`picture` |
+| `email` | `email`、`email_verified` |
+| `groups` | `groups` |
+
+#### `/.well-known/openid-configuration`
+
+OIDC Discovery 1.0 メタデータエンドポイント。OAuth モジュール（`@o3co/auth-provider-oauth`）が `config.oauth.jwt.issuer` が設定されている場合にのみ登録する。登録された場合、以下を含む JSON ドキュメントを返す:
+
+- `issuer`、`authorization_endpoint`、`token_endpoint`、`userinfo_endpoint`、`introspection_endpoint`
+- `jwks_uri` — 非対称な署名アルゴリズムが 1 つ以上設定されている場合のみ広告する（HS256 のみの構成では JWKS ルートが 404 を返すため省略）
+- `response_types_supported: ["code"]`
+- `subject_types_supported: ["public"]`
+- `id_token_signing_alg_values_supported` — 設定された `KeyStore.algorithm` から導出
+- `scopes_supported: ["openid", "profile", "email", "groups"]`
+- `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`
+- `code_challenge_methods_supported: ["S256"]`
+
+追加エンドポイントが必要なフィールド（`revocation_endpoint`、`end_session_endpoint`、back/front-channel logout）は F-4 では省略し、TODO-F-5 で追加予定。
+
 ## 関連
 
 - ルート [README](../../README.md) — アーキテクチャ概要、設定リファレンス、Docker セットアップ

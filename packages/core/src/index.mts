@@ -50,6 +50,12 @@ export type {
 	FederationTokenStoreFactory,
 	FederationTokens,
 } from "./federation-tokens/types.mjs";
+export { filterClaimsByScope } from "./grants/claimFilter.mjs";
+// id_token generation (OIDC Core §2)
+export {
+	type GenerateIdTokenOptions,
+	generateIdToken,
+} from "./grants/idToken.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
