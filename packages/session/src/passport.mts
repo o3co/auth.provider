@@ -128,6 +128,14 @@ export const _createPassportImpl = async ({
 						const provider = federationProviders.get(params.federationName);
 						const mapped =
 							provider && supportsClaimMapping(provider) ? provider.mapClaims(params.profile) : {};
+						// Reject empty profile.id — otherwise authenticateByToken("name:") could
+						// accidentally match a different externalId scheme or create records
+						// under a malformed key. Symmetric with the legacy-fallback guard in
+						// google.mts / github.mts.
+						if (!params.profile.id) {
+							params.done(null, false);
+							return;
+						}
 						const user = await userRepository.authenticateByToken(
 							`${params.federationName}:${params.profile.id}`,
 						);

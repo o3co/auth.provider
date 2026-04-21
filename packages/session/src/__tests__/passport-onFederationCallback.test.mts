@@ -236,6 +236,36 @@ describe("_createPassportImpl onFederationCallback wiring", () => {
 		expect(ft._attached).toHaveLength(0);
 	});
 
+	it("rejects empty profile.id without calling authenticateByToken or touching stores", async () => {
+		const doneResults: DoneRecord[] = [];
+		const us = makeUserSessionStore();
+		const ft = makeFederationTokenStore();
+		const provider = makeProvider("google", { id: "" }, doneResults);
+		const authenticateByToken = vi.fn().mockResolvedValue(fakeUser);
+		const userRepo = {
+			authenticate: async () => null,
+			authenticateByToken,
+		};
+
+		await _createPassportImpl({
+			pathResolver: (s) => s,
+			userRepository: userRepo as unknown as Parameters<
+				typeof _createPassportImpl
+			>[0]["userRepository"],
+			federationProviders: new Map([["google", provider]]),
+			userSessionStore: us,
+			federationTokenStore: ft,
+			_passportOverride: makePassportStub(),
+		});
+
+		expect(doneResults).toHaveLength(1);
+		expect(doneResults[0]?.err).toBeNull();
+		expect(doneResults[0]?.user).toBe(false);
+		expect(authenticateByToken).not.toHaveBeenCalled();
+		expect(us._saved).toHaveLength(0);
+		expect(ft._attached).toHaveLength(0);
+	});
+
 	it("skips FederationTokenStore.attach when profile has no accessToken", async () => {
 		const doneResults: DoneRecord[] = [];
 		const us = makeUserSessionStore();
