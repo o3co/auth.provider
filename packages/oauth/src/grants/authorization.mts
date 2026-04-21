@@ -361,11 +361,16 @@ export const createAuthorizationGrant = (
 						registeredAt: new Date(),
 					});
 				} catch {
+					// Fail-closed for any downstream dependency throw in this block —
+					// clientRepository.findById, userSessionStore.linkFamily, or
+					// userSessionStore.registerRP. The errorDescription is intentionally
+					// generic because the try spans both client lookup and session-store
+					// mutations; a more specific message would misattribute failures.
 					return {
 						result: {
 							status: 503,
 							error: "temporarily_unavailable",
-							errorDescription: "session store unavailable",
+							errorDescription: "session linking unavailable",
 						},
 					};
 				}

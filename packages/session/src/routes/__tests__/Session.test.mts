@@ -203,5 +203,37 @@ describe("Session routes — POST /session/login", () => {
 			expect(res.status).toBe(200);
 			expect(res.body).toMatchObject({ message: "Logged in successfully" });
 		});
+
+		it("returns 503 temporarily_unavailable when userSessionStore.create throws (fail-closed)", async () => {
+			const throwingStore: UserSessionStoreBase = {
+				kind: "memory",
+				async create() {
+					throw new Error("redis down");
+				},
+				async get() {
+					return null;
+				},
+				async registerRP() {},
+				async linkFamily() {},
+				async updateClaims() {},
+				async removeFederation() {},
+				async delete() {},
+			};
+			const { app } = buildApp({
+				userSessionStore: throwingStore,
+				sessionTtlMs: 3600_000,
+				user: { id: "u-503", username: "carol" },
+			});
+
+			const res = await request(app)
+				.post("/session/login")
+				.send("username=carol&password=secret")
+				.set("Content-Type", "application/x-www-form-urlencoded");
+
+			expect(res.status).toBe(503);
+			expect(res.body).toMatchObject({
+				error: "temporarily_unavailable",
+			});
+		});
 	});
 });

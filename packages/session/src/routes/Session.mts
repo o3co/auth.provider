@@ -145,14 +145,24 @@ export const createRouter = (
 					const claims = extractUserClaims(userObj);
 					const now = new Date();
 					sid = randomUUID();
-					await userSessionStore.create({
-						sid,
-						sub: userObj.id,
-						authTime: now,
-						expiresAt: new Date(now.getTime() + sessionTtlMs),
-						federations: [],
-						claims,
-					});
+					try {
+						await userSessionStore.create({
+							sid,
+							sub: userObj.id,
+							authTime: now,
+							expiresAt: new Date(now.getTime() + sessionTtlMs),
+							federations: [],
+							claims,
+						});
+					} catch {
+						// Fail-closed: store unavailable — return controlled 503 JSON rather
+						// than an unhandled rejection hitting Express's default HTML error
+						// handler. Matches the /token grant fail-closed pattern (CP-16/CP-17).
+						return res.status(503).json({
+							message: "Session store temporarily unavailable",
+							error: "temporarily_unavailable",
+						});
+					}
 				}
 
 				req.session.regenerate((err: Error | null) => {

@@ -42,7 +42,7 @@ declare module "express-session" {
 		code_redirect_uri?: string;
 		granted_scopes?: string[];
 		isAuthenticated?: boolean;
-		/** UserSession ID — set by the federation callback hook and preserved across session regeneration. */
+		/** UserSession ID — set by the federation callback hook or local login (`POST /session/login`) and preserved across session regeneration. */
 		sid?: string;
 	}
 }
