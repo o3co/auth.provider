@@ -147,9 +147,7 @@ export function createApp(options: AppOptions): AppResult {
 		// Advertise only the algorithm the configured KeyStore actually signs
 		// with. Hardcoding the full union would mislead clients to fetch JWKS
 		// expecting a key that is not there (OIDC Core §10.1 + RFC 8414 §2).
-		router.use(
-			oidcConfig.createRouter(express, { issuer, signingAlgs: [keyStore.algorithm] }),
-		);
+		router.use(oidcConfig.createRouter(express, { issuer, signingAlgs: [keyStore.algorithm] }));
 	}
 
 	const context: ModuleContext = {

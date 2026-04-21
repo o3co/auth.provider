@@ -6,8 +6,8 @@
 import { randomUUID } from "node:crypto";
 import type { JWTPayload, KeyStore } from "../keys/KeyStore.mjs";
 import type { UserSessionClaims } from "../user-sessions/types.mjs";
-import type { Token } from "./token.mjs";
 import { filterClaimsByScope } from "./claimFilter.mjs";
+import type { Token } from "./token.mjs";
 
 export interface GenerateIdTokenOptions {
 	readonly sub: string;

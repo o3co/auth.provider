@@ -1,7 +1,8 @@
 // packages/core/src/grants/__tests__/idToken.test.mts
+
+import { decodeJwt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
-import { decodeJwt, decodeProtectedHeader } from "jose";
 import { generateIdToken } from "../idToken.mjs";
 
 describe("generateIdToken", () => {
@@ -44,8 +45,14 @@ describe("generateIdToken", () => {
 
 	it("includes nonce when provided", async () => {
 		const { token } = await generateIdToken({
-			sub: "u", aud: "c", authTime: new Date(), sid: "s", scopes: ["openid"],
-			userClaims: {}, keyStore, issuer: "https://auth.example.com",
+			sub: "u",
+			aud: "c",
+			authTime: new Date(),
+			sid: "s",
+			scopes: ["openid"],
+			userClaims: {},
+			keyStore,
+			issuer: "https://auth.example.com",
 			nonce: "client-nonce-123",
 		});
 		expect(decodeJwt(token).nonce).toBe("client-nonce-123");
@@ -53,18 +60,28 @@ describe("generateIdToken", () => {
 
 	it("omits nonce when absent", async () => {
 		const { token } = await generateIdToken({
-			sub: "u", aud: "c", authTime: new Date(), sid: "s", scopes: ["openid"],
-			userClaims: {}, keyStore, issuer: "https://auth.example.com",
+			sub: "u",
+			aud: "c",
+			authTime: new Date(),
+			sid: "s",
+			scopes: ["openid"],
+			userClaims: {},
+			keyStore,
+			issuer: "https://auth.example.com",
 		});
 		expect(decodeJwt(token).nonce).toBeUndefined();
 	});
 
 	it("filters userClaims by scope (profile → name/picture)", async () => {
 		const { token } = await generateIdToken({
-			sub: "u", aud: "c", authTime: new Date(), sid: "s",
+			sub: "u",
+			aud: "c",
+			authTime: new Date(),
+			sid: "s",
 			scopes: ["openid", "profile"],
 			userClaims: { name: "Alice", picture: "https://p", email: "hidden@x.com" },
-			keyStore, issuer: "iss",
+			keyStore,
+			issuer: "iss",
 		});
 		const p = decodeJwt(token);
 		expect(p.name).toBe("Alice");
@@ -74,8 +91,14 @@ describe("generateIdToken", () => {
 
 	it("adds azp claim when provided (distinct from aud, per OIDC 1.0 §2)", async () => {
 		const { token } = await generateIdToken({
-			sub: "u", aud: "c", authTime: new Date(), sid: "s", scopes: ["openid"],
-			userClaims: {}, keyStore, issuer: "iss",
+			sub: "u",
+			aud: "c",
+			authTime: new Date(),
+			sid: "s",
+			scopes: ["openid"],
+			userClaims: {},
+			keyStore,
+			issuer: "iss",
 			azp: "c",
 		});
 		expect(decodeJwt(token).azp).toBe("c");
@@ -83,8 +106,14 @@ describe("generateIdToken", () => {
 
 	it("defaults expiresIn to 3600 seconds", async () => {
 		const { token, expiresIn } = await generateIdToken({
-			sub: "u", aud: "c", authTime: new Date(), sid: "s", scopes: ["openid"],
-			userClaims: {}, keyStore, issuer: "iss",
+			sub: "u",
+			aud: "c",
+			authTime: new Date(),
+			sid: "s",
+			scopes: ["openid"],
+			userClaims: {},
+			keyStore,
+			issuer: "iss",
 		});
 		expect(expiresIn).toBe(3600);
 		const p = decodeJwt(token);
@@ -93,8 +122,14 @@ describe("generateIdToken", () => {
 
 	it("respects custom expiresIn", async () => {
 		const { token, expiresIn } = await generateIdToken({
-			sub: "u", aud: "c", authTime: new Date(), sid: "s", scopes: ["openid"],
-			userClaims: {}, keyStore, issuer: "iss",
+			sub: "u",
+			aud: "c",
+			authTime: new Date(),
+			sid: "s",
+			scopes: ["openid"],
+			userClaims: {},
+			keyStore,
+			issuer: "iss",
 			expiresIn: 600,
 		});
 		expect(expiresIn).toBe(600);

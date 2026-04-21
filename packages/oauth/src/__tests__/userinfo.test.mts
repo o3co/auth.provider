@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { createSecretKey } from "node:crypto";
 import {
 	createSymmetricKeyStore,
 	type RefreshTokenStoreBase,
@@ -22,7 +23,6 @@ import {
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { SignJWT } from "jose";
-import { createSecretKey } from "node:crypto";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/userinfo.mjs";

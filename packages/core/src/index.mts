@@ -50,10 +50,11 @@ export type {
 	FederationTokenStoreFactory,
 	FederationTokens,
 } from "./federation-tokens/types.mjs";
+export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 // id_token generation (OIDC Core §2)
 export {
-	generateIdToken,
 	type GenerateIdTokenOptions,
+	generateIdToken,
 } from "./grants/idToken.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
@@ -165,7 +166,6 @@ export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
-export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export { extractUserClaims } from "./user-sessions/claims.mjs";
 export {
 	createUserSessionStoreFactory,

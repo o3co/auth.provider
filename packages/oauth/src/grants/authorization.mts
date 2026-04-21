@@ -22,11 +22,11 @@ import {
 	type GrantDependencies,
 	type GrantHandler,
 	type GrantHandlerResult,
-	type Token,
-	type UserSession,
 	generateIdToken,
 	generateToken,
 	generateTokenResponse,
+	type Token,
+	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
 

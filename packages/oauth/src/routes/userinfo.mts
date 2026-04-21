@@ -20,8 +20,8 @@ import {
 	type RefreshTokenStoreBase,
 	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
-import { decodeProtectedHeader, jwtVerify } from "jose";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { decodeProtectedHeader, jwtVerify } from "jose";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -85,9 +85,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			payload = verified.payload as Record<string, unknown>;
 		} catch {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
-			return res
-				.status(401)
-				.json({ error: "invalid_token", error_description: "invalid token" });
+			return res.status(401).json({ error: "invalid_token", error_description: "invalid token" });
 		}
 
 		// F-3 cascade revoke: check family_id against RefreshTokenStore.
@@ -143,9 +141,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		}
 		if (!session) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
-			return res
-				.status(401)
-				.json({ error: "invalid_token", error_description: "session_invalid" });
+			return res.status(401).json({ error: "invalid_token", error_description: "session_invalid" });
 		}
 
 		// Return sub + scope-filtered claims per OIDC Core §5.4

@@ -49,9 +49,10 @@ function createMockRes() {
 	};
 }
 
-async function callRoute(
-	opts: { issuer: string; signingAlgs: string[] },
-): Promise<Record<string, unknown>> {
+async function callRoute(opts: {
+	issuer: string;
+	signingAlgs: string[];
+}): Promise<Record<string, unknown>> {
 	const express = createMockExpress();
 	createRouter(express as any, opts);
 	const handler = express.routes["/.well-known/openid-configuration"];
@@ -74,7 +75,12 @@ describe("GET /.well-known/openid-configuration", () => {
 		expect(body.introspection_endpoint).toBe("https://auth.example.com/oauth/introspect");
 		expect(body.response_types_supported).toEqual(["code"]);
 		expect(body.subject_types_supported).toEqual(["public"]);
-		expect(body.id_token_signing_alg_values_supported).toEqual(["RS256", "ES256", "EdDSA", "HS256"]);
+		expect(body.id_token_signing_alg_values_supported).toEqual([
+			"RS256",
+			"ES256",
+			"EdDSA",
+			"HS256",
+		]);
 		expect(body.scopes_supported).toEqual(["openid", "profile", "email"]);
 		expect(body.code_challenge_methods_supported).toEqual(["S256"]);
 		expect(body.token_endpoint_auth_methods_supported).toEqual(
