@@ -135,7 +135,7 @@ function createGithubProvider(config: {
 }): FederationProviderBase;
 ```
 
-GitHub OAuth 2.0 用の `FederationProviderBase` を生成する。`passport-github2`（オプションの peer dep）が必要なため、別途インストールすること。デフォルトのスコープは `["read:user", "user:email"]`。`externalId` のフォーマットは `"github:" + profile.id`。
+GitHub OAuth 2.0 用の `FederationProviderBase` を生成する。`passport-github2`（オプションの peer dep）が必要なため、別途インストールすること。デフォルトのスコープは `["read:user", "user:email"]`。`externalId` のフォーマットは `${federationName}:${profile.id}`（`federationName` はプロバイダーに設定した `name`。例: デフォルトは `"github"`、カスタムテナントの場合は `"github-enterprise"` など）。
 
 ---
 
@@ -233,6 +233,125 @@ if (supportsLogout(provider)) {
   // local session destroy のみにフォールバック
 }
 ```
+
+---
+
+### `SupportsClaimMapping` (オプショナル capability)
+
+OAuth プロファイルから正規化されたクレームセットを生成できる provider 向けのオプショナル capability。
+
+```ts
+interface MappedClaims {
+  readonly email?: string;
+  readonly emailVerified?: boolean;
+  readonly name?: string;
+  readonly picture?: string;
+  readonly groups?: ReadonlyArray<string>;
+  readonly [key: string]: unknown;   // 非標準 IdP クレーム（例: Google の "hd"）
+}
+
+interface FederationProfile {
+  readonly id: string;                 // プロバイダー内部ユーザー ID
+  readonly raw: Readonly<Record<string, unknown>>;  // 生の passport プロファイルオブジェクト
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  readonly idToken?: string;
+  readonly expiresIn?: number;
+}
+
+interface SupportsClaimMapping {
+  mapClaims(profile: FederationProfile): MappedClaims;
+}
+
+function supportsClaimMapping(
+  provider: FederationProviderBase | undefined | null,
+): provider is FederationProviderBase & SupportsClaimMapping;
+```
+
+`SupportsClaimMapping` を実装した provider は、生の passport プロファイルデータを OIDC 標準のクレーム名に変換する。組み込みの `"google"` / `"github"` はこの capability を実装している。カスタム provider は `mapClaims` メソッドを追加することで対応できる:
+
+```ts
+import { supportsClaimMapping } from "@o3co/auth-provider-session";
+
+if (supportsClaimMapping(provider)) {
+  const claims = provider.mapClaims(profile);
+  // claims.email, claims.name, claims.picture …
+}
+```
+
+---
+
+### `SupportsRefresh` (オプショナル capability)
+
+リフレッシュトークンを使って新しいアクセストークンを取得できる provider 向けのオプショナル capability。
+
+```ts
+interface RefreshedTokens {
+  readonly accessToken: string;
+  readonly refreshToken?: string;
+  readonly idToken?: string;
+  readonly expiresAt: Date;
+}
+
+interface SupportsRefresh {
+  refreshFederationToken(refreshToken: string): Promise<RefreshedTokens>;
+}
+
+function supportsRefresh(
+  provider: FederationProviderBase | undefined | null,
+): provider is FederationProviderBase & SupportsRefresh;
+```
+
+`SupportsRefresh` を実装した provider は、ユーザー操作なしにフェデレーショントークンを維持できる。`FederationTokenStore`（`AppOptions` で設定）が初回トークンを保存し、リフレッシュフローが自動的に取得・更新する。
+
+```ts
+import { supportsRefresh } from "@o3co/auth-provider-session";
+
+if (supportsRefresh(provider)) {
+  const refreshed = await provider.refreshFederationToken(storedRefreshToken);
+  // refreshed.accessToken, refreshed.expiresAt …
+}
+```
+
+---
+
+### `onFederationCallback` フック
+
+`SetupPassportContext` にはオプショナルな `onFederationCallback` フックがある:
+
+```ts
+readonly onFederationCallback?: (params: {
+  readonly federationName: string;
+  readonly profile: FederationProfile;
+  readonly req: import("express").Request;
+  readonly done: (err: Error | null, user: User | false) => void;
+}) => Promise<void>;
+```
+
+**組み込みの動作:** `sessionModule` が passport コンテキストをセットアップする際、`AppOptions` に `UserSessionStore` と `FederationTokenStore` の**両方**が設定されている場合にのみ、組み込みの `onFederationCallback` が自動的に注入される。組み込みフックの動作:
+
+1. `UserRepository.authenticateByToken(`${federationName}:${profile.id}`)` を使って `User` を検索する。フェデレーション初回ログイン時にユーザーを自動プロビジョニングするデプロイでは、`authenticateByToken` の実装内でその処理を行うこと。
+2. IdP トークンを `FederationTokenStore` に保存する。
+3. 成功時に `done(null, user)` を呼び出す。
+
+いずれかのストアが未設定の場合、モジュールはレガシーの `verifyUser(externalId)` パスにフォールバックする。これはトークン永続化が不要なデプロイには十分。
+
+カスタム provider はこのフックを実装する必要はない。`SetupPassportContext.onFederationCallback` 経由で受け取り、`setupPassportStrategy` 内から呼び出す。このフック抽象化により、provider コードはストア依存から解放される。
+
+---
+
+### 組み込みプロバイダーのメモ
+
+**Google プロバイダー（`createGoogleProvider`）**
+
+- デフォルトで `openid profile email` スコープをリクエストする（`openid` スコープを追加することで、Google がアクセストークンと共に ID トークンを返すようになった）。
+- `passReqToCallback: true` を使用し、`onFederationCallback` フックがセッションデータを含む Express リクエストオブジェクトにアクセスできるようにする。
+
+**GitHub プロバイダー（`createGithubProvider`）**
+
+- デフォルトスコープは `["read:user", "user:email"]`。
+- プロファイルオブジェクトに `email` フィールドが含まれない場合、GitHub `/user/emails` API を呼び出してプライマリの確認済みメールアドレスを取得することでプロファイルを補完する。
+- `externalId` フォーマット: `${federationName}:${profile.id}`（`federationName` は設定した `name`。例: デフォルトは `"github"`、カスタムテナントの場合は `"github-enterprise"`）。
 
 ---
 

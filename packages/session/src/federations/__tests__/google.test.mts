@@ -17,6 +17,8 @@
 import type { PassportStatic } from "passport";
 import { describe, expect, it, vi } from "vitest";
 import { createGoogleProvider } from "#/federations/google.mjs";
+import type { FederationProfile } from "#/federations/types.mjs";
+import { supportsClaimMapping, supportsLogout, supportsRefresh } from "#/federations/types.mjs";
 
 const baseConfig = {
 	name: "google",
@@ -111,7 +113,7 @@ describe("setupPassportStrategy", () => {
 		expect(mockPassport.use).toHaveBeenCalledWith("google", expect.any(Object));
 	});
 
-	it("verify callback builds externalId as 'google:' + profile.id", async () => {
+	it("verify callback builds externalId as config.name + ':' + profile.id (default name='google')", async () => {
 		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
 		const verifyUser = vi.fn(async () => null);
 		const provider = createGoogleProvider(baseConfig);
@@ -119,10 +121,85 @@ describe("setupPassportStrategy", () => {
 		// Extract the verify callback passed to the GoogleStrategy constructor
 		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
 		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
-		// Invoke it with a mock profile
+		// Invoke it with a mock profile — passReqToCallback:true means req is the first arg
+		// arity-6: req, accessToken, refreshToken, params, profile, done
 		const done = vi.fn();
-		await verifyCallback("at", "rt", { id: "12345" }, done);
-		expect(verifyUser).toHaveBeenCalledWith("google:12345");
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "12345" }, done);
+		expect(verifyUser).toHaveBeenCalledWith(`${baseConfig.name}:12345`);
+	});
+
+	it("verify callback uses config.name in externalId for multi-tenant (google-work)", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const verifyUser = vi.fn(async () => null);
+		const multiTenantConfig = { ...baseConfig, name: "google-work" };
+		const provider = createGoogleProvider(multiTenantConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "12345" }, done);
+		expect(verifyUser).toHaveBeenCalledWith("google-work:12345");
+	});
+
+	it("verify callback calls done(null, false) when profile.id is empty", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const verifyUser = vi.fn(async () => null);
+		const provider = createGoogleProvider(baseConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "" }, done);
+		expect(done).toHaveBeenCalledWith(null, false);
+		expect(verifyUser).not.toHaveBeenCalled();
+	});
+
+	it("verify callback passes id_token and expires_in from params to FederationProfile", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const onFederationCallback = vi.fn(
+			async ({ done }: { done: (err: Error | null, user: unknown) => void }) => {
+				done(null, { id: "u1" });
+			},
+		);
+		const verifyUser = vi.fn(async () => null);
+		const provider = createGoogleProvider(baseConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser, onFederationCallback });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		// arity-6: params carries id_token and expires_in
+		await verifyCallback(
+			reqStub,
+			"access-token",
+			"refresh-token",
+			{ id_token: "google-id-token", expires_in: 7200 },
+			{ id: "gid-123" },
+			done,
+		);
+		expect(onFederationCallback).toHaveBeenCalledTimes(1);
+		const callArg = (onFederationCallback as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+			profile: import("#/federations/types.mjs").FederationProfile;
+		};
+		expect(callArg.profile.idToken).toBe("google-id-token");
+		expect(callArg.profile.expiresIn).toBe(7200);
+		expect(callArg.profile.accessToken).toBe("access-token");
+		expect(callArg.profile.refreshToken).toBe("refresh-token");
+	});
+
+	it("strategy has authorizationParams that always includes access_type=offline", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const provider = createGoogleProvider(baseConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser: async () => null });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock
+			.calls[0][1] as unknown as {
+			authorizationParams(opts: Record<string, unknown>): Record<string, unknown>;
+		};
+		const params = strategyInstance.authorizationParams({});
+		expect(params).toMatchObject({ access_type: "offline" });
 	});
 
 	it("uses config.name as the passport strategy identifier for multi-tenant", async () => {
@@ -166,5 +243,188 @@ describe("createGoogleProvider validation", () => {
 
 	it("throws when callbackURL is missing", () => {
 		expect(() => createGoogleProvider({ ...baseConfig, callbackURL: "" })).toThrow(/callbackURL/i);
+	});
+});
+
+describe("Google provider capabilities", () => {
+	const capConfig = {
+		name: "google",
+		clientId: "cid",
+		clientSecret: "csec",
+		callbackURL: "https://example.com/cb",
+	};
+
+	it("implements all three capabilities", () => {
+		const p = createGoogleProvider(capConfig);
+		expect(supportsClaimMapping(p)).toBe(true);
+		expect(supportsRefresh(p)).toBe(true);
+		expect(supportsLogout(p)).toBe(true);
+	});
+
+	describe("mapClaims", () => {
+		const p = createGoogleProvider(capConfig);
+		it("extracts email + name + picture from google profile", () => {
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = {
+				id: "gid-123",
+				raw: {
+					emails: [{ value: "alice@example.com", verified: true }],
+					displayName: "Alice",
+					photos: [{ value: "https://lh.com/p.png" }],
+					_json: { email: "alice@example.com", email_verified: true, hd: "example.com" },
+				},
+			};
+			expect(p.mapClaims(profile)).toEqual({
+				email: "alice@example.com",
+				emailVerified: true,
+				name: "Alice",
+				picture: "https://lh.com/p.png",
+				hd: "example.com",
+			});
+		});
+
+		it("returns empty claims when fields are absent", () => {
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = { id: "gid", raw: {} };
+			expect(p.mapClaims(profile)).toEqual({});
+		});
+	});
+
+	describe("refreshFederationToken", () => {
+		it("exchanges refresh_token for a new access_token via Google token endpoint", async () => {
+			const fetchMock = vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				async json() {
+					return {
+						access_token: "new-at",
+						expires_in: 3600,
+						token_type: "Bearer",
+						id_token: "new-id",
+					};
+				},
+			});
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			const result = await p.refreshFederationToken("old-rt");
+			expect(result.accessToken).toBe("new-at");
+			expect(result.idToken).toBe("new-id");
+			expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now() + 3500_000);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			const firstCall = fetchMock.mock.calls[0];
+			if (!firstCall) throw new Error("expected fetch to be called");
+			const [url, init] = firstCall;
+			expect(url).toBe("https://oauth2.googleapis.com/token");
+			expect((init as RequestInit).method).toBe("POST");
+			expect((init as RequestInit).body).toContain("refresh_token=old-rt");
+			expect((init as RequestInit).body).toContain("grant_type=refresh_token");
+		});
+
+		it("throws invalid_grant-shaped Error when Google rejects the refresh_token", async () => {
+			const fetchMock = vi.fn().mockResolvedValue({
+				ok: false,
+				status: 400,
+				async json() {
+					return { error: "invalid_grant", error_description: "Token revoked" };
+				},
+			});
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			await expect(p.refreshFederationToken("rt")).rejects.toThrow(/invalid_grant/);
+		});
+
+		it("throws transient-shaped Error on 5xx (caller returns 503 in F-6)", async () => {
+			const fetchMock = vi.fn().mockResolvedValue({
+				ok: false,
+				status: 503,
+				async json() {
+					return {};
+				},
+			});
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			await expect(p.refreshFederationToken("rt")).rejects.toThrow(/temporarily_unavailable/);
+		});
+
+		it("throws temporarily_unavailable when the fetch is aborted (timeout simulation)", async () => {
+			const abortError = Object.assign(new Error("The operation was aborted."), {
+				name: "AbortError",
+			});
+			const fetchMock = vi.fn().mockRejectedValue(abortError);
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			await expect(p.refreshFederationToken("rt")).rejects.toThrow(/temporarily_unavailable/);
+		});
+	});
+
+	describe("endSession", () => {
+		it("without endSessionEndpoint configured: redirects to postLogoutRedirectUri directly", async () => {
+			const p = createGoogleProvider(capConfig);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const { url, method } = await p.endSession({
+				postLogoutRedirectUri: "https://rp/logout-done",
+				state: "s1",
+			});
+			expect(method).toBe("GET");
+			expect(url.href).toContain("https://rp/logout-done");
+			expect(url.searchParams.get("state")).toBe("s1");
+		});
+
+		it("without endSessionEndpoint and no postLogoutRedirectUri: falls back to accounts.google.com/Logout", async () => {
+			const p = createGoogleProvider(capConfig);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const { url, method } = await p.endSession({});
+			expect(method).toBe("GET");
+			expect(url.hostname).toBe("accounts.google.com");
+			expect(url.pathname.endsWith("/Logout")).toBe(true);
+		});
+
+		it("with endSessionEndpoint configured: uses it and attaches all params", async () => {
+			const p = createGoogleProvider({
+				...capConfig,
+				endSessionEndpoint: "https://custom-logout.example.com/end",
+			});
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const { url, method } = await p.endSession({
+				idTokenHint: "idt",
+				postLogoutRedirectUri: "https://rp/done",
+				state: "s2",
+			});
+			expect(method).toBe("GET");
+			expect(url.origin).toBe("https://custom-logout.example.com");
+			expect(url.pathname).toBe("/end");
+			expect(url.searchParams.get("id_token_hint")).toBe("idt");
+			expect(url.searchParams.get("post_logout_redirect_uri")).toBe("https://rp/done");
+			expect(url.searchParams.get("state")).toBe("s2");
+		});
+
+		it("throws a descriptive error when endSessionEndpoint is an invalid URL", async () => {
+			const p = createGoogleProvider({
+				...capConfig,
+				endSessionEndpoint: "not-a-valid-url",
+			});
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			await expect(p.endSession({})).rejects.toThrow(/invalid endSessionEndpoint/i);
+		});
+
+		it("throws a descriptive error when postLogoutRedirectUri is an invalid URL (no endSessionEndpoint)", async () => {
+			const p = createGoogleProvider(capConfig);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			await expect(p.endSession({ postLogoutRedirectUri: "not a valid url" })).rejects.toThrow(
+				/invalid postLogoutRedirectUri/i,
+			);
+		});
 	});
 });

@@ -135,7 +135,7 @@ function createGithubProvider(config: {
 }): FederationProviderBase;
 ```
 
-Creates a `FederationProviderBase` for GitHub OAuth 2.0. Uses `passport-github2` (optional peer dep — must be installed separately). The default scope is `["read:user", "user:email"]`. The `externalId` format is `"github:" + profile.id`.
+Creates a `FederationProviderBase` for GitHub OAuth 2.0. Uses `passport-github2` (optional peer dep — must be installed separately). The default scope is `["read:user", "user:email"]`. The `externalId` format is `${federationName}:${profile.id}` where `federationName` is the configured `name` on the provider (e.g. `"github"` by default, or `"github-enterprise"` if you customize).
 
 ---
 
@@ -233,6 +233,125 @@ if (supportsLogout(provider)) {
   // fall back to local session destroy only
 }
 ```
+
+---
+
+### `SupportsClaimMapping` (optional capability)
+
+Optional capability for providers that can produce a normalized claim set from an OAuth profile.
+
+```ts
+interface MappedClaims {
+  readonly email?: string;
+  readonly emailVerified?: boolean;
+  readonly name?: string;
+  readonly picture?: string;
+  readonly groups?: ReadonlyArray<string>;
+  readonly [key: string]: unknown;   // non-standard IdP claims (e.g. Google's "hd")
+}
+
+interface FederationProfile {
+  readonly id: string;                 // provider-internal user id
+  readonly raw: Readonly<Record<string, unknown>>;  // raw passport profile object
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  readonly idToken?: string;
+  readonly expiresIn?: number;
+}
+
+interface SupportsClaimMapping {
+  mapClaims(profile: FederationProfile): MappedClaims;
+}
+
+function supportsClaimMapping(
+  provider: FederationProviderBase | undefined | null,
+): provider is FederationProviderBase & SupportsClaimMapping;
+```
+
+Providers that implement `SupportsClaimMapping` translate raw passport profile data into OIDC-standard claim names. The built-in `"google"` and `"github"` providers implement this capability. Custom providers can add it by exposing a `mapClaims` method:
+
+```ts
+import { supportsClaimMapping } from "@o3co/auth-provider-session";
+
+if (supportsClaimMapping(provider)) {
+  const claims = provider.mapClaims(profile);
+  // claims.email, claims.name, claims.picture …
+}
+```
+
+---
+
+### `SupportsRefresh` (optional capability)
+
+Optional capability for providers that can exchange a refresh token for a fresh access token.
+
+```ts
+interface RefreshedTokens {
+  readonly accessToken: string;
+  readonly refreshToken?: string;
+  readonly idToken?: string;
+  readonly expiresAt: Date;
+}
+
+interface SupportsRefresh {
+  refreshFederationToken(refreshToken: string): Promise<RefreshedTokens>;
+}
+
+function supportsRefresh(
+  provider: FederationProviderBase | undefined | null,
+): provider is FederationProviderBase & SupportsRefresh;
+```
+
+Providers implementing `SupportsRefresh` can keep federation tokens alive without user interaction. The `FederationTokenStore` (wired via `AppOptions`) stores the initial tokens; the refresh flow retrieves and updates them automatically.
+
+```ts
+import { supportsRefresh } from "@o3co/auth-provider-session";
+
+if (supportsRefresh(provider)) {
+  const refreshed = await provider.refreshFederationToken(storedRefreshToken);
+  // refreshed.accessToken, refreshed.expiresAt …
+}
+```
+
+---
+
+### `onFederationCallback` hook
+
+`SetupPassportContext` carries an optional `onFederationCallback` hook:
+
+```ts
+readonly onFederationCallback?: (params: {
+  readonly federationName: string;
+  readonly profile: FederationProfile;
+  readonly req: import("express").Request;
+  readonly done: (err: Error | null, user: User | false) => void;
+}) => Promise<void>;
+```
+
+**Built-in behaviour:** When `sessionModule` wires the passport context, it injects a built-in `onFederationCallback` implementation automatically — but only when **both** `UserSessionStore` and `FederationTokenStore` are configured in `AppOptions`. The built-in hook:
+
+1. Looks up a `User` via `UserRepository.authenticateByToken(`${federationName}:${profile.id}`)`. If your deployment auto-provisions users on first federation login, implement that inside your `authenticateByToken`.
+2. Saves the IdP tokens to `FederationTokenStore`.
+3. Calls `done(null, user)` on success.
+
+When either store is absent the module falls back to the legacy `verifyUser(externalId)` path, which is sufficient for deployments that do not need token persistence.
+
+Custom providers never need to implement this hook — they receive it via `SetupPassportContext.onFederationCallback` and call it from inside `setupPassportStrategy`. The hook abstraction keeps provider code free of store dependencies.
+
+---
+
+### Built-in provider notes
+
+**Google provider (`createGoogleProvider`)**
+
+- Requests `openid profile email` scope by default (the `openid` scope was added to ensure Google returns an ID token alongside the access token).
+- Uses `passReqToCallback: true` so the `onFederationCallback` hook can access the Express request object for session data.
+
+**GitHub provider (`createGithubProvider`)**
+
+- Default scope is `["read:user", "user:email"]`.
+- When the primary profile object omits an `email` field, the provider enriches the profile by calling the GitHub `/user/emails` API to retrieve the primary verified email.
+- `externalId` format: `${federationName}:${profile.id}` where `federationName` equals the configured `name` (e.g. `"github"` by default, or `"github-enterprise"` for a custom tenant).
 
 ---
 
