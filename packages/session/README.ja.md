@@ -499,6 +499,10 @@ for (const [name, section] of Object.entries(config.federations)) {
 }
 ```
 
+## TODO-F-3 の変更点
+
+- **ローカルログインのセッショントラッキング。** `AppOptions.userSessionStore` が設定されている場合、`POST /session/login` は `userSessionStore.create()` で `UserSession` レコードを作成し、生成された `sid` を `req.session.sid` に書き込む。これは F-2 で確立したフェデレーションコールバックのセッション作成パスと対称であり、ローカルログイン後に発行されるトークンに有効な `sid` クレームが付与されることを保証する。
+
 ## 関連
 
 - [`@o3co/auth-provider-oauth`](../oauth/README.ja.md) — OAuth 2.0 トークン・認可ルート

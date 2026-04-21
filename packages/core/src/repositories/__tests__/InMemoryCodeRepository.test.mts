@@ -144,4 +144,44 @@ describe("InMemoryCodeRepository", () => {
 			expect(found).toBeNull();
 		});
 	});
+
+	describe("TODO-F-3 extended fields (nonce / sid)", () => {
+		it("roundtrips nonce + sid + grantedScope via createCode → getByCode", async () => {
+			repo = new InMemoryCodeRepository();
+			const { code } = await repo.createCode({
+				code_challenge: "cc",
+				code_challenge_method: "S256",
+				redirect_uri: "https://rp/cb",
+				nonce: "n-abc",
+				sid: "sid-123",
+				grantedScope: ["openid", "profile"],
+				expiresIn: 60,
+			});
+			const r = await repo.getByCode(code);
+			expect(r?.nonce).toBe("n-abc");
+			expect(r?.sid).toBe("sid-123");
+			expect(r?.grantedScope).toEqual(["openid", "profile"]);
+		});
+
+		it("consumeByCode returns the fields exactly once then removes them", async () => {
+			repo = new InMemoryCodeRepository();
+			const { code } = await repo.createCode({
+				sid: "sid-1",
+				nonce: "n-1",
+			});
+			const first = await repo.consumeByCode(code);
+			expect(first?.sid).toBe("sid-1");
+			expect(first?.nonce).toBe("n-1");
+			const second = await repo.consumeByCode(code);
+			expect(second).toBeNull();
+		});
+
+		it("createCode without nonce/sid leaves them undefined (backward compat)", async () => {
+			repo = new InMemoryCodeRepository();
+			const { code } = await repo.createCode({ redirect_uri: "https://rp/cb" });
+			const r = await repo.getByCode(code);
+			expect(r?.nonce).toBeUndefined();
+			expect(r?.sid).toBeUndefined();
+		});
+	});
 });

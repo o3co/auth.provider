@@ -23,6 +23,9 @@ interface StoredCode extends Code {
 	redirect_uri?: string;
 	grantedScope?: readonly string[];
 	grantedAudience?: readonly string[];
+	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
+	nonce?: string;
+	sid?: string;
 }
 
 export class InMemoryCodeRepository implements CodeRepository {
@@ -48,6 +51,9 @@ export class InMemoryCodeRepository implements CodeRepository {
 		expiresIn?: number;
 		grantedScope?: readonly string[];
 		grantedAudience?: readonly string[];
+		// NEW (TODO-F-3): OIDC authorize → token round-trip state.
+		nonce?: string;
+		sid?: string;
 	}): Promise<Code> {
 		const code = crypto.randomBytes(32).toString("base64url");
 		const expiresIn = params.expiresIn ?? this.defaultExpiresIn;
@@ -60,6 +66,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			expiresAt: Date.now() + expiresIn * 1000,
 			grantedScope: params.grantedScope,
 			grantedAudience: params.grantedAudience,
+			nonce: params.nonce,
+			sid: params.sid,
 		};
 		this.codes.set(code, stored);
 		return {
@@ -70,6 +78,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			expiresIn,
 			grantedScope: params.grantedScope,
 			grantedAudience: params.grantedAudience,
+			nonce: params.nonce,
+			sid: params.sid,
 		};
 	}
 
@@ -88,6 +98,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			expiresIn: stored.expiresIn,
 			grantedScope: stored.grantedScope,
 			grantedAudience: stored.grantedAudience,
+			nonce: stored.nonce,
+			sid: stored.sid,
 		};
 	}
 
@@ -104,6 +116,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 			expiresIn: stored.expiresIn,
 			grantedScope: stored.grantedScope,
 			grantedAudience: stored.grantedAudience,
+			nonce: stored.nonce,
+			sid: stored.sid,
 		};
 	}
 

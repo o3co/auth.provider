@@ -39,6 +39,7 @@ export const oauthAuthorizationModule = (params: {
 				codeRepository: params.codeRepository,
 				clientRepository: params.clientRepository,
 				refreshTokenStore: context.refreshTokenStore,
+				userSessionStore: context.userSessionStore,
 				grantPolicy: context.grantPolicy,
 			});
 			context.grantRegistry.register("authorization", handler);
@@ -49,6 +50,7 @@ export const oauthAuthorizationModule = (params: {
 				config,
 				keyStore: context.keyStore,
 				refreshTokenStore: context.refreshTokenStore,
+				userSessionStore: context.userSessionStore,
 				grantPolicy: context.grantPolicy,
 			});
 			context.grantRegistry.register("refresh_token", handler);

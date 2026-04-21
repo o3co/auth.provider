@@ -213,6 +213,25 @@ export const createAuthorizationGrant = (
 				}
 			}
 
+			// TODO-F-3: sid from the code record — written at /authorize time by the
+			// login/federation callback wiring (Task 2).
+			// Only enforce sid presence when userSessionStore is wired. Deployments
+			// that opt out of session tracking (userSessionStore not configured) have
+			// no store to write sid at login time, so requiring it here would be a
+			// backward-compat regression. When the store IS wired, sid is mandatory
+			// so subsequent linkFamily / registerRP can execute.
+			const sid = codeData.sid;
+			if (deps.userSessionStore && !sid) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription:
+							"code record is missing session identifier (sid) — ensure login wiring records sid at authorize time",
+					},
+				};
+			}
+
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
@@ -234,8 +253,12 @@ export const createAuthorizationGrant = (
 			// consumers can't distinguish from "scope claim omitted").
 			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
 
+			// TODO-F-3: both access_token and refresh_token carry family_id and, when
+			// sid is present, the sid claim so introspect (Task 5) and refresh (Task 4)
+			// can propagate them without re-reading the session store on every request.
+			// sid is omitted when no userSessionStore is wired (backward-compat path).
 			const accessToken = await generateToken(
-				{},
+				{ family_id: familyId, ...(sid ? { sid } : {}) },
 				{
 					expiresIn: config.oauth.accessToken.expiresIn,
 					keyStore,
@@ -248,7 +271,7 @@ export const createAuthorizationGrant = (
 				},
 			);
 			const refreshToken = await generateToken(
-				{ family_id: familyId },
+				{ family_id: familyId, ...(sid ? { sid } : {}) },
 				{
 					expiresIn: config.oauth.refreshToken.expiresIn,
 					keyStore,
@@ -288,6 +311,68 @@ export const createAuthorizationGrant = (
 							},
 						};
 					}
+				}
+			}
+
+			// TODO-F-3: link the new token family to the user session and register
+			// the RP for back/front-channel logout. All calls are fail-closed: if the
+			// session store is unavailable or the session was deleted between /authorize
+			// and /token, we return a controlled error rather than issuing tokens that
+			// are invisible to logout orchestration.
+			// sid is guaranteed non-null here when deps.userSessionStore is set because
+			// the earlier guard (deps.userSessionStore && !sid) already rejected that case.
+			if (deps.userSessionStore && sid) {
+				// Fix I1: validate session still exists (mirrors refresh_token grant pattern).
+				// A session deleted between /authorize and /token exchange must not produce
+				// tokens — they would be orphaned from logout orchestration.
+				let session: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
+				try {
+					session = await deps.userSessionStore.get(sid);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session store unavailable",
+						},
+					};
+				}
+				if (!session) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "session_invalid",
+						},
+					};
+				}
+				// Fix I2: clientRepository.findById is fallible — move inside try/catch
+				// so a throw here returns a controlled 503 instead of propagating to the
+				// express default handler as an unhandled HTML 500.
+				try {
+					const clientRecord = await clientRepository.findById(client_id);
+					await deps.userSessionStore.linkFamily(sid, familyId);
+					await deps.userSessionStore.registerRP(sid, {
+						clientId: client_id,
+						backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
+							?.backchannelLogoutUri as string | undefined,
+						frontchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
+							?.frontchannelLogoutUri as string | undefined,
+						registeredAt: new Date(),
+					});
+				} catch {
+					// Fail-closed for any downstream dependency throw in this block —
+					// clientRepository.findById, userSessionStore.linkFamily, or
+					// userSessionStore.registerRP. The errorDescription is intentionally
+					// generic because the try spans both client lookup and session-store
+					// mutations; a more specific message would misattribute failures.
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session linking unavailable",
+						},
+					};
 				}
 			}
 

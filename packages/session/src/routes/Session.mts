@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 
-import type { AppConfig } from "@o3co/auth-provider-core";
+import { randomUUID } from "node:crypto";
+import {
+	type AppConfig,
+	extractUserClaims,
+	type User,
+	type UserSessionStoreBase,
+} from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
 import type { PassportStatic } from "passport";
@@ -24,8 +30,12 @@ declare module "express-session" {
 		isAuthenticated?: boolean;
 		user?: Record<string, unknown>;
 		redirectTo?: string;
+		/** UserSession ID — set by local login and preserved across session regeneration. */
+		sid?: string;
 	}
 }
+
+const DEFAULT_SESSION_TTL_MS = 86400_000;
 
 export const createRouter = (
 	express: {
@@ -33,7 +43,18 @@ export const createRouter = (
 		json: () => RequestHandler;
 		urlencoded: (opts: { extended: boolean }) => RequestHandler;
 	},
-	{ passport, config }: { passport: PassportStatic; config: AppConfig },
+	{
+		passport,
+		config,
+		userSessionStore,
+		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
+	}: {
+		passport: PassportStatic;
+		config: AppConfig;
+		userSessionStore?: UserSessionStoreBase;
+		/** Session TTL in milliseconds. Default: 24h. */
+		sessionTtlMs?: number;
+	},
 ): Router => {
 	const router = express.Router();
 
@@ -112,17 +133,58 @@ export const createRouter = (
 			passport.authenticate("local", {
 				session: true,
 			}),
-			(req: Request, res: Response) => {
+			async (req: Request, res: Response) => {
 				const user = req.user;
 				const redirectTo = req.body.redirect_to as string | undefined;
+
+				// Generate sid and create UserSession before regenerating the browser session,
+				// so we can restore the sid on the new session afterwards.
+				let sid: string | undefined;
+				if (userSessionStore && user) {
+					const userObj = user as User;
+					const claims = extractUserClaims(userObj);
+					const now = new Date();
+					sid = randomUUID();
+					try {
+						await userSessionStore.create({
+							sid,
+							sub: userObj.id,
+							authTime: now,
+							expiresAt: new Date(now.getTime() + sessionTtlMs),
+							federations: [],
+							claims,
+						});
+					} catch {
+						// Fail-closed: store unavailable — return controlled 503 JSON rather
+						// than an unhandled rejection hitting Express's default HTML error
+						// handler. Matches the /token grant fail-closed pattern (CP-16/CP-17).
+						return res.status(503).json({
+							message: "Session store temporarily unavailable",
+							error: "temporarily_unavailable",
+						});
+					}
+				}
+
 				req.session.regenerate((err: Error | null) => {
 					if (err) {
+						// Best-effort rollback: UserSession was created but session regeneration failed.
+						// Delete the orphan record so it doesn't leak. Ignore cleanup errors — the
+						// primary error is already being returned to the caller.
+						if (sid && userSessionStore) {
+							userSessionStore.delete(sid).catch(() => {
+								/* best-effort cleanup */
+							});
+						}
 						return res.status(500).json({ message: "Error regenerating session" });
 					}
 					req.session.isAuthenticated = true;
 					req.session.user = user as Record<string, unknown> | undefined;
 					if (redirectTo) {
 						req.session.redirectTo = redirectTo;
+					}
+					// Restore sid on the new session so downstream (token/introspect) can read it.
+					if (sid) {
+						req.session.sid = sid;
 					}
 					return res.status(200).json({ message: "Logged in successfully" });
 				});

@@ -213,18 +213,47 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				}
 			}
 
+			const tokenPayloadClaims = tokenPayload as Record<string, unknown>;
+			const familyIdRaw = tokenPayloadClaims.family_id;
 			const familyId =
-				((tokenPayload as Record<string, unknown>).family_id as string | undefined) ?? null;
+				typeof familyIdRaw === "string" && familyIdRaw.length > 0 ? familyIdRaw : null;
+			const sidRaw = tokenPayloadClaims.sid;
+			const sid = typeof sidRaw === "string" && sidRaw.length > 0 ? sidRaw : undefined;
 			const previousJti =
-				((tokenPayload as Record<string, unknown>).jti as string | undefined) ?? null;
+				typeof tokenPayloadClaims.jti === "string" ? tokenPayloadClaims.jti : null;
 			const newFamilyId = familyId ?? randomUUID();
+
+			// Fail-closed session check — only when both sid + store are present.
+			if (sid && deps.userSessionStore) {
+				let session: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
+				try {
+					session = await deps.userSessionStore.get(sid);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session store unavailable",
+						},
+					};
+				}
+				if (!session) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "session_invalid",
+						},
+					};
+				}
+			}
 
 			// CP-15: empty string (e.g. requested=" ") normalizes to null so the
 			// token response omits scope rather than emitting `scope: ""`.
 			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
 
 			const newAccessToken = await generateToken(
-				{},
+				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
 				{
 					expiresIn: config.oauth.accessToken.expiresIn,
 					keyStore,
@@ -238,7 +267,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			);
 
 			const newRefreshToken = await generateToken(
-				{ family_id: newFamilyId },
+				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
 				{
 					expiresIn: config.oauth.refreshToken.expiresIn,
 					keyStore,
