@@ -163,7 +163,9 @@ export const createOAuthRouter = async (
 				}
 				try {
 					const header = decodeProtectedHeader(token);
-					const key = await keyStore.getVerificationKey(header.kid ?? keyStore.getSigningKidFallback());
+					const key = await keyStore.getVerificationKey(
+						header.kid ?? keyStore.getSigningKidFallback(),
+					);
 					const { payload } = await jwtVerify(token, key);
 					const { exp, iat, iss, aud, sub } = payload;
 					const claims = payload as Record<string, unknown>;

@@ -13,13 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-	decodeProtectedHeader,
-	exportPKCS8,
-	exportSPKI,
-	generateKeyPair,
-	jwtVerify,
-} from "jose";
+import { decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
 import type { SignJwtOptions } from "#/keys/KeyStore.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";

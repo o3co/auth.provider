@@ -19,13 +19,7 @@
  * root, not shipped in `dist`. External KMS/HSM adapter authors should
  * implement the `KeyStore` interface directly per its TSDoc contract.
  */
-import type {
-	Algorithm,
-	KeyLike,
-	KeyStore,
-	ManagedKey,
-	SignJwtOptions,
-} from "../KeyStore.mjs";
+import type { Algorithm, KeyLike, KeyStore, ManagedKey, SignJwtOptions } from "../KeyStore.mjs";
 
 export interface TestKeyStoreOptions {
 	algorithm: Algorithm;
