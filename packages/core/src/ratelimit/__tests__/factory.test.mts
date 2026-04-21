@@ -79,3 +79,24 @@ describe("registerBuiltinRateLimiters (memory)", () => {
 		expect(second.allowed).toBe(false);
 	});
 });
+
+describe("memory rate limiter — per-key isolation", () => {
+	it("tracks different keys independently", async () => {
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		const limiter = await factory.create({
+			type: "memory",
+			limits: { shared: { limit: 2, windowSeconds: 60 } },
+		});
+		const a1 = await limiter.check("shared:A", {});
+		const a2 = await limiter.check("shared:A", {});
+		const a3 = await limiter.check("shared:A", {});
+		expect(a1.allowed).toBe(true);
+		expect(a2.allowed).toBe(true);
+		expect(a3.allowed).toBe(false);
+
+		const b1 = await limiter.check("shared:B", {});
+		expect(b1.allowed).toBe(true);
+		expect(b1.remaining).toBe(1);
+	});
+});
