@@ -144,10 +144,12 @@ export function createApp(options: AppOptions): AppResult {
 	// URL the discovery document would be invalid and misleading).
 	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
 	if (typeof issuer === "string" && issuer.length > 0) {
-		// Hardcode the algs KeyStore currently supports. Keep in sync with
-		// KeyStore.mts factory options. Task 7+ can read this from the KeyStore.
-		const signingAlgs = ["RS256", "ES256", "EdDSA", "HS256"];
-		router.use(oidcConfig.createRouter(express, { issuer, signingAlgs }));
+		// Advertise only the algorithm the configured KeyStore actually signs
+		// with. Hardcoding the full union would mislead clients to fetch JWKS
+		// expecting a key that is not there (OIDC Core §10.1 + RFC 8414 §2).
+		router.use(
+			oidcConfig.createRouter(express, { issuer, signingAlgs: [keyStore.algorithm] }),
+		);
 	}
 
 	const context: ModuleContext = {

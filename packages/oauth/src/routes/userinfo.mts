@@ -65,12 +65,21 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		}
 		const token = auth.slice(7);
 
-		// Verify JWT signature via KeyStore
+		// Verify JWT signature + reject non-access tokens. Refresh tokens
+		// (typ: rt+jwt) and id_tokens (typ: id+jwt) are signed by the same
+		// KeyStore and carry sub/sid/scope claims, so without a typ check
+		// they would also pass signature verification here. RFC 9068
+		// establishes `typ: "at+jwt"` as the indicator that a JWT is
+		// specifically an OAuth 2.0 access token; userinfo is an access-token
+		// resource (OIDC Core §5.3.1), so we require that typ exactly.
 		let payload: Record<string, unknown>;
 		try {
-			const { kid } = decodeProtectedHeader(token);
+			const header = decodeProtectedHeader(token);
+			if (header.typ !== "at+jwt") {
+				throw new Error("invalid token type");
+			}
 			const key = await opts.keyStore.getVerificationKey(
-				kid ?? opts.keyStore.getSigningKidFallback(),
+				header.kid ?? opts.keyStore.getSigningKidFallback(),
 			);
 			const verified = await jwtVerify(token, key);
 			payload = verified.payload as Record<string, unknown>;
@@ -78,7 +87,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
 			return res
 				.status(401)
-				.json({ error: "invalid_token", error_description: "invalid signature" });
+				.json({ error: "invalid_token", error_description: "invalid token" });
 		}
 
 		// F-3 cascade revoke: check family_id against RefreshTokenStore.

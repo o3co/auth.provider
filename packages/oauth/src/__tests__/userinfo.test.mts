@@ -287,6 +287,66 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.headers["www-authenticate"]).toMatch(/^Bearer/);
 	});
 
+	it("rejects refresh_token (typ: rt+jwt) presented as Bearer (security)", async () => {
+		// Refresh tokens are signed by the same KeyStore and carry sub/sid/scope
+		// claims, so without a typ check they would also pass signature verification.
+		// userinfo MUST accept access tokens only (OIDC Core §5.3.1 + RFC 9068).
+		const rtLikeToken = await new SignJWT({
+			sub: "u-1",
+			aud: "client",
+			scope: "openid email",
+			family_id: "fam-1",
+			sid: "sid-1",
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setExpirationTime("1h")
+			.setIssuedAt()
+			.sign(secretKey);
+
+		const res = await callUserinfo({
+			token: rtLikeToken,
+			userSessionStore: {
+				kind: "memory",
+				get: vi.fn().mockResolvedValue(baseSession),
+				create: vi.fn(),
+				registerRP: vi.fn(),
+				linkFamily: vi.fn(),
+				updateClaims: vi.fn(),
+				removeFederation: vi.fn(),
+				delete: vi.fn(),
+			},
+			refreshTokenStore: {
+				kind: "memory",
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				rotate: vi.fn(),
+				revokeFamily: vi.fn(),
+			},
+		});
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_token");
+		expect(res.headers["www-authenticate"]).toMatch(/^Bearer/);
+	});
+
+	it("rejects id_token (typ: id+jwt) presented as Bearer", async () => {
+		// id_tokens also share the signing key and can carry sub/sid. Belt-and-
+		// suspenders: even if a client misuses an id_token as a bearer, reject it.
+		const idLikeToken = await new SignJWT({
+			sub: "u-1",
+			aud: "client",
+			sid: "sid-1",
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
+			.setExpirationTime("1h")
+			.setIssuedAt()
+			.sign(secretKey);
+
+		const res = await callUserinfo({ token: idLikeToken });
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_token");
+	});
+
 	it("sets Cache-Control: no-store on all responses (RFC 6750 §5.3)", async () => {
 		// Success path
 		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid" });
