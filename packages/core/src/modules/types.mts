@@ -16,9 +16,14 @@
 import type { Router } from "express";
 import type { z } from "zod";
 
+import type { AuditSinkBase } from "../audit/types.mjs";
 import type { CoreConfig } from "../config/application.schema.mjs";
 import type { GrantRegistry } from "../grants/registry.mjs";
 import type { KeyStore } from "../keys/KeyStore.mjs";
+import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "../mfa/types.mjs";
+import type { GrantPolicyHookBase } from "../policy/types.mjs";
+import type { RateLimiterBase } from "../ratelimit/types.mjs";
+import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
 
 /**
  * Resolves a module specifier to a URL/path that can be passed to dynamic import().
@@ -38,6 +43,13 @@ export interface ModuleContext {
 	keyStore: KeyStore;
 	grantRegistry: GrantRegistry;
 	router: Router;
+	mfaProviderFactory?: MfaProviderFactory;
+	mfaCoordinator?: MfaCoordinator;
+	mfaTransactionStore?: MfaTransactionStore;
+	auditSink?: AuditSinkBase;
+	rateLimiter?: RateLimiterBase;
+	refreshTokenStore?: RefreshTokenStoreBase;
+	grantPolicy?: GrantPolicyHookBase;
 }
 
 /**
