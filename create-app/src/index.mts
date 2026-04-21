@@ -126,7 +126,16 @@ const parseArgs = (args: string[]): ParsedArgs => {
 
 const deriveDirName = (projectName: string, dir: string | undefined): string => {
 	if (dir !== undefined) return dir;
-	if (projectName.startsWith("@")) return projectName.split("/")[1];
+	if (projectName.startsWith("@")) {
+		const pkgPart = projectName.split("/")[1];
+		if (!pkgPart) {
+			// Unreachable when projectName has passed isValidProjectName (SCOPED_NAME_RE
+			// guarantees a non-empty package segment after the single "/"). Guarded here
+			// so refactors that reorder validation cannot silently produce undefined.
+			throw new Error(`invariant: unvalidated scoped name ${projectName}`);
+		}
+		return pkgPart;
+	}
 	return projectName;
 };
 
@@ -139,9 +148,7 @@ export const main = (): void => {
 		parsed = parseArgs(args);
 	} catch (e) {
 		console.error(`Error: ${(e as Error).message}`);
-		console.error(
-			"Usage: create-o3co-auth-provider <project-name> [--dir <dir-name>]",
-		);
+		console.error("Usage: create-o3co-auth-provider <project-name> [--dir <dir-name>]");
 		console.error(
 			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
 		);
@@ -152,7 +159,7 @@ export const main = (): void => {
 
 	if (!isValidProjectName(projectName)) {
 		console.error(
-			"Error: <project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped; max 214 chars; no path separators).",
+			"Error: <project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped; max 214 chars; no backslashes; no extra '/' beyond the single scope separator).",
 		);
 		process.exit(1);
 	}

@@ -174,9 +174,7 @@ describe("main (argv parsing and directory derivation)", () => {
 	it("scoped name: dir = pkg part, pkg.name = full scoped", () => {
 		const r = runMain(["@piratis-blossoms/auth.provider"]);
 		expect(r.exitCode).toBe(0);
-		const pkg = JSON.parse(
-			readFileSync(join(workdir, "auth.provider", "package.json"), "utf-8"),
-		);
+		const pkg = JSON.parse(readFileSync(join(workdir, "auth.provider", "package.json"), "utf-8"));
 		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
 	});
 
@@ -192,9 +190,7 @@ describe("main (argv parsing and directory derivation)", () => {
 	it("scoped name with --dir=<val>: dir = val, pkg.name = full scoped", () => {
 		const r = runMain(["@piratis-blossoms/auth.provider", "--dir=provider2"]);
 		expect(r.exitCode).toBe(0);
-		const pkg = JSON.parse(
-			readFileSync(join(workdir, "provider2", "package.json"), "utf-8"),
-		);
+		const pkg = JSON.parse(readFileSync(join(workdir, "provider2", "package.json"), "utf-8"));
 		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
 	});
 
