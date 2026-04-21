@@ -46,13 +46,25 @@ function keyPrefix(key: string): string {
 	return colon === -1 ? key : key.slice(0, colon);
 }
 
+interface RedisRateLimiterConfig extends MemoryRateLimiterConfig {
+	client?: {
+		incr(key: string): Promise<number>;
+		expire(key: string, seconds: number): Promise<number>;
+	};
+}
+
 export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 	factory.register("memory", (rawConfig) => {
 		const config = rawConfig as unknown as MemoryRateLimiterConfig;
 		const limits = normalizeLimits(config.limits);
 		const defaultLimit: RateLimitSpec = (() => {
 			const raw = config.defaultLimit;
-			if (raw && typeof raw === "object" && typeof raw.limit === "number" && typeof raw.windowSeconds === "number") {
+			if (
+				raw &&
+				typeof raw === "object" &&
+				typeof raw.limit === "number" &&
+				typeof raw.windowSeconds === "number"
+			) {
 				return raw;
 			}
 			return { limit: 60, windowSeconds: 60 };
@@ -73,11 +85,7 @@ export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 				if (!bucket || bucket.resetAt <= now) {
 					const fresh: BucketState = { count: 1, resetAt: now + spec.windowSeconds * 1000 };
 					buckets.set(key, fresh);
-					return {
-						allowed: true,
-						remaining: spec.limit - 1,
-						resetAt: new Date(fresh.resetAt),
-					};
+					return { allowed: true, remaining: spec.limit - 1, resetAt: new Date(fresh.resetAt) };
 				}
 				if (bucket.count >= spec.limit) {
 					return {
@@ -92,6 +100,56 @@ export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 					allowed: true,
 					remaining: spec.limit - bucket.count,
 					resetAt: new Date(bucket.resetAt),
+				};
+			},
+		};
+	});
+
+	factory.register("redis", async (rawConfig) => {
+		const config = rawConfig as unknown as RedisRateLimiterConfig;
+		const limits = normalizeLimits(config.limits);
+		const defaultLimit: RateLimitSpec = (() => {
+			const raw = config.defaultLimit;
+			if (
+				raw &&
+				typeof raw === "object" &&
+				typeof raw.limit === "number" &&
+				typeof raw.windowSeconds === "number"
+			) {
+				return raw;
+			}
+			return { limit: 60, windowSeconds: 60 };
+		})();
+		const client =
+			config.client ??
+			(await (async () => {
+				const { createClient } = await import("redis");
+				const c = createClient();
+				await c.connect();
+				return {
+					incr: (k: string) => c.incr(k) as Promise<number>,
+					expire: (k: string, s: number) => c.expire(k, s) as Promise<number>,
+				};
+			})());
+
+		return {
+			kind: "redis",
+			async check(key) {
+				const spec = limits[keyPrefix(key)] ?? defaultLimit;
+				const count = await client.incr(key);
+				if (count === 1) {
+					await client.expire(key, spec.windowSeconds);
+				}
+				if (count > spec.limit) {
+					return {
+						allowed: false,
+						remaining: 0,
+						reason: `limit:${keyPrefix(key)}`,
+					};
+				}
+				return {
+					allowed: true,
+					remaining: spec.limit - count,
 				};
 			},
 		};
