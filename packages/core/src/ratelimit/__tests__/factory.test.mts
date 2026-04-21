@@ -100,3 +100,21 @@ describe("memory rate limiter — per-key isolation", () => {
 		expect(b1.remaining).toBe(1);
 	});
 });
+
+describe("memory rate limiter — concurrent burst", () => {
+	it("counts parallel requests within the limit", async () => {
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		const limiter = await factory.create({
+			type: "memory",
+			limits: { burst: { limit: 5, windowSeconds: 60 } },
+		});
+		const results = await Promise.all(
+			Array.from({ length: 10 }, () => limiter.check("burst:K", {})),
+		);
+		const allowed = results.filter((r) => r.allowed).length;
+		const denied = results.filter((r) => !r.allowed).length;
+		expect(allowed).toBe(5);
+		expect(denied).toBe(5);
+	});
+});
