@@ -52,7 +52,9 @@ const mockClientRepository: ClientRepository = {
 
 const mockCodeRepository: CodeRepository = {
 	createCode: async () => ({ code: "test-code" }),
-	consumeCode: async () => null,
+	getByCode: async () => null,
+	consumeByCode: async () => null,
+	removeByCode: async () => {},
 };
 
 function createStubRateLimiter(

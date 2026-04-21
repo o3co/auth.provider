@@ -158,7 +158,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			}
 
 			let finalScope = grantedScope;
-			let finalAudience: string | string[] | null = tokenAud ?? client_id ?? null;
+			let finalAudience: string | null = tokenAud ?? client_id ?? null;
 
 			if (deps.grantPolicy) {
 				const decision = await deps.grantPolicy.evaluate(
@@ -184,10 +184,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				}
 				if (decision.grantedScope) finalScope = decision.grantedScope.join(" ");
 				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
-					finalAudience =
-						decision.grantedAudience.length === 1
-							? decision.grantedAudience[0]
-							: [...decision.grantedAudience];
+					// generateToken carries a single `aud` claim; policy may narrow
+					// to multiple audiences, but we flatten to the first one here.
+					// Multi-audience tokens are out of scope for this grant path.
+					finalAudience = decision.grantedAudience[0];
 				}
 			}
 
