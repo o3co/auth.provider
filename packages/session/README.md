@@ -499,6 +499,10 @@ for (const [name, section] of Object.entries(config.federations)) {
 }
 ```
 
+## TODO-F-3 changes
+
+- **Local login session tracking.** `POST /session/login` now creates a `UserSession` record via `userSessionStore.create()` and writes the resulting `sid` into `req.session.sid` when `AppOptions.userSessionStore` is wired. This mirrors the federation-callback session-creation path established in F-2 and ensures that tokens issued after a local login carry a valid `sid` claim.
+
 ## See Also
 
 - [`@o3co/auth-provider-oauth`](../oauth/README.md) — OAuth 2.0 token and authorization routes

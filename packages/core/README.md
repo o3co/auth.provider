@@ -545,6 +545,13 @@ Two new optional `AppOptions` fields introduced for federation + OIDC support:
 
 Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_token + /userinfo), F-5 (logout), and F-6 (/oauth/federation/:name/token). This plan (F-1) only adds the plumbing. See [the TODO-F spec](../../.claude/superpowers/specs/2026-04-21-todo-f-federation-token-lifecycle-design.md) for the full interface + encryption contract.
 
+**F-3 consumers activated.** `CodeData` now carries two optional fields wired by the login paths:
+
+- `nonce?` — OIDC nonce forwarded from the authorization request, propagated into access tokens and refresh tokens.
+- `sid?` — Session ID (`UserSession.id`) written by the login handler and used to bind minted tokens to the session.
+
+The `CodeRepository.createCode` params and `InMemoryCodeRepository` accept `nonce`, `sid`, and `grantedScope` in the same call. Consumers (the `authorization_code` grant) read `codeData.grantedScope` (set by `GrantPolicyHook` at `/oauth/authorize`) as the authoritative scope for token minting instead of `session.granted_scopes`.
+
 ## See Also
 
 - Root [README](../../README.md) — architecture overview, configuration reference, Docker setup

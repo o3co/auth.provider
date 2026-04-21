@@ -544,6 +544,13 @@ Federation + OIDC 対応のために `AppOptions` に追加された 2 つのオ
 
 両 store は TODO-F-3 (cascading revoke)、F-4 (id_token + /userinfo)、F-5 (logout)、F-6 (/oauth/federation/:name/token) で消費される。本 F-1 では plumbing のみを追加する。詳細な interface + encryption contract は [TODO-F spec](../../.claude/superpowers/specs/2026-04-21-todo-f-federation-token-lifecycle-design.md) を参照。
 
+**F-3 での consumer 有効化。** `CodeData` にログインパスが書き込む 2 つのオプションフィールドが追加された:
+
+- `nonce?` — 認可リクエストから転送される OIDC nonce。アクセストークンおよびリフレッシュトークンに伝播される。
+- `sid?` — ログインハンドラーが書き込むセッション ID（`UserSession.id`）。発行したトークンをセッションに紐付けるために使用される。
+
+`CodeRepository.createCode` のパラメーターと `InMemoryCodeRepository` は同一の呼び出しで `nonce`、`sid`、`grantedScope` を受け付ける。consumer（`authorization_code` grant）は、`session.granted_scopes` の代わりに、`/oauth/authorize` 時に `GrantPolicyHook` が設定した `codeData.grantedScope` をトークン発行のスコープとして使用する。
+
 ## 関連
 
 - ルート [README](../../README.md) — アーキテクチャ概要、設定リファレンス、Docker セットアップ
