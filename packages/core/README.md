@@ -520,6 +520,7 @@ Five extension points introduced in v0.4.0 (see
 - `RateLimiterBase.check(key, ctx)` atomic check + increment
 - Factory: `createRateLimiterFactory()`, built-in `"memory"` and `"redis"` via `registerBuiltinRateLimiters()`
 - 429 + `Retry-After` emitted by core on denial
+- The built-in `"redis"` limiter requires `config.client` matching `{ incr(key): Promise<number>; expire(key, seconds): Promise<number> }`. Core does not depend on the `redis` package and does not create its own client (`RateLimiterBase` has no disposal hook — lifecycle stays with the consumer). Any redis-compatible client satisfying that shape works.
 
 #### RefreshTokenStore (RFC 6819 §5.2.2.3 replay detection)
 

@@ -372,6 +372,37 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("returns 503 temporarily_unavailable when refreshTokenStore.rotate throws (CP-17)", async () => {
+			const throwingStore: RefreshTokenStoreBase = {
+				kind: "broken",
+				async rotate() {
+					throw new Error("redis down");
+				},
+				async isFamilyRevoked() {
+					return false;
+				},
+				async revokeFamily() {},
+			};
+			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenStore: throwingStore };
+			const token = await new SignJWT({ sub: "u1", scope: "read write" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setExpirationTime("24h")
+				.setJti("prev-jti-503")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(depsWithStore);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			});
+
+			expect(result.status).toBe(503);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("temporarily_unavailable");
+		});
+
 		it("returns invalid_grant/family_revoked when the store reports 'revoked'", async () => {
 			const stub = createStubRefreshTokenStore((_prev) => ({ outcome: "revoked" }));
 			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenStore: stub };
@@ -505,6 +536,27 @@ describe("createRefreshTokenGrant", () => {
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.error).toBe("invalid_scope");
 			expect(result.errorDescription).toContain("admin");
+		});
+
+		it("returns 503 temporarily_unavailable when grantPolicy.evaluate throws (CP-18)", async () => {
+			const token = await makeRefreshToken({ scope: "read" });
+			const policy = createStubPolicy(async () => {
+				throw new Error("policy backend 502");
+			});
+			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const handler = createRefreshTokenGrant(depsWithPolicy);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			});
+
+			expect(result.status).toBe(503);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("temporarily_unavailable");
+			expect(result.errorDescription).toContain("policy");
 		});
 
 		it("omits scope from token response when policy narrows to empty array (CP-15)", async () => {

@@ -149,18 +149,34 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			let finalAudience: string | null = tokenAud ?? client_id ?? null;
 
 			if (deps.grantPolicy) {
-				const decision = await deps.grantPolicy.evaluate(
-					{
-						grantType: "refresh_token",
-						clientId: client_id,
-						subject: subjectStr,
-						requestedScope: requestedScope
-							? [...new Set(requestedScope.split(" ").filter(Boolean))]
-							: undefined,
-						originalScope: scopeStr ? scopeStr.split(" ") : undefined,
-					},
-					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
-				);
+				// CP-18: fail-closed. grantPolicy is a security boundary (it
+				// narrows scope/audience); if it throws we cannot know what
+				// the narrowed decision would have been. Failing open would
+				// effectively grant the pre-policy scope ceiling, which is
+				// exactly what policy exists to prevent.
+				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
+				try {
+					decision = await deps.grantPolicy.evaluate(
+						{
+							grantType: "refresh_token",
+							clientId: client_id,
+							subject: subjectStr,
+							requestedScope: requestedScope
+								? [...new Set(requestedScope.split(" ").filter(Boolean))]
+								: undefined,
+							originalScope: scopeStr ? scopeStr.split(" ") : undefined,
+						},
+						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "policy evaluation unavailable",
+						},
+					};
+				}
 				if (decision.outcome === "deny") {
 					return {
 						result: {
@@ -240,12 +256,28 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				const newJti = newRefreshPayload.jti as string | undefined;
 				const newExp = newRefreshPayload.exp as number | undefined;
 				if (typeof newJti === "string" && typeof newExp === "number") {
-					const rotateResult = await deps.refreshTokenStore.rotate(
-						previousJti,
-						newJti,
-						newFamilyId,
-						new Date(newExp * 1000),
-					);
+					// CP-17: fail-closed when the store is unavailable. Same
+					// rationale as CP-16 — we cannot atomically consume the old
+					// jti and register the new one, so replay detection cannot
+					// be guaranteed. Return 503 so the client retries rather
+					// than bubbling an unhandled 500 HTML from express.
+					let rotateResult: Awaited<ReturnType<typeof deps.refreshTokenStore.rotate>>;
+					try {
+						rotateResult = await deps.refreshTokenStore.rotate(
+							previousJti,
+							newJti,
+							newFamilyId,
+							new Date(newExp * 1000),
+						);
+					} catch {
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "refresh token store unavailable",
+							},
+						};
+					}
 					if (rotateResult.outcome === "replayed") {
 						return {
 							result: {

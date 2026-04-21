@@ -67,6 +67,21 @@ export function createApp(options: AppOptions): AppResult {
 		}
 	}
 
+	// CP-20: when grantPolicy is configured, config.oauth.jwt.issuer MUST be
+	// set so the issuer observed by the policy matches the issuer claim on
+	// minted tokens. Otherwise policy decisions are made against a different
+	// (or empty) issuer than what ends up in the token, which silently
+	// splits the two code paths.
+	if (options.grantPolicy) {
+		const oauth = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth;
+		const issuer = oauth?.jwt?.issuer;
+		if (typeof issuer !== "string" || issuer.length === 0) {
+			throw new Error(
+				"createApp: config.oauth.jwt.issuer must be set when grantPolicy is configured (policy evaluations and minted tokens must share a single trusted issuer)",
+			);
+		}
+	}
+
 	const express: ExpressLike =
 		options.express ??
 		(() => {

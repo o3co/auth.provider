@@ -271,7 +271,23 @@ export const createAuthorizationGrant = (
 				const jti = payload.jti as string | undefined;
 				const exp = payload.exp as number | undefined;
 				if (typeof jti === "string" && typeof exp === "number") {
-					await deps.refreshTokenStore.rotate(null, jti, familyId, new Date(exp * 1000));
+					// CP-16: fail-closed when the store is unavailable. If we cannot
+					// register the initial rt, we cannot guarantee replay detection
+					// for the family — serving a token whose replay-detection is
+					// blind would undermine the RFC 6819 §5.2.2.3 contract. Return
+					// a controlled 503 JSON so clients see a retryable error instead
+					// of an unhandled HTML 500 from express.
+					try {
+						await deps.refreshTokenStore.rotate(null, jti, familyId, new Date(exp * 1000));
+					} catch {
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "refresh token store unavailable",
+							},
+						};
+					}
 				}
 			}
 

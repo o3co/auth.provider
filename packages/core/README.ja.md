@@ -519,6 +519,7 @@ v0.4.0 で追加された 5 つの拡張ポイント (詳細:
 - `RateLimiterBase.check(key, ctx)` で atomic check + increment
 - Factory: `createRateLimiterFactory()`、built-in `"memory"` と `"redis"` は `registerBuiltinRateLimiters()` で登録
 - deny 時には core が 429 + `Retry-After` header で応答
+- built-in `"redis"` limiter は `config.client` として `{ incr(key): Promise<number>; expire(key, seconds): Promise<number> }` の shape を満たす client の注入を必須とする。core は `redis` パッケージに依存せず自前で client を作らない (`RateLimiterBase` に dispose hook がないため lifecycle は consumer 側に委ねる)。この shape を満たせば redis 互換の任意 client で動作する。
 
 #### RefreshTokenStore (RFC 6819 §5.2.2.3 replay 検出)
 

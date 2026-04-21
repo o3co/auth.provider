@@ -389,20 +389,34 @@ export const createOAuthRouter = async (
 					// configured jwt.issuer so policy decisions match the issuer
 					// claim on minted tokens.
 					const trustedIssuer = config.oauth.jwt.issuer ?? "";
-					const decision = await grantPolicy.evaluate(
-						{
-							grantType: "authorization",
-							clientId: client_id,
-							subject: subjectForPolicy,
-							requestedScope: requestedScopes.length > 0 ? requestedScopes : undefined,
-							originalScope: allowedScopes,
-						},
-						{
-							ip: req.ip,
-							userAgent: req.get("user-agent"),
-							issuer: trustedIssuer,
-						},
-					);
+					// CP-18 (authorize side): fail-closed on policy throw. Same
+					// rationale as the refresh_token path — policy is a security
+					// boundary and failing open would hand out the pre-policy
+					// scope ceiling.
+					let decision: Awaited<ReturnType<typeof grantPolicy.evaluate>>;
+					try {
+						decision = await grantPolicy.evaluate(
+							{
+								grantType: "authorization",
+								clientId: client_id,
+								subject: subjectForPolicy,
+								requestedScope: requestedScopes.length > 0 ? requestedScopes : undefined,
+								originalScope: allowedScopes,
+							},
+							{
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								issuer: trustedIssuer,
+							},
+						);
+					} catch {
+						return redirectError(
+							redirect_uri,
+							"temporarily_unavailable",
+							"policy evaluation unavailable",
+							toStr(state),
+						);
+					}
 					if (decision.outcome === "deny") {
 						return redirectError(
 							redirect_uri,

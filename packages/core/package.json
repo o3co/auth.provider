@@ -40,14 +40,10 @@
 		"zod": "^4.3.6"
 	},
 	"peerDependencies": {
-		"express": "^5.0.0",
-		"redis": "^5.0.0"
+		"express": "^5.0.0"
 	},
 	"peerDependenciesMeta": {
 		"express": {
-			"optional": true
-		},
-		"redis": {
 			"optional": true
 		}
 	},

@@ -19,6 +19,7 @@ import { createApp } from "#/app.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "#/mfa/types.mjs";
+import type { GrantPolicyHookBase } from "#/policy/types.mjs";
 
 const mockExpress = {
 	Router: () =>
@@ -102,6 +103,127 @@ describe("createApp — MFA config guard", () => {
 			createApp({
 				express: mockExpress,
 				config: mockConfig,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("createApp — grantPolicy / jwt.issuer consistency guard (CP-20)", () => {
+	const noopPolicy: GrantPolicyHookBase = {
+		kind: "noop",
+		async evaluate() {
+			return { outcome: "allow" };
+		},
+	};
+
+	it("throws when grantPolicy is set but config.oauth.jwt.issuer is missing", () => {
+		const configWithoutIssuer = {
+			http: { port: 3000, trustProxy: false },
+			oauth: {
+				jwt: {
+					// issuer intentionally omitted
+					signingKey: {
+						provider: "local",
+						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+					},
+				},
+				accessToken: { expiresIn: 3600 },
+				refreshToken: { expiresIn: 86400 },
+				grants: {},
+			},
+		} as unknown as AppConfig;
+
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithoutIssuer,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				grantPolicy: noopPolicy,
+			}),
+		).toThrow(/config\.oauth\.jwt\.issuer must be set when grantPolicy/);
+	});
+
+	it("throws when grantPolicy is set and jwt.issuer is an empty string", () => {
+		const configEmptyIssuer = {
+			http: { port: 3000, trustProxy: false },
+			oauth: {
+				jwt: {
+					issuer: "",
+					signingKey: {
+						provider: "local",
+						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+					},
+				},
+				accessToken: { expiresIn: 3600 },
+				refreshToken: { expiresIn: 86400 },
+				grants: {},
+			},
+		} as unknown as AppConfig;
+
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configEmptyIssuer,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				grantPolicy: noopPolicy,
+			}),
+		).toThrow(/config\.oauth\.jwt\.issuer must be set when grantPolicy/);
+	});
+
+	it("accepts grantPolicy when jwt.issuer is set", () => {
+		const configWithIssuer = {
+			http: { port: 3000, trustProxy: false },
+			oauth: {
+				jwt: {
+					issuer: "https://auth.example",
+					signingKey: {
+						provider: "local",
+						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+					},
+				},
+				accessToken: { expiresIn: 3600 },
+				refreshToken: { expiresIn: 86400 },
+				grants: {},
+			},
+		} as unknown as AppConfig;
+
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithIssuer,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				grantPolicy: noopPolicy,
+			}),
+		).not.toThrow();
+	});
+
+	it("does NOT require jwt.issuer when grantPolicy is absent", () => {
+		// Same "no issuer" config passes without grantPolicy — the guard fires
+		// only when grantPolicy depends on a trusted issuer.
+		const configWithoutIssuer = {
+			http: { port: 3000, trustProxy: false },
+			oauth: {
+				jwt: {
+					signingKey: {
+						provider: "local",
+						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+					},
+				},
+				accessToken: { expiresIn: 3600 },
+				refreshToken: { expiresIn: 86400 },
+				grants: {},
+			},
+		} as unknown as AppConfig;
+
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithoutIssuer,
 				keyStore: createSymmetricKeyStore("test-secret"),
 				modules: [],
 			}),

@@ -478,6 +478,37 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(res.headers.location).toContain("admin");
 		});
 
+		it("redirects temporarily_unavailable when grantPolicy throws at /authorize (CP-18)", async () => {
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
+			const grantPolicy: GrantPolicyHookBase = {
+				kind: "throwing",
+				async evaluate() {
+					throw new Error("policy backend down");
+				},
+			};
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			const res = await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				scope: "read",
+			});
+
+			expect(res.status).toBe(302);
+			expect(res.headers.location).toContain("error=temporarily_unavailable");
+		});
+
 		it("persists undefined grantedScope on Code when policy narrows to empty (CP-14)", async () => {
 			let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({

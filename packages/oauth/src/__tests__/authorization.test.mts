@@ -206,6 +206,40 @@ describe("createAuthorizationGrant", () => {
 			expect(expiresAt).toBeInstanceOf(Date);
 		});
 
+		it("returns 503 temporarily_unavailable when initial rotate throws (CP-16)", async () => {
+			const throwingStore = {
+				kind: "broken",
+				async rotate() {
+					throw new Error("store down");
+				},
+				async isFamilyRevoked() {
+					return false;
+				},
+				async revokeFamily() {},
+			};
+			const deps = {
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc" })),
+				refreshTokenStore: throwingStore,
+			};
+			const handler = createAuthorizationGrant(deps);
+
+			const { result } = await handler.handle({
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			});
+
+			expect(result.status).toBe(503);
+			if (!("error" in result)) throw new Error("expected error");
+			expect(result.error).toBe("temporarily_unavailable");
+		});
+
 		it("skips initial-register when no refreshTokenStore is configured (CP-2 graceful)", async () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
 			const handler = createAuthorizationGrant(deps);
