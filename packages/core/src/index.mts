@@ -24,12 +24,12 @@ export {
 } from "./adapters/AdapterFactory.mjs";
 // App factory
 export { type AppOptions, type AppResult, createApp } from "./app.mjs";
-// Audit sink (partial exports — full export set lands in Task 24)
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,
 	registerBuiltinAuditSinks,
 } from "./audit/factory.mjs";
+// Audit
 export type { AuditEvent, AuditSinkBase, AuditSinkFactory } from "./audit/types.mjs";
 // Configuration
 export {
@@ -80,10 +80,30 @@ export {
 	createAsymmetricKeyStore,
 	createSymmetricKeyStore,
 } from "./keys/KeyStore.mjs";
+export { createMfaProviderFactory } from "./mfa/factory.mjs";
+export type { MfaRouteDeps } from "./mfa/route.mjs";
+export { createMfaRouter } from "./mfa/route.mjs";
+// MFA
+export type {
+	EnrollResult,
+	MfaChallenge,
+	MfaCoordinator,
+	MfaIssueContext,
+	MfaPendingTransaction,
+	MfaProviderBase,
+	MfaProviderFactory,
+	MfaResumeState,
+	MfaTransactionStore,
+	MfaVerifyFailureReason,
+	MfaVerifyResult,
+	SupportsEnrollment,
+	SupportsRevocation,
+} from "./mfa/types.mjs";
+export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
 // Module system
 export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
-// Grant policy hook (partial exports — full export set lands in Task 24)
 export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
+// Grant policy
 export type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
@@ -91,8 +111,11 @@ export type {
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
-// Rate limiter (partial exports — full export set lands in Task 24)
-export { createRateLimiterFactory, registerBuiltinRateLimiters } from "./ratelimit/factory.mjs";
+export {
+	createRateLimiterFactory,
+	registerBuiltinRateLimiters,
+} from "./ratelimit/factory.mjs";
+// Rate limiter
 export type {
 	RateLimitContext,
 	RateLimitDecision,
@@ -100,8 +123,8 @@ export type {
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
-// Refresh token store (Task 24 will finalize the full export set; partial exports pulled forward here for Task 16)
 export { createRefreshTokenStoreFactory } from "./refresh/factory.mjs";
+// Refresh token store
 export type {
 	RefreshTokenRotateOutcome,
 	RefreshTokenStoreBase,
