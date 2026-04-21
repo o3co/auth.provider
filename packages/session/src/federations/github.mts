@@ -15,8 +15,17 @@
  */
 
 import type { PassportStatic } from "passport";
-import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
-import type { FederationProviderBase, SetupPassportContext } from "./types.mjs";
+import { fetchGithubPrimaryEmail, resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
+import type {
+	EndSessionRequest,
+	EndSessionResult,
+	FederationProfile,
+	FederationProviderBase,
+	MappedClaims,
+	SetupPassportContext,
+	SupportsClaimMapping,
+	SupportsLogout,
+} from "./types.mjs";
 
 export interface GithubProviderConfig {
 	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
@@ -30,9 +39,13 @@ export interface GithubProviderConfig {
 	authCallbackUrl?: string;
 	/** Fallback URL for the client app (used when no redirectTo is present). Optional. */
 	clientUrl?: string;
+	/** Test-only: inject fetch impl used by fetchGithubPrimaryEmail. */
+	_fetch?: typeof fetch;
 }
 
-export function createGithubProvider(config: GithubProviderConfig): FederationProviderBase {
+type GithubProvider = FederationProviderBase & SupportsClaimMapping & SupportsLogout;
+
+export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(
 			`GitHub federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
@@ -40,6 +53,7 @@ export function createGithubProvider(config: GithubProviderConfig): FederationPr
 	}
 
 	const scope = ["read:user", "user:email"] as const;
+	const fetchImpl: typeof fetch = config._fetch ?? fetch;
 
 	return {
 		name: config.name,
@@ -55,11 +69,13 @@ export function createGithubProvider(config: GithubProviderConfig): FederationPr
 
 		async setupPassportStrategy(
 			passport: PassportStatic,
-			{ verifyUser, pathResolver }: SetupPassportContext,
+			ctx: SetupPassportContext,
 		): Promise<void> {
 			let GithubStrategy: typeof import("passport-github2").Strategy;
 			try {
-				const modSpec = pathResolver ? pathResolver("passport-github2") : "passport-github2";
+				const modSpec = ctx.pathResolver
+					? ctx.pathResolver("passport-github2")
+					: "passport-github2";
 				({ Strategy: GithubStrategy } = (await import(
 					modSpec
 				)) as typeof import("passport-github2"));
@@ -79,13 +95,44 @@ export function createGithubProvider(config: GithubProviderConfig): FederationPr
 						scope: [...scope],
 					},
 					async (
-						_at: string,
-						_rt: string,
-						profile: { id: string },
+						accessToken: string,
+						refreshToken: string | undefined,
+						profileRaw: { id: string } & Record<string, unknown>,
 						done: (err: Error | null, user?: unknown) => void,
 					) => {
+						let enrichedRaw: Record<string, unknown> = {
+							...(profileRaw as Record<string, unknown>),
+						};
+						if (!hasEmail(enrichedRaw)) {
+							const fetched = await fetchGithubPrimaryEmail(accessToken, fetchImpl);
+							if (fetched) {
+								enrichedRaw = {
+									...enrichedRaw,
+									emails: [{ value: fetched.email, verified: fetched.verified }],
+								};
+							}
+						}
+						const profile: FederationProfile = {
+							id:
+								typeof enrichedRaw.id === "string" ? enrichedRaw.id : String(enrichedRaw.id ?? ""),
+							raw: enrichedRaw,
+							accessToken,
+							refreshToken,
+						};
+						if (ctx.onFederationCallback) {
+							try {
+								await ctx.onFederationCallback({
+									federationName: config.name,
+									profile,
+									done: done as (err: Error | null, user: unknown) => void,
+								});
+							} catch (err) {
+								done(err as Error);
+							}
+							return;
+						}
 						try {
-							const user = await verifyUser(`github:${profile.id}`);
+							const user = await ctx.verifyUser(`github:${profile.id}`);
 							return done(null, user ?? false);
 						} catch (err) {
 							return done(err as Error);
@@ -94,5 +141,36 @@ export function createGithubProvider(config: GithubProviderConfig): FederationPr
 				),
 			);
 		},
+
+		mapClaims(profile: FederationProfile): MappedClaims {
+			const raw = profile.raw as Record<string, unknown>;
+			const emails = Array.isArray(raw.emails)
+				? (raw.emails as Array<{ value?: unknown; verified?: unknown }>)
+				: [];
+			const photos = Array.isArray(raw.photos) ? (raw.photos as Array<{ value?: unknown }>) : [];
+			const claims: Record<string, unknown> = {};
+			if (typeof emails[0]?.value === "string") claims.email = emails[0].value;
+			if (typeof emails[0]?.verified === "boolean") claims.emailVerified = emails[0].verified;
+			if (typeof raw.displayName === "string") claims.name = raw.displayName;
+			if (typeof photos[0]?.value === "string") claims.picture = photos[0].value;
+			return claims as MappedClaims;
+		},
+
+		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
+			// GitHub has no RP-Initiated Logout endpoint. Return a redirect directly to
+			// the post_logout_redirect_uri with round-tripped state. If no redirect is
+			// given, fall back to GitHub's top-level logout page.
+			const base = req.postLogoutRedirectUri ?? "https://github.com/logout";
+			const url = new URL(base);
+			if (req.state) url.searchParams.set("state", req.state);
+			return { url, method: "GET" };
+		},
 	};
+}
+
+function hasEmail(raw: Record<string, unknown>): boolean {
+	return (
+		Array.isArray(raw.emails) &&
+		raw.emails.some((e) => typeof (e as { value?: unknown }).value === "string")
+	);
 }

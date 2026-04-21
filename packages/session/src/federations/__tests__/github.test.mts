@@ -17,6 +17,8 @@
 import type { PassportStatic } from "passport";
 import { describe, expect, it, vi } from "vitest";
 import { createGithubProvider } from "#/federations/github.mjs";
+import type { FederationProfile } from "#/federations/types.mjs";
+import { supportsClaimMapping, supportsLogout, supportsRefresh } from "#/federations/types.mjs";
 
 const baseConfig = {
 	name: "github",
@@ -177,5 +179,66 @@ describe("createGithubProvider validation", () => {
 
 	it("throws when callbackURL is missing", () => {
 		expect(() => createGithubProvider({ ...baseConfig, callbackURL: "" })).toThrow(/callbackURL/i);
+	});
+});
+
+describe("GitHub provider capabilities", () => {
+	const base = {
+		name: "github",
+		clientId: "cid",
+		clientSecret: "csec",
+		callbackURL: "https://example.com/cb",
+	};
+
+	it("implements mapClaims and endSession; does NOT implement refresh", () => {
+		const p = createGithubProvider(base);
+		expect(supportsClaimMapping(p)).toBe(true);
+		expect(supportsLogout(p)).toBe(true);
+		expect(supportsRefresh(p)).toBe(false);
+	});
+
+	describe("mapClaims", () => {
+		it("maps profile fields (without fetching /user/emails)", async () => {
+			const p = createGithubProvider(base);
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = {
+				id: "gh-42",
+				raw: {
+					username: "alice",
+					displayName: "Alice Dev",
+					emails: [{ value: "primary@x.com" }],
+					photos: [{ value: "https://avatars.githubusercontent.com/u/42" }],
+				},
+			};
+			expect(p.mapClaims(profile)).toEqual({
+				email: "primary@x.com",
+				name: "Alice Dev",
+				picture: "https://avatars.githubusercontent.com/u/42",
+			});
+		});
+
+		it("omits email when passport profile exposes none (caller must fetchGithubPrimaryEmail separately)", () => {
+			const p = createGithubProvider(base);
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = {
+				id: "gh",
+				raw: { displayName: "Anon" },
+			};
+			expect(p.mapClaims(profile)).toEqual({ name: "Anon" });
+		});
+	});
+
+	describe("endSession", () => {
+		it("returns a no-op-ish GET URL pointing at the post_logout_redirect_uri directly (GitHub has no end-session endpoint)", async () => {
+			const p = createGithubProvider(base);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const result = await p.endSession({
+				postLogoutRedirectUri: "https://rp/done",
+				state: "abc",
+			});
+			expect(result.method).toBe("GET");
+			expect(result.url.href).toContain("https://rp/done");
+			expect(result.url.searchParams.get("state")).toBe("abc");
+		});
 	});
 });
