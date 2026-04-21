@@ -13,6 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+export type {
+	CascadeLogoutLogger,
+	CascadeLogoutOptions,
+	CascadeLogoutResult,
+} from "./logout/cascadeLogout.mjs";
+export { cascadeLogout } from "./logout/cascadeLogout.mjs";
 export { oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
 export { oauthSessionModule } from "./oauthSession.mjs";
