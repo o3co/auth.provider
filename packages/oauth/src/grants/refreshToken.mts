@@ -170,7 +170,25 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 						},
 					};
 				}
-				if (decision.grantedScope) finalScope = decision.grantedScope.join(" ");
+				if (decision.grantedScope) {
+					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed
+					// the scope of the original grant. Re-enforce after policy
+					// so a buggy/compromised policy cannot expand privileges
+					// beyond what the refresh token originally carried.
+					const originalSet = scopeStr ? scopeStr.split(" ") : [];
+					const exceeded = decision.grantedScope.filter((s) => !originalSet.includes(s));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_scope",
+								errorDescription: `policy returned scopes exceeding original grant: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// CP-15: empty array → null so response omits scope.
+					finalScope = decision.grantedScope.length > 0 ? decision.grantedScope.join(" ") : null;
+				}
 				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
 					// generateToken carries a single `aud` claim; policy may narrow
 					// to multiple audiences, but we flatten to the first one here.
@@ -185,6 +203,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				((tokenPayload as Record<string, unknown>).jti as string | undefined) ?? null;
 			const newFamilyId = familyId ?? randomUUID();
 
+			// CP-15: empty string (e.g. requested=" ") normalizes to null so the
+			// token response omits scope rather than emitting `scope: ""`.
+			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
+
 			const newAccessToken = await generateToken(
 				{},
 				{
@@ -194,7 +216,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					audience: finalAudience,
 					subject: subjectStr ?? null,
 					authorizedParty: azpStr ?? null,
-					scope: finalScope,
+					scope: scopeClaim,
 					tokenType: "at+jwt",
 				},
 			);
@@ -208,7 +230,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					audience: finalAudience,
 					subject: subjectStr ?? null,
 					authorizedParty: azpStr ?? null,
-					scope: finalScope,
+					scope: scopeClaim,
 					tokenType: "rt+jwt",
 				},
 			);

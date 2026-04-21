@@ -252,6 +252,55 @@ describe("createAuthorizationGrant", () => {
 			);
 		});
 
+		it("omits scope from token response when granted scopes is empty (CP-12)", async () => {
+			// Code has neither grantedScope nor session.granted_scopes.
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const handler = createAuthorizationGrant(deps);
+			const ctx: GrantContext = {
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					// granted_scopes intentionally omitted
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			// Response must NOT carry scope: ""; it should be undefined / omitted
+			expect(result.tokens.scope === "" ? "empty-string" : "ok").toBe("ok");
+			const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect(decoded.scope).toBeUndefined();
+		});
+
+		it("omits scope when Code.grantedScope is explicitly empty (CP-12)", async () => {
+			// Even if persisted as [], code exchange must not emit `scope: ""`.
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", grantedScope: [] as readonly string[] }),
+			);
+			const handler = createAuthorizationGrant(deps);
+			const { result } = await handler.handle({
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			});
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect(decoded.scope).toBeUndefined();
+		});
+
 		it("returns 400 when PKCE is required but code_verifier is missing", async () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({

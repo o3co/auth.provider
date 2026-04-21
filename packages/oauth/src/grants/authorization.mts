@@ -229,6 +229,11 @@ export const createAuthorizationGrant = (
 					? grantedAudiencesFromCode[0]
 					: client_id;
 
+			// CP-12: normalize empty scope array to null so the token response
+			// omits `scope` entirely instead of emitting `scope: ""` (which
+			// consumers can't distinguish from "scope claim omitted").
+			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
+
 			const accessToken = await generateToken(
 				{},
 				{
@@ -238,7 +243,7 @@ export const createAuthorizationGrant = (
 					audience,
 					subject: userId ?? null,
 					authorizedParty: client_id ?? null,
-					scope: grantedScopes?.join(" ") ?? null,
+					scope: scopeClaim,
 					tokenType: "at+jwt",
 				},
 			);
@@ -251,7 +256,7 @@ export const createAuthorizationGrant = (
 					audience,
 					subject: userId ?? null,
 					authorizedParty: client_id ?? null,
-					scope: grantedScopes?.join(" ") ?? null,
+					scope: scopeClaim,
 					tokenType: "rt+jwt",
 				},
 			);

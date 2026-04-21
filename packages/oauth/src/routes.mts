@@ -411,7 +411,25 @@ export const createOAuthRouter = async (
 							toStr(state),
 						);
 					}
-					if (decision.grantedScope) grantedScopes = decision.grantedScope;
+					if (decision.grantedScope) {
+						// CP-13: policy MUST NOT expand the client's scope ceiling.
+						// Enforce grantedScope ⊆ allowedFilteredScopes (the
+						// pre-policy-narrowed set) — a policy returning a scope
+						// outside this is a bug or a compromised policy, and we
+						// fail closed with invalid_scope per RFC 6749.
+						const invalidFromPolicy = decision.grantedScope.filter(
+							(s) => !allowedFilteredScopes.includes(s),
+						);
+						if (invalidFromPolicy.length > 0) {
+							return redirectError(
+								redirect_uri,
+								"invalid_scope",
+								`policy returned scopes outside client allowance: ${invalidFromPolicy.join(" ")}`,
+								toStr(state),
+							);
+						}
+						grantedScopes = decision.grantedScope;
+					}
 					if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
 				}
 
@@ -433,14 +451,22 @@ export const createOAuthRouter = async (
 					resolvedMethod = undefined;
 				}
 
+				// CP-14: persist `undefined` when no scopes/audiences survived —
+				// an empty array would later stringify to `scope: ""` in the
+				// token response, which is indistinguishable from "scope claim
+				// omitted" and surprises consumers.
+				const scopeForPersist = grantedScopes.length > 0 ? grantedScopes : undefined;
+				const audienceForPersist =
+					grantedAudience && grantedAudience.length > 0 ? grantedAudience : undefined;
+
 				let issue: Awaited<ReturnType<typeof codeRepository.createCode>>;
 				try {
 					issue = await codeRepository.createCode({
 						code_challenge: toStr(code_challenge),
 						code_challenge_method: resolvedMethod,
 						redirect_uri,
-						grantedScope: grantedScopes,
-						grantedAudience,
+						grantedScope: scopeForPersist,
+						grantedAudience: audienceForPersist,
 					});
 				} catch {
 					return redirectError(

@@ -443,6 +443,76 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(captured?.grantedAudience).toBeUndefined();
 		});
 
+		it("rejects with invalid_scope when grantPolicy returns scopes outside client allowance (CP-13)", async () => {
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
+				allowedScopes: ["read"],
+			});
+			const grantPolicy: GrantPolicyHookBase = {
+				kind: "escalating",
+				async evaluate() {
+					// Policy attempts to grant a scope the client isn't allowed to request.
+					return { outcome: "allow", grantedScope: ["read", "admin"] };
+				},
+			};
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			const res = await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				scope: "read",
+			});
+
+			expect(res.status).toBe(302);
+			expect(res.headers.location).toContain("error=invalid_scope");
+			expect(res.headers.location).toContain("admin");
+		});
+
+		it("persists undefined grantedScope on Code when policy narrows to empty (CP-14)", async () => {
+			let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
+				captureCode: (p) => {
+					captured = p;
+				},
+			});
+			const grantPolicy: GrantPolicyHookBase = {
+				kind: "empty",
+				async evaluate() {
+					return { outcome: "allow", grantedScope: [] };
+				},
+			};
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				scope: "read",
+			});
+
+			expect(captured?.grantedScope).toBeUndefined();
+		});
+
 		it("authorization grant reads Code.grantedScope (not session.granted_scopes)", async () => {
 			// Simulate that /authorize ran earlier and persisted ["read"] on the Code,
 			// but the session got tampered to ["write"]. Code must win.

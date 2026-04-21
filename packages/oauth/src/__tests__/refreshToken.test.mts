@@ -483,5 +483,50 @@ describe("createRefreshTokenGrant", () => {
 				expect.fail("Expected error in result");
 			}
 		});
+
+		it("rejects invalid_scope when policy grantedScope exceeds original (CP-15 RFC 6749 §6)", async () => {
+			const token = await makeRefreshToken({ scope: "read" });
+			const policy = createStubPolicy(async () => ({
+				outcome: "allow",
+				grantedScope: ["read", "admin"], // admin is NOT in the original "read"
+			}));
+			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const handler = createRefreshTokenGrant(depsWithPolicy);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("invalid_scope");
+			expect(result.errorDescription).toContain("admin");
+		});
+
+		it("omits scope from token response when policy narrows to empty array (CP-15)", async () => {
+			const token = await makeRefreshToken({ scope: "read write" });
+			const policy = createStubPolicy(async () => ({
+				outcome: "allow",
+				grantedScope: [],
+			}));
+			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const handler = createRefreshTokenGrant(depsWithPolicy);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+			});
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("expected tokens");
+			// Response MUST NOT include scope: "". decodeJwt scope field is also absent.
+			expect(result.tokens.scope).toBeUndefined();
+		});
 	});
 });
