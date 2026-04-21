@@ -153,8 +153,23 @@ export const _createPassportImpl = async ({
 								expiresAt: new Date(Date.now() + (params.profile.expiresIn ?? 3600) * 1000),
 							});
 						}
-						const session = params.req.session as unknown as Record<string, unknown> | undefined;
-						if (session) session.sid = sid;
+						const session = params.req.session as unknown as
+							| (Record<string, unknown> & {
+									save?: (cb: (err: unknown) => void) => void;
+							  })
+							| undefined;
+						if (session) {
+							session.sid = sid;
+							if (typeof session.save === "function") {
+								await new Promise<void>((resolve, reject) => {
+									// session.save is guaranteed by the typeof check above; call it.
+									(session.save as (cb: (err: unknown) => void) => void)((err) => {
+										if (err) reject(err as Error);
+										else resolve();
+									});
+								});
+							}
+						}
 						params.done(null, user);
 					} catch (err) {
 						params.done(err as Error, false);

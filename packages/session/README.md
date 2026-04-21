@@ -330,7 +330,7 @@ readonly onFederationCallback?: (params: {
 
 **Built-in behaviour:** When `sessionModule` wires the passport context, it injects a built-in `onFederationCallback` implementation automatically — but only when **both** `UserSessionStore` and `FederationTokenStore` are configured in `AppOptions`. The built-in hook:
 
-1. Looks up or creates a `User` from the federation profile (`SupportsClaimMapping` is used when available).
+1. Looks up a `User` via `UserRepository.authenticateByToken(`${federationName}:${profile.id}`)`. If your deployment auto-provisions users on first federation login, implement that inside your `authenticateByToken`.
 2. Saves the IdP tokens to `FederationTokenStore`.
 3. Calls `done(null, user)` on success.
 

@@ -330,7 +330,7 @@ readonly onFederationCallback?: (params: {
 
 **組み込みの動作:** `sessionModule` が passport コンテキストをセットアップする際、`AppOptions` に `UserSessionStore` と `FederationTokenStore` の**両方**が設定されている場合にのみ、組み込みの `onFederationCallback` が自動的に注入される。組み込みフックの動作:
 
-1. フェデレーションプロファイルから `User` を検索または作成する（利用可能な場合は `SupportsClaimMapping` を使用）。
+1. `UserRepository.authenticateByToken(`${federationName}:${profile.id}`)` を使って `User` を検索する。フェデレーション初回ログイン時にユーザーを自動プロビジョニングするデプロイでは、`authenticateByToken` の実装内でその処理を行うこと。
 2. IdP トークンを `FederationTokenStore` に保存する。
 3. 成功時に `done(null, user)` を呼び出す。
 

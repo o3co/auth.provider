@@ -122,10 +122,56 @@ describe("setupPassportStrategy", () => {
 		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
 		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
 		// Invoke it with a mock profile — passReqToCallback:true means req is the first arg
+		// arity-6: req, accessToken, refreshToken, params, profile, done
 		const done = vi.fn();
 		const reqStub = { session: {} } as unknown as import("express").Request;
-		await verifyCallback(reqStub, "at", "rt", { id: "12345" }, done);
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "12345" }, done);
 		expect(verifyUser).toHaveBeenCalledWith("google:12345");
+	});
+
+	it("verify callback passes id_token and expires_in from params to FederationProfile", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const onFederationCallback = vi.fn(
+			async ({ done }: { done: (err: Error | null, user: unknown) => void }) => {
+				done(null, { id: "u1" });
+			},
+		);
+		const verifyUser = vi.fn(async () => null);
+		const provider = createGoogleProvider(baseConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser, onFederationCallback });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		// arity-6: params carries id_token and expires_in
+		await verifyCallback(
+			reqStub,
+			"access-token",
+			"refresh-token",
+			{ id_token: "google-id-token", expires_in: 7200 },
+			{ id: "gid-123" },
+			done,
+		);
+		expect(onFederationCallback).toHaveBeenCalledTimes(1);
+		const callArg = (onFederationCallback as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+			profile: import("#/federations/types.mjs").FederationProfile;
+		};
+		expect(callArg.profile.idToken).toBe("google-id-token");
+		expect(callArg.profile.expiresIn).toBe(7200);
+		expect(callArg.profile.accessToken).toBe("access-token");
+		expect(callArg.profile.refreshToken).toBe("refresh-token");
+	});
+
+	it("strategy has authorizationParams that always includes access_type=offline", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const provider = createGoogleProvider(baseConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser: async () => null });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock
+			.calls[0][1] as unknown as {
+			authorizationParams(opts: Record<string, unknown>): Record<string, unknown>;
+		};
+		const params = strategyInstance.authorizationParams({});
+		expect(params).toMatchObject({ access_type: "offline" });
 	});
 
 	it("uses config.name as the passport strategy identifier for multi-tenant", async () => {
@@ -283,16 +329,44 @@ describe("Google provider capabilities", () => {
 	});
 
 	describe("endSession", () => {
-		it("returns Google revoke URL", async () => {
+		it("without endSessionEndpoint configured: redirects to postLogoutRedirectUri directly", async () => {
 			const p = createGoogleProvider(capConfig);
 			if (!supportsLogout(p)) throw new Error("expected logout capability");
 			const { url, method } = await p.endSession({
-				idTokenHint: "idt",
 				postLogoutRedirectUri: "https://rp/logout-done",
+				state: "s1",
 			});
 			expect(method).toBe("GET");
+			expect(url.href).toContain("https://rp/logout-done");
+			expect(url.searchParams.get("state")).toBe("s1");
+		});
+
+		it("without endSessionEndpoint and no postLogoutRedirectUri: falls back to accounts.google.com/Logout", async () => {
+			const p = createGoogleProvider(capConfig);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const { url, method } = await p.endSession({});
+			expect(method).toBe("GET");
 			expect(url.hostname).toBe("accounts.google.com");
-			expect(url.pathname).toContain("logout");
+			expect(url.pathname.endsWith("/Logout")).toBe(true);
+		});
+
+		it("with endSessionEndpoint configured: uses it and attaches all params", async () => {
+			const p = createGoogleProvider({
+				...capConfig,
+				endSessionEndpoint: "https://custom-logout.example.com/end",
+			});
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const { url, method } = await p.endSession({
+				idTokenHint: "idt",
+				postLogoutRedirectUri: "https://rp/done",
+				state: "s2",
+			});
+			expect(method).toBe("GET");
+			expect(url.origin).toBe("https://custom-logout.example.com");
+			expect(url.pathname).toBe("/end");
+			expect(url.searchParams.get("id_token_hint")).toBe("idt");
+			expect(url.searchParams.get("post_logout_redirect_uri")).toBe("https://rp/done");
+			expect(url.searchParams.get("state")).toBe("s2");
 		});
 	});
 });

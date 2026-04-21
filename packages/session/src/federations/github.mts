@@ -85,6 +85,58 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 					{ cause: err },
 				);
 			}
+			// passport-oauth2 runtime dispatches on callback arity: 6-arg receives `params`
+			// (raw token-endpoint response including expires_in). @types/passport-github2 only
+			// declares the 5-arg overload, so we cast the verify function to bypass the
+			// TypeScript restriction while preserving the correct runtime behavior.
+			const verify6 = async (
+				req: import("express").Request,
+				accessToken: string,
+				refreshToken: string | undefined,
+				params: Record<string, unknown> | undefined,
+				profileRaw: { id: string } & Record<string, unknown>,
+				done: (err: Error | null, user?: unknown) => void,
+			): Promise<void> => {
+				let enrichedRaw: Record<string, unknown> = {
+					...(profileRaw as Record<string, unknown>),
+				};
+				if (!hasEmail(enrichedRaw)) {
+					const fetched = await fetchGithubPrimaryEmail(accessToken, fetchImpl);
+					if (fetched) {
+						enrichedRaw = {
+							...enrichedRaw,
+							emails: [{ value: fetched.email, verified: fetched.verified }],
+						};
+					}
+				}
+				const profile: FederationProfile = {
+					id: typeof enrichedRaw.id === "string" ? enrichedRaw.id : String(enrichedRaw.id ?? ""),
+					raw: enrichedRaw,
+					accessToken,
+					refreshToken,
+					idToken: typeof params?.id_token === "string" ? params.id_token : undefined,
+					expiresIn: typeof params?.expires_in === "number" ? params.expires_in : undefined,
+				};
+				if (ctx.onFederationCallback) {
+					try {
+						await ctx.onFederationCallback({
+							federationName: config.name,
+							profile,
+							req,
+							done: done as (err: Error | null, user: unknown) => void,
+						});
+					} catch (err) {
+						done(err as Error);
+					}
+					return;
+				}
+				try {
+					const user = await ctx.verifyUser(`github:${profile.id}`);
+					return done(null, user ?? false);
+				} catch (err) {
+					return done(err as Error);
+				}
+			};
 			passport.use(
 				config.name,
 				new GithubStrategy(
@@ -95,52 +147,13 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 						scope: [...scope],
 						passReqToCallback: true,
 					},
-					async (
-						req: import("express").Request,
+					verify6 as unknown as (
+						req: unknown,
 						accessToken: string,
-						refreshToken: string | undefined,
-						profileRaw: { id: string } & Record<string, unknown>,
+						refreshToken: string,
+						profile: unknown,
 						done: (err: Error | null, user?: unknown) => void,
-					) => {
-						let enrichedRaw: Record<string, unknown> = {
-							...(profileRaw as Record<string, unknown>),
-						};
-						if (!hasEmail(enrichedRaw)) {
-							const fetched = await fetchGithubPrimaryEmail(accessToken, fetchImpl);
-							if (fetched) {
-								enrichedRaw = {
-									...enrichedRaw,
-									emails: [{ value: fetched.email, verified: fetched.verified }],
-								};
-							}
-						}
-						const profile: FederationProfile = {
-							id:
-								typeof enrichedRaw.id === "string" ? enrichedRaw.id : String(enrichedRaw.id ?? ""),
-							raw: enrichedRaw,
-							accessToken,
-							refreshToken,
-						};
-						if (ctx.onFederationCallback) {
-							try {
-								await ctx.onFederationCallback({
-									federationName: config.name,
-									profile,
-									req,
-									done: done as (err: Error | null, user: unknown) => void,
-								});
-							} catch (err) {
-								done(err as Error);
-							}
-							return;
-						}
-						try {
-							const user = await ctx.verifyUser(`github:${profile.id}`);
-							return done(null, user ?? false);
-						} catch (err) {
-							return done(err as Error);
-						}
-					},
+					) => void,
 				),
 			);
 		},
@@ -174,6 +187,9 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 function hasEmail(raw: Record<string, unknown>): boolean {
 	return (
 		Array.isArray(raw.emails) &&
-		raw.emails.some((e) => typeof (e as { value?: unknown }).value === "string")
+		raw.emails.some(
+			(e) =>
+				typeof e === "object" && e !== null && typeof (e as { value?: unknown }).value === "string",
+		)
 	);
 }

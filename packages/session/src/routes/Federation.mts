@@ -120,12 +120,16 @@ export const createRouter = (
 
 				const user = req.user;
 				const { redirectTo } = req.session;
+				// Capture sid before regeneration — it was set by the built-in onFederationCallback.
+				const sid = (req.session as unknown as { sid?: string }).sid;
 
 				req.session.regenerate((err: Error | null) => {
 					if (err) return res.status(500).json({ message: "Error regenerating session" });
 
 					req.session.isAuthenticated = true;
 					req.session.user = user as Record<string, unknown> | undefined;
+					// Restore sid on the new session so F-3's access_token claim has a source.
+					if (sid) (req.session as unknown as { sid: string }).sid = sid;
 
 					const redirectResult = provider.resolveCallbackRedirect({ redirectTo });
 					if (!redirectResult.ok) {

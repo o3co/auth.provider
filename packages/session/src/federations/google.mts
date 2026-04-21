@@ -42,7 +42,7 @@ export interface GoogleProviderConfig {
 	clientUrl?: string;
 	/** Override Google's OAuth token endpoint (default: https://oauth2.googleapis.com/token). */
 	tokenEndpoint?: string;
-	/** Override Google's end-session endpoint (default: https://accounts.google.com/o/oauth2/v2/auth/logout). */
+	/** Override Google's end-session endpoint. When omitted Google does not publish an OIDC end_session_endpoint; the provider redirects directly to postLogoutRedirectUri instead. */
 	endSessionEndpoint?: string;
 	/** Test-only: inject a fetch impl for refreshFederationToken. Not documented publicly. */
 	_fetch?: typeof fetch;
@@ -54,7 +54,6 @@ type GoogleProvider = FederationProviderBase &
 	SupportsLogout;
 
 const DEFAULT_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
-const DEFAULT_END_SESSION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth/logout";
 
 export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvider => {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
@@ -63,7 +62,6 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 		);
 	}
 	const tokenEndpoint = config.tokenEndpoint ?? DEFAULT_TOKEN_ENDPOINT;
-	const endSessionEndpoint = config.endSessionEndpoint ?? DEFAULT_END_SESSION_ENDPOINT;
 	const fetchImpl: typeof fetch = config._fetch ?? fetch;
 
 	return {
@@ -88,40 +86,71 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 			const { Strategy: GoogleStrategy } = (await import(
 				modSpec
 			)) as typeof import("passport-google-oauth20");
-			passport.use(
-				config.name,
-				new GoogleStrategy(
-					{
-						clientID: config.clientId,
-						clientSecret: config.clientSecret,
-						callbackURL: config.callbackURL,
-						passReqToCallback: true,
-					},
-					async (req, accessToken, refreshToken, profileRaw, done) => {
-						const profile = toFederationProfile(profileRaw, accessToken, refreshToken);
-						if (ctx.onFederationCallback) {
-							try {
-								await ctx.onFederationCallback({
-									federationName: config.name,
-									profile,
-									req: req as import("express").Request,
-									done: done as (err: Error | null, user: unknown) => void,
-								});
-							} catch (err) {
-								done(err as Error);
-							}
-							return;
-						}
-						// Legacy fallback (federation-tokens not wired): emulate prior behavior.
+			const strategy = new GoogleStrategy(
+				{
+					clientID: config.clientId,
+					clientSecret: config.clientSecret,
+					callbackURL: config.callbackURL,
+					passReqToCallback: true,
+				},
+				// 6-arg verify form: passport-oauth2 dispatches on arity and passes the
+				// raw token-endpoint response `params` only when the callback declares 6
+				// parameters. We need `params.id_token` + `params.expires_in` for the
+				// FederationProfile.
+				async (
+					req: import("express").Request,
+					accessToken: string,
+					refreshToken: string,
+					params: import("passport-google-oauth20").GoogleCallbackParameters,
+					profileRaw: import("passport-google-oauth20").Profile,
+					done: import("passport-google-oauth20").VerifyCallback,
+				) => {
+					const p = params as unknown as Record<string, unknown>;
+					const profile = toFederationProfile(profileRaw as unknown as Record<string, unknown>, {
+						accessToken,
+						refreshToken,
+						idToken: typeof p?.id_token === "string" ? p.id_token : undefined,
+						expiresIn: typeof p?.expires_in === "number" ? p.expires_in : undefined,
+					});
+					if (ctx.onFederationCallback) {
 						try {
-							const user = await ctx.verifyUser(`google:${profile.id}`);
-							return done(null, user ?? false);
+							await ctx.onFederationCallback({
+								federationName: config.name,
+								profile,
+								req,
+								done: done as (err: Error | null, user: unknown) => void,
+							});
 						} catch (err) {
-							return done(err as Error);
+							done(err as Error);
 						}
-					},
-				),
+						return;
+					}
+					try {
+						const user = await ctx.verifyUser(`google:${profile.id}`);
+						return done(null, user ?? false);
+					} catch (err) {
+						return done(err as Error);
+					}
+				},
 			);
+			// Override authorizationParams to always include access_type=offline so Google
+			// returns a refresh_token on the first authorization. This cannot be set via the
+			// constructor options because passport-google-oauth20 only reads accessType from
+			// the per-request options passed to passport.authenticate(); overriding the method
+			// here avoids exposing per-strategy configuration to the route layer.
+			const baseAuthorizationParams = (
+				strategy as unknown as {
+					authorizationParams(opts: Record<string, unknown>): Record<string, unknown>;
+				}
+			).authorizationParams.bind(strategy);
+			(
+				strategy as unknown as {
+					authorizationParams(opts: Record<string, unknown>): Record<string, unknown>;
+				}
+			).authorizationParams = (opts: Record<string, unknown>) => {
+				return { ...baseAuthorizationParams(opts), access_type: "offline" };
+			};
+			passport.use(config.name, strategy);
 		},
 
 		mapClaims(profile: FederationProfile): MappedClaims {
@@ -192,10 +221,20 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 		},
 
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
-			const url = new URL(endSessionEndpoint);
-			if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
-			if (req.postLogoutRedirectUri)
-				url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
+			// Google does not publish an OIDC end_session_endpoint in its discovery document;
+			// operators MUST pass `endSessionEndpoint` explicitly if they want an upstream logout.
+			// Absent that, we redirect directly to the RP's postLogoutRedirectUri with state,
+			// mirroring the GitHub provider. The application is responsible for its own session cleanup.
+			if (config.endSessionEndpoint) {
+				const url = new URL(config.endSessionEndpoint);
+				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
+				if (req.postLogoutRedirectUri)
+					url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
+				if (req.state) url.searchParams.set("state", req.state);
+				return { url, method: "GET" };
+			}
+			const base = req.postLogoutRedirectUri ?? "https://accounts.google.com/Logout";
+			const url = new URL(base);
 			if (req.state) url.searchParams.set("state", req.state);
 			return { url, method: "GET" };
 		},
@@ -204,15 +243,18 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 
 function toFederationProfile(
 	raw: unknown,
-	accessToken: string | undefined,
-	refreshToken: string | undefined,
+	tokens: {
+		accessToken: string | undefined;
+		refreshToken: string | undefined;
+		idToken?: string;
+		expiresIn?: number;
+	},
 ): FederationProfile {
 	const rawObj = (raw ?? {}) as Record<string, unknown>;
 	const id = typeof rawObj.id === "string" ? rawObj.id : "";
 	return {
 		id,
 		raw: rawObj,
-		accessToken,
-		refreshToken,
+		...tokens,
 	};
 }

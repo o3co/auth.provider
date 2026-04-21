@@ -127,9 +127,10 @@ describe("setupPassportStrategy", () => {
 		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
 		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
 		// Invoke it with a mock profile — passReqToCallback:true means req is the first arg
+		// arity-6: req, accessToken, refreshToken, params, profile, done
 		const done = vi.fn();
 		const reqStub = { session: {} } as unknown as import("express").Request;
-		await verifyCallback(reqStub, "at", "rt", { id: "99999" }, done);
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "99999" }, done);
 		expect(verifyUser).toHaveBeenCalledWith("github:99999");
 	});
 
