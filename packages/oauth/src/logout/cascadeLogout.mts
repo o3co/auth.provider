@@ -18,15 +18,17 @@ import type {
 	RefreshTokenStoreBase,
 	UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
+import type { LogoutLogger } from "./types.mjs";
 
 /**
  * Minimal structural logger interface for cascadeLogout.
  * Accepts `console` and any structured logger (pino, winston, etc.)
  * with a compatible `warn(message, ...args)` signature.
+ *
+ * @deprecated Use `LogoutLogger` from `./types.mjs` directly. This alias is kept
+ * for backward compatibility.
  */
-export interface CascadeLogoutLogger {
-	warn(message: string, ...args: unknown[]): void;
-}
+export type CascadeLogoutLogger = LogoutLogger;
 
 export interface CascadeLogoutOptions {
 	readonly sid: string;
