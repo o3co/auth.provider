@@ -11,7 +11,17 @@ import type {
 	UserSessionStoreBase,
 } from "../types.mjs";
 
-type Stored = Omit<UserSession, "claims"> & { claims: Record<string, unknown> };
+type Stored = {
+	sid: string;
+	sub: string;
+	authTime: Date;
+	createdAt: Date;
+	expiresAt: Date;
+	federations: string[];
+	activeRPs: RegisteredRP[];
+	familyIds: string[];
+	claims: Record<string, unknown>;
+};
 
 export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 	const sessions = new Map<string, Stored>();
@@ -38,7 +48,7 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 				authTime: input.authTime,
 				createdAt: new Date(),
 				expiresAt: input.expiresAt,
-				federations: input.federations ?? [],
+				federations: [...(input.federations ?? [])],
 				activeRPs: [],
 				familyIds: [],
 				claims: { ...input.claims },
