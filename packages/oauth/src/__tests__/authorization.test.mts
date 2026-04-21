@@ -157,6 +157,72 @@ describe("createAuthorizationGrant", () => {
 			expect(sessionMutation?.clear).toContain("granted_scopes");
 		});
 
+		it("registers initial rt+jwt via refreshTokenStore.rotate(null, ...) (CP-2)", async () => {
+			const rotateSpy = vi.fn(
+				async (_prev: string | null, _next: string, _fam: string, _exp: Date) =>
+					({ outcome: "rotated" }) as const,
+			);
+			const refreshTokenStore = {
+				kind: "spy",
+				rotate: rotateSpy,
+				async isFamilyRevoked() {
+					return false;
+				},
+				async revokeFamily() {},
+			};
+			const deps = {
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc" })),
+				refreshTokenStore,
+			};
+			const handler = createAuthorizationGrant(deps);
+			const ctx: GrantContext = {
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			expect(rotateSpy).toHaveBeenCalledTimes(1);
+			const [previousJti, newJti, familyId, expiresAt] = rotateSpy.mock.calls[0] as [
+				string | null,
+				string,
+				string,
+				Date,
+			];
+			expect(previousJti).toBeNull();
+			expect(typeof newJti).toBe("string");
+			expect(newJti.length).toBeGreaterThan(0);
+			expect(familyId).toMatch(
+				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+			);
+			expect(expiresAt).toBeInstanceOf(Date);
+		});
+
+		it("skips initial-register when no refreshTokenStore is configured (CP-2 graceful)", async () => {
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const handler = createAuthorizationGrant(deps);
+			const { result } = await handler.handle({
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			});
+			expect(result.status).toBe(200);
+		});
+
 		it("issues an initial rt+jwt carrying a new family_id (C-3)", async () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
 			const handler = createAuthorizationGrant(deps);

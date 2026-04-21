@@ -58,6 +58,42 @@ describe("emitAuditEvent", () => {
 			}),
 		).resolves.toBeUndefined();
 	});
+
+	it("does not block the caller on a slow sink (fire-and-forget)", async () => {
+		// Resolve-later promise — never settles during this test.
+		let release: (() => void) | undefined;
+		const slowSink: AuditSinkBase = {
+			kind: "slow",
+			async record() {
+				await new Promise<void>((resolve) => {
+					release = resolve;
+				});
+			},
+		};
+
+		const started = Date.now();
+		await emitAuditEvent(slowSink, { timestamp: new Date(), type: "test" });
+		const elapsed = Date.now() - started;
+		expect(elapsed).toBeLessThan(50);
+		// Release the dangling promise so vitest doesn't see an unhandled async op
+		release?.();
+	});
+
+	it("swallows rejections from detached sink.record without emitting unhandled-rejection", async () => {
+		const rejectingSink: AuditSinkBase = {
+			kind: "reject",
+			record() {
+				return Promise.reject(new Error("sink failed"));
+			},
+		};
+		// If the .catch weren't attached, process would log
+		// an unhandledRejection warning. We assert the emit returns cleanly.
+		await expect(
+			emitAuditEvent(rejectingSink, { timestamp: new Date(), type: "test" }),
+		).resolves.toBeUndefined();
+		// Yield the microtask queue so the detached promise settles
+		await new Promise((r) => setImmediate(r));
+	});
 });
 
 describe("registerBuiltinAuditSinks", () => {

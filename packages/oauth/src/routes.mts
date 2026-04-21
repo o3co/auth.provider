@@ -78,10 +78,28 @@ export const createOAuthRouter = async (
 		if (!rateLimiter) return true;
 		const ip = req.ip ?? "unknown";
 		const key = `${tag}:ip:${ip}`;
-		const decision = await rateLimiter.check(key, {
-			ip: req.ip,
-			userAgent: req.get("user-agent"),
-		});
+		let decision: Awaited<ReturnType<typeof rateLimiter.check>>;
+		try {
+			decision = await rateLimiter.check(key, {
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+			});
+		} catch (cause) {
+			// Fail-open: if the limiter backend is unavailable we prefer to serve
+			// the auth flow over 5xx-ing every request. Operators see the outage
+			// via the audit event below and via their limiter's own telemetry.
+			emitAuditEvent(auditSink, {
+				timestamp: new Date(),
+				type: "rate_limit.unavailable",
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: {
+					tag,
+					error: cause instanceof Error ? cause.message : String(cause),
+				},
+			});
+			return true;
+		}
 		if (!decision.allowed) {
 			if (decision.resetAt) {
 				const secs = Math.max(0, Math.ceil((decision.resetAt.getTime() - Date.now()) / 1000));
@@ -135,6 +153,8 @@ export const createOAuthRouter = async (
 				session: req.session,
 				issuer,
 				metadata: { ip: req.ip },
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
 			};
 			const { result, sessionMutation } = await handler.handle(ctx);
 

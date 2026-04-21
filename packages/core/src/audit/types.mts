@@ -24,7 +24,7 @@ export interface AuditEvent {
 	 *   "token.issued" | "token.refreshed" | "token.revoked" |
 	 *   "federation.success" | "federation.failure" |
 	 *   "mfa.challenge.issued" | "mfa.challenge.success" | "mfa.challenge.failure" |
-	 *   "logout" | "scope.denied"
+	 *   "logout" | "scope.denied" | "rate_limit.unavailable"
 	 * Consumers MAY emit custom event types with their own namespace.
 	 */
 	readonly type: string;

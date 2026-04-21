@@ -85,7 +85,7 @@ function createSpyAuditSink(): { sink: AuditSinkBase; events: AuditEvent[] } {
 
 async function buildApp(overrides: { rateLimiter?: RateLimiterBase; auditSink?: AuditSinkBase }) {
 	const app = express();
-	// Required so express-rate-limit can resolve req.ip in test environment
+	// Ensure req.ip is consistently populated so the RateLimiter hook sees it
 	app.set("trust proxy", 1);
 	app.use(express.json());
 	app.use(express.urlencoded({ extended: false }));
@@ -153,6 +153,32 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			expect(res.status).toBe(429);
 			expect(res.body.error).toBe("rate_limited");
+		});
+
+		it("fails open when rateLimiter.check throws and emits rate_limit.unavailable audit (CP-6)", async () => {
+			const { sink, events } = createSpyAuditSink();
+			const app = await buildApp({
+				rateLimiter: {
+					kind: "broken",
+					async check() {
+						throw new Error("redis down");
+					},
+				},
+				auditSink: sink,
+			});
+
+			const res = await request(app)
+				.post("/oauth/token")
+				.send({ grant_type: "unsupported_type_xyz" });
+
+			// 400 unsupported_grant_type — request was allowed through (fail-open)
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("unsupported_grant_type");
+			// Yield microtasks so the fire-and-forget audit emit settles
+			await new Promise((r) => setImmediate(r));
+			const ev = events.find((e) => e.type === "rate_limit.unavailable");
+			expect(ev).toBeDefined();
+			expect((ev?.details as { error?: string } | undefined)?.error).toContain("redis down");
 		});
 
 		it("does not block requests when rateLimiter allows", async () => {

@@ -26,6 +26,19 @@ import {
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
 
+function decodeJwtPayload(token: string): Record<string, unknown> {
+	const parts = token.split(".");
+	if (parts.length < 2) return {};
+	try {
+		return JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf-8")) as Record<
+			string,
+			unknown
+		>;
+	} catch {
+		return {};
+	}
+}
+
 export const createAuthorizationGrant = (
 	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
 ): GrantHandler => {
@@ -228,37 +241,51 @@ export const createAuthorizationGrant = (
 					? grantedAudiencesFromCode[0]
 					: client_id;
 
+			const accessToken = await generateToken(
+				{},
+				{
+					expiresIn: config.oauth.accessToken.expiresIn,
+					keyStore,
+					issuer,
+					audience,
+					subject: userId ?? null,
+					authorizedParty: client_id ?? null,
+					scope: grantedScopes?.join(" ") ?? null,
+					tokenType: "at+jwt",
+				},
+			);
+			const refreshToken = await generateToken(
+				{ family_id: familyId },
+				{
+					expiresIn: config.oauth.refreshToken.expiresIn,
+					keyStore,
+					issuer,
+					audience,
+					subject: userId ?? null,
+					authorizedParty: client_id ?? null,
+					scope: grantedScopes?.join(" ") ?? null,
+					tokenType: "rt+jwt",
+				},
+			);
+
+			// Register the initial refresh token in the store so the family is known
+			// from issuance. rotate(null, ...) is the initial-registration shape per
+			// RefreshTokenStoreBase§2.4; without this step the first rotation would
+			// observe an unknown previousJti and replay detection would be blind to
+			// attackers replaying the initial token.
+			if (deps.refreshTokenStore) {
+				const payload = decodeJwtPayload(refreshToken.token);
+				const jti = payload.jti as string | undefined;
+				const exp = payload.exp as number | undefined;
+				if (typeof jti === "string" && typeof exp === "number") {
+					await deps.refreshTokenStore.rotate(null, jti, familyId, new Date(exp * 1000));
+				}
+			}
+
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({
-						accessToken: await generateToken(
-							{},
-							{
-								expiresIn: config.oauth.accessToken.expiresIn,
-								keyStore,
-								issuer,
-								audience,
-								subject: userId ?? null,
-								authorizedParty: client_id ?? null,
-								scope: grantedScopes?.join(" ") ?? null,
-								tokenType: "at+jwt",
-							},
-						),
-						refreshToken: await generateToken(
-							{ family_id: familyId },
-							{
-								expiresIn: config.oauth.refreshToken.expiresIn,
-								keyStore,
-								issuer,
-								audience,
-								subject: userId ?? null,
-								authorizedParty: client_id ?? null,
-								scope: grantedScopes?.join(" ") ?? null,
-								tokenType: "rt+jwt",
-							},
-						),
-					}),
+					tokens: generateTokenResponse({ accessToken, refreshToken }),
 				},
 				sessionMutation: {
 					clear: ["code", "code_client_id", "code_redirect_uri", "granted_scopes"],

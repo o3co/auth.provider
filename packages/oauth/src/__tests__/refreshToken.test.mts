@@ -431,6 +431,32 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("forwards ctx.ip and ctx.userAgent to grantPolicy.evaluate (CP-1)", async () => {
+			const token = await makeRefreshToken({ scope: "read write" });
+			let observedIp: string | undefined;
+			let observedUa: string | undefined;
+			const policy = createStubPolicy(async (_req, ctxArg) => {
+				observedIp = ctxArg.ip;
+				observedUa = ctxArg.userAgent;
+				return { outcome: "allow" };
+			});
+			const depsWithPolicy: GrantDependencies = { ...mockDeps, grantPolicy: policy };
+			const handler = createRefreshTokenGrant(depsWithPolicy);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "10.0.0.1" },
+				ip: "10.0.0.1",
+				userAgent: "test-agent/1.0",
+			};
+
+			await handler.handle(ctx);
+
+			expect(observedIp).toBe("10.0.0.1");
+			expect(observedUa).toBe("test-agent/1.0");
+		});
+
 		it("denies with policy-provided error", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const policy = createStubPolicy(async () => ({

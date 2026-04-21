@@ -120,17 +120,17 @@ export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 			}
 			return { limit: 60, windowSeconds: 60 };
 		})();
-		const client =
-			config.client ??
-			(await (async () => {
-				const { createClient } = await import("redis");
-				const c = createClient();
-				await c.connect();
-				return {
-					incr: (k: string) => c.incr(k) as Promise<number>,
-					expire: (k: string, s: number) => c.expire(k, s) as Promise<number>,
-				};
-			})());
+		// The built-in redis limiter requires an injected client. RateLimiterBase
+		// has no dispose() hook, so if the limiter created its own client it
+		// could never be cleanly closed — sockets would leak across process
+		// restarts. Consumers pass `config.client` so lifecycle lives in their
+		// composition root alongside other redis users (session store, etc.).
+		const client = config.client;
+		if (!client) {
+			throw new Error(
+				'Rate limiter "redis" requires config.client; the built-in limiter does not create its own redis client because RateLimiterBase has no disposal hook.',
+			);
+		}
 
 		return {
 			kind: "redis",

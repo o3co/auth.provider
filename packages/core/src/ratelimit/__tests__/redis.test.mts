@@ -55,4 +55,10 @@ describe("registerBuiltinRateLimiters (redis, injected client)", () => {
 		const third = await limiter.check(key, { ip: "1.2.3.4" });
 		expect(third.allowed).toBe(false);
 	});
+
+	it("throws when config.client is omitted (CP-4)", async () => {
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		await expect(factory.create({ type: "redis" })).rejects.toThrow(/config\.client/);
+	});
 });
