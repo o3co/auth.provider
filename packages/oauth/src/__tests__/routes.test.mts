@@ -27,10 +27,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 
 const mockConfig = {
-	rateLimit: {
-		token: { windowMs: 60000, limit: 100 },
-		authorize: { windowMs: 60000, limit: 100 },
-	},
 	endpoints: {
 		login: { url: "/login" },
 	},

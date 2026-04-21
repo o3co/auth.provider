@@ -109,6 +109,20 @@ describe("InMemoryCodeRepository", () => {
 		});
 	});
 
+	describe("grantedScope / grantedAudience round-trip", () => {
+		it("round-trips grantedScope and grantedAudience", async () => {
+			const repo = new InMemoryCodeRepository();
+			const created = await repo.createCode({
+				grantedScope: ["read"],
+				grantedAudience: ["https://api.example"],
+			});
+			const found = await repo.getByCode(created.code);
+			expect(found?.grantedScope).toEqual(["read"]);
+			expect(found?.grantedAudience).toEqual(["https://api.example"]);
+			repo.dispose();
+		});
+	});
+
 	describe("expiration", () => {
 		it("expires codes after defaultExpiresIn", async () => {
 			repo = new InMemoryCodeRepository({ defaultExpiresIn: 0.05 }); // 50ms

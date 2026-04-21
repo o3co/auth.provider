@@ -178,8 +178,6 @@ export const fullSectionsSchema = z.object({
 	}),
 	rateLimit: z.object({
 		login: rateLimitSchema,
-		token: rateLimitSchema,
-		authorize: rateLimitSchema,
 	}),
 	federations: z.record(z.string(), federationEntrySchema).default({}),
 	repositories: z.object({

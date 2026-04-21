@@ -25,6 +25,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
+import { decodeJwtPayload } from "./_jwtPayload.mjs";
 
 export const createAuthorizationGrant = (
 	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
@@ -125,7 +126,12 @@ export const createAuthorizationGrant = (
 				}
 			}
 
-			const grantedScopes = session.granted_scopes;
+			// C-2: prefer narrowed values persisted on Code at /authorize time; fall back
+			// to session for pre-C-2 codes and tests that bypass the authorize endpoint.
+			// Do NOT re-run grantPolicy here — evaluate-once-at-authorize is the contract.
+			const grantedScopes: readonly string[] | undefined =
+				codeData.grantedScope ?? session.granted_scopes;
+			const grantedAudiencesFromCode = codeData.grantedAudience;
 
 			// B-8: PKCE required check at token endpoint
 			if (pkceRequired && !codeData.code_challenge_method) {
@@ -210,37 +216,85 @@ export const createAuthorizationGrant = (
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
+			// Initial rt+jwt opens a new refresh-token family for replay detection
+			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same
+			// family_id; revoking the family revokes every descendant.
+			const familyId = crypto.randomUUID();
+
+			// generateToken carries a single `aud` claim; if policy narrowed to multiple
+			// audiences we flatten to the first. Multi-audience tokens are out of scope
+			// for the authorization code grant.
+			const audience =
+				grantedAudiencesFromCode && grantedAudiencesFromCode.length > 0
+					? grantedAudiencesFromCode[0]
+					: client_id;
+
+			// CP-12: normalize empty scope array to null so the token response
+			// omits `scope` entirely instead of emitting `scope: ""` (which
+			// consumers can't distinguish from "scope claim omitted").
+			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
+
+			const accessToken = await generateToken(
+				{},
+				{
+					expiresIn: config.oauth.accessToken.expiresIn,
+					keyStore,
+					issuer,
+					audience,
+					subject: userId ?? null,
+					authorizedParty: client_id ?? null,
+					scope: scopeClaim,
+					tokenType: "at+jwt",
+				},
+			);
+			const refreshToken = await generateToken(
+				{ family_id: familyId },
+				{
+					expiresIn: config.oauth.refreshToken.expiresIn,
+					keyStore,
+					issuer,
+					audience,
+					subject: userId ?? null,
+					authorizedParty: client_id ?? null,
+					scope: scopeClaim,
+					tokenType: "rt+jwt",
+				},
+			);
+
+			// Register the initial refresh token in the store so the family is known
+			// from issuance. rotate(null, ...) is the initial-registration shape per
+			// RefreshTokenStoreBase§2.4; without this step the first rotation would
+			// observe an unknown previousJti and replay detection would be blind to
+			// attackers replaying the initial token.
+			if (deps.refreshTokenStore) {
+				const payload = decodeJwtPayload(refreshToken.token);
+				const jti = payload.jti as string | undefined;
+				const exp = payload.exp as number | undefined;
+				if (typeof jti === "string" && typeof exp === "number") {
+					// CP-16: fail-closed when the store is unavailable. If we cannot
+					// register the initial rt, we cannot guarantee replay detection
+					// for the family — serving a token whose replay-detection is
+					// blind would undermine the RFC 6819 §5.2.2.3 contract. Return
+					// a controlled 503 JSON so clients see a retryable error instead
+					// of an unhandled HTML 500 from express.
+					try {
+						await deps.refreshTokenStore.rotate(null, jti, familyId, new Date(exp * 1000));
+					} catch {
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "refresh token store unavailable",
+							},
+						};
+					}
+				}
+			}
+
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({
-						accessToken: await generateToken(
-							{},
-							{
-								expiresIn: config.oauth.accessToken.expiresIn,
-								keyStore,
-								issuer,
-								audience: client_id,
-								subject: userId ?? null,
-								authorizedParty: client_id ?? null,
-								scope: grantedScopes?.join(" ") ?? null,
-								tokenType: "at+jwt",
-							},
-						),
-						refreshToken: await generateToken(
-							{},
-							{
-								expiresIn: config.oauth.refreshToken.expiresIn,
-								keyStore,
-								issuer,
-								audience: client_id,
-								subject: userId ?? null,
-								authorizedParty: client_id ?? null,
-								scope: grantedScopes?.join(" ") ?? null,
-								tokenType: "rt+jwt",
-							},
-						),
-					}),
+					tokens: generateTokenResponse({ accessToken, refreshToken }),
 				},
 				sessionMutation: {
 					clear: ["code", "code_client_id", "code_redirect_uri", "granted_scopes"],
