@@ -26,6 +26,7 @@ import {
 	type KeyStore,
 	type PublicClient,
 	type RateLimiterBase,
+	type RefreshTokenStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
@@ -41,6 +42,8 @@ declare module "express-session" {
 		code_redirect_uri?: string;
 		granted_scopes?: string[];
 		isAuthenticated?: boolean;
+		/** UserSession ID — set by the federation callback hook or local login (`POST /session/login`) and preserved across session regeneration. */
+		sid?: string;
 	}
 }
 
@@ -60,6 +63,7 @@ export const createOAuthRouter = async (
 		rateLimiter,
 		auditSink,
 		grantPolicy,
+		refreshTokenStore,
 	}: {
 		passport: PassportStatic;
 		registry: GrantRegistry;
@@ -70,6 +74,7 @@ export const createOAuthRouter = async (
 		rateLimiter?: RateLimiterBase;
 		auditSink?: AuditSinkBase;
 		grantPolicy?: GrantPolicyHookBase;
+		refreshTokenStore?: RefreshTokenStoreBase;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
@@ -235,6 +240,49 @@ export const createOAuthRouter = async (
 						header.kid ?? keyStore.getSigningKidFallback(),
 					);
 					const { payload } = await jwtVerify(token, key);
+
+					// TODO-F-3: cascading revoke (RFC 7009 §2.1 SHOULD). When a refresh_token
+					// family has been revoked, all access_tokens minted under the same
+					// authorization grant must introspect as inactive. family_id claim is
+					// optional — legacy tokens without it still succeed (no cascade available).
+					const rawFamilyId = (payload as Record<string, unknown>).family_id;
+					const familyId =
+						typeof rawFamilyId === "string" && rawFamilyId.length > 0 ? rawFamilyId : null;
+					if (familyId !== null && refreshTokenStore) {
+						let revoked: boolean;
+						try {
+							revoked = await refreshTokenStore.isFamilyRevoked(familyId);
+						} catch (cause) {
+							// Fail-closed: RFC 7662 §2.2 defines `active: false` for revoked/invalid tokens.
+							// When we cannot determine family revocation state, prefer inactive over active
+							// (and over a 5xx) — introspect's response shape has no "temporarily_unavailable"
+							// equivalent, so inactive keeps resource servers on the safe side of the scope gate.
+							// Note: Tasks 3/4 use 503 temporarily_unavailable for store failures, but RFC 7662
+							// has no such slot for introspect responses — inactive is the only safe fallback.
+							emitAuditEvent(auditSink, {
+								timestamp: new Date(),
+								type: "introspect.store_unavailable",
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								details: {
+									family_id: familyId,
+									error: cause instanceof Error ? cause.message : String(cause),
+								},
+							});
+							return res.status(200).json({ active: false });
+						}
+						if (revoked) {
+							emitAuditEvent(auditSink, {
+								timestamp: new Date(),
+								type: "introspect.family_revoked",
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								details: { family_id: familyId },
+							});
+							return res.status(200).json({ active: false });
+						}
+					}
+
 					const { exp, iat, iss, aud, sub } = payload;
 					const claims = payload as Record<string, unknown>;
 					const azp = typeof claims.azp === "string" ? claims.azp : undefined;
@@ -481,6 +529,9 @@ export const createOAuthRouter = async (
 						redirect_uri,
 						grantedScope: scopeForPersist,
 						grantedAudience: audienceForPersist,
+						// NEW (TODO-F-3): OIDC round-trip state on the code record.
+						nonce: typeof req.query.nonce === "string" ? req.query.nonce : undefined,
+						sid: typeof req.session?.sid === "string" ? req.session.sid : undefined,
 					});
 				} catch {
 					return redirectError(

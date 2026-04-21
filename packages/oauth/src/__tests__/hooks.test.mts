@@ -551,6 +551,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				code: "code-xyz",
 				redirect_uri: "https://example.test/cb",
 				grantedScope: ["read"],
+				sid: "test-sid-1",
 			};
 			const codeRepo: CodeRepository = {
 				createCode: async () => persistedCode,

@@ -31,6 +31,10 @@ export interface CodeData {
 	code_challenge?: string;
 	code_challenge_method?: string;
 	redirect_uri?: string;
+	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
+	// These fields are persisted at /authorize and read at /token.
+	nonce?: string;
+	sid?: string;
 }
 
 export interface Code extends CodeData {

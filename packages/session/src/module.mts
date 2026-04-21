@@ -58,6 +58,8 @@ type SessionModuleInternalOptions = SessionModuleOptions & {
 	_federationFactory?: FederationProviderFactory;
 	/** For testing only — replace createPassport to capture call arguments. */
 	_createPassport?: typeof createPassport;
+	/** For testing only — replace sessionRoutes.createRouter to capture call arguments. */
+	_createSessionRouter?: typeof sessionRoutes.createRouter;
 };
 
 /**
@@ -179,11 +181,14 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 		});
 
 		// Mount session routes
+		const _csr = params._createSessionRouter ?? sessionRoutes.createRouter;
 		context.router.use(
 			"/session",
-			sessionRoutes.createRouter(express, {
+			_csr(express, {
 				passport,
 				config,
+				userSessionStore: context.userSessionStore,
+				sessionTtlMs: params.sessionTtlMs,
 			}),
 		);
 
