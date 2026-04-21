@@ -25,10 +25,13 @@ describe("encryptTokenField / decryptTokenField", () => {
 	it("tampering fails authentication", () => {
 		const ct = encryptTokenField(plaintext, key);
 		const parts = ct.split(".");
+		expect(parts).toHaveLength(4);
+		const [ver, iv, ct0, tag] = parts as [string, string, string, string];
 		// Flip one bit in the ciphertext section.
-		const ctBuf = Buffer.from(parts[2]!, "base64url");
-		ctBuf[0] = ctBuf[0]! ^ 0x01;
-		const tampered = [parts[0], parts[1], ctBuf.toString("base64url"), parts[3]].join(".");
+		const ctBuf = Buffer.from(ct0, "base64url");
+		const first = ctBuf[0] ?? 0;
+		ctBuf[0] = first ^ 0x01;
+		const tampered = [ver, iv, ctBuf.toString("base64url"), tag].join(".");
 		expect(() => decryptTokenField(tampered, key)).toThrow();
 	});
 

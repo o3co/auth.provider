@@ -56,7 +56,9 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 			encryption: { mode: "required", key: encryptionKey },
 		});
 		await store.attach("sid-1", "google", tokens);
-		const raw = [...redis.data.values()][0]!;
+		const values = [...redis.data.values()];
+		expect(values).toHaveLength(1);
+		const raw = values[0] as string;
 		expect(raw).not.toContain("rt-secret");
 		// round-trip
 		expect(await store.get("sid-1", "google")).toEqual(tokens);
@@ -98,7 +100,9 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 			encryption: { mode: "allow-plaintext" },
 		});
 		await store.attach("sid-1", "google", tokens);
-		const raw = [...redis.data.values()][0]!;
+		const values = [...redis.data.values()];
+		expect(values).toHaveLength(1);
+		const raw = values[0] as string;
 		expect(raw).toContain("rt-secret");
 		expect(await store.get("sid-1", "google")).toEqual(tokens);
 	});

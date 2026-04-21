@@ -28,11 +28,17 @@ export function decryptTokenField(envelope: string, key: Buffer): string {
 	if (key.length !== KEY_LEN) throw new Error(`encryption key must be ${KEY_LEN} bytes`);
 	const parts = envelope.split(".");
 	if (parts.length !== 4) throw new Error("invalid envelope format");
-	const [ver, ivB64, ctB64, tagB64] = parts;
+	const ver = parts[0];
+	const ivB64 = parts[1];
+	const ctB64 = parts[2];
+	const tagB64 = parts[3];
+	if (ver === undefined || ivB64 === undefined || ctB64 === undefined || tagB64 === undefined) {
+		throw new Error("invalid envelope format");
+	}
 	if (ver !== VERSION) throw new Error(`unsupported envelope version: ${ver}`);
-	const iv = Buffer.from(ivB64!, "base64url");
-	const ct = Buffer.from(ctB64!, "base64url");
-	const tag = Buffer.from(tagB64!, "base64url");
+	const iv = Buffer.from(ivB64, "base64url");
+	const ct = Buffer.from(ctB64, "base64url");
+	const tag = Buffer.from(tagB64, "base64url");
 	const decipher = createDecipheriv(ALGO, key, iv);
 	decipher.setAuthTag(tag);
 	const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
