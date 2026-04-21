@@ -496,6 +496,44 @@ const clientRepo = new InMemoryClientRepository(clients);
 const userRepo = new InMemoryUserRepository(users);
 ```
 
+### 拡張ポイント (v0.4.0)
+
+v0.4.0 で追加された 5 つの拡張ポイント (詳細:
+`.claude/superpowers/specs/2026-04-21-extension-surface-decisions-design.md`)。
+
+#### MFA
+
+- `MfaProviderBase` と optional な `SupportsEnrollment` / `SupportsRevocation` capability
+- Factory: `createMfaProviderFactory()`、type guard は `supportsEnrollment()` / `supportsRevocation()`
+- Flow: `/oauth/authorize` と `/auth/federation/callback` が `MfaCoordinator.listEnrolled(userId)` を参照。MFA 必要時は `MfaTransactionStore` に transaction を保存、user は `POST /auth/mfa/verify { transaction_id, proof }` を submit、core は `providerKind` で provider に dispatch
+- v0.4.0 では built-in provider 同梱なし — TOTP / WebAuthn / backup codes は後続 spec で提供予定
+
+#### Audit (監査ログ)
+
+- `AuditSinkBase.record(event)` は fire-and-forget
+- Factory: `createAuditSinkFactory()`、built-in `"console"` は `registerBuiltinAuditSinks()` で登録
+- Sink のエラーは core 側で握りつぶす — audit 失敗で認証フローがブロックされることはない
+
+#### Rate limiter
+
+- `RateLimiterBase.check(key, ctx)` で atomic check + increment
+- Factory: `createRateLimiterFactory()`、built-in `"memory"` と `"redis"` は `registerBuiltinRateLimiters()` で登録
+- deny 時には core が 429 + `Retry-After` header で応答
+
+#### RefreshTokenStore (RFC 6819 §5.2.2.3 replay 検出)
+
+- `RefreshTokenStoreBase.rotate(previousJti, newJti, familyId, expiresAt)` は atomic primitive
+- 全 `rt+jwt` token は `family_id` claim を常に含む (後方互換性あり)
+- Optional: `AppOptions.refreshTokenStore` を設定すると replay 検出 + family revocation が有効化される
+
+#### GrantPolicyHook (scope / audience / token exchange policy)
+
+- `GrantPolicyHookBase.evaluate(request, ctx)` は allow (narrowing 可) / deny を返す
+- `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用 (authorization_code flow では再評価しない)
+- その他 grant (refresh / client_credentials / did / token-exchange) は token endpoint で評価
+
+全 adapter は optional — 未設定時は no-op default。
+
 ## 関連
 
 - ルート [README](../../README.md) — アーキテクチャ概要、設定リファレンス、Docker セットアップ

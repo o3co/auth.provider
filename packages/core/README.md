@@ -497,6 +497,44 @@ const clientRepo = new InMemoryClientRepository(clients);
 const userRepo = new InMemoryUserRepository(users);
 ```
 
+### Extension points (v0.4.0)
+
+Five extension points introduced in v0.4.0 (see
+`.claude/superpowers/specs/2026-04-21-extension-surface-decisions-design.md`).
+
+#### MFA
+
+- `MfaProviderBase`, optional `SupportsEnrollment` / `SupportsRevocation` capabilities
+- Factory: `createMfaProviderFactory()`, type guards `supportsEnrollment()` / `supportsRevocation()`
+- Flow: `/oauth/authorize` + `/auth/federation/callback` consult `MfaCoordinator.listEnrolled(userId)`; on MFA required, transaction saved via `MfaTransactionStore`, user posts to `POST /auth/mfa/verify { transaction_id, proof }`, core dispatches via `providerKind`
+- No built-in providers in v0.4.0 — TOTP / WebAuthn / backup codes ship in later spec
+
+#### Audit
+
+- `AuditSinkBase.record(event)` fire-and-forget
+- Factory: `createAuditSinkFactory()`, built-in `"console"` via `registerBuiltinAuditSinks()`
+- Errors swallowed by core — audit failure never blocks auth flow
+
+#### Rate limiter
+
+- `RateLimiterBase.check(key, ctx)` atomic check + increment
+- Factory: `createRateLimiterFactory()`, built-in `"memory"` and `"redis"` via `registerBuiltinRateLimiters()`
+- 429 + `Retry-After` emitted by core on denial
+
+#### RefreshTokenStore (RFC 6819 §5.2.2.3 replay detection)
+
+- `RefreshTokenStoreBase.rotate(previousJti, newJti, familyId, expiresAt)` atomic primitive
+- All `rt+jwt` tokens carry `family_id` claim (always emitted, backward-compatible)
+- Optional: set `AppOptions.refreshTokenStore` to enable replay detection + family revocation
+
+#### GrantPolicyHook (scope / audience / token exchange policy)
+
+- `GrantPolicyHookBase.evaluate(request, ctx)` returns allow (with optional narrowing) or deny
+- `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
+- Other grants (refresh / client_credentials / did / token-exchange) evaluate at the token endpoint
+
+All five adapters are optional — absence = no-op default.
+
 ## See Also
 
 - Root [README](../../README.md) — architecture overview, configuration reference, Docker setup
