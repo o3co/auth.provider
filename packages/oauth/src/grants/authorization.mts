@@ -213,6 +213,23 @@ export const createAuthorizationGrant = (
 				}
 			}
 
+			// TODO-F-3: sid is required on the code record — it is written at /authorize
+			// time by the login/federation callback wiring (Task 2). A missing sid means
+			// the operator has not yet deployed the F-2 login wiring; fail with a clear
+			// error so the misconfiguration is surfaced immediately rather than silently
+			// producing tokens without a session link.
+			const sid = codeData.sid;
+			if (!sid) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription:
+							"code record is missing session identifier (sid) — ensure login wiring records sid at authorize time",
+					},
+				};
+			}
+
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
@@ -234,8 +251,11 @@ export const createAuthorizationGrant = (
 			// consumers can't distinguish from "scope claim omitted").
 			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
 
+			// TODO-F-3: both access_token and refresh_token carry family_id + sid so
+			// introspect (Task 5) and refresh (Task 4) can propagate them without
+			// re-reading the session store on every request.
 			const accessToken = await generateToken(
-				{},
+				{ family_id: familyId, sid },
 				{
 					expiresIn: config.oauth.accessToken.expiresIn,
 					keyStore,
@@ -248,7 +268,7 @@ export const createAuthorizationGrant = (
 				},
 			);
 			const refreshToken = await generateToken(
-				{ family_id: familyId },
+				{ family_id: familyId, sid },
 				{
 					expiresIn: config.oauth.refreshToken.expiresIn,
 					keyStore,
@@ -288,6 +308,33 @@ export const createAuthorizationGrant = (
 							},
 						};
 					}
+				}
+			}
+
+			// TODO-F-3: link the new token family to the user session and register
+			// the RP for back/front-channel logout. Both calls are fail-closed: if the
+			// session store is unavailable, return 503 rather than issuing tokens that
+			// are invisible to logout orchestration.
+			if (deps.userSessionStore) {
+				const clientRecord = await clientRepository.findById(client_id ?? "");
+				try {
+					await deps.userSessionStore.linkFamily(sid, familyId);
+					await deps.userSessionStore.registerRP(sid, {
+						clientId: client_id ?? "",
+						backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
+							?.backchannelLogoutUri as string | undefined,
+						frontchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
+							?.frontchannelLogoutUri as string | undefined,
+						registeredAt: new Date(),
+					});
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session store unavailable",
+						},
+					};
 				}
 			}
 

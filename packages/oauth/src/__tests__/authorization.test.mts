@@ -125,7 +125,7 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("returns 200 with access and refresh tokens on valid code exchange (no PKCE)", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1" },
@@ -171,7 +171,7 @@ describe("createAuthorizationGrant", () => {
 				async revokeFamily() {},
 			};
 			const deps = {
-				...makeDeps(vi.fn().mockResolvedValue({ code: "abc" })),
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
 				refreshTokenStore,
 			};
 			const handler = createAuthorizationGrant(deps);
@@ -218,7 +218,7 @@ describe("createAuthorizationGrant", () => {
 				async revokeFamily() {},
 			};
 			const deps = {
-				...makeDeps(vi.fn().mockResolvedValue({ code: "abc" })),
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
 				refreshTokenStore: throwingStore,
 			};
 			const handler = createAuthorizationGrant(deps);
@@ -241,7 +241,7 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("skips initial-register when no refreshTokenStore is configured (CP-2 graceful)", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
 				body: { code: "abc", client_id: "client1" },
@@ -258,7 +258,7 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("issues an initial rt+jwt carrying a new family_id (C-3)", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1" },
@@ -288,7 +288,7 @@ describe("createAuthorizationGrant", () => {
 
 		it("omits scope from token response when granted scopes is empty (CP-12)", async () => {
 			// Code has neither grantedScope nor session.granted_scopes.
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
 				body: { code: "abc", client_id: "client1" },
@@ -315,7 +315,11 @@ describe("createAuthorizationGrant", () => {
 		it("omits scope when Code.grantedScope is explicitly empty (CP-12)", async () => {
 			// Even if persisted as [], code exchange must not emit `scope: ""`.
 			const deps = makeDeps(
-				vi.fn().mockResolvedValue({ code: "abc", grantedScope: [] as readonly string[] }),
+				vi.fn().mockResolvedValue({
+					code: "abc",
+					sid: "test-sid-1",
+					grantedScope: [] as readonly string[],
+				}),
 			);
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
@@ -408,6 +412,7 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					sid: "test-sid-1",
 					code_challenge: challenge,
 					code_challenge_method: "S256",
 				}),
@@ -430,6 +435,7 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					sid: "test-sid-1",
 					code_challenge: verifier,
 					code_challenge_method: "plain",
 				}),
@@ -507,6 +513,7 @@ describe("createAuthorizationGrant", () => {
 					codeRepository: {
 						consumeByCode: vi.fn().mockResolvedValue({
 							code: "abc",
+							sid: "test-sid-1",
 							code_challenge: challenge,
 							code_challenge_method: "S256",
 						}),
@@ -585,6 +592,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
+						sid: "test-sid-1",
 						redirect_uri: "https://example.com/callback",
 					}),
 				);
@@ -609,6 +617,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
+						sid: "test-sid-1",
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -663,7 +672,10 @@ describe("createAuthorizationGrant", () => {
 						allowedScopes: [],
 					}),
 				};
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }), clientRepo);
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }),
+					clientRepo,
+				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1", client_secret: "correct-secret" },
@@ -687,7 +699,10 @@ describe("createAuthorizationGrant", () => {
 					}),
 					authenticate: vi.fn().mockResolvedValue(null),
 				};
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }), clientRepo);
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }),
+					clientRepo,
+				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
 					body: { code: "abc", client_id: "client1" }, // no client_secret
@@ -790,6 +805,7 @@ describe("createAuthorizationGrant", () => {
 					codeRepository: {
 						consumeByCode: vi.fn().mockResolvedValue({
 							code: "abc",
+							sid: "test-sid-1",
 							// no code_challenge_method
 						}),
 						createCode: vi.fn(),
@@ -809,6 +825,131 @@ describe("createAuthorizationGrant", () => {
 				const { result } = await handler.handle(ctx);
 
 				expect(result.status).toBe(200);
+			});
+		});
+
+		describe("TODO-F-3: family_id + sid claims, RP registration", () => {
+			it("happy path: access_token and refresh_token both carry family_id and sid claims (F-3-1)", async () => {
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" }));
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						granted_scopes: ["read"],
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+
+				const decodedAt = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+				expect(typeof decodedAt.family_id).toBe("string");
+				expect(decodedAt.family_id as string).toMatch(
+					/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+				);
+				expect(decodedAt.sid).toBe("session-abc");
+
+				const refreshToken = result.tokens.refresh_token;
+				if (typeof refreshToken !== "string") throw new Error("expected refresh_token string");
+				const decodedRt = decodeJwt(refreshToken) as Record<string, unknown>;
+				expect(decodedRt.family_id).toBe(decodedAt.family_id);
+				expect(decodedRt.sid).toBe("session-abc");
+			});
+
+			it("returns 400 invalid_grant when code record has no sid (F-3-2)", async () => {
+				// Code was issued before Task 2 login wiring — sid missing.
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" /* no sid */ }));
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(400);
+				if (!("error" in result)) throw new Error("expected error");
+				expect(result.error).toBe("invalid_grant");
+				expect((result as { errorDescription?: string }).errorDescription).toMatch(/sid/);
+			});
+
+			it("calls linkFamily and registerRP when userSessionStore is wired (F-3-3)", async () => {
+				const linkFamilySpy = vi.fn(async (_sid: string, _fam: string) => {});
+				const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown) => {});
+				const userSessionStore = {
+					kind: "spy",
+					linkFamily: linkFamilySpy,
+					registerRP: registerRPSpy,
+					async create() {},
+					async get() {
+						return null;
+					},
+					async updateClaims() {},
+					async removeFederation() {},
+					async delete() {},
+				};
+				const deps = {
+					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz" })),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						granted_scopes: ["read"],
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				expect(linkFamilySpy).toHaveBeenCalledTimes(1);
+				const [sidArg, familyIdArg] = linkFamilySpy.mock.calls[0] as [string, string];
+				expect(sidArg).toBe("session-xyz");
+				expect(familyIdArg).toMatch(
+					/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+				);
+				expect(registerRPSpy).toHaveBeenCalledTimes(1);
+				const [rpSid, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>];
+				expect(rpSid).toBe("session-xyz");
+				expect(rpData.clientId).toBe("client1");
+				expect(rpData.registeredAt).toBeInstanceOf(Date);
+			});
+
+			it("backward compat: issues tokens without userSessionStore (F-3-4)", async () => {
+				// No userSessionStore in deps — grant must succeed without linkFamily/registerRP.
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" }));
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						granted_scopes: ["read"],
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				// Tokens must still carry family_id and sid even without a session store.
+				const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+				expect(typeof decoded.family_id).toBe("string");
+				expect(decoded.sid).toBe("session-abc");
 			});
 		});
 	});
