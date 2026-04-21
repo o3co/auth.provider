@@ -12,14 +12,11 @@ import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { createInMemoryUserSessionStore } from "./adapters/memory.mjs";
 import type { UserSessionStoreBase, UserSessionStoreFactory } from "./types.mjs";
 
-export function createUserSessionStoreFactory(): UserSessionStoreFactory & { kind: string } {
-	const factory = createAdapterFactory<UserSessionStoreBase>("userSessionStore");
-	return Object.assign(factory, { kind: "userSessionStore" });
+export function createUserSessionStoreFactory(): UserSessionStoreFactory {
+	return createAdapterFactory<UserSessionStoreBase>("userSessionStore");
 }
 
-export function registerBuiltinUserSessionStores(
-	factory: UserSessionStoreFactory,
-): void {
+export function registerBuiltinUserSessionStores(factory: UserSessionStoreFactory): void {
 	factory.register("memory", () => createInMemoryUserSessionStore());
 }
 

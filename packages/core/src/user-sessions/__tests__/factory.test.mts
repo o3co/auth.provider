@@ -15,9 +15,10 @@ import {
 } from "../factory.mjs";
 
 describe("UserSessionStoreFactory", () => {
-	it("kind of the factory is 'userSessionStore'", () => {
+	it("registerBuiltinUserSessionStores registers the 'memory' type", () => {
 		const f = createUserSessionStoreFactory();
-		expect(f.kind).toBe("userSessionStore");
+		registerBuiltinUserSessionStores(f);
+		expect(f.registeredTypes()).toContain("memory");
 	});
 
 	it("built-in memory adapter is creatable", async () => {
@@ -27,9 +28,9 @@ describe("UserSessionStoreFactory", () => {
 		expect(store.kind).toBe("memory");
 	});
 
-	it("unknown type throws AdapterFactoryError", async () => {
+	it("unknown type throws AdapterFactoryError with UserSessionStore context", async () => {
 		const f = createUserSessionStoreFactory();
 		registerBuiltinUserSessionStores(f);
-		await expect(f.create({ type: "unknown" })).rejects.toThrow(/unknown/);
+		await expect(f.create({ type: "unknown" })).rejects.toThrow(/userSessionStore/);
 	});
 });
