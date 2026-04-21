@@ -55,6 +55,9 @@ function makeUserSessionStore(): UserSessionStoreBase & { sessions: unknown[] } 
  *
  * The passport stub short-circuits authenticate("local", …) by immediately
  * calling next() after setting req.user — simulating a successful local login.
+ *
+ * Returns `capturedSession`: a ref populated by a post-router middleware so
+ * tests can assert on `req.session` fields (e.g. `sid`) after a response.
  */
 function buildApp(
 	opts: {
@@ -111,8 +114,20 @@ function buildApp(
 		...(sessionTtlMs !== undefined ? { sessionTtlMs } : {}),
 	});
 
+	// Pre-router middleware: register a res.on('finish') listener before the route
+	// handler runs. When the route sends its response, finish fires and we snapshot
+	// req.session (which has already been mutated by the regenerate callback).
+	const capturedSession: { current: Record<string, unknown> | null } = { current: null };
+	app.use("/session", (req, res, next) => {
+		res.on("finish", () => {
+			capturedSession.current = (req as unknown as { session: Record<string, unknown> }).session;
+		});
+		next();
+	});
+
 	app.use("/session", router);
-	return { app, passportStub };
+
+	return { app, passportStub, capturedSession };
 }
 
 describe("Session routes — POST /session/login", () => {
@@ -120,17 +135,12 @@ describe("Session routes — POST /session/login", () => {
 		it("creates a UserSession record and sets req.session.sid when userSessionStore is wired", async () => {
 			const store = makeUserSessionStore();
 
-			// Intercept the response to capture req.session.sid via a custom middleware
-			// placed after the router — we do this by inspecting the store instead.
-			const { app } = buildApp({
+			const { app, capturedSession } = buildApp({
 				userSessionStore: store,
 				sessionTtlMs: 3600_000,
 				user: { id: "u-local-1", username: "alice", email: "alice@example.com", name: "Alice" },
 			});
 
-			// Also intercept to capture sid set on session post-response
-			// We'll verify via the store record that has the sid, then rely on the
-			// store.sessions array.
 			const res = await request(app)
 				.post("/session/login")
 				.send("username=alice&password=secret")
@@ -144,7 +154,7 @@ describe("Session routes — POST /session/login", () => {
 			const saved = store.sessions[0] as {
 				sid: string;
 				sub: string;
-				federations: unknown;
+				federations: unknown[];
 				claims: Record<string, unknown>;
 				authTime: unknown;
 				expiresAt: unknown;
@@ -157,9 +167,9 @@ describe("Session routes — POST /session/login", () => {
 			// sub matches user.id
 			expect(saved.sub).toBe("u-local-1");
 
-			// federations defaults to [] (not required by CreateUserSessionInput — store initialises it)
-			// The implementation passes federations: [] explicitly; assert it's empty.
-			expect(saved.federations ?? []).toEqual([]);
+			// federations is explicitly set to [] — assert directly (no ?? fallback)
+			// so a regression where the field is omitted would be caught.
+			expect(saved.federations).toEqual([]);
 
 			// claims extracted from user
 			expect(saved.claims).toMatchObject({
@@ -170,6 +180,12 @@ describe("Session routes — POST /session/login", () => {
 			// authTime and expiresAt are Date instances (or ISO strings from structuredClone)
 			expect(saved.authTime).toBeTruthy();
 			expect(saved.expiresAt).toBeTruthy();
+
+			// I2: req.session.sid must equal the store's sid after regenerate completes.
+			// capturedSession.current is populated by the res.on('finish') listener
+			// registered before the router, guaranteeing it reflects post-regenerate state.
+			expect(capturedSession.current).not.toBeNull();
+			expect(capturedSession.current?.sid).toBe(saved.sid);
 		});
 
 		it("does not crash and does not create a UserSession when userSessionStore is not wired (backward compat)", async () => {

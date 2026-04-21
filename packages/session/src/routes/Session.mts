@@ -30,6 +30,8 @@ declare module "express-session" {
 		isAuthenticated?: boolean;
 		user?: Record<string, unknown>;
 		redirectTo?: string;
+		/** UserSession ID — set by local login and preserved across session regeneration. */
+		sid?: string;
 	}
 }
 
@@ -155,6 +157,14 @@ export const createRouter = (
 
 				req.session.regenerate((err: Error | null) => {
 					if (err) {
+						// Best-effort rollback: UserSession was created but session regeneration failed.
+						// Delete the orphan record so it doesn't leak. Ignore cleanup errors — the
+						// primary error is already being returned to the caller.
+						if (sid && userSessionStore) {
+							userSessionStore.delete(sid).catch(() => {
+								/* best-effort cleanup */
+							});
+						}
 						return res.status(500).json({ message: "Error regenerating session" });
 					}
 					req.session.isAuthenticated = true;

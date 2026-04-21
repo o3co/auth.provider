@@ -373,6 +373,61 @@ describe("sessionModule", () => {
 		});
 	});
 
+	it("forwards userSessionStore and sessionTtlMs to sessionRoutes.createRouter", async () => {
+		// C1: module.mts must thread context.userSessionStore and params.sessionTtlMs to
+		// sessionRoutes.createRouter so the local login handler can create UserSession records.
+		const userSessionStore: UserSessionStoreBase = {
+			create: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+			list: vi.fn(),
+		} as unknown as UserSessionStoreBase;
+
+		let capturedRouterOptions: Record<string, unknown> | undefined;
+		// Stub router so init() can proceed without a real express app.
+		const routerStub = { use: vi.fn().mockReturnThis() } as unknown as import("express").Router;
+		const createSessionRouterSpy = vi
+			.fn()
+			.mockImplementation((_, opts: Record<string, unknown>) => {
+				capturedRouterOptions = opts;
+				return routerStub;
+			});
+
+		// Provide a full passport stub so route mounting works.
+		const passportStub = {
+			serializeUser: vi.fn(),
+			deserializeUser: vi.fn(),
+			use: vi.fn(),
+			initialize: vi.fn().mockReturnValue(vi.fn()),
+			session: vi.fn().mockReturnValue(vi.fn()),
+			authenticate: vi.fn().mockReturnValue(vi.fn()),
+		};
+		const createPassportSpy = vi.fn().mockResolvedValue(passportStub);
+
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as import("express").Router;
+		const ctx = makeContext({ router: routerMock, userSessionStore });
+
+		const module = _sessionModuleImpl({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			sessionTtlMs: 7200_000,
+			_createPassport:
+				createPassportSpy as unknown as typeof import("#/passport.mjs").createPassport,
+			_createSessionRouter:
+				createSessionRouterSpy as unknown as typeof import("#/routes/Session.mjs").createRouter,
+		});
+
+		await module.init(ctx);
+
+		expect(createSessionRouterSpy).toHaveBeenCalledTimes(1);
+		expect(capturedRouterOptions).toMatchObject({
+			userSessionStore,
+			sessionTtlMs: 7200_000,
+		});
+	});
+
 	it("injects name and context fields into builder config", async () => {
 		const factory = {
 			create: vi.fn().mockResolvedValue({
