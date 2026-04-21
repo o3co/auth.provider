@@ -214,8 +214,9 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			}
 
 			const tokenPayloadClaims = tokenPayload as Record<string, unknown>;
+			const familyIdRaw = tokenPayloadClaims.family_id;
 			const familyId =
-				typeof tokenPayloadClaims.family_id === "string" ? tokenPayloadClaims.family_id : null;
+				typeof familyIdRaw === "string" && familyIdRaw.length > 0 ? familyIdRaw : null;
 			const sidRaw = tokenPayloadClaims.sid;
 			const sid = typeof sidRaw === "string" && sidRaw.length > 0 ? sidRaw : undefined;
 			const previousJti =

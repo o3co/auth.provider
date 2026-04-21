@@ -547,7 +547,7 @@ Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_to
 
 **F-3 consumers activated.** `CodeData` now carries two optional fields wired by the login paths:
 
-- `nonce?` — OIDC nonce forwarded from the authorization request, propagated into access tokens and refresh tokens.
+- `nonce?` — OIDC nonce forwarded from the authorization request, persisted on the code record for later `id_token`/`userinfo` use.
 - `sid?` — Session ID (`UserSession.id`) written by the login handler and used to bind minted tokens to the session.
 
 The `CodeRepository.createCode` params and `InMemoryCodeRepository` accept `nonce`, `sid`, and `grantedScope` in the same call. Consumers (the `authorization_code` grant) read `codeData.grantedScope` (set by `GrantPolicyHook` at `/oauth/authorize`) as the authoritative scope for token minting instead of `session.granted_scopes`.

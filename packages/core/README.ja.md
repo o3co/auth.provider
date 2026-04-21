@@ -546,7 +546,7 @@ Federation + OIDC 対応のために `AppOptions` に追加された 2 つのオ
 
 **F-3 での consumer 有効化。** `CodeData` にログインパスが書き込む 2 つのオプションフィールドが追加された:
 
-- `nonce?` — 認可リクエストから転送される OIDC nonce。アクセストークンおよびリフレッシュトークンに伝播される。
+- `nonce?` — 認可リクエストから転送される OIDC nonce。コードレコードに保存され、後続の `id_token` / `/userinfo` 向け処理で参照できるように保持される。
 - `sid?` — ログインハンドラーが書き込むセッション ID（`UserSession.id`）。発行したトークンをセッションに紐付けるために使用される。
 
 `CodeRepository.createCode` のパラメーターと `InMemoryCodeRepository` は同一の呼び出しで `nonce`、`sid`、`grantedScope` を受け付ける。consumer（`authorization_code` grant）は、`session.granted_scopes` の代わりに、`/oauth/authorize` 時に `GrantPolicyHook` が設定した `codeData.grantedScope` をトークン発行のスコープとして使用する。
