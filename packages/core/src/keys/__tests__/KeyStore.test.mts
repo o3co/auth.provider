@@ -42,7 +42,7 @@ describe("SymmetricKeyStore", () => {
 
 	it("accepts custom kid", () => {
 		const ks = createSymmetricKeyStore("test-secret", "custom-kid");
-		expect(ks.getCurrentKid()).toBe("custom-kid");
+		expect(ks.getSigningKidFallback()).toBe("custom-kid");
 	});
 
 	it("getVerificationKey returns key for current kid", async () => {
@@ -85,9 +85,9 @@ describe("SymmetricKeyStore", () => {
 		expect(header.typ).toBe("at+jwt");
 	});
 
-	it("getCurrentKid returns the current signing kid", () => {
+	it("getSigningKidFallback returns the current signing kid", () => {
 		const ks = createSymmetricKeyStore("x", "my-kid");
-		expect(ks.getCurrentKid()).toBe("my-kid");
+		expect(ks.getSigningKidFallback()).toBe("my-kid");
 	});
 });
 
@@ -106,7 +106,7 @@ describe("AsymmetricKeyStore", () => {
 		});
 
 		expect(store.algorithm).toBe(alg);
-		expect(store.getCurrentKid()).toBe("k1");
+		expect(store.getSigningKidFallback()).toBe("k1");
 
 		const token = await store.sign({ claims: { sub: "user1" } });
 		const header = decodeProtectedHeader(token);
@@ -279,7 +279,7 @@ describe("AsymmetricKeyStore", () => {
 		expect(payload.sub).toBe("carol");
 	});
 
-	it("getCurrentKid returns the current signing kid", async () => {
+	it("getSigningKidFallback returns the current signing kid", async () => {
 		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
 		const store = await createAsymmetricKeyStore({
 			algorithm: "ES256",
@@ -287,7 +287,7 @@ describe("AsymmetricKeyStore", () => {
 			privateKeyPem,
 			publicKeyPem,
 		});
-		expect(store.getCurrentKid()).toBe("k-current-only");
+		expect(store.getSigningKidFallback()).toBe("k-current-only");
 	});
 
 	it("throws for expired kid", async () => {

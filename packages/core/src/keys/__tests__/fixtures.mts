@@ -42,7 +42,7 @@ export function createTestKeyStore(options: TestKeyStoreOptions): KeyStore {
 		async sign(opts) {
 			return signer(opts);
 		},
-		getCurrentKid() {
+		getSigningKidFallback() {
 			return kid;
 		},
 		async getVerificationKey(requestedKid) {

@@ -158,7 +158,7 @@ function formatObject<T extends object>(data: T): Partial<T>;
 
 ### キーストア
 
-`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を抽象化し、`previousKeys` によるキーローテーションをサポートします。`sign(options)` は compact JWT を返す。protected header の `alg` / `kid` は KeyStore 側で自動注入されるため、caller からの上書き不可。この契約により、private key を露出せずに remote-sign adapter (KMS/HSM) が `sign()` を実装できる。`getCurrentKid()` は `kid` header が欠落した legacy/malformed token の verify 用 fallback accessor。rotation-safe lookup には使わないこと (rotation 時は token 側の `kid` をそのまま `getVerificationKey(kid)` に渡す)。
+`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を抽象化し、`previousKeys` によるキーローテーションをサポートします。`sign(options)` は compact JWT を返す。protected header の `alg` / `kid` は KeyStore 側で自動注入されるため、caller からの上書き不可。この契約により、private key を露出せずに remote-sign adapter (KMS/HSM) が `sign()` を実装できる。`getSigningKidFallback()` は `kid` header が欠落した legacy/malformed token の verify 用に、現在の signing kid を返す fallback accessor。rotation-safe lookup には使わないこと (rotation 時は token 側の `kid` をそのまま `getVerificationKey(kid)` に渡す)。
 
 ```typescript
 type KeyLike = CryptoKey | KeyObject | Uint8Array;
@@ -188,7 +188,7 @@ interface SignJwtOptions {
 interface KeyStore {
   readonly algorithm: "HS256" | "RS256" | "ES256" | "EdDSA";
   sign(options: SignJwtOptions): Promise<string>;
-  getCurrentKid(): string;
+  getSigningKidFallback(): string;
   getVerificationKeys(): Promise<ManagedKey[]>;
   getVerificationKey(kid: string): Promise<KeyLike>;
 }

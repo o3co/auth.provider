@@ -62,8 +62,8 @@ export interface KeyStore {
 	 */
 	sign(options: SignJwtOptions): Promise<string>;
 	/**
-	 * Current signing kid. Intended as a fallback for verifying
-	 * legacy/malformed tokens missing a `kid` header. **Do not use for
+	 * Returns the current signing kid as a fallback for verifying
+	 * legacy/malformed tokens that lack a `kid` header. **Do not use for
 	 * rotation-safe lookup** — for rotation, pass the token's own `kid` to
 	 * `getVerificationKey(kid)`.
 	 *
@@ -71,7 +71,7 @@ export interface KeyStore {
 	 * must cache the current kid locally and return it without any remote
 	 * call. Never exposes private key material.
 	 */
-	getCurrentKid(): string;
+	getSigningKidFallback(): string;
 	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */
 	getVerificationKeys(): Promise<ManagedKey[]>;
 	/** Specific kid's public key. Throws on unknown or expired kid. */
@@ -127,7 +127,7 @@ export async function createAsymmetricKeyStore(
 				.sign(privateKey);
 		},
 
-		getCurrentKid(): string {
+		getSigningKidFallback(): string {
 			return kid;
 		},
 
@@ -169,7 +169,7 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 				.sign(secretKey);
 		},
 
-		getCurrentKid(): string {
+		getSigningKidFallback(): string {
 			return kid;
 		},
 
