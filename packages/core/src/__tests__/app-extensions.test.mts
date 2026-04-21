@@ -304,4 +304,54 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 			}),
 		).not.toThrow();
 	});
+
+	it('treats env-var string "true" as enabled and requires stores (pre-zod-coerce robustness)', () => {
+		const configWithEnvString = {
+			...mockConfig,
+			federations: {
+				google: { enabled: "true", clientId: "x", clientSecret: "y", callbackURL: "z" },
+			},
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithEnvString,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				// Both stores omitted — should throw.
+			}),
+		).toThrow(/federationTokenStore|userSessionStore/);
+	});
+
+	it('treats env-var string "1" as enabled', () => {
+		const configWithEnvOne = {
+			...mockConfig,
+			federations: { google: { enabled: "1", clientId: "x", clientSecret: "y", callbackURL: "z" } },
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithEnvOne,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).toThrow();
+	});
+
+	it('treats env-var string "false" as disabled (no stores required)', () => {
+		const configWithEnvFalse = {
+			...mockConfig,
+			federations: {
+				google: { enabled: "false", clientId: "x", clientSecret: "y", callbackURL: "z" },
+			},
+		} as unknown as AppConfig;
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithEnvFalse,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).not.toThrow();
+	});
 });

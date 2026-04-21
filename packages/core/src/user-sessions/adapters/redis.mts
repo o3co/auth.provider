@@ -97,10 +97,16 @@ export function createRedisUserSessionStore(
 		}
 	};
 
-	const writeEnvelope = async (env: Envelope, nx = false): Promise<string | null> => {
+	type WriteResult = "ok" | "nx_failed" | "ttl_expired";
+
+	const writeEnvelope = async (env: Envelope, nx = false): Promise<WriteResult> => {
 		const remaining = env.expiresAtMs - Date.now();
-		if (remaining <= 0) return null;
-		return opts.client.set(k(env.sid), JSON.stringify(env), { PX: remaining, NX: nx });
+		if (remaining <= 0) return "ttl_expired";
+		const result = await opts.client.set(k(env.sid), JSON.stringify(env), {
+			PX: remaining,
+			NX: nx,
+		});
+		return result === null ? "nx_failed" : "ok";
 	};
 
 	return {
@@ -126,7 +132,17 @@ export function createRedisUserSessionStore(
 				claims: { ...input.claims },
 			};
 			const result = await writeEnvelope(toEnvelope(session), true);
-			if (result === null) throw new Error(`UserSession ${input.sid} already exists`);
+			if (result === "nx_failed") {
+				throw new Error(`UserSession ${input.sid} already exists`);
+			}
+			if (result === "ttl_expired") {
+				// Upstream expiresAt > now check (above) should prevent this, but a
+				// small racy window (clock skew, slow call) can still hit it. Surface
+				// a clear error rather than a misleading "already exists".
+				throw new Error(
+					`UserSession ${input.sid}: expiresAt elapsed before Redis SET could run (clock skew or delay)`,
+				);
+			}
 		},
 		async get(sid) {
 			const env = await loadEnvelope(sid);

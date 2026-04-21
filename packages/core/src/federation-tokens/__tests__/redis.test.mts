@@ -92,6 +92,46 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 			}),
 		).toThrow(/encryption key/i);
 	});
+
+	it("rejects ttl: 0 at construction", () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: redis,
+				encryption: { mode: "allow-plaintext" },
+				ttl: 0,
+			}),
+		).toThrow(/ttl must be a positive finite number/i);
+	});
+
+	it("rejects ttl: -1 at construction", () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: redis,
+				encryption: { mode: "allow-plaintext" },
+				ttl: -1,
+			}),
+		).toThrow(/ttl must be a positive finite number/i);
+	});
+
+	it("rejects ttl: NaN at construction", () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: redis,
+				encryption: { mode: "allow-plaintext" },
+				ttl: Number.NaN,
+			}),
+		).toThrow(/ttl must be a positive finite number/i);
+	});
+
+	it("rejects ttl: Infinity at construction", () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: redis,
+				encryption: { mode: "allow-plaintext" },
+				ttl: Number.POSITIVE_INFINITY,
+			}),
+		).toThrow(/ttl must be a positive finite number/i);
+	});
 });
 
 describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {

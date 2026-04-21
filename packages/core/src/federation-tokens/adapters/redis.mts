@@ -59,7 +59,11 @@ export function createRedisFederationTokenStore(
 		throw new Error("FederationTokenStore redis: encryption key must be 32 bytes");
 	}
 	const prefix = opts.keyPrefix ?? "ft:";
-	const storeTtlMs = (opts.ttl ?? DEFAULT_TTL_SECONDS) * 1000;
+	const ttlSeconds = opts.ttl ?? DEFAULT_TTL_SECONDS;
+	if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+		throw new Error("FederationTokenStore redis: ttl must be a positive finite number of seconds");
+	}
+	const storeTtlMs = ttlSeconds * 1000;
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
 	const sidPattern = (sid: string) => `${prefix}${sid}:*`;
 

@@ -72,13 +72,24 @@ export function createApp(options: AppOptions): AppResult {
 	}
 
 	// Spec Section 10.1 — federations configured means stores are required.
-	// We detect configured federations by any entry with enabled === true.
+	// This runs BEFORE zod parsing, so `enabled` may still be a string from
+	// env-var overrides (HOCON substitutions emit `"true"`/`"1"`/etc.). Mirror
+	// `coerceBooleanFromEnv` semantics (Plan #3 schema) so the check does not
+	// miss federations that zod will later coerce to boolean true.
+	const isEnabledTruthy = (v: unknown): boolean => {
+		if (v === true) return true;
+		if (typeof v !== "string") return false;
+		const normalized = v.trim().toLowerCase();
+		return (
+			normalized === "true" || normalized === "1" || normalized === "yes" || normalized === "on"
+		);
+	};
 	const federationsCfg = (config as { federations?: Record<string, { enabled?: unknown }> })
 		.federations;
 	const federationsConfigured =
 		typeof federationsCfg === "object" &&
 		federationsCfg !== null &&
-		Object.values(federationsCfg).some((f) => f != null && f.enabled === true);
+		Object.values(federationsCfg).some((f) => f != null && isEnabledTruthy(f.enabled));
 
 	if (federationsConfigured && !options.federationTokenStore) {
 		throw new Error(
