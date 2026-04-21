@@ -37,9 +37,10 @@ export interface SetupPassportContext {
 	 * the legacy single-parameter `verifyUser(externalId)` flow.
 	 */
 	readonly onFederationCallback?: (params: {
-		federationName: string;
-		profile: FederationProfile;
-		done: (err: Error | null, user: User | false) => void;
+		readonly federationName: string;
+		readonly profile: FederationProfile;
+		readonly req: import("express").Request;
+		readonly done: (err: Error | null, user: User | false) => void;
 	}) => Promise<void>;
 }
 

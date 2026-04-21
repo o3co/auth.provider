@@ -93,8 +93,10 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 						clientSecret: config.clientSecret,
 						callbackURL: config.callbackURL,
 						scope: [...scope],
+						passReqToCallback: true,
 					},
 					async (
+						req: import("express").Request,
 						accessToken: string,
 						refreshToken: string | undefined,
 						profileRaw: { id: string } & Record<string, unknown>,
@@ -124,6 +126,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 								await ctx.onFederationCallback({
 									federationName: config.name,
 									profile,
+									req,
 									done: done as (err: Error | null, user: unknown) => void,
 								});
 							} catch (err) {

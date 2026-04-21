@@ -14,9 +14,21 @@
  * limitations under the License.
  */
 
-import type { PathResolver, UserRepository } from "@o3co/auth-provider-core";
+import { randomUUID } from "node:crypto";
+import {
+	extractUserClaims,
+	type FederationTokenStoreBase,
+	type PathResolver,
+	type UserRepository,
+	type UserSessionStoreBase,
+} from "@o3co/auth-provider-core";
 import type { PassportStatic } from "passport";
-import type { FederationProviderBase, SetupPassportContext } from "./federations/types.mjs";
+import {
+	type FederationProfile,
+	type FederationProviderBase,
+	type SetupPassportContext,
+	supportsClaimMapping,
+} from "./federations/types.mjs";
 
 declare global {
 	namespace Express {
@@ -28,7 +40,13 @@ export type CreatePassportOptions = {
 	pathResolver: PathResolver;
 	userRepository: UserRepository;
 	federationProviders: ReadonlyMap<string, FederationProviderBase>;
+	userSessionStore?: UserSessionStoreBase;
+	federationTokenStore?: FederationTokenStoreBase;
+	/** Session TTL in milliseconds. Default: 24h. */
+	sessionTtlMs?: number;
 };
+
+const DEFAULT_SESSION_TTL_MS = 86400_000;
 
 /**
  * Internal implementation — accepts an optional passport override for testing.
@@ -38,6 +56,9 @@ export const _createPassportImpl = async ({
 	pathResolver,
 	userRepository,
 	federationProviders,
+	userSessionStore,
+	federationTokenStore,
+	sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 	_passportOverride,
 }: CreatePassportOptions & {
 	/** For testing only — inject a passport stub to skip dynamic import. */
@@ -91,12 +112,62 @@ export const _createPassportImpl = async ({
 		),
 	);
 
+	// Build the built-in onFederationCallback only when BOTH stores are wired.
+	// When either store is absent the hook is left undefined so providers fall
+	// back to their legacy single-call verifyUser path.
+	const onFederationCallback =
+		userSessionStore && federationTokenStore
+			? async (params: {
+					federationName: string;
+					profile: FederationProfile;
+					req: import("express").Request;
+					done: (err: Error | null, user: unknown) => void;
+				}) => {
+					try {
+						const provider = federationProviders.get(params.federationName);
+						const mapped =
+							provider && supportsClaimMapping(provider) ? provider.mapClaims(params.profile) : {};
+						const user = await userRepository.authenticateByToken(
+							`${params.federationName}:${params.profile.id}`,
+						);
+						if (!user) {
+							params.done(null, false);
+							return;
+						}
+						const sid = randomUUID();
+						const claims = { ...extractUserClaims(user), ...mapped };
+						await userSessionStore.create({
+							sid,
+							sub: user.id,
+							authTime: new Date(),
+							expiresAt: new Date(Date.now() + sessionTtlMs),
+							federations: [params.federationName],
+							claims,
+						});
+						if (params.profile.accessToken) {
+							await federationTokenStore.attach(sid, params.federationName, {
+								accessToken: params.profile.accessToken,
+								refreshToken: params.profile.refreshToken,
+								idToken: params.profile.idToken,
+								expiresAt: new Date(Date.now() + (params.profile.expiresIn ?? 3600) * 1000),
+							});
+						}
+						const session = params.req.session as Record<string, unknown> | undefined;
+						if (session) session.sid = sid;
+						params.done(null, user as Record<string, unknown>);
+					} catch (err) {
+						params.done(err as Error, false);
+					}
+				}
+			: undefined;
+
 	// Build the setup context once: verifyUser delegates to userRepository so federation
 	// providers don't depend on the repo directly; pathResolver is forwarded for
 	// non-standard module layouts (Yarn PnP, custom require hooks).
 	const ctx: SetupPassportContext = {
 		verifyUser: (externalId: string) => userRepository.authenticateByToken(externalId),
 		pathResolver,
+		onFederationCallback,
 	};
 
 	// Register each enabled federation provider's passport strategy.

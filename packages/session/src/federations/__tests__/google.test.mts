@@ -121,9 +121,10 @@ describe("setupPassportStrategy", () => {
 		// Extract the verify callback passed to the GoogleStrategy constructor
 		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
 		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
-		// Invoke it with a mock profile
+		// Invoke it with a mock profile — passReqToCallback:true means req is the first arg
 		const done = vi.fn();
-		await verifyCallback("at", "rt", { id: "12345" }, done);
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", { id: "12345" }, done);
 		expect(verifyUser).toHaveBeenCalledWith("google:12345");
 	});
 

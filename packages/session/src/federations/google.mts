@@ -95,15 +95,16 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 						clientID: config.clientId,
 						clientSecret: config.clientSecret,
 						callbackURL: config.callbackURL,
-						passReqToCallback: false,
+						passReqToCallback: true,
 					},
-					async (accessToken, refreshToken, profileRaw, done) => {
+					async (req, accessToken, refreshToken, profileRaw, done) => {
 						const profile = toFederationProfile(profileRaw, accessToken, refreshToken);
 						if (ctx.onFederationCallback) {
 							try {
 								await ctx.onFederationCallback({
 									federationName: config.name,
 									profile,
+									req: req as import("express").Request,
 									done: done as (err: Error | null, user: unknown) => void,
 								});
 							} catch (err) {
