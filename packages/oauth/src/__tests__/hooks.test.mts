@@ -187,5 +187,58 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			expect(res.status).toBe(400);
 		});
+
+		it("login.success audit event carries subject from session.user.id (I-2)", async () => {
+			const { sink, events } = createSpyAuditSink();
+			const app = express();
+			app.set("trust proxy", 1);
+			app.use(express.json());
+			app.use(express.urlencoded({ extended: false }));
+
+			// Inline session middleware substitute — minimal surface needed by routes
+			app.use((req, _res, next) => {
+				(req as unknown as { session: Record<string, unknown> }).session = {
+					isAuthenticated: true,
+					user: { id: "user-42" },
+				};
+				next();
+			});
+
+			const clientRepo: ClientRepository = {
+				findById: async () => ({
+					id: "client-42",
+					allowedRedirectUris: ["https://example.test/cb"],
+					allowedScopes: ["read"],
+				}),
+				authenticate: async () => null,
+			};
+			const codeRepo: CodeRepository = {
+				createCode: async () => ({ code: "auth-code-1" }),
+				getByCode: async () => null,
+				consumeByCode: async () => null,
+				removeByCode: async () => {},
+			};
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				auditSink: sink,
+			});
+			app.use("/oauth", router);
+
+			await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-42",
+				redirect_uri: "https://example.test/cb",
+			});
+
+			const ev = events.find((e) => e.type === "login.success");
+			expect(ev).toBeDefined();
+			expect(ev?.subject).toBe("user-42");
+		});
 	});
 });

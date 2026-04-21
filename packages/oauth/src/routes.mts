@@ -395,7 +395,7 @@ export const createOAuthRouter = async (
 				await emitAuditEvent(auditSink, {
 					timestamp: new Date(),
 					type: "login.success",
-					subject: typeof req.session.user?.sub === "string" ? req.session.user.sub : undefined,
+					subject: typeof req.session.user?.id === "string" ? req.session.user.id : undefined,
 					clientId: client_id,
 					ip: req.ip,
 					userAgent: req.get("user-agent"),

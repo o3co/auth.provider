@@ -157,6 +157,33 @@ describe("createAuthorizationGrant", () => {
 			expect(sessionMutation?.clear).toContain("granted_scopes");
 		});
 
+		it("issues an initial rt+jwt carrying a new family_id (C-3)", async () => {
+			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }));
+			const handler = createAuthorizationGrant(deps);
+			const ctx: GrantContext = {
+				body: { code: "abc", client_id: "client1" },
+				session: {
+					code: "abc",
+					code_client_id: "client1",
+					granted_scopes: ["read"],
+					user: { id: "u1" },
+				},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			const decoded = decodeJwt(result.tokens.refresh_token) as Record<string, unknown>;
+			expect(typeof decoded.family_id).toBe("string");
+			// UUID v4 shape: 8-4-4-4-12 hex, version nibble = 4
+			expect(decoded.family_id as string).toMatch(
+				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+			);
+		});
+
 		it("returns 400 when PKCE is required but code_verifier is missing", async () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({

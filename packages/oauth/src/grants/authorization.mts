@@ -210,6 +210,11 @@ export const createAuthorizationGrant = (
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
+			// Initial rt+jwt opens a new refresh-token family for replay detection
+			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same
+			// family_id; revoking the family revokes every descendant.
+			const familyId = crypto.randomUUID();
+
 			return {
 				result: {
 					status: 200,
@@ -228,7 +233,7 @@ export const createAuthorizationGrant = (
 							},
 						),
 						refreshToken: await generateToken(
-							{},
+							{ family_id: familyId },
 							{
 								expiresIn: config.oauth.refreshToken.expiresIn,
 								keyStore,
