@@ -17,6 +17,8 @@
 import type { PassportStatic } from "passport";
 import { describe, expect, it, vi } from "vitest";
 import { createGoogleProvider } from "#/federations/google.mjs";
+import type { FederationProfile } from "#/federations/types.mjs";
+import { supportsClaimMapping, supportsLogout, supportsRefresh } from "#/federations/types.mjs";
 
 const baseConfig = {
 	name: "google",
@@ -166,5 +168,130 @@ describe("createGoogleProvider validation", () => {
 
 	it("throws when callbackURL is missing", () => {
 		expect(() => createGoogleProvider({ ...baseConfig, callbackURL: "" })).toThrow(/callbackURL/i);
+	});
+});
+
+describe("Google provider capabilities", () => {
+	const capConfig = {
+		name: "google",
+		clientId: "cid",
+		clientSecret: "csec",
+		callbackURL: "https://example.com/cb",
+	};
+
+	it("implements all three capabilities", () => {
+		const p = createGoogleProvider(capConfig);
+		expect(supportsClaimMapping(p)).toBe(true);
+		expect(supportsRefresh(p)).toBe(true);
+		expect(supportsLogout(p)).toBe(true);
+	});
+
+	describe("mapClaims", () => {
+		const p = createGoogleProvider(capConfig);
+		it("extracts email + name + picture from google profile", () => {
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = {
+				id: "gid-123",
+				raw: {
+					emails: [{ value: "alice@example.com", verified: true }],
+					displayName: "Alice",
+					photos: [{ value: "https://lh.com/p.png" }],
+					_json: { email: "alice@example.com", email_verified: true, hd: "example.com" },
+				},
+			};
+			expect(p.mapClaims(profile)).toEqual({
+				email: "alice@example.com",
+				emailVerified: true,
+				name: "Alice",
+				picture: "https://lh.com/p.png",
+				hd: "example.com",
+			});
+		});
+
+		it("returns empty claims when fields are absent", () => {
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = { id: "gid", raw: {} };
+			expect(p.mapClaims(profile)).toEqual({});
+		});
+	});
+
+	describe("refreshFederationToken", () => {
+		it("exchanges refresh_token for a new access_token via Google token endpoint", async () => {
+			const fetchMock = vi.fn().mockResolvedValue({
+				ok: true,
+				status: 200,
+				async json() {
+					return {
+						access_token: "new-at",
+						expires_in: 3600,
+						token_type: "Bearer",
+						id_token: "new-id",
+					};
+				},
+			});
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			const result = await p.refreshFederationToken("old-rt");
+			expect(result.accessToken).toBe("new-at");
+			expect(result.idToken).toBe("new-id");
+			expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now() + 3500_000);
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			const firstCall = fetchMock.mock.calls[0];
+			if (!firstCall) throw new Error("expected fetch to be called");
+			const [url, init] = firstCall;
+			expect(url).toBe("https://oauth2.googleapis.com/token");
+			expect((init as RequestInit).method).toBe("POST");
+			expect((init as RequestInit).body).toContain("refresh_token=old-rt");
+			expect((init as RequestInit).body).toContain("grant_type=refresh_token");
+		});
+
+		it("throws invalid_grant-shaped Error when Google rejects the refresh_token", async () => {
+			const fetchMock = vi.fn().mockResolvedValue({
+				ok: false,
+				status: 400,
+				async json() {
+					return { error: "invalid_grant", error_description: "Token revoked" };
+				},
+			});
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			await expect(p.refreshFederationToken("rt")).rejects.toThrow(/invalid_grant/);
+		});
+
+		it("throws transient-shaped Error on 5xx (caller returns 503 in F-6)", async () => {
+			const fetchMock = vi.fn().mockResolvedValue({
+				ok: false,
+				status: 503,
+				async json() {
+					return {};
+				},
+			});
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			await expect(p.refreshFederationToken("rt")).rejects.toThrow(/temporarily_unavailable/);
+		});
+	});
+
+	describe("endSession", () => {
+		it("returns Google revoke URL", async () => {
+			const p = createGoogleProvider(capConfig);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const { url, method } = await p.endSession({
+				idTokenHint: "idt",
+				postLogoutRedirectUri: "https://rp/logout-done",
+			});
+			expect(method).toBe("GET");
+			expect(url.hostname).toBe("accounts.google.com");
+			expect(url.pathname).toContain("logout");
+		});
 	});
 });
