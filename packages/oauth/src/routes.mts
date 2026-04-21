@@ -245,20 +245,40 @@ export const createOAuthRouter = async (
 					// family has been revoked, all access_tokens minted under the same
 					// authorization grant must introspect as inactive. family_id claim is
 					// optional — legacy tokens without it still succeed (no cascade available).
+					const rawFamilyId = (payload as Record<string, unknown>).family_id;
 					const familyId =
-						typeof (payload as Record<string, unknown>).family_id === "string"
-							? ((payload as Record<string, unknown>).family_id as string)
-							: null;
+						typeof rawFamilyId === "string" && rawFamilyId.length > 0 ? rawFamilyId : null;
 					if (familyId !== null && refreshTokenStore) {
 						let revoked: boolean;
 						try {
 							revoked = await refreshTokenStore.isFamilyRevoked(familyId);
-						} catch {
-							// Fail-closed: when we cannot determine family state, prefer inactive
-							// per RFC 7009 §2.2 intent ("serve inactive if state cannot be determined").
+						} catch (cause) {
+							// Fail-closed: RFC 7662 §2.2 defines `active: false` for revoked/invalid tokens.
+							// When we cannot determine family revocation state, prefer inactive over active
+							// (and over a 5xx) — introspect's response shape has no "temporarily_unavailable"
+							// equivalent, so inactive keeps resource servers on the safe side of the scope gate.
+							// Note: Tasks 3/4 use 503 temporarily_unavailable for store failures, but RFC 7662
+							// has no such slot for introspect responses — inactive is the only safe fallback.
+							emitAuditEvent(auditSink, {
+								timestamp: new Date(),
+								type: "introspect.store_unavailable",
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								details: {
+									family_id: familyId,
+									error: cause instanceof Error ? cause.message : String(cause),
+								},
+							});
 							return res.status(200).json({ active: false });
 						}
 						if (revoked) {
+							emitAuditEvent(auditSink, {
+								timestamp: new Date(),
+								type: "introspect.family_revoked",
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								details: { family_id: familyId },
+							});
 							return res.status(200).json({ active: false });
 						}
 					}
