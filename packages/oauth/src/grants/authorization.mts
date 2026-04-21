@@ -316,11 +316,11 @@ export const createAuthorizationGrant = (
 			// session store is unavailable, return 503 rather than issuing tokens that
 			// are invisible to logout orchestration.
 			if (deps.userSessionStore) {
-				const clientRecord = await clientRepository.findById(client_id ?? "");
+				const clientRecord = await clientRepository.findById(client_id);
 				try {
 					await deps.userSessionStore.linkFamily(sid, familyId);
 					await deps.userSessionStore.registerRP(sid, {
-						clientId: client_id ?? "",
+						clientId: client_id,
 						backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
 							?.backchannelLogoutUri as string | undefined,
 						frontchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
