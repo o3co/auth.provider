@@ -72,7 +72,6 @@ export interface KeyStore {
 	getVerificationKeys(): Promise<ManagedKey[]>;
 	/** Specific kid's public key. Throws on unknown or expired kid. */
 	getVerificationKey(kid: string): Promise<KeyLike>;
-
 }
 
 export interface AsymmetricKeyStoreOptions {
