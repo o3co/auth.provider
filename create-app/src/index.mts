@@ -159,7 +159,7 @@ export const main = (): void => {
 
 	if (dir !== undefined && !isValidDirName(dir)) {
 		console.error(
-			"Error: --dir must be a valid unscoped package name (no '/', '\\\\', '@'; not '.' or '..'; max 214 chars).",
+			"Error: --dir must be a valid unscoped package name (no '/', '\\', '@'; not '.' or '..'; max 214 chars).",
 		);
 		process.exit(1);
 	}
