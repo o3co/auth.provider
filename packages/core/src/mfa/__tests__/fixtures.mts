@@ -39,21 +39,28 @@ export function createTestMfaProvider(options: {
 	return {
 		kind: options.kind,
 		async issue(userId, ctx) {
-			return options.onIssue ? options.onIssue(userId, ctx) : {
-				id: `${options.kind}-challenge-${userId}`,
-				kind: options.kind,
-				expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-			};
+			return options.onIssue
+				? options.onIssue(userId, ctx)
+				: {
+						id: `${options.kind}-challenge-${userId}`,
+						kind: options.kind,
+						expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+					};
 		},
 		async verify(challengeId, proof) {
-			return options.onVerify ? options.onVerify(challengeId, proof) : { success: false, failureReason: "invalid" };
+			return options.onVerify
+				? options.onVerify(challengeId, proof)
+				: { success: false, failureReason: "invalid" };
 		},
 	};
 }
 
 export function createTestMfaProviderWithCapabilities(options: {
 	kind: string;
-	onEnroll?: (userId: string, request: unknown) => Promise<{ success: boolean; enrollmentId?: string }>;
+	onEnroll?: (
+		userId: string,
+		request: unknown,
+	) => Promise<{ success: boolean; enrollmentId?: string }>;
 	onRevoke?: (userId: string) => Promise<void>;
 }): MfaProviderBase & SupportsEnrollment & SupportsRevocation {
 	const base = createTestMfaProvider({ kind: options.kind });

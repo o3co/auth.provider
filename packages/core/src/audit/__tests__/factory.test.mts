@@ -15,7 +15,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createAuditSinkFactory, emitAuditEvent, registerBuiltinAuditSinks } from "#/audit/factory.mjs";
+import {
+	createAuditSinkFactory,
+	emitAuditEvent,
+	registerBuiltinAuditSinks,
+} from "#/audit/factory.mjs";
 import type { AuditSinkBase } from "#/audit/types.mjs";
 
 describe("createAuditSinkFactory", () => {
