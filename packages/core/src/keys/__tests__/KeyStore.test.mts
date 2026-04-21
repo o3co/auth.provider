@@ -13,16 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-	decodeProtectedHeader,
-	exportPKCS8,
-	exportSPKI,
-	generateKeyPair,
-	jwtVerify,
-	SignJWT,
-} from "jose";
+import { decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
+import type { SignJwtOptions } from "#/keys/KeyStore.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
+import { createTestKeyStore } from "./fixtures.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -39,38 +34,54 @@ describe("SymmetricKeyStore", () => {
 		expect(keyStore.algorithm).toBe("HS256");
 	});
 
-	it("has default kid v0", () => {
-		expect(keyStore.current.kid).toBe("v0");
-	});
-
 	it("accepts custom kid", () => {
 		const ks = createSymmetricKeyStore("test-secret", "custom-kid");
-		expect(ks.current.kid).toBe("custom-kid");
+		expect(ks.getSigningKidFallback()).toBe("custom-kid");
 	});
 
-	it("getSigningKey returns kid and privateKey", () => {
-		const signingKey = keyStore.getSigningKey();
-		expect(signingKey.kid).toBe("v0");
-		expect(signingKey.privateKey).toBeDefined();
-	});
-
-	it("getVerificationKey returns key for current kid", () => {
-		const key = keyStore.getVerificationKey("v0");
+	it("getVerificationKey returns key for current kid", async () => {
+		const key = await keyStore.getVerificationKey("v0");
 		expect(key).toBeDefined();
 	});
 
-	it("getVerificationKey throws for unknown kid", () => {
-		expect(() => keyStore.getVerificationKey("unknown")).toThrow();
+	it("getVerificationKey throws for unknown kid", async () => {
+		await expect(keyStore.getVerificationKey("unknown")).rejects.toThrow();
 	});
 
-	it("getVerificationKeys returns current key only (no previous keys)", () => {
-		const keys = keyStore.getVerificationKeys();
+	it("getVerificationKeys returns current key only (no previous keys)", async () => {
+		const keys = await keyStore.getVerificationKeys();
 		expect(keys).toHaveLength(1);
 		expect(keys[0].kid).toBe("v0");
 	});
 
-	it("current.privateKey and current.publicKey are the same for symmetric", () => {
-		expect(keyStore.current.privateKey).toBe(keyStore.current.publicKey);
+	it("sign() produces a JWT verifiable with getVerificationKey", async () => {
+		const ks = createSymmetricKeyStore("round-trip-secret", "k-sym");
+		const token = await ks.sign({ claims: { sub: "alice" } });
+
+		// Header has alg + kid injected by KeyStore
+		const header = decodeProtectedHeader(token);
+		expect(header.alg).toBe("HS256");
+		expect(header.kid).toBe("k-sym");
+
+		// Payload preserves claims
+		const key = await ks.getVerificationKey("k-sym");
+		const { payload } = await jwtVerify(token, key);
+		expect(payload.sub).toBe("alice");
+	});
+
+	it("sign() injects typ when provided in header options", async () => {
+		const ks = createSymmetricKeyStore("typ-test-secret");
+		const token = await ks.sign({
+			claims: { sub: "bob" },
+			header: { typ: "at+jwt" },
+		});
+		const header = decodeProtectedHeader(token);
+		expect(header.typ).toBe("at+jwt");
+	});
+
+	it("getSigningKidFallback returns the current signing kid", () => {
+		const ks = createSymmetricKeyStore("x", "my-kid");
+		expect(ks.getSigningKidFallback()).toBe("my-kid");
 	});
 });
 
@@ -89,17 +100,13 @@ describe("AsymmetricKeyStore", () => {
 		});
 
 		expect(store.algorithm).toBe(alg);
-		expect(store.current.kid).toBe("k1");
+		expect(store.getSigningKidFallback()).toBe("k1");
 
-		// Sign a JWT with the signing key
-		const { kid, privateKey } = store.getSigningKey();
-		const token = await new SignJWT({ sub: "user1" })
-			.setProtectedHeader({ alg, kid })
-			.setIssuedAt()
-			.sign(privateKey);
+		const token = await store.sign({ claims: { sub: "user1" } });
+		const header = decodeProtectedHeader(token);
+		expect(header.kid).toBe("k1");
 
-		// Verify with the verification key
-		const verificationKey = store.getVerificationKey(kid);
+		const verificationKey = await store.getVerificationKey(header.kid as string);
 		const { payload } = await jwtVerify(token, verificationKey);
 		expect(payload.sub).toBe("user1");
 	});
@@ -122,7 +129,7 @@ describe("AsymmetricKeyStore", () => {
 			],
 		});
 
-		const keys = store.getVerificationKeys();
+		const keys = await store.getVerificationKeys();
 		expect(keys).toHaveLength(2);
 		expect(keys.map((k) => k.kid)).toContain("k1");
 		expect(keys.map((k) => k.kid)).toContain("k2");
@@ -146,7 +153,7 @@ describe("AsymmetricKeyStore", () => {
 			],
 		});
 
-		const keys = store.getVerificationKeys();
+		const keys = await store.getVerificationKeys();
 		expect(keys).toHaveLength(1);
 		expect(keys[0].kid).toBe("k2");
 	});
@@ -156,10 +163,10 @@ describe("AsymmetricKeyStore", () => {
 		const oldPair = await generateTestKeyPair("ES256");
 		const newPair = await generateTestKeyPair("ES256");
 
-		// Sign a token with the old key
-		const { importPKCS8 } = await import("jose");
+		// Sign a token with the old key (simulating an external signer, not via KeyStore)
+		const { importPKCS8, SignJWT: JoseSignJWT } = await import("jose");
 		const oldSigningKey = await importPKCS8(oldPair.privateKeyPem, "ES256");
-		const token = await new SignJWT({ sub: "user-old" })
+		const token = await new JoseSignJWT({ sub: "user-old" })
 			.setProtectedHeader({ alg: "ES256", kid: "k-old" })
 			.setIssuedAt()
 			.sign(oldSigningKey);
@@ -182,7 +189,7 @@ describe("AsymmetricKeyStore", () => {
 		// Verify old token with previous key
 		const header = decodeProtectedHeader(token);
 		if (!header.kid) throw new Error("Expected kid in header");
-		const verificationKey = store.getVerificationKey(header.kid);
+		const verificationKey = await store.getVerificationKey(header.kid);
 		const { payload } = await jwtVerify(token, verificationKey);
 		expect(payload.sub).toBe("user-old");
 	});
@@ -244,7 +251,37 @@ describe("AsymmetricKeyStore", () => {
 			publicKeyPem,
 		});
 
-		expect(() => store.getVerificationKey("unknown")).toThrow("Unknown kid: unknown");
+		await expect(store.getVerificationKey("unknown")).rejects.toThrow("Unknown kid: unknown");
+	});
+
+	it("sign() round-trip works for asymmetric (ES256)", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
+		const store = await createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "asym-sign-k",
+			privateKeyPem,
+			publicKeyPem,
+		});
+
+		const token = await store.sign({ claims: { sub: "carol" } });
+		const header = decodeProtectedHeader(token);
+		expect(header.alg).toBe("ES256");
+		expect(header.kid).toBe("asym-sign-k");
+
+		const key = await store.getVerificationKey("asym-sign-k");
+		const { payload } = await jwtVerify(token, key);
+		expect(payload.sub).toBe("carol");
+	});
+
+	it("getSigningKidFallback returns the current signing kid", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
+		const store = await createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "k-current-only",
+			privateKeyPem,
+			publicKeyPem,
+		});
+		expect(store.getSigningKidFallback()).toBe("k-current-only");
 	});
 
 	it("throws for expired kid", async () => {
@@ -265,6 +302,40 @@ describe("AsymmetricKeyStore", () => {
 			],
 		});
 
-		expect(() => store.getVerificationKey("k1")).toThrow();
+		await expect(store.getVerificationKey("k1")).rejects.toThrow();
+	});
+});
+
+describe("KeyStore contract (via fixture)", () => {
+	it("sign() forwards options to the signer", async () => {
+		let received: SignJwtOptions | undefined;
+		const ks = createTestKeyStore({
+			algorithm: "HS256",
+			kid: "fixture-kid",
+			signer: async (opts) => {
+				received = opts;
+				return "fake.jwt.value";
+			},
+			verificationKeys: new Map(),
+		});
+
+		const result = await ks.sign({
+			claims: { sub: "fixture-user" },
+			header: { typ: "at+jwt" },
+		});
+
+		expect(result).toBe("fake.jwt.value");
+		expect(received?.claims.sub).toBe("fixture-user");
+		expect(received?.header?.typ).toBe("at+jwt");
+	});
+
+	it("getVerificationKey throws on unknown kid", async () => {
+		const ks = createTestKeyStore({
+			algorithm: "HS256",
+			kid: "k",
+			signer: async () => "",
+			verificationKeys: new Map(),
+		});
+		await expect(ks.getVerificationKey("missing")).rejects.toThrow("Unknown kid: missing");
 	});
 });
