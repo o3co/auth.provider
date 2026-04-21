@@ -239,4 +239,84 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.headers["www-authenticate"]).toMatch(/^Bearer/);
 		expect(res.body.error).toBe("invalid_token");
 	});
+
+	it("returns {sub} only when userSessionStore is not wired (backward compat)", async () => {
+		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid email" });
+
+		const res = await callUserinfo({
+			token,
+			userSessionStore: undefined,
+			refreshTokenStore: {
+				kind: "memory",
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				rotate: vi.fn(),
+				revokeFamily: vi.fn(),
+			},
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ sub: "u-1" });
+	});
+
+	it("returns 401 invalid_token when userSessionStore.get throws (fail-closed)", async () => {
+		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid email" });
+
+		const res = await callUserinfo({
+			token,
+			userSessionStore: {
+				kind: "memory",
+				get: vi.fn().mockRejectedValue(new Error("redis unavailable")),
+				create: vi.fn(),
+				registerRP: vi.fn(),
+				linkFamily: vi.fn(),
+				updateClaims: vi.fn(),
+				removeFederation: vi.fn(),
+				delete: vi.fn(),
+			},
+			refreshTokenStore: {
+				kind: "memory",
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				rotate: vi.fn(),
+				revokeFamily: vi.fn(),
+			},
+		});
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_token");
+		expect(res.body.error_description).toBe("session lookup unavailable");
+		expect(res.headers["www-authenticate"]).toMatch(/^Bearer/);
+	});
+
+	it("sets Cache-Control: no-store on all responses (RFC 6750 §5.3)", async () => {
+		// Success path
+		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid" });
+		const okRes = await callUserinfo({
+			token,
+			userSessionStore: {
+				kind: "memory",
+				get: vi.fn().mockResolvedValue(baseSession),
+				create: vi.fn(),
+				registerRP: vi.fn(),
+				linkFamily: vi.fn(),
+				updateClaims: vi.fn(),
+				removeFederation: vi.fn(),
+				delete: vi.fn(),
+			},
+			refreshTokenStore: {
+				kind: "memory",
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				rotate: vi.fn(),
+				revokeFamily: vi.fn(),
+			},
+		});
+		expect(okRes.status).toBe(200);
+		expect(okRes.headers["cache-control"]).toBe("no-store");
+		expect(okRes.headers.pragma).toBe("no-cache");
+
+		// Error path (no auth header)
+		const errRes = await callUserinfo({ token: null });
+		expect(errRes.status).toBe(401);
+		expect(errRes.headers["cache-control"]).toBe("no-store");
+		expect(errRes.headers.pragma).toBe("no-cache");
+	});
 });

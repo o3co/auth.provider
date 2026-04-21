@@ -49,6 +49,12 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 	const router = express.Router();
 
 	router.get("/userinfo", async (req: Request, res: Response) => {
+		// RFC 6750 §5.3 + §6.1: bearer-authenticated responses MUST NOT be cached
+		// by intermediaries. Set this once at the top so it applies to every
+		// response path (200 success, 401 error).
+		res.setHeader("Cache-Control", "no-store");
+		res.setHeader("Pragma", "no-cache");
+
 		// RFC 6750 §2.1: Bearer token in Authorization header
 		const auth = req.headers.authorization;
 		if (!auth?.startsWith("Bearer ")) {
@@ -75,7 +81,10 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 				.json({ error: "invalid_token", error_description: "invalid signature" });
 		}
 
-		// F-3 cascade revoke: check family_id against RefreshTokenStore
+		// F-3 cascade revoke: check family_id against RefreshTokenStore.
+		// Precondition: only activates when the JWT carries a family_id claim —
+		// tokens minted before F-3 lack this claim and bypass the cascade check
+		// (legacy backward-compat). New tokens always carry family_id per F-3.
 		const familyId = typeof payload.family_id === "string" ? payload.family_id : null;
 		if (familyId !== null && opts.refreshTokenStore) {
 			let revoked: boolean;
@@ -111,8 +120,18 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			return res.status(200).json({ sub });
 		}
 
-		// Validate session liveness
-		const session = await opts.userSessionStore.get(sid);
+		// Validate session liveness. Fail-closed on store throw (symmetric with
+		// the refreshTokenStore cascade above): a backend outage must not leak
+		// claims, and returning 401 invalid_token keeps parity with RFC 6750.
+		let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
+		try {
+			session = await opts.userSessionStore.get(sid);
+		} catch {
+			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
+			return res
+				.status(401)
+				.json({ error: "invalid_token", error_description: "session lookup unavailable" });
+		}
 		if (!session) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
 			return res
