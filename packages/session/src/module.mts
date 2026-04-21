@@ -49,11 +49,15 @@ const sessionConfigSchema = fullSectionsSchema.pick({
 export type SessionModuleOptions = {
 	userRepository: UserRepository;
 	express?: ExpressLike;
+	/** Session TTL in milliseconds for new federation-created UserSessions. Default 24h. */
+	sessionTtlMs?: number;
 };
 
 type SessionModuleInternalOptions = SessionModuleOptions & {
 	/** For testing only — inject a pre-configured factory to skip registration. */
 	_federationFactory?: FederationProviderFactory;
+	/** For testing only — replace createPassport to capture call arguments. */
+	_createPassport?: typeof createPassport;
 };
 
 /**
@@ -160,11 +164,18 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 			federationProviders.set(name, provider);
 		}
 
-		// Initialize passport with pathResolver
-		const passport = await createPassport({
+		// Initialize passport with pathResolver and optional store bindings.
+		// userSessionStore / federationTokenStore are optional on ModuleContext (F-1);
+		// if absent, createPassport receives undefined and the built-in
+		// onFederationCallback won't activate — correct fallback for unconfigured stores.
+		const _cp = params._createPassport ?? createPassport;
+		const passport = await _cp({
 			pathResolver: context.pathResolver,
 			userRepository: params.userRepository,
 			federationProviders,
+			userSessionStore: context.userSessionStore,
+			federationTokenStore: context.federationTokenStore,
+			sessionTtlMs: params.sessionTtlMs,
 		});
 
 		// Mount session routes

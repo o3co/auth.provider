@@ -17,9 +17,11 @@
 import {
 	type AppConfig,
 	createSymmetricKeyStore,
+	type FederationTokenStoreBase,
 	GrantRegistry,
 	type ModuleContext,
 	type UserRepository,
+	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import { describe, expect, it, vi } from "vitest";
@@ -313,6 +315,62 @@ describe("sessionModule", () => {
 		});
 
 		await expect(module.init(ctx)).rejects.toThrow(/provider builder returned name/i);
+	});
+
+	it("forwards userSessionStore, federationTokenStore, and sessionTtlMs to createPassport", async () => {
+		// Arrange: stub stores and a _createPassport spy to capture call arguments.
+		const userSessionStore: UserSessionStoreBase = {
+			create: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+			list: vi.fn(),
+		} as unknown as UserSessionStoreBase;
+		const federationTokenStore: FederationTokenStoreBase = {
+			attach: vi.fn(),
+			get: vi.fn(),
+			delete: vi.fn(),
+		} as unknown as FederationTokenStoreBase;
+
+		let capturedOptions: Record<string, unknown> | undefined;
+		// Return a passport stub with all methods used by route factories so init() can proceed.
+		const passportStub = {
+			serializeUser: vi.fn(),
+			deserializeUser: vi.fn(),
+			use: vi.fn(),
+			initialize: vi.fn().mockReturnValue(vi.fn()),
+			session: vi.fn().mockReturnValue(vi.fn()),
+			authenticate: vi.fn().mockReturnValue(vi.fn()),
+		};
+		const createPassportSpy = vi.fn().mockImplementation(async (opts: Record<string, unknown>) => {
+			capturedOptions = opts;
+			return passportStub;
+		});
+
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const ctx = makeContext({
+			router: routerMock,
+			userSessionStore,
+			federationTokenStore,
+		});
+
+		const module = _sessionModuleImpl({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			sessionTtlMs: 3600_000,
+			_createPassport:
+				createPassportSpy as unknown as typeof import("#/passport.mjs").createPassport,
+		});
+
+		await module.init(ctx);
+
+		expect(createPassportSpy).toHaveBeenCalledTimes(1);
+		expect(capturedOptions).toMatchObject({
+			userSessionStore,
+			federationTokenStore,
+			sessionTtlMs: 3600_000,
+		});
 	});
 
 	it("injects name and context fields into builder config", async () => {

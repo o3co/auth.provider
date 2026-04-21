@@ -17,6 +17,8 @@
 import type { PassportStatic } from "passport";
 import { describe, expect, it, vi } from "vitest";
 import { createGithubProvider } from "#/federations/github.mjs";
+import type { FederationProfile } from "#/federations/types.mjs";
+import { supportsClaimMapping, supportsLogout, supportsRefresh } from "#/federations/types.mjs";
 
 const baseConfig = {
 	name: "github",
@@ -116,7 +118,7 @@ describe("setupPassportStrategy", () => {
 		expect(mockPassport.use).toHaveBeenCalledWith("github", expect.any(Object));
 	});
 
-	it("verify callback builds externalId as 'github:' + profile.id", async () => {
+	it("verify callback builds externalId as config.name + ':' + profile.id (default name='github')", async () => {
 		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
 		const verifyUser = vi.fn(async () => null);
 		const provider = createGithubProvider(baseConfig);
@@ -124,10 +126,40 @@ describe("setupPassportStrategy", () => {
 		// Extract the verify callback passed to the GithubStrategy constructor
 		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
 		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
-		// Invoke it with a mock profile
+		// Invoke it with a mock profile — passReqToCallback:true means req is the first arg
+		// arity-6: req, accessToken, refreshToken, params, profile, done
 		const done = vi.fn();
-		await verifyCallback("at", "rt", { id: "99999" }, done);
-		expect(verifyUser).toHaveBeenCalledWith("github:99999");
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "99999" }, done);
+		expect(verifyUser).toHaveBeenCalledWith(`${baseConfig.name}:99999`);
+	});
+
+	it("verify callback uses config.name in externalId for multi-tenant (github-enterprise)", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const verifyUser = vi.fn(async () => null);
+		const multiTenantConfig = { ...baseConfig, name: "github-enterprise" };
+		const provider = createGithubProvider(multiTenantConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "99999" }, done);
+		expect(verifyUser).toHaveBeenCalledWith("github-enterprise:99999");
+	});
+
+	it("verify callback calls done(null, false) when profile.id is empty", async () => {
+		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
+		const verifyUser = vi.fn(async () => null);
+		const provider = createGithubProvider(baseConfig);
+		await provider.setupPassportStrategy(mockPassport, { verifyUser });
+		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
+		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
+		const done = vi.fn();
+		const reqStub = { session: {} } as unknown as import("express").Request;
+		await verifyCallback(reqStub, "at", "rt", {}, { id: "" }, done);
+		expect(done).toHaveBeenCalledWith(null, false);
+		expect(verifyUser).not.toHaveBeenCalled();
 	});
 
 	it("uses config.name as the passport strategy identifier for multi-tenant", async () => {
@@ -177,5 +209,74 @@ describe("createGithubProvider validation", () => {
 
 	it("throws when callbackURL is missing", () => {
 		expect(() => createGithubProvider({ ...baseConfig, callbackURL: "" })).toThrow(/callbackURL/i);
+	});
+});
+
+describe("GitHub provider capabilities", () => {
+	const base = {
+		name: "github",
+		clientId: "cid",
+		clientSecret: "csec",
+		callbackURL: "https://example.com/cb",
+	};
+
+	it("implements mapClaims and endSession; does NOT implement refresh", () => {
+		const p = createGithubProvider(base);
+		expect(supportsClaimMapping(p)).toBe(true);
+		expect(supportsLogout(p)).toBe(true);
+		expect(supportsRefresh(p)).toBe(false);
+	});
+
+	describe("mapClaims", () => {
+		it("maps profile fields (without fetching /user/emails)", async () => {
+			const p = createGithubProvider(base);
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = {
+				id: "gh-42",
+				raw: {
+					username: "alice",
+					displayName: "Alice Dev",
+					emails: [{ value: "primary@x.com" }],
+					photos: [{ value: "https://avatars.githubusercontent.com/u/42" }],
+				},
+			};
+			expect(p.mapClaims(profile)).toEqual({
+				email: "primary@x.com",
+				name: "Alice Dev",
+				picture: "https://avatars.githubusercontent.com/u/42",
+			});
+		});
+
+		it("omits email when passport profile exposes none (caller must fetchGithubPrimaryEmail separately)", () => {
+			const p = createGithubProvider(base);
+			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
+			const profile: FederationProfile = {
+				id: "gh",
+				raw: { displayName: "Anon" },
+			};
+			expect(p.mapClaims(profile)).toEqual({ name: "Anon" });
+		});
+	});
+
+	describe("endSession", () => {
+		it("returns a no-op-ish GET URL pointing at the post_logout_redirect_uri directly (GitHub has no end-session endpoint)", async () => {
+			const p = createGithubProvider(base);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			const result = await p.endSession({
+				postLogoutRedirectUri: "https://rp/done",
+				state: "abc",
+			});
+			expect(result.method).toBe("GET");
+			expect(result.url.href).toContain("https://rp/done");
+			expect(result.url.searchParams.get("state")).toBe("abc");
+		});
+
+		it("throws a descriptive error when postLogoutRedirectUri is an invalid URL", async () => {
+			const p = createGithubProvider(base);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			await expect(p.endSession({ postLogoutRedirectUri: "not a valid url" })).rejects.toThrow(
+				/invalid postLogoutRedirectUri/i,
+			);
+		});
 	});
 });
