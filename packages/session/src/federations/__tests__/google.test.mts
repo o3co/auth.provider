@@ -354,6 +354,19 @@ describe("Google provider capabilities", () => {
 			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
 			await expect(p.refreshFederationToken("rt")).rejects.toThrow(/temporarily_unavailable/);
 		});
+
+		it("throws temporarily_unavailable when the fetch is aborted (timeout simulation)", async () => {
+			const abortError = Object.assign(new Error("The operation was aborted."), {
+				name: "AbortError",
+			});
+			const fetchMock = vi.fn().mockRejectedValue(abortError);
+			const p = createGoogleProvider({
+				...capConfig,
+				_fetch: fetchMock as unknown as typeof fetch,
+			});
+			if (!supportsRefresh(p)) throw new Error("expected refresh capability");
+			await expect(p.refreshFederationToken("rt")).rejects.toThrow(/temporarily_unavailable/);
+		});
 	});
 
 	describe("endSession", () => {
@@ -395,6 +408,23 @@ describe("Google provider capabilities", () => {
 			expect(url.searchParams.get("id_token_hint")).toBe("idt");
 			expect(url.searchParams.get("post_logout_redirect_uri")).toBe("https://rp/done");
 			expect(url.searchParams.get("state")).toBe("s2");
+		});
+
+		it("throws a descriptive error when endSessionEndpoint is an invalid URL", async () => {
+			const p = createGoogleProvider({
+				...capConfig,
+				endSessionEndpoint: "not-a-valid-url",
+			});
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			await expect(p.endSession({})).rejects.toThrow(/invalid endSessionEndpoint/i);
+		});
+
+		it("throws a descriptive error when postLogoutRedirectUri is an invalid URL (no endSessionEndpoint)", async () => {
+			const p = createGoogleProvider(capConfig);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			await expect(p.endSession({ postLogoutRedirectUri: "not a valid url" })).rejects.toThrow(
+				/invalid postLogoutRedirectUri/i,
+			);
 		});
 	});
 });

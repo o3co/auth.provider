@@ -149,6 +149,9 @@ export async function fetchGithubPrimaryEmail(
 	accessToken: string,
 	fetchImpl: typeof fetch = fetch,
 ): Promise<GithubEmailResult | null> {
+	const timeoutMs = 10_000;
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), timeoutMs);
 	try {
 		const res = await fetchImpl("https://api.github.com/user/emails", {
 			headers: {
@@ -156,6 +159,7 @@ export async function fetchGithubPrimaryEmail(
 				"User-Agent": "o3co-auth-provider",
 				Accept: "application/vnd.github+json",
 			},
+			signal: controller.signal,
 		});
 		if (!res.ok) return null;
 		const rows = (await res.json()) as Array<{
@@ -170,6 +174,9 @@ export async function fetchGithubPrimaryEmail(
 		if (!chosen || typeof chosen.email !== "string") return null;
 		return { email: chosen.email, verified: true };
 	} catch {
+		// Abort (timeout) and any other transient error treated as "no email available".
 		return null;
+	} finally {
+		clearTimeout(timer);
 	}
 }

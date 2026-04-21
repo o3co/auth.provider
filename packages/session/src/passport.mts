@@ -147,6 +147,7 @@ export const _createPassportImpl = async ({
 						});
 						// Post-create operations: any failure here orphans the UserSession,
 						// so we roll back with a best-effort delete before calling done(err).
+						let attachedToFederation = false;
 						try {
 							if (params.profile.accessToken) {
 								await federationTokenStore.attach(sid, params.federationName, {
@@ -155,6 +156,7 @@ export const _createPassportImpl = async ({
 									idToken: params.profile.idToken,
 									expiresAt: new Date(Date.now() + (params.profile.expiresIn ?? 3600) * 1000),
 								});
+								attachedToFederation = true;
 							}
 							const session = params.req.session as unknown as
 								| (Record<string, unknown> & {
@@ -175,8 +177,15 @@ export const _createPassportImpl = async ({
 							}
 							params.done(null, user);
 						} catch (postCreateErr) {
-							// Best-effort rollback: delete the orphan UserSession. If delete itself
-							// throws, swallow it — the original error is what matters for the caller.
+							// Best-effort rollback: delete in REVERSE order of creation.
+							// Token first (only if attach succeeded), then UserSession.
+							if (attachedToFederation) {
+								try {
+									await federationTokenStore.delete(sid, params.federationName);
+								} catch {
+									// ignore
+								}
+							}
 							try {
 								await userSessionStore.delete(sid);
 							} catch {

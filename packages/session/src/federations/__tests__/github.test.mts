@@ -270,5 +270,13 @@ describe("GitHub provider capabilities", () => {
 			expect(result.url.href).toContain("https://rp/done");
 			expect(result.url.searchParams.get("state")).toBe("abc");
 		});
+
+		it("throws a descriptive error when postLogoutRedirectUri is an invalid URL", async () => {
+			const p = createGithubProvider(base);
+			if (!supportsLogout(p)) throw new Error("expected logout capability");
+			await expect(p.endSession({ postLogoutRedirectUri: "not a valid url" })).rejects.toThrow(
+				/invalid postLogoutRedirectUri/i,
+			);
+		});
 	});
 });

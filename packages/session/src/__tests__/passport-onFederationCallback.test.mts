@@ -52,11 +52,16 @@ function makeUserSessionStore(): UserSessionStoreBase & { _saved: unknown[]; _de
 	} as UserSessionStoreBase & { _saved: unknown[]; _deleted: string[] };
 }
 
-function makeFederationTokenStore(): FederationTokenStoreBase & { _attached: unknown[] } {
+function makeFederationTokenStore(): FederationTokenStoreBase & {
+	_attached: unknown[];
+	_deletedPairs: Array<{ sid: string; federationName: string }>;
+} {
 	const attached: unknown[] = [];
+	const deletedPairs: Array<{ sid: string; federationName: string }> = [];
 	return {
 		kind: "memory",
 		_attached: attached,
+		_deletedPairs: deletedPairs,
 		async attach(sid, name, tokens) {
 			attached.push({ sid, name, tokens });
 		},
@@ -65,8 +70,13 @@ function makeFederationTokenStore(): FederationTokenStoreBase & { _attached: unk
 		},
 		async update() {},
 		async deleteBySession() {},
-		async delete() {},
-	} as FederationTokenStoreBase & { _attached: unknown[] };
+		async delete(sid: string, federationName: string) {
+			deletedPairs.push({ sid, federationName });
+		},
+	} as FederationTokenStoreBase & {
+		_attached: unknown[];
+		_deletedPairs: Array<{ sid: string; federationName: string }>;
+	};
 }
 
 type DoneRecord = { err: Error | null; user: unknown; reqSid: unknown };
@@ -341,6 +351,82 @@ describe("_createPassportImpl onFederationCallback wiring", () => {
 		expect(doneResults).toHaveLength(1);
 		expect(doneResults[0]?.err).toBe(boom);
 		expect(doneResults[0]?.user).toBe(false);
+	});
+
+	it("rolls back both FederationTokenStore and UserSession when session.save throws after attach", async () => {
+		const doneResults: DoneRecord[] = [];
+		const us = makeUserSessionStore();
+		const ft = makeFederationTokenStore();
+		const saveError = new Error("session save failure");
+		const provider = makeProvider(
+			"google",
+			{ id: "gid-save-fail", accessToken: "at" },
+			doneResults,
+		);
+		// Override the req.session provided by makeProvider to have a save() that throws.
+		// We do this by injecting a custom provider that passes a session with a failing save().
+		const reqStub = {
+			session: {
+				save(cb: (err: unknown) => void) {
+					cb(saveError);
+				},
+			} as Record<string, unknown>,
+		} as unknown as import("express").Request;
+		const providerWithFailingSave: typeof provider = {
+			...provider,
+			async setupPassportStrategy(_passport, ctx) {
+				if (!ctx.onFederationCallback) throw new Error("onFederationCallback hook missing");
+				await ctx.onFederationCallback({
+					federationName: "google",
+					profile: {
+						id: "gid-save-fail",
+						raw: {},
+						accessToken: "at",
+					},
+					req: reqStub,
+					done: (err, user) => {
+						doneResults.push({
+							err,
+							user,
+							reqSid: (reqStub.session as Record<string, unknown>).sid,
+						});
+					},
+				});
+			},
+		};
+		const userRepo = {
+			authenticate: async () => null,
+			authenticateByToken: vi.fn().mockResolvedValue(fakeUser),
+		};
+
+		await _createPassportImpl({
+			pathResolver: (s) => s,
+			userRepository: userRepo as unknown as Parameters<
+				typeof _createPassportImpl
+			>[0]["userRepository"],
+			federationProviders: new Map([["google", providerWithFailingSave]]),
+			userSessionStore: us,
+			federationTokenStore: ft,
+			_passportOverride: makePassportStub(),
+		});
+
+		// UserSession was created
+		expect(us._saved).toHaveLength(1);
+		const saved = us._saved[0] as { sid: string };
+
+		// done was called with the save error
+		expect(doneResults).toHaveLength(1);
+		expect(doneResults[0]?.err).toBe(saveError);
+		expect(doneResults[0]?.user).toBe(false);
+
+		// FederationTokenStore entry was deleted (attach succeeded before save failed)
+		expect(ft._deletedPairs).toHaveLength(1);
+		expect(ft._deletedPairs[0]?.sid).toBe(saved.sid);
+		expect(ft._deletedPairs[0]?.federationName).toBe("google");
+
+		// UserSession was also rolled back
+		expect(us._deleted).toHaveLength(1);
+		expect(us._deleted[0]).toBe(saved.sid);
 	});
 
 	it("rolls back UserSession (delete) when federationTokenStore.attach throws post-create", async () => {

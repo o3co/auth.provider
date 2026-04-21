@@ -182,11 +182,27 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 				client_id: config.clientId,
 				client_secret: config.clientSecret,
 			});
-			const res = await fetchImpl(tokenEndpoint, {
-				method: "POST",
-				headers: { "Content-Type": "application/x-www-form-urlencoded" },
-				body: body.toString(),
-			});
+			const refreshTimeoutMs = 30_000;
+			const controller = new AbortController();
+			const timer = setTimeout(() => controller.abort(), refreshTimeoutMs);
+			let res: Response;
+			try {
+				res = await fetchImpl(tokenEndpoint, {
+					method: "POST",
+					headers: { "Content-Type": "application/x-www-form-urlencoded" },
+					body: body.toString(),
+					signal: controller.signal,
+				});
+			} catch (err) {
+				if (err instanceof Error && err.name === "AbortError") {
+					throw new Error(
+						`temporarily_unavailable: google refresh timed out after ${refreshTimeoutMs}ms`,
+					);
+				}
+				throw err;
+			} finally {
+				clearTimeout(timer);
+			}
 			if (!res.ok) {
 				let detail = "";
 				try {
@@ -229,7 +245,14 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 			// Absent that, we redirect directly to the RP's postLogoutRedirectUri with state,
 			// mirroring the GitHub provider. The application is responsible for its own session cleanup.
 			if (config.endSessionEndpoint) {
-				const url = new URL(config.endSessionEndpoint);
+				let url: URL;
+				try {
+					url = new URL(config.endSessionEndpoint);
+				} catch {
+					throw new Error(
+						`Google federation "${config.name}" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
+					);
+				}
 				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
 				if (req.postLogoutRedirectUri)
 					url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
@@ -237,7 +260,14 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 				return { url, method: "GET" };
 			}
 			const base = req.postLogoutRedirectUri ?? "https://accounts.google.com/Logout";
-			const url = new URL(base);
+			let url: URL;
+			try {
+				url = new URL(base);
+			} catch {
+				throw new Error(
+					`Google federation "${config.name}" received an invalid postLogoutRedirectUri: ${base}`,
+				);
+			}
 			if (req.state) url.searchParams.set("state", req.state);
 			return { url, method: "GET" };
 		},

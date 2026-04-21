@@ -180,7 +180,14 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			// the post_logout_redirect_uri with round-tripped state. If no redirect is
 			// given, fall back to GitHub's top-level logout page.
 			const base = req.postLogoutRedirectUri ?? "https://github.com/logout";
-			const url = new URL(base);
+			let url: URL;
+			try {
+				url = new URL(base);
+			} catch {
+				throw new Error(
+					`GitHub federation "${config.name}" received an invalid postLogoutRedirectUri: ${base}`,
+				);
+			}
 			if (req.state) url.searchParams.set("state", req.state);
 			return { url, method: "GET" };
 		},

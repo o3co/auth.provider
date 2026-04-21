@@ -76,4 +76,31 @@ describe("fetchGithubPrimaryEmail", () => {
 		expect(capturedInit?.headers?.["User-Agent"]).toMatch(/auth[.-]?provider/i);
 		expect(capturedInit?.headers?.Accept).toBe("application/vnd.github+json");
 	});
+
+	it("passes an AbortSignal in the fetch init (timeout wiring)", async () => {
+		let capturedInit: { signal?: unknown } | undefined;
+		const fetchImpl = (async (_url: string, init?: unknown) => {
+			capturedInit = init as { signal?: unknown };
+			return {
+				status: 200,
+				ok: true,
+				async json() {
+					return [];
+				},
+			};
+		}) as unknown as typeof fetch;
+		await fetchGithubPrimaryEmail("any-token", fetchImpl);
+		expect(capturedInit?.signal).toBeInstanceOf(AbortSignal);
+	});
+
+	it("returns null when the fetch is aborted (abort treated as unavailable)", async () => {
+		const abortError = Object.assign(new Error("The operation was aborted."), {
+			name: "AbortError",
+		});
+		const fetchImpl = (async () => {
+			throw abortError;
+		}) as unknown as typeof fetch;
+		const result = await fetchGithubPrimaryEmail("token", fetchImpl);
+		expect(result).toBeNull();
+	});
 });
