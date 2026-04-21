@@ -80,8 +80,11 @@ export const createOAuthRouter = async (
 		const key = `${tag}:ip:${ip}`;
 		let decision: Awaited<ReturnType<typeof rateLimiter.check>>;
 		try {
+			// CP-10: pass the same normalized ip into the check context as the
+			// key derivation uses, so limiters that re-use ctx.ip for logging
+			// or secondary keying observe the same value.
 			decision = await rateLimiter.check(key, {
-				ip: req.ip,
+				ip,
 				userAgent: req.get("user-agent"),
 			});
 		} catch (cause) {
@@ -91,7 +94,7 @@ export const createOAuthRouter = async (
 			emitAuditEvent(auditSink, {
 				timestamp: new Date(),
 				type: "rate_limit.unavailable",
-				ip: req.ip,
+				ip,
 				userAgent: req.get("user-agent"),
 				details: {
 					tag,
@@ -381,6 +384,11 @@ export const createOAuthRouter = async (
 						? ((req.session.user as Record<string, unknown>).id as string)
 						: undefined;
 				if (grantPolicy) {
+					// CP-11: issuer must NOT be request-derived (Host header is
+					// attacker-controlled in many deployments). Prefer the
+					// configured jwt.issuer so policy decisions match the issuer
+					// claim on minted tokens.
+					const trustedIssuer = config.oauth.jwt.issuer ?? "";
 					const decision = await grantPolicy.evaluate(
 						{
 							grantType: "authorization",
@@ -392,7 +400,7 @@ export const createOAuthRouter = async (
 						{
 							ip: req.ip,
 							userAgent: req.get("user-agent"),
-							issuer: `${req.protocol}://${req.get("host") ?? ""}`,
+							issuer: trustedIssuer,
 						},
 					);
 					if (decision.outcome === "deny") {

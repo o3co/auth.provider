@@ -194,6 +194,25 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(res.status).toBe(400);
 			expect(res.body.error).toBe("unsupported_grant_type");
 		});
+
+		it("normalized ip passed into check ctx matches key derivation (CP-10)", async () => {
+			let observedKey: string | undefined;
+			let observedCtxIp: string | undefined;
+			const rateLimiter: RateLimiterBase = {
+				kind: "capture",
+				async check(key, ctx) {
+					observedKey = key;
+					observedCtxIp = ctx?.ip;
+					return { allowed: true };
+				},
+			};
+			const app = await buildApp({ rateLimiter });
+			await request(app).post("/oauth/token").send({ grant_type: "unsupported_xyz" });
+			expect(observedKey).toBeDefined();
+			// Extract ip portion from key "token:ip:<ip>"
+			const keyIp = observedKey?.split(":").slice(2).join(":");
+			expect(observedCtxIp).toBe(keyIp);
+		});
 	});
 
 	describe("auditSink hook", () => {
@@ -470,6 +489,41 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			const { decodeJwt } = await import("jose");
 			const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
 			expect(decoded.scope).toBe("read");
+		});
+
+		it("passes trusted config.oauth.jwt.issuer (not Host header) to grantPolicy (CP-11)", async () => {
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
+			let observedIssuer: string | undefined;
+			const grantPolicy: GrantPolicyHookBase = {
+				kind: "spy",
+				async evaluate(_req, ctx) {
+					observedIssuer = ctx.issuer;
+					return { outcome: "allow" };
+				},
+			};
+
+			const { router } = await createOAuthRouter(express, {
+				passport: mockPassport,
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			// Send a spoofed Host header to confirm the issuer passed to policy is
+			// the configured one, not the attacker-controlled header.
+			await request(app).get("/oauth/authorize").set("Host", "evil.example").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				scope: "read",
+			});
+
+			expect(observedIssuer).toBe("https://auth.example");
+			expect(observedIssuer).not.toContain("evil.example");
 		});
 	});
 });

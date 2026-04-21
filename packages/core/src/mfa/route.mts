@@ -64,13 +64,29 @@ export function createMfaRouter(express: { Router: () => Router }, deps: MfaRout
 				error_description: "unknown or expired transaction",
 			});
 		}
-		const provider = await deps.providerFactory.create({ type: tx.providerKind });
-		if (provider.kind !== tx.providerKind) {
-			return res
-				.status(500)
-				.json({ error: "server_error", error_description: "provider kind mismatch" });
+		// CP-7: provider creation or verification can throw (unregistered kind,
+		// backend outage, etc.). Return a controlled 500 JSON instead of
+		// letting Express surface an unhandled error. On irrecoverable
+		// provider errors we delete the transaction — it cannot be retried
+		// meaningfully when the provider isn't available to verify it.
+		let result: Awaited<ReturnType<typeof provider.verify>>;
+		let provider: Awaited<ReturnType<typeof deps.providerFactory.create>>;
+		try {
+			provider = await deps.providerFactory.create({ type: tx.providerKind });
+			if (provider.kind !== tx.providerKind) {
+				await deps.transactionStore.delete(transactionId);
+				return res
+					.status(500)
+					.json({ error: "server_error", error_description: "provider kind mismatch" });
+			}
+			result = await provider.verify(tx.challengeId, body.proof);
+		} catch {
+			await deps.transactionStore.delete(transactionId);
+			return res.status(500).json({
+				error: "server_error",
+				error_description: "mfa verification unavailable",
+			});
 		}
-		const result = await provider.verify(tx.challengeId, body.proof);
 		if (!result.success) {
 			return res.status(401).json({
 				error: "mfa_failed",

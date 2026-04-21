@@ -25,19 +25,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
-
-function decodeJwtPayload(token: string): Record<string, unknown> {
-	const parts = token.split(".");
-	if (parts.length < 2) return {};
-	try {
-		return JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf-8")) as Record<
-			string,
-			unknown
-		>;
-	} catch {
-		return {};
-	}
-}
+import { decodeJwtPayload } from "./_jwtPayload.mjs";
 
 export const createAuthorizationGrant = (
 	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },

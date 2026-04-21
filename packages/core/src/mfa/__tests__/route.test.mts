@@ -162,6 +162,84 @@ describe("/auth/mfa/verify", () => {
 		expect(deleteSpy).toHaveBeenCalledWith("tx-expired");
 	});
 
+	it("returns controlled 500 + deletes tx when provider.verify throws (CP-7)", async () => {
+		const factory = createMfaProviderFactory();
+		factory.register("totp", () =>
+			createTestMfaProvider({
+				kind: "totp",
+				onVerify: async () => {
+					throw new Error("backend down");
+				},
+			}),
+		);
+		const store = createInMemoryTransactionStore();
+		await store.save({
+			transactionId: "tx-boom",
+			flow: "login",
+			subject: "user-q",
+			providerKind: "totp",
+			challengeId: "ch-q",
+			expiresAt: new Date(Date.now() + 60_000),
+			resumeState: { flow: "login" },
+		});
+
+		const app = express();
+		app.use(express.json());
+		app.use(
+			createMfaRouter(express as unknown as { Router: () => express.Router }, {
+				providerFactory: factory,
+				transactionStore: store,
+				onAuthorizeResume: async () => {},
+				onFederationResume: async () => {},
+				onLoginResume: async () => {},
+			}),
+		);
+
+		const res = await request(app)
+			.post("/auth/mfa/verify")
+			.send({ transaction_id: "tx-boom", proof: { code: "any" } });
+
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("server_error");
+		// Transaction is deleted — cannot retry against a broken provider
+		expect(await store.load("tx-boom")).toBeNull();
+	});
+
+	it("returns controlled 500 + deletes tx when providerFactory.create throws (CP-7)", async () => {
+		const factory = createMfaProviderFactory();
+		// No provider registered for "totp" → factory.create throws
+		const store = createInMemoryTransactionStore();
+		await store.save({
+			transactionId: "tx-noprov",
+			flow: "login",
+			subject: "user-q",
+			providerKind: "totp",
+			challengeId: "ch-q",
+			expiresAt: new Date(Date.now() + 60_000),
+			resumeState: { flow: "login" },
+		});
+
+		const app = express();
+		app.use(express.json());
+		app.use(
+			createMfaRouter(express as unknown as { Router: () => express.Router }, {
+				providerFactory: factory,
+				transactionStore: store,
+				onAuthorizeResume: async () => {},
+				onFederationResume: async () => {},
+				onLoginResume: async () => {},
+			}),
+		);
+
+		const res = await request(app)
+			.post("/auth/mfa/verify")
+			.send({ transaction_id: "tx-noprov", proof: { code: "any" } });
+
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("server_error");
+		expect(await store.load("tx-noprov")).toBeNull();
+	});
+
 	it("returns invalid_grant for unknown/expired transaction", async () => {
 		const factory = createMfaProviderFactory();
 		const store = createInMemoryTransactionStore();
