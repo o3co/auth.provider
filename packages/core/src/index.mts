@@ -56,6 +56,12 @@ export {
 	type GenerateIdTokenOptions,
 	generateIdToken,
 } from "./grants/idToken.mjs";
+// logout_token generation (OIDC Back-Channel Logout 1.0 §2.4)
+export {
+	BACKCHANNEL_LOGOUT_EVENT_URI,
+	type GenerateLogoutTokenOptions,
+	generateLogoutToken,
+} from "./grants/logoutToken.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
