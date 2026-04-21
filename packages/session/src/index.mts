@@ -25,12 +25,21 @@ export { createGoogleProvider } from "./federations/google.mjs";
 export type {
 	EndSessionRequest,
 	EndSessionResult,
+	FederationProfile,
 	FederationProviderBase,
 	FederationResult,
+	MappedClaims,
+	RefreshedTokens,
 	SetupPassportContext,
+	SupportsClaimMapping,
 	SupportsLogout,
+	SupportsRefresh,
 } from "./federations/types.mjs";
-export { supportsLogout } from "./federations/types.mjs";
+export {
+	supportsClaimMapping,
+	supportsLogout,
+	supportsRefresh,
+} from "./federations/types.mjs";
 export { sessionModule } from "./module.mjs";
 export { createPassport } from "./passport.mjs";
 export type { SessionStoreFactory } from "./store/factory.mjs";
