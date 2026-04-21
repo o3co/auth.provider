@@ -23,6 +23,7 @@ import {
 	GrantRegistry,
 	type ModuleContext,
 	type RefreshTokenStoreBase,
+	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import express from "express";
@@ -220,6 +221,67 @@ describe("oauthAuthorizationModule", () => {
 		});
 
 		expect(rotateSpy).toHaveBeenCalled();
+	});
+
+	it("forwards context.userSessionStore to authorization and refresh_token grants (Fix C1/P1)", async () => {
+		// Construct module with a spy userSessionStore. Drive the authorization grant
+		// through a valid code exchange; assert get() was consulted (store is threaded).
+		const getSpy = vi.fn().mockResolvedValue({
+			sid: "sid-wired",
+			sub: "u1",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 3600_000),
+			federations: [],
+			activeRPs: [],
+			familyIds: [],
+			claims: {},
+		});
+		const userSessionStore: UserSessionStoreBase = {
+			kind: "spy",
+			get: getSpy,
+			create: vi.fn(),
+			registerRP: vi.fn(),
+			linkFamily: vi.fn(),
+			updateClaims: vi.fn(),
+			removeFederation: vi.fn(),
+			delete: vi.fn(),
+		};
+		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
+		const ctx = makeContext({ userSessionStore, keyStore });
+
+		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code", sid: "sid-wired" });
+		const module = oauthAuthorizationModule({
+			codeRepository: {
+				consumeByCode,
+				createCode: vi.fn(),
+				getByCode: vi.fn(),
+				removeByCode: vi.fn(),
+			} as unknown as CodeRepository,
+			clientRepository: mockClientRepository,
+		});
+
+		await module.init(ctx);
+
+		const handler = ctx.grantRegistry.get("authorization");
+		expect(handler).toBeDefined();
+		if (!handler) return;
+
+		const { result } = await handler.handle({
+			body: { code: "auth-code", client_id: "client1" },
+			session: {
+				code: "auth-code",
+				code_client_id: "client1",
+				granted_scopes: ["read"],
+				user: { id: "u1" },
+			},
+			issuer: "localhost",
+			metadata: {},
+		});
+
+		// The grant must succeed and have consulted the store via get(sid)
+		expect(result.status).toBe(200);
+		expect(getSpy).toHaveBeenCalledWith("sid-wired");
 	});
 
 	it("forwards context.grantPolicy to authorization and refresh_token grants", async () => {

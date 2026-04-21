@@ -213,13 +213,15 @@ export const createAuthorizationGrant = (
 				}
 			}
 
-			// TODO-F-3: sid is required on the code record — it is written at /authorize
-			// time by the login/federation callback wiring (Task 2). A missing sid means
-			// the operator has not yet deployed the F-2 login wiring; fail with a clear
-			// error so the misconfiguration is surfaced immediately rather than silently
-			// producing tokens without a session link.
+			// TODO-F-3: sid from the code record — written at /authorize time by the
+			// login/federation callback wiring (Task 2).
+			// Only enforce sid presence when userSessionStore is wired. Deployments
+			// that opt out of session tracking (userSessionStore not configured) have
+			// no store to write sid at login time, so requiring it here would be a
+			// backward-compat regression. When the store IS wired, sid is mandatory
+			// so subsequent linkFamily / registerRP can execute.
 			const sid = codeData.sid;
-			if (!sid) {
+			if (deps.userSessionStore && !sid) {
 				return {
 					result: {
 						status: 400,
@@ -251,11 +253,12 @@ export const createAuthorizationGrant = (
 			// consumers can't distinguish from "scope claim omitted").
 			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
 
-			// TODO-F-3: both access_token and refresh_token carry family_id + sid so
-			// introspect (Task 5) and refresh (Task 4) can propagate them without
-			// re-reading the session store on every request.
+			// TODO-F-3: both access_token and refresh_token carry family_id and, when
+			// sid is present, the sid claim so introspect (Task 5) and refresh (Task 4)
+			// can propagate them without re-reading the session store on every request.
+			// sid is omitted when no userSessionStore is wired (backward-compat path).
 			const accessToken = await generateToken(
-				{ family_id: familyId, sid },
+				{ family_id: familyId, ...(sid ? { sid } : {}) },
 				{
 					expiresIn: config.oauth.accessToken.expiresIn,
 					keyStore,
@@ -268,7 +271,7 @@ export const createAuthorizationGrant = (
 				},
 			);
 			const refreshToken = await generateToken(
-				{ family_id: familyId, sid },
+				{ family_id: familyId, ...(sid ? { sid } : {}) },
 				{
 					expiresIn: config.oauth.refreshToken.expiresIn,
 					keyStore,
@@ -312,12 +315,42 @@ export const createAuthorizationGrant = (
 			}
 
 			// TODO-F-3: link the new token family to the user session and register
-			// the RP for back/front-channel logout. Both calls are fail-closed: if the
-			// session store is unavailable, return 503 rather than issuing tokens that
+			// the RP for back/front-channel logout. All calls are fail-closed: if the
+			// session store is unavailable or the session was deleted between /authorize
+			// and /token, we return a controlled error rather than issuing tokens that
 			// are invisible to logout orchestration.
-			if (deps.userSessionStore) {
-				const clientRecord = await clientRepository.findById(client_id);
+			// sid is guaranteed non-null here when deps.userSessionStore is set because
+			// the earlier guard (deps.userSessionStore && !sid) already rejected that case.
+			if (deps.userSessionStore && sid) {
+				// Fix I1: validate session still exists (mirrors refresh_token grant pattern).
+				// A session deleted between /authorize and /token exchange must not produce
+				// tokens — they would be orphaned from logout orchestration.
+				let session: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
 				try {
+					session = await deps.userSessionStore.get(sid);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session store unavailable",
+						},
+					};
+				}
+				if (!session) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "session_invalid",
+						},
+					};
+				}
+				// Fix I2: clientRepository.findById is fallible — move inside try/catch
+				// so a throw here returns a controlled 503 instead of propagating to the
+				// express default handler as an unhandled HTML 500.
+				try {
+					const clientRecord = await clientRepository.findById(client_id);
 					await deps.userSessionStore.linkFamily(sid, familyId);
 					await deps.userSessionStore.registerRP(sid, {
 						clientId: client_id,

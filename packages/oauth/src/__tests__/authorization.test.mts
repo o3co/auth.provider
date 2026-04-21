@@ -861,9 +861,25 @@ describe("createAuthorizationGrant", () => {
 				expect(decodedRt.sid).toBe("session-abc");
 			});
 
-			it("returns 400 invalid_grant when code record has no sid (F-3-2)", async () => {
+			it("returns 400 invalid_grant when code record has no sid and userSessionStore IS wired (F-3-2)", async () => {
 				// Code was issued before Task 2 login wiring — sid missing.
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" /* no sid */ }));
+				// When the store is wired, sid is required so the store can link/register.
+				const userSessionStore = {
+					kind: "spy",
+					linkFamily: vi.fn(),
+					registerRP: vi.fn(),
+					create: vi.fn(),
+					async get() {
+						return null;
+					},
+					updateClaims: vi.fn(),
+					removeFederation: vi.fn(),
+					delete: vi.fn(),
+				};
+				const deps = {
+					...makeDeps(vi.fn().mockResolvedValue({ code: "abc" /* no sid */ })),
+					userSessionStore,
+				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
 					body: { code: "abc", client_id: "client1" },
@@ -882,6 +898,31 @@ describe("createAuthorizationGrant", () => {
 				expect((result as { errorDescription?: string }).errorDescription).toMatch(/sid/);
 			});
 
+			it("backward compat — no userSessionStore + no sid → grant succeeds without sid claim (F-3-2-compat)", async () => {
+				// Deployments that have not wired userSessionStore do not write sid at login
+				// time and must continue to work. No store → sid not required.
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" /* no sid */ }));
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						granted_scopes: ["read"],
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+				// family_id is always present; sid must NOT appear when it was never set
+				expect(typeof decoded.family_id).toBe("string");
+				expect(Object.hasOwn(decoded, "sid")).toBe(false);
+			});
+
 			it("calls linkFamily and registerRP when userSessionStore is wired (F-3-3)", async () => {
 				const linkFamilySpy = vi.fn(async (_sid: string, _fam: string) => {});
 				const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown) => {});
@@ -891,7 +932,18 @@ describe("createAuthorizationGrant", () => {
 					registerRP: registerRPSpy,
 					async create() {},
 					async get() {
-						return null;
+						// Return a minimal session so the existence check passes
+						return {
+							sid: "session-xyz",
+							sub: "u1",
+							authTime: new Date(),
+							createdAt: new Date(),
+							expiresAt: new Date(Date.now() + 3600_000),
+							federations: [],
+							activeRPs: [],
+							familyIds: [],
+							claims: {},
+						};
 					},
 					async updateClaims() {},
 					async removeFederation() {},
@@ -950,6 +1002,132 @@ describe("createAuthorizationGrant", () => {
 				const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
 				expect(typeof decoded.family_id).toBe("string");
 				expect(decoded.sid).toBe("session-abc");
+			});
+
+			it("returns 400 invalid_grant session_invalid when session was deleted between /authorize and /token (F-3-I1)", async () => {
+				// Session deleted after /authorize was issued — get(sid) returns null.
+				const userSessionStore = {
+					kind: "spy",
+					linkFamily: vi.fn(),
+					registerRP: vi.fn(),
+					async create() {},
+					async get() {
+						return null; // session gone
+					},
+					async updateClaims() {},
+					async removeFederation() {},
+					async delete() {},
+				};
+				const deps = {
+					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-gone" })),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						granted_scopes: ["read"],
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(400);
+				if (!("error" in result)) throw new Error("expected error");
+				expect(result.error).toBe("invalid_grant");
+				expect((result as { errorDescription?: string }).errorDescription).toMatch(/session/i);
+			});
+
+			it("returns 503 temporarily_unavailable when userSessionStore.get throws (F-3-I1-503)", async () => {
+				// Store is wired but unavailable when get() is called.
+				const userSessionStore = {
+					kind: "broken",
+					linkFamily: vi.fn(),
+					registerRP: vi.fn(),
+					async create() {},
+					async get() {
+						throw new Error("store down");
+					},
+					async updateClaims() {},
+					async removeFederation() {},
+					async delete() {},
+				};
+				const deps = {
+					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" })),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						granted_scopes: ["read"],
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(503);
+				if (!("error" in result)) throw new Error("expected error");
+				expect(result.error).toBe("temporarily_unavailable");
+			});
+
+			it("returns 503 temporarily_unavailable when clientRepository.findById throws (F-3-I2)", async () => {
+				// findById is now inside the try/catch — a throw must produce a controlled 503.
+				const throwingClientRepo: ClientRepository = {
+					findById: vi.fn().mockRejectedValue(new Error("db down")),
+					authenticate: vi.fn().mockResolvedValue(null),
+				};
+				const userSessionStore = {
+					kind: "spy",
+					linkFamily: vi.fn(),
+					registerRP: vi.fn(),
+					async create() {},
+					async get() {
+						return {
+							sid: "session-abc",
+							sub: "u1",
+							authTime: new Date(),
+							createdAt: new Date(),
+							expiresAt: new Date(Date.now() + 3600_000),
+							federations: [] as ReadonlyArray<string>,
+							activeRPs: [] as ReadonlyArray<{ clientId: string; registeredAt: Date }>,
+							familyIds: [] as ReadonlyArray<string>,
+							claims: {},
+						};
+					},
+					async updateClaims() {},
+					async removeFederation() {},
+					async delete() {},
+				};
+				const deps = {
+					...makeDeps(
+						vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" }),
+						throwingClientRepo,
+					),
+					userSessionStore,
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: { code: "abc", client_id: "client1" },
+					session: {
+						code: "abc",
+						code_client_id: "client1",
+						granted_scopes: ["read"],
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(503);
+				if (!("error" in result)) throw new Error("expected error");
+				expect(result.error).toBe("temporarily_unavailable");
 			});
 		});
 	});
