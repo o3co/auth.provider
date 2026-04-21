@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { scaffold } from "../index.mjs";
+import { isValidDirName, isValidProjectName, scaffold } from "../index.mjs";
 
 describe("scaffold", () => {
 	let tempDir: string;
@@ -67,5 +67,58 @@ describe("scaffold", () => {
 
 		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
 		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
+	});
+});
+
+describe("isValidProjectName", () => {
+	it.each([
+		["my-auth"],
+		["auth.provider"],
+		["a"],
+		["foo_bar~baz.1"],
+		["@piratis-blossoms/auth.provider"],
+		["@foo-bar/baz_qux~1"],
+	])("accepts %s", (name) => {
+		expect(isValidProjectName(name)).toBe(true);
+	});
+
+	it.each([
+		[""],
+		["."],
+		[".."],
+		["UPPER"],
+		["with space"],
+		["with/slash"],
+		["with\\back"],
+		["@"],
+		["@/"],
+		["@scope"],
+		["@/pkg"],
+		["@scope/"],
+		["@scope//pkg"],
+		["@SCOPE/pkg"],
+		["a".repeat(215)],
+	])("rejects %s", (name) => {
+		expect(isValidProjectName(name)).toBe(false);
+	});
+});
+
+describe("isValidDirName", () => {
+	it.each([["my-auth"], ["auth.provider"], ["a"], ["foo_bar~baz.1"]])("accepts %s", (name) => {
+		expect(isValidDirName(name)).toBe(true);
+	});
+
+	it.each([
+		[""],
+		["."],
+		[".."],
+		["@scope/pkg"],
+		["with/slash"],
+		["with\\back"],
+		["@piratis-blossoms"],
+		["UPPER"],
+		["a".repeat(215)],
+	])("rejects %s", (name) => {
+		expect(isValidDirName(name)).toBe(false);
 	});
 });
