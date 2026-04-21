@@ -26,6 +26,7 @@ import {
 	type KeyStore,
 	type PublicClient,
 	type RateLimiterBase,
+	type RefreshTokenStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
@@ -62,6 +63,7 @@ export const createOAuthRouter = async (
 		rateLimiter,
 		auditSink,
 		grantPolicy,
+		refreshTokenStore,
 	}: {
 		passport: PassportStatic;
 		registry: GrantRegistry;
@@ -72,6 +74,7 @@ export const createOAuthRouter = async (
 		rateLimiter?: RateLimiterBase;
 		auditSink?: AuditSinkBase;
 		grantPolicy?: GrantPolicyHookBase;
+		refreshTokenStore?: RefreshTokenStoreBase;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
@@ -237,6 +240,29 @@ export const createOAuthRouter = async (
 						header.kid ?? keyStore.getSigningKidFallback(),
 					);
 					const { payload } = await jwtVerify(token, key);
+
+					// TODO-F-3: cascading revoke (RFC 7009 §2.1 SHOULD). When a refresh_token
+					// family has been revoked, all access_tokens minted under the same
+					// authorization grant must introspect as inactive. family_id claim is
+					// optional — legacy tokens without it still succeed (no cascade available).
+					const familyId =
+						typeof (payload as Record<string, unknown>).family_id === "string"
+							? ((payload as Record<string, unknown>).family_id as string)
+							: null;
+					if (familyId !== null && refreshTokenStore) {
+						let revoked: boolean;
+						try {
+							revoked = await refreshTokenStore.isFamilyRevoked(familyId);
+						} catch {
+							// Fail-closed: when we cannot determine family state, prefer inactive
+							// per RFC 7009 §2.2 intent ("serve inactive if state cannot be determined").
+							return res.status(200).json({ active: false });
+						}
+						if (revoked) {
+							return res.status(200).json({ active: false });
+						}
+					}
+
 					const { exp, iat, iss, aud, sub } = payload;
 					const claims = payload as Record<string, unknown>;
 					const azp = typeof claims.azp === "string" ? claims.azp : undefined;
