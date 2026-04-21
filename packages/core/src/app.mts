@@ -18,6 +18,7 @@ import type { z } from "zod";
 import type { AuditSinkBase } from "./audit/types.mjs";
 import type { CoreConfig } from "./config/application.schema.mjs";
 import { composeConfigSchema } from "./config/application.schema.mjs";
+import type { FederationTokenStoreBase } from "./federation-tokens/types.mjs";
 import { GrantRegistry } from "./grants/registry.mjs";
 import type { KeyStore } from "./keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "./mfa/types.mjs";
@@ -27,6 +28,7 @@ import type { RateLimiterBase } from "./ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
 import * as healthcheck from "./routes/Healthcheck.mjs";
 import * as jwks from "./routes/Jwks.mjs";
+import type { UserSessionStoreBase } from "./user-sessions/types.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -47,6 +49,8 @@ export interface AppOptions {
 	rateLimiter?: RateLimiterBase;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
+	userSessionStore?: UserSessionStoreBase;
+	federationTokenStore?: FederationTokenStoreBase;
 }
 
 export interface AppResult {
@@ -65,6 +69,28 @@ export function createApp(options: AppOptions): AppResult {
 		if (!options.mfaTransactionStore) {
 			throw new Error("createApp: mfaTransactionStore is required when mfaCoordinator is set");
 		}
+	}
+
+	// Spec Section 10.1 — federations configured means stores are required.
+	// We detect configured federations by any entry with enabled === true.
+	const federationsCfg = (config as { federations?: Record<string, { enabled?: unknown }> })
+		.federations;
+	const federationsConfigured =
+		typeof federationsCfg === "object" &&
+		federationsCfg !== null &&
+		Object.values(federationsCfg).some((f) => f != null && f.enabled === true);
+
+	if (federationsConfigured && !options.federationTokenStore) {
+		throw new Error(
+			"createApp: federations are configured but federationTokenStore was not provided. " +
+				"Register a FederationTokenStore adapter in AppOptions.",
+		);
+	}
+	if (federationsConfigured && !options.userSessionStore) {
+		throw new Error(
+			"createApp: federations are configured but userSessionStore was not provided. " +
+				"Register a UserSessionStore adapter in AppOptions.",
+		);
 	}
 
 	// CP-20: when grantPolicy is configured, config.oauth.jwt.issuer MUST be
@@ -109,6 +135,8 @@ export function createApp(options: AppOptions): AppResult {
 		rateLimiter: options.rateLimiter,
 		refreshTokenStore: options.refreshTokenStore,
 		grantPolicy: options.grantPolicy,
+		userSessionStore: options.userSessionStore,
+		federationTokenStore: options.federationTokenStore,
 	};
 
 	async function init(): Promise<void> {

@@ -17,9 +17,11 @@ import type { Router } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { createApp } from "#/app.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
+import { createInMemoryFederationTokenStore } from "#/federation-tokens/adapters/memory.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "#/mfa/types.mjs";
 import type { GrantPolicyHookBase } from "#/policy/types.mjs";
+import { createInMemoryUserSessionStore } from "#/user-sessions/adapters/memory.mjs";
 
 const mockExpress = {
 	Router: () =>
@@ -224,6 +226,79 @@ describe("createApp — grantPolicy / jwt.issuer consistency guard (CP-20)", () 
 			createApp({
 				express: mockExpress,
 				config: configWithoutIssuer,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).not.toThrow();
+	});
+});
+
+describe("createApp — TODO-F-1 federation store plumbing", () => {
+	const configWithFederations = {
+		...mockConfig,
+		federations: {
+			google: { enabled: true, clientId: "x", clientSecret: "y", callbackURL: "z" },
+		},
+	} as unknown as AppConfig;
+
+	const configWithoutFederations = {
+		...mockConfig,
+		federations: {},
+	} as unknown as AppConfig;
+
+	it("throws when federations configured without federationTokenStore", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+			}),
+		).toThrow(/federationTokenStore/);
+	});
+
+	it("throws when federations configured without userSessionStore", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				federationTokenStore: createInMemoryFederationTokenStore(),
+			}),
+		).toThrow(/userSessionStore/);
+	});
+
+	it("accepts federation config when both stores are wired", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts no stores when no federations are configured", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithoutFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+			}),
+		).not.toThrow();
+	});
+
+	it("accepts no stores when federations config is entirely absent", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: mockConfig,
 				keyStore: createSymmetricKeyStore("test-secret"),
 				modules: [],
 			}),
