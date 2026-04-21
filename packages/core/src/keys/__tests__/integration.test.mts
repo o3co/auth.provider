@@ -18,6 +18,7 @@ import { decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair, jwtVer
 import { describe, expect, it } from "vitest";
 import { generateToken } from "#/grants/token.mjs";
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
+import { createAsymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -199,5 +200,29 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 
 		// Attempting to verify with expired previous key should throw
 		await expect(newKeyStore.getVerificationKey("r-old")).rejects.toThrow("Expired kid: r-old");
+	});
+
+	it("generateToken overwrites caller-supplied jti with a fresh UUID", async () => {
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("ES256");
+		const keyStore = await createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "jti-test",
+			privateKeyPem,
+			publicKeyPem,
+		});
+
+		const manuallyProvidedJti = "caller-provided-jti-should-be-ignored";
+		const result = await generateToken(
+			{ sub: "u1", jti: manuallyProvidedJti },
+			{ keyStore, issuer: "https://auth.test" },
+		);
+
+		const verificationKey = await keyStore.getVerificationKey("jti-test");
+		const { payload } = await jwtVerify(result.token, verificationKey);
+
+		// jti must be a randomUUID v4 (36 chars, contains dashes), NOT the caller-supplied value
+		expect(payload.jti).not.toBe(manuallyProvidedJti);
+		expect(typeof payload.jti).toBe("string");
+		expect(payload.jti).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 	});
 });
