@@ -17,12 +17,16 @@
 import {
 	type AppConfig,
 	createApp,
+	createFederationTokenStoreFactory,
 	createKeyStoreFactory,
+	createUserSessionStoreFactory,
 	generateToken,
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
+	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
+	registerBuiltinUserSessionStores,
 } from "@o3co/auth-provider-core";
 import {
 	oauthAuthorizationModule,
@@ -95,10 +99,20 @@ describe("standalone smoke test", () => {
 			...(config.oauth.jwt.signingKey.local ?? {}),
 		});
 
+		const userSessionStoreFactory = createUserSessionStoreFactory();
+		registerBuiltinUserSessionStores(userSessionStoreFactory);
+		const userSessionStore = await userSessionStoreFactory.create({ type: "memory" });
+
+		const federationTokenStoreFactory = createFederationTokenStoreFactory();
+		registerBuiltinFederationTokenStores(federationTokenStoreFactory);
+		const federationTokenStore = await federationTokenStoreFactory.create({ type: "memory" });
+
 		const { init, router, grantRegistry } = createApp({
 			express,
 			config,
 			keyStore,
+			userSessionStore,
+			federationTokenStore,
 			modules: [
 				oauthModule({ clientRepository, codeRepository, express }),
 				sessionModule({ userRepository, express }),
