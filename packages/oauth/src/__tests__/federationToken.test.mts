@@ -354,7 +354,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("isFamilyRevoked returns true", () => {
-		it("returns 401 + emits federation_token.family_revoked audit event", async () => {
+		it("returns 401 + emits federation.token.family_revoked audit event", async () => {
 			const auditSink: AuditSinkBase = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
@@ -372,7 +372,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.headers["www-authenticate"]).toMatch(/error="invalid_token"/);
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "federation_token.family_revoked",
+					type: "federation.token.family_revoked",
 					details: expect.objectContaining({ sid: "sid-1" }),
 				}),
 			);
@@ -431,7 +431,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("client.allowedAzpForFederationToken !== true", () => {
-		it("returns 403 forbidden + emits federation_token.forbidden audit event", async () => {
+		it("returns 403 forbidden + emits federation.token.forbidden audit event", async () => {
 			const auditSink: AuditSinkBase = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
@@ -453,7 +453,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("forbidden");
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "federation_token.forbidden",
+					type: "federation.token.forbidden",
 					details: expect.objectContaining({ federation: "google", azp: "client-1" }),
 				}),
 			);
@@ -596,7 +596,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(sessionStore.removeFederation).toHaveBeenCalledWith("sid-1", "google");
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "federation_token.reauthentication_required",
+					type: "federation.token.reauthentication_required",
 					details: expect.objectContaining({ federation: "google" }),
 				}),
 			);
@@ -629,7 +629,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("refresh: provider throws generic error", () => {
-		it("returns 500 refresh_failed + emits federation_token.refresh_failed audit event", async () => {
+		it("returns 500 refresh_failed + emits federation.token.refresh_failed audit event", async () => {
 			const auditSink: AuditSinkBase = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
@@ -655,7 +655,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("refresh_failed");
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "federation_token.refresh_failed",
+					type: "federation.token.refresh_failed",
 					details: expect.objectContaining({
 						federation: "google",
 						error: "unexpected provider error",
@@ -786,10 +786,10 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// Audit event: federation_token.success
-	// ---------------------------------------------------------------------------
+	// Audit event: federation.token.success
+// ---------------------------------------------------------------------------
 
-	describe("audit event: federation_token.success on happy path", () => {
+	describe("audit event: federation.token.success on happy path", () => {
 		it("emits with refreshed: false on valid non-expired token", async () => {
 			const auditSink: AuditSinkBase = {
 				kind: "mock",
@@ -803,7 +803,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(200);
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "federation_token.success",
+					type: "federation.token.success",
 					details: expect.objectContaining({ federation: "google", refreshed: false }),
 				}),
 			);
@@ -841,7 +841,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(200);
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "federation_token.success",
+					type: "federation.token.success",
 					details: expect.objectContaining({ federation: "google", refreshed: true }),
 				}),
 			);

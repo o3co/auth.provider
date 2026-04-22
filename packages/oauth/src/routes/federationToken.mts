@@ -200,7 +200,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		if (revoked) {
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
-				type: "federation_token.family_revoked",
+				type: "federation.token.family_revoked",
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
@@ -258,7 +258,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		if (!client || !client.allowedAzpForFederationToken) {
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
-				type: "federation_token.forbidden",
+				type: "federation.token.forbidden",
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
@@ -311,10 +311,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 
 		// Step 10: If not expired (within buffer), return existing token.
 		if (tokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
-			const expiresIn = Math.floor((tokens.expiresAt.getTime() - Date.now()) / 1000);
+			const expiresIn = Math.max(0, Math.floor((tokens.expiresAt.getTime() - Date.now()) / 1000));
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
-				type: "federation_token.success",
+				type: "federation.token.success",
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
@@ -399,12 +399,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					freshTokens.expiresAt.getTime() > Date.now() + refreshBufferMs
 				) {
 					// Another caller already refreshed: return the fresh token without calling IdP.
-					const expiresIn = Math.floor(
+					const expiresIn = Math.max(0, Math.floor(
 						(freshTokens.expiresAt.getTime() - Date.now()) / 1000,
-					);
+					));
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
-						type: "federation_token.success",
+						type: "federation.token.success",
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
@@ -420,6 +420,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			}
 
 			// 11e: Call provider to refresh the federation token.
+			// The lock is held across the IdP refresh call. Lock TTL (default 5s per
+			// AcquireLockOptions) SHOULD be >= IdP refresh timeout to avoid another
+			// waiter acquiring mid-flight. If the IdP call exceeds TTL, a second
+			// waiter will call the IdP too — not dangerous because federationTokenStore.update
+			// is atomic and last-write-wins preserves a valid token, but operators
+			// should tune ttlMs via the lock adapter config if their IdP is slow.
 			let refreshed: Awaited<ReturnType<typeof provider.refreshFederationToken>>;
 			try {
 				refreshed = await provider.refreshFederationToken(tokens.refreshToken!);
@@ -448,7 +454,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					}
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
-						type: "federation_token.reauthentication_required",
+						type: "federation.token.reauthentication_required",
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
@@ -469,7 +475,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 
 				emitAuditEvent(opts.auditSink, {
 					timestamp: new Date(),
-					type: "federation_token.refresh_failed",
+					type: "federation.token.refresh_failed",
 					subject: sub ?? undefined,
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
@@ -505,10 +511,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			}
 
 			// 11h: Return refreshed token.
-			const expiresIn = Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000);
+			const expiresIn = Math.max(0, Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000));
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
-				type: "federation_token.success",
+				type: "federation.token.success",
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
