@@ -56,6 +56,12 @@ export {
 	type GenerateIdTokenOptions,
 	generateIdToken,
 } from "./grants/idToken.mjs";
+// logout_token generation (OIDC Back-Channel Logout 1.0 §2.4)
+export {
+	BACKCHANNEL_LOGOUT_EVENT_URI,
+	type GenerateLogoutTokenOptions,
+	generateLogoutToken,
+} from "./grants/logoutToken.mjs";
 // Grant types and interfaces
 export { GrantRegistry } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
@@ -96,6 +102,8 @@ export {
 	createAsymmetricKeyStore,
 	createSymmetricKeyStore,
 } from "./keys/KeyStore.mjs";
+// Logging
+export type { Logger } from "./logging/Logger.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";
 export type { MfaRouteDeps } from "./mfa/route.mjs";
 export { createMfaRouter } from "./mfa/route.mjs";
@@ -117,7 +125,12 @@ export type {
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
 // Module system
-export type { Module, ModuleContext, PathResolver } from "./modules/index.mjs";
+export type {
+	FederationProviderHandle,
+	Module,
+	ModuleContext,
+	PathResolver,
+} from "./modules/index.mjs";
 export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
 // Grant policy
 export type {

@@ -168,6 +168,59 @@ Authorization: Bearer <access_token>
 - **`authorization_code` グラント — `sid` の必要条件。** グラントは `CodeData` レコードから `sid` を読み取る。発行トークンに `sid` クレームを含めるには、F-2/F-3 のログインワイアリング（ローカルログインまたはフェデレーションコールバックがコードに `sid` を書き込む処理）が必要。
 - **`refresh_token` グラント — セッション検証。** `AppOptions.userSessionStore` が設定されており、かつリフレッシュトークンに `sid` クレームが含まれる場合、グラントは `userSessionStore.get(sid)` を呼び出してセッションがまだアクティブかを検証する。セッションが存在しない場合は `400 invalid_grant`、ストアエラーの場合は `503 temporarily_unavailable` を返す。
 
+## TODO-F-5 の変更点 — ログアウトエンドポイント
+
+OAuth モジュールは `userSessionStore`、`federationTokenStore`、`refreshTokenStore`、`oauth.jwt.issuer` が設定されている場合に 2 つのログアウトルートを公開する。
+
+### POST /oauth/logout
+
+OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。`application/x-www-form-urlencoded` を受け付ける:
+
+- `id_token_hint`（必須） — このプロバイダーが発行した署名済み id_token。`sid` クレームでセッションを特定する
+- `post_logout_redirect_uri`（任意） — `client.postLogoutRedirectUris` のいずれかと完全一致する必要がある
+- `state`（任意） — `post_logout_redirect_uri` へのリダイレクト時にそのまま返す
+
+フロー: `id_token_hint` を検証 → セッションを取得 → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を POST → ストアカスケード（リフレッシュファミリー失効・フェデレーショントークン削除・セッション削除）を実行 → 以下のいずれかで応答:
+
+- `frontchannelLogoutUri` を持つ RP ごとに `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が優先された場合）
+- 最初のフェデレーションの IdP end-session URL への `303` リダイレクト（そのフェデレーションプロバイダーが `SupportsLogout` を実装している場合）
+- `post_logout_redirect_uri` への `303` リダイレクト（クライアントのアローリストに一致する場合）
+- `200 {"logged_out": true}`（フォールバック）
+
+カスケード失敗時は `503 {"error": "temporarily_unavailable"}` を返す。カスケードの実行順序は仕様により固定されており、ステップ 1（リフレッシュファミリー失効）とステップ 3（セッション削除）は失敗時にそのまま終了し、ステップ 2（フェデレーショントークン削除）はベストエフォートで失敗してもカスケードを継続する。
+
+### POST /oauth/federation/:name/logout
+
+プロバイダー単位のフェデレーション切断。Authorization ヘッダーに `Bearer <access_token>`（`typ: at+jwt`）を指定する。ボディ（任意）: `post_logout_redirect_uri`、`state`。
+
+フロー: access_token を検証 → ファミリーが失効していないか確認 → セッションを取得 → 該当フェデレーションがセッションに紐付いていることを確認 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装している場合は IdP end-session URL にリダイレクト。それ以外は `200 {"disconnected": true}` を返す。
+
+IdP end-session 呼び出しが失敗した場合、ローカル状態はすでにクリア済みのため `200 {"disconnected": true}` を返し、オペレーター向けに `federation.logout.idp_unreachable` 監査イベントを出力する。
+
+セッションに指定フェデレーションが存在しない場合は `404 {"error": "federation_not_linked"}` を返す。
+
+### ディスカバリーメタデータ
+
+`GET /.well-known/openid-configuration` に以下が追加された:
+
+- `end_session_endpoint`
+- `backchannel_logout_supported: true`
+- `backchannel_logout_session_supported: true` — デフォルトで `logout_token` に `sid` を含む
+- `frontchannel_logout_supported: true`
+- `frontchannel_logout_session_supported: true` — デフォルトでフロントチャネルの iframe URL に `sid` を含む
+
+`session_supported` のデフォルト `true` は OIDC Back-Channel Logout 1.0 §2.2 の仕様デフォルト（`false`）から意図的に逸脱している。仕様デフォルトの動作が必要なクライアントは、クライアントレコードで `backchannelLogoutSessionRequired: false` または `frontchannelLogoutSessionRequired: false` を設定すること。
+
+### クライアントレコードのログアウトメタデータ
+
+各 `Client` はログアウト動作を制御する 5 つのオプションフィールドをサポートする:
+
+- `postLogoutRedirectUris?: string[]` — `POST /oauth/logout` の `post_logout_redirect_uri` 許可リスト
+- `backchannelLogoutUri?: string` — `logout_token` の POST を受け取る URI
+- `backchannelLogoutSessionRequired?: boolean` — デフォルト `true`。`false` にすると `logout_token` から `sid` を除外する
+- `frontchannelLogoutUri?: string` — フロントチャネルの iframe src
+- `frontchannelLogoutSessionRequired?: boolean` — デフォルト `true`。`false` にすると iframe URL から `sid` を除外する
+
 ## 関連
 
 - [`@o3co/auth-provider-session`](../session/README.ja.md) — セッションログイン / フェデレーションルート

@@ -19,6 +19,16 @@ export interface Client {
 	clientSecret: string;
 	allowedRedirectUris: string[];
 	allowedScopes: string[];
+	// NEW (TODO-F-5): Logout metadata.
+	postLogoutRedirectUris?: string[];
+	backchannelLogoutUri?: string;
+	// default: true (includes sid in logout_token) — intentional deviation from OIDC Back-Channel
+	// Logout 1.0 §2.2 spec default of false, to default to the safer behavior. See ClientEntrySchema.
+	backchannelLogoutSessionRequired?: boolean;
+	frontchannelLogoutUri?: string;
+	// default: true (includes sid in frontchannel logout iframe URL) — intentional deviation from OIDC
+	// Front-Channel Logout 1.0 spec default of false, to default to the safer behavior. See ClientEntrySchema.
+	frontchannelLogoutSessionRequired?: boolean;
 }
 
 export interface User {

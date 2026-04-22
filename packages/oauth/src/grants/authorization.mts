@@ -377,8 +377,12 @@ export const createAuthorizationGrant = (
 						clientId: client_id,
 						backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
 							?.backchannelLogoutUri as string | undefined,
+						backchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
+							?.backchannelLogoutSessionRequired as boolean | undefined,
 						frontchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
 							?.frontchannelLogoutUri as string | undefined,
+						frontchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
+							?.frontchannelLogoutSessionRequired as boolean | undefined,
 						registeredAt: new Date(),
 					});
 				} catch {

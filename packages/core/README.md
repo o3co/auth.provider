@@ -223,6 +223,12 @@ interface Client {
   clientSecret: string;
   allowedRedirectUris: string[];
   allowedScopes: string[];
+  // Logout metadata (TODO-F-5):
+  postLogoutRedirectUris?: string[];
+  backchannelLogoutUri?: string;
+  backchannelLogoutSessionRequired?: boolean; // default: true
+  frontchannelLogoutUri?: string;
+  frontchannelLogoutSessionRequired?: boolean; // default: true
 }
 
 type PublicClient = Omit<Client, "clientSecret">;
@@ -617,8 +623,51 @@ OIDC Discovery 1.0 metadata endpoint. Registered by the OAuth module (`@o3co/aut
 - `scopes_supported: ["openid", "profile", "email", "groups"]`
 - `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`
 - `code_challenge_methods_supported: ["S256"]`
+- `end_session_endpoint` — added in TODO-F-5
+- `backchannel_logout_supported: true` — added in TODO-F-5
+- `backchannel_logout_session_supported: true` — added in TODO-F-5
+- `frontchannel_logout_supported: true` — added in TODO-F-5
+- `frontchannel_logout_session_supported: true` — added in TODO-F-5
 
-Fields that require additional endpoints (`revocation_endpoint`, `end_session_endpoint`, back/front-channel logout) are omitted in F-4 and will be added in TODO-F-5.
+### Logout helpers (TODO-F-5)
+
+Low-level helpers used by `POST /oauth/logout` in `@o3co/auth-provider-oauth`.
+
+#### `generateLogoutToken`
+
+```typescript
+interface GenerateLogoutTokenOptions {
+  readonly issuer: string;
+  readonly sub: string;
+  readonly aud: string | string[];
+  readonly sid?: string;
+  readonly includeSid?: boolean; // default true
+  readonly keyStore: KeyStore;
+  readonly expiresIn?: number; // default 300 s
+}
+
+function generateLogoutToken(opts: GenerateLogoutTokenOptions): Promise<Token>;
+```
+
+Generates a signed `logout_token` JWT (OIDC Back-Channel Logout 1.0 §2.4). Header `typ: logout+jwt`. Claim composition: `iss`, `sub`, `aud`, `iat`, `exp`, `jti`, and `events` carrying `{ [BACKCHANNEL_LOGOUT_EVENT_URI]: {} }`. The `sid` claim is included by default; set `includeSid: false` for RPs registered with `backchannel_logout_session_required: false`. Default TTL is 300 s. The `nonce` claim is never included (spec §2.4 requirement).
+
+#### `BACKCHANNEL_LOGOUT_EVENT_URI`
+
+```typescript
+const BACKCHANNEL_LOGOUT_EVENT_URI: "http://schemas.openid.net/event/backchannel-logout";
+```
+
+The canonical event URI required in every `logout_token`'s `events` claim. Exported so downstream code and tests can reference it without re-literalizing.
+
+#### `Logger`
+
+```typescript
+interface Logger {
+  warn(message: string, ...args: unknown[]): void;
+}
+```
+
+Minimal structural logger interface accepted by `cascadeLogout`, `broadcastBackchannelLogout`, and other internal call sites. Structurally compatible with `console`, pino, winston, bunyan, etc. Additional methods (`info`, `error`, `debug`) are added when an internal consumer needs them.
 
 ## See Also
 

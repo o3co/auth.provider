@@ -95,6 +95,22 @@ describe("redis UserSessionStore", () => {
 		expect(s?.activeRPs).toHaveLength(1);
 	});
 
+	it("registerRP round-trips backchannelLogoutSessionRequired and frontchannelLogoutSessionRequired through JSON envelope", async () => {
+		await store.create(base);
+		await store.registerRP("sid-1", {
+			clientId: "rp-flags",
+			backchannelLogoutUri: "https://rp/bc",
+			backchannelLogoutSessionRequired: false,
+			frontchannelLogoutUri: "https://rp/fc",
+			frontchannelLogoutSessionRequired: false,
+			registeredAt: new Date(),
+		});
+		const s = await store.get("sid-1");
+		const rp = s?.activeRPs[0];
+		expect(rp?.backchannelLogoutSessionRequired).toBe(false);
+		expect(rp?.frontchannelLogoutSessionRequired).toBe(false);
+	});
+
 	it("delete removes the key", async () => {
 		await store.create(base);
 		await store.delete("sid-1");

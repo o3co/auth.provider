@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { createSecretKey } from "node:crypto";
 import {
 	type AppConfig,
 	type AuditEvent,
@@ -21,12 +22,18 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type FederationProviderHandle,
+	type FederationTokenStoreBase,
 	GrantRegistry,
 	type ModuleContext,
 	type RateLimiterBase,
+	type RefreshTokenStoreBase,
+	type UserSession,
+	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import express from "express";
+import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
@@ -139,5 +146,127 @@ describe("oauthModule", () => {
 			(call: unknown[]) => call[0] === "/oauth",
 		);
 		expect(oauthCall).toBeDefined();
+	});
+
+	// -----------------------------------------------------------------------
+	// Integration: lazy getFederationProviders closure
+	//
+	// Proves that composing modules as [oauthModule, sessionModule, ...] (oauth
+	// inits FIRST) still correctly resolves federation providers at request time
+	// because createOAuthRouter receives `() => context.federationProviders`
+	// rather than a snapshot of the map value at init time.
+	// -----------------------------------------------------------------------
+	it("federation logout works when oauth module inits BEFORE context.federationProviders is populated (lazy closure)", async () => {
+		const SECRET = "test-secret-at-least-32-chars!!";
+		const secretKey = createSecretKey(Buffer.from(SECRET));
+
+		// A minimal access token for POST /oauth/federation/:name/logout
+		const accessToken = await new SignJWT({ sub: "u-1", sid: "sid-1", family_id: "fam-1" })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+			.setExpirationTime("1h")
+			.setIssuedAt()
+			.sign(secretKey);
+
+		// Session has "google" linked
+		const session: UserSession = {
+			sid: "sid-1",
+			sub: "u-1",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			federations: ["google"],
+			activeRPs: [],
+			familyIds: ["fam-1"],
+			claims: {},
+		};
+
+		const sessionStore: UserSessionStoreBase = {
+			kind: "memory",
+			create: vi.fn(),
+			get: vi.fn().mockResolvedValue(session),
+			registerRP: vi.fn(),
+			linkFamily: vi.fn(),
+			updateClaims: vi.fn(),
+			removeFederation: vi.fn().mockResolvedValue(undefined),
+			delete: vi.fn(),
+		};
+
+		const refreshStore: RefreshTokenStoreBase = {
+			kind: "memory",
+			isFamilyRevoked: vi.fn().mockResolvedValue(false),
+			rotate: vi.fn(),
+			revokeFamily: vi.fn().mockResolvedValue(undefined),
+		};
+
+		const fedTokenStore: FederationTokenStoreBase = {
+			kind: "memory",
+			attach: vi.fn(),
+			get: vi.fn().mockResolvedValue({ idToken: "id-token-hint" }),
+			update: vi.fn(),
+			deleteBySession: vi.fn().mockResolvedValue(undefined),
+			delete: vi.fn().mockResolvedValue(undefined),
+		};
+
+		// The provider's endSession returns a redirect URL
+		const endSessionUrl = new URL("https://accounts.google.com/logout?hint=id-token-hint");
+		const googleProvider: FederationProviderHandle & {
+			endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
+		} = {
+			name: "google",
+			endSession: vi.fn().mockResolvedValue({ url: endSessionUrl, method: "GET" }),
+		};
+
+		// Build context — federationProviders is undefined at construction time,
+		// simulating the state when oauthModule.init runs before sessionModule.init.
+		const rootRouter = express.Router();
+		const ctx: ModuleContext = makeContext({
+			config: {
+				...mockConfig,
+				oauth: {
+					...mockConfig.oauth,
+					jwt: { secret: SECRET, issuer: "https://auth.example.com" },
+				},
+			} as unknown as AppConfig,
+			keyStore: createSymmetricKeyStore(SECRET),
+			router: rootRouter,
+			refreshTokenStore: refreshStore,
+			userSessionStore: sessionStore,
+			federationTokenStore: fedTokenStore,
+			// NOT setting federationProviders yet — simulates oauth init running first
+		});
+
+		// Step 1: oauth module inits (federationProviders still undefined on ctx)
+		const oauth = oauthModule({
+			clientRepository: { findById: vi.fn(), authenticate: vi.fn() } as ClientRepository,
+			codeRepository: {
+				createCode: vi.fn(),
+				getCode: vi.fn(),
+				deleteCode: vi.fn(),
+			} as unknown as CodeRepository,
+			express,
+		});
+		await oauth.init(ctx);
+
+		// Step 2: "session module" sets federationProviders AFTER oauth init — simulates
+		// the real module composition order where session inits after oauth.
+		ctx.federationProviders = new Map<string, FederationProviderHandle>([
+			["google", googleProvider],
+		]);
+
+		// Step 3: issue a real HTTP request — the closure in createOAuthRouter reads
+		// context.federationProviders at request time, so it picks up the map set above.
+		const app = express();
+		app.use(rootRouter);
+
+		const res = await request(app)
+			.post("/oauth/federation/google/logout")
+			.type("form")
+			.set("Authorization", `Bearer ${accessToken}`)
+			.send({});
+
+		// The lazy closure resolved the provider → endSession redirect
+		expect(res.status).toBe(303);
+		expect(res.headers.location).toContain("accounts.google.com");
+		expect(googleProvider.endSession).toHaveBeenCalledOnce();
 	});
 });

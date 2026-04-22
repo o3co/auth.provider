@@ -107,6 +107,11 @@ export const oauthModule = (params: {
 			grantPolicy: context.grantPolicy,
 			refreshTokenStore: context.refreshTokenStore,
 			userSessionStore: context.userSessionStore,
+			federationTokenStore: context.federationTokenStore,
+			// Lazy closure: evaluated at request time, not at init time.
+			// Captures `context` by reference so federation providers written by
+			// sessionModule.init() are visible regardless of module init order.
+			getFederationProviders: () => context.federationProviders,
 		});
 
 		context.router.use("/oauth", oauthRouter);
@@ -122,10 +127,17 @@ export const oauthModule = (params: {
 			// Advertise only the algorithm the configured KeyStore actually signs
 			// with. Hardcoding the full union would mislead clients to fetch JWKS
 			// expecting a key that is not there (OIDC Core §10.1 + RFC 8414 §2).
+			//
+			// logoutSupported mirrors the condition used in createOAuthRouter to mount
+			// the logout router. When any required store is absent, the logout route
+			// is not registered and discovery must not advertise the 5 logout fields.
+			const logoutSupported =
+				!!context.userSessionStore && !!context.federationTokenStore && !!context.refreshTokenStore;
 			context.router.use(
 				oidcConfig.createRouter(express, {
 					issuer,
 					signingAlgs: [context.keyStore.algorithm],
+					logoutSupported,
 				}),
 			);
 		}

@@ -15,7 +15,10 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
-import { InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";
+import {
+	ClientEntrySchema,
+	InMemoryClientRepository,
+} from "#/repositories/InMemoryClientRepository.mjs";
 
 describe("InMemoryClientRepository", () => {
 	describe("findById", () => {
@@ -55,6 +58,141 @@ describe("InMemoryClientRepository", () => {
 			);
 			const client = await repo.findById("nonexistent-client");
 			expect(client).toBeNull();
+		});
+	});
+
+	describe("logout metadata fields round-trip", () => {
+		it("preserves all logout fields when set", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"logout-client",
+						{
+							clientSecret: "secret",
+							allowedRedirectUris: ["http://localhost:3000/callback"],
+							allowedScopes: ["openid"],
+							postLogoutRedirectUris: [
+								"http://localhost:3000/logged-out",
+								"http://localhost:3000/home",
+							],
+							backchannelLogoutUri: "http://localhost:3000/backchannel-logout",
+							backchannelLogoutSessionRequired: false,
+							frontchannelLogoutUri: "http://localhost:3000/frontchannel-logout",
+							frontchannelLogoutSessionRequired: false,
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("logout-client");
+			expect(client).not.toBeNull();
+			expect(client?.postLogoutRedirectUris).toEqual([
+				"http://localhost:3000/logged-out",
+				"http://localhost:3000/home",
+			]);
+			expect(client?.backchannelLogoutUri).toBe("http://localhost:3000/backchannel-logout");
+			expect(client?.backchannelLogoutSessionRequired).toBe(false);
+			expect(client?.frontchannelLogoutUri).toBe("http://localhost:3000/frontchannel-logout");
+			expect(client?.frontchannelLogoutSessionRequired).toBe(false);
+		});
+
+		it("omits optional logout URI fields when not set, but session-required booleans default to true", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"no-logout-client",
+						{
+							clientSecret: "secret",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("no-logout-client");
+			expect(client).not.toBeNull();
+			// URI fields remain absent when not configured.
+			expect(client).not.toHaveProperty("postLogoutRedirectUris");
+			expect(client).not.toHaveProperty("backchannelLogoutUri");
+			expect(client).not.toHaveProperty("frontchannelLogoutUri");
+			// Session-required booleans default to true (intentional deviation from OIDC spec default
+			// of false — see ClientEntrySchema for rationale).
+			expect(client?.backchannelLogoutSessionRequired).toBe(true);
+			expect(client?.frontchannelLogoutSessionRequired).toBe(true);
+		});
+
+		it("explicit false is preserved (not overwritten by default)", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"explicit-false-client",
+						{
+							clientSecret: "secret",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							backchannelLogoutSessionRequired: false,
+							frontchannelLogoutSessionRequired: false,
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("explicit-false-client");
+			expect(client).not.toBeNull();
+			expect(client?.backchannelLogoutSessionRequired).toBe(false);
+			expect(client?.frontchannelLogoutSessionRequired).toBe(false);
+		});
+	});
+
+	describe("ClientEntrySchema URI validation", () => {
+		it("rejects an invalid URL in backchannelLogoutUri", () => {
+			const result = ClientEntrySchema.safeParse({
+				clientSecret: "secret",
+				allowedRedirectUris: [],
+				allowedScopes: [],
+				backchannelLogoutUri: "not-a-url",
+			});
+			expect(result.success).toBe(false);
+		});
+	});
+
+	describe("ClientEntrySchema URL scheme allowlist (F-5 XSS hardening)", () => {
+		const baseEntry = {
+			clientSecret: "secret",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+		};
+
+		it.each([
+			["postLogoutRedirectUris", { postLogoutRedirectUris: ["javascript:alert(1)"] }],
+			[
+				"postLogoutRedirectUris",
+				{ postLogoutRedirectUris: ["data:text/html,<script>alert(1)</script>"] },
+			],
+			["postLogoutRedirectUris", { postLogoutRedirectUris: ["file:///etc/passwd"] }],
+			["backchannelLogoutUri", { backchannelLogoutUri: "javascript:alert(1)" }],
+			["frontchannelLogoutUri", { frontchannelLogoutUri: "javascript:alert(1)" }],
+		])("rejects %s with scheme %s", (_field, override) => {
+			const result = ClientEntrySchema.safeParse({ ...baseEntry, ...override });
+			expect(result.success).toBe(false);
+		});
+
+		it("accepts https: scheme for all three logout URI fields", () => {
+			const result = ClientEntrySchema.safeParse({
+				...baseEntry,
+				postLogoutRedirectUris: ["https://rp.example/logged-out"],
+				backchannelLogoutUri: "https://rp.example/backchannel-logout",
+				frontchannelLogoutUri: "https://rp.example/fc-logout",
+			});
+			expect(result.success).toBe(true);
+		});
+
+		it("accepts http: scheme for local/dev URIs", () => {
+			const result = ClientEntrySchema.safeParse({
+				...baseEntry,
+				postLogoutRedirectUris: ["http://localhost:3000/logged-out"],
+				backchannelLogoutUri: "http://localhost:3000/back-logout",
+				frontchannelLogoutUri: "http://localhost:3000/fc-logout",
+			});
+			expect(result.success).toBe(true);
 		});
 	});
 
