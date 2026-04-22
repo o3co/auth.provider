@@ -706,10 +706,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			};
 			const release = vi.fn().mockResolvedValue(undefined);
 			// First get returns expired, second (post-lock re-read) returns fresh
-			const getFn = vi
-				.fn()
-				.mockResolvedValueOnce(expiredTokens)
-				.mockResolvedValueOnce(freshTokens);
+			const getFn = vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValueOnce(freshTokens);
 			const lockingStore = {
 				...makeFedTokenStore({ get: getFn }),
 				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
@@ -787,7 +784,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	// ---------------------------------------------------------------------------
 	// Audit event: federation.token.success
-// ---------------------------------------------------------------------------
+	// ---------------------------------------------------------------------------
 
 	describe("audit event: federation.token.success on happy path", () => {
 		it("emits with refreshed: false on valid non-expired token", async () => {

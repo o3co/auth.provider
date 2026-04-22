@@ -221,10 +221,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			session = await opts.userSessionStore.get(sid);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: userSessionStore.get failed:`,
-				error,
-			);
+			logger.warn(`POST /oauth/federation/${name}/token: userSessionStore.get failed:`, error);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -246,10 +243,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			client = await opts.clientRepository.findById(azp);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: clientRepository.findById failed:`,
-				error,
-			);
+			logger.warn(`POST /oauth/federation/${name}/token: clientRepository.findById failed:`, error);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "client repository unavailable",
@@ -283,10 +277,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			tokens = await opts.federationTokenStore.get(sid, name);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: federationTokenStore.get failed:`,
-				error,
-			);
+			logger.warn(`POST /oauth/federation/${name}/token: federationTokenStore.get failed:`, error);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "federation token store unavailable",
@@ -360,10 +351,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					federationName: name,
 				});
 			} catch (error) {
-				logger.warn(
-					`POST /oauth/federation/${name}/token: acquireLock failed:`,
-					error,
-				);
+				logger.warn(`POST /oauth/federation/${name}/token: acquireLock failed:`, error);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "federation token store unavailable",
@@ -400,14 +388,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						error_description: "federation token store unavailable",
 					});
 				}
-				if (
-					freshTokens &&
-					freshTokens.expiresAt.getTime() > Date.now() + refreshBufferMs
-				) {
+				if (freshTokens && freshTokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
 					// Another caller already refreshed: return the fresh token without calling IdP.
-					const expiresIn = Math.max(0, Math.floor(
-						(freshTokens.expiresAt.getTime() - Date.now()) / 1000,
-					));
+					const expiresIn = Math.max(
+						0,
+						Math.floor((freshTokens.expiresAt.getTime() - Date.now()) / 1000),
+					);
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
 						type: "federation.token.success",
@@ -530,7 +516,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			}
 
 			// 11h: Return refreshed token.
-			const expiresIn = Math.max(0, Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000));
+			const expiresIn = Math.max(
+				0,
+				Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000),
+			);
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "federation.token.success",
@@ -551,10 +540,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				try {
 					await release();
 				} catch (error) {
-					logger.warn(
-						`POST /oauth/federation/${name}/token: lock release failed:`,
-						error,
-					);
+					logger.warn(`POST /oauth/federation/${name}/token: lock release failed:`, error);
 				}
 			}
 		}
