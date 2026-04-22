@@ -106,6 +106,211 @@ export interface LogoutRouterOptions {
 export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): Router {
 	const router = express.Router();
 
+	// POST /federation/:name/logout — mounted under /oauth → POST /oauth/federation/:name/logout
+	router.post(
+		"/federation/:name/logout",
+		express.urlencoded({ extended: false }),
+		async (req: Request, res: Response) => {
+			const { name } = req.params as { name: string };
+			const {
+				post_logout_redirect_uri: postLogoutRedirectUri,
+				state,
+			} = req.body as Record<string, string | undefined>;
+
+			const logger = opts.logger ?? console;
+
+			// Step 1: Extract Bearer access_token from Authorization header.
+			const auth = req.headers.authorization;
+			// RFC 6750 §2.1: "Bearer" is case-insensitive in practice but the spec
+			// uses "Bearer". We do a case-insensitive prefix check per §2.1 common usage.
+			if (!auth || !/^Bearer /i.test(auth)) {
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(401).json({
+					error: "invalid_token",
+					error_description: "missing Bearer token",
+				});
+			}
+			const token = auth.slice(auth.indexOf(" ") + 1);
+
+			// Step 2: Verify JWT signature + check typ === "at+jwt".
+			// Reject refresh (rt+jwt), id (id+jwt), and logout (logout+jwt) tokens.
+			let payload: Record<string, unknown>;
+			try {
+				const header = decodeProtectedHeader(token);
+				if (header.typ !== "at+jwt") {
+					throw new Error("invalid token type");
+				}
+				const key = await opts.keyStore.getVerificationKey(
+					header.kid ?? opts.keyStore.getSigningKidFallback(),
+				);
+				const verified = await jwtVerify(token, key);
+				payload = verified.payload as Record<string, unknown>;
+			} catch (error) {
+				// Log the reason at warn level — keep minimal (don't log the token itself,
+				// since this path can be attacker-driven).
+				logger.warn(
+					`/oauth/federation/${name}/logout: jwtVerify failed:`,
+					error instanceof Error ? error.message : String(error),
+				);
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(401).json({
+					error: "invalid_token",
+					error_description: "invalid token",
+				});
+			}
+
+			// Step 3: Extract family_id, sid, sub from verified payload.
+			const familyId = typeof payload.family_id === "string" ? payload.family_id : null;
+			const sid = typeof payload.sid === "string" ? payload.sid : null;
+			// sub is not strictly required for this endpoint but extracted for future use.
+			// const sub = typeof payload.sub === "string" ? payload.sub : null;
+
+			// Step 4: Check family revocation. Fail-closed: any throw → 401.
+			if (familyId !== null) {
+				let revoked: boolean;
+				try {
+					revoked = await opts.refreshTokenStore.isFamilyRevoked(familyId);
+				} catch (error) {
+					logger.warn(
+						`/oauth/federation/${name}/logout: isFamilyRevoked failed (refresh store outage):`,
+						error,
+					);
+					res.setHeader("Cache-Control", "no-store");
+					return res.status(401).json({
+						error: "invalid_token",
+						error_description: "revocation check unavailable",
+					});
+				}
+				if (revoked) {
+					res.setHeader("Cache-Control", "no-store");
+					return res.status(401).json({
+						error: "invalid_token",
+						error_description: "family revoked",
+					});
+				}
+			}
+
+			// Step 5: sid is required to look up the session.
+			if (!sid) {
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(401).json({
+					error: "invalid_token",
+					error_description: "missing sid claim",
+				});
+			}
+
+			// Step 6: Load session. null → 401 (no session = token is effectively invalid).
+			let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
+			try {
+				session = await opts.userSessionStore.get(sid);
+			} catch (error) {
+				logger.warn(
+					`/oauth/federation/${name}/logout: userSessionStore.get failed:`,
+					error,
+				);
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
+			if (!session) {
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(401).json({
+					error: "invalid_token",
+					error_description: "session not found",
+				});
+			}
+
+			// Step 7: Verify the named federation is linked to this session.
+			if (!session.federations.includes(name)) {
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(404).json({
+					error: "federation_not_linked",
+					error_description: `federation "${name}" is not linked to this session`,
+				});
+			}
+
+			// Step 8: Get federation tokens (may be null — best-effort idTokenHint).
+			let fedTokens: Awaited<ReturnType<typeof opts.federationTokenStore.get>>;
+			try {
+				fedTokens = await opts.federationTokenStore.get(sid, name);
+			} catch (error) {
+				logger.warn(
+					`/oauth/federation/${name}/logout: federationTokenStore.get failed:`,
+					error,
+				);
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "federation token store unavailable",
+				});
+			}
+
+			// Step 9: Delete federation token record.
+			try {
+				await opts.federationTokenStore.delete(sid, name);
+			} catch (error) {
+				logger.warn(
+					`/oauth/federation/${name}/logout: federationTokenStore.delete failed:`,
+					error,
+				);
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "federation token store unavailable",
+				});
+			}
+
+			// Step 10: Remove federation link from session.
+			try {
+				await opts.userSessionStore.removeFederation(sid, name);
+			} catch (error) {
+				logger.warn(
+					`/oauth/federation/${name}/logout: userSessionStore.removeFederation failed:`,
+					error,
+				);
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
+
+			// Step 11: Attempt IdP end-session redirect (best-effort).
+			// getFederationProviders() is called at request time (lazy) so module init order
+			// does not affect resolution — the closure captures `context` by reference.
+			const provider = opts.getFederationProviders()?.get(name);
+			if (supportsEndSession(provider)) {
+				try {
+					const endSessionResult = await provider.endSession({
+						idTokenHint: fedTokens?.idToken ?? undefined,
+						postLogoutRedirectUri:
+							typeof postLogoutRedirectUri === "string" ? postLogoutRedirectUri : undefined,
+						state: typeof state === "string" ? state : undefined,
+					});
+					// Local state already cleared — redirect to IdP end-session URL.
+					res.setHeader("Cache-Control", "no-store");
+					res.setHeader("Pragma", "no-cache");
+					return res.redirect(303, endSessionResult.url.toString());
+				} catch (error) {
+					// Best-effort: IdP logout failed but local state is already cleared.
+					// Log at warn — "orphan IdP session" case, critical for operators.
+					logger.warn(
+						`/oauth/federation/${name}/logout: provider.endSession failed (orphan IdP session):`,
+						error,
+					);
+					res.setHeader("Cache-Control", "no-store");
+					return res.status(200).json({ disconnected: true });
+				}
+			}
+
+			// Step 12: No endSession support → return 200 disconnected.
+			res.setHeader("Cache-Control", "no-store");
+			return res.status(200).json({ disconnected: true });
+		},
+	);
+
 	// POST /logout — mounted under /oauth → POST /oauth/logout
 	router.post(
 		"/logout",

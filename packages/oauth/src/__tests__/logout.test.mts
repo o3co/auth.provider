@@ -50,6 +50,24 @@ async function mintIdToken(extra: Record<string, unknown> = {}): Promise<string>
 		.sign(secretKey);
 }
 
+/**
+ * Mint an access token (typ: at+jwt) for use with POST /oauth/federation/:name/logout.
+ * Includes sid, sub, and family_id by default.
+ */
+async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<string> {
+	return new SignJWT({
+		sub: "u-1",
+		sid: "sid-1",
+		family_id: "fam-1",
+		...extra,
+	})
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+		.setExpirationTime("1h")
+		.setIssuedAt()
+		.setIssuer("https://auth.example.com")
+		.sign(secretKey);
+}
+
 // A minimal valid UserSession with no federations (simplifies most test cases)
 const baseSession: UserSession = {
 	sid: "sid-1",
@@ -438,6 +456,240 @@ describe("POST /oauth/logout", () => {
 				const res = await postLogout(app, { id_token_hint: token });
 				// Logout still succeeds (best-effort federation end-session)
 				expect(res.status).toBe(200);
+				expect(warnSpy).toHaveBeenCalled();
+				expect(consoleWarnSpy).not.toHaveBeenCalled();
+			} finally {
+				consoleWarnSpy.mockRestore();
+			}
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// POST /oauth/federation/:name/logout
+// ---------------------------------------------------------------------------
+
+/** Session that has google linked */
+const sessionWithGoogle: UserSession = {
+	...baseSession,
+	federations: ["google"],
+};
+
+function buildFedLogoutApp(opts: BuildAppOpts = {}) {
+	return buildApp({
+		sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithGoogle) }),
+		...opts,
+	});
+}
+
+async function postFedLogout(
+	app: ReturnType<typeof express>,
+	name: string,
+	token: string,
+	body: Record<string, string> = {},
+	headers: Record<string, string> = {},
+) {
+	const req = request(app)
+		.post(`/oauth/federation/${name}/logout`)
+		.type("form")
+		.set("Authorization", `Bearer ${token}`);
+	for (const [k, v] of Object.entries(headers)) {
+		req.set(k, v);
+	}
+	return req.send(body);
+}
+
+describe("POST /oauth/federation/:name/logout", () => {
+	describe("happy path WITH endSession capability", () => {
+		it("returns 303 redirect to provider end-session URL", async () => {
+			const endSessionUrl = new URL("https://accounts.google.com/o/oauth2/revoke?token=id-hint");
+			const mockProvider: FederationProviderHandle & {
+				endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
+			} = {
+				name: "google",
+				endSession: vi.fn().mockResolvedValue({ url: endSessionUrl, method: "GET" }),
+			};
+			const app = buildFedLogoutApp({
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", mockProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(303);
+			expect(res.headers.location).toContain("accounts.google.com");
+			expect(mockProvider.endSession).toHaveBeenCalledOnce();
+			expect(res.headers["cache-control"]).toBe("no-store");
+		});
+	});
+
+	describe("happy path WITHOUT endSession capability", () => {
+		it("returns 200 JSON { disconnected: true } when provider has no endSession method", async () => {
+			const bareProvider: FederationProviderHandle = { name: "github" };
+			const sessionWithGithub: UserSession = { ...baseSession, federations: ["github"] };
+			const app = buildApp({
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithGithub) }),
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["github", bareProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "github", token);
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
+			expect(res.headers["cache-control"]).toBe("no-store");
+		});
+	});
+
+	describe("missing Authorization header", () => {
+		it("returns 401 invalid_token", async () => {
+			const app = buildFedLogoutApp();
+			const res = await request(app)
+				.post("/oauth/federation/google/logout")
+				.type("form")
+				.send({});
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+	});
+
+	describe("wrong token type (rt+jwt)", () => {
+		it("returns 401 invalid_token when typ is not at+jwt", async () => {
+			const refreshToken = await new SignJWT({ sub: "u-1", sid: "sid-1", family_id: "fam-1" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setExpirationTime("1h")
+				.setIssuedAt()
+				.sign(secretKey);
+			const app = buildFedLogoutApp();
+
+			const res = await postFedLogout(app, "google", refreshToken);
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+	});
+
+	describe("invalid signature", () => {
+		it("returns 401 invalid_token", async () => {
+			const app = buildFedLogoutApp();
+
+			const res = await postFedLogout(app, "google", "not.a.valid.jwt");
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+	});
+
+	describe("family revoked", () => {
+		it("returns 401 invalid_token when isFamilyRevoked returns true", async () => {
+			const refreshStore = makeRefreshStore({
+				isFamilyRevoked: vi.fn().mockResolvedValue(true),
+			});
+			const app = buildFedLogoutApp({ refreshStore });
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+	});
+
+	describe("session null", () => {
+		it("returns 401 invalid_token when session is not found", async () => {
+			const app = buildApp({
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(null) }),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_token");
+		});
+	});
+
+	describe("federation not linked", () => {
+		it("returns 404 federation_not_linked when federation is absent from session", async () => {
+			// sessionWithGoogle only has google, so 'github' is not linked
+			const app = buildFedLogoutApp();
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "github", token);
+
+			expect(res.status).toBe(404);
+			expect(res.body.error).toBe("federation_not_linked");
+		});
+	});
+
+	describe("federationTokenStore.delete throws", () => {
+		it("returns 503 when delete fails after local state was partially cleared", async () => {
+			const fedTokenStore = makeFedTokenStore({
+				delete: vi.fn().mockRejectedValue(new Error("redis down")),
+			});
+			const app = buildFedLogoutApp({ fedTokenStore });
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(res.headers["cache-control"]).toBe("no-store");
+		});
+	});
+
+	describe("provider.endSession throws (soft-fail)", () => {
+		it("returns 200 { disconnected: true } when endSession throws (local state already cleared)", async () => {
+			const throwingProvider: FederationProviderHandle & {
+				endSession: () => Promise<never>;
+			} = {
+				name: "google",
+				endSession: vi.fn().mockRejectedValue(new Error("IdP unreachable")),
+			};
+			const app = buildFedLogoutApp({
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", throwingProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			// Local state cleared before endSession call; soft-fail returns 200
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
+			expect(res.headers["cache-control"]).toBe("no-store");
+		});
+	});
+
+	describe("getFederationProviders returns undefined (no federation configured)", () => {
+		it("returns 200 { disconnected: true } when providers map is undefined", async () => {
+			const app = buildFedLogoutApp({ getFederationProviders: () => undefined });
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ disconnected: true });
+		});
+	});
+
+	describe("logger routing", () => {
+		it("routes /federation/:name/logout failures to opts.logger (not console)", async () => {
+			const warnSpy = vi.fn<(message: string, ...args: unknown[]) => void>();
+			const logger: Logger = { warn: warnSpy };
+			const fedTokenStore = makeFedTokenStore({
+				delete: vi.fn().mockRejectedValue(new Error("boom")),
+			});
+			const app = buildFedLogoutApp({ fedTokenStore, logger });
+			const token = await mintAccessToken();
+
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			try {
+				const res = await postFedLogout(app, "google", token);
+				expect(res.status).toBe(503);
 				expect(warnSpy).toHaveBeenCalled();
 				expect(consoleWarnSpy).not.toHaveBeenCalled();
 			} finally {

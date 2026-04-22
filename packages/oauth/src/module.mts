@@ -107,6 +107,11 @@ export const oauthModule = (params: {
 			grantPolicy: context.grantPolicy,
 			refreshTokenStore: context.refreshTokenStore,
 			userSessionStore: context.userSessionStore,
+			federationTokenStore: context.federationTokenStore,
+			// Lazy closure: evaluated at request time, not at init time.
+			// Captures `context` by reference so federation providers written by
+			// sessionModule.init() are visible regardless of module init order.
+			getFederationProviders: () => context.federationProviders,
 		});
 
 		context.router.use("/oauth", oauthRouter);
