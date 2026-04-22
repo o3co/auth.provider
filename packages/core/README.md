@@ -669,6 +669,15 @@ interface Logger {
 
 Minimal structural logger interface accepted by `cascadeLogout`, `broadcastBackchannelLogout`, and other internal call sites. Structurally compatible with `console`, pino, winston, bunyan, etc. Additional methods (`info`, `error`, `debug`) are added when an internal consumer needs them.
 
+### Federation token capabilities (TODO-F-6)
+
+Low-level building blocks used by `POST /oauth/federation/:name/token` in `@o3co/auth-provider-oauth`.
+
+- `SupportsLock` — optional capability on `FederationTokenStore` for per-`(sid, federationName)` advisory locks. Used to prevent concurrent-refresh thundering herds. Built-in memory and redis adapters both implement this capability. Consumers detect it via the `supportsLock(store)` type guard.
+- `createInProcessLock()` — in-memory lock implementation, stored in a process-local Map with TTL-expiry and Symbol-based ownership tokens (prevents release-after-TTL race).
+- `createRedisLock({ client, keyPrefix })` — redis-backed lock via `SET NX PX` + compare-and-delete release. Accepts any minimal redis client (`get` / `set` / `del`) — see JSDoc on `RedisLockClient` for the value-fidelity contract.
+- `Client.allowedAzpForFederationToken` — opt-in flag on the `Client` interface; default `false`. Clients that consume `POST /oauth/federation/:name/token` must set this to `true`.
+
 ## See Also
 
 - Root [README](../../README.md) — architecture overview, configuration reference, Docker setup
