@@ -60,7 +60,16 @@ function narrowFederationConfig(
 	const clientUrl = typeof config.clientUrl === "string" ? config.clientUrl : undefined;
 	const endSessionEndpoint =
 		typeof config.endSessionEndpoint === "string" ? config.endSessionEndpoint : undefined;
-	return { name, clientId, clientSecret, callbackURL, sessionDomain, authCallbackUrl, clientUrl, endSessionEndpoint };
+	return {
+		name,
+		clientId,
+		clientSecret,
+		callbackURL,
+		sessionDomain,
+		authCallbackUrl,
+		clientUrl,
+		endSessionEndpoint,
+	};
 }
 
 export function registerBuiltinFederations(factory: FederationProviderFactory): void {

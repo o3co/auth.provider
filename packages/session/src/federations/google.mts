@@ -15,8 +15,8 @@
  */
 
 import * as oidc from "openid-client";
-import { codeChallenge } from "./pkce.mjs";
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
+import { codeChallenge } from "./pkce.mjs";
 import type {
 	EndSessionRequest,
 	EndSessionResult,
@@ -118,8 +118,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				oidc.skipSubjectCheck,
 			);
 
-			const expiresIn =
-				typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
+			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
 
 			// Extension claims: anything beyond first-class fields lands on the profile
 			// via the index signature — no `raw` wrapper needed.
@@ -132,8 +131,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
 				picture: typeof userInfo.picture === "string" ? userInfo.picture : undefined,
 				accessToken: tokens.access_token,
-				refreshToken:
-					typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
+				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
 				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
 				expiresAt: new Date(Date.now() + expiresIn * 1000),
 			};
@@ -148,12 +146,10 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 
 		async refreshToken(refreshTokenValue: string): Promise<RefreshedTokens> {
 			const tokens = await oidc.refreshTokenGrant(oidcConfig, refreshTokenValue);
-			const expiresIn =
-				typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
+			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
 			return {
 				accessToken: tokens.access_token,
-				refreshToken:
-					typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
+				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
 				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
 				expiresAt: new Date(Date.now() + expiresIn * 1000),
 				// sub / issuer intentionally absent — callers reuse stored identity.

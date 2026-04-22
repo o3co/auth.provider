@@ -103,7 +103,7 @@ describe("FederationProfile shape", () => {
 			issuer: "https://example.com",
 			sub: "u1",
 			hd: "example.com", // Google-specific hosted-domain claim
-			tid: "tenant-id",  // Microsoft-specific tenant id
+			tid: "tenant-id", // Microsoft-specific tenant id
 		};
 		expect(profile.hd).toBe("example.com");
 		expect(profile.tid).toBe("tenant-id");

@@ -22,7 +22,5 @@
 import { describe, test } from "vitest";
 
 describe("helpers", () => {
-	test.todo(
-		"fetchGithubPrimaryEmail removed (I-3) — email-fetch logic covered by github.test.mts",
-	);
+	test.todo("fetchGithubPrimaryEmail removed (I-3) — email-fetch logic covered by github.test.mts");
 });

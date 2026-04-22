@@ -20,8 +20,8 @@ export {
 	registerBuiltinFederations,
 } from "./federations/factory.mjs";
 export type { GithubProviderConfig } from "./federations/github.mjs";
-export type { GoogleProviderConfig } from "./federations/google.mjs";
 export { createGithubProvider } from "./federations/github.mjs";
+export type { GoogleProviderConfig } from "./federations/google.mjs";
 export { createGoogleProvider } from "./federations/google.mjs";
 export type {
 	EndSessionRequest,

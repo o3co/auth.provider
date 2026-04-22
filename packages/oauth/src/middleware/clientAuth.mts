@@ -58,9 +58,7 @@ const WWW_AUTH = 'Basic realm="oauth"';
  * @param clientRepository - used to look up the client by credential pair.
  * @returns an express RequestHandler.
  */
-export function createClientAuthMiddleware(
-	clientRepository: ClientRepository,
-): RequestHandler {
+export function createClientAuthMiddleware(clientRepository: ClientRepository): RequestHandler {
 	return async (req, res, next) => {
 		let clientId: string | undefined;
 		let clientSecret: string | undefined;
@@ -99,13 +97,17 @@ export function createClientAuthMiddleware(
 
 		if (malformedBasic) {
 			res.set("WWW-Authenticate", WWW_AUTH);
-			res.status(401).json({ error: "invalid_client", error_description: "Malformed client credentials" });
+			res
+				.status(401)
+				.json({ error: "invalid_client", error_description: "Malformed client credentials" });
 			return;
 		}
 
 		if (!clientId || !clientSecret) {
 			res.set("WWW-Authenticate", WWW_AUTH);
-			res.status(401).json({ error: "invalid_client", error_description: "Client authentication is required" });
+			res
+				.status(401)
+				.json({ error: "invalid_client", error_description: "Client authentication is required" });
 			return;
 		}
 
@@ -123,7 +125,9 @@ export function createClientAuthMiddleware(
 
 		if (!client) {
 			res.set("WWW-Authenticate", WWW_AUTH);
-			res.status(401).json({ error: "invalid_client", error_description: "Invalid client credentials" });
+			res
+				.status(401)
+				.json({ error: "invalid_client", error_description: "Invalid client credentials" });
 			return;
 		}
 

@@ -109,9 +109,7 @@ describe("sessionModule", () => {
 			} as unknown as UserRepository,
 		});
 
-		await expect(module.init(ctx)).rejects.toThrow(
-			/userSessionStore and federationTokenStore/i,
-		);
+		await expect(module.init(ctx)).rejects.toThrow(/userSessionStore and federationTokenStore/i);
 	});
 
 	it("throws when federationTokenStore is missing from context", async () => {
@@ -123,9 +121,7 @@ describe("sessionModule", () => {
 			} as unknown as UserRepository,
 		});
 
-		await expect(module.init(ctx)).rejects.toThrow(
-			/userSessionStore and federationTokenStore/i,
-		);
+		await expect(module.init(ctx)).rejects.toThrow(/userSessionStore and federationTokenStore/i);
 	});
 
 	it("mounts /session routes on context.router", async () => {

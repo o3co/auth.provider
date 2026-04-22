@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import type { FederationTokenStoreBase, UserRepository, UserSessionStoreBase } from "@o3co/auth-provider-core";
+import type {
+	FederationTokenStoreBase,
+	UserRepository,
+	UserSessionStoreBase,
+} from "@o3co/auth-provider-core";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -244,9 +248,7 @@ function buildCallbackApp({
 }
 
 /** Plant the session and return the agent with the sid cookie set. */
-async function plantAndGetAgent(
-	app: express.Express,
-): Promise<ReturnType<typeof request.agent>> {
+async function plantAndGetAgent(app: express.Express): Promise<ReturnType<typeof request.agent>> {
 	const agent = request.agent(app);
 	// Use the /_plant route to set the cookie
 	await agent.get("/_plant");
@@ -384,9 +386,7 @@ describe("Federation routes", () => {
 		it("returns 400 invalid_session when session.federation is absent", async () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 
-			const res = await request(app).get(
-				"/oauth/federation/test/callback?state=x&code=y",
-			);
+			const res = await request(app).get("/oauth/federation/test/callback?state=x&code=y");
 
 			expect(res.status).toBe(400);
 			expect(JSON.parse(res.text)).toMatchObject({ error: "invalid_session" });
@@ -418,9 +418,7 @@ describe("Federation routes", () => {
 			});
 			const agent = await plantAndGetAgent(app);
 
-			const res = await agent.get(
-				"/oauth/federation/test/callback?state=wrong-state&code=y",
-			);
+			const res = await agent.get("/oauth/federation/test/callback?state=wrong-state&code=y");
 			expect(res.status).toBe(400);
 			expect(JSON.parse(res.text)).toMatchObject({ error: "invalid_state" });
 		});
@@ -526,8 +524,8 @@ describe("Federation routes", () => {
 
 			// FederationTokenStore.attach called with correct tokens
 			expect(fts.attach).toHaveBeenCalledOnce();
-			const [attachSid, attachName, attachTokens] = (fts.attach as ReturnType<typeof vi.fn>)
-				.mock.calls[0] as [string, string, Record<string, unknown>];
+			const [attachSid, attachName, attachTokens] = (fts.attach as ReturnType<typeof vi.fn>).mock
+				.calls[0] as [string, string, Record<string, unknown>];
 			expect(attachSid).toBe(createArg.sid);
 			expect(attachName).toBe("test");
 			expect(attachTokens.accessToken).toBe("at");

@@ -23,7 +23,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
-import { supportsClaimMapping, type FederationProvider } from "../federations/types.mjs";
+import { type FederationProvider, supportsClaimMapping } from "../federations/types.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -126,7 +126,11 @@ export const createRouter = (
 				});
 			}
 
-			const authUrl = provider.buildAuthorizationUrl({ redirectUri: callbackUrl, state, codeVerifier });
+			const authUrl = provider.buildAuthorizationUrl({
+				redirectUri: callbackUrl,
+				state,
+				codeVerifier,
+			});
 
 			return res.redirect(authUrl.toString());
 		})
@@ -211,9 +215,7 @@ export const createRouter = (
 				});
 			}
 
-			const user = await userRepository.authenticateByToken(
-				`${provider.name}:${profile.sub}`,
-			);
+			const user = await userRepository.authenticateByToken(`${provider.name}:${profile.sub}`);
 			if (!user) {
 				return res.status(401).json({
 					error: "unknown_user",

@@ -177,11 +177,10 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 			// Extract callbackURL for this provider's providerCallbackUrls entry.
 			// The callbackURL lives in flatConfig (already extracted from nested/flat shape).
-			const callbackURL = typeof flatConfig.callbackURL === "string" ? flatConfig.callbackURL : undefined;
+			const callbackURL =
+				typeof flatConfig.callbackURL === "string" ? flatConfig.callbackURL : undefined;
 			if (!callbackURL) {
-				throw new Error(
-					`federations.${name}: callbackURL is required when federation is enabled`,
-				);
+				throw new Error(`federations.${name}: callbackURL is required when federation is enabled`);
 			}
 			providerCallbackUrls.set(name, callbackURL);
 		}

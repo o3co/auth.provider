@@ -128,4 +128,3 @@ export function resolveCallbackRedirect(
 
 	return { ok: true, value: clientUrl };
 }
-

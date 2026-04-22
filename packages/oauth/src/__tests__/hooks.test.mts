@@ -261,7 +261,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -349,7 +348,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -385,7 +383,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -416,7 +413,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			});
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -450,7 +446,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -482,7 +477,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -518,7 +512,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -599,7 +592,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-	
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,

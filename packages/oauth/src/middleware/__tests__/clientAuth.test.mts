@@ -71,7 +71,9 @@ describe("createClientAuthMiddleware", () => {
 
 	it("returns 401 invalid_client with error_description when credentials do not match", async () => {
 		const app = express().use(express.urlencoded({ extended: false }));
-		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "s3cret" })), (_req, res) => res.end());
+		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "s3cret" })), (_req, res) =>
+			res.end(),
+		);
 		const res = await request(app)
 			.post("/test")
 			.type("form")
@@ -98,12 +100,12 @@ describe("createClientAuthMiddleware", () => {
 
 	it("returns 401 malformed error_description on Basic header with no colon", async () => {
 		const app = express().use(express.urlencoded({ extended: false }));
-		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "s3cret" })), (_req, res) => res.end());
+		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "s3cret" })), (_req, res) =>
+			res.end(),
+		);
 		// Base64 of a string with no colon
 		const malformed = Buffer.from("nocolon").toString("base64");
-		const res = await request(app)
-			.post("/test")
-			.set("Authorization", `Basic ${malformed}`);
+		const res = await request(app).post("/test").set("Authorization", `Basic ${malformed}`);
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("invalid_client");
 		expect(res.body.error_description).toBe("Malformed client credentials");
@@ -112,7 +114,9 @@ describe("createClientAuthMiddleware", () => {
 	it("returns 401 fail-closed when clientRepository.authenticate throws — no error_description", async () => {
 		const throwingRepo: ClientRepository = {
 			findById: async () => null,
-			authenticate: async () => { throw new Error("store unavailable"); },
+			authenticate: async () => {
+				throw new Error("store unavailable");
+			},
 		};
 		const app = express().use(express.urlencoded({ extended: false }));
 		app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
@@ -128,12 +132,12 @@ describe("createClientAuthMiddleware", () => {
 	// Fix 5: Edge-case tests
 	it("returns 401 when client_id has empty secret (client_id:)", async () => {
 		const app = express().use(express.urlencoded({ extended: false }));
-		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "" })), (_req, res) => res.end());
+		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "" })), (_req, res) =>
+			res.end(),
+		);
 		// Basic header for "alice:" — empty secret should trip the guard
 		const basic = Buffer.from("alice:").toString("base64");
-		const res = await request(app)
-			.post("/test")
-			.set("Authorization", `Basic ${basic}`);
+		const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("invalid_client");
 	});
@@ -145,17 +149,15 @@ describe("createClientAuthMiddleware", () => {
 		app.post("/test", createClientAuthMiddleware(spyRepo), (_req, res) => res.end());
 		// Base64 of "a:b:c:d" — clientId should be "a", secret "b:c:d"
 		const basic = Buffer.from("a:b:c:d").toString("base64");
-		const res = await request(app)
-			.post("/test")
-			.set("Authorization", `Basic ${basic}`);
+		const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
 		expect(res.status).toBe(401);
 		expect(authenticateSpy).toHaveBeenCalledWith("a", "b:c:d");
 	});
 
 	it("URL-decodes percent-encoded credentials from Basic header", async () => {
-		const authenticateSpy = vi.fn<ClientRepository["authenticate"]>().mockResolvedValue(
-			fakePublicClient("client_id@example"),
-		);
+		const authenticateSpy = vi
+			.fn<ClientRepository["authenticate"]>()
+			.mockResolvedValue(fakePublicClient("client_id@example"));
 		const spyRepo: ClientRepository = { authenticate: authenticateSpy, findById: vi.fn() };
 		const app = express().use(express.urlencoded({ extended: false }));
 		app.post("/test", createClientAuthMiddleware(spyRepo), (req, res) => {
@@ -163,9 +165,7 @@ describe("createClientAuthMiddleware", () => {
 		});
 		// Base64 of "client_id%40example:secret%20with%20space"
 		const basic = Buffer.from("client_id%40example:secret%20with%20space").toString("base64");
-		const res = await request(app)
-			.post("/test")
-			.set("Authorization", `Basic ${basic}`);
+		const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
 		expect(res.status).toBe(200);
 		expect(authenticateSpy).toHaveBeenCalledWith("client_id@example", "secret with space");
 		expect(res.body.client).toBe("client_id@example");
@@ -175,10 +175,7 @@ describe("createClientAuthMiddleware", () => {
 		const app = express().use(express.urlencoded({ extended: false }));
 		app.post("/test", createClientAuthMiddleware(fakeRepo({})), (_req, res) => res.end());
 		// POST with no Authorization header, no client_id, no client_secret
-		const res = await request(app)
-			.post("/test")
-			.type("form")
-			.send({});
+		const res = await request(app).post("/test").type("form").send({});
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("invalid_client");
 		expect(res.body.error_description).toBe("Client authentication is required");
@@ -191,9 +188,7 @@ describe("createClientAuthMiddleware", () => {
 		// "%zz" is invalid URL-encoding — decodeURIComponent will throw
 		// Buffer.from preserves the literal bytes through base64 round-trip
 		const basic = Buffer.from("%zz:x").toString("base64");
-		const res = await request(app)
-			.post("/test")
-			.set("Authorization", `Basic ${basic}`);
+		const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("invalid_client");
 		expect(res.body.error_description).toBe("Malformed client credentials");

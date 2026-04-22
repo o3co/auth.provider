@@ -494,6 +494,79 @@ for (const [name, section] of Object.entries(config.federations)) {
 
 - **Local login session tracking.** `POST /session/login` now creates a `UserSession` record via `userSessionStore.create()` and writes the resulting `sid` into `req.session.sid` when `AppOptions.userSessionStore` is wired. This mirrors the federation-callback session-creation path established in F-2 and ensures that tokens issued after a local login carry a valid `sid` claim.
 
+## Migrating from v0.3.x to v0.4.0
+
+v0.4.0 removes passport as a direct dependency from this package.
+
+### Breaking changes
+
+1. **`FederationProviderBase` renamed to `FederationProvider`.** If you implement custom providers, rename the interface in your imports.
+2. **`setupPassportStrategy(passport, ctx)` removed.** Implement `buildAuthorizationUrl({ redirectUri, state, codeVerifier }): URL` and `exchangeCode({ code, codeVerifier, redirectUri }): Promise<FederationProfile>` instead. The new interface is vendor-agnostic — no passport types leak into the signature.
+3. **`FederationProfile.raw` removed.** OIDC-standard claims are first-class fields (`sub`, `email`, `emailVerified`, `name`, `picture`, `accessToken`, `refreshToken`, `idToken`, `expiresAt`). Provider-specific claims (Google `hd`, Microsoft `tid`) are carried by the index signature `[key: string]: unknown`.
+4. **`FederationProfile.id` renamed to `sub`, `expiresIn: number` replaced with `expiresAt: Date`.**
+5. **`createPassport()` and `SetupPassportContext` removed from the public API.** State (CSRF) and PKCE are managed by the route layer internally; providers are pure functions.
+6. **`UserSessionStore` and `FederationTokenStore` are now required** (previously optional with legacy fallback). The `sessionModule` throws at `init()` time if either is absent from `ModuleContext`.
+7. **`/login` error responses** follow RFC 6749 §5.2 shape: `{ error, error_description }`. If your client parses the old `{ message: "..." }` format, update accordingly.
+8. **`SupportsRefresh.refreshToken`** returns `RefreshedTokens` (new type): `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }`. Google/GitHub refresh responses legitimately omit `sub`; the route layer preserves stored identity.
+
+### Custom provider migration example
+
+**Before (v0.3.x, passport-based):**
+
+```ts
+class CustomProvider implements FederationProviderBase {
+  name = "custom";
+  scope = ["openid"];
+  async setupPassportStrategy(passport, ctx) {
+    passport.use(this.name, new CustomStrategy({...}, (accessToken, refreshToken, profile, done) => {
+      done(null, { id: profile.id, raw: profile });
+    }));
+  }
+  validateRedirect(url) { /* ... */ }
+  resolveCallbackRedirect(session) { /* ... */ }
+}
+```
+
+**After (v0.4.0, pure-function interface):**
+
+```ts
+import { codeChallenge } from "@o3co/auth-provider-session/federations/pkce.mjs";
+
+class CustomProvider implements FederationProvider, SupportsClaimMapping {
+  readonly name = "custom";
+  readonly scope = ["openid"] as const;
+  buildAuthorizationUrl({ redirectUri, state, codeVerifier }) {
+    const url = new URL("https://idp.example.com/authorize");
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", this.clientId);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("state", state);
+    url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("scope", this.scope.join(" "));
+    return url;
+  }
+  async exchangeCode({ code, codeVerifier, redirectUri }) {
+    // POST to token endpoint + optional userinfo; normalize to FederationProfile
+    return {
+      issuer: "https://idp.example.com",
+      sub: userId,
+      email,
+      accessToken,
+      refreshToken,
+      expiresAt,
+    };
+  }
+  mapClaims(profile) { return { email: profile.email }; }
+  validateRedirect(url) { /* unchanged */ }
+  resolveCallbackRedirect(session) { /* unchanged */ }
+}
+```
+
+### Module wiring
+
+`sessionModule` no longer requires a `pathResolver` for passport. It requires `userRepository` (for `/login`). `userSessionStore` + `federationTokenStore` from `ModuleContext` are now **required**.
+
 ## See Also
 
 - [`@o3co/auth-provider-oauth`](../oauth/README.md) — OAuth 2.0 token and authorization routes

@@ -74,10 +74,7 @@ describe("createGithubProvider on openid-client", () => {
 			codeVerifier: verifier,
 		});
 		expect(url.hostname).toBe("github.com");
-		const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [
-			unknown,
-			Record<string, string>,
-		];
+		const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [unknown, Record<string, string>];
 		expect(params.redirect_uri).toBe(baseConfig.callbackURL);
 		expect(params.state).toBe("abc");
 		expect(params.code_challenge_method).toBe("S256");

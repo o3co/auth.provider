@@ -503,6 +503,79 @@ for (const [name, section] of Object.entries(config.federations)) {
 
 - **ローカルログインのセッショントラッキング。** `AppOptions.userSessionStore` が設定されている場合、`POST /session/login` は `userSessionStore.create()` で `UserSession` レコードを作成し、生成された `sid` を `req.session.sid` に書き込む。これは F-2 で確立したフェデレーションコールバックのセッション作成パスと対称であり、ローカルログイン後に発行されるトークンに有効な `sid` クレームが付与されることを保証する。
 
+## v0.3.x → v0.4.0 マイグレーション
+
+v0.4.0 ではこのパッケージから passport を直接依存として削除した。
+
+### 破壊的変更
+
+1. **`FederationProviderBase` → `FederationProvider` へリネーム。** カスタムプロバイダーを実装している場合は import のインターフェース名を変更すること。
+2. **`setupPassportStrategy(passport, ctx)` を削除。** 代わりに `buildAuthorizationUrl({ redirectUri, state, codeVerifier }): URL` と `exchangeCode({ code, codeVerifier, redirectUri }): Promise<FederationProfile>` を実装する。新しいインターフェースはベンダー非依存であり、シグネチャに passport の型が漏出しない。
+3. **`FederationProfile.raw` を削除。** OIDC 標準クレームがファーストクラスフィールドになった（`sub`、`email`、`emailVerified`、`name`、`picture`、`accessToken`、`refreshToken`、`idToken`、`expiresAt`）。プロバイダー固有クレーム（Google の `hd`、Microsoft の `tid` など）はインデックスシグネチャ `[key: string]: unknown` で伝達される。
+4. **`FederationProfile.id` → `sub` へリネーム、`expiresIn: number` → `expiresAt: Date` へ変更。**
+5. **`createPassport()` と `SetupPassportContext` をパブリック API から削除。** 状態（CSRF）と PKCE はルート層が内部で管理する。プロバイダーは純粋関数になった。
+6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。いずれかが `ModuleContext` に存在しない場合、`sessionModule` は `init()` 時に例外をスローする。
+7. **`/login` エラーレスポンス** は RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。旧フォーマット `{ message: "..." }` をクライアントが解析している場合は更新が必要。
+8. **`SupportsRefresh.refreshToken`** の戻り型が `RefreshedTokens`（新型）: `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }` に変更。Google/GitHub のリフレッシュレスポンスは正当に `sub` を省略するため、ルート層が保存済み identity を維持する。
+
+### カスタムプロバイダーのマイグレーション例
+
+**変更前（v0.3.x、passport ベース）:**
+
+```ts
+class CustomProvider implements FederationProviderBase {
+  name = "custom";
+  scope = ["openid"];
+  async setupPassportStrategy(passport, ctx) {
+    passport.use(this.name, new CustomStrategy({...}, (accessToken, refreshToken, profile, done) => {
+      done(null, { id: profile.id, raw: profile });
+    }));
+  }
+  validateRedirect(url) { /* ... */ }
+  resolveCallbackRedirect(session) { /* ... */ }
+}
+```
+
+**変更後（v0.4.0、純粋関数インターフェース）:**
+
+```ts
+import { codeChallenge } from "@o3co/auth-provider-session/federations/pkce.mjs";
+
+class CustomProvider implements FederationProvider, SupportsClaimMapping {
+  readonly name = "custom";
+  readonly scope = ["openid"] as const;
+  buildAuthorizationUrl({ redirectUri, state, codeVerifier }) {
+    const url = new URL("https://idp.example.com/authorize");
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("client_id", this.clientId);
+    url.searchParams.set("redirect_uri", redirectUri);
+    url.searchParams.set("state", state);
+    url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
+    url.searchParams.set("code_challenge_method", "S256");
+    url.searchParams.set("scope", this.scope.join(" "));
+    return url;
+  }
+  async exchangeCode({ code, codeVerifier, redirectUri }) {
+    // トークンエンドポイントへ POST + 必要に応じて userinfo を取得し、FederationProfile に正規化する
+    return {
+      issuer: "https://idp.example.com",
+      sub: userId,
+      email,
+      accessToken,
+      refreshToken,
+      expiresAt,
+    };
+  }
+  mapClaims(profile) { return { email: profile.email }; }
+  validateRedirect(url) { /* 変更なし */ }
+  resolveCallbackRedirect(session) { /* 変更なし */ }
+}
+```
+
+### モジュールの配線
+
+`sessionModule` は passport の `pathResolver` を必要としなくなった。`userRepository`（`/login` 用）が必要。`ModuleContext` の `userSessionStore` + `federationTokenStore` は**必須**になった。
+
 ## 関連
 
 - [`@o3co/auth-provider-oauth`](../oauth/README.ja.md) — OAuth 2.0 トークン・認可ルート

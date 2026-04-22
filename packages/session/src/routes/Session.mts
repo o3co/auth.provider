@@ -131,10 +131,8 @@ export const createRouter = (
 				next();
 			},
 			async (req: Request, res: Response) => {
-				const username =
-					typeof req.body?.username === "string" ? req.body.username : undefined;
-				const password =
-					typeof req.body?.password === "string" ? req.body.password : undefined;
+				const username = typeof req.body?.username === "string" ? req.body.username : undefined;
+				const password = typeof req.body?.password === "string" ? req.body.password : undefined;
 				if (!username || !password) {
 					return res.status(400).json({
 						error: "invalid_request",
@@ -147,12 +145,10 @@ export const createRouter = (
 					user = await userRepository.authenticate(username, password);
 				} catch (err) {
 					console.warn({ err }, "local login authenticate failed");
-					return res
-						.status(500)
-						.json({
-							error: "authentication_error",
-							error_description: "Authentication failed",
-						});
+					return res.status(500).json({
+						error: "authentication_error",
+						error_description: "Authentication failed",
+					});
 				}
 				if (!user) {
 					return res.status(401).json({

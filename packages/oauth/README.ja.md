@@ -295,6 +295,22 @@ clients:
 - `federation.token.refresh_failed` — `provider.refreshFederationToken` が throw したとき（`invalid_grant` 以外）
 - `federation.token.reauthentication_required` — IdP から `invalid_grant` を受け取ったとき
 
+## v0.3.x → v0.4.0 マイグレーション
+
+v0.4.0 ではこのパッケージから passport を削除した。`/oauth/introspect` エンドポイントは `createClientAuthMiddleware(clientRepository)` を使用するようになった。これは RFC 6749 §2.3.1 準拠の HTTP Basic + form-encoded クライアント認証ミドルウェアを自前実装したものである。
+
+### 破壊的変更
+
+1. **`createOAuthRouter` のシグネチャ変更**: `passport` オプションを削除。`clientRepository: ClientRepository` を直接渡す。`oauthModule({ clientRepository, ... })` を使用すれば自動で配線される。
+2. **`/introspect` エラーレスポンス**: RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。
+3. **`req.oauthClient`**（`PublicClient | undefined` 型）が `createClientAuthMiddleware` によって Express `Request` に付与される。このミドルウェアを独自ルートに組み込む場合は直接参照できる — 型はグローバルの Express 名前空間拡張で提供される。
+
+### コンシューマー向け
+
+`@o3co/auth-provider-oauth` のパブリック API（`oauthModule`、`createOAuthRouter`）経由で利用している場合、設定の更新以外にコード変更は不要 — モジュールが内部で新しいミドルウェアを配線する。
+
+カスタムのクライアント認証スキーム向けにミドルウェアを拡張または置き換える場合は、`@o3co/auth-provider-oauth` から `createClientAuthMiddleware` を参照するか、`req.oauthClient` に互換性のある `PublicClient` を付与するドロップイン代替実装を作成すること。
+
 ## 関連
 
 - [`@o3co/auth-provider-session`](../session/README.ja.md) — セッションログイン / フェデレーションルート

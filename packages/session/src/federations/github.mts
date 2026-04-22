@@ -15,8 +15,8 @@
  */
 
 import * as oidc from "openid-client";
-import { codeChallenge } from "./pkce.mjs";
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
+import { codeChallenge } from "./pkce.mjs";
 import type {
 	EndSessionRequest,
 	EndSessionResult,
@@ -128,9 +128,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 							? ghId
 							: "";
 			if (!sub) {
-				throw new Error(
-					`GitHub federation "${config.name}" received userinfo without id/sub`,
-				);
+				throw new Error(`GitHub federation "${config.name}" received userinfo without id/sub`);
 			}
 
 			// Fetch primary+verified email from /user/emails.
@@ -154,9 +152,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 					verified?: unknown;
 				}>;
 				if (Array.isArray(rows)) {
-					const verified = rows.filter(
-						(r) => r.verified === true && typeof r.email === "string",
-					);
+					const verified = rows.filter((r) => r.verified === true && typeof r.email === "string");
 					const primary = verified.find((r) => r.primary === true);
 					const chosen = primary ?? verified[0];
 					if (chosen && typeof chosen.email === "string") {
@@ -168,8 +164,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				// Transient /user/emails failure treated as "no email available" — never kills login.
 			}
 
-			const expiresIn =
-				typeof tokens.expires_in === "number" ? tokens.expires_in : undefined;
+			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : undefined;
 
 			// GitHub's /user returns `avatar_url` (not the OIDC `picture` field).
 			const ghAvatarUrl = (userInfo as { avatar_url?: unknown }).avatar_url;

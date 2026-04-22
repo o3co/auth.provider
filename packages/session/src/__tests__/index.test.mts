@@ -29,17 +29,23 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 
 	it("exports createFederationProviderFactory as a runtime factory", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { createFederationProviderFactory?: unknown }).createFederationProviderFactory).toBe("function");
+		expect(
+			typeof (mod as { createFederationProviderFactory?: unknown }).createFederationProviderFactory,
+		).toBe("function");
 	});
 
 	it("exports createGoogleProvider as a runtime factory", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { createGoogleProvider?: unknown }).createGoogleProvider).toBe("function");
+		expect(typeof (mod as { createGoogleProvider?: unknown }).createGoogleProvider).toBe(
+			"function",
+		);
 	});
 
 	it("exports createGithubProvider as a runtime factory", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { createGithubProvider?: unknown }).createGithubProvider).toBe("function");
+		expect(typeof (mod as { createGithubProvider?: unknown }).createGithubProvider).toBe(
+			"function",
+		);
 	});
 
 	it("does NOT export createPassport (passport-era export removed)", async () => {

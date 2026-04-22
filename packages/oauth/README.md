@@ -295,6 +295,22 @@ The following audit events fire on this endpoint:
 - `federation.token.refresh_failed` — on provider.refreshFederationToken throwing (non-invalid_grant)
 - `federation.token.reauthentication_required` — on `invalid_grant` from IdP
 
+## Migrating from v0.3.x to v0.4.0
+
+v0.4.0 removes passport from this package. The `/oauth/introspect` endpoint now uses `createClientAuthMiddleware(clientRepository)` — a self-hosted RFC 6749 §2.3.1 HTTP Basic + form-encoded client-auth middleware.
+
+### Breaking changes
+
+1. **`createOAuthRouter` signature**: the `passport` option is dropped. Pass `clientRepository: ClientRepository` directly. `oauthModule({ clientRepository, ... })` wires this automatically.
+2. **`/introspect` error response**: follows RFC 6749 §5.2 shape `{ error, error_description }`.
+3. **`req.oauthClient`** (typed as `PublicClient | undefined`) is attached to the express `Request` by `createClientAuthMiddleware`. Consumers composing this middleware onto their own routes can read it directly — types come via global Express namespace augmentation.
+
+### For consumers
+
+If you consume `@o3co/auth-provider-oauth` via its public API (`oauthModule`, `createOAuthRouter`), no code changes beyond updating your config are required — the module internally wires the new middleware.
+
+If you extend or replace the middleware for custom client-auth schemes, import `createClientAuthMiddleware` from `@o3co/auth-provider-oauth` as a reference, or write a drop-in replacement that attaches a compatible `PublicClient` to `req.oauthClient`.
+
 ## See Also
 
 - [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes
