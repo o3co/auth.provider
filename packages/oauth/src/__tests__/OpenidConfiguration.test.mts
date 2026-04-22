@@ -52,6 +52,7 @@ function createMockRes() {
 async function callRoute(opts: {
 	issuer: string;
 	signingAlgs: string[];
+	logoutSupported?: boolean;
 }): Promise<Record<string, unknown>> {
 	const express = createMockExpress();
 	createRouter(express as any, opts);
@@ -88,11 +89,61 @@ describe("GET /.well-known/openid-configuration", () => {
 		);
 	});
 
-	it("does NOT advertise revocation_endpoint / end_session_endpoint / backchannel_logout_supported (out of F-4 scope)", async () => {
+	it("does NOT advertise revocation_endpoint (out of F-5 scope)", async () => {
 		const body = await callRoute({ issuer: "https://auth.example.com", signingAlgs: [] });
 		expect(body.revocation_endpoint).toBeUndefined();
+	});
+
+	it("advertises end_session_endpoint per OIDC RP-Initiated Logout 1.0", async () => {
+		const body = await callRoute({
+			issuer: "https://auth.example.com",
+			signingAlgs: [],
+			logoutSupported: true,
+		});
+		expect(body.end_session_endpoint).toBe("https://auth.example.com/oauth/logout");
+	});
+
+	it("advertises Back-Channel Logout support per OIDC Back-Channel Logout 1.0", async () => {
+		const body = await callRoute({
+			issuer: "https://auth.example.com",
+			signingAlgs: [],
+			logoutSupported: true,
+		});
+		expect(body.backchannel_logout_supported).toBe(true);
+		expect(body.backchannel_logout_session_supported).toBe(true);
+	});
+
+	it("advertises Front-Channel Logout support per OIDC Front-Channel Logout 1.0", async () => {
+		const body = await callRoute({
+			issuer: "https://auth.example.com",
+			signingAlgs: [],
+			logoutSupported: true,
+		});
+		expect(body.frontchannel_logout_supported).toBe(true);
+		expect(body.frontchannel_logout_session_supported).toBe(true);
+	});
+
+	it("omits all logout fields when logoutSupported is not set (default false — explicit opt-in required)", async () => {
+		const body = await callRoute({ issuer: "https://auth.example.com", signingAlgs: [] });
+		// No logoutSupported option passed — default must be false (safe default for direct users)
 		expect(body.end_session_endpoint).toBeUndefined();
 		expect(body.backchannel_logout_supported).toBeUndefined();
+		expect(body.backchannel_logout_session_supported).toBeUndefined();
+		expect(body.frontchannel_logout_supported).toBeUndefined();
+		expect(body.frontchannel_logout_session_supported).toBeUndefined();
+	});
+
+	it("omits all 5 logout fields when logoutSupported is false (stores not configured)", async () => {
+		const body = await callRoute({
+			issuer: "https://auth.example.com",
+			signingAlgs: [],
+			logoutSupported: false,
+		});
+		expect(body.end_session_endpoint).toBeUndefined();
+		expect(body.backchannel_logout_supported).toBeUndefined();
+		expect(body.backchannel_logout_session_supported).toBeUndefined();
+		expect(body.frontchannel_logout_supported).toBeUndefined();
+		expect(body.frontchannel_logout_session_supported).toBeUndefined();
 	});
 
 	it("strips trailing slashes from issuer in both the issuer field and endpoint URLs", async () => {

@@ -61,6 +61,36 @@ describe("in-memory UserSessionStore", () => {
 		expect(s?.activeRPs[0]?.backchannelLogoutUri).toBe("https://rp/bc");
 	});
 
+	it("registerRP round-trips backchannelLogoutSessionRequired and frontchannelLogoutSessionRequired", async () => {
+		await store.create(baseInput);
+		await store.registerRP("sid-1", {
+			clientId: "rp-flags",
+			backchannelLogoutUri: "https://rp/bc",
+			backchannelLogoutSessionRequired: false,
+			frontchannelLogoutUri: "https://rp/fc",
+			frontchannelLogoutSessionRequired: false,
+			registeredAt: new Date(),
+		});
+		const s = await store.get("sid-1");
+		const rp = s?.activeRPs[0];
+		expect(rp?.backchannelLogoutSessionRequired).toBe(false);
+		expect(rp?.frontchannelLogoutSessionRequired).toBe(false);
+	});
+
+	it("get deep-copies backchannelLogoutSessionRequired and frontchannelLogoutSessionRequired", async () => {
+		await store.create(baseInput);
+		await store.registerRP("sid-1", {
+			clientId: "rp-flags",
+			backchannelLogoutSessionRequired: true,
+			frontchannelLogoutSessionRequired: true,
+			registeredAt: new Date(),
+		});
+		const first = await store.get("sid-1");
+		const second = await store.get("sid-1");
+		expect(first?.activeRPs[0]?.backchannelLogoutSessionRequired).toBe(true);
+		expect(second?.activeRPs[0]?.backchannelLogoutSessionRequired).toBe(true);
+	});
+
 	it("linkFamily appends without duplicates", async () => {
 		await store.create(baseInput);
 		await store.linkFamily("sid-1", "fam-1");

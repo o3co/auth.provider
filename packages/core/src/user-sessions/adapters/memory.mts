@@ -90,7 +90,9 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 				activeRPs: s.activeRPs.map((r) => ({
 					clientId: r.clientId,
 					backchannelLogoutUri: r.backchannelLogoutUri,
+					backchannelLogoutSessionRequired: r.backchannelLogoutSessionRequired,
 					frontchannelLogoutUri: r.frontchannelLogoutUri,
+					frontchannelLogoutSessionRequired: r.frontchannelLogoutSessionRequired,
 					registeredAt: new Date(r.registeredAt.getTime()),
 				})),
 				familyIds: [...s.familyIds],
@@ -104,7 +106,9 @@ export function createInMemoryUserSessionStore(): UserSessionStoreBase {
 			const rpCopy: RegisteredRP = {
 				clientId: rp.clientId,
 				backchannelLogoutUri: rp.backchannelLogoutUri,
+				backchannelLogoutSessionRequired: rp.backchannelLogoutSessionRequired,
 				frontchannelLogoutUri: rp.frontchannelLogoutUri,
+				frontchannelLogoutSessionRequired: rp.frontchannelLogoutSessionRequired,
 				registeredAt: new Date(rp.registeredAt.getTime()),
 			};
 			s.activeRPs = [...s.activeRPs.filter((r) => r.clientId !== rp.clientId), rpCopy];

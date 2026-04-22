@@ -20,6 +20,8 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	emitAuditEvent,
+	type FederationProviderHandle,
+	type FederationTokenStoreBase,
 	formatObject,
 	type GrantPolicyHookBase,
 	type GrantRegistry,
@@ -32,6 +34,7 @@ import {
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import type { PassportStatic } from "passport";
+import * as logoutRoute from "./routes/logout.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
 
 // Session data type augmentation
@@ -67,6 +70,8 @@ export const createOAuthRouter = async (
 		grantPolicy,
 		refreshTokenStore,
 		userSessionStore,
+		federationTokenStore,
+		getFederationProviders = () => undefined,
 	}: {
 		passport: PassportStatic;
 		registry: GrantRegistry;
@@ -79,6 +84,13 @@ export const createOAuthRouter = async (
 		grantPolicy?: GrantPolicyHookBase;
 		refreshTokenStore?: RefreshTokenStoreBase;
 		userSessionStore?: UserSessionStoreBase;
+		federationTokenStore?: FederationTokenStoreBase;
+		/**
+		 * Lazy getter for the federation providers Map. Evaluated at request time so
+		 * module init order does not affect resolution — pass `() => context.federationProviders`
+		 * from `module.mts`. Defaults to `() => undefined` when not provided.
+		 */
+		getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
@@ -578,6 +590,31 @@ export const createOAuthRouter = async (
 
 	// OIDC Core §5.3 — UserInfo endpoint
 	router.use(userinfo.createRouter(express, { keyStore, userSessionStore, refreshTokenStore }));
+
+	// Logout endpoints — mount only when all required stores + issuer are present.
+	// federationTokenStore is required for POST /oauth/federation/:name/logout.
+	// issuer is required for logout_token signing in POST /oauth/logout.
+	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
+	if (
+		userSessionStore &&
+		federationTokenStore &&
+		refreshTokenStore &&
+		typeof issuer === "string" &&
+		issuer.length > 0
+	) {
+		router.use(
+			logoutRoute.createRouter(express, {
+				keyStore,
+				issuer,
+				userSessionStore,
+				federationTokenStore,
+				refreshTokenStore,
+				clientRepository,
+				getFederationProviders,
+				auditSink,
+			}),
+		);
+	}
 
 	return { router, registry };
 };

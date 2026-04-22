@@ -19,11 +19,61 @@ import bcrypt from "bcrypt";
 import { z } from "zod";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
+/**
+ * Validates that a URL string uses only `http:` or `https:` schemes.
+ * Rejects `javascript:`, `data:`, `file:`, and other dangerous schemes that
+ * could enable XSS when embedded in `<iframe src="...">` (front-channel logout)
+ * or used in redirect flows.
+ *
+ * @internal — shared only with unit tests in this package.
+ */
+const httpUrlSchema = z
+	.string()
+	.url()
+	.refine(
+		(u) => {
+			try {
+				const scheme = new URL(u).protocol;
+				return scheme === "https:" || scheme === "http:";
+			} catch {
+				// new URL() threw — the string is not a valid absolute URL;
+				// z.string().url() already rejects it, so return false here too.
+				return false;
+			}
+		},
+		{ message: "URL must use http: or https: scheme" },
+	);
+
+/**
+ * @internal
+ *
+ * Zod schema for per-client configuration entries consumed by the in-memory and
+ * YAML client repositories. NOT part of the public API — consumers implementing
+ * a custom `ClientRepository` should define their own input schema suited to
+ * their backing store (database row, JWT claims, LDAP attributes, etc.).
+ * This schema is exported only to share fixtures with unit tests within the
+ * package.
+ */
 export const ClientEntrySchema = z
 	.object({
 		clientSecret: z.string().min(1),
 		allowedRedirectUris: z.array(z.string()).default([]),
 		allowedScopes: z.array(z.string()).default([]),
+		// NEW (TODO-F-5): Logout metadata.
+		// Use httpUrlSchema (not z.string().url()) for fields that end up in iframe src
+		// or redirect targets — rejects javascript:, data:, file: to prevent XSS.
+		postLogoutRedirectUris: z.array(httpUrlSchema).optional(),
+		backchannelLogoutUri: httpUrlSchema.optional(),
+		// NOTE: OIDC Back-Channel Logout 1.0 §2.2 defines backchannel_logout_session_required
+		// as defaulting to `false` when omitted. This implementation intentionally defaults to
+		// `true` to include `sid` in logout_token by default, which mitigates CSRF / session-
+		// confusion risk for self-hosted deployments where RPs often cannot correlate logouts
+		// without sid. Clients that want the spec-default behavior must set the field explicitly
+		// to `false`. The OIDC Discovery metadata (`backchannel_logout_session_supported`,
+		// `frontchannel_logout_session_supported`) must advertise `true` — see Task 7.
+		backchannelLogoutSessionRequired: z.boolean().optional().default(true),
+		frontchannelLogoutUri: httpUrlSchema.optional(),
+		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
 	})
 	.strict();
 
@@ -33,7 +83,11 @@ export class InMemoryClientRepository implements ClientRepository {
 	private clients: Map<string, ClientEntry>;
 
 	constructor(clients: Map<string, ClientEntry>) {
-		this.clients = clients;
+		// Parse each entry through the schema to enforce defaults (e.g. backchannelLogoutSessionRequired
+		// and frontchannelLogoutSessionRequired default to `true`).
+		this.clients = new Map(
+			Array.from(clients.entries()).map(([id, entry]) => [id, ClientEntrySchema.parse(entry)]),
+		);
 	}
 
 	async findById(clientId: string): Promise<PublicClient | null> {
@@ -43,6 +97,17 @@ export class InMemoryClientRepository implements ClientRepository {
 			clientId,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
+			...(entry.postLogoutRedirectUris !== undefined && {
+				postLogoutRedirectUris: entry.postLogoutRedirectUris,
+			}),
+			...(entry.backchannelLogoutUri !== undefined && {
+				backchannelLogoutUri: entry.backchannelLogoutUri,
+			}),
+			backchannelLogoutSessionRequired: entry.backchannelLogoutSessionRequired,
+			...(entry.frontchannelLogoutUri !== undefined && {
+				frontchannelLogoutUri: entry.frontchannelLogoutUri,
+			}),
+			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 		};
 	}
 
@@ -68,6 +133,17 @@ export class InMemoryClientRepository implements ClientRepository {
 			clientId,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
+			...(entry.postLogoutRedirectUris !== undefined && {
+				postLogoutRedirectUris: entry.postLogoutRedirectUris,
+			}),
+			...(entry.backchannelLogoutUri !== undefined && {
+				backchannelLogoutUri: entry.backchannelLogoutUri,
+			}),
+			backchannelLogoutSessionRequired: entry.backchannelLogoutSessionRequired,
+			...(entry.frontchannelLogoutUri !== undefined && {
+				frontchannelLogoutUri: entry.frontchannelLogoutUri,
+			}),
+			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 		};
 	}
 }

@@ -166,6 +166,12 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 			federationProviders.set(name, provider);
 		}
 
+		// Expose a snapshot of the federation providers for other modules that need
+		// to resolve providers at request time (e.g. oauth's /oauth/logout). A copy
+		// is passed — not the original Map — so consumers cannot corrupt the session
+		// module's internal provider registry by mutating the shared reference.
+		context.federationProviders = new Map(federationProviders);
+
 		// Initialize passport with pathResolver and optional store bindings.
 		// userSessionStore / federationTokenStore are optional on ModuleContext (F-1);
 		// if absent, createPassport receives undefined and the built-in
