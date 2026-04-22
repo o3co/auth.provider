@@ -33,7 +33,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
-import type { PassportStatic } from "passport";
+import { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
@@ -60,7 +60,6 @@ export const createOAuthRouter = async (
 		urlencoded: (opts: { extended: boolean }) => RequestHandler;
 	},
 	{
-		passport,
 		registry,
 		config,
 		clientRepository,
@@ -74,7 +73,6 @@ export const createOAuthRouter = async (
 		federationTokenStore,
 		getFederationProviders = () => undefined,
 	}: {
-		passport: PassportStatic;
 		registry: GrantRegistry;
 		config: AppConfig;
 		clientRepository: ClientRepository;
@@ -244,7 +242,7 @@ export const createOAuthRouter = async (
 						return res.status(200).json({ active: false });
 					}
 				}
-				return passport.authenticate("oauth2-client-password", { session: false })(req, res, next);
+				return createClientAuthMiddleware(clientRepository)(req, res, next);
 			},
 			async (req: Request, res: Response) => {
 				const { token } = req.body;
