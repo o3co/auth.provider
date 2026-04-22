@@ -46,10 +46,14 @@ export {
 } from "./federation-tokens/factory.mjs";
 // FederationTokenStore — TODO-F-1
 export type {
+	AcquireLockOptions,
 	FederationTokenStoreBase,
 	FederationTokenStoreFactory,
 	FederationTokens,
+	LockResult,
+	SupportsLock,
 } from "./federation-tokens/types.mjs";
+export { supportsLock } from "./federation-tokens/types.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 // id_token generation (OIDC Core §2)
 export {

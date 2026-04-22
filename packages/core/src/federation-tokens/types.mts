@@ -47,3 +47,47 @@ export interface FederationTokenStoreBase {
 }
 
 export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStoreBase>;
+
+/**
+ * Input for acquireLock — identifies the lock by (sid, federationName) pair
+ * and provides timeout knobs.
+ */
+export interface AcquireLockOptions {
+	readonly sid: string;
+	readonly federationName: string;
+	/** Lock TTL in milliseconds. Defaults to 5000. */
+	readonly ttlMs?: number;
+	/** Max wait for acquisition in milliseconds. Defaults to 4000 (just under ttlMs). */
+	readonly waitForMs?: number;
+}
+
+export type LockResult =
+	| { readonly acquired: true; readonly release: () => Promise<void> }
+	| { readonly acquired: false; readonly reason: "held" | "timeout" };
+
+/**
+ * Optional capability: advisory lock on (sid, federationName) pairs, used by
+ * `POST /oauth/federation/:name/token` (TODO-F-6) to prevent concurrent
+ * federation-refresh thundering herd. Consumers detect presence with
+ * {@link supportsLock}; when absent, the refresh path proceeds without
+ * coordination — acceptable for low-concurrency deployments.
+ */
+export interface SupportsLock {
+	acquireLock(opts: AcquireLockOptions): Promise<LockResult>;
+}
+
+/**
+ * Structural type guard for the {@link SupportsLock} capability.
+ *
+ * Returns `false` for `null` / `undefined` so consumers can call this directly on
+ * results without an explicit existence check. When `store` is non-null, returns
+ * `true` when `store.acquireLock` is a function. Inside a `true` branch, TypeScript
+ * narrows `store` to `FederationTokenStoreBase & SupportsLock`, so
+ * `store.acquireLock(...)` is callable without a cast.
+ */
+export function supportsLock(
+	store: FederationTokenStoreBase | undefined | null,
+): store is FederationTokenStoreBase & SupportsLock {
+	if (store == null) return false;
+	return typeof (store as { acquireLock?: unknown }).acquireLock === "function";
+}
