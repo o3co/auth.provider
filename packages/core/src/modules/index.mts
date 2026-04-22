@@ -13,4 +13,4 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export type { Module, ModuleContext, PathResolver } from "./types.mjs";
+export type { FederationProviderHandle, Module, ModuleContext, PathResolver } from "./types.mjs";
