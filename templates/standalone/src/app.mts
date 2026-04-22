@@ -50,8 +50,16 @@ import logger from "#/logger.mjs";
 // boot-time error (fail-fast on typos or unconfigured environments).
 const env = process.env.CONFIG_ENV || process.env.NODE_ENV || "development";
 const configDir = new URL("../config/", import.meta.url);
-const applicationConfPath = fileURLToPath(new URL("application.conf", configDir));
-const envConfPath = fileURLToPath(new URL(`${env}.conf`, configDir));
+const configDirPath = fileURLToPath(configDir);
+const applicationConfPath = path.join(configDirPath, "application.conf");
+const envConfPath = path.resolve(configDirPath, `${env}.conf`);
+// Reject env names whose resolved path escapes configDir (e.g. "../secrets").
+// The overlay must be an immediate child of configDir, not a nested path.
+if (path.dirname(envConfPath) !== configDirPath) {
+	throw new Error(
+		`Invalid config environment name: "${env}" resolves outside ${configDirPath}`,
+	);
+}
 const config: AppConfig = validate(
 	parseFile(envConfPath).withFallback(parseFile(applicationConfPath)),
 	AppConfigSchema,
