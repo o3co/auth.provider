@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+import type { Logger } from "@o3co/auth-provider-core";
+
 export interface FrontchannelRP {
 	readonly clientId: string;
 	readonly frontchannelLogoutUri?: string;
@@ -27,6 +29,11 @@ export interface RenderFrontchannelLogoutHtmlOptions {
 	readonly postLogoutRedirectUri?: string;
 	/** Defaults to 2000ms. */
 	readonly redirectDelayMs?: number;
+	/**
+	 * Optional logger for warning when an RP's frontchannelLogoutUri is invalid
+	 * and its iframe must be skipped. Falls back to `console` when omitted.
+	 */
+	readonly logger?: Logger;
 }
 
 const HTML_ESCAPE: Record<string, string> = {
@@ -84,6 +91,7 @@ function buildIframeUrl(baseUri: string, issuer: string, sid: string | undefined
  * `Content-Type: text/html; charset=utf-8`.
  */
 export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlOptions): string {
+	const logger = opts.logger ?? console;
 	const iframes = opts.rps
 		.filter(
 			(rp): rp is FrontchannelRP & { frontchannelLogoutUri: string } =>
@@ -94,17 +102,31 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 			// existing query string or a fragment. Manual string-concat would produce
 			// `https://rp/fc#frag?iss=...` where the browser treats the query as
 			// part of the fragment — the RP never receives iss/sid.
-			const includeSid = rp.frontchannelLogoutSessionRequired !== false;
-			const iframeSrc = buildIframeUrl(
-				rp.frontchannelLogoutUri,
-				opts.issuer,
-				includeSid ? opts.sid : undefined,
-			);
-			// escapeHtml is still required: new URL() percent-encodes for URL context
-			// but the value is being placed inside an HTML attribute, so & must become
-			// &amp; to produce well-formed HTML.
-			return `<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`;
+			//
+			// Per-RP try/catch: if new URL() throws (invalid or relative URI that slipped
+			// past schema validation, or corrupted store record), skip that RP's iframe
+			// rather than propagating the throw after cascadeLogout has already cleared
+			// session state (which would produce a 500 with an empty response body).
+			try {
+				const includeSid = rp.frontchannelLogoutSessionRequired !== false;
+				const iframeSrc = buildIframeUrl(
+					rp.frontchannelLogoutUri,
+					opts.issuer,
+					includeSid ? opts.sid : undefined,
+				);
+				// escapeHtml is still required: new URL() percent-encodes for URL context
+				// but the value is being placed inside an HTML attribute, so & must become
+				// &amp; to produce well-formed HTML.
+				return `<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`;
+			} catch (err) {
+				logger.warn(
+					`renderFrontchannelLogoutHtml: failed to build iframe for RP ${rp.clientId} (skipping):`,
+					err,
+				);
+				return ""; // skipped; filtered out below
+			}
 		})
+		.filter((s) => s.length > 0)
 		.join("\n    ");
 
 	const delay = opts.redirectDelayMs ?? DEFAULT_REDIRECT_DELAY_MS;

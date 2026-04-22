@@ -20,6 +20,31 @@ import { z } from "zod";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
 /**
+ * Validates that a URL string uses only `http:` or `https:` schemes.
+ * Rejects `javascript:`, `data:`, `file:`, and other dangerous schemes that
+ * could enable XSS when embedded in `<iframe src="...">` (front-channel logout)
+ * or used in redirect flows.
+ *
+ * @internal — shared only with unit tests in this package.
+ */
+const httpUrlSchema = z
+	.string()
+	.url()
+	.refine(
+		(u) => {
+			try {
+				const scheme = new URL(u).protocol;
+				return scheme === "https:" || scheme === "http:";
+			} catch {
+				// new URL() threw — the string is not a valid absolute URL;
+				// z.string().url() already rejects it, so return false here too.
+				return false;
+			}
+		},
+		{ message: "URL must use http: or https: scheme" },
+	);
+
+/**
  * @internal
  *
  * Zod schema for per-client configuration entries consumed by the in-memory and
@@ -35,8 +60,10 @@ export const ClientEntrySchema = z
 		allowedRedirectUris: z.array(z.string()).default([]),
 		allowedScopes: z.array(z.string()).default([]),
 		// NEW (TODO-F-5): Logout metadata.
-		postLogoutRedirectUris: z.array(z.string().url()).optional(),
-		backchannelLogoutUri: z.string().url().optional(),
+		// Use httpUrlSchema (not z.string().url()) for fields that end up in iframe src
+		// or redirect targets — rejects javascript:, data:, file: to prevent XSS.
+		postLogoutRedirectUris: z.array(httpUrlSchema).optional(),
+		backchannelLogoutUri: httpUrlSchema.optional(),
 		// NOTE: OIDC Back-Channel Logout 1.0 §2.2 defines backchannel_logout_session_required
 		// as defaulting to `false` when omitted. This implementation intentionally defaults to
 		// `true` to include `sid` in logout_token by default, which mitigates CSRF / session-
@@ -45,7 +72,7 @@ export const ClientEntrySchema = z
 		// to `false`. The OIDC Discovery metadata (`backchannel_logout_session_supported`,
 		// `frontchannel_logout_session_supported`) must advertise `true` — see Task 7.
 		backchannelLogoutSessionRequired: z.boolean().optional().default(true),
-		frontchannelLogoutUri: z.string().url().optional(),
+		frontchannelLogoutUri: httpUrlSchema.optional(),
 		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
 	})
 	.strict();

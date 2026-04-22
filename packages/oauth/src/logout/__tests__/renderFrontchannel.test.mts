@@ -1,4 +1,4 @@
-import { assert, describe, expect, it } from "vitest";
+import { assert, describe, expect, it, vi } from "vitest";
 import { renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
 
 describe("renderFrontchannelLogoutHtml", () => {
@@ -159,6 +159,30 @@ describe("renderFrontchannelLogoutHtml", () => {
 		});
 		expect(html).not.toContain("setTimeout");
 		expect(html).not.toContain("window.location.href");
+	});
+
+	it("skips RPs with invalid frontchannelLogoutUri instead of throwing", () => {
+		const logger = { warn: vi.fn() };
+		const html = renderFrontchannelLogoutHtml({
+			rps: [
+				{ clientId: "good", frontchannelLogoutUri: "https://good.example/fc" },
+				{ clientId: "bad", frontchannelLogoutUri: "not-a-url" },
+			],
+			issuer: "https://auth.example",
+			sid: "sid-1",
+			logger,
+		});
+		// good RP still produces an iframe
+		expect(html).toContain("good.example");
+		// bad RP is skipped
+		expect(html).not.toContain("not-a-url");
+		// exactly one iframe in the output
+		expect([...html.matchAll(/<iframe/g)].length).toBe(1);
+		// warning was logged for the bad RP
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.stringContaining("bad"),
+			expect.anything(),
+		);
 	});
 
 	it("postLogoutRedirectUri is safe against </script> injection (CSP-safe pattern)", () => {

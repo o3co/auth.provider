@@ -505,6 +505,65 @@ describe("POST /oauth/logout", () => {
 		});
 	});
 
+	describe("Cache-Control / Pragma headers", () => {
+		it("200 JSON success path sets Cache-Control: no-store and Pragma: no-cache", async () => {
+			const app = buildApp();
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(200);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+		});
+
+		it("503 cascade failure sets Cache-Control: no-store and Pragma: no-cache", async () => {
+			const refreshStore = makeRefreshStore({
+				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
+			});
+			const app = buildApp({ refreshStore });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(503);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+		});
+
+		it("400 invalid id_token_hint sets Cache-Control: no-store and Pragma: no-cache", async () => {
+			const app = buildApp();
+
+			const res = await postLogout(app, { id_token_hint: "not.a.valid.jwt" });
+
+			expect(res.status).toBe(400);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+		});
+
+		it("200 HTML front-channel response sets Cache-Control: no-store and Pragma: no-cache", async () => {
+			const sessionWithRP: UserSession = {
+				...baseSession,
+				activeRPs: [
+					{
+						clientId: "rp-1",
+						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+						registeredAt: new Date(),
+					},
+				],
+			};
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
+			const app = buildApp({ sessionStore });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
+
+			expect(res.status).toBe(200);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+		});
+	});
+
 	describe("q-weighted Accept header content negotiation", () => {
 		it("application/json > text/html returns JSON (not HTML)", async () => {
 			const sessionWithRP: UserSession = {
@@ -798,6 +857,56 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body).toEqual({ disconnected: true });
+		});
+	});
+
+	describe("WWW-Authenticate header on 401 paths", () => {
+		it("missing Authorization header returns WWW-Authenticate: Bearer error=invalid_token", async () => {
+			const app = buildFedLogoutApp();
+			const res = await request(app)
+				.post("/oauth/federation/google/logout")
+				.type("form")
+				.send({});
+
+			expect(res.status).toBe(401);
+			expect(res.headers["www-authenticate"]).toMatch(/Bearer/);
+			expect(res.headers["www-authenticate"]).toMatch(/error="invalid_token"/);
+		});
+
+		it("invalid signature returns WWW-Authenticate: Bearer error=invalid_token", async () => {
+			const app = buildFedLogoutApp();
+			const res = await postFedLogout(app, "google", "not.a.valid.jwt");
+
+			expect(res.status).toBe(401);
+			expect(res.headers["www-authenticate"]).toMatch(/Bearer/);
+			expect(res.headers["www-authenticate"]).toMatch(/error="invalid_token"/);
+		});
+
+		it("family revoked returns WWW-Authenticate: Bearer error=invalid_token", async () => {
+			const refreshStore = makeRefreshStore({
+				isFamilyRevoked: vi.fn().mockResolvedValue(true),
+			});
+			const app = buildFedLogoutApp({ refreshStore });
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(401);
+			expect(res.headers["www-authenticate"]).toMatch(/Bearer/);
+			expect(res.headers["www-authenticate"]).toMatch(/error="invalid_token"/);
+		});
+
+		it("session not found returns WWW-Authenticate: Bearer error=invalid_token", async () => {
+			const app = buildApp({
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(null) }),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(401);
+			expect(res.headers["www-authenticate"]).toMatch(/Bearer/);
+			expect(res.headers["www-authenticate"]).toMatch(/error="invalid_token"/);
 		});
 	});
 

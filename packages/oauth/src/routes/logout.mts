@@ -129,6 +129,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// uses "Bearer". We do a case-insensitive prefix check per §2.1 common usage.
 			if (!auth || !/^Bearer /i.test(auth)) {
 				res.setHeader("Cache-Control", "no-store");
+				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="missing Bearer token"');
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "missing Bearer token",
@@ -157,6 +158,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					error instanceof Error ? error.message : String(error),
 				);
 				res.setHeader("Cache-Control", "no-store");
+				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="invalid token"');
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "invalid token",
@@ -194,6 +196,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						details: { sid: sid ?? undefined },
 					});
 					res.setHeader("Cache-Control", "no-store");
+					res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="family revoked"');
 					return res.status(401).json({
 						error: "invalid_token",
 						error_description: "family revoked",
@@ -204,6 +207,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Step 5: sid is required to look up the session.
 			if (!sid) {
 				res.setHeader("Cache-Control", "no-store");
+				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="missing sid claim"');
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "missing sid claim",
@@ -227,6 +231,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			}
 			if (!session) {
 				res.setHeader("Cache-Control", "no-store");
+				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="session not found"');
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "session not found",
@@ -354,6 +359,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		"/logout",
 		express.urlencoded({ extended: false }),
 		async (req: Request, res: Response) => {
+			// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
+			res.setHeader("Cache-Control", "no-store");
+			res.setHeader("Pragma", "no-cache");
+
 			const {
 				id_token_hint: idTokenHint,
 				post_logout_redirect_uri: postLogoutRedirectUri,
@@ -532,6 +541,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					sid,
 					// Use the allowlist-validated URI — prevents open redirect via HTML branch.
 					postLogoutRedirectUri: validatedPostLogoutRedirectUri,
+					logger: opts.logger,
 				});
 				res.setHeader("Content-Type", "text/html; charset=utf-8");
 				return res.status(200).send(html);

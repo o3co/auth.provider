@@ -151,6 +151,45 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
+	describe("ClientEntrySchema URL scheme allowlist (F-5 XSS hardening)", () => {
+		const baseEntry = {
+			clientSecret: "secret",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+		};
+
+		it.each([
+			["postLogoutRedirectUris", { postLogoutRedirectUris: ["javascript:alert(1)"] }],
+			["postLogoutRedirectUris", { postLogoutRedirectUris: ["data:text/html,<script>alert(1)</script>"] }],
+			["postLogoutRedirectUris", { postLogoutRedirectUris: ["file:///etc/passwd"] }],
+			["backchannelLogoutUri", { backchannelLogoutUri: "javascript:alert(1)" }],
+			["frontchannelLogoutUri", { frontchannelLogoutUri: "javascript:alert(1)" }],
+		])("rejects %s with scheme %s", (_field, override) => {
+			const result = ClientEntrySchema.safeParse({ ...baseEntry, ...override });
+			expect(result.success).toBe(false);
+		});
+
+		it("accepts https: scheme for all three logout URI fields", () => {
+			const result = ClientEntrySchema.safeParse({
+				...baseEntry,
+				postLogoutRedirectUris: ["https://rp.example/logged-out"],
+				backchannelLogoutUri: "https://rp.example/backchannel-logout",
+				frontchannelLogoutUri: "https://rp.example/fc-logout",
+			});
+			expect(result.success).toBe(true);
+		});
+
+		it("accepts http: scheme for local/dev URIs", () => {
+			const result = ClientEntrySchema.safeParse({
+				...baseEntry,
+				postLogoutRedirectUris: ["http://localhost:3000/logged-out"],
+				backchannelLogoutUri: "http://localhost:3000/back-logout",
+				frontchannelLogoutUri: "http://localhost:3000/fc-logout",
+			});
+			expect(result.success).toBe(true);
+		});
+	});
+
 	describe("authenticate", () => {
 		it("returns client with correct plain text secret", async () => {
 			const repo = new InMemoryClientRepository(
