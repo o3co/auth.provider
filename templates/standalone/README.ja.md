@@ -23,6 +23,20 @@ pnpm start
 
 設定は `config/application.conf`（HOCON 形式）から読み込まれます。各値は対応する環境変数で上書きできます。
 
+### 環境別コンフィグ overlay
+
+`src/app.mts` は 2 層構成でコンフィグを読み込みます:
+
+1. **`config/application.conf`** — アプリの基本デフォルト。
+2. **`config/{ENV}.conf`** — 現在の環境の overlay。
+   `ENV = CONFIG_ENV || NODE_ENV || "development"` で決まります。
+
+overlay の値は `application.conf` を上書きします。scaffold には
+`development.conf` と `production.conf` が同梱されています。別の環境
+（例: `staging`）を追加するときは `config/staging.conf` を作成し、
+`CONFIG_ENV=staging` を設定してください。`{ENV}.conf` が存在しない場合は
+起動時にエラーになります（タイポを silent に素通りさせず fail-fast します）。
+
 ### HTTP
 
 | 変数 | デフォルト | 説明 |

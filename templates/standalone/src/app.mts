@@ -45,8 +45,21 @@ import passport from "passport";
 import logger from "#/logger.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
+// Layering: {ENV}.conf overrides application.conf.
+// ENV = CONFIG_ENV || NODE_ENV || "development". A missing {ENV}.conf is a
+// boot-time error (fail-fast on typos or unconfigured environments).
+const env = process.env.CONFIG_ENV || process.env.NODE_ENV || "development";
+const configDir = new URL("../config/", import.meta.url);
+const configDirPath = fileURLToPath(configDir);
+const applicationConfPath = path.join(configDirPath, "application.conf");
+const envConfPath = path.resolve(configDirPath, `${env}.conf`);
+// Reject env names whose resolved path escapes configDir (e.g. "../secrets").
+// The overlay must be an immediate child of configDir, not a nested path.
+if (path.dirname(envConfPath) !== configDirPath) {
+	throw new Error(`Invalid config environment name: "${env}" resolves outside ${configDirPath}`);
+}
 const config: AppConfig = validate(
-	parseFile(fileURLToPath(new URL("../config/application.conf", import.meta.url))),
+	parseFile(envConfPath).withFallback(parseFile(applicationConfPath)),
 	AppConfigSchema,
 );
 

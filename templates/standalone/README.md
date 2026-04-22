@@ -23,6 +23,20 @@ pnpm start
 
 Configuration is loaded from `config/application.conf` (HOCON format). Each value can be overridden with the corresponding environment variable.
 
+### Environment-specific config overlay
+
+`src/app.mts` loads configuration in two layers:
+
+1. **`config/application.conf`** — base defaults for the app.
+2. **`config/{ENV}.conf`** — overlay for the current environment, where
+   `ENV = CONFIG_ENV || NODE_ENV || "development"`.
+
+Values in the overlay take precedence over `application.conf`. The scaffold
+ships with `development.conf` and `production.conf`. To add another
+environment (e.g. `staging`), create `config/staging.conf` and set
+`CONFIG_ENV=staging`. A missing `{ENV}.conf` is a boot-time error — typos
+fail fast rather than silently falling back to defaults.
+
 ### HTTP
 
 | Variable | Default | Description |
