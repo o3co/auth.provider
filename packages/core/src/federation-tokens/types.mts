@@ -61,6 +61,15 @@ export interface AcquireLockOptions {
 	readonly waitForMs?: number;
 }
 
+/**
+ * Result of `acquireLock`. The `"held"` reason is reserved for future use
+ * where a non-blocking acquire semantics is added; current implementations
+ * return `"timeout"` whenever the wait deadline elapses with the lock still
+ * held by another owner.
+ *
+ * Note: lock-implementation-level errors (e.g. redis network outage) are NOT
+ * surfaced here — `acquireLock` rejects instead. See {@link SupportsLock}.
+ */
 export type LockResult =
 	| { readonly acquired: true; readonly release: () => Promise<void> }
 	| { readonly acquired: false; readonly reason: "held" | "timeout" };
@@ -71,6 +80,17 @@ export type LockResult =
  * federation-refresh thundering herd. Consumers detect presence with
  * {@link supportsLock}; when absent, the refresh path proceeds without
  * coordination — acceptable for low-concurrency deployments.
+ *
+ * ## Error semantics
+ *
+ * `acquireLock` returns a `LockResult` discriminated union for the two expected
+ * outcomes — acquired or wait-timed-out. A thrown/rejected Promise from
+ * `acquireLock` indicates a **client-level failure** (network partition,
+ * cluster down, authentication error) that the caller must decide how to
+ * handle: typical choices are to surface HTTP 503 or to fall back to an
+ * unlocked refresh. Lock implementations SHOULD NOT internalize these errors
+ * as `{ acquired: false }` because the caller's response code depends on
+ * whether the failure is transient-operational or protocol-level.
  */
 export interface SupportsLock {
 	acquireLock(opts: AcquireLockOptions): Promise<LockResult>;
