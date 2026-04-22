@@ -312,10 +312,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		// (e.g. GitHub OAuth Apps classic tokens). Treat as "never expired; never
 		// refresh" — reuse the stored accessToken indefinitely, and omit the
 		// `expires_in` field from the response (RFC 6749 §5.1 makes it optional).
-		if (
-			tokens.expiresAt === null ||
-			tokens.expiresAt.getTime() > Date.now() + refreshBufferMs
-		) {
+		if (tokens.expiresAt === null || tokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "federation.token.success",
@@ -416,10 +413,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					const expiresIn =
 						freshTokens.expiresAt === null
 							? undefined
-							: Math.max(
-									0,
-									Math.floor((freshTokens.expiresAt.getTime() - Date.now()) / 1000),
-								);
+							: Math.max(0, Math.floor((freshTokens.expiresAt.getTime() - Date.now()) / 1000));
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
 						type: "federation.token.success",
