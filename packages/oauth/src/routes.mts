@@ -595,7 +595,13 @@ export const createOAuthRouter = async (
 	// federationTokenStore is required for POST /oauth/federation/:name/logout.
 	// issuer is required for logout_token signing in POST /oauth/logout.
 	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
-	if (userSessionStore && federationTokenStore && refreshTokenStore && typeof issuer === "string") {
+	if (
+		userSessionStore &&
+		federationTokenStore &&
+		refreshTokenStore &&
+		typeof issuer === "string" &&
+		issuer.length > 0
+	) {
 		router.use(
 			logoutRoute.createRouter(express, {
 				keyStore,

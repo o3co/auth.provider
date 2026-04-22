@@ -904,6 +904,31 @@ describe("POST /oauth/federation/:name/logout", () => {
 		});
 	});
 
+	describe("Cache-Control / Pragma headers", () => {
+		it("401 missing Bearer sets both Cache-Control: no-store and Pragma: no-cache", async () => {
+			const app = buildFedLogoutApp();
+			const res = await request(app).post("/oauth/federation/google/logout").type("form").send({});
+
+			expect(res.status).toBe(401);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+		});
+
+		it("503 federationTokenStore.delete throw sets both Cache-Control: no-store and Pragma: no-cache", async () => {
+			const fedTokenStore = makeFedTokenStore({
+				delete: vi.fn().mockRejectedValue(new Error("redis down")),
+			});
+			const app = buildFedLogoutApp({ fedTokenStore });
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(503);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+		});
+	});
+
 	describe("logger routing", () => {
 		it("routes /federation/:name/logout failures to opts.logger (not console)", async () => {
 			const warnSpy = vi.fn<(message: string, ...args: unknown[]) => void>();

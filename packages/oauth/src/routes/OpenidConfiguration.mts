@@ -25,11 +25,11 @@ export interface OidcConfigRouterOptions {
 	issuer: string;
 	signingAlgs: ReadonlyArray<string>;
 	/**
-	 * When false, omit end_session_endpoint and backchannel/frontchannel logout_supported
-	 * fields from the discovery response. Set to false when the required stores
-	 * (userSessionStore, federationTokenStore, refreshTokenStore) are not configured
-	 * and the logout router is therefore not mounted.
-	 * Defaults to true for backward compatibility.
+	 * When true, advertise end_session_endpoint and backchannel/frontchannel logout_supported
+	 * fields in the discovery response. Must be set explicitly — defaults to false so that
+	 * callers who use this router directly (bypassing oauthModule) do not accidentally
+	 * advertise logout support without mounting the logout route.
+	 * oauthModule sets this to the computed `!!stores && !!issuer` expression.
 	 */
 	logoutSupported?: boolean;
 }
@@ -56,10 +56,10 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 			...(hasAsymmetricAlg ? { jwks_uri: `${iss}/.well-known/jwks.json` } : {}),
 			introspection_endpoint: `${iss}/oauth/introspect`,
 			// Logout discovery fields are only advertised when the logout router is mounted.
-			// opts.logoutSupported defaults to true for backward compatibility; pass false
-			// explicitly when userSessionStore / federationTokenStore / refreshTokenStore
-			// are absent and the /oauth/logout route is therefore not registered.
-			...(opts.logoutSupported !== false
+			// opts.logoutSupported defaults to false (explicit opt-in); oauthModule sets it
+			// to the computed !!stores && !!issuer expression. Callers who use createRouter
+			// directly must pass logoutSupported: true explicitly.
+			...(opts.logoutSupported === true
 				? {
 						end_session_endpoint: `${iss}/oauth/logout`,
 						backchannel_logout_supported: true,

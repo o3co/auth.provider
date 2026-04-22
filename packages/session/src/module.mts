@@ -166,11 +166,11 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 			federationProviders.set(name, provider);
 		}
 
-		// Expose the Map for other modules that need to resolve providers at request
-		// time (e.g. oauth's /oauth/logout for federation end-session). Consumers MUST
-		// read this lazily via a getter in their handler — they cannot capture the
-		// reference during their own init because module init order is not guaranteed.
-		context.federationProviders = federationProviders;
+		// Expose a snapshot of the federation providers for other modules that need
+		// to resolve providers at request time (e.g. oauth's /oauth/logout). A copy
+		// is passed — not the original Map — so consumers cannot corrupt the session
+		// module's internal provider registry by mutating the shared reference.
+		context.federationProviders = new Map(federationProviders);
 
 		// Initialize passport with pathResolver and optional store bindings.
 		// userSessionStore / federationTokenStore are optional on ModuleContext (F-1);

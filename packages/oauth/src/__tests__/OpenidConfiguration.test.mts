@@ -123,6 +123,16 @@ describe("GET /.well-known/openid-configuration", () => {
 		expect(body.frontchannel_logout_session_supported).toBe(true);
 	});
 
+	it("omits all logout fields when logoutSupported is not set (default false — explicit opt-in required)", async () => {
+		const body = await callRoute({ issuer: "https://auth.example.com", signingAlgs: [] });
+		// No logoutSupported option passed — default must be false (safe default for direct users)
+		expect(body.end_session_endpoint).toBeUndefined();
+		expect(body.backchannel_logout_supported).toBeUndefined();
+		expect(body.backchannel_logout_session_supported).toBeUndefined();
+		expect(body.frontchannel_logout_supported).toBeUndefined();
+		expect(body.frontchannel_logout_session_supported).toBeUndefined();
+	});
+
 	it("omits all 5 logout fields when logoutSupported is false (stores not configured)", async () => {
 		const body = await callRoute({
 			issuer: "https://auth.example.com",
