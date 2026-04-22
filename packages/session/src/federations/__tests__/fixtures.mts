@@ -17,23 +17,24 @@
 import type {
 	EndSessionRequest,
 	EndSessionResult,
-	FederationProviderBase,
+	FederationProvider,
 	SupportsLogout,
 } from "../types.mjs";
 
 /**
- * Test fixture: a minimal provider that implements only the Base contract.
+ * Test fixture: a minimal provider that implements only the FederationProvider contract.
  * Used to exercise the `supportsLogout(p) === false` path and as a starting shape
  * that external implementers can copy when writing a custom provider without the
  * logout capability.
  */
-export function createTestBaseProvider(name: string): FederationProviderBase {
+export function createTestBaseProvider(name: string): FederationProvider {
 	return {
 		name,
 		scope: [],
 		validateRedirect: () => ({ ok: true, value: undefined }),
 		resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
-		async setupPassportStrategy(_passport, _ctx) {},
+		buildAuthorizationUrl: () => new URL("https://example.com/authorize"),
+		exchangeCode: async () => ({ issuer: "https://example.com", sub: "test-sub" }),
 	};
 }
 
@@ -48,7 +49,7 @@ export function createTestBaseProvider(name: string): FederationProviderBase {
 export function createTestLogoutProvider(opts: {
 	name: string;
 	endSessionEndpoint: string;
-}): FederationProviderBase & SupportsLogout {
+}): FederationProvider & SupportsLogout {
 	return {
 		...createTestBaseProvider(opts.name),
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {

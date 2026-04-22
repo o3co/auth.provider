@@ -17,12 +17,12 @@
 import { type AdapterFactory, createAdapterFactory } from "@o3co/auth-provider-core";
 import { createGithubProvider } from "./github.mjs";
 import { createGoogleProvider } from "./google.mjs";
-import type { FederationProviderBase } from "./types.mjs";
+import type { FederationProvider } from "./types.mjs";
 
-export type FederationProviderFactory = AdapterFactory<FederationProviderBase>;
+export type FederationProviderFactory = AdapterFactory<FederationProvider>;
 
 export function createFederationProviderFactory(): FederationProviderFactory {
-	return createAdapterFactory<FederationProviderBase>("FederationProvider");
+	return createAdapterFactory<FederationProvider>("FederationProvider");
 }
 
 /**
