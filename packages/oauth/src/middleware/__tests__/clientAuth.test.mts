@@ -181,6 +181,24 @@ describe("createClientAuthMiddleware", () => {
 		expect(res.body.error_description).toBe("Client authentication is required");
 	});
 
+	// Fix 5: RFC 6749 §2.3.1 — `+` in Basic credentials must decode to space (x-www-form-urlencoded)
+	it("Fix 5: Basic auth with + in credentials decodes to space (RFC 6749 §2.3.1 x-www-form-urlencoded)", async () => {
+		const authenticateSpy = vi
+			.fn<ClientRepository["authenticate"]>()
+			.mockResolvedValue(fakePublicClient("alice"));
+		const spyRepo: ClientRepository = { authenticate: authenticateSpy, findById: vi.fn() };
+		const app = express().use(express.urlencoded({ extended: false }));
+		app.post("/test", createClientAuthMiddleware(spyRepo), (req, res) => {
+			res.json({ client: req.oauthClient?.clientId });
+		});
+		// "alice:with+space" — `+` represents a literal space per x-www-form-urlencoded
+		const basic = Buffer.from("alice:with+space").toString("base64");
+		const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+		expect(res.status).toBe(200);
+		expect(authenticateSpy).toHaveBeenCalledWith("alice", "with space");
+		expect(res.body.client).toBe("alice");
+	});
+
 	// Fix 6: decodeURIComponent throw path
 	it("returns 401 Malformed client credentials when Basic header contains invalid percent-encoding", async () => {
 		const app = express().use(express.urlencoded({ extended: false }));

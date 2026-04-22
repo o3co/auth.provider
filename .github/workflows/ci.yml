@@ -37,7 +37,7 @@ jobs:
           # Match only module-import occurrences: `import ... from "vendor"` or `require("vendor")`.
           # JSDoc prose mentioning vendor names is allowed (it's documentation, not a type leak).
           VENDOR_NAMES='arctic|openid-client|oauth4webapi|passport'
-          PATTERN='(from[[:space:]]+["'"'"']('"$VENDOR_NAMES"')["'"'"']|require\([[:space:]]*["'"'"']('"$VENDOR_NAMES"')["'"'"'])'
+          PATTERN='(from[[:space:]]+["'"'"']('"$VENDOR_NAMES"')["'"'"']|require\([[:space:]]*["'"'"']('"$VENDOR_NAMES"')["'"'"']|import\([[:space:]]*["'"'"']('"$VENDOR_NAMES"')["'"'"'])'
           LEAKED=$(find packages/*/dist \( -name '*.d.ts' -o -name '*.d.mts' \) -exec grep -l -E "$PATTERN" {} \; 2>/dev/null || true)
           if [ -n "$LEAKED" ]; then
             echo "::error::Vendor import statements leaked into the following public .d.mts files:"

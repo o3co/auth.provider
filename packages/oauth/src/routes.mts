@@ -94,6 +94,9 @@ export const createOAuthRouter = async (
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
 
+	// Construct once at router-creation time so the closure is not re-allocated per request.
+	const clientAuthMw = createClientAuthMiddleware(clientRepository);
+
 	async function checkRateLimit(req: Request, res: Response, tag: string): Promise<boolean> {
 		if (!rateLimiter) return true;
 		const ip = req.ip ?? "unknown";
@@ -242,7 +245,7 @@ export const createOAuthRouter = async (
 						return res.status(200).json({ active: false });
 					}
 				}
-				return createClientAuthMiddleware(clientRepository)(req, res, next);
+				return clientAuthMw(req, res, next);
 			},
 			async (req: Request, res: Response) => {
 				const { token } = req.body;

@@ -41,6 +41,45 @@ type SessionStore = Map<string, Record<string, unknown>>;
  * Every request reads/writes the session object from the shared store via a
  * `sid` cookie. `req.session.save` calls its callback synchronously.
  */
+/**
+ * Build a minimal session-like object backed by `store` under `persistKey`.
+ *
+ * `persistKey` is the store key used for both reads and writes.  For the initial
+ * session it equals the cookie id.  For regenerated sessions it is still the
+ * original cookie id — simulating the browser receiving a `Set-Cookie` with the
+ * new session id, which in tests cannot actually change the agent's cookie.
+ * This keeps `/_inspect` requests (which arrive with the original cookie) able
+ * to read the regenerated session's data.
+ */
+function makeSessionObject(
+	store: SessionStore,
+	persistKey: string,
+	req: express.Request,
+): Record<string, unknown> {
+	const sessionData = store.get(persistKey) ?? {};
+	const session: Record<string, unknown> = {
+		...sessionData,
+		save(cb?: (err: unknown) => void) {
+			const current = (req as unknown as { session: Record<string, unknown> }).session;
+			const { save: _s, regenerate: _r, ...rest } = current;
+			store.set(persistKey, rest);
+			cb?.(null);
+			return this as unknown as import("express-session").Session;
+		},
+		regenerate(cb?: (err: unknown) => void) {
+			// Simulate session ID rotation: clear the store entry (old data gone) and
+			// install a fresh empty session.  We reuse the same `persistKey` so that
+			// subsequent supertest requests with the same cookie still reach the data.
+			store.set(persistKey, {});
+			const newSession = makeSessionObject(store, persistKey, req);
+			(req as unknown as { session: Record<string, unknown> }).session = newSession;
+			cb?.(null);
+			return this as unknown as import("express-session").Session;
+		},
+	};
+	return session;
+}
+
 function makeSessionApp(store: SessionStore): express.Express {
 	const app = express();
 	app.use((req, _res, next) => {
@@ -50,20 +89,13 @@ function makeSessionApp(store: SessionStore): express.Express {
 		const id = sidMatch ? decodeURIComponent(sidMatch[1]) : String(Math.random());
 
 		if (!store.has(id)) store.set(id, {});
-		const sessionData = store.get(id) ?? {};
 
 		// Attach a minimal session-like object to req
-		(req as unknown as { session: Record<string, unknown> }).session = {
-			...sessionData,
-			save(cb?: (err: unknown) => void) {
-				// Persist mutations back to store
-				const current = (req as unknown as { session: Record<string, unknown> }).session;
-				const { save: _s, ...rest } = current;
-				store.set(id, rest);
-				cb?.(null);
-				return this as unknown as import("express-session").Session;
-			},
-		};
+		(req as unknown as { session: Record<string, unknown> }).session = makeSessionObject(
+			store,
+			id,
+			req,
+		);
 
 		next();
 	});
@@ -570,20 +602,41 @@ describe("Federation routes", () => {
 			const uss = makeUserSessionStore();
 			const fts = makeFederationTokenStore();
 
-			// The route makes two save calls per callback request:
-			//   call 1 — early deletion-persist (session.federation cleared, should succeed)
-			//   call 2 — post-create sid persist (should fail to trigger rollback)
-			let saveCalls = 0;
+			// The route makes the following calls per callback request:
+			//   save 1 — reuse-prevention persist (session.federation cleared, should succeed)
+			//   regenerate() — replaces req.session with a new object
+			//   save 2 (on new session) — post-regenerate sid persist (should fail → rollback)
+			//
+			// The saveInterceptor patches both the initial save AND wraps regenerate so that
+			// the new session's save is also intercepted.
 			const saveInterceptor: express.RequestHandler = (req, _res, next) => {
-				const origSave = req.session.save.bind(req.session);
-				req.session.save = (cb?: (err: unknown) => void) => {
-					saveCalls++;
-					if (saveCalls === 2 && typeof cb === "function") {
-						cb(new Error("session save failed"));
-						return req.session;
-					}
-					return origSave(cb);
+				let saveCalls = 0;
+
+				function patchSave(session: import("express-session").Session) {
+					const orig = session.save.bind(session);
+					session.save = (cb?: (err: unknown) => void) => {
+						saveCalls++;
+						// save 2 (on the regenerated session) should fail to trigger rollback
+						if (saveCalls === 2 && typeof cb === "function") {
+							cb(new Error("session save failed"));
+							return session;
+						}
+						return orig(cb);
+					};
+				}
+
+				patchSave(req.session);
+
+				// Also wrap regenerate to patch save on the newly created session.
+				const origRegenerate = req.session.regenerate.bind(req.session);
+				req.session.regenerate = (cb?: (err: unknown) => void) => {
+					return origRegenerate((err: unknown) => {
+						// req.session is now the new session — patch its save too.
+						patchSave(req.session);
+						cb?.(err);
+					});
 				};
+
 				next();
 			};
 
@@ -675,6 +728,187 @@ describe("Federation routes", () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 			const res = await request(app).get("/oauth/federation/unknown/callback?state=x&code=y");
 			expect(res.status).toBe(404);
+		});
+
+		// Fix 1 — session fixation: regenerate is called; new session has correct sid/isAuthenticated/user
+		it("Fix 1: regenerates session after successful auth; new session has sid/isAuthenticated/user", async () => {
+			const provider = makeFakeProvider();
+			const providers = new Map([["test", provider]]);
+			const repo = makeUserRepository({ id: "user-1", username: "alice" });
+			const uss = makeUserSessionStore();
+			const fts = makeFederationTokenStore();
+
+			// Spy on regenerate to verify it was called
+			let regenerateCalled = false;
+			const regenerateInterceptor: express.RequestHandler = (req, _res, next) => {
+				const origRegenerate = req.session.regenerate.bind(req.session);
+				req.session.regenerate = (cb?: (err: unknown) => void) => {
+					regenerateCalled = true;
+					return origRegenerate(cb);
+				};
+				next();
+			};
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1", redirectTo: "/dashboard" },
+				userRepository: repo,
+				userSessionStore: uss,
+				federationTokenStore: fts,
+				saveInterceptor: regenerateInterceptor,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(302);
+			expect(res.headers.location).toBe("/dashboard");
+
+			// regenerate was called
+			expect(regenerateCalled).toBe(true);
+
+			// New session must have the correct auth fields
+			const inspect = await agent.get("/_inspect");
+			const sessionData = JSON.parse(inspect.text) as Record<string, unknown>;
+			expect(sessionData.isAuthenticated).toBe(true);
+			expect(typeof sessionData.sid).toBe("string");
+			expect((sessionData.user as Record<string, unknown>).id).toBe("user-1");
+		});
+
+		// Fix 1: if regenerate fails, userSessionStore.delete is called (rollback) and 500 returned
+		it("Fix 1: regenerate failure → UserSessionStore.delete rollback + 500", async () => {
+			const provider = makeFakeProvider();
+			const providers = new Map([["test", provider]]);
+			const uss = makeUserSessionStore();
+			const fts = makeFederationTokenStore();
+
+			const regenerateFailInterceptor: express.RequestHandler = (req, _res, next) => {
+				req.session.regenerate = (cb?: (err: unknown) => void) => {
+					cb?.(new Error("regenerate failed"));
+					return req.session;
+				};
+				next();
+			};
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userSessionStore: uss,
+				federationTokenStore: fts,
+				saveInterceptor: regenerateFailInterceptor,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(500);
+			expect(JSON.parse(res.text)).toMatchObject({ error: "session_create_failed" });
+
+			// UserSession was created then rolled back
+			expect(uss.create).toHaveBeenCalledOnce();
+			expect(uss.delete).toHaveBeenCalledOnce();
+			// No token was attached (regenerate failed before attach)
+			expect(fts.attach).not.toHaveBeenCalled();
+			expect(fts.delete).not.toHaveBeenCalled();
+		});
+
+		// Fix 2 — fail-closed reuse-prevention: save failure returns 500, does NOT call exchangeCode
+		it("Fix 2: reuse-prevention save failure returns 500 and does NOT call exchangeCode", async () => {
+			const provider = makeFakeProvider();
+			const providers = new Map([["test", provider]]);
+
+			// Intercept the first save (reuse-prevention) to fail
+			const saveFailInterceptor: express.RequestHandler = (req, _res, next) => {
+				const origSave = req.session.save.bind(req.session);
+				let saveCount = 0;
+				req.session.save = (cb?: (err: unknown) => void) => {
+					saveCount++;
+					if (saveCount === 1 && typeof cb === "function") {
+						cb(new Error("store unavailable"));
+						return req.session;
+					}
+					return origSave(cb);
+				};
+				next();
+			};
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				saveInterceptor: saveFailInterceptor,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(500);
+			expect(JSON.parse(res.text)).toMatchObject({
+				error: "server_error",
+				error_description: "Session store unavailable",
+			});
+
+			// exchangeCode must NOT have been called (fail-closed gate)
+			expect(provider.exchangeCode).not.toHaveBeenCalled();
+		});
+
+		// Fix 3 — authenticateByToken throws → 503 temporarily_unavailable
+		it("Fix 3: authenticateByToken throws → 503 temporarily_unavailable", async () => {
+			const provider = makeFakeProvider();
+			const providers = new Map([["test", provider]]);
+			const repo: UserRepository = {
+				authenticate: vi.fn(async () => null),
+				authenticateByToken: vi.fn(async () => {
+					throw new Error("db outage");
+				}),
+			};
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userRepository: repo,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(503);
+			expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
+		});
+
+		// Fix 4 — missing code query param → 400 invalid_request (not 502 exchange_failed)
+		it("Fix 4: missing code query param returns 400 invalid_request", async () => {
+			const provider = makeFakeProvider();
+			const providers = new Map([["test", provider]]);
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			});
+			const agent = await plantAndGetAgent(app);
+
+			// No code param
+			const res = await agent.get("/oauth/federation/test/callback?state=s1");
+			expect(res.status).toBe(400);
+			expect(JSON.parse(res.text)).toMatchObject({
+				error: "invalid_request",
+				error_description: "Missing authorization code",
+			});
+
+			// exchangeCode must NOT be called
+			expect(provider.exchangeCode).not.toHaveBeenCalled();
+		});
+
+		// Fix 4: empty string code param → 400 invalid_request
+		it("Fix 4: empty string code query param returns 400 invalid_request", async () => {
+			const provider = makeFakeProvider();
+			const providers = new Map([["test", provider]]);
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=");
+			expect(res.status).toBe(400);
+			expect(JSON.parse(res.text)).toMatchObject({ error: "invalid_request" });
+			expect(provider.exchangeCode).not.toHaveBeenCalled();
 		});
 	});
 });

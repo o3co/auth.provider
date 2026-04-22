@@ -37,6 +37,15 @@ declare global {
 const WWW_AUTH = 'Basic realm="oauth"';
 
 /**
+ * Decodes an `application/x-www-form-urlencoded`-encoded string per RFC 6749 §2.3.1.
+ * `+` is a synonym for space in x-www-form-urlencoded encoding (distinct from %20).
+ * `decodeURIComponent` alone does NOT handle `+`, so we normalise it first.
+ */
+function formUrlDecode(s: string): string {
+	return decodeURIComponent(s.replace(/\+/g, " "));
+}
+
+/**
  * Creates RFC 6749 §2.3.1 client-authentication middleware for the /oauth/introspect
  * endpoint (and any other route requiring authenticated OAuth client access).
  *
@@ -71,8 +80,8 @@ export function createClientAuthMiddleware(clientRepository: ClientRepository): 
 				const decoded = Buffer.from(authHeader.slice(6), "base64").toString("utf8");
 				const idx = decoded.indexOf(":");
 				if (idx > 0) {
-					clientId = decodeURIComponent(decoded.slice(0, idx));
-					clientSecret = decodeURIComponent(decoded.slice(idx + 1));
+					clientId = formUrlDecode(decoded.slice(0, idx));
+					clientSecret = formUrlDecode(decoded.slice(idx + 1));
 				} else {
 					// No colon found — malformed credential pair
 					malformedBasic = true;

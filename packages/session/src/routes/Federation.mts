@@ -169,19 +169,33 @@ export const createRouter = (
 			// to guarantee reuse prevention even if exchangeCode throws.
 			const { codeVerifier, redirectTo } = fed;
 			delete session.federation;
-			// Best-effort persist: if save fails here, continue anyway — reuse
-			// prevention has already been applied in-memory for this request.
-			await new Promise<void>((resolve) => {
-				req.session.save((err) => {
-					if (err) {
-						console.warn(
-							{ err, provider: provider.name },
-							"reuse-prevention session save failed; continuing with in-memory state",
-						);
-					}
-					resolve();
-				});
+			// Fail-closed: if the reuse-prevention save fails, the old federation state
+			// could still be replayed from the store on a subsequent read.  Return 500
+			// rather than continuing — an attacker who can force a save failure and then
+			// replay the code would bypass CSRF protection entirely.
+			const reusePrevSaveErr = await new Promise<unknown>((resolve) => {
+				req.session.save((err) => resolve(err ?? null));
 			});
+			if (reusePrevSaveErr) {
+				console.warn(
+					{ err: reusePrevSaveErr, provider: provider.name },
+					"reuse-prevention session save failed",
+				);
+				return res.status(500).json({
+					error: "server_error",
+					error_description: "Session store unavailable",
+				});
+			}
+
+			// Fix 4: validate code query parameter early — missing/empty code must be a 400
+			// rather than propagating an empty string downstream to the IdP (→ 502).
+			const codeParam = req.query.code;
+			if (typeof codeParam !== "string" || codeParam.length === 0) {
+				return res.status(400).json({
+					error: "invalid_request",
+					error_description: "Missing authorization code",
+				});
+			}
 
 			// Exchange the authorization code for a FederationProfile
 			// providerCallbackUrls is the authoritative map; same entry verified above in the start handler.
@@ -196,7 +210,7 @@ export const createRouter = (
 			let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
 			try {
 				profile = await provider.exchangeCode({
-					code: String(req.query.code ?? ""),
+					code: codeParam,
 					codeVerifier,
 					redirectUri: callbackUrl,
 				});
@@ -215,7 +229,16 @@ export const createRouter = (
 				});
 			}
 
-			const user = await userRepository.authenticateByToken(`${provider.name}:${profile.sub}`);
+			let user: Awaited<ReturnType<typeof userRepository.authenticateByToken>>;
+			try {
+				user = await userRepository.authenticateByToken(`${provider.name}:${profile.sub}`);
+			} catch (err) {
+				console.warn({ err, provider: provider.name }, "user repository lookup failed");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "User directory temporarily unavailable",
+				});
+			}
 			if (!user) {
 				return res.status(401).json({
 					error: "unknown_user",
@@ -242,8 +265,37 @@ export const createRouter = (
 				claims,
 			});
 
-			// Post-create: attach federation tokens + save session.sid.
+			// Session fixation mitigation: regenerate the session ID before writing auth state.
+			// This must happen AFTER userSessionStore.create (so we have a sid to restore) but
+			// BEFORE attaching federation tokens or writing session fields.
+			//
+			// Rollback responsibility:
+			//  - If regenerate fails: only userSessionStore.create needs to be rolled back
+			//    (no tokens have been attached yet).
+			//  - If post-regenerate work fails: rollback in REVERSE order (token → userSession).
+			const regenerateErr = await new Promise<Error | null>((resolve) => {
+				req.session.regenerate((err: Error | null) => resolve(err));
+			});
+			if (regenerateErr) {
+				// Rollback the orphaned UserSession record.
+				try {
+					await userSessionStore.delete(sid);
+				} catch {
+					// best-effort — ignore
+				}
+				console.error(
+					{ err: regenerateErr, sid, provider: provider.name },
+					"session regeneration failed after userSessionStore.create",
+				);
+				return res.status(500).json({
+					error: "session_create_failed",
+					error_description: "Internal error: session could not be regenerated",
+				});
+			}
+
+			// Post-regenerate: attach federation tokens + restore sid on the new session.
 			// Any failure here rolls back in REVERSE order (F-6 pattern).
+			// Note: `session` is a stale reference after regenerate — use req.session exclusively.
 			let attachedToFederation = false;
 			try {
 				if (profile.accessToken) {
@@ -256,12 +308,12 @@ export const createRouter = (
 					attachedToFederation = true;
 				}
 
-				// Set session fields
-				session.sid = sid;
-				session.isAuthenticated = true;
-				session.user = user as Record<string, unknown>;
+				// Restore auth state on the new session (req.session is now the fresh one).
+				req.session.sid = sid;
+				req.session.isAuthenticated = true;
+				req.session.user = user as Record<string, unknown>;
 
-				// Persist session
+				// Persist the new session with auth state.
 				await new Promise<void>((resolve, reject) => {
 					req.session.save((err) => (err ? reject(err as Error) : resolve()));
 				});
