@@ -48,7 +48,7 @@ import logger from "#/logger.mjs";
 // Layering: {ENV}.conf overrides application.conf.
 // ENV = CONFIG_ENV || NODE_ENV || "development". A missing {ENV}.conf is a
 // boot-time error (fail-fast on typos or unconfigured environments).
-const env = process.env.CONFIG_ENV ?? process.env.NODE_ENV ?? "development";
+const env = process.env.CONFIG_ENV || process.env.NODE_ENV || "development";
 const configDir = new URL("../config/", import.meta.url);
 const applicationConfPath = fileURLToPath(new URL("application.conf", configDir));
 const envConfPath = fileURLToPath(new URL(`${env}.conf`, configDir));
