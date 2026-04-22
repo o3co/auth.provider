@@ -61,12 +61,12 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 			// are absent and the /oauth/logout route is therefore not registered.
 			...(opts.logoutSupported !== false
 				? {
-					end_session_endpoint: `${iss}/oauth/logout`,
-					backchannel_logout_supported: true,
-					backchannel_logout_session_supported: true,
-					frontchannel_logout_supported: true,
-					frontchannel_logout_session_supported: true,
-				}
+						end_session_endpoint: `${iss}/oauth/logout`,
+						backchannel_logout_supported: true,
+						backchannel_logout_session_supported: true,
+						frontchannel_logout_supported: true,
+						frontchannel_logout_session_supported: true,
+					}
 				: {}),
 			response_types_supported: ["code"],
 			subject_types_supported: ["public"],

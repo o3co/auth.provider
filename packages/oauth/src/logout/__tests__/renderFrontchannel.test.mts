@@ -5,8 +5,16 @@ describe("renderFrontchannelLogoutHtml", () => {
 	it("emits one iframe per RP with frontchannelLogoutUri", () => {
 		const html = renderFrontchannelLogoutHtml({
 			rps: [
-				{ clientId: "rp1", frontchannelLogoutUri: "https://rp1.example/fc", frontchannelLogoutSessionRequired: true },
-				{ clientId: "rp2", frontchannelLogoutUri: "https://rp2.example/fc", frontchannelLogoutSessionRequired: true },
+				{
+					clientId: "rp1",
+					frontchannelLogoutUri: "https://rp1.example/fc",
+					frontchannelLogoutSessionRequired: true,
+				},
+				{
+					clientId: "rp2",
+					frontchannelLogoutUri: "https://rp2.example/fc",
+					frontchannelLogoutSessionRequired: true,
+				},
 				{ clientId: "rp3" }, // no frontchannelLogoutUri — skipped
 			],
 			issuer: "https://auth.example",
@@ -179,10 +187,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 		// exactly one iframe in the output
 		expect([...html.matchAll(/<iframe/g)].length).toBe(1);
 		// warning was logged for the bad RP
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.stringContaining("bad"),
-			expect.anything(),
-		);
+		expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("bad"), expect.anything());
 	});
 
 	it("postLogoutRedirectUri is safe against </script> injection (CSP-safe pattern)", () => {
@@ -190,7 +195,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 			rps: [],
 			issuer: "iss",
 			sid: "sid",
-			postLogoutRedirectUri: 'https://evil.example/</script><script>alert(1)</script>',
+			postLogoutRedirectUri: "https://evil.example/</script><script>alert(1)</script>",
 		});
 		// The literal </script> must not appear in the output — it would prematurely
 		// close the inline <script> block wrapping the redirect.

@@ -15,7 +15,10 @@
  */
 import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
-import { ClientEntrySchema, InMemoryClientRepository } from "#/repositories/InMemoryClientRepository.mjs";
+import {
+	ClientEntrySchema,
+	InMemoryClientRepository,
+} from "#/repositories/InMemoryClientRepository.mjs";
 
 describe("InMemoryClientRepository", () => {
 	describe("findById", () => {
@@ -160,7 +163,10 @@ describe("InMemoryClientRepository", () => {
 
 		it.each([
 			["postLogoutRedirectUris", { postLogoutRedirectUris: ["javascript:alert(1)"] }],
-			["postLogoutRedirectUris", { postLogoutRedirectUris: ["data:text/html,<script>alert(1)</script>"] }],
+			[
+				"postLogoutRedirectUris",
+				{ postLogoutRedirectUris: ["data:text/html,<script>alert(1)</script>"] },
+			],
 			["postLogoutRedirectUris", { postLogoutRedirectUris: ["file:///etc/passwd"] }],
 			["backchannelLogoutUri", { backchannelLogoutUri: "javascript:alert(1)" }],
 			["frontchannelLogoutUri", { frontchannelLogoutUri: "javascript:alert(1)" }],

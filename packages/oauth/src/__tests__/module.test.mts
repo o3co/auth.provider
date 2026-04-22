@@ -238,7 +238,11 @@ describe("oauthModule", () => {
 		// Step 1: oauth module inits (federationProviders still undefined on ctx)
 		const oauth = oauthModule({
 			clientRepository: { findById: vi.fn(), authenticate: vi.fn() } as ClientRepository,
-			codeRepository: { createCode: vi.fn(), getCode: vi.fn(), deleteCode: vi.fn() } as unknown as CodeRepository,
+			codeRepository: {
+				createCode: vi.fn(),
+				getCode: vi.fn(),
+				deleteCode: vi.fn(),
+			} as unknown as CodeRepository,
 			express,
 		});
 		await oauth.init(ctx);

@@ -1,15 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
 import type {
 	FederationTokenStoreBase,
 	RefreshTokenStoreBase,
 	UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
+import { describe, expect, it, vi } from "vitest";
 import { cascadeLogout } from "../cascadeLogout.mjs";
 
 const okRefresh = () =>
 	({ revokeFamily: vi.fn().mockResolvedValue(undefined) }) as unknown as RefreshTokenStoreBase;
 const okFederation = () =>
-	({ deleteBySession: vi.fn().mockResolvedValue(undefined) }) as unknown as FederationTokenStoreBase;
+	({
+		deleteBySession: vi.fn().mockResolvedValue(undefined),
+	}) as unknown as FederationTokenStoreBase;
 const okSession = () =>
 	({ delete: vi.fn().mockResolvedValue(undefined) }) as unknown as UserSessionStoreBase;
 
@@ -26,10 +28,20 @@ describe("cascadeLogout (spec Section 14.2)", () => {
 			userSessionStore: uss,
 		});
 		expect(result.outcome).toBe("done");
-		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenCalledTimes(2);
-		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenNthCalledWith(1, "fam-1");
-		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenNthCalledWith(2, "fam-2");
-		expect((fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession).toHaveBeenCalledWith("sid-1");
+		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenCalledTimes(
+			2,
+		);
+		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenNthCalledWith(
+			1,
+			"fam-1",
+		);
+		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenNthCalledWith(
+			2,
+			"fam-2",
+		);
+		expect(
+			(fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession,
+		).toHaveBeenCalledWith("sid-1");
 		expect((uss as unknown as { delete: typeof vi.fn }).delete).toHaveBeenCalledWith("sid-1");
 	});
 
@@ -49,7 +61,9 @@ describe("cascadeLogout (spec Section 14.2)", () => {
 			expect(result.step).toBe(1);
 			expect(result.error).toBeInstanceOf(Error);
 		}
-		expect((fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession).not.toHaveBeenCalled();
+		expect(
+			(fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession,
+		).not.toHaveBeenCalled();
 		expect((uss as unknown as { delete: typeof vi.fn }).delete).not.toHaveBeenCalled();
 	});
 
@@ -131,7 +145,9 @@ describe("cascadeLogout (spec Section 14.2)", () => {
 			userSessionStore: uss,
 		});
 		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).not.toHaveBeenCalled();
-		expect((fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession).toHaveBeenCalled();
+		expect(
+			(fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession,
+		).toHaveBeenCalled();
 		expect((uss as unknown as { delete: typeof vi.fn }).delete).toHaveBeenCalled();
 	});
 });

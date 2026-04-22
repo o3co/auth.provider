@@ -116,10 +116,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		express.urlencoded({ extended: false }),
 		async (req: Request, res: Response) => {
 			const { name } = req.params as { name: string };
-			const {
-				post_logout_redirect_uri: postLogoutRedirectUri,
-				state,
-			} = req.body as Record<string, string | undefined>;
+			const { post_logout_redirect_uri: postLogoutRedirectUri, state } = req.body as Record<
+				string,
+				string | undefined
+			>;
 
 			const logger = opts.logger ?? console;
 
@@ -129,7 +129,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// uses "Bearer". We do a case-insensitive prefix check per §2.1 common usage.
 			if (!auth || !/^Bearer /i.test(auth)) {
 				res.setHeader("Cache-Control", "no-store");
-				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="missing Bearer token"');
+				res.setHeader(
+					"WWW-Authenticate",
+					'Bearer error="invalid_token", error_description="missing Bearer token"',
+				);
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "missing Bearer token",
@@ -158,7 +161,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					error instanceof Error ? error.message : String(error),
 				);
 				res.setHeader("Cache-Control", "no-store");
-				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="invalid token"');
+				res.setHeader(
+					"WWW-Authenticate",
+					'Bearer error="invalid_token", error_description="invalid token"',
+				);
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "invalid token",
@@ -196,7 +202,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						details: { sid: sid ?? undefined },
 					});
 					res.setHeader("Cache-Control", "no-store");
-					res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="family revoked"');
+					res.setHeader(
+						"WWW-Authenticate",
+						'Bearer error="invalid_token", error_description="family revoked"',
+					);
 					return res.status(401).json({
 						error: "invalid_token",
 						error_description: "family revoked",
@@ -207,7 +216,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Step 5: sid is required to look up the session.
 			if (!sid) {
 				res.setHeader("Cache-Control", "no-store");
-				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="missing sid claim"');
+				res.setHeader(
+					"WWW-Authenticate",
+					'Bearer error="invalid_token", error_description="missing sid claim"',
+				);
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "missing sid claim",
@@ -219,10 +231,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				session = await opts.userSessionStore.get(sid);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: userSessionStore.get failed:`,
-					error,
-				);
+				logger.warn(`/oauth/federation/${name}/logout: userSessionStore.get failed:`, error);
 				res.setHeader("Cache-Control", "no-store");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -231,7 +240,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			}
 			if (!session) {
 				res.setHeader("Cache-Control", "no-store");
-				res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token", error_description="session not found"');
+				res.setHeader(
+					"WWW-Authenticate",
+					'Bearer error="invalid_token", error_description="session not found"',
+				);
 				return res.status(401).json({
 					error: "invalid_token",
 					error_description: "session not found",
@@ -252,10 +264,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				fedTokens = await opts.federationTokenStore.get(sid, name);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: federationTokenStore.get failed:`,
-					error,
-				);
+				logger.warn(`/oauth/federation/${name}/logout: federationTokenStore.get failed:`, error);
 				res.setHeader("Cache-Control", "no-store");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -267,10 +276,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				await opts.federationTokenStore.delete(sid, name);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: federationTokenStore.delete failed:`,
-					error,
-				);
+				logger.warn(`/oauth/federation/${name}/logout: federationTokenStore.delete failed:`, error);
 				res.setHeader("Cache-Control", "no-store");
 				return res.status(503).json({
 					error: "temporarily_unavailable",

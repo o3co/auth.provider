@@ -132,9 +132,7 @@ export const oauthModule = (params: {
 			// the logout router. When any required store is absent, the logout route
 			// is not registered and discovery must not advertise the 5 logout fields.
 			const logoutSupported =
-				!!context.userSessionStore &&
-				!!context.federationTokenStore &&
-				!!context.refreshTokenStore;
+				!!context.userSessionStore && !!context.federationTokenStore && !!context.refreshTokenStore;
 			context.router.use(
 				oidcConfig.createRouter(express, {
 					issuer,

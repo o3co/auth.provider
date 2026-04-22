@@ -730,10 +730,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 	describe("missing Authorization header", () => {
 		it("returns 401 invalid_token", async () => {
 			const app = buildFedLogoutApp();
-			const res = await request(app)
-				.post("/oauth/federation/google/logout")
-				.type("form")
-				.send({});
+			const res = await request(app).post("/oauth/federation/google/logout").type("form").send({});
 
 			expect(res.status).toBe(401);
 			expect(res.body.error).toBe("invalid_token");
@@ -863,10 +860,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 	describe("WWW-Authenticate header on 401 paths", () => {
 		it("missing Authorization header returns WWW-Authenticate: Bearer error=invalid_token", async () => {
 			const app = buildFedLogoutApp();
-			const res = await request(app)
-				.post("/oauth/federation/google/logout")
-				.type("form")
-				.send({});
+			const res = await request(app).post("/oauth/federation/google/logout").type("form").send({});
 
 			expect(res.status).toBe(401);
 			expect(res.headers["www-authenticate"]).toMatch(/Bearer/);
@@ -940,7 +934,10 @@ describe("POST /oauth/federation/:name/logout", () => {
 describe("audit events", () => {
 	describe("federation.logout.idp_unreachable", () => {
 		it("emits when provider.endSession throws (orphan IdP session)", async () => {
-			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const auditSink: AuditSinkBase = {
+				kind: "mock",
+				record: vi.fn().mockResolvedValue(undefined),
+			};
 			const throwingProvider: FederationProviderHandle & { endSession: () => Promise<never> } = {
 				name: "google",
 				endSession: vi.fn().mockRejectedValue(new Error("IdP down")),
@@ -966,7 +963,10 @@ describe("audit events", () => {
 
 	describe("federation.logout.success", () => {
 		it("emits with redirected_to_idp: true when endSession succeeds (303 path)", async () => {
-			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const auditSink: AuditSinkBase = {
+				kind: "mock",
+				record: vi.fn().mockResolvedValue(undefined),
+			};
 			const endSessionUrl = new URL("https://accounts.google.com/logout");
 			const mockProvider: FederationProviderHandle & {
 				endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
@@ -993,7 +993,10 @@ describe("audit events", () => {
 		});
 
 		it("emits with redirected_to_idp: false when provider has no endSession (200 path)", async () => {
-			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const auditSink: AuditSinkBase = {
+				kind: "mock",
+				record: vi.fn().mockResolvedValue(undefined),
+			};
 			const bareProvider: FederationProviderHandle = { name: "github" };
 			const sessionWithGithub: UserSession = { ...baseSession, federations: ["github"] };
 			const app = buildApp({
@@ -1018,7 +1021,10 @@ describe("audit events", () => {
 
 	describe("logout.success", () => {
 		it("emits on POST /oauth/logout happy path", async () => {
-			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const auditSink: AuditSinkBase = {
+				kind: "mock",
+				record: vi.fn().mockResolvedValue(undefined),
+			};
 			const app = buildApp({ auditSink });
 			const token = await mintIdToken();
 
@@ -1036,7 +1042,10 @@ describe("audit events", () => {
 
 	describe("logout.cascade_failed", () => {
 		it("emits on 503 cascade failure", async () => {
-			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const auditSink: AuditSinkBase = {
+				kind: "mock",
+				record: vi.fn().mockResolvedValue(undefined),
+			};
 			const refreshStore = makeRefreshStore({
 				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
 			});

@@ -125,7 +125,12 @@ export type {
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
 // Module system
-export type { FederationProviderHandle, Module, ModuleContext, PathResolver } from "./modules/index.mjs";
+export type {
+	FederationProviderHandle,
+	Module,
+	ModuleContext,
+	PathResolver,
+} from "./modules/index.mjs";
 export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
 // Grant policy
 export type {
