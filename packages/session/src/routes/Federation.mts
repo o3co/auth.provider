@@ -113,8 +113,7 @@ export const createRouter = (
 			const codeVerifier = generateCodeVerifier();
 
 			// Persist ephemeral federation state in the session
-			const session = req.session as unknown as Record<string, unknown>;
-			session.federation = { name: provider.name, state, codeVerifier, redirectTo };
+			req.session.federation = { name: provider.name, state, codeVerifier, redirectTo };
 
 			// providerCallbackUrls is the authoritative map of per-provider callback URLs,
 			// populated by module wiring from config.federations.<name>.callbackURL.
@@ -144,10 +143,7 @@ export const createRouter = (
 				return res.status(404).json({ message: "NotFound" });
 			}
 
-			const session = req.session as unknown as Record<string, unknown>;
-			const fed = session.federation as
-				| { name: string; state: string; codeVerifier: string; redirectTo?: string }
-				| undefined;
+			const fed = req.session.federation;
 
 			// Check session.federation present and name matches
 			if (!fed || fed.name !== String(req.params.name)) {
@@ -168,7 +164,7 @@ export const createRouter = (
 			// Copy ephemeral state to locals, then delete and persist BEFORE any async work
 			// to guarantee reuse prevention even if exchangeCode throws.
 			const { codeVerifier, redirectTo } = fed;
-			delete session.federation;
+			delete req.session.federation;
 			// Fail-closed: if the reuse-prevention save fails, the old federation state
 			// could still be replayed from the store on a subsequent read.  Return 500
 			// rather than continuing — an attacker who can force a save failure and then
@@ -307,11 +303,14 @@ export const createRouter = (
 			let attachedToFederation = false;
 			try {
 				if (profile.accessToken) {
+					// `profile.expiresAt` is `Date | null` (required on FederationProfile).
+					// `null` propagates to the store and signals "do not refresh; reuse" —
+					// the route layer never invents a fallback expiry.
 					await federationTokenStore.attach(sid, provider.name, {
 						accessToken: profile.accessToken,
 						refreshToken: profile.refreshToken,
 						idToken: profile.idToken,
-						expiresAt: profile.expiresAt ?? new Date(Date.now() + 3_600_000),
+						expiresAt: profile.expiresAt,
 					});
 					attachedToFederation = true;
 				}

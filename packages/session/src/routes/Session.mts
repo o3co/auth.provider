@@ -179,9 +179,10 @@ export const createRouter = (
 						// Fail-closed: store unavailable — return controlled 503 JSON rather
 						// than an unhandled rejection hitting Express's default HTML error
 						// handler. Matches the /token grant fail-closed pattern (CP-16/CP-17).
+						// RFC 6749 §5.2 error shape for consistency with other /login failures.
 						return res.status(503).json({
-							message: "Session store temporarily unavailable",
 							error: "temporarily_unavailable",
+							error_description: "Session store temporarily unavailable",
 						});
 					}
 				}

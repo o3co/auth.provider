@@ -178,7 +178,10 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				accessToken: tokens.access_token,
 				// GitHub OAuth Apps do not issue refresh tokens.
 				refreshToken: undefined,
-				expiresAt: expiresIn !== undefined ? new Date(Date.now() + expiresIn * 1000) : undefined,
+				// GitHub OAuth Apps classic tokens have no finite expiry; the new-style
+				// user-to-server tokens (`expires_in`-bearing) do. `null` signals "reuse,
+				// do not attempt refresh" — see FederationProfile.expiresAt contract.
+				expiresAt: expiresIn !== undefined ? new Date(Date.now() + expiresIn * 1000) : null,
 			};
 		},
 

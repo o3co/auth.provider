@@ -118,6 +118,8 @@ describe("createGithubProvider on openid-client", () => {
 		expect(profile.accessToken).toBe("gh-at");
 		// GitHub OAuth Apps do not issue refresh tokens
 		expect(profile.refreshToken).toBeUndefined();
+		// expires_in: 28800 → expiresAt is a Date ~8h in the future
+		expect(profile.expiresAt).toBeInstanceOf(Date);
 		const [, , checks] = mockAuthorizationCodeGrant.mock.calls[0] as [
 			unknown,
 			unknown,
@@ -142,6 +144,23 @@ describe("createGithubProvider on openid-client", () => {
 		});
 		expect(profile.sub).toBe("99");
 		expect(typeof profile.sub).toBe("string");
+	});
+
+	it("exchangeCode returns expiresAt=null when GitHub omits expires_in (OAuth Apps classic)", async () => {
+		// GitHub OAuth Apps classic tokens have no finite expiry; the token response
+		// omits expires_in entirely. Adapter MUST return `null` (not `undefined`) so
+		// the FederationTokenStore envelope can distinguish "no expiry" from a missing
+		// field, and /oauth/federation/:name/token refuses to refresh.
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-classic" });
+		mockFetchUserInfo.mockResolvedValueOnce({ id: 7, login: "carol" });
+		mockFetchProtectedResource.mockResolvedValueOnce({ json: async () => [] });
+		const p = createGithubProvider(baseConfig);
+		const profile = await p.exchangeCode({
+			code: "c",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.expiresAt).toBeNull();
 	});
 
 	it("exchangeCode throws a descriptive error when userinfo has neither id nor sub", async () => {

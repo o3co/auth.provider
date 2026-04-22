@@ -569,10 +569,51 @@ describe("Federation routes", () => {
 			expect(attachTokens.accessToken).toBe("at");
 			expect(attachTokens.refreshToken).toBe("rt");
 			expect(attachTokens.idToken).toBe("it");
+			// profile.expiresAt is a Date → attached as-is, no 1h fallback re-invented
+			expect(attachTokens.expiresAt).toBeInstanceOf(Date);
 
 			// req.session.sid set on the session
 			const inspect = await agent.get("/_inspect");
 			expect(JSON.parse(inspect.text).sid).toBe(createArg.sid);
+		});
+
+		// Regression: route must propagate profile.expiresAt === null verbatim
+		// (no legacy "now + 1h" fallback). null signals "no finite expiry; don't
+		// refresh" — a fallback would trigger spurious refresh attempts for
+		// GitHub OAuth Apps classic tokens.
+		it("expiresAt=null on profile propagates to FederationTokenStore.attach as null", async () => {
+			const provider = makeFakeProvider({
+				exchangeCode: vi.fn(async () => ({
+					issuer: "https://idp.example.com",
+					sub: "external-42",
+					accessToken: "at",
+					expiresAt: null as Date | null,
+				})),
+			});
+			const providers = new Map([["test", provider]]);
+			const repo = makeUserRepository();
+			const uss = makeUserSessionStore();
+			const fts = makeFederationTokenStore();
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userRepository: repo,
+				userSessionStore: uss,
+				federationTokenStore: fts,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(302);
+
+			expect(fts.attach).toHaveBeenCalledOnce();
+			const [, , attachTokens] = (fts.attach as ReturnType<typeof vi.fn>).mock.calls[0] as [
+				string,
+				string,
+				Record<string, unknown>,
+			];
+			expect(attachTokens.expiresAt).toBeNull();
 		});
 
 		// Test 11 — rollback: FederationTokenStore.attach throws → UserSessionStore.delete; no token.delete

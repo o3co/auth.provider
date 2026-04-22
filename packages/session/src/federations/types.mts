@@ -42,8 +42,16 @@ export interface FederationProfile {
 	readonly refreshToken?: string;
 	/** OIDC id_token JWT, if issued. */
 	readonly idToken?: string;
-	/** Absolute expiry time of `accessToken`, derived from `expires_in` by the adapter. */
-	readonly expiresAt?: Date;
+	/**
+	 * Absolute expiry time of `accessToken`, derived from `expires_in` by the adapter.
+	 *
+	 * `null` means the provider did not issue a finite expiry (e.g. GitHub OAuth Apps
+	 * classic tokens). Consumers MUST treat `null` as "do not attempt refresh; reuse
+	 * until the provider explicitly invalidates". Required (no `undefined`) so adapters
+	 * are forced to make an explicit decision per provider rather than the route layer
+	 * inventing a fallback expiry.
+	 */
+	readonly expiresAt: Date | null;
 	/** Provider-specific extension claims (e.g. Google `hd`, Microsoft `tid`). */
 	readonly [key: string]: unknown;
 }

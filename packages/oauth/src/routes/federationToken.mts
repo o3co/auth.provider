@@ -44,7 +44,14 @@ interface SupportsRefreshShape {
 		accessToken: string;
 		refreshToken?: string;
 		idToken?: string;
-		expiresAt: Date;
+		/**
+		 * Absolute expiry of refreshed `accessToken`. `null` means the upstream
+		 * provider issued a non-expiring replacement (rare, but legal under RFC 6749
+		 * §5.1 where `expires_in` is optional). Mirrors session's
+		 * `FederationProfile.expiresAt` contract so adapters stay consistent across
+		 * issue and refresh paths.
+		 */
+		expiresAt: Date | null;
 	}>;
 }
 
@@ -301,8 +308,14 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		}
 
 		// Step 10: If not expired (within buffer), return existing token.
-		if (tokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
-			const expiresIn = Math.max(0, Math.floor((tokens.expiresAt.getTime() - Date.now()) / 1000));
+		// `expiresAt === null` means the upstream provider issues no finite expiry
+		// (e.g. GitHub OAuth Apps classic tokens). Treat as "never expired; never
+		// refresh" — reuse the stored accessToken indefinitely, and omit the
+		// `expires_in` field from the response (RFC 6749 §5.1 makes it optional).
+		if (
+			tokens.expiresAt === null ||
+			tokens.expiresAt.getTime() > Date.now() + refreshBufferMs
+		) {
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "federation.token.success",
@@ -311,10 +324,14 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				userAgent: req.get("user-agent"),
 				details: { federation: name, refreshed: false },
 			});
+			const expiresIn =
+				tokens.expiresAt === null
+					? undefined
+					: Math.max(0, Math.floor((tokens.expiresAt.getTime() - Date.now()) / 1000));
 			return res.status(200).json({
 				access_token: tokens.accessToken,
 				token_type: "Bearer",
-				expires_in: expiresIn,
+				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
 				...(tokens.scope ? { scope: tokens.scope } : {}),
 			});
 		}
@@ -388,12 +405,21 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						error_description: "federation token store unavailable",
 					});
 				}
-				if (freshTokens && freshTokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
-					// Another caller already refreshed: return the fresh token without calling IdP.
-					const expiresIn = Math.max(
-						0,
-						Math.floor((freshTokens.expiresAt.getTime() - Date.now()) / 1000),
-					);
+				if (
+					freshTokens &&
+					(freshTokens.expiresAt === null ||
+						freshTokens.expiresAt.getTime() > Date.now() + refreshBufferMs)
+				) {
+					// Another caller already refreshed, OR the provider issues no finite
+					// expiry (expiresAt === null → never refresh): return the stored token
+					// without calling IdP.
+					const expiresIn =
+						freshTokens.expiresAt === null
+							? undefined
+							: Math.max(
+									0,
+									Math.floor((freshTokens.expiresAt.getTime() - Date.now()) / 1000),
+								);
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
 						type: "federation.token.success",
@@ -405,7 +431,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					return res.status(200).json({
 						access_token: freshTokens.accessToken,
 						token_type: "Bearer",
-						expires_in: expiresIn,
+						...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
 						...(freshTokens.scope ? { scope: freshTokens.scope } : {}),
 					});
 				}
@@ -516,10 +542,13 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			}
 
 			// 11h: Return refreshed token.
-			const expiresIn = Math.max(
-				0,
-				Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000),
-			);
+			// Mirror Step 10's contract: when `expiresAt === null` the provider refuses
+			// to commit to a finite lifetime; omit `expires_in` from the RFC 6749 §5.1
+			// response (the field is optional).
+			const expiresIn =
+				refreshed.expiresAt === null
+					? undefined
+					: Math.max(0, Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000));
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "federation.token.success",
@@ -531,7 +560,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			return res.status(200).json({
 				access_token: refreshed.accessToken,
 				token_type: "Bearer",
-				expires_in: expiresIn,
+				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
 				...(currentTokens.scope ? { scope: currentTokens.scope } : {}),
 			});
 		} finally {

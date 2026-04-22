@@ -236,7 +236,10 @@ interface FederationProfile {
   readonly accessToken?: string;
   readonly refreshToken?: string;
   readonly idToken?: string;
-  readonly expiresAt?: Date;        // absolute expiry of accessToken
+  // absolute expiry of accessToken, or null when the provider issues no finite expiry
+  // (e.g. GitHub OAuth Apps classic tokens). Required; consumers MUST treat null as
+  // "do not refresh; reuse".
+  readonly expiresAt: Date | null;
   readonly [key: string]: unknown;  // provider-specific extension claims
 }
 
@@ -472,7 +475,7 @@ v0.4.0 removes passport as a direct dependency from this package.
 1. **`FederationProviderBase` renamed to `FederationProvider`.** If you implement custom providers, rename the interface in your imports.
 2. **`setupPassportStrategy(passport, ctx)` removed.** Implement `buildAuthorizationUrl({ redirectUri, state, codeVerifier }): URL` and `exchangeCode({ code, codeVerifier, redirectUri }): Promise<FederationProfile>` instead. The new interface is vendor-agnostic — no passport types leak into the signature.
 3. **`FederationProfile.raw` removed.** OIDC-standard claims are first-class fields (`sub`, `email`, `emailVerified`, `name`, `picture`, `accessToken`, `refreshToken`, `idToken`, `expiresAt`). Provider-specific claims (Google `hd`, Microsoft `tid`) are carried by the index signature `[key: string]: unknown`.
-4. **`FederationProfile.id` renamed to `sub`, `expiresIn: number` replaced with `expiresAt: Date`.**
+4. **`FederationProfile.id` renamed to `sub`, `expiresIn: number` replaced with `expiresAt: Date | null` (required).** Adapters MUST make an explicit decision: return a `Date` when the provider issues a finite expiry, `null` when it does not (e.g. GitHub OAuth Apps classic tokens). The route layer no longer invents a fallback expiry — `null` signals "do not refresh; reuse until the provider invalidates". `FederationTokens.expiresAt` on `FederationTokenStore` follows the same contract.
 5. **`createPassport()` and `SetupPassportContext` removed from the public API.** State (CSRF) and PKCE are managed by the route layer internally; providers are pure functions.
 6. **`UserSessionStore` and `FederationTokenStore` are now required** (previously optional with legacy fallback). The `sessionModule` throws at `init()` time if either is absent from `ModuleContext`.
 7. **`/login` error responses** follow RFC 6749 §5.2 shape: `{ error, error_description }`. If your client parses the old `{ message: "..." }` format, update accordingly.

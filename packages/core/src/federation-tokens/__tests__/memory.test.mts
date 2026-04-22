@@ -74,6 +74,12 @@ describe("in-memory FederationTokenStore", () => {
 		await expect(store.delete("nope", "google")).resolves.toBeUndefined();
 	});
 
+	it("expiresAt=null round-trips as null (GitHub OAuth Apps classic)", async () => {
+		await store.attach("sid-gh", "github", { ...tokens, expiresAt: null });
+		const round = await store.get("sid-gh", "github");
+		expect(round?.expiresAt).toBeNull();
+	});
+
 	it("implements SupportsLock capability", async () => {
 		const s = createInMemoryFederationTokenStore();
 		expect(supportsLock(s)).toBe(true);

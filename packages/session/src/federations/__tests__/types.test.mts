@@ -102,10 +102,31 @@ describe("FederationProfile shape", () => {
 		const profile: FederationProfile = {
 			issuer: "https://example.com",
 			sub: "u1",
+			expiresAt: null,
 			hd: "example.com", // Google-specific hosted-domain claim
 			tid: "tenant-id", // Microsoft-specific tenant id
 		};
 		expect(profile.hd).toBe("example.com");
 		expect(profile.tid).toBe("tenant-id");
+	});
+
+	it("requires expiresAt (Date | null) — null signals no finite expiry", () => {
+		// null path: GitHub OAuth Apps classic tokens have no finite expiry.
+		const classic: FederationProfile = {
+			issuer: "https://github.com",
+			sub: "99",
+			accessToken: "at",
+			expiresAt: null,
+		};
+		expect(classic.expiresAt).toBeNull();
+
+		// Date path: OIDC providers always return expires_in.
+		const oidc: FederationProfile = {
+			issuer: "https://accounts.google.com",
+			sub: "gu1",
+			accessToken: "at",
+			expiresAt: new Date(0),
+		};
+		expect(oidc.expiresAt).toBeInstanceOf(Date);
 	});
 });

@@ -237,7 +237,9 @@ interface FederationProfile {
   readonly accessToken?: string;
   readonly refreshToken?: string;
   readonly idToken?: string;
-  readonly expiresAt?: Date;        // accessToken の絶対有効期限
+  // accessToken の絶対有効期限。プロバイダーが有限の expires_in を返さない場合（例: GitHub OAuth Apps の classic token）は null。
+  // 必須フィールド。consumer は null を「refresh せず reuse」として扱わなければならない。
+  readonly expiresAt: Date | null;
   readonly [key: string]: unknown;  // プロバイダー固有の拡張クレーム
 }
 
@@ -482,7 +484,7 @@ v0.4.0 ではこのパッケージから passport を直接依存として削除
 1. **`FederationProviderBase` → `FederationProvider` へリネーム。** カスタムプロバイダーを実装している場合は import のインターフェース名を変更すること。
 2. **`setupPassportStrategy(passport, ctx)` を削除。** 代わりに `buildAuthorizationUrl({ redirectUri, state, codeVerifier }): URL` と `exchangeCode({ code, codeVerifier, redirectUri }): Promise<FederationProfile>` を実装する。新しいインターフェースはベンダー非依存であり、シグネチャに passport の型が漏出しない。
 3. **`FederationProfile.raw` を削除。** OIDC 標準クレームがファーストクラスフィールドになった（`sub`、`email`、`emailVerified`、`name`、`picture`、`accessToken`、`refreshToken`、`idToken`、`expiresAt`）。プロバイダー固有クレーム（Google の `hd`、Microsoft の `tid` など）はインデックスシグネチャ `[key: string]: unknown` で伝達される。
-4. **`FederationProfile.id` → `sub` へリネーム、`expiresIn: number` → `expiresAt: Date` へ変更。**
+4. **`FederationProfile.id` → `sub` へリネーム、`expiresIn: number` → `expiresAt: Date | null`（必須）に変更。** adapter は明示的に判断する必要がある — プロバイダーが有限の expiry を発行する場合は `Date`、発行しない場合（GitHub OAuth Apps の classic token 等）は `null` を返す。route 層は fallback expiry を勝手に発明しなくなった — `null` は「refresh せず、プロバイダーが invalidate するまで reuse」を意味する。`FederationTokenStore` 側の `FederationTokens.expiresAt` も同じ契約に従う。
 5. **`createPassport()` と `SetupPassportContext` をパブリック API から削除。** 状態（CSRF）と PKCE はルート層が内部で管理する。プロバイダーは純粋関数になった。
 6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。いずれかが `ModuleContext` に存在しない場合、`sessionModule` は `init()` 時に例外をスローする。
 7. **`/login` エラーレスポンス** は RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。旧フォーマット `{ message: "..." }` をクライアントが解析している場合は更新が必要。
