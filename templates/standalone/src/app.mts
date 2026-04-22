@@ -56,9 +56,7 @@ const envConfPath = path.resolve(configDirPath, `${env}.conf`);
 // Reject env names whose resolved path escapes configDir (e.g. "../secrets").
 // The overlay must be an immediate child of configDir, not a nested path.
 if (path.dirname(envConfPath) !== configDirPath) {
-	throw new Error(
-		`Invalid config environment name: "${env}" resolves outside ${configDirPath}`,
-	);
+	throw new Error(`Invalid config environment name: "${env}" resolves outside ${configDirPath}`);
 }
 const config: AppConfig = validate(
 	parseFile(envConfPath).withFallback(parseFile(applicationConfPath)),
