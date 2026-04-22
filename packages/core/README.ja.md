@@ -223,6 +223,12 @@ interface Client {
   clientSecret: string;
   allowedRedirectUris: string[];
   allowedScopes: string[];
+  // ログアウトメタデータ (TODO-F-5):
+  postLogoutRedirectUris?: string[];
+  backchannelLogoutUri?: string;
+  backchannelLogoutSessionRequired?: boolean; // デフォルト: true
+  frontchannelLogoutUri?: string;
+  frontchannelLogoutSessionRequired?: boolean; // デフォルト: true
 }
 
 type PublicClient = Omit<Client, "clientSecret">;
@@ -616,8 +622,51 @@ OIDC Discovery 1.0 メタデータエンドポイント。OAuth モジュール�
 - `scopes_supported: ["openid", "profile", "email", "groups"]`
 - `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`
 - `code_challenge_methods_supported: ["S256"]`
+- `end_session_endpoint` — TODO-F-5 で追加
+- `backchannel_logout_supported: true` — TODO-F-5 で追加
+- `backchannel_logout_session_supported: true` — TODO-F-5 で追加
+- `frontchannel_logout_supported: true` — TODO-F-5 で追加
+- `frontchannel_logout_session_supported: true` — TODO-F-5 で追加
 
-追加エンドポイントが必要なフィールド（`revocation_endpoint`、`end_session_endpoint`、back/front-channel logout）は F-4 では省略し、TODO-F-5 で追加予定。
+### ログアウトヘルパー (TODO-F-5)
+
+`@o3co/auth-provider-oauth` の `POST /oauth/logout` が使用する低レベルヘルパー。
+
+#### `generateLogoutToken`
+
+```typescript
+interface GenerateLogoutTokenOptions {
+  readonly issuer: string;
+  readonly sub: string;
+  readonly aud: string | string[];
+  readonly sid?: string;
+  readonly includeSid?: boolean; // デフォルト true
+  readonly keyStore: KeyStore;
+  readonly expiresIn?: number; // デフォルト 300 秒
+}
+
+function generateLogoutToken(opts: GenerateLogoutTokenOptions): Promise<Token>;
+```
+
+OIDC Back-Channel Logout 1.0 §2.4 の `logout_token` JWT に署名して返す。ヘッダーは `typ: logout+jwt`。クレーム構成: `iss`、`sub`、`aud`、`iat`、`exp`、`jti`、および `{ [BACKCHANNEL_LOGOUT_EVENT_URI]: {} }` を値に持つ `events`。デフォルトで `sid` を含む。`backchannel_logout_session_required: false` で登録した RP 向けには `includeSid: false` を指定する。デフォルト TTL は 300 秒。`nonce` クレームは仕様 §2.4 の要件により常に含まれない。
+
+#### `BACKCHANNEL_LOGOUT_EVENT_URI`
+
+```typescript
+const BACKCHANNEL_LOGOUT_EVENT_URI: "http://schemas.openid.net/event/backchannel-logout";
+```
+
+すべての `logout_token` の `events` クレームに必要な正規イベント URI。このリテラルを各所で繰り返さずに参照できるようにエクスポートされている。
+
+#### `Logger`
+
+```typescript
+interface Logger {
+  warn(message: string, ...args: unknown[]): void;
+}
+```
+
+`cascadeLogout`、`broadcastBackchannelLogout` などの内部コールサイトが受け付ける最小の構造的ロガーインターフェース。`console`、pino、winston、bunyan など、互換 shape を持つオブジェクトであれば構造的に適合する。内部コールサイトが必要になった時点で追加メソッド（`info`、`error`、`debug`）を追加する。
 
 ## 関連
 

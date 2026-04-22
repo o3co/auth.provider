@@ -168,6 +168,59 @@ Scope-to-claim mapping (OIDC Core §5.4 standard scopes):
 - **`authorization_code` grant — `sid` requirement.** The grant reads `sid` from the `CodeData` record. Deployments must have the F-2/F-3 login wiring in place (local login or federation callback writing `sid` onto the code) for the `sid` claim to be present in issued tokens.
 - **`refresh_token` grant — session validation.** When `AppOptions.userSessionStore` is wired and the refresh token carries a `sid` claim, the grant calls `userSessionStore.get(sid)` to verify the session is still active. A missing session returns `400 invalid_grant`; a store error returns `503 temporarily_unavailable`.
 
+## TODO-F-5 changes — Logout endpoints
+
+The OAuth module exposes two logout-related routes when wired with `userSessionStore`, `federationTokenStore`, `refreshTokenStore`, and `oauth.jwt.issuer`:
+
+### POST /oauth/logout
+
+OIDC RP-Initiated Logout 1.0 `end_session_endpoint`. Accepts `application/x-www-form-urlencoded`:
+
+- `id_token_hint` (required) — signed id_token from this provider; `sid` claim identifies the session
+- `post_logout_redirect_uri` (optional) — must match one of `client.postLogoutRedirectUris` exactly
+- `state` (optional) — round-tripped when redirecting to `post_logout_redirect_uri`
+
+Flow: verifies `id_token_hint` → loads session → broadcasts OIDC Back-Channel Logout 1.0 `logout_token` to every RP with `backchannelLogoutUri` → executes store cascade (refresh-family revoke, federation-token delete, session delete) → responds with one of:
+
+- `text/html` page with `<iframe>` per RP with `frontchannelLogoutUri` (when `Accept: text/html` wins q-weighted negotiation)
+- `303` to first-federation IdP end-session URL (when that federation's provider implements `SupportsLogout`)
+- `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
+- `200 {"logged_out": true}` (fallback)
+
+Cascade failure returns `503 {"error": "temporarily_unavailable"}`. The cascade order is fixed per the spec: step 1 (refresh-family revoke) and step 3 (session delete) fail hard; step 2 (federation-token delete) is best-effort and logs a warning on failure without aborting the cascade.
+
+### POST /oauth/federation/:name/logout
+
+Provider-scoped federation disconnect. Authorization: `Bearer <access_token>` with `typ: at+jwt`. Optional body: `post_logout_redirect_uri`, `state`.
+
+Flow: verifies access_token → checks family not revoked → loads session → verifies federation is linked → deletes federation token → removes federation from session → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
+
+If the IdP end-session call throws, local state is already cleared; the response is `200 {"disconnected": true}` and an audit event `federation.logout.idp_unreachable` is emitted for operator visibility.
+
+Returns `404 {"error": "federation_not_linked"}` when the named federation is not in the session.
+
+### Discovery metadata
+
+`GET /.well-known/openid-configuration` now advertises:
+
+- `end_session_endpoint`
+- `backchannel_logout_supported: true`
+- `backchannel_logout_session_supported: true` — `logout_token` includes `sid` by default
+- `frontchannel_logout_supported: true`
+- `frontchannel_logout_session_supported: true` — front-channel iframe URL includes `sid` by default
+
+The `session_supported` defaults of `true` intentionally deviate from OIDC Back-Channel Logout 1.0 §2.2 (spec default: `false`). Clients that require the spec-default behavior must set `backchannelLogoutSessionRequired: false` or `frontchannelLogoutSessionRequired: false` on their client record.
+
+### Client record logout metadata
+
+Each `Client` supports five optional fields for logout behavior:
+
+- `postLogoutRedirectUris?: string[]` — allowlist for `POST /oauth/logout`'s `post_logout_redirect_uri`
+- `backchannelLogoutUri?: string` — receives `logout_token` POST
+- `backchannelLogoutSessionRequired?: boolean` — default `true`; set `false` to exclude `sid` from `logout_token`
+- `frontchannelLogoutUri?: string` — iframe src target
+- `frontchannelLogoutSessionRequired?: boolean` — default `true`; set `false` to exclude `sid` from iframe URL
+
 ## See Also
 
 - [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes
