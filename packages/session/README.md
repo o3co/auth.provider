@@ -285,6 +285,10 @@ if (supportsClaimMapping(provider)) {
 
 Optional capability for providers that can exchange a refresh token for a fresh access token.
 
+> **Note**: `SupportsRefresh` and `supportsRefresh` are internal capability types used by the session package's federation wiring. They are not re-exported from `@o3co/auth-provider-session`'s public entrypoint and are not a stable public API (subject to change before 1.0). Custom providers implementing this capability should declare the interface shape locally or import from the package's internal federations module.
+
+The interface shape is:
+
 ```ts
 interface RefreshedTokens {
   readonly accessToken: string;
@@ -296,22 +300,9 @@ interface RefreshedTokens {
 interface SupportsRefresh {
   refreshFederationToken(refreshToken: string): Promise<RefreshedTokens>;
 }
-
-function supportsRefresh(
-  provider: FederationProviderBase | undefined | null,
-): provider is FederationProviderBase & SupportsRefresh;
 ```
 
 Providers implementing `SupportsRefresh` can keep federation tokens alive without user interaction. The `FederationTokenStore` (wired via `AppOptions`) stores the initial tokens; the refresh flow retrieves and updates them automatically.
-
-```ts
-import { supportsRefresh } from "@o3co/auth-provider-session";
-
-if (supportsRefresh(provider)) {
-  const refreshed = await provider.refreshFederationToken(storedRefreshToken);
-  // refreshed.accessToken, refreshed.expiresAt …
-}
-```
 
 ---
 

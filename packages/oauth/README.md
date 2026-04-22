@@ -221,6 +221,80 @@ Each `Client` supports five optional fields for logout behavior:
 - `frontchannelLogoutUri?: string` — iframe src target
 - `frontchannelLogoutSessionRequired?: boolean` — default `true`; set `false` to exclude `sid` from iframe URL
 
+## TODO-F-6 changes — Federation token endpoint
+
+`POST /oauth/federation/:name/token` retrieves the upstream IdP access_token for the caller's session, so consumers can make server-side API calls to Google Calendar / GitHub API / etc. on the user's behalf.
+
+### Authentication
+
+- Bearer access_token minted by this auth.provider instance (`typ: at+jwt`).
+- The token's `azp` claim identifies the client; the client record MUST opt in via `allowedAzpForFederationToken: true` (see below).
+
+### Flow
+
+1. Verify the Bearer access_token.
+2. Deny if the family_id is revoked or the session no longer exists.
+3. Deny unless `client.allowedAzpForFederationToken === true`.
+4. Deny unless the federation is linked to the session.
+5. Return the cached upstream access_token if it has > 30 seconds of validity remaining.
+6. Otherwise, refresh it:
+   - Acquire an advisory lock (when `FederationTokenStore` implements `SupportsLock`) to prevent concurrent refresh fan-out.
+   - Re-read after the lock — another waiter may have refreshed during the wait.
+   - Call `provider.refreshFederationToken(refreshToken)`; persist the result.
+   - Release the lock.
+
+### Response
+
+```json
+{
+  "access_token": "<upstream-IdP-access-token>",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "<if-available>"
+}
+```
+
+### Error responses
+
+| Status | Error | Meaning |
+| --- | --- | --- |
+| 401 | `invalid_token` | Bearer missing, invalid, wrong type (not `at+jwt`), or family revoked |
+| 403 | `forbidden` | Client not opted in via `allowedAzpForFederationToken` |
+| 404 | `federation_not_linked` | The named federation isn't linked to this session |
+| 410 | `refresh_token_absent` | Stored tokens have no refresh_token (upstream didn't return one at login) |
+| 410 | `re_authentication_required` | IdP returned `invalid_grant` — session federation is cleared; user must re-authenticate with the IdP |
+| 500 | `refresh_failed` | Generic error from the IdP refresh |
+| 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh` |
+| 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window |
+| 503 | `temporarily_unavailable` | Store outage or IdP 5xx / temporarily_unavailable response |
+
+All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.
+
+### Opt-in: `allowedAzpForFederationToken`
+
+Each `Client` carries an optional `allowedAzpForFederationToken: boolean` flag. Default is `false` — clients do NOT get federation-token access automatically. Operators explicitly opt in for clients that need it:
+
+```yaml
+clients:
+  - clientId: my-backend-api
+    clientSecret: ...
+    allowedRedirectUris: [...]
+    allowedScopes: [openid, profile, email]
+    allowedAzpForFederationToken: true  # explicit opt-in
+```
+
+Rationale: federation access_tokens grant access to the user's external resources (Google Drive, GitHub API, etc.). Deny-by-default prevents accidental exposure when a generic OAuth client registration only needs auth.
+
+### Audit events
+
+The following audit events fire on this endpoint:
+
+- `federation.token.success` — on token issuance (details include `refreshed: boolean` to distinguish cache hits from refresh path)
+- `federation.token.forbidden` — on 403 (client not opted in)
+- `federation.token.family_revoked` — on 401 via revoked family
+- `federation.token.refresh_failed` — on provider.refreshFederationToken throwing (non-invalid_grant)
+- `federation.token.reauthentication_required` — on `invalid_grant` from IdP
+
 ## See Also
 
 - [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes

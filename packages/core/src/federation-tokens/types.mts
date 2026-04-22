@@ -47,3 +47,67 @@ export interface FederationTokenStoreBase {
 }
 
 export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStoreBase>;
+
+/**
+ * Input for acquireLock — identifies the lock by (sid, federationName) pair
+ * and provides timeout knobs.
+ */
+export interface AcquireLockOptions {
+	readonly sid: string;
+	readonly federationName: string;
+	/** Lock TTL in milliseconds. Defaults to 5000. */
+	readonly ttlMs?: number;
+	/** Max wait for acquisition in milliseconds. Defaults to 4000 (just under ttlMs). */
+	readonly waitForMs?: number;
+}
+
+/**
+ * Result of `acquireLock`. The `"held"` reason is reserved for future use
+ * where a non-blocking acquire semantics is added; current implementations
+ * return `"timeout"` whenever the wait deadline elapses with the lock still
+ * held by another owner.
+ *
+ * Note: lock-implementation-level errors (e.g. redis network outage) are NOT
+ * surfaced here — `acquireLock` rejects instead. See {@link SupportsLock}.
+ */
+export type LockResult =
+	| { readonly acquired: true; readonly release: () => Promise<void> }
+	| { readonly acquired: false; readonly reason: "held" | "timeout" };
+
+/**
+ * Optional capability: advisory lock on (sid, federationName) pairs, used by
+ * `POST /oauth/federation/:name/token` (TODO-F-6) to prevent concurrent
+ * federation-refresh thundering herd. Consumers detect presence with
+ * {@link supportsLock}; when absent, the refresh path proceeds without
+ * coordination — acceptable for low-concurrency deployments.
+ *
+ * ## Error semantics
+ *
+ * `acquireLock` returns a `LockResult` discriminated union for the two expected
+ * outcomes — acquired or wait-timed-out. A thrown/rejected Promise from
+ * `acquireLock` indicates a **client-level failure** (network partition,
+ * cluster down, authentication error) that the caller must decide how to
+ * handle: typical choices are to surface HTTP 503 or to fall back to an
+ * unlocked refresh. Lock implementations SHOULD NOT internalize these errors
+ * as `{ acquired: false }` because the caller's response code depends on
+ * whether the failure is transient-operational or protocol-level.
+ */
+export interface SupportsLock {
+	acquireLock(opts: AcquireLockOptions): Promise<LockResult>;
+}
+
+/**
+ * Structural type guard for the {@link SupportsLock} capability.
+ *
+ * Returns `false` for `null` / `undefined` so consumers can call this directly on
+ * results without an explicit existence check. When `store` is non-null, returns
+ * `true` when `store.acquireLock` is a function. Inside a `true` branch, TypeScript
+ * narrows `store` to `FederationTokenStoreBase & SupportsLock`, so
+ * `store.acquireLock(...)` is callable without a cast.
+ */
+export function supportsLock(
+	store: FederationTokenStoreBase | undefined | null,
+): store is FederationTokenStoreBase & SupportsLock {
+	if (store == null) return false;
+	return typeof (store as { acquireLock?: unknown }).acquireLock === "function";
+}

@@ -4,11 +4,12 @@
  */
 
 import { decryptTokenField, encryptTokenField } from "../crypto.mjs";
-import type { FederationTokenStoreBase, FederationTokens } from "../types.mjs";
+import { createRedisLock } from "../lock/redis.mjs";
+import type { FederationTokenStoreBase, FederationTokens, SupportsLock } from "../types.mjs";
 
 export interface RedisLikeClient {
 	get(key: string): Promise<string | null>;
-	set(key: string, value: string, opts?: { PX?: number }): Promise<string | null>;
+	set(key: string, value: string, opts?: { PX?: number; NX?: boolean }): Promise<string | null>;
 	del(...keys: string[]): Promise<number>;
 	/**
 	 * Non-blocking alternative to Redis KEYS — matches redis v5 client's
@@ -54,7 +55,7 @@ interface Envelope {
 
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
-): FederationTokenStoreBase {
+): FederationTokenStoreBase & SupportsLock {
 	if (opts.encryption.mode === "required" && opts.encryption.key.length !== 32) {
 		throw new Error("FederationTokenStore redis: encryption key must be 32 bytes");
 	}
@@ -65,6 +66,20 @@ export function createRedisFederationTokenStore(
 	}
 	const storeTtlMs = ttlSeconds * 1000;
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
+
+	// Advisory lock: uses a separate key namespace (lock:) so lock keys never
+	// collide with token envelope keys. The lock client shim bridges the
+	// variadic del(...keys) of RedisLikeClient to the single-key del(key) that
+	// RedisLockClient requires.
+	const lockKeyPrefix = `${prefix}lock:`;
+	const lock = createRedisLock({
+		client: {
+			get: (key) => opts.client.get(key),
+			set: (key, value, o) => opts.client.set(key, value, o),
+			del: (key) => opts.client.del(key),
+		},
+		keyPrefix: lockKeyPrefix,
+	});
 	const sidPattern = (sid: string) => `${prefix}${sid}:*`;
 
 	const encryptRequired = (v: string): string =>
@@ -146,6 +161,9 @@ export function createRedisFederationTokenStore(
 		},
 		async delete(sid, name) {
 			await opts.client.del(k(sid, name));
+		},
+		acquireLock(a) {
+			return lock.acquireLock(a);
 		},
 	};
 }

@@ -3,7 +3,8 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import type { FederationTokenStoreBase, FederationTokens } from "../types.mjs";
+import { createInProcessLock } from "../lock/memory.mjs";
+import type { FederationTokenStoreBase, FederationTokens, SupportsLock } from "../types.mjs";
 
 const key = (sid: string, name: string) => `${sid}\u0000${name}`;
 
@@ -33,8 +34,9 @@ const cloneTokens = (t: FederationTokens): FederationTokens => ({
 	rawParams: t.rawParams ? { ...t.rawParams } : undefined,
 });
 
-export function createInMemoryFederationTokenStore(): FederationTokenStoreBase {
+export function createInMemoryFederationTokenStore(): FederationTokenStoreBase & SupportsLock {
 	const store = new Map<string, FederationTokens>();
+	const lock = createInProcessLock();
 
 	return {
 		kind: "memory",
@@ -55,6 +57,9 @@ export function createInMemoryFederationTokenStore(): FederationTokenStoreBase {
 		},
 		async delete(sid, name) {
 			store.delete(key(sid, name));
+		},
+		acquireLock(opts) {
+			return lock.acquireLock(opts);
 		},
 	};
 }
