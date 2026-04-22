@@ -34,6 +34,7 @@ import {
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import type { PassportStatic } from "passport";
+import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
 
@@ -591,24 +592,37 @@ export const createOAuthRouter = async (
 	// OIDC Core §5.3 — UserInfo endpoint
 	router.use(userinfo.createRouter(express, { keyStore, userSessionStore, refreshTokenStore }));
 
-	// Logout endpoints — mount only when all required stores + issuer are present.
-	// federationTokenStore is required for POST /oauth/federation/:name/logout.
+	// Federation endpoints — mount only when all required stores + issuer are present.
+	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
+	// POST /oauth/federation/:name/token.
 	// issuer is required for logout_token signing in POST /oauth/logout.
 	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
-	if (
-		userSessionStore &&
-		federationTokenStore &&
-		refreshTokenStore &&
+	const federationEndpointsSupported =
+		!!userSessionStore &&
+		!!federationTokenStore &&
+		!!refreshTokenStore &&
 		typeof issuer === "string" &&
-		issuer.length > 0
-	) {
+		issuer.length > 0;
+
+	if (federationEndpointsSupported) {
 		router.use(
 			logoutRoute.createRouter(express, {
 				keyStore,
-				issuer,
+				issuer: issuer as string,
 				userSessionStore,
 				federationTokenStore,
 				refreshTokenStore,
+				clientRepository,
+				getFederationProviders,
+				auditSink,
+			}),
+		);
+		router.use(
+			federationTokenRoute.createRouter(express, {
+				keyStore,
+				refreshTokenStore,
+				userSessionStore,
+				federationTokenStore,
 				clientRepository,
 				getFederationProviders,
 				auditSink,
