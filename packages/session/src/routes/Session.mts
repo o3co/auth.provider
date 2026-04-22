@@ -19,11 +19,11 @@ import {
 	type AppConfig,
 	extractUserClaims,
 	type User,
+	type UserRepository,
 	type UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
-import type { PassportStatic } from "passport";
 
 declare module "express-session" {
 	interface SessionData {
@@ -44,12 +44,12 @@ export const createRouter = (
 		urlencoded: (opts: { extended: boolean }) => RequestHandler;
 	},
 	{
-		passport,
+		userRepository,
 		config,
 		userSessionStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 	}: {
-		passport: PassportStatic;
+		userRepository: UserRepository;
 		config: AppConfig;
 		userSessionStore?: UserSessionStoreBase;
 		/** Session TTL in milliseconds. Default: 24h. */
@@ -130,25 +130,50 @@ export const createRouter = (
 				}
 				next();
 			},
-			passport.authenticate("local", {
-				session: true,
-			}),
 			async (req: Request, res: Response) => {
-				const user = req.user;
+				const username =
+					typeof req.body?.username === "string" ? req.body.username : undefined;
+				const password =
+					typeof req.body?.password === "string" ? req.body.password : undefined;
+				if (!username || !password) {
+					return res.status(400).json({
+						error: "invalid_request",
+						error_description: "missing credentials",
+					});
+				}
+
+				let user: User | null;
+				try {
+					user = await userRepository.authenticate(username, password);
+				} catch (err) {
+					console.warn({ err }, "local login authenticate failed");
+					return res
+						.status(500)
+						.json({
+							error: "authentication_error",
+							error_description: "Authentication failed",
+						});
+				}
+				if (!user) {
+					return res.status(401).json({
+						error: "invalid_credentials",
+						error_description: "Incorrect username or password.",
+					});
+				}
+
 				const redirectTo = req.body.redirect_to as string | undefined;
 
 				// Generate sid and create UserSession before regenerating the browser session,
 				// so we can restore the sid on the new session afterwards.
 				let sid: string | undefined;
-				if (userSessionStore && user) {
-					const userObj = user as User;
-					const claims = extractUserClaims(userObj);
+				if (userSessionStore) {
+					const claims = extractUserClaims(user);
 					const now = new Date();
 					sid = randomUUID();
 					try {
 						await userSessionStore.create({
 							sid,
-							sub: userObj.id,
+							sub: user.id,
 							authTime: now,
 							expiresAt: new Date(now.getTime() + sessionTtlMs),
 							federations: [],

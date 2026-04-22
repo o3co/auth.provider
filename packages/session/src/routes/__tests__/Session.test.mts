@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-import type { AppConfig, UserSessionStoreBase } from "@o3co/auth-provider-core";
+import type { AppConfig, UserRepository, UserSessionStoreBase } from "@o3co/auth-provider-core";
 import express from "express";
-import type { PassportStatic } from "passport";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/Session.mjs";
@@ -53,35 +52,33 @@ function makeUserSessionStore(): UserSessionStoreBase & { sessions: unknown[] } 
 /**
  * Build a test express app with the Session router mounted at "/session".
  *
- * The passport stub short-circuits authenticate("local", …) by immediately
- * calling next() after setting req.user — simulating a successful local login.
+ * userRepository.authenticate controls the login outcome:
+ * - resolves to a User object → successful login
+ * - resolves to null → invalid credentials (401)
+ * - rejects with an Error → authentication error (500)
  *
  * Returns `capturedSession`: a ref populated by a post-router middleware so
  * tests can assert on `req.session` fields (e.g. `sid`) after a response.
  */
 function buildApp(
 	opts: {
+		userRepository?: UserRepository;
 		userSessionStore?: UserSessionStoreBase;
 		sessionTtlMs?: number;
-		user?: Record<string, unknown>;
 	} = {},
 ) {
 	const {
+		userRepository = {
+			authenticate: vi.fn().mockResolvedValue({
+				id: "u-1",
+				username: "alice",
+				email: "alice@example.com",
+			}),
+			authenticateByToken: vi.fn(),
+		} as unknown as UserRepository,
 		userSessionStore,
 		sessionTtlMs,
-		user = { id: "u-1", username: "alice", email: "alice@example.com" },
 	} = opts;
-
-	// Passport stub: authenticate("local", …) immediately calls next() + sets req.user
-	const passportStub: PassportStatic = {
-		authenticate: vi.fn(
-			(_strategy: string, _options: unknown) =>
-				(req: express.Request, _res: express.Response, next: express.NextFunction) => {
-					(req as unknown as { user: unknown }).user = user;
-					next();
-				},
-		),
-	} as unknown as PassportStatic;
 
 	const app = express();
 
@@ -92,7 +89,6 @@ function buildApp(
 			...sessionData,
 			regenerate(cb: (err: null) => void) {
 				// After regenerate, session data is reset — mirror real express-session behaviour.
-				// We re-attach a fresh object but keep a reference so we can inspect sid after the call.
 				const fresh: Record<string, unknown> = {
 					regenerate: this.regenerate,
 					save: this.save,
@@ -108,7 +104,7 @@ function buildApp(
 	});
 
 	const router = createRouter(express, {
-		passport: passportStub,
+		userRepository,
 		config: stubConfig,
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
 		...(sessionTtlMs !== undefined ? { sessionTtlMs } : {}),
@@ -127,18 +123,38 @@ function buildApp(
 
 	app.use("/session", router);
 
-	return { app, passportStub, capturedSession };
+	return { app, capturedSession };
 }
 
 describe("Session routes — POST /session/login", () => {
-	describe("UserSession creation on successful local login", () => {
+	describe("happy path", () => {
+		it("returns 200 and sets isAuthenticated when credentials are valid", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app)
+				.post("/session/login")
+				.send("username=alice&password=secret")
+				.set("Content-Type", "application/x-www-form-urlencoded");
+
+			expect(res.status).toBe(200);
+			expect(res.body).toMatchObject({ message: "Logged in successfully" });
+		});
+
 		it("creates a UserSession record and sets req.session.sid when userSessionStore is wired", async () => {
 			const store = makeUserSessionStore();
 
 			const { app, capturedSession } = buildApp({
+				userRepository: {
+					authenticate: vi.fn().mockResolvedValue({
+						id: "u-local-1",
+						username: "alice",
+						email: "alice@example.com",
+						name: "Alice",
+					}),
+					authenticateByToken: vi.fn(),
+				} as unknown as UserRepository,
 				userSessionStore: store,
 				sessionTtlMs: 3600_000,
-				user: { id: "u-local-1", username: "alice", email: "alice@example.com", name: "Alice" },
 			});
 
 			const res = await request(app)
@@ -167,8 +183,7 @@ describe("Session routes — POST /session/login", () => {
 			// sub matches user.id
 			expect(saved.sub).toBe("u-local-1");
 
-			// federations is explicitly set to [] — assert directly (no ?? fallback)
-			// so a regression where the field is omitted would be caught.
+			// federations is explicitly set to []
 			expect(saved.federations).toEqual([]);
 
 			// claims extracted from user
@@ -177,21 +192,21 @@ describe("Session routes — POST /session/login", () => {
 				name: "Alice",
 			});
 
-			// authTime and expiresAt are Date instances (or ISO strings from structuredClone)
+			// authTime and expiresAt are present
 			expect(saved.authTime).toBeTruthy();
 			expect(saved.expiresAt).toBeTruthy();
 
-			// I2: req.session.sid must equal the store's sid after regenerate completes.
-			// capturedSession.current is populated by the res.on('finish') listener
-			// registered before the router, guaranteeing it reflects post-regenerate state.
+			// req.session.sid must equal the store's sid after regenerate completes
 			expect(capturedSession.current).not.toBeNull();
 			expect(capturedSession.current?.sid).toBe(saved.sid);
 		});
 
 		it("does not crash and does not create a UserSession when userSessionStore is not wired (backward compat)", async () => {
-			// No userSessionStore
 			const { app } = buildApp({
-				user: { id: "u-no-store", username: "bob" },
+				userRepository: {
+					authenticate: vi.fn().mockResolvedValue({ id: "u-no-store", username: "bob" }),
+					authenticateByToken: vi.fn(),
+				} as unknown as UserRepository,
 			});
 
 			const res = await request(app)
@@ -202,6 +217,81 @@ describe("Session routes — POST /session/login", () => {
 			// Login still succeeds — backward compat
 			expect(res.status).toBe(200);
 			expect(res.body).toMatchObject({ message: "Logged in successfully" });
+		});
+	});
+
+	describe("invalid credentials", () => {
+		it("returns 401 with RFC 6749 §5.2 error shape when authenticate returns null", async () => {
+			const { app } = buildApp({
+				userRepository: {
+					authenticate: vi.fn().mockResolvedValue(null),
+					authenticateByToken: vi.fn(),
+				} as unknown as UserRepository,
+			});
+
+			const res = await request(app)
+				.post("/session/login")
+				.send("username=alice&password=wrong")
+				.set("Content-Type", "application/x-www-form-urlencoded");
+
+			expect(res.status).toBe(401);
+			expect(res.body).toMatchObject({
+				error: "invalid_credentials",
+				error_description: expect.any(String),
+			});
+		});
+	});
+
+	describe("missing credentials", () => {
+		it("returns 400 with RFC 6749 error shape when username is missing", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app)
+				.post("/session/login")
+				.send("password=secret")
+				.set("Content-Type", "application/x-www-form-urlencoded");
+
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({
+				error: "invalid_request",
+				error_description: expect.any(String),
+			});
+		});
+
+		it("returns 400 with RFC 6749 error shape when password is missing", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app)
+				.post("/session/login")
+				.send("username=alice")
+				.set("Content-Type", "application/x-www-form-urlencoded");
+
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({
+				error: "invalid_request",
+				error_description: expect.any(String),
+			});
+		});
+	});
+
+	describe("authentication error", () => {
+		it("returns 500 with authentication_error when authenticate throws", async () => {
+			const { app } = buildApp({
+				userRepository: {
+					authenticate: vi.fn().mockRejectedValue(new Error("db failure")),
+					authenticateByToken: vi.fn(),
+				} as unknown as UserRepository,
+			});
+
+			const res = await request(app)
+				.post("/session/login")
+				.send("username=alice&password=secret")
+				.set("Content-Type", "application/x-www-form-urlencoded");
+
+			expect(res.status).toBe(500);
+			expect(res.body).toMatchObject({
+				error: "authentication_error",
+			});
 		});
 
 		it("returns 503 temporarily_unavailable when userSessionStore.create throws (fail-closed)", async () => {
@@ -219,10 +309,17 @@ describe("Session routes — POST /session/login", () => {
 				async removeFederation() {},
 				async delete() {},
 			};
+
 			const { app } = buildApp({
+				userRepository: {
+					authenticate: vi.fn().mockResolvedValue({
+						id: "u-503",
+						username: "carol",
+					}),
+					authenticateByToken: vi.fn(),
+				} as unknown as UserRepository,
 				userSessionStore: throwingStore,
 				sessionTtlMs: 3600_000,
-				user: { id: "u-503", username: "carol" },
 			});
 
 			const res = await request(app)
@@ -234,6 +331,32 @@ describe("Session routes — POST /session/login", () => {
 			expect(res.body).toMatchObject({
 				error: "temporarily_unavailable",
 			});
+		});
+	});
+
+	describe("redirect_to validation", () => {
+		it("rejects non-string redirect_to with 400", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app)
+				.post("/session/login")
+				.send({ username: "alice", password: "secret", redirect_to: ["array"] })
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_redirect" });
+		});
+
+		it("rejects non-http/https redirect_to scheme with 400", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app)
+				.post("/session/login")
+				.send({ username: "alice", password: "secret", redirect_to: "ftp://evil.example.com/" })
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_redirect" });
 		});
 	});
 });

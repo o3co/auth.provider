@@ -27,8 +27,7 @@ import {
 	type FederationProviderFactory,
 	registerBuiltinFederations,
 } from "./federations/factory.mjs";
-import type { FederationProviderBase } from "./federations/types.mjs";
-import { createPassport } from "./passport.mjs";
+import type { FederationProvider } from "./federations/types.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 
@@ -56,10 +55,10 @@ export type SessionModuleOptions = {
 type SessionModuleInternalOptions = SessionModuleOptions & {
 	/** For testing only — inject a pre-configured factory to skip registration. */
 	_federationFactory?: FederationProviderFactory;
-	/** For testing only — replace createPassport to capture call arguments. */
-	_createPassport?: typeof createPassport;
 	/** For testing only — replace sessionRoutes.createRouter to capture call arguments. */
 	_createSessionRouter?: typeof sessionRoutes.createRouter;
+	/** For testing only — replace federationRoutes.createRouter to capture call arguments. */
+	_createFederationRouter?: typeof federationRoutes.createRouter;
 };
 
 /**
@@ -78,6 +77,13 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 			})());
 		const config = context.config as AppConfig;
 
+		// Validate that required stores are present before proceeding.
+		if (!context.userSessionStore || !context.federationTokenStore) {
+			throw new Error(
+				"session module requires userSessionStore and federationTokenStore in ModuleContext",
+			);
+		}
+
 		// Build federation provider factory (or use injected stub in tests).
 		const factory: FederationProviderFactory =
 			params._federationFactory ??
@@ -88,7 +94,11 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 			})();
 
 		// Normalize federation config entries and build the provider Map.
-		const federationProviders = new Map<string, FederationProviderBase>();
+		const federationProviders = new Map<string, FederationProvider>();
+
+		// Build the providerCallbackUrls map from config.federations.
+		const providerCallbackUrls = new Map<string, string>();
+
 		for (const [name, section] of Object.entries(config.federations)) {
 			if (!section.enabled) continue;
 
@@ -155,15 +165,25 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 			// Invariant guard: the provider's name must equal the config key so that
 			// routes/Federation.mts can look up the provider by the :name route param.
-			// Custom builders must propagate config.name to FederationProviderBase.name.
+			// Custom builders must propagate config.name to FederationProvider.name.
 			if (provider.name !== name) {
 				throw new Error(
 					`federations.${name}: provider builder returned name="${provider.name}", expected "${name}". ` +
-						`Custom builders must propagate config.name to FederationProviderBase.name to preserve the config-key ↔ passport-strategy-name invariant.`,
+						`Custom builders must propagate config.name to FederationProvider.name to preserve the config-key ↔ route-param invariant.`,
 				);
 			}
 
 			federationProviders.set(name, provider);
+
+			// Extract callbackURL for this provider's providerCallbackUrls entry.
+			// The callbackURL lives in flatConfig (already extracted from nested/flat shape).
+			const callbackURL = typeof flatConfig.callbackURL === "string" ? flatConfig.callbackURL : undefined;
+			if (!callbackURL) {
+				throw new Error(
+					`federations.${name}: callbackURL is required when federation is enabled`,
+				);
+			}
+			providerCallbackUrls.set(name, callbackURL);
 		}
 
 		// Expose a snapshot of the federation providers for other modules that need
@@ -172,26 +192,12 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 		// module's internal provider registry by mutating the shared reference.
 		context.federationProviders = new Map(federationProviders);
 
-		// Initialize passport with pathResolver and optional store bindings.
-		// userSessionStore / federationTokenStore are optional on ModuleContext (F-1);
-		// if absent, createPassport receives undefined and the built-in
-		// onFederationCallback won't activate — correct fallback for unconfigured stores.
-		const _cp = params._createPassport ?? createPassport;
-		const passport = await _cp({
-			pathResolver: context.pathResolver,
-			userRepository: params.userRepository,
-			federationProviders,
-			userSessionStore: context.userSessionStore,
-			federationTokenStore: context.federationTokenStore,
-			sessionTtlMs: params.sessionTtlMs,
-		});
-
 		// Mount session routes
 		const _csr = params._createSessionRouter ?? sessionRoutes.createRouter;
 		context.router.use(
 			"/session",
 			_csr(express, {
-				passport,
+				userRepository: params.userRepository,
 				config,
 				userSessionStore: context.userSessionStore,
 				sessionTtlMs: params.sessionTtlMs,
@@ -199,12 +205,17 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 		);
 
 		// Mount federation routes
+		const _cfr = params._createFederationRouter ?? federationRoutes.createRouter;
 		context.router.use(
 			"/session",
-			federationRoutes.createRouter(express, {
-				passport,
+			_cfr(express, {
 				config,
 				federationProviders,
+				providerCallbackUrls,
+				userRepository: params.userRepository,
+				userSessionStore: context.userSessionStore,
+				federationTokenStore: context.federationTokenStore,
+				sessionTtlMs: params.sessionTtlMs,
 			}),
 		);
 	},
