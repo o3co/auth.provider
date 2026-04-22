@@ -47,6 +47,12 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
 			...(hasAsymmetricAlg ? { jwks_uri: `${iss}/.well-known/jwks.json` } : {}),
 			introspection_endpoint: `${iss}/oauth/introspect`,
+			// TODO-F-5: RP-Initiated Logout 1.0 + Back-Channel Logout 1.0 + Front-Channel Logout 1.0.
+			end_session_endpoint: `${iss}/oauth/logout`,
+			backchannel_logout_supported: true,
+			backchannel_logout_session_supported: true,
+			frontchannel_logout_supported: true,
+			frontchannel_logout_session_supported: true,
 			response_types_supported: ["code"],
 			subject_types_supported: ["public"],
 			id_token_signing_alg_values_supported: [...opts.signingAlgs],
@@ -54,9 +60,6 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 			scopes_supported: ["openid", "profile", "email", "groups"],
 			token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
 			code_challenge_methods_supported: ["S256"],
-			// OUT of F-4 scope: revocation_endpoint, end_session_endpoint,
-			// backchannel_logout_supported, frontchannel_logout_supported —
-			// F-5 will add them when the corresponding routes exist.
 		});
 	});
 
