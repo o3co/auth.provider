@@ -18,25 +18,23 @@ import { describe, expect, it } from "vitest";
 import {
 	type EndSessionRequest,
 	type EndSessionResult,
-	type FederationProviderBase,
+	type FederationProvider,
 	type SupportsLogout,
 	supportsLogout,
 } from "#/federations/types.mjs";
 
-function makeBaseProvider(name: string): FederationProviderBase {
+function makeBaseProvider(name: string): FederationProvider {
 	return {
 		name,
 		scope: [],
 		validateRedirect: () => ({ ok: true, value: undefined }),
 		resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
-		async setupPassportStrategy() {},
+		buildAuthorizationUrl: () => new URL("https://example.com/authorize"),
+		exchangeCode: async () => ({ issuer: "https://example.com", sub: "test-sub" }),
 	};
 }
 
-function makeLogoutProvider(
-	name: string,
-	endpoint: string,
-): FederationProviderBase & SupportsLogout {
+function makeLogoutProvider(name: string, endpoint: string): FederationProvider & SupportsLogout {
 	return {
 		...makeBaseProvider(name),
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
@@ -62,7 +60,7 @@ describe("supportsLogout()", () => {
 	});
 
 	it("narrows the type so endSession is callable without cast", async () => {
-		const p: FederationProviderBase = makeLogoutProvider("myidp", "https://myidp.example/logout");
+		const p: FederationProvider = makeLogoutProvider("myidp", "https://myidp.example/logout");
 		if (supportsLogout(p)) {
 			// Inside this branch, TypeScript narrows `p` to `FederationProviderBase & SupportsLogout`.
 			const result = await p.endSession({ idTokenHint: "abc" });

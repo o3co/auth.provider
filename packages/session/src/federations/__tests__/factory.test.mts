@@ -21,7 +21,7 @@ import {
 	type FederationProviderFactory,
 	registerBuiltinFederations,
 } from "#/federations/factory.mjs";
-import type { FederationProviderBase } from "#/federations/types.mjs";
+import type { FederationProvider } from "#/federations/types.mjs";
 
 describe("createFederationProviderFactory", () => {
 	it("returns an AdapterFactory with no registered types", () => {
@@ -39,22 +39,23 @@ describe("createFederationProviderFactory", () => {
 		);
 	});
 
-	it("factory element type is exactly FederationProviderBase", async () => {
+	it("factory element type is exactly FederationProvider", async () => {
 		type Elem = Awaited<ReturnType<FederationProviderFactory["create"]>>;
 
-		// Bidirectional assignability: any FederationProviderBase is Elem and vice versa.
+		// Bidirectional assignability: any FederationProvider is Elem and vice versa.
 		// A regression that over-narrows the factory's generic (e.g. to
-		// `FederationProviderBase & SupportsLogout`) would break the first direction;
+		// `FederationProvider & SupportsLogout`) would break the first direction;
 		// a regression that over-widens (e.g. to `unknown`) would break the second.
-		const baseValue: FederationProviderBase = {
+		const baseValue: FederationProvider = {
 			name: "stub",
 			scope: [],
 			validateRedirect: () => ({ ok: true, value: undefined }),
 			resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
-			async setupPassportStrategy() {},
+			buildAuthorizationUrl: () => new URL("https://example.com"),
+			exchangeCode: async () => ({ issuer: "https://example.com", sub: "x" }),
 		};
 		const asElem: Elem = baseValue;
-		const asBase: FederationProviderBase = asElem;
+		const asBase: FederationProvider = asElem;
 
 		const factory = createFederationProviderFactory();
 		factory.register("stub", async () => baseValue);

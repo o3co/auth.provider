@@ -22,7 +22,6 @@ import {
 	GrantRegistry,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
-import type { PassportStatic } from "passport";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 
@@ -45,12 +44,7 @@ const mockExpress = {
 
 describe("createOAuthRouter", () => {
 	it("returns a router", async () => {
-		const mockPassport = {
-			authenticate: vi.fn().mockReturnValue(vi.fn()),
-		} as unknown as PassportStatic;
-
 		const result = await createOAuthRouter(mockExpress, {
-			passport: mockPassport,
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,
@@ -62,10 +56,6 @@ describe("createOAuthRouter", () => {
 	});
 
 	it("applies rate limit middleware to POST /introspect", async () => {
-		const mockPassport = {
-			authenticate: vi.fn().mockReturnValue(vi.fn()),
-		} as unknown as PassportStatic;
-
 		const postCalls: unknown[][] = [];
 		const router = {
 			use: vi.fn().mockReturnThis(),
@@ -83,7 +73,6 @@ describe("createOAuthRouter", () => {
 		};
 
 		await createOAuthRouter(trackingExpress, {
-			passport: mockPassport,
 			registry: new GrantRegistry(),
 			config: mockConfig,
 			clientRepository: {} as ClientRepository,

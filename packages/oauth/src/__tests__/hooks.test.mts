@@ -27,7 +27,6 @@ import {
 	type RateLimiterBase,
 } from "@o3co/auth-provider-core";
 import express from "express";
-import type { PassportStatic } from "passport";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
@@ -42,10 +41,6 @@ const mockConfig = {
 		login: { url: "/login" },
 	},
 } as unknown as AppConfig;
-
-const mockPassport = {
-	authenticate: () => (_req: unknown, _res: unknown, next: () => void) => next(),
-} as unknown as PassportStatic;
 
 const mockClientRepository: ClientRepository = {
 	findById: async () => null,
@@ -91,7 +86,6 @@ async function buildApp(overrides: { rateLimiter?: RateLimiterBase; auditSink?: 
 	app.use(express.urlencoded({ extended: false }));
 
 	const { router } = await createOAuthRouter(express, {
-		passport: mockPassport,
 		registry: new GrantRegistry(),
 		config: mockConfig,
 		clientRepository: mockClientRepository,
@@ -267,7 +261,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -355,7 +348,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -391,7 +383,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -422,7 +413,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			});
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -456,7 +446,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -488,7 +477,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -524,7 +512,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,
@@ -605,7 +592,6 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 
 			const { router } = await createOAuthRouter(express, {
-				passport: mockPassport,
 				registry: new GrantRegistry(),
 				config: mockConfig,
 				clientRepository: clientRepo,

@@ -14,55 +14,119 @@
  * limitations under the License.
  */
 
-import type { PassportStatic } from "passport";
 import { describe, expect, it } from "vitest";
-import type { FederationProviderBase, SetupPassportContext } from "#/federations/types.mjs";
+import {
+	type FederationProfile,
+	type FederationProvider,
+	type SupportsClaimMapping,
+	type SupportsLogout,
+	type SupportsRefresh,
+	supportsClaimMapping,
+	supportsLogout,
+	supportsRefresh,
+} from "../types.mjs";
 
-describe("FederationProviderBase interface", () => {
-	it("requires name, scope, validateRedirect, resolveCallbackRedirect, setupPassportStrategy — no enabled or strategyName", () => {
-		// Type-only structural test: the literal must type-check under the new shape.
-		const provider: FederationProviderBase = {
-			name: "google",
-			scope: ["profile", "email"],
-			validateRedirect: () => ({ ok: true, value: undefined }),
-			resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
-			setupPassportStrategy: async () => {
-				// noop — signature check only
-			},
-		};
-		expect(provider.name).toBe("google");
-		expect(provider.scope).toEqual(["profile", "email"]);
+describe("FederationProvider type guards", () => {
+	const minimalProvider: FederationProvider = {
+		name: "test",
+		scope: ["openid"],
+		validateRedirect: () => ({ ok: true, value: undefined }),
+		resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
+		buildAuthorizationUrl: () => new URL("https://example.com/authorize"),
+		exchangeCode: async () => ({
+			issuer: "https://example.com",
+			sub: "u1",
+		}),
+	};
+
+	it("supportsRefresh returns false for a provider lacking refreshToken", () => {
+		expect(supportsRefresh(minimalProvider)).toBe(false);
+		expect(supportsRefresh(null)).toBe(false);
+		expect(supportsRefresh(undefined)).toBe(false);
 	});
 
-	it("setupPassportStrategy accepts a PassportStatic and SetupPassportContext", () => {
-		// Type-only: annotate a function with the expected signature so tsc would fail
-		// if setupPassportStrategy's shape were to drift.
-		const setup: FederationProviderBase["setupPassportStrategy"] = async (
-			_passport: PassportStatic,
-			_ctx: SetupPassportContext,
-		) => {};
-		expect(typeof setup).toBe("function");
+	it("supportsRefresh narrows when refreshToken is a function", () => {
+		const p: FederationProvider & SupportsRefresh = {
+			...minimalProvider,
+			refreshToken: async () => ({
+				issuer: "https://example.com",
+				sub: "u1",
+			}),
+		};
+		expect(supportsRefresh(p)).toBe(true);
 	});
 
-	it("SetupPassportContext has verifyUser(externalId): Promise<User | null>", () => {
-		const ctx: SetupPassportContext = {
-			verifyUser: async (externalId: string) => {
-				expect(externalId).toMatch(/^\w+:/);
-				return null;
-			},
-		};
-		expect(typeof ctx.verifyUser).toBe("function");
+	it("supportsLogout returns false for a provider lacking endSession", () => {
+		expect(supportsLogout(minimalProvider)).toBe(false);
 	});
 
-	it("SetupPassportContext has optional pathResolver(spec: string): string", () => {
-		const ctx: SetupPassportContext = {
-			verifyUser: async () => null,
-			pathResolver: (spec) => `/custom/path/${spec}`,
+	it("supportsLogout narrows when endSession is a function", () => {
+		const p: FederationProvider & SupportsLogout = {
+			...minimalProvider,
+			endSession: async () => ({ url: new URL("https://example.com/end"), method: "GET" as const }),
 		};
-		expect(typeof ctx.pathResolver).toBe("function");
-		// biome-ignore lint/style/noNonNullAssertion: pathResolver set above
-		expect(ctx.pathResolver!("passport-google-oauth20")).toBe(
-			"/custom/path/passport-google-oauth20",
-		);
+		expect(supportsLogout(p)).toBe(true);
+	});
+
+	it("supportsClaimMapping returns false for a provider lacking mapClaims", () => {
+		expect(supportsClaimMapping(minimalProvider)).toBe(false);
+	});
+
+	it("supportsClaimMapping narrows when mapClaims is a function", () => {
+		const p: FederationProvider & SupportsClaimMapping = {
+			...minimalProvider,
+			mapClaims: () => ({}),
+		};
+		expect(supportsClaimMapping(p)).toBe(true);
+	});
+});
+
+describe("FederationProfile shape", () => {
+	it("allows OIDC-standard claims as first-class fields", () => {
+		const profile: FederationProfile = {
+			issuer: "https://example.com",
+			sub: "u1",
+			email: "a@example.com",
+			emailVerified: true,
+			name: "Alice",
+			picture: "https://example.com/p",
+			accessToken: "at",
+			refreshToken: "rt",
+			idToken: "it",
+			expiresAt: new Date(0),
+		};
+		expect(profile.sub).toBe("u1");
+	});
+
+	it("accepts provider-specific extension claims through the index signature", () => {
+		const profile: FederationProfile = {
+			issuer: "https://example.com",
+			sub: "u1",
+			expiresAt: null,
+			hd: "example.com", // Google-specific hosted-domain claim
+			tid: "tenant-id", // Microsoft-specific tenant id
+		};
+		expect(profile.hd).toBe("example.com");
+		expect(profile.tid).toBe("tenant-id");
+	});
+
+	it("requires expiresAt (Date | null) — null signals no finite expiry", () => {
+		// null path: GitHub OAuth Apps classic tokens have no finite expiry.
+		const classic: FederationProfile = {
+			issuer: "https://github.com",
+			sub: "99",
+			accessToken: "at",
+			expiresAt: null,
+		};
+		expect(classic.expiresAt).toBeNull();
+
+		// Date path: OIDC providers always return expires_in.
+		const oidc: FederationProfile = {
+			issuer: "https://accounts.google.com",
+			sub: "gu1",
+			accessToken: "at",
+			expiresAt: new Date(0),
+		};
+		expect(oidc.expiresAt).toBeInstanceOf(Date);
 	});
 });

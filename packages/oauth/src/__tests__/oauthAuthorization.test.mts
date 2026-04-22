@@ -27,7 +27,6 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import express from "express";
-import type { PassportStatic } from "passport";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
@@ -47,10 +46,6 @@ const authorizeConfig = {
 		login: { url: "/login" },
 	},
 } as unknown as AppConfig;
-
-const authorizePassport = {
-	authenticate: () => (_req: unknown, _res: unknown, next: () => void) => next(),
-} as unknown as PassportStatic;
 
 const authorizeClientRepo: ClientRepository = {
 	findById: async () => ({
@@ -94,7 +89,6 @@ async function buildAuthorizeApp(opts: {
 	};
 
 	const { router } = await createOAuthRouter(express, {
-		passport: authorizePassport,
 		registry: new GrantRegistry(),
 		config: authorizeConfig,
 		clientRepository: authorizeClientRepo,

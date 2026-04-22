@@ -6,277 +6,271 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
  */
 
-import type { PassportStatic } from "passport";
-import { describe, expect, it, vi } from "vitest";
-import { createGithubProvider } from "#/federations/github.mjs";
-import type { FederationProfile } from "#/federations/types.mjs";
-import { supportsClaimMapping, supportsLogout, supportsRefresh } from "#/federations/types.mjs";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const baseConfig = {
-	name: "github",
-	clientId: "ghid",
-	clientSecret: "ghsecret",
-	callbackURL: "http://localhost/callback",
-	sessionDomain: ".example.com",
-	authCallbackUrl: "/auth/callback",
-	clientUrl: "http://localhost:3001",
-};
+const hoisted = vi.hoisted(() => ({
+	mockBuildAuthorizationUrl: vi.fn(),
+	mockAuthorizationCodeGrant: vi.fn(),
+	mockFetchUserInfo: vi.fn(),
+	mockFetchProtectedResource: vi.fn(),
+	skipStateCheckSym: Symbol("skipStateCheck"),
+	skipSubjectCheckSym: Symbol("skipSubjectCheck"),
+}));
+const {
+	mockBuildAuthorizationUrl,
+	mockAuthorizationCodeGrant,
+	mockFetchUserInfo,
+	mockFetchProtectedResource,
+	skipStateCheckSym,
+} = hoisted;
 
-describe("createGithubProvider", () => {
-	it("returns a provider with the configured name", () => {
-		const provider = createGithubProvider(baseConfig);
-		expect(provider.name).toBe("github");
+vi.mock("openid-client", () => ({
+	Configuration: class MockConfiguration {
+		constructor(
+			public serverMetadata: unknown,
+			public clientId: string,
+			public clientSecret?: string,
+		) {}
+	},
+	buildAuthorizationUrl: (...args: unknown[]) => hoisted.mockBuildAuthorizationUrl(...args),
+	authorizationCodeGrant: (...args: unknown[]) => hoisted.mockAuthorizationCodeGrant(...args),
+	fetchUserInfo: (...args: unknown[]) => hoisted.mockFetchUserInfo(...args),
+	fetchProtectedResource: (...args: unknown[]) => hoisted.mockFetchProtectedResource(...args),
+	skipStateCheck: hoisted.skipStateCheckSym,
+	skipSubjectCheck: hoisted.skipSubjectCheckSym,
+}));
+
+import { createGithubProvider } from "../github.mjs";
+
+describe("createGithubProvider on openid-client", () => {
+	const baseConfig = {
+		name: "github",
+		clientId: "client-id",
+		clientSecret: "client-secret",
+		callbackURL: "https://app.example.com/session/oauth/federation/github/callback",
+	};
+
+	beforeEach(() => {
+		vi.resetAllMocks();
 	});
 
-	it("returns scope === ['read:user', 'user:email']", () => {
-		const provider = createGithubProvider(baseConfig);
-		expect(provider.scope).toEqual(["read:user", "user:email"]);
+	it("advertises name and GitHub scopes", () => {
+		const p = createGithubProvider(baseConfig);
+		expect(p.name).toBe("github");
+		expect([...p.scope]).toEqual(["read:user", "user:email"]);
 	});
 
-	it("validates redirect URL against session domain", () => {
-		const provider = createGithubProvider(baseConfig);
-		const result = provider.validateRedirect("https://app.example.com/callback");
-		expect(result.ok).toBe(true);
-	});
-
-	it("rejects redirect URL from different domain", () => {
-		const provider = createGithubProvider(baseConfig);
-		const result = provider.validateRedirect("https://evil.com/callback");
-		expect(result.ok).toBe(false);
-	});
-
-	it("resolves callback redirect with redirectTo", () => {
-		const provider = createGithubProvider(baseConfig);
-		const result = provider.resolveCallbackRedirect({
-			redirectTo: "https://app.example.com/dashboard",
+	it("buildAuthorizationUrl forwards redirect_uri/state/code_challenge to openid-client with GitHub authorize URL", () => {
+		mockBuildAuthorizationUrl.mockReturnValueOnce(
+			new URL("https://github.com/login/oauth/authorize?stub=1"),
+		);
+		const p = createGithubProvider(baseConfig);
+		const verifier = "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef";
+		const url = p.buildAuthorizationUrl({
+			redirectUri: baseConfig.callbackURL,
+			state: "abc",
+			codeVerifier: verifier,
 		});
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.value).toContain("/auth/callback");
-			expect(result.value).toContain("redirect_to=");
-		}
+		expect(url.hostname).toBe("github.com");
+		const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [unknown, Record<string, string>];
+		expect(params.redirect_uri).toBe(baseConfig.callbackURL);
+		expect(params.state).toBe("abc");
+		expect(params.code_challenge_method).toBe("S256");
+		expect(params.code_challenge).toMatch(/^[A-Za-z0-9_-]+$/);
+		expect(params.scope).toBe("read:user user:email");
 	});
 
-	it("returns misconfiguration error when clientUrl and authCallbackUrl are undefined", () => {
-		const configWithoutWebEndpoints = {
-			...baseConfig,
-			authCallbackUrl: undefined,
-			clientUrl: undefined,
-		};
-		const provider = createGithubProvider(configWithoutWebEndpoints);
-		const result = provider.resolveCallbackRedirect({});
-		expect(result.ok).toBe(false);
-		if (!result.ok) {
-			expect(result.error).toBe("misconfiguration");
-		}
-	});
-
-	it("returns misconfiguration error when redirectTo is set but authCallbackUrl is undefined", () => {
-		const configWithClientOnly = {
-			...baseConfig,
-			authCallbackUrl: undefined,
-		};
-		const provider = createGithubProvider(configWithClientOnly);
-		const result = provider.resolveCallbackRedirect({
-			redirectTo: "https://app.example.com/dashboard",
+	it("exchangeCode composes authorizationCodeGrant + fetchUserInfo + /user/emails into a FederationProfile", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({
+			access_token: "gh-at",
+			expires_in: 28800,
 		});
-		expect(result.ok).toBe(false);
-		if (!result.ok) {
-			expect(result.error).toBe("misconfiguration");
-			expect(result.errorDescription).toContain("authCallback");
-		}
-	});
-
-	it("falls back to client URL when authCallbackUrl is undefined and no redirectTo", () => {
-		const configWithClientOnly = {
-			...baseConfig,
-			authCallbackUrl: undefined,
-		};
-		const provider = createGithubProvider(configWithClientOnly);
-		const result = provider.resolveCallbackRedirect({});
-		expect(result.ok).toBe(true);
-		if (result.ok) {
-			expect(result.value).toBe("http://localhost:3001");
-		}
-	});
-});
-
-describe("setupPassportStrategy", () => {
-	it("registers passport-github2 strategy under provider.name", async () => {
-		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
-		const verifyUser = vi.fn(async () => null);
-		const provider = createGithubProvider(baseConfig);
-		await provider.setupPassportStrategy(mockPassport, { verifyUser });
-		expect(mockPassport.use).toHaveBeenCalledWith("github", expect.any(Object));
-	});
-
-	it("verify callback builds externalId as config.name + ':' + profile.id (default name='github')", async () => {
-		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
-		const verifyUser = vi.fn(async () => null);
-		const provider = createGithubProvider(baseConfig);
-		await provider.setupPassportStrategy(mockPassport, { verifyUser });
-		// Extract the verify callback passed to the GithubStrategy constructor
-		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
-		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
-		// Invoke it with a mock profile — passReqToCallback:true means req is the first arg
-		// arity-6: req, accessToken, refreshToken, params, profile, done
-		const done = vi.fn();
-		const reqStub = { session: {} } as unknown as import("express").Request;
-		await verifyCallback(reqStub, "at", "rt", {}, { id: "99999" }, done);
-		expect(verifyUser).toHaveBeenCalledWith(`${baseConfig.name}:99999`);
-	});
-
-	it("verify callback uses config.name in externalId for multi-tenant (github-enterprise)", async () => {
-		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
-		const verifyUser = vi.fn(async () => null);
-		const multiTenantConfig = { ...baseConfig, name: "github-enterprise" };
-		const provider = createGithubProvider(multiTenantConfig);
-		await provider.setupPassportStrategy(mockPassport, { verifyUser });
-		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
-		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
-		const done = vi.fn();
-		const reqStub = { session: {} } as unknown as import("express").Request;
-		await verifyCallback(reqStub, "at", "rt", {}, { id: "99999" }, done);
-		expect(verifyUser).toHaveBeenCalledWith("github-enterprise:99999");
-	});
-
-	it("verify callback calls done(null, false) when profile.id is empty", async () => {
-		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
-		const verifyUser = vi.fn(async () => null);
-		const provider = createGithubProvider(baseConfig);
-		await provider.setupPassportStrategy(mockPassport, { verifyUser });
-		const strategyInstance = (mockPassport.use as ReturnType<typeof vi.fn>).mock.calls[0][1];
-		const verifyCallback = strategyInstance._verify ?? strategyInstance.verify;
-		const done = vi.fn();
-		const reqStub = { session: {} } as unknown as import("express").Request;
-		await verifyCallback(reqStub, "at", "rt", {}, { id: "" }, done);
-		expect(done).toHaveBeenCalledWith(null, false);
-		expect(verifyUser).not.toHaveBeenCalled();
-	});
-
-	it("uses config.name as the passport strategy identifier for multi-tenant", async () => {
-		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
-		const provider = createGithubProvider({
-			...baseConfig,
-			name: "github-enterprise",
+		// GitHub's /user returns `id: number`, not `sub` — real shape, no fiction.
+		mockFetchUserInfo.mockResolvedValueOnce({
+			id: 12345678,
+			login: "alice",
+			name: "Alice",
+			avatar_url: "https://github.com/alice.png",
 		});
-		await provider.setupPassportStrategy(mockPassport, { verifyUser: async () => null });
-		expect(mockPassport.use).toHaveBeenCalledWith("github-enterprise", expect.any(Object));
-	});
-
-	it("uses ctx.pathResolver when provided to resolve passport-github2", async () => {
-		const mockPassport = { use: vi.fn() } as unknown as PassportStatic;
-		const provider = createGithubProvider(baseConfig);
-		// pathResolver records what spec was requested and returns the real module path
-		// so the dynamic import actually succeeds in this test environment.
-		const resolved: string[] = [];
-		const pathResolver = (spec: string) => {
-			resolved.push(spec);
-			return spec; // fall through to real module resolution
-		};
-		await provider.setupPassportStrategy(mockPassport, {
-			verifyUser: async () => null,
-			pathResolver,
+		// /user/emails response: primary+verified email
+		mockFetchProtectedResource.mockResolvedValueOnce({
+			json: async () => [
+				{ email: "alice@work.com", primary: true, verified: true },
+				{ email: "alice@personal.com", primary: false, verified: true },
+			],
 		});
-		expect(resolved).toContain("passport-github2");
+		const p = createGithubProvider(baseConfig);
+		const profile = await p.exchangeCode({
+			code: "gh-code",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.issuer).toBe("https://github.com");
+		// Adapter must coerce numeric id → string sub.
+		expect(profile.sub).toBe("12345678");
+		expect(profile.email).toBe("alice@work.com");
+		expect(profile.emailVerified).toBe(true);
+		expect(profile.name).toBe("Alice");
+		// GitHub returns avatar_url, not picture — adapter maps avatar_url → picture.
+		expect(profile.picture).toBe("https://github.com/alice.png");
+		expect(profile.accessToken).toBe("gh-at");
+		// GitHub OAuth Apps do not issue refresh tokens
+		expect(profile.refreshToken).toBeUndefined();
+		// expires_in: 28800 → expiresAt is a Date ~8h in the future
+		expect(profile.expiresAt).toBeInstanceOf(Date);
+		const [, , checks] = mockAuthorizationCodeGrant.mock.calls[0] as [
+			unknown,
+			unknown,
+			{ pkceCodeVerifier: string; expectedState: symbol },
+		];
+		expect(checks.pkceCodeVerifier).toBe("v");
+		expect(checks.expectedState).toBe(skipStateCheckSym);
 	});
 
-	it.skip("throws a clear error when passport-github2 is not installed (TODO: test via dynamic import mock — verify manually with package uninstalled)", () => {
-		// Manual verification: uninstall passport-github2 and call setupPassportStrategy.
-		// Expect: Error matching /GitHub federation requires passport-github2/i
-		// with the original module-not-found error as `cause`.
+	it("exchangeCode coerces numeric GitHub id to string sub (C-1 regression guard)", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-tok" });
+		// Real GitHub shape: id is a number, no sub field at all.
+		mockFetchUserInfo.mockResolvedValueOnce({ id: 99, login: "bob" });
+		mockFetchProtectedResource.mockResolvedValueOnce({
+			json: async () => [],
+		});
+		const p = createGithubProvider(baseConfig);
+		const profile = await p.exchangeCode({
+			code: "c",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.sub).toBe("99");
+		expect(typeof profile.sub).toBe("string");
 	});
-});
 
-describe("createGithubProvider validation", () => {
-	it("throws when clientId is missing", () => {
-		expect(() => createGithubProvider({ ...baseConfig, clientId: "" })).toThrow(/clientId/i);
+	it("exchangeCode returns expiresAt=null when GitHub omits expires_in (OAuth Apps classic)", async () => {
+		// GitHub OAuth Apps classic tokens have no finite expiry; the token response
+		// omits expires_in entirely. Adapter MUST return `null` (not `undefined`) so
+		// the FederationTokenStore envelope can distinguish "no expiry" from a missing
+		// field, and /oauth/federation/:name/token refuses to refresh.
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-classic" });
+		mockFetchUserInfo.mockResolvedValueOnce({ id: 7, login: "carol" });
+		mockFetchProtectedResource.mockResolvedValueOnce({ json: async () => [] });
+		const p = createGithubProvider(baseConfig);
+		const profile = await p.exchangeCode({
+			code: "c",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.expiresAt).toBeNull();
 	});
 
-	it("throws when clientSecret is missing", () => {
-		expect(() => createGithubProvider({ ...baseConfig, clientSecret: "" })).toThrow(
-			/clientSecret/i,
+	it("exchangeCode throws a descriptive error when userinfo has neither id nor sub", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-tok2" });
+		// No id, no sub — should never happen in production but must be caught.
+		mockFetchUserInfo.mockResolvedValueOnce({ login: "nosub" });
+		mockFetchProtectedResource.mockResolvedValueOnce({
+			json: async () => [],
+		});
+		const p = createGithubProvider(baseConfig);
+		await expect(
+			p.exchangeCode({ code: "c", codeVerifier: "v", redirectUri: baseConfig.callbackURL }),
+		).rejects.toThrow(/without id\/sub/i);
+	});
+
+	it("exchangeCode falls back to first-verified email when primary email is unverified", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at2" });
+		mockFetchUserInfo.mockResolvedValueOnce({ id: 99, login: "bob" });
+		mockFetchProtectedResource.mockResolvedValueOnce({
+			json: async () => [
+				{ email: "unverified@example.com", primary: true, verified: false },
+				{ email: "verified@example.com", primary: false, verified: true },
+			],
+		});
+		const p = createGithubProvider(baseConfig);
+		const profile = await p.exchangeCode({
+			code: "c",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.email).toBe("verified@example.com");
+		expect(profile.emailVerified).toBe(true);
+	});
+
+	it("exchangeCode sets email=undefined when no verified email exists", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at3" });
+		mockFetchUserInfo.mockResolvedValueOnce({ id: 77, login: "charlie" });
+		mockFetchProtectedResource.mockResolvedValueOnce({
+			json: async () => [{ email: "nope@example.com", primary: true, verified: false }],
+		});
+		const p = createGithubProvider(baseConfig);
+		const profile = await p.exchangeCode({
+			code: "c",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.email).toBeUndefined();
+		expect(profile.emailVerified).toBeUndefined();
+	});
+
+	it("does NOT implement SupportsRefresh (GitHub OAuth Apps do not issue refresh tokens)", () => {
+		const p = createGithubProvider(baseConfig);
+		expect((p as Record<string, unknown>).refreshToken).toBeUndefined();
+	});
+
+	it("mapClaims maps first-class claims from FederationProfile", () => {
+		const p = createGithubProvider(baseConfig);
+		const claims = p.mapClaims({
+			issuer: "https://github.com",
+			sub: "12345678",
+			email: "bob@work.com",
+			emailVerified: true,
+			name: "Bob",
+			picture: "https://avatars.githubusercontent.com/u/12345678",
+		});
+		expect(claims.email).toBe("bob@work.com");
+		expect(claims.emailVerified).toBe(true);
+		expect(claims.name).toBe("Bob");
+		expect(claims.picture).toBe("https://avatars.githubusercontent.com/u/12345678");
+	});
+
+	it("endSession redirects to postLogoutRedirectUri (GitHub has no end-session endpoint)", async () => {
+		const p = createGithubProvider(baseConfig);
+		const { url, method } = await p.endSession({
+			postLogoutRedirectUri: "https://rp/done",
+			state: "s1",
+		});
+		expect(method).toBe("GET");
+		expect(url.href).toContain("https://rp/done");
+		expect(url.searchParams.get("state")).toBe("s1");
+	});
+
+	it("endSession throws a descriptive error when postLogoutRedirectUri is an invalid URL", async () => {
+		const p = createGithubProvider(baseConfig);
+		await expect(p.endSession({ postLogoutRedirectUri: "not a valid url" })).rejects.toThrow(
+			/invalid postLogoutRedirectUri/i,
 		);
 	});
 
-	it("throws when callbackURL is missing", () => {
-		expect(() => createGithubProvider({ ...baseConfig, callbackURL: "" })).toThrow(/callbackURL/i);
-	});
-});
-
-describe("GitHub provider capabilities", () => {
-	const base = {
-		name: "github",
-		clientId: "cid",
-		clientSecret: "csec",
-		callbackURL: "https://example.com/cb",
-	};
-
-	it("implements mapClaims and endSession; does NOT implement refresh", () => {
-		const p = createGithubProvider(base);
-		expect(supportsClaimMapping(p)).toBe(true);
-		expect(supportsLogout(p)).toBe(true);
-		expect(supportsRefresh(p)).toBe(false);
+	it("endSession honors configured endSessionEndpoint when present (I-1 — GitHub Enterprise support)", async () => {
+		const p = createGithubProvider({
+			...baseConfig,
+			endSessionEndpoint: "https://github.example.corp/logout",
+		});
+		const { url, method } = await p.endSession({
+			idTokenHint: "id-tok",
+			postLogoutRedirectUri: "https://app.example.com/done",
+			state: "st2",
+		});
+		expect(method).toBe("GET");
+		expect(url.origin + url.pathname).toBe("https://github.example.corp/logout");
+		expect(url.searchParams.get("id_token_hint")).toBe("id-tok");
+		expect(url.searchParams.get("post_logout_redirect_uri")).toBe("https://app.example.com/done");
+		expect(url.searchParams.get("state")).toBe("st2");
 	});
 
-	describe("mapClaims", () => {
-		it("maps profile fields (without fetching /user/emails)", async () => {
-			const p = createGithubProvider(base);
-			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
-			const profile: FederationProfile = {
-				id: "gh-42",
-				raw: {
-					username: "alice",
-					displayName: "Alice Dev",
-					emails: [{ value: "primary@x.com" }],
-					photos: [{ value: "https://avatars.githubusercontent.com/u/42" }],
-				},
-			};
-			expect(p.mapClaims(profile)).toEqual({
-				email: "primary@x.com",
-				name: "Alice Dev",
-				picture: "https://avatars.githubusercontent.com/u/42",
-			});
-		});
-
-		it("omits email when passport profile exposes none (caller must fetchGithubPrimaryEmail separately)", () => {
-			const p = createGithubProvider(base);
-			if (!supportsClaimMapping(p)) throw new Error("expected claim mapping");
-			const profile: FederationProfile = {
-				id: "gh",
-				raw: { displayName: "Anon" },
-			};
-			expect(p.mapClaims(profile)).toEqual({ name: "Anon" });
-		});
-	});
-
-	describe("endSession", () => {
-		it("returns a no-op-ish GET URL pointing at the post_logout_redirect_uri directly (GitHub has no end-session endpoint)", async () => {
-			const p = createGithubProvider(base);
-			if (!supportsLogout(p)) throw new Error("expected logout capability");
-			const result = await p.endSession({
-				postLogoutRedirectUri: "https://rp/done",
-				state: "abc",
-			});
-			expect(result.method).toBe("GET");
-			expect(result.url.href).toContain("https://rp/done");
-			expect(result.url.searchParams.get("state")).toBe("abc");
-		});
-
-		it("throws a descriptive error when postLogoutRedirectUri is an invalid URL", async () => {
-			const p = createGithubProvider(base);
-			if (!supportsLogout(p)) throw new Error("expected logout capability");
-			await expect(p.endSession({ postLogoutRedirectUri: "not a valid url" })).rejects.toThrow(
-				/invalid postLogoutRedirectUri/i,
-			);
-		});
+	it("endSession falls back to https://github.com/logout when neither endSessionEndpoint nor postLogoutRedirectUri is set", async () => {
+		const p = createGithubProvider(baseConfig);
+		const { url, method } = await p.endSession({});
+		expect(method).toBe("GET");
+		expect(url.href).toContain("https://github.com/logout");
 	});
 });

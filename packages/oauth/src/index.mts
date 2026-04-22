@@ -29,6 +29,7 @@ export {
 	type RenderFrontchannelLogoutHtmlOptions,
 	renderFrontchannelLogoutHtml,
 } from "./logout/renderFrontchannel.mjs";
+export { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 export { oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
 export { oauthSessionModule } from "./oauthSession.mjs";

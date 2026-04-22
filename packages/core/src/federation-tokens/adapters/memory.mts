@@ -27,7 +27,8 @@ const cloneTokens = (t: FederationTokens): FederationTokens => ({
 	refreshToken: t.refreshToken,
 	idToken: t.idToken,
 	// Copy Date so caller-held references can't mutate stored state.
-	expiresAt: new Date(t.expiresAt.getTime()),
+	// `null` means upstream provider issued no finite expiry — pass through as-is.
+	expiresAt: t.expiresAt === null ? null : new Date(t.expiresAt.getTime()),
 	tokenType: t.tokenType,
 	scope: t.scope,
 	// Shallow-copy rawParams; sufficient since consumers treat it as read-only.

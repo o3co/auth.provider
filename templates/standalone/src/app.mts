@@ -21,8 +21,12 @@ import {
 	AppConfigSchema,
 	createApp,
 	createDefaultFactories,
+	createFederationTokenStoreFactory,
 	createKeyStoreFactory,
+	createUserSessionStoreFactory,
+	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
+	registerBuiltinUserSessionStores,
 } from "@o3co/auth-provider-core";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import {
@@ -40,7 +44,6 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import session from "express-session";
 import helmet from "helmet";
-import passport from "passport";
 
 import logger from "#/logger.mjs";
 import { resolveConfigPaths } from "./configPath.mjs";
@@ -135,14 +138,29 @@ await (async (): Promise<void> => {
 		}),
 	);
 
-	// Step 6: Install Passport middleware. Strategies are registered later by modules during init().
-	app.use(passport.initialize());
-	app.use(passport.session());
-
-	// Step 7: Build the JWT signing KeyStore used to issue access / ID tokens.
+	// Step 6: Build the JWT signing KeyStore used to issue access / ID tokens.
 	const keyStoreFactory = createKeyStoreFactory();
 	registerBuiltinKeyStores(keyStoreFactory);
 	const keyStore = await keyStoreFactory.create(flattenAdapterConfig(config.oauth.jwt.signingKey));
+
+	// Step 7: Build UserSessionStore and FederationTokenStore (required by sessionModule).
+	const userSessionStoreFactory = createUserSessionStoreFactory();
+	registerBuiltinUserSessionStores(userSessionStoreFactory);
+	const userSessionStore = await userSessionStoreFactory.create(
+		flattenAdapterConfig(
+			(config as { userSessionStore?: { type: string } & Record<string, unknown> })
+				.userSessionStore ?? { type: "memory" },
+		),
+	);
+
+	const federationTokenStoreFactory = createFederationTokenStoreFactory();
+	registerBuiltinFederationTokenStores(federationTokenStoreFactory);
+	const federationTokenStore = await federationTokenStoreFactory.create(
+		flattenAdapterConfig(
+			(config as { federationTokenStore?: { type: string } & Record<string, unknown> })
+				.federationTokenStore ?? { type: "memory" },
+		),
+	);
 
 	// Step 8: Compose the OAuth / session modules and build the app router.
 	const { init, router, grantRegistry } = createApp({
@@ -150,6 +168,8 @@ await (async (): Promise<void> => {
 		pathResolver: import.meta.resolve,
 		config,
 		keyStore,
+		userSessionStore,
+		federationTokenStore,
 		modules: [
 			oauthModule({ clientRepository, codeRepository, express }),
 			sessionModule({ userRepository, express }),
@@ -158,7 +178,7 @@ await (async (): Promise<void> => {
 		],
 	});
 
-	// Step 9: Run async module init (registers Passport strategies, resolves external deps via pathResolver).
+	// Step 9: Run async module init (resolves external deps via pathResolver).
 	await init();
 
 	// Step 10: Mount the composed router onto the Express app.
