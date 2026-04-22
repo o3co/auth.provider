@@ -256,14 +256,22 @@ export const createRouter = (
 			const authTime = new Date();
 			const expiresAt = new Date(Date.now() + sessionTtlMs);
 
-			await userSessionStore.create({
-				sid,
-				sub: user.id,
-				authTime,
-				expiresAt,
-				federations: [provider.name],
-				claims,
-			});
+			try {
+				await userSessionStore.create({
+					sid,
+					sub: user.id,
+					authTime,
+					expiresAt,
+					federations: [provider.name],
+					claims,
+				});
+			} catch (err) {
+				console.warn({ err, provider: provider.name }, "userSession create failed");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "Session store unavailable",
+				});
+			}
 
 			// Session fixation mitigation: regenerate the session ID before writing auth state.
 			// This must happen AFTER userSessionStore.create (so we have a sid to restore) but
@@ -342,6 +350,11 @@ export const createRouter = (
 				} catch {
 					// best-effort — ignore
 				}
+				// Best-effort: destroy the fresh (empty) session so the store doesn't
+				// accumulate authenticated-nothing sessions on post-regenerate failures.
+				await new Promise<void>((resolve) => {
+					req.session.destroy(() => resolve());
+				});
 				console.error({ err, sid, provider: provider.name }, "session post-create failed");
 				return res.status(500).json({
 					error: "session_create_failed",

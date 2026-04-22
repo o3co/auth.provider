@@ -21,8 +21,6 @@ peer dependencies（ワークスペースルートに別途インストール）
 
 ```
 express@^5.0.0
-passport@^0.7.0                        (optional)
-passport-oauth2-client-password@^0.1.2  (optional)
 ```
 
 ## パブリック API
@@ -79,7 +77,6 @@ grant レジストリに `"authorization_code"` および `"refresh_token"` gran
 function createOAuthRouter(
   express: ExpressLike,
   options: {
-    passport: PassportStatic;
     registry: GrantRegistry;
     config: AppConfig;
     clientRepository: ClientRepository;
@@ -89,7 +86,7 @@ function createOAuthRouter(
 ): Promise<{ router: Router; registry: GrantRegistry }>;
 ```
 
-低レベルのファクトリ関数。Express ルーターと設定済み grant レジストリを生成する。通常は `oauthModule` 内部で呼び出される。構築後のレジストリインスタンスに直接アクセスしたい場合に使用する。
+低レベルのファクトリ関数。Express ルーターと設定済み grant レジストリを生成する。通常は `oauthModule` 内部で呼び出される。構築後のレジストリインスタンスに直接アクセスしたい場合に使用する。`/oauth/introspect` のクライアント認証は `createClientAuthMiddleware(clientRepository)` が担う — Passport 依存なし。
 
 ## 使い方
 

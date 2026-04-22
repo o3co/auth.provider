@@ -75,9 +75,11 @@ export function createClientAuthMiddleware(clientRepository: ClientRepository): 
 
 		// RFC 6749 §2.3.1: HTTP Basic is the preferred method.
 		const authHeader = req.headers.authorization;
-		if (typeof authHeader === "string" && authHeader.startsWith("Basic ")) {
+		if (typeof authHeader === "string" && /^basic\s+/i.test(authHeader)) {
 			try {
-				const decoded = Buffer.from(authHeader.slice(6), "base64").toString("utf8");
+				const decoded = Buffer.from(authHeader.replace(/^basic\s+/i, ""), "base64").toString(
+					"utf8",
+				);
 				const idx = decoded.indexOf(":");
 				if (idx > 0) {
 					clientId = formUrlDecode(decoded.slice(0, idx));

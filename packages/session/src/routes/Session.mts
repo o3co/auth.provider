@@ -145,9 +145,9 @@ export const createRouter = (
 					user = await userRepository.authenticate(username, password);
 				} catch (err) {
 					console.warn({ err }, "local login authenticate failed");
-					return res.status(500).json({
-						error: "authentication_error",
-						error_description: "Authentication failed",
+					return res.status(503).json({
+						error: "temporarily_unavailable",
+						error_description: "User directory temporarily unavailable",
 					});
 				}
 				if (!user) {

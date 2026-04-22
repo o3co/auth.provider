@@ -76,6 +76,12 @@ function makeSessionObject(
 			cb?.(null);
 			return this as unknown as import("express-session").Session;
 		},
+		destroy(cb?: (err: unknown) => void) {
+			// Best-effort destroy: remove the session from the store.
+			store.delete(persistKey);
+			cb?.(null);
+			return this as unknown as import("express-session").Session;
+		},
 	};
 	return session;
 }
@@ -869,6 +875,32 @@ describe("Federation routes", () => {
 			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
 			expect(res.status).toBe(503);
 			expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
+		});
+
+		// C-1 Claude: userSessionStore.create throws → 503 temporarily_unavailable (no rollback needed)
+		it("C-1: userSessionStore.create throws → 503 temporarily_unavailable; exchangeCode was called", async () => {
+			const provider = makeFakeProvider();
+			const providers = new Map([["test", provider]]);
+			const uss = makeUserSessionStore();
+			(uss.create as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("db outage"));
+			const fts = makeFederationTokenStore();
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userSessionStore: uss,
+				federationTokenStore: fts,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(503);
+			expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
+
+			// exchangeCode was called (failure happens at persist step, not exchange step)
+			expect(provider.exchangeCode).toHaveBeenCalledOnce();
+			// No token was attached (create failed before attach)
+			expect(fts.attach).not.toHaveBeenCalled();
 		});
 
 		// Fix 4 — missing code query param → 400 invalid_request (not 502 exchange_failed)

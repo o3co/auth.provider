@@ -199,6 +199,29 @@ describe("createClientAuthMiddleware", () => {
 		expect(res.body.client).toBe("alice");
 	});
 
+	// Fix 6 (P2 Codex): RFC 7235 §2.1 — auth scheme name is case-insensitive
+	it("Fix P2: authenticates via lowercase 'basic' scheme (RFC 7235 §2.1 case-insensitive)", async () => {
+		const app = express().use(express.urlencoded({ extended: false }));
+		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "s3cret" })), (req, res) => {
+			res.json({ client: req.oauthClient?.clientId });
+		});
+		const creds = Buffer.from("alice:s3cret").toString("base64");
+		const res = await request(app).post("/test").set("Authorization", `basic ${creds}`);
+		expect(res.status).toBe(200);
+		expect(res.body.client).toBe("alice");
+	});
+
+	it("Fix P2: authenticates via uppercase 'BASIC' scheme (RFC 7235 §2.1 case-insensitive)", async () => {
+		const app = express().use(express.urlencoded({ extended: false }));
+		app.post("/test", createClientAuthMiddleware(fakeRepo({ alice: "s3cret" })), (req, res) => {
+			res.json({ client: req.oauthClient?.clientId });
+		});
+		const creds = Buffer.from("alice:s3cret").toString("base64");
+		const res = await request(app).post("/test").set("Authorization", `BASIC ${creds}`);
+		expect(res.status).toBe(200);
+		expect(res.body.client).toBe("alice");
+	});
+
 	// Fix 6: decodeURIComponent throw path
 	it("returns 401 Malformed client credentials when Basic header contains invalid percent-encoding", async () => {
 		const app = express().use(express.urlencoded({ extended: false }));

@@ -21,8 +21,6 @@ Peer dependencies (install separately in the workspace root):
 
 ```
 express@^5.0.0
-passport@^0.7.0                       (optional)
-passport-oauth2-client-password@^0.1.2 (optional)
 ```
 
 ## Public API
@@ -79,7 +77,6 @@ Registers the `"authorization_code"` and `"refresh_token"` grant types in the gr
 function createOAuthRouter(
   express: ExpressLike,
   options: {
-    passport: PassportStatic;
     registry: GrantRegistry;
     config: AppConfig;
     clientRepository: ClientRepository;
@@ -89,7 +86,7 @@ function createOAuthRouter(
 ): Promise<{ router: Router; registry: GrantRegistry }>;
 ```
 
-Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction.
+Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction. Client authentication at `/oauth/introspect` is handled by `createClientAuthMiddleware(clientRepository)` — no Passport dependency required.
 
 ## Usage Example
 

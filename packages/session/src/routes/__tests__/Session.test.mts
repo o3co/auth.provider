@@ -275,7 +275,7 @@ describe("Session routes — POST /session/login", () => {
 	});
 
 	describe("authentication error", () => {
-		it("returns 500 with authentication_error when authenticate throws", async () => {
+		it("returns 503 temporarily_unavailable when authenticate throws (user directory outage)", async () => {
 			const { app } = buildApp({
 				userRepository: {
 					authenticate: vi.fn().mockRejectedValue(new Error("db failure")),
@@ -288,9 +288,9 @@ describe("Session routes — POST /session/login", () => {
 				.send("username=alice&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
-			expect(res.status).toBe(500);
+			expect(res.status).toBe(503);
 			expect(res.body).toMatchObject({
-				error: "authentication_error",
+				error: "temporarily_unavailable",
 			});
 		});
 
