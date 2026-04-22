@@ -379,6 +379,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		}
 
 		try {
+			// currentTokens tracks the freshest snapshot of stored federation tokens.
+			// It starts as the pre-lock read and is updated to the post-lock re-read
+			// value (11d) so that all downstream IdP calls and store writes use the
+			// most up-to-date refresh_token and id_token — never a stale pre-lock snapshot.
+			let currentTokens = tokens;
+
 			// 11d: Re-read tokens after lock acquisition to detect concurrent refresh.
 			if (release !== undefined) {
 				let freshTokens: Awaited<ReturnType<typeof opts.federationTokenStore.get>>;
@@ -417,9 +423,18 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						...(freshTokens.scope ? { scope: freshTokens.scope } : {}),
 					});
 				}
+				// Update to the post-lock re-read value (may be freshTokens or null if
+				// the store returned null; in either case currentTokens keeps the pre-lock
+				// snapshot when freshTokens is null, which is the safest fallback).
+				if (freshTokens) {
+					currentTokens = freshTokens;
+				}
 			}
 
 			// 11e: Call provider to refresh the federation token.
+			// currentTokens now holds the freshest available snapshot — any post-lock
+			// re-read value has been folded in above. This ensures we never call the IdP
+			// with a stale (pre-lock, already-rotated) refresh_token.
 			// The lock is held across the IdP refresh call. Lock TTL (default 5s per
 			// AcquireLockOptions) SHOULD be >= IdP refresh timeout to avoid another
 			// waiter acquiring mid-flight. If the IdP call exceeds TTL, a second
@@ -428,7 +443,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// should tune ttlMs via the lock adapter config if their IdP is slow.
 			let refreshed: Awaited<ReturnType<typeof provider.refreshFederationToken>>;
 			try {
-				refreshed = await provider.refreshFederationToken(tokens.refreshToken!);
+				refreshed = await provider.refreshFederationToken(currentTokens.refreshToken ?? "");
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
 				logger.warn(`POST /oauth/federation/${name}/token: refreshFederationToken failed:`, error);
@@ -487,15 +502,19 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				});
 			}
 
-			// 11f: Update store — preserve refresh_token when IdP didn't rotate it.
+			// 11f: Update store — preserve refresh_token and id_token when IdP didn't rotate/return them.
+			// Use currentTokens (post-lock re-read) as the fallback source so we never
+			// revert to a stale pre-lock snapshot.
 			const updatedTokens = {
 				accessToken: refreshed.accessToken,
-				refreshToken: refreshed.refreshToken ?? tokens.refreshToken,
-				idToken: refreshed.idToken,
+				refreshToken: refreshed.refreshToken ?? currentTokens.refreshToken,
+				// IdPs like Google/GitHub typically don't return a new id_token on refresh.
+				// Fall back to the stored id_token to preserve the id_token_hint for logout (F-5).
+				idToken: refreshed.idToken ?? currentTokens.idToken,
 				expiresAt: refreshed.expiresAt,
-				tokenType: tokens.tokenType,
-				scope: tokens.scope,
-				rawParams: tokens.rawParams,
+				tokenType: currentTokens.tokenType,
+				scope: currentTokens.scope,
+				rawParams: currentTokens.rawParams,
 			};
 			try {
 				await opts.federationTokenStore.update(sid, name, updatedTokens);
@@ -524,7 +543,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				access_token: refreshed.accessToken,
 				token_type: "Bearer",
 				expires_in: expiresIn,
-				...(tokens.scope ? { scope: tokens.scope } : {}),
+				...(currentTokens.scope ? { scope: currentTokens.scope } : {}),
 			});
 		} finally {
 			// 11g: Release lock if acquired.

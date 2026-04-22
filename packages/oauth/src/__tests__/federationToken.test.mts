@@ -849,6 +849,129 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// Fix 1 regression: post-lock re-read currentTokens.refreshToken used (Codex P2)
+	// ---------------------------------------------------------------------------
+
+	describe("post-lock refresh uses currentTokens.refreshToken (Codex P2 regression)", () => {
+		it("calls refreshFederationToken with the FRESH refresh_token read after lock, not the pre-lock stale one", async () => {
+			const staleRefreshToken = "stale-rt-pre-lock";
+			const freshRefreshToken = "fresh-rt-post-lock";
+
+			// Pre-lock get: stale tokens with expired access_token
+			const staleTokens = {
+				...baseFedTokens,
+				refreshToken: staleRefreshToken,
+				expiresAt: new Date(Date.now() - 1000),
+			};
+			// Post-lock re-read: fresh tokens that are still within the 30s buffer
+			// (expiresAt is 10s from now — less than the default 30s buffer)
+			// so code still falls into the refresh branch
+			const freshTokensWithinBuffer = {
+				...baseFedTokens,
+				accessToken: "fresh-at-still-expiring",
+				refreshToken: freshRefreshToken,
+				expiresAt: new Date(Date.now() + 10_000), // 10s — inside the 30s buffer
+			};
+
+			const release = vi.fn().mockResolvedValue(undefined);
+			const getFn = vi
+				.fn()
+				.mockResolvedValueOnce(staleTokens) // pre-lock read
+				.mockResolvedValueOnce(freshTokensWithinBuffer); // post-lock re-read
+
+			const lockingStore = {
+				...makeFedTokenStore({ get: getFn }),
+				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+			};
+
+			const newExpiresAt = new Date(Date.now() + 3_600_000);
+			const refreshFn = vi.fn().mockResolvedValue({
+				accessToken: "brand-new-at",
+				refreshToken: "brand-new-rt",
+				expiresAt: newExpiresAt,
+			});
+			const refreshProvider: FederationProviderHandle & {
+				refreshFederationToken: (rt: string) => Promise<{
+					accessToken: string;
+					refreshToken?: string;
+					expiresAt: Date;
+				}>;
+			} = {
+				name: "google",
+				refreshFederationToken: refreshFn,
+			};
+
+			const app = buildApp({
+				fedTokenStore: lockingStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(200);
+			// The critical assertion: must use the FRESH refresh_token from post-lock re-read
+			expect(refreshFn).toHaveBeenCalledWith(freshRefreshToken);
+			expect(refreshFn).not.toHaveBeenCalledWith(staleRefreshToken);
+			expect(release).toHaveBeenCalled();
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Fix 2: preserve stored id_token when IdP omits it on refresh (Claude I1)
+	// ---------------------------------------------------------------------------
+
+	describe("preserves stored id_token when IdP omits it on refresh (Claude I1)", () => {
+		it("stores original idToken when provider.refreshFederationToken returns no idToken", async () => {
+			const storedIdToken = "stored-id-token-for-logout-hint";
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				idToken: storedIdToken,
+			};
+			const newExpiresAt = new Date(Date.now() + 3_600_000);
+			const refreshProvider: FederationProviderHandle & {
+				refreshFederationToken: (rt: string) => Promise<{
+					accessToken: string;
+					refreshToken?: string;
+					expiresAt: Date;
+				}>;
+			} = {
+				name: "google",
+				refreshFederationToken: vi.fn().mockResolvedValue({
+					accessToken: "new-at",
+					refreshToken: "new-rt",
+					// idToken deliberately absent — Google-style refresh
+					expiresAt: newExpiresAt,
+				}),
+			};
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(200);
+			// Stored idToken must be preserved, not overwritten with undefined
+			expect(fedTokenStore.update).toHaveBeenCalledWith(
+				"sid-1",
+				"google",
+				expect.objectContaining({
+					accessToken: "new-at",
+					idToken: storedIdToken,
+				}),
+			);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
 	// Logger routing
 	// ---------------------------------------------------------------------------
 

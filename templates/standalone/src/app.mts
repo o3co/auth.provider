@@ -44,6 +44,7 @@ import passport from "passport";
 
 import logger from "#/logger.mjs";
 
+// Step 1: Load and validate application config (HOCON → Zod schema).
 const config: AppConfig = validate(
 	parseFile(fileURLToPath(new URL("../config/application.conf", import.meta.url))),
 	AppConfigSchema,
@@ -67,11 +68,12 @@ const flattenAdapterConfig = (
 };
 
 await (async (): Promise<void> => {
-	// Initialize repositories via factory
+	// Step 2: Build repository factories and register built-in adapters (memory / file / etc.).
 	const appDir = path.dirname(fileURLToPath(import.meta.url));
 	const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
 	registerBuiltinAdapters({ userFactory, codeFactory, pathResolver: import.meta.resolve });
 
+	// Step 3: Instantiate client / user / code repositories from config.
 	const clientConfig = flattenAdapterConfig(
 		config.repositories.client as { type: string } & Record<string, unknown>,
 	);
@@ -86,6 +88,7 @@ await (async (): Promise<void> => {
 		flattenAdapterConfig(config.repositories.code as { type: string } & Record<string, unknown>),
 	);
 
+	// Step 4: Create the Express app and apply base security middleware (trust proxy + helmet).
 	const app = express();
 
 	app.set("trust proxy", config.http.trustProxy);
@@ -100,6 +103,7 @@ await (async (): Promise<void> => {
 		}),
 	);
 
+	// Step 5: Build the session store from config and mount express-session middleware.
 	const sessionStoreFactory = createSessionStoreFactory();
 	registerBuiltinSessionStores(sessionStoreFactory);
 	const store = await sessionStoreFactory.create(
@@ -123,16 +127,16 @@ await (async (): Promise<void> => {
 		}),
 	);
 
-	// Initialize Passport middleware (strategies are registered by modules during init)
+	// Step 6: Install Passport middleware. Strategies are registered later by modules during init().
 	app.use(passport.initialize());
 	app.use(passport.session());
 
-	// Initialize KeyStore
+	// Step 7: Build the JWT signing KeyStore used to issue access / ID tokens.
 	const keyStoreFactory = createKeyStoreFactory();
 	registerBuiltinKeyStores(keyStoreFactory);
 	const keyStore = await keyStoreFactory.create(flattenAdapterConfig(config.oauth.jwt.signingKey));
 
-	// Create app with module composition
+	// Step 8: Compose the OAuth / session modules and build the app router.
 	const { init, router, grantRegistry } = createApp({
 		express,
 		pathResolver: import.meta.resolve,
@@ -146,14 +150,17 @@ await (async (): Promise<void> => {
 		],
 	});
 
-	// Initialize all modules (async — resolves external deps via pathResolver)
+	// Step 9: Run async module init (registers Passport strategies, resolves external deps via pathResolver).
 	await init();
 
+	// Step 10: Mount the composed router onto the Express app.
 	app.use(router);
 
+	// Step 11: Start the HTTP server.
 	const server = app.listen(config.http.port, (): void => {
 		logger.info(`Server is running on http://localhost:${config.http.port}`);
 	});
 
+	// Step 12: Register graceful shutdown so in-flight grants are cleaned up on SIGTERM / SIGINT.
 	gracefulShutdown(server, () => grantRegistry.cleanup());
 })();
