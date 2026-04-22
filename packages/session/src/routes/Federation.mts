@@ -13,22 +13,36 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import crypto from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { AppConfig } from "@o3co/auth-provider-core";
+import {
+	extractUserClaims,
+	type FederationTokenStoreBase,
+	type UserRepository,
+	type UserSessionStoreBase,
+} from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import type { PassportStatic } from "passport";
-import type { FederationProviderBase } from "../federations/types.mjs";
+import { generateCodeVerifier } from "../federations/pkce.mjs";
+import { supportsClaimMapping, type FederationProvider } from "../federations/types.mjs";
 
 declare module "express-session" {
 	interface SessionData {
-		redirectTo?: string;
-		oauth_csrf_state?: string;
+		/** Ephemeral federation state stored during the OAuth 2 redirect leg.
+		 *  Deleted by the callback handler immediately after the CSRF check (reuse prevention). */
+		federation?: {
+			name: string;
+			state: string;
+			codeVerifier: string;
+			redirectTo?: string;
+		};
+		/** UserSession ID — set after successful federation callback. */
+		sid?: string;
 		isAuthenticated?: boolean;
 		user?: Record<string, unknown>;
-		/** UserSession ID — set by the built-in onFederationCallback hook and preserved across session regeneration. */
-		sid?: string;
 	}
 }
+
+const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
 
 export const createRouter = (
 	express: {
@@ -37,35 +51,53 @@ export const createRouter = (
 		urlencoded: (opts: { extended: boolean }) => RequestHandler;
 	},
 	{
-		passport,
-		config,
+		config: _config,
 		federationProviders,
+		providerCallbackUrls,
+		userRepository,
+		userSessionStore,
+		federationTokenStore,
+		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 	}: {
-		passport: PassportStatic;
 		config: AppConfig;
-		federationProviders: ReadonlyMap<string, FederationProviderBase>;
+		federationProviders: ReadonlyMap<string, FederationProvider>;
+		providerCallbackUrls: ReadonlyMap<string, string>;
+		userRepository: UserRepository;
+		userSessionStore: UserSessionStoreBase;
+		federationTokenStore: FederationTokenStoreBase;
+		sessionTtlMs?: number;
 	},
 ): Router => {
+	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
+	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");
+	if (!userRepository) throw new Error("federation routes require userRepository");
+	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
+
 	const router = express.Router();
 
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
-		.get("/oauth/federation/:name", (req: Request, res: Response, next) => {
+
+		// ------------------------------------------------------------------
+		// GET /oauth/federation/:name  — start the OAuth 2 redirect leg
+		// ------------------------------------------------------------------
+		.get("/oauth/federation/:name", (req: Request, res: Response) => {
 			const provider = federationProviders.get(String(req.params.name));
 			if (!provider) {
 				return res.status(404).json({ message: "NotFound" });
 			}
 
 			const { redirect_to } = req.query;
+
+			let redirectTo: string | undefined;
 			if (redirect_to != null) {
 				if (typeof redirect_to !== "string") {
 					return res.status(400).json({
 						error: "invalid_redirect",
-						error_description: "Invalid redirect_to",
+						error_description: "redirect_to must be a string",
 					});
 				}
-
 				const validation = provider.validateRedirect(redirect_to);
 				if (!validation.ok) {
 					return res.status(validation.status).json({
@@ -73,78 +105,196 @@ export const createRouter = (
 						error_description: validation.errorDescription,
 					});
 				}
+				redirectTo = redirect_to;
 			}
 
-			const csrfState = crypto.randomBytes(16).toString("hex");
-			req.session.oauth_csrf_state = csrfState;
-			if (typeof redirect_to === "string") {
-				req.session.redirectTo = redirect_to;
-			}
+			// Generate CSRF state and PKCE code verifier
+			const state = randomBytes(16).toString("base64url");
+			const codeVerifier = generateCodeVerifier();
 
-			return req.session.save((err: Error | null) => {
-				if (err) return res.status(500).json({ message: "Error saving session" });
-				// provider.name is the unique passport strategy identifier registered by
-				// setupPassportStrategy. The :name route param identifies the federation
-				// instance; provider.name is guaranteed to equal the :name route param —
-				// module.mts validates this invariant at build time by asserting the
-				// builder propagated config.name.
-				return passport.authenticate(provider.name, {
-					// Spread readonly to mutable to satisfy passport's AuthenticateOptions type.
-					scope: [...provider.scope],
-					state: csrfState,
-				})(req, res, next);
-			});
-		})
-		.get(
-			"/oauth/federation/:name/callback",
-			(req: Request, res: Response, next) => {
-				const provider = federationProviders.get(String(req.params.name));
-				if (!provider) {
-					return res.status(404).json({ message: "NotFound" });
-				}
+			// Persist ephemeral federation state in the session
+			const session = req.session as unknown as Record<string, unknown>;
+			session.federation = { name: provider.name, state, codeVerifier, redirectTo };
 
-				if (!req.session.oauth_csrf_state || req.query.state !== req.session.oauth_csrf_state) {
-					return res.status(400).json({ message: "invalid state" });
-				}
-
-				// provider.name is the unique passport strategy identifier registered by
-				// setupPassportStrategy.
-				return passport.authenticate(provider.name, {
-					session: false,
-					failureRedirect: config.endpoints.login.url,
-				})(req, res, next);
-			},
-			(req: Request, res: Response) => {
-				const provider = federationProviders.get(String(req.params.name));
-				if (!provider) {
-					return res.status(404).json({ message: "NotFound" });
-				}
-
-				const user = req.user;
-				const { redirectTo } = req.session;
-				// Capture sid before regeneration — it was set by the built-in onFederationCallback.
-				const sid = req.session.sid;
-
-				req.session.regenerate((err: Error | null) => {
-					if (err) return res.status(500).json({ message: "Error regenerating session" });
-
-					req.session.isAuthenticated = true;
-					req.session.user = user as Record<string, unknown> | undefined;
-					// Restore sid on the new session so F-3's access_token claim has a source.
-					if (sid) req.session.sid = sid;
-
-					const redirectResult = provider.resolveCallbackRedirect({ redirectTo });
-					if (!redirectResult.ok) {
-						return res.status(redirectResult.status).json({
-							error: redirectResult.error,
-							error_description: redirectResult.errorDescription,
-						});
-					}
-
-					return res.redirect(redirectResult.value);
+			// providerCallbackUrls is the authoritative map of per-provider callback URLs,
+			// populated by module wiring from config.federations.<name>.callbackURL.
+			const callbackUrl = providerCallbackUrls.get(provider.name);
+			if (!callbackUrl) {
+				return res.status(500).json({
+					error: "misconfiguration",
+					error_description: `No callback URL registered for provider "${provider.name}"`,
 				});
-			},
-		);
+			}
+
+			const authUrl = provider.buildAuthorizationUrl({ redirectUri: callbackUrl, state, codeVerifier });
+
+			return res.redirect(authUrl.toString());
+		})
+
+		// ------------------------------------------------------------------
+		// GET /oauth/federation/:name/callback  — exchange code, persist session
+		// ------------------------------------------------------------------
+		.get("/oauth/federation/:name/callback", async (req: Request, res: Response) => {
+			const provider = federationProviders.get(String(req.params.name));
+			if (!provider) {
+				return res.status(404).json({ message: "NotFound" });
+			}
+
+			const session = req.session as unknown as Record<string, unknown>;
+			const fed = session.federation as
+				| { name: string; state: string; codeVerifier: string; redirectTo?: string }
+				| undefined;
+
+			// Check session.federation present and name matches
+			if (!fed || fed.name !== String(req.params.name)) {
+				return res.status(400).json({
+					error: "invalid_session",
+					error_description: "No active federation session for this provider",
+				});
+			}
+
+			// CSRF state check
+			if (req.query.state !== fed.state) {
+				return res.status(400).json({
+					error: "invalid_state",
+					error_description: "CSRF state mismatch",
+				});
+			}
+
+			// Copy ephemeral state to locals, then delete and persist BEFORE any async work
+			// to guarantee reuse prevention even if exchangeCode throws.
+			const { codeVerifier, redirectTo } = fed;
+			delete session.federation;
+			// Best-effort persist: if save fails here, continue anyway — reuse
+			// prevention has already been applied in-memory for this request.
+			await new Promise<void>((resolve) => {
+				req.session.save((err) => {
+					if (err) {
+						console.warn(
+							{ err, provider: provider.name },
+							"reuse-prevention session save failed; continuing with in-memory state",
+						);
+					}
+					resolve();
+				});
+			});
+
+			// Exchange the authorization code for a FederationProfile
+			// providerCallbackUrls is the authoritative map; same entry verified above in the start handler.
+			const callbackUrl = providerCallbackUrls.get(provider.name);
+			if (!callbackUrl) {
+				return res.status(500).json({
+					error: "misconfiguration",
+					error_description: `No callback URL registered for provider "${provider.name}"`,
+				});
+			}
+
+			let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
+			try {
+				profile = await provider.exchangeCode({
+					code: String(req.query.code ?? ""),
+					codeVerifier,
+					redirectUri: callbackUrl,
+				});
+			} catch (err) {
+				console.warn({ err, provider: provider.name }, "federation token exchange failed");
+				return res.status(502).json({
+					error: "exchange_failed",
+					error_description: "Token exchange with upstream IdP failed",
+				});
+			}
+
+			if (!profile.sub) {
+				return res.status(400).json({
+					error: "invalid_profile",
+					error_description: "Federation profile is missing sub claim",
+				});
+			}
+
+			const user = await userRepository.authenticateByToken(
+				`${provider.name}:${profile.sub}`,
+			);
+			if (!user) {
+				return res.status(401).json({
+					error: "unknown_user",
+					error_description: "No local account linked to this federated identity",
+				});
+			}
+
+			// Build claims: user base claims merged with provider-specific mapped claims
+			const claims = {
+				...extractUserClaims(user),
+				...(supportsClaimMapping(provider) ? provider.mapClaims(profile) : {}),
+			};
+
+			const sid = randomUUID();
+			const authTime = new Date();
+			const expiresAt = new Date(Date.now() + sessionTtlMs);
+
+			await userSessionStore.create({
+				sid,
+				sub: user.id,
+				authTime,
+				expiresAt,
+				federations: [provider.name],
+				claims,
+			});
+
+			// Post-create: attach federation tokens + save session.sid.
+			// Any failure here rolls back in REVERSE order (F-6 pattern).
+			let attachedToFederation = false;
+			try {
+				if (profile.accessToken) {
+					await federationTokenStore.attach(sid, provider.name, {
+						accessToken: profile.accessToken,
+						refreshToken: profile.refreshToken,
+						idToken: profile.idToken,
+						expiresAt: profile.expiresAt ?? new Date(Date.now() + 3_600_000),
+					});
+					attachedToFederation = true;
+				}
+
+				// Set session fields
+				session.sid = sid;
+				session.isAuthenticated = true;
+				session.user = user as Record<string, unknown>;
+
+				// Persist session
+				await new Promise<void>((resolve, reject) => {
+					req.session.save((err) => (err ? reject(err as Error) : resolve()));
+				});
+
+				// Resolve redirect URL via provider
+				const redirectResult = provider.resolveCallbackRedirect({ redirectTo });
+				if (!redirectResult.ok) {
+					return res.status(redirectResult.status).json({
+						error: redirectResult.error,
+						error_description: redirectResult.errorDescription,
+					});
+				}
+
+				return res.redirect(redirectResult.value);
+			} catch (err) {
+				// Rollback in REVERSE order of creation
+				if (attachedToFederation) {
+					try {
+						await federationTokenStore.delete(sid, provider.name);
+					} catch {
+						// best-effort — ignore
+					}
+				}
+				try {
+					await userSessionStore.delete(sid);
+				} catch {
+					// best-effort — ignore
+				}
+				console.error({ err, sid, provider: provider.name }, "session post-create failed");
+				return res.status(500).json({
+					error: "session_create_failed",
+					error_description: "Internal error: session could not be persisted",
+				});
+			}
+		});
 
 	return router;
 };
