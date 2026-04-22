@@ -16,8 +16,8 @@ describe("in-memory UserSessionStore", () => {
 	const baseInput = {
 		sid: "sid-1",
 		sub: "user-1",
-		authTime: new Date("2026-04-21T00:00:00Z"),
-		expiresAt: new Date("2026-04-22T00:00:00Z"),
+		authTime: new Date(Date.now() - 3600_000),
+		expiresAt: new Date(Date.now() + 3600_000),
 		claims: { email: "a@b.com" },
 	};
 
