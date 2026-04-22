@@ -23,6 +23,8 @@ describe("scaffold", () => {
 		expect(existsSync(join(targetDir, "tsconfig.json"))).toBe(true);
 		expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
 		expect(existsSync(join(targetDir, "config", "application.conf"))).toBe(true);
+		expect(existsSync(join(targetDir, "config", "development.conf"))).toBe(true);
+		expect(existsSync(join(targetDir, "config", "production.conf"))).toBe(true);
 	});
 
 	it("rewrites package.json name to project name", () => {
