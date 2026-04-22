@@ -15,6 +15,7 @@
  */
 
 import type {
+	AuditSinkBase,
 	ClientRepository,
 	FederationProviderHandle,
 	FederationTokenStoreBase,
@@ -23,6 +24,7 @@ import type {
 	RefreshTokenStoreBase,
 	UserSessionStoreBase,
 } from "@o3co/auth-provider-core";
+import { emitAuditEvent } from "@o3co/auth-provider-core";
 import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
@@ -82,6 +84,8 @@ export interface LogoutRouterOptions {
 	fetchImpl?: typeof fetch;
 	/** Structured logger shared with broadcastBackchannelLogout and cascadeLogout. */
 	logger?: Logger;
+	/** Audit sink for operator observability events. No-op when undefined. */
+	auditSink?: AuditSinkBase;
 }
 
 /**
@@ -162,8 +166,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Step 3: Extract family_id, sid, sub from verified payload.
 			const familyId = typeof payload.family_id === "string" ? payload.family_id : null;
 			const sid = typeof payload.sid === "string" ? payload.sid : null;
-			// sub is not strictly required for this endpoint but extracted for future use.
-			// const sub = typeof payload.sub === "string" ? payload.sub : null;
+			const sub = typeof payload.sub === "string" ? payload.sub : null;
 
 			// Step 4: Check family revocation. Fail-closed: any throw → 401.
 			if (familyId !== null) {
@@ -182,6 +185,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					});
 				}
 				if (revoked) {
+					emitAuditEvent(opts.auditSink, {
+						timestamp: new Date(),
+						type: "logout.family_revoked",
+						subject: sub ?? undefined,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { sid: sid ?? undefined },
+					});
 					res.setHeader("Cache-Control", "no-store");
 					return res.status(401).json({
 						error: "invalid_token",
@@ -290,6 +301,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						state: typeof state === "string" ? state : undefined,
 					});
 					// Local state already cleared — redirect to IdP end-session URL.
+					emitAuditEvent(opts.auditSink, {
+						timestamp: new Date(),
+						type: "federation.logout.success",
+						subject: sub ?? undefined,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { federation: name, redirected_to_idp: true },
+					});
 					res.setHeader("Cache-Control", "no-store");
 					res.setHeader("Pragma", "no-cache");
 					return res.redirect(303, endSessionResult.url.toString());
@@ -300,12 +319,31 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						`/oauth/federation/${name}/logout: provider.endSession failed (orphan IdP session):`,
 						error,
 					);
+					emitAuditEvent(opts.auditSink, {
+						timestamp: new Date(),
+						type: "federation.logout.idp_unreachable",
+						subject: sub ?? undefined,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: {
+							federation: name,
+							error: error instanceof Error ? error.message : String(error),
+						},
+					});
 					res.setHeader("Cache-Control", "no-store");
 					return res.status(200).json({ disconnected: true });
 				}
 			}
 
 			// Step 12: No endSession support → return 200 disconnected.
+			emitAuditEvent(opts.auditSink, {
+				timestamp: new Date(),
+				type: "federation.logout.success",
+				subject: sub ?? undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { federation: name, redirected_to_idp: false },
+			});
 			res.setHeader("Cache-Control", "no-store");
 			return res.status(200).json({ disconnected: true });
 		},
@@ -435,6 +473,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			});
 
 			if (cascade.outcome === "failed") {
+				emitAuditEvent(opts.auditSink, {
+					timestamp: new Date(),
+					type: "logout.cascade_failed",
+					subject: sub ?? undefined,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { sid, step: cascade.step },
+				});
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "logout cascade failed",
@@ -442,6 +488,19 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			}
 
 			// Step 7: Select response.
+
+			// Emit logout.success before all terminal success response paths.
+			// Placed here (after cascade, before response selection) so every
+			// success branch (HTML / IdP redirect / post-logout redirect / JSON)
+			// emits exactly once without duplicating the call.
+			emitAuditEvent(opts.auditSink, {
+				timestamp: new Date(),
+				type: "logout.success",
+				subject: sub ?? undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { sid, federations: session.federations },
+			});
 
 			// 7a: Front-channel logout — if Accept: text/html AND any RP has a frontchannelLogoutUri.
 			// Use q-weighted negotiation: application/json is first so Accept: */* defaults to JSON.

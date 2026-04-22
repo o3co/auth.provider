@@ -610,6 +610,7 @@ export const createOAuthRouter = async (
 				refreshTokenStore,
 				clientRepository,
 				getFederationProviders,
+				auditSink,
 			}),
 		);
 	}

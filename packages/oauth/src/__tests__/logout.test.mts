@@ -16,6 +16,7 @@
 
 import { createSecretKey } from "node:crypto";
 import {
+	type AuditSinkBase,
 	type ClientRepository,
 	createSymmetricKeyStore,
 	type FederationProviderHandle,
@@ -133,6 +134,7 @@ interface BuildAppOpts {
 	/** Getter for federation providers — evaluated at request time. */
 	getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
 	logger?: Logger;
+	auditSink?: AuditSinkBase;
 }
 
 function buildApp(opts: BuildAppOpts = {}) {
@@ -148,6 +150,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 		// Stub fetchImpl so broadcast never makes real network calls
 		fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
 		logger: opts.logger,
+		auditSink: opts.auditSink,
 	});
 	app.use("/oauth", router);
 	return app;
@@ -695,6 +698,129 @@ describe("POST /oauth/federation/:name/logout", () => {
 			} finally {
 				consoleWarnSpy.mockRestore();
 			}
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Audit event observability
+// ---------------------------------------------------------------------------
+
+describe("audit events", () => {
+	describe("federation.logout.idp_unreachable", () => {
+		it("emits when provider.endSession throws (orphan IdP session)", async () => {
+			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const throwingProvider: FederationProviderHandle & { endSession: () => Promise<never> } = {
+				name: "google",
+				endSession: vi.fn().mockRejectedValue(new Error("IdP down")),
+			};
+			const app = buildFedLogoutApp({
+				auditSink,
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", throwingProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(200);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.logout.idp_unreachable",
+					details: expect.objectContaining({ federation: "google", error: "IdP down" }),
+				}),
+			);
+		});
+	});
+
+	describe("federation.logout.success", () => {
+		it("emits with redirected_to_idp: true when endSession succeeds (303 path)", async () => {
+			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const endSessionUrl = new URL("https://accounts.google.com/logout");
+			const mockProvider: FederationProviderHandle & {
+				endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
+			} = {
+				name: "google",
+				endSession: vi.fn().mockResolvedValue({ url: endSessionUrl, method: "GET" }),
+			};
+			const app = buildFedLogoutApp({
+				auditSink,
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", mockProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "google", token);
+
+			expect(res.status).toBe(303);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.logout.success",
+					details: expect.objectContaining({ federation: "google", redirected_to_idp: true }),
+				}),
+			);
+		});
+
+		it("emits with redirected_to_idp: false when provider has no endSession (200 path)", async () => {
+			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const bareProvider: FederationProviderHandle = { name: "github" };
+			const sessionWithGithub: UserSession = { ...baseSession, federations: ["github"] };
+			const app = buildApp({
+				auditSink,
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithGithub) }),
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["github", bareProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, "github", token);
+
+			expect(res.status).toBe(200);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.logout.success",
+					details: expect.objectContaining({ federation: "github", redirected_to_idp: false }),
+				}),
+			);
+		});
+	});
+
+	describe("logout.success", () => {
+		it("emits on POST /oauth/logout happy path", async () => {
+			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const app = buildApp({ auditSink });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(200);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "logout.success",
+					details: expect.objectContaining({ sid: "sid-1" }),
+				}),
+			);
+		});
+	});
+
+	describe("logout.cascade_failed", () => {
+		it("emits on 503 cascade failure", async () => {
+			const auditSink: AuditSinkBase = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const refreshStore = makeRefreshStore({
+				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
+			});
+			const app = buildApp({ auditSink, refreshStore });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(503);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "logout.cascade_failed",
+					details: expect.objectContaining({ sid: "sid-1", step: 1 }),
+				}),
+			);
 		});
 	});
 });
