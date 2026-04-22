@@ -29,6 +29,18 @@ export interface Client {
 	// default: true (includes sid in frontchannel logout iframe URL) — intentional deviation from OIDC
 	// Front-Channel Logout 1.0 spec default of false, to default to the safer behavior. See ClientEntrySchema.
 	frontchannelLogoutSessionRequired?: boolean;
+	// NEW (TODO-F-6): Federation-token access opt-in.
+	/**
+	 * When true, this client MAY call POST /oauth/federation/:name/token to
+	 * retrieve the user's upstream federation access_token. Deny-by-default
+	 * (deny-by-absence); must be explicitly opted in per client.
+	 *
+	 * Why default false: federation access_tokens grant access to the user's
+	 * external resources (Google Calendar, GitHub API, etc.) — high blast
+	 * radius. Opt-in prevents accidentally granting this power to a generic
+	 * OAuth client registration that only needs auth.
+	 */
+	allowedAzpForFederationToken?: boolean;
 }
 
 export interface User {

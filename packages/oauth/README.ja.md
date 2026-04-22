@@ -221,6 +221,80 @@ IdP end-session 呼び出しが失敗した場合、ローカル状態はすで�
 - `frontchannelLogoutUri?: string` — フロントチャネルの iframe src
 - `frontchannelLogoutSessionRequired?: boolean` — デフォルト `true`。`false` にすると iframe URL から `sid` を除外する
 
+## TODO-F-6 の変更点 — フェデレーショントークンエンドポイント
+
+`POST /oauth/federation/:name/token` は、呼び出し元のセッションに紐付いた upstream IdP の access_token を返す。これにより、Google Calendar / GitHub API などに対してサーバーサイドの API 呼び出しをユーザーの代わりに行える。
+
+### 認証
+
+- この auth.provider インスタンスが発行した Bearer access_token（`typ: at+jwt`）を使用する。
+- トークンの `azp` クレームでクライアントを特定する。クライアントレコードは `allowedAzpForFederationToken: true` で明示的に opt-in する必要がある（下記参照）。
+
+### フロー
+
+1. Bearer access_token を検証する。
+2. `family_id` が失効済み、またはセッションが存在しない場合は拒否。
+3. `client.allowedAzpForFederationToken === true` でない場合は拒否。
+4. フェデレーションがセッションに紐付いていない場合は拒否。
+5. キャッシュ済みの upstream access_token の有効期限が 30 秒以上残っている場合はそのまま返す。
+6. それ以外はリフレッシュを行う:
+   - 並行リフレッシュのファンアウトを防ぐために advisory lock を取得する（`FederationTokenStore` が `SupportsLock` を実装している場合）。
+   - ロック取得後に再読み込みを行う — 待機中に別のウェイターがリフレッシュした可能性がある。
+   - `provider.refreshFederationToken(refreshToken)` を呼び出し、結果を永続化する。
+   - ロックを解放する。
+
+### レスポンス
+
+```json
+{
+  "access_token": "<upstream-IdP-access-token>",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "<if-available>"
+}
+```
+
+### エラーレスポンス
+
+| ステータス | エラー | 意味 |
+| --- | --- | --- |
+| 401 | `invalid_token` | Bearer 未指定・形式不正・型が `at+jwt` でない・family が失効済み |
+| 403 | `forbidden` | クライアントが `allowedAzpForFederationToken` で opt-in していない |
+| 404 | `federation_not_linked` | 指定のフェデレーションがセッションに紐付いていない |
+| 410 | `refresh_token_absent` | 保存済みトークンに refresh_token がない（ログイン時に upstream が返さなかった） |
+| 410 | `re_authentication_required` | IdP が `invalid_grant` を返した — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要 |
+| 500 | `refresh_failed` | IdP リフレッシュの汎用エラー |
+| 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない |
+| 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった |
+| 503 | `temporarily_unavailable` | ストア障害、または IdP の 5xx / temporarily_unavailable |
+
+すべてのエラーレスポンスには `Cache-Control: no-store` と `Pragma: no-cache` を付与する。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
+
+### Opt-in: `allowedAzpForFederationToken`
+
+各 `Client` はオプションの `allowedAzpForFederationToken: boolean` フラグを持つ。デフォルトは `false` — クライアントは自動的にフェデレーショントークンアクセスを得ない。このエンドポイントを必要とするクライアントにはオペレーターが明示的に opt-in する:
+
+```yaml
+clients:
+  - clientId: my-backend-api
+    clientSecret: ...
+    allowedRedirectUris: [...]
+    allowedScopes: [openid, profile, email]
+    allowedAzpForFederationToken: true  # explicit opt-in
+```
+
+設計の意図: フェデレーションの access_token はユーザーの外部リソース（Google Drive、GitHub API など）へのアクセスを許可する。deny-by-default により、認証のみを目的とする一般的な OAuth クライアント登録で誤って露出するリスクを防ぐ。
+
+### 監査イベント
+
+このエンドポイントでは以下の監査イベントが発火する:
+
+- `federation.token.success` — トークン発行時（詳細に `refreshed: boolean` が含まれ、キャッシュヒットかリフレッシュパスかを区別できる）
+- `federation.token.forbidden` — 403 発生時（クライアントが opt-in していない）
+- `federation.token.family_revoked` — family 失効による 401 発生時
+- `federation.token.refresh_failed` — `provider.refreshFederationToken` が throw したとき（`invalid_grant` 以外）
+- `federation.token.reauthentication_required` — IdP から `invalid_grant` を受け取ったとき
+
 ## 関連
 
 - [`@o3co/auth-provider-session`](../session/README.ja.md) — セッションログイン / フェデレーションルート

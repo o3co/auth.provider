@@ -668,6 +668,15 @@ interface Logger {
 
 `cascadeLogout`、`broadcastBackchannelLogout` などの内部コールサイトが受け付ける最小の構造的ロガーインターフェース。`console`、pino、winston、bunyan など、互換 shape を持つオブジェクトであれば構造的に適合する。内部コールサイトが必要になった時点で追加メソッド（`info`、`error`、`debug`）を追加する。
 
+### フェデレーショントークン capabilities (TODO-F-6)
+
+`@o3co/auth-provider-oauth` の `POST /oauth/federation/:name/token` が使用する低レベルの構成要素。
+
+- `SupportsLock` — `FederationTokenStore` のオプション capability。`(sid, federationName)` 単位の advisory lock を提供し、並行リフレッシュによるサンダリングハード問題を防ぐ。組み込みの memory / redis アダプター両方がこの capability を実装している。`supportsLock(store)` type guard で検出できる。
+- `createInProcessLock()` — インメモリのロック実装。プロセスローカルな Map に保存し、TTL 付き expiry と Symbol ベースの所有権トークン（TTL 後の誤解放を防ぐ）を使用する。
+- `createRedisLock({ client, keyPrefix })` — `SET NX PX` + compare-and-delete release による redis バックのロック実装。最小限の redis クライアント（`get` / `set` / `del`）を受け付ける。値の整合性に関する契約は `RedisLockClient` の JSDoc を参照。
+- `Client.allowedAzpForFederationToken` — `Client` インターフェースの opt-in フラグ。デフォルト `false`。`POST /oauth/federation/:name/token` を利用するクライアントは `true` に設定する必要がある。
+
 ## 関連
 
 - ルート [README](../../README.md) — アーキテクチャ概要、設定リファレンス、Docker セットアップ

@@ -5,7 +5,8 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRedisFederationTokenStore, type RedisLikeClient } from "../adapters/redis.mjs";
-import type { FederationTokens } from "../types.mjs";
+import type { FederationTokenStoreBase, FederationTokens, SupportsLock } from "../types.mjs";
+import { supportsLock } from "../types.mjs";
 
 function createFakeRedis() {
 	const data = new Map<string, string>();
@@ -14,7 +15,9 @@ function createFakeRedis() {
 		data,
 		ttls,
 		get: vi.fn(async (k: string) => data.get(k) ?? null),
-		set: vi.fn(async (k: string, v: string, opts?: { PX?: number }) => {
+		set: vi.fn(async (k: string, v: string, opts?: { PX?: number; NX?: boolean }) => {
+			// NX: only set if key does not exist; return null when skipped.
+			if (opts?.NX && data.has(k)) return null;
 			data.set(k, v);
 			if (opts?.PX !== undefined) ttls.set(k, opts.PX);
 			return "OK";
@@ -180,6 +183,59 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(await reader.get("sid-1", "google")).toBeNull();
 		// The corrupt key is now gone so the next get also returns null naturally.
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+	});
+});
+
+describe("redis FederationTokenStore implements SupportsLock", () => {
+	it("supportsLock returns true for the redis store", () => {
+		const redis = createFakeRedis();
+		const store = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "allow-plaintext" },
+		});
+		expect(supportsLock(store)).toBe(true);
+	});
+
+	it("acquireLock returns acquired: true and release cleans up", async () => {
+		const redis = createFakeRedis();
+		const store = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "allow-plaintext" },
+		});
+		const r = await (store as FederationTokenStoreBase & SupportsLock).acquireLock({
+			sid: "s",
+			federationName: "google",
+		});
+		expect(r.acquired).toBe(true);
+		if (r.acquired) await r.release();
+		// After release the lock key is gone (uses lock: namespace, not ft: namespace).
+		const lockKeys = [...redis.data.keys()].filter((k) => k.includes("lock:"));
+		expect(lockKeys).toHaveLength(0);
+	});
+
+	it("lock key uses the lock: sub-namespace, not the token envelope namespace", async () => {
+		const redis = createFakeRedis();
+		const store = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "allow-plaintext" },
+		});
+		await store.attach("s", "google", {
+			accessToken: "at",
+			expiresAt: new Date(Date.now() + 3600_000),
+		});
+		const r = await (store as FederationTokenStoreBase & SupportsLock).acquireLock({
+			sid: "s",
+			federationName: "google",
+		});
+		expect(r.acquired).toBe(true);
+		// The lock key contains "lock:" and the token envelope key does not.
+		const lockKeys = [...redis.data.keys()].filter((k) => k.includes("lock:"));
+		const tokenKeys = [...redis.data.keys()].filter((k) => !k.includes("lock:"));
+		expect(lockKeys).toHaveLength(1);
+		expect(tokenKeys).toHaveLength(1);
+		expect(lockKeys[0]).toContain("ft:lock:");
+		expect(tokenKeys[0]).toMatch(/^ft:s:google$/);
+		if (r.acquired) await r.release();
 	});
 });
 

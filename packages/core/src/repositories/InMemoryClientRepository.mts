@@ -74,6 +74,8 @@ export const ClientEntrySchema = z
 		backchannelLogoutSessionRequired: z.boolean().optional().default(true),
 		frontchannelLogoutUri: httpUrlSchema.optional(),
 		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
+		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
+		allowedAzpForFederationToken: z.boolean().optional().default(false),
 	})
 	.strict();
 
@@ -108,6 +110,7 @@ export class InMemoryClientRepository implements ClientRepository {
 				frontchannelLogoutUri: entry.frontchannelLogoutUri,
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
+			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
 		};
 	}
 
@@ -144,6 +147,7 @@ export class InMemoryClientRepository implements ClientRepository {
 				frontchannelLogoutUri: entry.frontchannelLogoutUri,
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
+			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
 		};
 	}
 }

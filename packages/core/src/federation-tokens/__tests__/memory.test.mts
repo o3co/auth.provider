@@ -5,7 +5,12 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { createInMemoryFederationTokenStore } from "../adapters/memory.mjs";
-import type { FederationTokenStoreBase, FederationTokens } from "../types.mjs";
+import {
+	type FederationTokenStoreBase,
+	type FederationTokens,
+	type SupportsLock,
+	supportsLock,
+} from "../types.mjs";
 
 describe("in-memory FederationTokenStore", () => {
 	let store: FederationTokenStoreBase;
@@ -67,5 +72,16 @@ describe("in-memory FederationTokenStore", () => {
 	it("deleteBySession / delete are idempotent", async () => {
 		await expect(store.deleteBySession("nope")).resolves.toBeUndefined();
 		await expect(store.delete("nope", "google")).resolves.toBeUndefined();
+	});
+
+	it("implements SupportsLock capability", async () => {
+		const s = createInMemoryFederationTokenStore();
+		expect(supportsLock(s)).toBe(true);
+		const r = await (s as FederationTokenStoreBase & SupportsLock).acquireLock({
+			sid: "s",
+			federationName: "google",
+		});
+		expect(r.acquired).toBe(true);
+		if (r.acquired) await r.release();
 	});
 });

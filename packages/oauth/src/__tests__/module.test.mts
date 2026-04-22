@@ -269,4 +269,192 @@ describe("oauthModule", () => {
 		expect(res.headers.location).toContain("accounts.google.com");
 		expect(googleProvider.endSession).toHaveBeenCalledOnce();
 	});
+
+	it("federation token endpoint works when oauth module inits BEFORE context.federationProviders is populated (lazy resolution)", async () => {
+		const SECRET = "test-secret-at-least-32-chars!!";
+		const secretKey = createSecretKey(Buffer.from(SECRET));
+
+		// Access token with azp identifying the permitted client
+		const accessToken = await new SignJWT({
+			sub: "u-1",
+			sid: "sid-1",
+			family_id: "fam-1",
+			azp: "client-1",
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+			.setExpirationTime("1h")
+			.setIssuedAt()
+			.sign(secretKey);
+
+		// Session has "google" linked
+		const session: UserSession = {
+			sid: "sid-1",
+			sub: "u-1",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			federations: ["google"],
+			activeRPs: [],
+			familyIds: ["fam-1"],
+			claims: {},
+		};
+
+		const sessionStore: UserSessionStoreBase = {
+			kind: "memory",
+			create: vi.fn(),
+			get: vi.fn().mockResolvedValue(session),
+			registerRP: vi.fn(),
+			linkFamily: vi.fn(),
+			updateClaims: vi.fn(),
+			removeFederation: vi.fn().mockResolvedValue(undefined),
+			delete: vi.fn(),
+		};
+
+		const refreshStore: RefreshTokenStoreBase = {
+			kind: "memory",
+			isFamilyRevoked: vi.fn().mockResolvedValue(false),
+			rotate: vi.fn(),
+			revokeFamily: vi.fn().mockResolvedValue(undefined),
+		};
+
+		// Federation tokens — well within expiry so no refresh path is exercised
+		const fedTokenStore: FederationTokenStoreBase = {
+			kind: "memory",
+			attach: vi.fn(),
+			get: vi.fn().mockResolvedValue({
+				accessToken: "upstream-access-token",
+				expiresAt: new Date(Date.now() + 3_600_000),
+				tokenType: "Bearer",
+			}),
+			update: vi.fn(),
+			deleteBySession: vi.fn().mockResolvedValue(undefined),
+			delete: vi.fn().mockResolvedValue(undefined),
+		};
+
+		// Client with permission to retrieve federation tokens
+		const clientRepo: ClientRepository = {
+			findById: vi.fn().mockResolvedValue({
+				id: "client-1",
+				allowedRedirectUris: [],
+				allowedScopes: [],
+				allowedAzpForFederationToken: true,
+			}),
+			authenticate: vi.fn(),
+		};
+
+		// Build context — federationProviders is undefined at construction time
+		const rootRouter = express.Router();
+		const ctx: ModuleContext = makeContext({
+			config: {
+				...mockConfig,
+				oauth: {
+					...mockConfig.oauth,
+					jwt: { secret: SECRET, issuer: "https://auth.example.com" },
+				},
+			} as unknown as AppConfig,
+			keyStore: createSymmetricKeyStore(SECRET),
+			router: rootRouter,
+			refreshTokenStore: refreshStore,
+			userSessionStore: sessionStore,
+			federationTokenStore: fedTokenStore,
+			// NOT setting federationProviders yet — simulates oauth init running first
+		});
+
+		// Step 1: oauth module inits (federationProviders still undefined on ctx)
+		const oauth = oauthModule({
+			clientRepository: clientRepo,
+			codeRepository: {
+				createCode: vi.fn(),
+				getCode: vi.fn(),
+				deleteCode: vi.fn(),
+			} as unknown as CodeRepository,
+			express,
+		});
+		await oauth.init(ctx);
+
+		// Step 2: "session module" sets federationProviders AFTER oauth init
+		ctx.federationProviders = new Map<string, FederationProviderHandle>([
+			["google", { name: "google" }],
+		]);
+
+		// Step 3: issue a real HTTP request — the token is fresh so no refresh is needed
+		const app = express();
+		app.use(rootRouter);
+
+		const res = await request(app)
+			.post("/oauth/federation/google/token")
+			.set("Authorization", `Bearer ${accessToken}`)
+			.send({});
+
+		// The route is mounted and the token is returned
+		expect(res.status).toBe(200);
+		expect(res.body.access_token).toBe("upstream-access-token");
+		expect(res.body.token_type).toBe("Bearer");
+	});
+
+	it("federation-token endpoint is mounted even when oauth.jwt.issuer is absent (returns 401, not 404)", async () => {
+		const SECRET = "test-secret-at-least-32-chars!!";
+
+		const sessionStore: UserSessionStoreBase = {
+			kind: "memory",
+			create: vi.fn(),
+			get: vi.fn(),
+			registerRP: vi.fn(),
+			linkFamily: vi.fn(),
+			updateClaims: vi.fn(),
+			removeFederation: vi.fn(),
+			delete: vi.fn(),
+		};
+		const refreshStore: RefreshTokenStoreBase = {
+			kind: "memory",
+			isFamilyRevoked: vi.fn(),
+			rotate: vi.fn(),
+			revokeFamily: vi.fn(),
+		};
+		const fedTokenStore: FederationTokenStoreBase = {
+			kind: "memory",
+			attach: vi.fn(),
+			get: vi.fn(),
+			update: vi.fn(),
+			deleteBySession: vi.fn(),
+			delete: vi.fn(),
+		};
+
+		// Config intentionally omits oauth.jwt.issuer — only secret is provided.
+		const rootRouter = express.Router();
+		const ctx: ModuleContext = makeContext({
+			config: {
+				...mockConfig,
+				oauth: {
+					...mockConfig.oauth,
+					jwt: { secret: SECRET },
+					// issuer is deliberately absent
+				},
+			} as unknown as AppConfig,
+			keyStore: createSymmetricKeyStore(SECRET),
+			router: rootRouter,
+			refreshTokenStore: refreshStore,
+			userSessionStore: sessionStore,
+			federationTokenStore: fedTokenStore,
+		});
+
+		const oauth = oauthModule({
+			clientRepository: { findById: vi.fn(), authenticate: vi.fn() } as ClientRepository,
+			codeRepository: {
+				createCode: vi.fn(),
+				getCode: vi.fn(),
+				deleteCode: vi.fn(),
+			} as unknown as CodeRepository,
+			express,
+		});
+		await oauth.init(ctx);
+
+		const app = express();
+		app.use(rootRouter);
+
+		// No Authorization header → should get 401 (route is mounted) not 404 (route missing)
+		const res = await request(app).post("/oauth/federation/google/token").send({});
+
+		expect(res.status).toBe(401);
+	});
 });
