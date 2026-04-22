@@ -142,6 +142,61 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
+	describe("federation-token opt-in field round-trip (F-6)", () => {
+		it("preserves allowedAzpForFederationToken when set to true", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"rp",
+						{
+							clientSecret: "secret",
+							allowedRedirectUris: ["https://rp.example/cb"],
+							allowedScopes: ["openid"],
+							allowedAzpForFederationToken: true,
+						},
+					],
+				]),
+			);
+			const c = await repo.findById("rp");
+			expect(c?.allowedAzpForFederationToken).toBe(true);
+		});
+
+		it("defaults allowedAzpForFederationToken to false when omitted", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"rp",
+						{
+							clientSecret: "secret",
+							allowedRedirectUris: ["https://rp.example/cb"],
+							allowedScopes: ["openid"],
+						},
+					],
+				]),
+			);
+			const c = await repo.findById("rp");
+			expect(c?.allowedAzpForFederationToken).toBe(false);
+		});
+
+		it("preserves allowedAzpForFederationToken: false when explicit", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"rp",
+						{
+							clientSecret: "secret",
+							allowedRedirectUris: ["https://rp.example/cb"],
+							allowedScopes: ["openid"],
+							allowedAzpForFederationToken: false,
+						},
+					],
+				]),
+			);
+			const c = await repo.findById("rp");
+			expect(c?.allowedAzpForFederationToken).toBe(false);
+		});
+	});
+
 	describe("ClientEntrySchema URI validation", () => {
 		it("rejects an invalid URL in backchannelLogoutUri", () => {
 			const result = ClientEntrySchema.safeParse({
