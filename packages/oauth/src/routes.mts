@@ -592,19 +592,22 @@ export const createOAuthRouter = async (
 	// OIDC Core §5.3 — UserInfo endpoint
 	router.use(userinfo.createRouter(express, { keyStore, userSessionStore, refreshTokenStore }));
 
-	// Federation endpoints — mount only when all required stores + issuer are present.
+	// Federation endpoints — mount conditionally based on available stores and config.
 	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
 	// POST /oauth/federation/:name/token.
-	// issuer is required for logout_token signing in POST /oauth/logout.
+	// issuer is required for logout_token signing in POST /oauth/logout only.
 	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
-	const federationEndpointsSupported =
-		!!userSessionStore &&
-		!!federationTokenStore &&
-		!!refreshTokenStore &&
-		typeof issuer === "string" &&
-		issuer.length > 0;
+	const hasIssuer = typeof issuer === "string" && issuer.length > 0;
 
-	if (federationEndpointsSupported) {
+	// Logout (back-channel logout_token signing requires issuer).
+	const logoutSupported =
+		!!userSessionStore && !!federationTokenStore && !!refreshTokenStore && hasIssuer;
+
+	// Federation-token endpoint forwards upstream; does NOT need our issuer.
+	const federationTokenSupported =
+		!!userSessionStore && !!federationTokenStore && !!refreshTokenStore;
+
+	if (logoutSupported) {
 		router.use(
 			logoutRoute.createRouter(express, {
 				keyStore,
@@ -617,6 +620,9 @@ export const createOAuthRouter = async (
 				auditSink,
 			}),
 		);
+	}
+
+	if (federationTokenSupported) {
 		router.use(
 			federationTokenRoute.createRouter(express, {
 				keyStore,

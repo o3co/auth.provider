@@ -673,9 +673,11 @@ Minimal structural logger interface accepted by `cascadeLogout`, `broadcastBackc
 
 Low-level building blocks used by `POST /oauth/federation/:name/token` in `@o3co/auth-provider-oauth`.
 
+The lock primitives below (`createInProcessLock`, `createRedisLock`) are **internal implementation details** of the built-in adapters and are not exported from `@o3co/auth-provider-core`'s public entrypoint. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on these internal helpers.
+
 - `SupportsLock` — optional capability on `FederationTokenStore` for per-`(sid, federationName)` advisory locks. Used to prevent concurrent-refresh thundering herds. Built-in memory and redis adapters both implement this capability. Consumers detect it via the `supportsLock(store)` type guard.
-- `createInProcessLock()` — in-memory lock implementation, stored in a process-local Map with TTL-expiry and Symbol-based ownership tokens (prevents release-after-TTL race).
-- `createRedisLock({ client, keyPrefix })` — redis-backed lock via `SET NX PX` + compare-and-delete release. Accepts any minimal redis client (`get` / `set` / `del`) — see JSDoc on `RedisLockClient` for the value-fidelity contract.
+- `createInProcessLock()` — internal in-memory lock implementation used by the built-in memory adapter. Not exported from `@o3co/auth-provider-core`'s public entrypoint.
+- `createRedisLock({ client, keyPrefix })` — internal redis-backed lock implementation used by the built-in redis adapter. Not exported from the public entrypoint. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on this internal helper.
 - `Client.allowedAzpForFederationToken` — opt-in flag on the `Client` interface; default `false`. Clients that consume `POST /oauth/federation/:name/token` must set this to `true`.
 
 ## See Also

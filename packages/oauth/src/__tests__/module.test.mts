@@ -391,4 +391,70 @@ describe("oauthModule", () => {
 		expect(res.body.access_token).toBe("upstream-access-token");
 		expect(res.body.token_type).toBe("Bearer");
 	});
+
+	it("federation-token endpoint is mounted even when oauth.jwt.issuer is absent (returns 401, not 404)", async () => {
+		const SECRET = "test-secret-at-least-32-chars!!";
+
+		const sessionStore: UserSessionStoreBase = {
+			kind: "memory",
+			create: vi.fn(),
+			get: vi.fn(),
+			registerRP: vi.fn(),
+			linkFamily: vi.fn(),
+			updateClaims: vi.fn(),
+			removeFederation: vi.fn(),
+			delete: vi.fn(),
+		};
+		const refreshStore: RefreshTokenStoreBase = {
+			kind: "memory",
+			isFamilyRevoked: vi.fn(),
+			rotate: vi.fn(),
+			revokeFamily: vi.fn(),
+		};
+		const fedTokenStore: FederationTokenStoreBase = {
+			kind: "memory",
+			attach: vi.fn(),
+			get: vi.fn(),
+			update: vi.fn(),
+			deleteBySession: vi.fn(),
+			delete: vi.fn(),
+		};
+
+		// Config intentionally omits oauth.jwt.issuer — only secret is provided.
+		const rootRouter = express.Router();
+		const ctx: ModuleContext = makeContext({
+			config: {
+				...mockConfig,
+				oauth: {
+					...mockConfig.oauth,
+					jwt: { secret: SECRET },
+					// issuer is deliberately absent
+				},
+			} as unknown as AppConfig,
+			keyStore: createSymmetricKeyStore(SECRET),
+			router: rootRouter,
+			refreshTokenStore: refreshStore,
+			userSessionStore: sessionStore,
+			federationTokenStore: fedTokenStore,
+		});
+
+		const oauth = oauthModule({
+			clientRepository: { findById: vi.fn(), authenticate: vi.fn() } as ClientRepository,
+			codeRepository: {
+				createCode: vi.fn(),
+				getCode: vi.fn(),
+				deleteCode: vi.fn(),
+			} as unknown as CodeRepository,
+			express,
+		});
+		await oauth.init(ctx);
+
+		const app = express();
+		app.use(rootRouter);
+
+		// No Authorization header → should get 401 (route is mounted) not 404 (route missing)
+		const res = await request(app).post("/oauth/federation/google/token").send({});
+
+		expect(res.status).toBe(401);
+	});
 });
