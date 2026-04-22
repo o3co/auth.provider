@@ -14,22 +14,27 @@
  * limitations under the License.
  */
 
+import * as oidc from "openid-client";
+import { codeChallenge } from "./pkce.mjs";
 import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
 import type {
 	EndSessionRequest,
 	EndSessionResult,
 	FederationProfile,
-	FederationProviderBase,
+	FederationProvider,
+	FederationResult,
 	MappedClaims,
 	RefreshedTokens,
-	SetupPassportContext,
 	SupportsClaimMapping,
 	SupportsLogout,
 	SupportsRefresh,
 } from "./types.mjs";
 
+const GOOGLE_ISSUER = "https://accounts.google.com";
+const SCOPES = ["openid", "profile", "email"] as const;
+
 export interface GoogleProviderConfig {
-	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
+	/** Strategy identifier — use a unique name per tenant for multi-tenant setups. */
 	name: string;
 	clientId: string;
 	clientSecret: string;
@@ -40,210 +45,125 @@ export interface GoogleProviderConfig {
 	authCallbackUrl?: string;
 	/** Fallback URL for the client app (used when no redirectTo is present). Optional. */
 	clientUrl?: string;
-	/** Override Google's OAuth token endpoint (default: https://oauth2.googleapis.com/token). */
-	tokenEndpoint?: string;
-	/** Override Google's end-session endpoint. When omitted Google does not publish an OIDC end_session_endpoint; the provider redirects directly to postLogoutRedirectUri instead. */
+	/** Override Google's end-session endpoint. When omitted, the provider redirects directly
+	 *  to postLogoutRedirectUri (or accounts.google.com/Logout as fallback). */
 	endSessionEndpoint?: string;
-	/** Test-only: inject a fetch impl for refreshFederationToken. Not documented publicly. */
-	_fetch?: typeof fetch;
 }
 
-type GoogleProvider = FederationProviderBase &
-	SupportsClaimMapping &
-	SupportsRefresh &
-	SupportsLogout;
+type GoogleProvider = FederationProvider & SupportsRefresh & SupportsLogout & SupportsClaimMapping;
 
-const DEFAULT_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
-
-export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvider => {
+export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(
 			`Google federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
 		);
 	}
-	const tokenEndpoint = config.tokenEndpoint ?? DEFAULT_TOKEN_ENDPOINT;
-	const fetchImpl: typeof fetch = config._fetch ?? fetch;
+
+	// ServerMetadata constructed locally — no discovery call. Google's endpoints are stable.
+	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
+	const serverMetadata: oidc.ServerMetadata = {
+		issuer: GOOGLE_ISSUER,
+		authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+		token_endpoint: "https://oauth2.googleapis.com/token",
+		userinfo_endpoint: "https://www.googleapis.com/oauth2/v3/userinfo",
+	};
+
+	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
 
 	return {
 		name: config.name,
-		scope: ["openid", "profile", "email"],
+		scope: SCOPES,
 
-		validateRedirect(url: string) {
+		validateRedirect(url: string): FederationResult<void> {
 			return validateRedirect(url, config);
 		},
 
-		resolveCallbackRedirect(session: { redirectTo?: string }) {
-			// authCallbackUrl and clientUrl are optional (DID-only deployments don't need them).
-			// When Google federation is enabled, operators must configure authCallbackUrl
-			// if redirect_to flows are used.
+		resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
 			return resolveCallbackRedirect(session, config);
 		},
 
-		async setupPassportStrategy(passport, ctx: SetupPassportContext) {
-			const modSpec = ctx.pathResolver
-				? ctx.pathResolver("passport-google-oauth20")
-				: "passport-google-oauth20";
-			const { Strategy: GoogleStrategy } = (await import(
-				modSpec
-			)) as typeof import("passport-google-oauth20");
-			const strategy = new GoogleStrategy(
-				{
-					clientID: config.clientId,
-					clientSecret: config.clientSecret,
-					callbackURL: config.callbackURL,
-					passReqToCallback: true,
-				},
-				// 6-arg verify form: passport-oauth2 dispatches on arity and passes the
-				// raw token-endpoint response `params` only when the callback declares 6
-				// parameters. We need `params.id_token` + `params.expires_in` for the
-				// FederationProfile.
-				async (
-					req: import("express").Request,
-					accessToken: string,
-					refreshToken: string,
-					params: import("passport-google-oauth20").GoogleCallbackParameters,
-					profileRaw: import("passport-google-oauth20").Profile,
-					done: import("passport-google-oauth20").VerifyCallback,
-				) => {
-					const p = params as unknown as Record<string, unknown>;
-					const profile = toFederationProfile(profileRaw as unknown as Record<string, unknown>, {
-						accessToken,
-						refreshToken,
-						idToken: typeof p?.id_token === "string" ? p.id_token : undefined,
-						expiresIn: typeof p?.expires_in === "number" ? p.expires_in : undefined,
-					});
-					if (ctx.onFederationCallback) {
-						try {
-							await ctx.onFederationCallback({
-								federationName: config.name,
-								profile,
-								req,
-								done: done as (err: Error | null, user: unknown) => void,
-							});
-						} catch (err) {
-							done(err as Error);
-						}
-						return;
-					}
-					try {
-						if (!profile.id) {
-							return done(null, false);
-						}
-						const user = await ctx.verifyUser(`${config.name}:${profile.id}`);
-						return done(null, user ?? false);
-					} catch (err) {
-						return done(err as Error);
-					}
-				},
-			);
-			// Override authorizationParams to always include access_type=offline so Google
-			// returns a refresh_token on the first authorization. This cannot be set via the
-			// constructor options because passport-google-oauth20 only reads accessType from
-			// the per-request options passed to passport.authenticate(); overriding the method
-			// here avoids exposing per-strategy configuration to the route layer.
-			const baseAuthorizationParams = (
-				strategy as unknown as {
-					authorizationParams(opts: Record<string, unknown>): Record<string, unknown>;
-				}
-			).authorizationParams.bind(strategy);
-			(
-				strategy as unknown as {
-					authorizationParams(opts: Record<string, unknown>): Record<string, unknown>;
-				}
-			).authorizationParams = (opts: Record<string, unknown>) => {
-				return { ...baseAuthorizationParams(opts), access_type: "offline" };
-			};
-			passport.use(config.name, strategy);
-		},
-
-		mapClaims(profile: FederationProfile): MappedClaims {
-			const raw = profile.raw as Record<string, unknown>;
-			const json = (raw._json ?? {}) as Record<string, unknown>;
-			const emails = Array.isArray(raw.emails)
-				? (raw.emails as Array<{ value?: unknown; verified?: unknown }>)
-				: [];
-			const photos = Array.isArray(raw.photos) ? (raw.photos as Array<{ value?: unknown }>) : [];
-			const claims: Record<string, unknown> = {};
-			if (typeof json.email === "string") claims.email = json.email;
-			else if (emails[0]?.value && typeof emails[0].value === "string")
-				claims.email = emails[0].value;
-			if (typeof json.email_verified === "boolean") claims.emailVerified = json.email_verified;
-			else if (typeof emails[0]?.verified === "boolean") claims.emailVerified = emails[0].verified;
-			if (typeof raw.displayName === "string") claims.name = raw.displayName;
-			if (typeof photos[0]?.value === "string") claims.picture = photos[0].value;
-			if (typeof json.hd === "string") claims.hd = json.hd;
-			return claims as MappedClaims;
-		},
-
-		async refreshFederationToken(refreshToken: string): Promise<RefreshedTokens> {
-			const body = new URLSearchParams({
-				grant_type: "refresh_token",
-				refresh_token: refreshToken,
-				client_id: config.clientId,
-				client_secret: config.clientSecret,
+		buildAuthorizationUrl(params: {
+			readonly redirectUri: string;
+			readonly state: string;
+			readonly codeVerifier: string;
+		}): URL {
+			return oidc.buildAuthorizationUrl(oidcConfig, {
+				redirect_uri: params.redirectUri,
+				scope: SCOPES.join(" "),
+				state: params.state,
+				code_challenge: codeChallenge(params.codeVerifier),
+				code_challenge_method: "S256",
+				access_type: "offline",
 			});
-			const refreshTimeoutMs = 30_000;
-			const controller = new AbortController();
-			const timer = setTimeout(() => controller.abort(), refreshTimeoutMs);
-			let res: Response;
-			try {
-				res = await fetchImpl(tokenEndpoint, {
-					method: "POST",
-					headers: { "Content-Type": "application/x-www-form-urlencoded" },
-					body: body.toString(),
-					signal: controller.signal,
-				});
-			} catch (err) {
-				if (err instanceof Error && err.name === "AbortError") {
-					throw new Error(
-						`temporarily_unavailable: google refresh timed out after ${refreshTimeoutMs}ms`,
-					);
-				}
-				throw err;
-			} finally {
-				clearTimeout(timer);
-			}
-			if (!res.ok) {
-				let detail = "";
-				try {
-					const err = (await res.json()) as { error?: string; error_description?: string };
-					detail = `${err.error ?? ""} ${err.error_description ?? ""}`.trim();
-				} catch {
-					// ignore JSON parse error
-				}
-				if (res.status >= 500) {
-					throw new Error(
-						`temporarily_unavailable: google refresh failed (${res.status}) ${detail}`,
-					);
-				}
-				if (detail.includes("invalid_grant")) {
-					throw new Error(`invalid_grant: google refresh rejected ${detail}`);
-				}
-				throw new Error(`refresh_failed: google refresh failed (${res.status}) ${detail}`);
-			}
-			const json = (await res.json()) as {
-				access_token?: unknown;
-				refresh_token?: unknown;
-				id_token?: unknown;
-				expires_in?: unknown;
-			};
-			if (typeof json.access_token !== "string") {
-				throw new Error("refresh_failed: google refresh returned no access_token");
-			}
-			const expiresIn = typeof json.expires_in === "number" ? json.expires_in : 3600;
-			return {
-				accessToken: json.access_token,
-				refreshToken: typeof json.refresh_token === "string" ? json.refresh_token : undefined,
-				idToken: typeof json.id_token === "string" ? json.id_token : undefined,
+		},
+
+		async exchangeCode(params: {
+			readonly code: string;
+			readonly codeVerifier: string;
+			readonly redirectUri: string;
+		}): Promise<FederationProfile> {
+			// openid-client's authorizationCodeGrant expects the full callback URL.
+			// We synthesize it from redirectUri + code since the route receives them separately.
+			const callbackUrl = new URL(params.redirectUri);
+			callbackUrl.searchParams.set("code", params.code);
+
+			const tokens = await oidc.authorizationCodeGrant(oidcConfig, callbackUrl, {
+				pkceCodeVerifier: params.codeVerifier,
+				expectedState: oidc.skipStateCheck,
+			});
+
+			const userInfo = await oidc.fetchUserInfo(
+				oidcConfig,
+				tokens.access_token,
+				oidc.skipSubjectCheck,
+			);
+
+			const expiresIn =
+				typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
+
+			// Extension claims: anything beyond first-class fields lands on the profile
+			// via the index signature — no `raw` wrapper needed.
+			const profile: FederationProfile = {
+				issuer: GOOGLE_ISSUER,
+				sub: typeof userInfo.sub === "string" ? userInfo.sub : "",
+				email: typeof userInfo.email === "string" ? userInfo.email : undefined,
+				emailVerified:
+					typeof userInfo.email_verified === "boolean" ? userInfo.email_verified : undefined,
+				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
+				picture: typeof userInfo.picture === "string" ? userInfo.picture : undefined,
+				accessToken: tokens.access_token,
+				refreshToken:
+					typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
+				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
 				expiresAt: new Date(Date.now() + expiresIn * 1000),
+			};
+
+			// Carry through known extension claims (e.g. Google hd).
+			if (typeof userInfo.hd === "string") {
+				(profile as Record<string, unknown>).hd = userInfo.hd;
+			}
+
+			return profile;
+		},
+
+		async refreshToken(refreshTokenValue: string): Promise<RefreshedTokens> {
+			const tokens = await oidc.refreshTokenGrant(oidcConfig, refreshTokenValue);
+			const expiresIn =
+				typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
+			return {
+				accessToken: tokens.access_token,
+				refreshToken:
+					typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
+				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
+				expiresAt: new Date(Date.now() + expiresIn * 1000),
+				// sub / issuer intentionally absent — callers reuse stored identity.
 			};
 		},
 
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
-			// Google does not publish an OIDC end_session_endpoint in its discovery document;
-			// operators MUST pass `endSessionEndpoint` explicitly if they want an upstream logout.
-			// Absent that, we redirect directly to the RP's postLogoutRedirectUri with state,
-			// mirroring the GitHub provider. The application is responsible for its own session cleanup.
+			// Google does not publish an OIDC end_session_endpoint in its discovery document.
+			// Operators MUST pass endSessionEndpoint explicitly for upstream logout.
+			// Absent that, redirect directly to postLogoutRedirectUri (or accounts.google.com/Logout).
 			if (config.endSessionEndpoint) {
 				let url: URL;
 				try {
@@ -259,7 +179,7 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 				if (req.state) url.searchParams.set("state", req.state);
 				return { url, method: "GET" };
 			}
-			const base = req.postLogoutRedirectUri ?? "https://accounts.google.com/Logout";
+			const base = req.postLogoutRedirectUri ?? `${GOOGLE_ISSUER}/Logout`;
 			let url: URL;
 			try {
 				url = new URL(base);
@@ -271,23 +191,16 @@ export const createGoogleProvider = (config: GoogleProviderConfig): GoogleProvid
 			if (req.state) url.searchParams.set("state", req.state);
 			return { url, method: "GET" };
 		},
-	};
-};
 
-function toFederationProfile(
-	raw: unknown,
-	tokens: {
-		accessToken: string | undefined;
-		refreshToken: string | undefined;
-		idToken?: string;
-		expiresIn?: number;
-	},
-): FederationProfile {
-	const rawObj = (raw ?? {}) as Record<string, unknown>;
-	const id = typeof rawObj.id === "string" ? rawObj.id : "";
-	return {
-		id,
-		raw: rawObj,
-		...tokens,
+		mapClaims(profile: FederationProfile): MappedClaims {
+			const claims: Record<string, unknown> = {};
+			if (typeof profile.email === "string") claims.email = profile.email;
+			if (typeof profile.emailVerified === "boolean") claims.emailVerified = profile.emailVerified;
+			if (typeof profile.name === "string") claims.name = profile.name;
+			if (typeof profile.picture === "string") claims.picture = profile.picture;
+			// Pass through extension claims (e.g. hd for Google Workspace domain restriction).
+			if (typeof profile.hd === "string") claims.hd = profile.hd;
+			return claims as MappedClaims;
+		},
 	};
 }

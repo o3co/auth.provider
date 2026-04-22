@@ -14,93 +14,15 @@
  * limitations under the License.
  */
 
-import { describe, expect, it } from "vitest";
-import { fetchGithubPrimaryEmail } from "../helpers.mjs";
+// fetchGithubPrimaryEmail was removed in code-quality review (I-3): the email-fetch
+// logic was inlined into github.mts using oidc.fetchProtectedResource and is covered
+// by github.test.mts. validateRedirect / resolveCallbackRedirect are exercised through
+// google.test.mts, github.test.mts, and factory.test.mts.
 
-describe("fetchGithubPrimaryEmail", () => {
-	const makeFetch = (response: unknown, status = 200) =>
-		(async (_url: string, _init?: unknown) => ({
-			status,
-			ok: status >= 200 && status < 300,
-			async json() {
-				return response;
-			},
-		})) as unknown as typeof fetch;
+import { describe, test } from "vitest";
 
-	it("returns the primary verified email when present", async () => {
-		const body = [
-			{ email: "a@x.com", primary: false, verified: true },
-			{ email: "primary@x.com", primary: true, verified: true },
-			{ email: "b@x.com", primary: false, verified: false },
-		];
-		const email = await fetchGithubPrimaryEmail("token", makeFetch(body));
-		expect(email).toEqual({ email: "primary@x.com", verified: true });
-	});
-
-	it("falls back to the first verified email when no primary exists", async () => {
-		const body = [
-			{ email: "unverified@x.com", primary: false, verified: false },
-			{ email: "ok@x.com", primary: false, verified: true },
-		];
-		const email = await fetchGithubPrimaryEmail("token", makeFetch(body));
-		expect(email).toEqual({ email: "ok@x.com", verified: true });
-	});
-
-	it("returns null when no verified email exists", async () => {
-		const body = [
-			{ email: "a@x.com", primary: true, verified: false },
-			{ email: "b@x.com", primary: false, verified: false },
-		];
-		expect(await fetchGithubPrimaryEmail("token", makeFetch(body))).toBeNull();
-	});
-
-	it("returns null on 4xx/5xx without throwing", async () => {
-		expect(await fetchGithubPrimaryEmail("token", makeFetch({ message: "nope" }, 401))).toBeNull();
-		expect(await fetchGithubPrimaryEmail("token", makeFetch({}, 502))).toBeNull();
-	});
-
-	it("sends Authorization + User-Agent headers", async () => {
-		let capturedInit: { headers?: Record<string, string> } | undefined;
-		const fetchImpl = (async (_url: string, init?: unknown) => {
-			capturedInit = init as { headers?: Record<string, string> };
-			return {
-				status: 200,
-				ok: true,
-				async json() {
-					return [];
-				},
-			};
-		}) as unknown as typeof fetch;
-		await fetchGithubPrimaryEmail("token-123", fetchImpl);
-		expect(capturedInit?.headers?.Authorization).toBe("Bearer token-123");
-		expect(capturedInit?.headers?.["User-Agent"]).toMatch(/auth[.-]?provider/i);
-		expect(capturedInit?.headers?.Accept).toBe("application/vnd.github+json");
-	});
-
-	it("passes an AbortSignal in the fetch init (timeout wiring)", async () => {
-		let capturedInit: { signal?: unknown } | undefined;
-		const fetchImpl = (async (_url: string, init?: unknown) => {
-			capturedInit = init as { signal?: unknown };
-			return {
-				status: 200,
-				ok: true,
-				async json() {
-					return [];
-				},
-			};
-		}) as unknown as typeof fetch;
-		await fetchGithubPrimaryEmail("any-token", fetchImpl);
-		expect(capturedInit?.signal).toBeInstanceOf(AbortSignal);
-	});
-
-	it("returns null when the fetch is aborted (abort treated as unavailable)", async () => {
-		const abortError = Object.assign(new Error("The operation was aborted."), {
-			name: "AbortError",
-		});
-		const fetchImpl = (async () => {
-			throw abortError;
-		}) as unknown as typeof fetch;
-		const result = await fetchGithubPrimaryEmail("token", fetchImpl);
-		expect(result).toBeNull();
-	});
+describe("helpers", () => {
+	test.todo(
+		"fetchGithubPrimaryEmail removed (I-3) — email-fetch logic covered by github.test.mts",
+	);
 });

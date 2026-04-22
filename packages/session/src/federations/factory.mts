@@ -43,6 +43,7 @@ function narrowFederationConfig(
 	sessionDomain?: string;
 	authCallbackUrl?: string;
 	clientUrl?: string;
+	endSessionEndpoint?: string;
 } {
 	const name = typeof config.name === "string" ? config.name : undefined;
 	const clientId = typeof config.clientId === "string" ? config.clientId : undefined;
@@ -57,7 +58,9 @@ function narrowFederationConfig(
 	const authCallbackUrl =
 		typeof config.authCallbackUrl === "string" ? config.authCallbackUrl : undefined;
 	const clientUrl = typeof config.clientUrl === "string" ? config.clientUrl : undefined;
-	return { name, clientId, clientSecret, callbackURL, sessionDomain, authCallbackUrl, clientUrl };
+	const endSessionEndpoint =
+		typeof config.endSessionEndpoint === "string" ? config.endSessionEndpoint : undefined;
+	return { name, clientId, clientSecret, callbackURL, sessionDomain, authCallbackUrl, clientUrl, endSessionEndpoint };
 }
 
 export function registerBuiltinFederations(factory: FederationProviderFactory): void {

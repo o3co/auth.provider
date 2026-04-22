@@ -140,9 +140,21 @@ export function supportsClaimMapping(
 	return typeof (p as { mapClaims?: unknown }).mapClaims === "function";
 }
 
+/**
+ * Partial token snapshot returned by `SupportsRefresh.refreshToken`.
+ *
+ * `issuer` and `sub` are optional because callers reuse the stored identity from the
+ * original federation profile — the refresh grant does not re-assert identity. All other
+ * token fields follow the same semantics as `FederationProfile`.
+ */
+export type RefreshedTokens = Omit<FederationProfile, "issuer" | "sub"> & {
+	readonly issuer?: string;
+	readonly sub?: string;
+};
+
 export interface SupportsRefresh {
-	/** Refresh an upstream IdP access token using its refresh token. Returns an updated profile. */
-	refreshToken(refreshToken: string): Promise<FederationProfile>;
+	/** Refresh an upstream IdP access token using its refresh token. Returns a partial token snapshot. */
+	refreshToken(refreshToken: string): Promise<RefreshedTokens>;
 }
 
 export function supportsRefresh(

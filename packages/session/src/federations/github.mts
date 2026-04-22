@@ -14,21 +14,26 @@
  * limitations under the License.
  */
 
-import type { PassportStatic } from "passport";
-import { fetchGithubPrimaryEmail, resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
+import * as oidc from "openid-client";
+import { codeChallenge } from "./pkce.mjs";
+import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
 import type {
 	EndSessionRequest,
 	EndSessionResult,
 	FederationProfile,
-	FederationProviderBase,
+	FederationProvider,
+	FederationResult,
 	MappedClaims,
-	SetupPassportContext,
 	SupportsClaimMapping,
 	SupportsLogout,
 } from "./types.mjs";
 
+const GITHUB_ISSUER = "https://github.com";
+const SCOPES = ["read:user", "user:email"] as const;
+const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
+
 export interface GithubProviderConfig {
-	/** Passport strategy identifier — use a unique name per tenant for multi-tenant setups. */
+	/** Strategy identifier — use a unique name per tenant for multi-tenant setups. */
 	name: string;
 	clientId: string;
 	clientSecret: string;
@@ -39,11 +44,12 @@ export interface GithubProviderConfig {
 	authCallbackUrl?: string;
 	/** Fallback URL for the client app (used when no redirectTo is present). Optional. */
 	clientUrl?: string;
-	/** Test-only: inject fetch impl used by fetchGithubPrimaryEmail. */
-	_fetch?: typeof fetch;
+	/** Override GitHub's end-session endpoint. When omitted, the provider redirects directly
+	 *  to postLogoutRedirectUri. */
+	endSessionEndpoint?: string;
 }
 
-type GithubProvider = FederationProviderBase & SupportsClaimMapping & SupportsLogout;
+type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
 
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
@@ -52,134 +58,155 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 		);
 	}
 
-	const scope = ["read:user", "user:email"] as const;
-	const fetchImpl: typeof fetch = config._fetch ?? fetch;
+	// GitHub does not expose an OIDC discovery document, so we construct ServerMetadata manually.
+	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
+	const serverMetadata: oidc.ServerMetadata = {
+		issuer: GITHUB_ISSUER,
+		authorization_endpoint: "https://github.com/login/oauth/authorize",
+		token_endpoint: "https://github.com/login/oauth/access_token",
+		userinfo_endpoint: "https://api.github.com/user",
+	};
+
+	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
 
 	return {
 		name: config.name,
-		scope,
+		scope: SCOPES,
 
-		validateRedirect(url: string) {
+		validateRedirect(url: string): FederationResult<void> {
 			return validateRedirect(url, config);
 		},
 
-		resolveCallbackRedirect(session: { redirectTo?: string }) {
+		resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
 			return resolveCallbackRedirect(session, config);
 		},
 
-		async setupPassportStrategy(
-			passport: PassportStatic,
-			ctx: SetupPassportContext,
-		): Promise<void> {
-			let GithubStrategy: typeof import("passport-github2").Strategy;
-			try {
-				const modSpec = ctx.pathResolver
-					? ctx.pathResolver("passport-github2")
-					: "passport-github2";
-				({ Strategy: GithubStrategy } = (await import(
-					modSpec
-				)) as typeof import("passport-github2"));
-			} catch (err) {
+		buildAuthorizationUrl(params: {
+			readonly redirectUri: string;
+			readonly state: string;
+			readonly codeVerifier: string;
+		}): URL {
+			return oidc.buildAuthorizationUrl(oidcConfig, {
+				redirect_uri: params.redirectUri,
+				scope: SCOPES.join(" "),
+				state: params.state,
+				code_challenge: codeChallenge(params.codeVerifier),
+				code_challenge_method: "S256",
+			});
+		},
+
+		async exchangeCode(params: {
+			readonly code: string;
+			readonly codeVerifier: string;
+			readonly redirectUri: string;
+		}): Promise<FederationProfile> {
+			// Synthesize the callback URL from redirectUri + code.
+			const callbackUrl = new URL(params.redirectUri);
+			callbackUrl.searchParams.set("code", params.code);
+
+			const tokens = await oidc.authorizationCodeGrant(oidcConfig, callbackUrl, {
+				pkceCodeVerifier: params.codeVerifier,
+				expectedState: oidc.skipStateCheck,
+			});
+
+			const userInfo = await oidc.fetchUserInfo(
+				oidcConfig,
+				tokens.access_token,
+				oidc.skipSubjectCheck,
+			);
+
+			// GitHub's /user endpoint returns `id: number`, not the OIDC `sub` field.
+			// openid-client passes the raw JSON through without remapping id → sub.
+			// Coerce to string so every profile has a stable, non-empty sub.
+			const ghId = (userInfo as { id?: unknown }).id;
+			const sub =
+				typeof userInfo.sub === "string" && userInfo.sub !== ""
+					? userInfo.sub
+					: typeof ghId === "number"
+						? String(ghId)
+						: typeof ghId === "string" && ghId !== ""
+							? ghId
+							: "";
+			if (!sub) {
 				throw new Error(
-					"GitHub federation requires passport-github2. Run: pnpm add passport-github2 @types/passport-github2",
-					{ cause: err },
+					`GitHub federation "${config.name}" received userinfo without id/sub`,
 				);
 			}
-			// passport-oauth2 runtime dispatches on callback arity: 6-arg receives `params`
-			// (raw token-endpoint response including expires_in). @types/passport-github2 only
-			// declares the 5-arg overload, so we cast the verify function to bypass the
-			// TypeScript restriction while preserving the correct runtime behavior.
-			const verify6 = async (
-				req: import("express").Request,
-				accessToken: string,
-				refreshToken: string | undefined,
-				params: Record<string, unknown> | undefined,
-				profileRaw: { id: string } & Record<string, unknown>,
-				done: (err: Error | null, user?: unknown) => void,
-			): Promise<void> => {
-				let enrichedRaw: Record<string, unknown> = {
-					...(profileRaw as Record<string, unknown>),
-				};
-				if (!hasEmail(enrichedRaw)) {
-					const fetched = await fetchGithubPrimaryEmail(accessToken, fetchImpl);
-					if (fetched) {
-						enrichedRaw = {
-							...enrichedRaw,
-							emails: [{ value: fetched.email, verified: fetched.verified }],
-						};
+
+			// Fetch primary+verified email from /user/emails.
+			// GitHub's /user endpoint often omits email for users who keep it private.
+			// Fallback order:
+			//   1. primary + verified email
+			//   2. first verified email (when primary is unverified)
+			//   3. undefined (no verified email at all)
+			let email: string | undefined;
+			let emailVerified: boolean | undefined;
+			try {
+				const emailsRes = await oidc.fetchProtectedResource(
+					oidcConfig,
+					tokens.access_token,
+					new URL(GITHUB_EMAILS_URL),
+					"GET",
+				);
+				const rows = (await emailsRes.json()) as Array<{
+					email?: unknown;
+					primary?: unknown;
+					verified?: unknown;
+				}>;
+				if (Array.isArray(rows)) {
+					const verified = rows.filter(
+						(r) => r.verified === true && typeof r.email === "string",
+					);
+					const primary = verified.find((r) => r.primary === true);
+					const chosen = primary ?? verified[0];
+					if (chosen && typeof chosen.email === "string") {
+						email = chosen.email;
+						emailVerified = true;
 					}
 				}
-				const profile: FederationProfile = {
-					id: typeof enrichedRaw.id === "string" ? enrichedRaw.id : String(enrichedRaw.id ?? ""),
-					raw: enrichedRaw,
-					accessToken,
-					refreshToken,
-					idToken: typeof params?.id_token === "string" ? params.id_token : undefined,
-					expiresIn: typeof params?.expires_in === "number" ? params.expires_in : undefined,
-				};
-				if (ctx.onFederationCallback) {
-					try {
-						await ctx.onFederationCallback({
-							federationName: config.name,
-							profile,
-							req,
-							done: done as (err: Error | null, user: unknown) => void,
-						});
-					} catch (err) {
-						done(err as Error);
-					}
-					return;
-				}
-				try {
-					if (!profile.id) {
-						return done(null, false);
-					}
-					const user = await ctx.verifyUser(`${config.name}:${profile.id}`);
-					return done(null, user ?? false);
-				} catch (err) {
-					return done(err as Error);
-				}
+			} catch {
+				// Transient /user/emails failure treated as "no email available" — never kills login.
+			}
+
+			const expiresIn =
+				typeof tokens.expires_in === "number" ? tokens.expires_in : undefined;
+
+			// GitHub's /user returns `avatar_url` (not the OIDC `picture` field).
+			const ghAvatarUrl = (userInfo as { avatar_url?: unknown }).avatar_url;
+			return {
+				issuer: GITHUB_ISSUER,
+				sub,
+				email,
+				emailVerified,
+				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
+				picture: typeof ghAvatarUrl === "string" ? ghAvatarUrl : undefined,
+				accessToken: tokens.access_token,
+				// GitHub OAuth Apps do not issue refresh tokens.
+				refreshToken: undefined,
+				expiresAt: expiresIn !== undefined ? new Date(Date.now() + expiresIn * 1000) : undefined,
 			};
-			passport.use(
-				config.name,
-				new GithubStrategy(
-					{
-						clientID: config.clientId,
-						clientSecret: config.clientSecret,
-						callbackURL: config.callbackURL,
-						scope: [...scope],
-						passReqToCallback: true,
-					},
-					verify6 as unknown as (
-						req: unknown,
-						accessToken: string,
-						refreshToken: string,
-						profile: unknown,
-						done: (err: Error | null, user?: unknown) => void,
-					) => void,
-				),
-			);
 		},
 
-		mapClaims(profile: FederationProfile): MappedClaims {
-			const raw = profile.raw as Record<string, unknown>;
-			const emails = Array.isArray(raw.emails)
-				? (raw.emails as Array<{ value?: unknown; verified?: unknown }>)
-				: [];
-			const photos = Array.isArray(raw.photos) ? (raw.photos as Array<{ value?: unknown }>) : [];
-			const claims: Record<string, unknown> = {};
-			if (typeof emails[0]?.value === "string") claims.email = emails[0].value;
-			if (typeof emails[0]?.verified === "boolean") claims.emailVerified = emails[0].verified;
-			if (typeof raw.displayName === "string") claims.name = raw.displayName;
-			if (typeof photos[0]?.value === "string") claims.picture = photos[0].value;
-			return claims as MappedClaims;
-		},
-
+		// GitHub has no RP-Initiated Logout endpoint by default.
+		// Precedence: (1) configured endSessionEndpoint wins; (2) postLogoutRedirectUri redirect;
+		// (3) fallback to https://github.com/logout (preserves pre-Task-3 behaviour, supports GitHub Enterprise).
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
-			// GitHub has no RP-Initiated Logout endpoint. Return a redirect directly to
-			// the post_logout_redirect_uri with round-tripped state. If no redirect is
-			// given, fall back to GitHub's top-level logout page.
-			const base = req.postLogoutRedirectUri ?? "https://github.com/logout";
+			if (config.endSessionEndpoint) {
+				let url: URL;
+				try {
+					url = new URL(config.endSessionEndpoint);
+				} catch {
+					throw new Error(
+						`GitHub federation "${config.name}" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
+					);
+				}
+				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
+				if (req.postLogoutRedirectUri)
+					url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
+				if (req.state) url.searchParams.set("state", req.state);
+				return { url, method: "GET" };
+			}
+			const base = req.postLogoutRedirectUri ?? `${GITHUB_ISSUER}/logout`;
 			let url: URL;
 			try {
 				url = new URL(base);
@@ -191,15 +218,14 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			if (req.state) url.searchParams.set("state", req.state);
 			return { url, method: "GET" };
 		},
-	};
-}
 
-function hasEmail(raw: Record<string, unknown>): boolean {
-	return (
-		Array.isArray(raw.emails) &&
-		raw.emails.some(
-			(e) =>
-				typeof e === "object" && e !== null && typeof (e as { value?: unknown }).value === "string",
-		)
-	);
+		mapClaims(profile: FederationProfile): MappedClaims {
+			const claims: Record<string, unknown> = {};
+			if (typeof profile.email === "string") claims.email = profile.email;
+			if (typeof profile.emailVerified === "boolean") claims.emailVerified = profile.emailVerified;
+			if (typeof profile.name === "string") claims.name = profile.name;
+			if (typeof profile.picture === "string") claims.picture = profile.picture;
+			return claims as MappedClaims;
+		},
+	};
 }
