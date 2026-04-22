@@ -1,15 +1,15 @@
 {
-  "entryPoints": [
-    "packages/core",
-    "packages/did",
-    "packages/oauth",
-    "packages/session",
-    "packages/foundation"
-  ],
-  "entryPointStrategy": "packages",
-  "out": "docs/api",
-  "exclude": ["**/__tests__/**", "**/node_modules/**"],
-  "excludePrivate": true,
-  "excludeInternal": true,
-  "name": "auth.provider API"
+	"entryPoints": [
+		"packages/core",
+		"packages/did",
+		"packages/oauth",
+		"packages/session",
+		"packages/foundation"
+	],
+	"entryPointStrategy": "packages",
+	"out": "docs/api",
+	"exclude": ["**/__tests__/**", "**/node_modules/**"],
+	"excludePrivate": true,
+	"excludeInternal": true,
+	"name": "auth.provider API"
 }

@@ -21,8 +21,6 @@ Peer dependencies (install separately in the workspace root):
 
 ```
 express@^5.0.0
-passport@^0.7.0                       (optional)
-passport-oauth2-client-password@^0.1.2 (optional)
 ```
 
 ## Public API
@@ -79,7 +77,6 @@ Registers the `"authorization_code"` and `"refresh_token"` grant types in the gr
 function createOAuthRouter(
   express: ExpressLike,
   options: {
-    passport: PassportStatic;
     registry: GrantRegistry;
     config: AppConfig;
     clientRepository: ClientRepository;
@@ -89,7 +86,7 @@ function createOAuthRouter(
 ): Promise<{ router: Router; registry: GrantRegistry }>;
 ```
 
-Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction.
+Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction. Client authentication at `/oauth/introspect` is handled by `createClientAuthMiddleware(clientRepository)` — no Passport dependency required.
 
 ## Usage Example
 
@@ -294,6 +291,22 @@ The following audit events fire on this endpoint:
 - `federation.token.family_revoked` — on 401 via revoked family
 - `federation.token.refresh_failed` — on provider.refreshFederationToken throwing (non-invalid_grant)
 - `federation.token.reauthentication_required` — on `invalid_grant` from IdP
+
+## Migrating from v0.3.x to v0.4.0
+
+v0.4.0 removes passport from this package. The `/oauth/introspect` endpoint now uses `createClientAuthMiddleware(clientRepository)` — a self-hosted RFC 6749 §2.3.1 HTTP Basic + form-encoded client-auth middleware.
+
+### Breaking changes
+
+1. **`createOAuthRouter` signature**: the `passport` option is dropped. Pass `clientRepository: ClientRepository` directly. `oauthModule({ clientRepository, ... })` wires this automatically.
+2. **`/introspect` error response**: follows RFC 6749 §5.2 shape `{ error, error_description }`.
+3. **`req.oauthClient`** (typed as `PublicClient | undefined`) is attached to the express `Request` by `createClientAuthMiddleware`. Consumers composing this middleware onto their own routes can read it directly — types come via global Express namespace augmentation.
+
+### For consumers
+
+If you consume `@o3co/auth-provider-oauth` via its public API (`oauthModule`, `createOAuthRouter`), no code changes beyond updating your config are required — the module internally wires the new middleware.
+
+If you extend or replace the middleware for custom client-auth schemes, import `createClientAuthMiddleware` from `@o3co/auth-provider-oauth` as a reference, or write a drop-in replacement that attaches a compatible `PublicClient` to `req.oauthClient`.
 
 ## See Also
 

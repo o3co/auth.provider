@@ -47,7 +47,13 @@ interface Envelope {
 	accessToken: string;
 	refreshToken?: string;
 	idToken?: string;
-	expiresAtMs: number;
+	/**
+	 * `number` = absolute epoch-ms of access token expiry. `null` = upstream provider
+	 * issued no finite expiry (e.g. GitHub OAuth Apps classic). Stored as explicit
+	 * `null` (JSON-round-trippable) so F-6 refresh logic can distinguish "no expiry"
+	 * from "unknown / missing field" on future schema migrations.
+	 */
+	expiresAtMs: number | null;
 	tokenType?: string;
 	scope?: string;
 	rawParams?: Record<string, unknown>;
@@ -98,7 +104,7 @@ export function createRedisFederationTokenStore(
 		accessToken: encryptRequired(t.accessToken),
 		refreshToken: encryptOptional(t.refreshToken),
 		idToken: encryptOptional(t.idToken),
-		expiresAtMs: t.expiresAt.getTime(),
+		expiresAtMs: t.expiresAt === null ? null : t.expiresAt.getTime(),
 		tokenType: t.tokenType,
 		scope: t.scope,
 		rawParams: t.rawParams as Record<string, unknown> | undefined,
@@ -108,7 +114,7 @@ export function createRedisFederationTokenStore(
 		accessToken: decryptRequired(e.accessToken),
 		refreshToken: decryptOptional(e.refreshToken),
 		idToken: decryptOptional(e.idToken),
-		expiresAt: new Date(e.expiresAtMs),
+		expiresAt: e.expiresAtMs === null ? null : new Date(e.expiresAtMs),
 		tokenType: e.tokenType,
 		scope: e.scope,
 		rawParams: e.rawParams,

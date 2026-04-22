@@ -29,7 +29,6 @@ import {
 import type { Router } from "express";
 import express from "express";
 import { SignJWT } from "jose";
-import type { PassportStatic } from "passport";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
@@ -50,10 +49,6 @@ const mockConfig = {
 		login: { url: "/login" },
 	},
 } as unknown as AppConfig;
-
-const mockPassport = {
-	authenticate: () => (_req: unknown, _res: unknown, next: () => void) => next(),
-} as unknown as PassportStatic;
 
 const mockClientRepository: ClientRepository = {
 	findById: async () => null,
@@ -81,7 +76,6 @@ async function buildApp(refreshTokenStore?: RefreshTokenStoreBase, auditSink?: A
 	app.use(express.urlencoded({ extended: false }));
 
 	const { router } = await createOAuthRouter(express, {
-		passport: mockPassport,
 		registry: new GrantRegistry(),
 		config: mockConfig,
 		clientRepository: mockClientRepository,

@@ -23,7 +23,6 @@ import {
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
-import type { PassportStatic } from "passport";
 import * as oidcConfig from "./routes/OpenidConfiguration.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 
@@ -47,45 +46,6 @@ export const oauthModule = (params: {
 	async init(context: ModuleContext): Promise<void> {
 		const config = context.config as AppConfig;
 
-		// Resolve passport via pathResolver for client credential auth on introspect
-		const { default: passport } = (await import(context.pathResolver("passport"))) as {
-			default: PassportStatic;
-		};
-
-		// Resolve passport-oauth2-client-password for client credential strategy
-		const { Strategy: ClientCredentialStrategy } = (await import(
-			context.pathResolver("passport-oauth2-client-password")
-		)) as { Strategy: new (...args: unknown[]) => unknown };
-
-		// Register client credential strategy on this passport instance
-		passport.use(
-			new (
-				ClientCredentialStrategy as new (
-					verify: (
-						clientId: string,
-						clientSecret: string,
-						done: (err: Error | null, client?: unknown) => void,
-					) => void,
-				) => unknown
-			)(
-				async (
-					clientId: string,
-					clientSecret: string,
-					done: (err: Error | null, client?: unknown) => void,
-				) => {
-					try {
-						const client = await params.clientRepository.authenticate(clientId, clientSecret);
-						if (!client) {
-							return done(null, false);
-						}
-						return done(null, client as unknown);
-					} catch (cause) {
-						return done(cause as Error);
-					}
-				},
-			) as import("passport").Strategy,
-		);
-
 		// We need express-like factory for creating sub-router.
 		// Use the express instance passed via params, or construct a minimal one.
 		const express: ExpressLike =
@@ -96,7 +56,6 @@ export const oauthModule = (params: {
 			})());
 
 		const { router: oauthRouter } = await createOAuthRouter(express, {
-			passport,
 			registry: context.grantRegistry,
 			config,
 			clientRepository: params.clientRepository,

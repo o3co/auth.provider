@@ -17,12 +17,12 @@
 import { type AdapterFactory, createAdapterFactory } from "@o3co/auth-provider-core";
 import { createGithubProvider } from "./github.mjs";
 import { createGoogleProvider } from "./google.mjs";
-import type { FederationProviderBase } from "./types.mjs";
+import type { FederationProvider } from "./types.mjs";
 
-export type FederationProviderFactory = AdapterFactory<FederationProviderBase>;
+export type FederationProviderFactory = AdapterFactory<FederationProvider>;
 
 export function createFederationProviderFactory(): FederationProviderFactory {
-	return createAdapterFactory<FederationProviderBase>("FederationProvider");
+	return createAdapterFactory<FederationProvider>("FederationProvider");
 }
 
 /**
@@ -43,6 +43,7 @@ function narrowFederationConfig(
 	sessionDomain?: string;
 	authCallbackUrl?: string;
 	clientUrl?: string;
+	endSessionEndpoint?: string;
 } {
 	const name = typeof config.name === "string" ? config.name : undefined;
 	const clientId = typeof config.clientId === "string" ? config.clientId : undefined;
@@ -57,7 +58,18 @@ function narrowFederationConfig(
 	const authCallbackUrl =
 		typeof config.authCallbackUrl === "string" ? config.authCallbackUrl : undefined;
 	const clientUrl = typeof config.clientUrl === "string" ? config.clientUrl : undefined;
-	return { name, clientId, clientSecret, callbackURL, sessionDomain, authCallbackUrl, clientUrl };
+	const endSessionEndpoint =
+		typeof config.endSessionEndpoint === "string" ? config.endSessionEndpoint : undefined;
+	return {
+		name,
+		clientId,
+		clientSecret,
+		callbackURL,
+		sessionDomain,
+		authCallbackUrl,
+		clientUrl,
+		endSessionEndpoint,
+	};
 }
 
 export function registerBuiltinFederations(factory: FederationProviderFactory): void {

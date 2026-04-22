@@ -280,6 +280,22 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 		const accessTokenExpiry = new Date(Date.now() + 1800_000); // 30min
 		await store.attach("sid-1", "google", { ...tokens, expiresAt: accessTokenExpiry });
 		const round = await store.get("sid-1", "google");
-		expect(round?.expiresAt.getTime()).toBe(accessTokenExpiry.getTime());
+		expect(round?.expiresAt).toBeInstanceOf(Date);
+		expect((round?.expiresAt as Date).getTime()).toBe(accessTokenExpiry.getTime());
+	});
+
+	it("expiresAt=null round-trips as null (GitHub OAuth Apps classic)", async () => {
+		// Regression: FederationTokens.expiresAt is `Date | null` (required).
+		// `null` MUST persist as `null` in the envelope and deserialize back to `null`,
+		// so F-6 refresh logic can reliably detect "no finite expiry" without falling
+		// through to a Date-instanceof check that would silently convert to
+		// `new Date(null)` === epoch.
+		const store = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "allow-plaintext" },
+		});
+		await store.attach("sid-gh", "github", { ...tokens, expiresAt: null });
+		const round = await store.get("sid-gh", "github");
+		expect(round?.expiresAt).toBeNull();
 	});
 });

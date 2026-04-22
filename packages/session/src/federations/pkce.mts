@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
-// fetchGithubPrimaryEmail was removed in code-quality review (I-3): the email-fetch
-// logic was inlined into github.mts using oidc.fetchProtectedResource and is covered
-// by github.test.mts. validateRedirect / resolveCallbackRedirect are exercised through
-// google.test.mts, github.test.mts, and factory.test.mts.
+import { createHash, randomBytes } from "node:crypto";
 
-import { describe, test } from "vitest";
+/** RFC 7636 §4.1: high-entropy URL-safe random string, 43 chars from 32 bytes base64url. */
+export function generateCodeVerifier(): string {
+	return randomBytes(32).toString("base64url");
+}
 
-describe("helpers", () => {
-	test.todo("fetchGithubPrimaryEmail removed (I-3) — email-fetch logic covered by github.test.mts");
-});
+/** RFC 7636 §4.2: S256 transform — BASE64URL(SHA256(verifier)). */
+export function codeChallenge(verifier: string): string {
+	return createHash("sha256").update(verifier).digest("base64url");
+}

@@ -14,106 +14,120 @@
  * limitations under the License.
  */
 
-import type { User } from "@o3co/auth-provider-core";
-import type { PassportStatic } from "passport";
-
 export type FederationResult<T> =
 	| { ok: true; value: T }
 	| { ok: false; status: number; error: string; errorDescription: string };
 
-export interface SetupPassportContext {
-	readonly verifyUser: (externalId: string) => Promise<User | null>;
+/**
+ * Snapshot of a successful federation callback: identity + OIDC-standard claims + OAuth 2 tokens.
+ *
+ * The `[key: string]: unknown` index signature is an extension slot for provider-specific claims
+ * (Google `hd`, Microsoft `tid`, etc). Promote a claim to first-class only when it becomes
+ * widely useful across providers (see Migration Guide in the spec).
+ *
+ * Fields are ordered to match the RFC 6749 §5.1 + OIDC Core §5.1 claim sources.
+ */
+export interface FederationProfile {
+	/** IdP issuer URL (OIDC discovery `issuer`) or provider name for non-OIDC providers. */
+	readonly issuer: string;
+	/** OIDC `sub` claim — stable identifier for the federated user at this IdP. */
+	readonly sub: string;
+	readonly email?: string;
+	readonly emailVerified?: boolean;
+	readonly name?: string;
+	readonly picture?: string;
+	/** OAuth 2 access token for subsequent IdP API calls. */
+	readonly accessToken?: string;
+	/** Refresh token; absent if the IdP did not issue one. */
+	readonly refreshToken?: string;
+	/** OIDC id_token JWT, if issued. */
+	readonly idToken?: string;
 	/**
-	 * Optional module resolver used for dynamic imports of passport strategies.
-	 * Deployments with non-standard module layouts (Yarn PnP, custom require hooks)
-	 * can pass a resolver; standard Node/npm deployments omit it.
+	 * Absolute expiry time of `accessToken`, derived from `expires_in` by the adapter.
+	 *
+	 * `null` means the provider did not issue a finite expiry (e.g. GitHub OAuth Apps
+	 * classic tokens). Consumers MUST treat `null` as "do not attempt refresh; reuse
+	 * until the provider explicitly invalidates". Required (no `undefined`) so adapters
+	 * are forced to make an explicit decision per provider rather than the route layer
+	 * inventing a fallback expiry.
 	 */
-	readonly pathResolver?: (spec: string) => string;
-	/**
-	 * Optional hook called by federation provider passport strategies after
-	 * successful OAuth code exchange. Built-in implementations (in session
-	 * module) orchestrate UserSessionStore + FederationTokenStore; custom
-	 * deployments can wire their own. When absent, providers fall back to
-	 * the legacy single-parameter `verifyUser(externalId)` flow.
-	 */
-	readonly onFederationCallback?: (params: {
-		readonly federationName: string;
-		readonly profile: FederationProfile;
-		readonly req: import("express").Request;
-		readonly done: (err: Error | null, user: User | false) => void;
-	}) => Promise<void>;
+	readonly expiresAt: Date | null;
+	/** Provider-specific extension claims (e.g. Google `hd`, Microsoft `tid`). */
+	readonly [key: string]: unknown;
 }
 
 /**
- * Minimum contract implemented by every federation provider.
- * Provider-specific optional features are layered via `SupportsX` capability interfaces.
+ * Pure-function interface for an upstream OAuth 2 / OIDC identity provider.
+ *
+ * Implementations MUST NOT expose vendor library types (passport, arctic, openid-client, etc)
+ * through this interface or through types exported alongside it. Adapters should keep vendor
+ * concerns below a ≤50-line facade (target).
+ *
+ * State (CSRF `state`, PKCE `codeVerifier`) is managed by the session route layer and passed
+ * into both calls; providers never allocate state themselves.
  */
-export interface FederationProviderBase {
+export interface FederationProvider {
 	readonly name: string;
 	readonly scope: readonly string[];
+
+	/**
+	 * Build the authorization URL for RFC 6749 §4.1 + RFC 7636 code flow.
+	 *
+	 * `codeVerifier` MUST be a cryptographically strong URL-safe random string; the route
+	 * layer generates and stores it in the session before calling. Adapters compute
+	 * `code_challenge` via the shared `pkce` helper (`codeChallenge(codeVerifier)`); do
+	 * not accept a pre-computed challenge to avoid mismatches between transform methods.
+	 */
+	buildAuthorizationUrl(params: {
+		readonly redirectUri: string;
+		readonly state: string;
+		readonly codeVerifier: string;
+	}): URL;
+
+	/**
+	 * Exchange an authorization `code` for a normalized `FederationProfile`.
+	 *
+	 * Adapters post to the IdP's token endpoint, optionally call the userinfo endpoint,
+	 * and return a `FederationProfile`. They MUST include `issuer` and `sub`; all other
+	 * standard fields are optional.
+	 */
+	exchangeCode(params: {
+		readonly code: string;
+		readonly codeVerifier: string;
+		readonly redirectUri: string;
+	}): Promise<FederationProfile>;
+
+	/** URL-pattern validation for a consumer-supplied `redirect_to` (retained from old interface). */
 	validateRedirect(url: string): FederationResult<void>;
+	/** Resolve the post-callback redirect URL from the session's `redirectTo`. */
 	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
-	setupPassportStrategy(passport: PassportStatic, ctx: SetupPassportContext): Promise<void>;
 }
 
 /**
- * Arguments for an OIDC RP-Initiated Logout (end-session) request.
- *
- * All fields are optional per the OIDC spec. Consumers should generate a `state`
- * value and verify it on the post-logout redirect to mitigate CSRF.
+ * Arguments for an OIDC RP-Initiated Logout (end-session) request. Unchanged from v0.3.x.
  */
 export interface EndSessionRequest {
-	/** ID token previously issued by the IdP, used to identify the session to terminate. */
 	idTokenHint?: string;
-	/** URL the IdP redirects the user agent to after logout completes. */
 	postLogoutRedirectUri?: string;
-	/** Opaque value round-tripped by the IdP for CSRF protection. */
 	state?: string;
 }
 
-/**
- * Outcome of building an end-session redirect.
- *
- * `method` is currently always `"GET"` (OIDC RP-Initiated Logout 1.0). Future extensions
- * (e.g. POST logout for SAML interop) can widen the union additively.
- */
 export interface EndSessionResult {
-	/** Fully-qualified end-session URL with all parameters encoded. */
 	url: URL;
-	/** HTTP method the consumer should use when driving the redirect. */
 	method: "GET";
 }
 
-/**
- * Optional capability: OIDC RP-Initiated Logout (end-session).
- *
- * Providers whose IdP exposes an end_session endpoint implement this capability by
- * returning a redirect URL. Consumers detect the capability with {@link supportsLogout}.
- */
 export interface SupportsLogout {
 	endSession(req: EndSessionRequest): Promise<EndSessionResult>;
 }
 
-/**
- * Type guard: does `provider` implement the {@link SupportsLogout} capability?
- *
- * Returns `false` for `null` / `undefined` so consumers can call this directly on
- * `Map.get(name)` results without an explicit existence check. When `provider` is
- * non-null, returns `true` when `provider.endSession` is a function. Inside a `true`
- * branch, TypeScript narrows `provider` to `FederationProviderBase & SupportsLogout`,
- * so `provider.endSession(...)` is callable without a cast.
- */
 export function supportsLogout(
-	provider: FederationProviderBase | undefined | null,
-): provider is FederationProviderBase & SupportsLogout {
+	provider: FederationProvider | undefined | null,
+): provider is FederationProvider & SupportsLogout {
 	if (provider == null) return false;
 	return typeof (provider as { endSession?: unknown }).endSession === "function";
 }
 
-/**
- * OIDC-standard claims mapped from a federation profile. `[key: string]: unknown`
- * allows providers to add non-standard claims (e.g. Google's `hd` hosted domain).
- */
 export interface MappedClaims {
 	readonly email?: string;
 	readonly emailVerified?: boolean;
@@ -123,45 +137,37 @@ export interface MappedClaims {
 	readonly [key: string]: unknown;
 }
 
-/**
- * Snapshot of a successful federation callback: provider-internal id + the raw
- * passport profile payload + the tokens the IdP returned. Consumed by the
- * `onFederationCallback` hook (see {@link SetupPassportContext}).
- */
-export interface FederationProfile {
-	readonly id: string;
-	readonly raw: Readonly<Record<string, unknown>>;
-	readonly accessToken?: string;
-	readonly refreshToken?: string;
-	readonly idToken?: string;
-	readonly expiresIn?: number;
-}
-
 export interface SupportsClaimMapping {
 	mapClaims(profile: FederationProfile): MappedClaims;
 }
 
 export function supportsClaimMapping(
-	p: FederationProviderBase | undefined | null,
-): p is FederationProviderBase & SupportsClaimMapping {
+	p: FederationProvider | undefined | null,
+): p is FederationProvider & SupportsClaimMapping {
 	if (p == null) return false;
 	return typeof (p as { mapClaims?: unknown }).mapClaims === "function";
 }
 
-export interface RefreshedTokens {
-	readonly accessToken: string;
-	readonly refreshToken?: string;
-	readonly idToken?: string;
-	readonly expiresAt: Date;
-}
+/**
+ * Partial token snapshot returned by `SupportsRefresh.refreshToken`.
+ *
+ * `issuer` and `sub` are optional because callers reuse the stored identity from the
+ * original federation profile — the refresh grant does not re-assert identity. All other
+ * token fields follow the same semantics as `FederationProfile`.
+ */
+export type RefreshedTokens = Omit<FederationProfile, "issuer" | "sub"> & {
+	readonly issuer?: string;
+	readonly sub?: string;
+};
 
 export interface SupportsRefresh {
-	refreshFederationToken(refreshToken: string): Promise<RefreshedTokens>;
+	/** Refresh an upstream IdP access token using its refresh token. Returns a partial token snapshot. */
+	refreshToken(refreshToken: string): Promise<RefreshedTokens>;
 }
 
 export function supportsRefresh(
-	p: FederationProviderBase | undefined | null,
-): p is FederationProviderBase & SupportsRefresh {
+	p: FederationProvider | undefined | null,
+): p is FederationProvider & SupportsRefresh {
 	if (p == null) return false;
-	return typeof (p as { refreshFederationToken?: unknown }).refreshFederationToken === "function";
+	return typeof (p as { refreshToken?: unknown }).refreshToken === "function";
 }

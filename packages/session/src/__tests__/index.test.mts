@@ -22,11 +22,46 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect(typeof (mod as { supportsLogout?: unknown }).supportsLogout).toBe("function");
 	});
 
+	it("exports sessionModule as a runtime factory", async () => {
+		const mod = await import("#/index.mjs");
+		expect(typeof (mod as { sessionModule?: unknown }).sessionModule).toBe("function");
+	});
+
+	it("exports createFederationProviderFactory as a runtime factory", async () => {
+		const mod = await import("#/index.mjs");
+		expect(
+			typeof (mod as { createFederationProviderFactory?: unknown }).createFederationProviderFactory,
+		).toBe("function");
+	});
+
+	it("exports createGoogleProvider as a runtime factory", async () => {
+		const mod = await import("#/index.mjs");
+		expect(typeof (mod as { createGoogleProvider?: unknown }).createGoogleProvider).toBe(
+			"function",
+		);
+	});
+
+	it("exports createGithubProvider as a runtime factory", async () => {
+		const mod = await import("#/index.mjs");
+		expect(typeof (mod as { createGithubProvider?: unknown }).createGithubProvider).toBe(
+			"function",
+		);
+	});
+
+	it("does NOT export createPassport (passport-era export removed)", async () => {
+		const mod = await import("#/index.mjs");
+		expect((mod as Record<string, unknown>).createPassport).toBeUndefined();
+	});
+
 	it("does not export the removed FederationProvider / VerifyUserContext names as runtime values", async () => {
 		const mod = await import("#/index.mjs");
 		// These are type-only exports and would not appear as runtime values anyway;
 		// this assertion documents the intended invariant.
-		expect((mod as Record<string, unknown>).FederationProvider).toBeUndefined();
 		expect((mod as Record<string, unknown>).VerifyUserContext).toBeUndefined();
+	});
+
+	it("does NOT export SetupPassportContext (passport-era type removed)", async () => {
+		const mod = await import("#/index.mjs");
+		expect((mod as Record<string, unknown>).SetupPassportContext).toBeUndefined();
 	});
 });

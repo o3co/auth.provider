@@ -14,7 +14,14 @@ export interface FederationTokens {
 	readonly accessToken: string;
 	readonly refreshToken?: string;
 	readonly idToken?: string;
-	readonly expiresAt: Date;
+	/**
+	 * Absolute expiry time of `accessToken`. `null` means the upstream provider
+	 * did not issue a finite expiry (e.g. GitHub OAuth Apps classic tokens).
+	 * Consumers MUST treat `null` as "do not attempt refresh; reuse until the
+	 * provider explicitly invalidates". Required (no `undefined`) so adapters
+	 * are forced to make an explicit decision per provider.
+	 */
+	readonly expiresAt: Date | null;
 	readonly tokenType?: string;
 	readonly scope?: string;
 	readonly rawParams?: Readonly<Record<string, unknown>>;
