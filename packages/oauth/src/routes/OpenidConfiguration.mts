@@ -24,6 +24,14 @@ type ExpressLike = {
 export interface OidcConfigRouterOptions {
 	issuer: string;
 	signingAlgs: ReadonlyArray<string>;
+	/**
+	 * When false, omit end_session_endpoint and backchannel/frontchannel logout_supported
+	 * fields from the discovery response. Set to false when the required stores
+	 * (userSessionStore, federationTokenStore, refreshTokenStore) are not configured
+	 * and the logout router is therefore not mounted.
+	 * Defaults to true for backward compatibility.
+	 */
+	logoutSupported?: boolean;
 }
 
 export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions): Router {
@@ -47,12 +55,19 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
 			...(hasAsymmetricAlg ? { jwks_uri: `${iss}/.well-known/jwks.json` } : {}),
 			introspection_endpoint: `${iss}/oauth/introspect`,
-			// TODO-F-5: RP-Initiated Logout 1.0 + Back-Channel Logout 1.0 + Front-Channel Logout 1.0.
-			end_session_endpoint: `${iss}/oauth/logout`,
-			backchannel_logout_supported: true,
-			backchannel_logout_session_supported: true,
-			frontchannel_logout_supported: true,
-			frontchannel_logout_session_supported: true,
+			// Logout discovery fields are only advertised when the logout router is mounted.
+			// opts.logoutSupported defaults to true for backward compatibility; pass false
+			// explicitly when userSessionStore / federationTokenStore / refreshTokenStore
+			// are absent and the /oauth/logout route is therefore not registered.
+			...(opts.logoutSupported !== false
+				? {
+					end_session_endpoint: `${iss}/oauth/logout`,
+					backchannel_logout_supported: true,
+					backchannel_logout_session_supported: true,
+					frontchannel_logout_supported: true,
+					frontchannel_logout_session_supported: true,
+				}
+				: {}),
 			response_types_supported: ["code"],
 			subject_types_supported: ["public"],
 			id_token_signing_alg_values_supported: [...opts.signingAlgs],

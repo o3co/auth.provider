@@ -502,6 +502,21 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				details: { sid, federations: session.federations },
 			});
 
+			// Validate post_logout_redirect_uri against the initiating client's allowlist ONCE.
+			// Both the HTML branch (7a) and the redirect branch (7c) use this validated value.
+			// Invalid or missing URIs become undefined — fall through to JSON fallback.
+			let validatedPostLogoutRedirectUri: string | undefined;
+			if (typeof postLogoutRedirectUri === "string" && postLogoutRedirectUri.length > 0 && aud) {
+				try {
+					const client = await opts.clientRepository.findById(aud);
+					if (client?.postLogoutRedirectUris?.includes(postLogoutRedirectUri)) {
+						validatedPostLogoutRedirectUri = postLogoutRedirectUri;
+					}
+				} catch {
+					// Client repo throw → treat as unvalidated; fall through to JSON
+				}
+			}
+
 			// 7a: Front-channel logout — if Accept: text/html AND any RP has a frontchannelLogoutUri.
 			// Use q-weighted negotiation: application/json is first so Accept: */* defaults to JSON.
 			// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
@@ -515,8 +530,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					rps: session.activeRPs,
 					issuer: opts.issuer,
 					sid,
-					postLogoutRedirectUri:
-						typeof postLogoutRedirectUri === "string" ? postLogoutRedirectUri : undefined,
+					// Use the allowlist-validated URI — prevents open redirect via HTML branch.
+					postLogoutRedirectUri: validatedPostLogoutRedirectUri,
 				});
 				res.setHeader("Content-Type", "text/html; charset=utf-8");
 				return res.status(200).send(html);
@@ -527,21 +542,13 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				return res.redirect(303, endSessionUri);
 			}
 
-			// 7c: post_logout_redirect_uri — validate against client allowlist.
-			if (typeof postLogoutRedirectUri === "string" && postLogoutRedirectUri.length > 0 && aud) {
-				let client: Awaited<ReturnType<typeof opts.clientRepository.findById>> | null = null;
-				try {
-					client = await opts.clientRepository.findById(aud);
-				} catch {
-					// Fall through to JSON on lookup failure
+			// 7c: post_logout_redirect_uri — use the already-validated value (allowlist checked above).
+			if (validatedPostLogoutRedirectUri) {
+				const redirectUrl = new URL(validatedPostLogoutRedirectUri);
+				if (typeof state === "string" && state.length > 0) {
+					redirectUrl.searchParams.set("state", state);
 				}
-				if (client?.postLogoutRedirectUris?.includes(postLogoutRedirectUri)) {
-					const redirectUrl = new URL(postLogoutRedirectUri);
-					if (typeof state === "string" && state.length > 0) {
-						redirectUrl.searchParams.set("state", state);
-					}
-					return res.redirect(303, redirectUrl.toString());
-				}
+				return res.redirect(303, redirectUrl.toString());
 			}
 
 			// 7d: Default — JSON success.

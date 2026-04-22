@@ -36,7 +36,9 @@ interface Envelope {
 	activeRPs: {
 		clientId: string;
 		backchannelLogoutUri?: string;
+		backchannelLogoutSessionRequired?: boolean;
 		frontchannelLogoutUri?: string;
+		frontchannelLogoutSessionRequired?: boolean;
 		registeredAtMs: number;
 	}[];
 	familyIds: string[];
@@ -53,7 +55,9 @@ const toEnvelope = (s: UserSession): Envelope => ({
 	activeRPs: s.activeRPs.map((r) => ({
 		clientId: r.clientId,
 		backchannelLogoutUri: r.backchannelLogoutUri,
+		backchannelLogoutSessionRequired: r.backchannelLogoutSessionRequired,
 		frontchannelLogoutUri: r.frontchannelLogoutUri,
+		frontchannelLogoutSessionRequired: r.frontchannelLogoutSessionRequired,
 		registeredAtMs: r.registeredAt.getTime(),
 	})),
 	familyIds: [...s.familyIds],
@@ -70,7 +74,9 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	activeRPs: e.activeRPs.map((r) => ({
 		clientId: r.clientId,
 		backchannelLogoutUri: r.backchannelLogoutUri,
+		backchannelLogoutSessionRequired: r.backchannelLogoutSessionRequired,
 		frontchannelLogoutUri: r.frontchannelLogoutUri,
+		frontchannelLogoutSessionRequired: r.frontchannelLogoutSessionRequired,
 		registeredAt: new Date(r.registeredAtMs),
 	})),
 	familyIds: e.familyIds,
@@ -156,7 +162,9 @@ export function createRedisUserSessionStore(
 				{
 					clientId: rp.clientId,
 					backchannelLogoutUri: rp.backchannelLogoutUri,
+					backchannelLogoutSessionRequired: rp.backchannelLogoutSessionRequired,
 					frontchannelLogoutUri: rp.frontchannelLogoutUri,
+					frontchannelLogoutSessionRequired: rp.frontchannelLogoutSessionRequired,
 					registeredAtMs: rp.registeredAt.getTime(),
 				},
 			];

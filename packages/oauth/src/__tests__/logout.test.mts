@@ -133,6 +133,8 @@ interface BuildAppOpts {
 	clientRepo?: ClientRepository;
 	/** Getter for federation providers — evaluated at request time. */
 	getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
+	/** Override fetch for broadcast testing. Defaults to a no-op stub. */
+	fetchImpl?: typeof fetch;
 	logger?: Logger;
 	auditSink?: AuditSinkBase;
 }
@@ -148,7 +150,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 		clientRepository: opts.clientRepo ?? makeClientRepo(),
 		getFederationProviders: opts.getFederationProviders ?? (() => undefined),
 		// Stub fetchImpl so broadcast never makes real network calls
-		fetchImpl: vi.fn().mockResolvedValue({ ok: true }),
+		fetchImpl: opts.fetchImpl ?? vi.fn().mockResolvedValue({ ok: true }),
 		logger: opts.logger,
 		auditSink: opts.auditSink,
 	});
@@ -254,6 +256,47 @@ describe("POST /oauth/logout", () => {
 		});
 	});
 
+	describe("backchannelLogoutSessionRequired:false omits sid from logout_token", () => {
+		it("RP with backchannelLogoutSessionRequired:false → fetch called without sid in logout_token", async () => {
+			const capturedBodies: string[] = [];
+			const fetchSpy = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+				if (init?.body) capturedBodies.push(String(init.body));
+				return { ok: true };
+			});
+			const sessionWithRP: UserSession = {
+				...baseSession,
+				sub: "u-1",
+				activeRPs: [
+					{
+						clientId: "rp-no-sid",
+						backchannelLogoutUri: "https://rp.example.com/back-logout",
+						backchannelLogoutSessionRequired: false,
+						registeredAt: new Date(),
+					},
+				],
+			};
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
+			const app = buildApp({ sessionStore, fetchImpl: fetchSpy });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(200);
+			expect(fetchSpy).toHaveBeenCalledOnce();
+			// The logout_token body is URL-encoded; extract and decode it
+			expect(capturedBodies).toHaveLength(1);
+			const params = new URLSearchParams(capturedBodies[0]);
+			const logoutToken = params.get("logout_token");
+			expect(logoutToken).toBeTruthy();
+			if (!logoutToken) throw new Error("logout_token missing from broadcast request body");
+			// Decode JWT payload (no signature verification needed — we minted it)
+			const payloadBase64 = logoutToken.split(".")[1];
+			const payload = JSON.parse(Buffer.from(payloadBase64, "base64url").toString("utf8"));
+			// backchannelLogoutSessionRequired:false → sid MUST be absent
+			expect(payload.sid).toBeUndefined();
+		});
+	});
+
 	describe("front-channel HTML response", () => {
 		it("Accept: text/html + session has frontchannelLogoutUri RP → 200 text/html with <iframe>", async () => {
 			const sessionWithRP: UserSession = {
@@ -276,6 +319,85 @@ describe("POST /oauth/logout", () => {
 			expect(res.headers["content-type"]).toMatch(/text\/html/);
 			expect(res.text).toContain("<iframe");
 			expect(res.text).toContain("rp1.example.com");
+		});
+	});
+
+	describe("HTML branch open-redirect defense", () => {
+		it("unregistered post_logout_redirect_uri is NOT embedded in redirect script (open redirect defense)", async () => {
+			const sessionWithRP: UserSession = {
+				...baseSession,
+				activeRPs: [
+					{
+						clientId: "client-1",
+						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+						registeredAt: new Date(),
+					},
+				],
+			};
+			// Client does NOT include evil.example in postLogoutRedirectUris
+			const clientRepo = makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+					postLogoutRedirectUris: ["https://trusted.example.com/logged-out"],
+				}),
+			});
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
+			const app = buildApp({ sessionStore, clientRepo });
+			const token = await mintIdToken();
+
+			const res = await postLogout(
+				app,
+				{
+					id_token_hint: token,
+					post_logout_redirect_uri: "https://evil.example/steal",
+				},
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(200);
+			expect(res.headers["content-type"]).toMatch(/text\/html/);
+			// Body MUST NOT contain the attacker-controlled URL
+			expect(res.text).not.toContain("evil.example");
+		});
+
+		it("registered post_logout_redirect_uri IS embedded in HTML redirect script", async () => {
+			const sessionWithRP: UserSession = {
+				...baseSession,
+				activeRPs: [
+					{
+						clientId: "client-1",
+						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+						registeredAt: new Date(),
+					},
+				],
+			};
+			const clientRepo = makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+					postLogoutRedirectUris: ["https://trusted.example.com/logged-out"],
+				}),
+			});
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
+			const app = buildApp({ sessionStore, clientRepo });
+			const token = await mintIdToken();
+
+			const res = await postLogout(
+				app,
+				{
+					id_token_hint: token,
+					post_logout_redirect_uri: "https://trusted.example.com/logged-out",
+				},
+				{ Accept: "text/html" },
+			);
+
+			expect(res.status).toBe(200);
+			expect(res.headers["content-type"]).toMatch(/text\/html/);
+			// The validated URI MUST appear in the page
+			expect(res.text).toContain("trusted.example.com");
 		});
 	});
 
