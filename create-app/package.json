@@ -1,9 +1,14 @@
 {
 	"name": "create-o3co-auth-provider",
 	"version": "0.0.0",
-	"private": true,
+	"description": "Scaffold a new o3co/auth.provider project from the standalone template",
 	"license": "Apache-2.0",
 	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "create-app"
+	},
 	"bin": {
 		"create-o3co-auth-provider": "./dist/cli.mjs"
 	},
