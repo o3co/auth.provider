@@ -31,5 +31,20 @@ jobs:
       - run: pnpm install
       - run: pnpm run lint
       - run: pnpm run build
+      - name: Check vendor names are not leaked into public .d.ts
+        run: |
+          set -euo pipefail
+          VENDOR_NAMES='arctic|openid-client|oauth4webapi|passport'
+          LEAKED=$(find packages/*/dist \( -name '*.d.ts' -o -name '*.d.mts' \) -exec grep -l -E "$VENDOR_NAMES" {} \; 2>/dev/null || true)
+          if [ -n "$LEAKED" ]; then
+            echo "::error::Vendor names leaked into the following public .d.ts files:"
+            echo "$LEAKED" | while read -r f; do
+              echo "---"
+              echo "file: $f"
+              grep -n -E "$VENDOR_NAMES" "$f" || true
+            done
+            exit 1
+          fi
+          echo "No vendor name leaks found in public .d.ts."
       - run: pnpm -r --if-present run typecheck
       - run: pnpm run test
