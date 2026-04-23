@@ -131,7 +131,8 @@ await init();
 - **core** — Interfaces, config schemas, token service, app factory. Always required.
 - **oauth** — OAuth routes (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`). Required for any token issuance.
 - **did** — DID authentication grant. Optional — only needed if you use DID-based auth.
-- **session** — Session login + OAuth federation (Google, GitHub, extensible). Optional — skip for API-only deployments.
+- **session** — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.
+- **federation-google / federation-github** — Concrete OAuth federation providers. Optional — install only the providers you register.
 - **foundation** — Production repository adapters (Redis code store, HTTP user lookup). Optional.
 
 ## Packages
@@ -141,7 +142,9 @@ await init();
 | [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | Grant registry, token service, repository interfaces, config schemas |
 | [`packages/did`](packages/did/) | `@o3co/auth-provider-did` | DID authentication grant with pluggable resolver |
 | [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth routes: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
-| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session routes, Passport.js, OAuth federation (Google, GitHub, extensible) |
+| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session routes and provider-registered OAuth federation |
+| [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google OAuth/OIDC federation provider |
+| [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub OAuth federation provider |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Redis code store, HTTP user/client repositories |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
 | [`create-app`](create-app/) | `create-o3co-auth-provider` | CLI scaffolder |

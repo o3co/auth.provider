@@ -52,6 +52,8 @@ describe("scaffold", () => {
 
 		// Specific checks
 		expect(pkg.dependencies["@o3co/auth-provider-core"]).toMatch(/^\^/);
+		expect(pkg.dependencies["@o3co/auth-provider-federation-google"]).toMatch(/^\^/);
+		expect(pkg.dependencies["@o3co/auth-provider-federation-github"]).toBeUndefined();
 		expect(pkg.dependencies["@o3co/auth-provider-foundation"]).toMatch(/^\^/);
 	});
 
@@ -69,6 +71,13 @@ describe("scaffold", () => {
 
 		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
 		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
+	});
+
+	it("ships versions for optional federation provider packages", () => {
+		const versions = JSON.parse(readFileSync(join("templates", "versions.json"), "utf-8"));
+
+		expect(versions["@o3co/auth-provider-federation-google"]).toBe("0.0.0");
+		expect(versions["@o3co/auth-provider-federation-github"]).toBe("0.0.0");
 	});
 });
 
