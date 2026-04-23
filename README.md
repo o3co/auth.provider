@@ -6,6 +6,8 @@
 [![API Docs](https://img.shields.io/badge/docs-API-blue)](https://o3co.github.io/auth.provider/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
+> This repository handles **authentication and token issuance** in the three-layer separation of concerns (authentication & token issuance / [authorization decision](https://github.com/o3co/auth.policy-verifier) / [authorization enforcement](https://github.com/o3co/protobuf.interceptors)) of the [auth](https://github.com/o3co/auth) stack.
+
 OAuth 2.0 provider with DID (Decentralized Identifier) authentication. Issue JWTs from traditional login flows or DID-based cryptographic proof — same token format, same introspection endpoint, same downstream verification.
 
 ## DID Authentication
@@ -244,7 +246,7 @@ docker build -t my-auth .
 
 - [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier) — ABAC policy engine for authorization decisions
 - [auth.proxy](https://github.com/o3co/auth.proxy) — Token validation reverse proxy
-- [grpc.authz](https://github.com/o3co/grpc.authz) — gRPC authorization middleware (calls auth.provider for introspection, auth.policy-verifier for authorization)
+- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — protobuf-option-driven authorization interceptors for gRPC / ConnectRPC (calls auth.provider for introspection, auth.policy-verifier for authorization)
 - [auth](https://github.com/o3co/auth) — Architecture docs and E2E tests
 
 ## License
