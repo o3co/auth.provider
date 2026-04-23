@@ -1,11 +1,11 @@
-# create-o3co-auth-provider
+# @o3co/create-auth-provider
 
 CLI scaffolder for auth.provider. Generates a new project from the standalone template.
 
 ## Usage
 
 ```bash
-npx create-o3co-auth-provider <project-name> [--dir <dir-name>]
+npx @o3co/create-auth-provider <project-name> [--dir <dir-name>]
 ```
 
 `<project-name>` may be either a scoped npm name (`@scope/pkg`) or an unscoped name (`pkg`).
@@ -13,7 +13,7 @@ npx create-o3co-auth-provider <project-name> [--dir <dir-name>]
 Unscoped example:
 
 ```bash
-npx create-o3co-auth-provider my-auth-server
+npx @o3co/create-auth-provider my-auth-server
 cd my-auth-server
 npm install
 npm run debug
@@ -22,7 +22,7 @@ npm run debug
 Scoped example (directory defaults to the package portion `auth.provider`):
 
 ```bash
-npx create-o3co-auth-provider @my-org/auth.provider
+npx @o3co/create-auth-provider @my-org/auth.provider
 cd auth.provider
 npm install
 npm run debug
@@ -31,7 +31,7 @@ npm run debug
 Override the directory name with `--dir`:
 
 ```bash
-npx create-o3co-auth-provider @my-org/auth.provider --dir provider
+npx @o3co/create-auth-provider @my-org/auth.provider --dir provider
 cd provider
 ```
 
@@ -90,7 +90,7 @@ After generation, fill in the required environment variables in `.env` (copy fro
 ## Programmatic API
 
 ```typescript
-import { scaffold, main } from "create-o3co-auth-provider";
+import { scaffold, main } from "@o3co/create-auth-provider";
 
 // Generate a project at an absolute path
 scaffold(targetDir: string, projectName: string): void;

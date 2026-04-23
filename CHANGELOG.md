@@ -12,11 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `@o3co/auth-provider-federation-github` package with `createGithubProvider()` and `registerGithubFederation(factory)`.
 - `sessionModule({ federationProviderFactory })` option for composition roots that explicitly register federation provider packages.
 - `validateRedirect` and `resolveCallbackRedirect` exports from `@o3co/auth-provider-session` for provider package implementations. (`codeChallenge` was already exported since v0.4.0.)
+- `@o3co/create-auth-provider` scoped scaffolder package. Replaces the unscoped `create-o3co-auth-provider` so the scaffolder lives under the `@o3co` npm org alongside the runtime packages. Consumers should switch to `npx @o3co/create-auth-provider my-auth-app`. The old `create-o3co-auth-provider` package on npm is deprecated.
 
 ### Changed
 
 - **Breaking**: Google and GitHub federation providers are no longer bundled in `@o3co/auth-provider-session`. Consumers must install provider packages, register them with `createFederationProviderFactory()`, and pass the factory to `sessionModule`.
 - `templates/standalone` registers `@o3co/auth-provider-federation-google` explicitly for the default Google federation config.
+- Scaffolder CLI renamed from `create-o3co-auth-provider` to `@o3co/create-auth-provider` (scoped). The `bin` entry is now `create-auth-provider`.
 
 ### Removed
 

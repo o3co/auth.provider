@@ -55,7 +55,7 @@ The `DidDocumentResolver` interface is pluggable — implement it for your DID m
 ## Quick Start
 
 ```bash
-npx create-o3co-auth-provider my-auth-app
+npx @o3co/create-auth-provider my-auth-app
 cd my-auth-app
 pnpm install
 pnpm build
@@ -149,7 +149,7 @@ await init();
 | [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub OAuth federation provider |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Redis code store, HTTP user/client repositories |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
-| [`create-app`](create-app/) | `create-o3co-auth-provider` | CLI scaffolder |
+| [`create-app`](create-app/) | `@o3co/create-auth-provider` | CLI scaffolder |
 
 ## Endpoints
 
@@ -237,7 +237,7 @@ pnpm -r test      # test all packages
 ## Docker
 
 ```bash
-npx create-o3co-auth-provider my-auth-app
+npx @o3co/create-auth-provider my-auth-app
 cd my-auth-app
 docker build -t my-auth .
 ```

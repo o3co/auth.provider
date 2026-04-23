@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-auth.provider のデプロイ可能なサーバーテンプレートです。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動します。`create-o3co-auth-provider` で生成されます。
+auth.provider のデプロイ可能なサーバーテンプレートです。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動します。`@o3co/create-auth-provider` で生成されます。
 
 ## 使い方
 
@@ -202,4 +202,4 @@ const { init, router, grantRegistry } = createApp(express, {
 - [`@o3co/auth-provider-oauth`](../../packages/oauth) — OAuth モジュール
 - [`@o3co/auth-provider-session`](../../packages/session) — Session モジュール
 - [`@o3co/auth-provider-foundation`](../../packages/foundation) — 組み込みアダプター登録
-- [`create-o3co-auth-provider`](../../create-app) — このテンプレートを生成する CLI スキャフォルダー
+- [`@o3co/create-auth-provider`](../../create-app) — このテンプレートを生成する CLI スキャフォルダー

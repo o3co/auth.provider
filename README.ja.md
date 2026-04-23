@@ -49,7 +49,7 @@ Client                              auth.provider
 ## Quick Start
 
 ```bash
-npx create-o3co-auth-provider my-auth-app
+npx @o3co/create-auth-provider my-auth-app
 cd my-auth-app
 pnpm install
 pnpm build
@@ -139,7 +139,7 @@ await init();
 | [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | セッションルート, Passport.js, OAuth フェデレーション（Google・GitHub・拡張可能） |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Redis コードストア, HTTP ユーザー/クライアントリポジトリ |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |
-| [`create-app`](create-app/) | `create-o3co-auth-provider` | CLI スキャフォルダー |
+| [`create-app`](create-app/) | `@o3co/create-auth-provider` | CLI スキャフォルダー |
 
 ## エンドポイント
 
@@ -216,7 +216,7 @@ pnpm -r test      # 全テスト実行
 ## Docker
 
 ```bash
-npx create-o3co-auth-provider my-auth-app
+npx @o3co/create-auth-provider my-auth-app
 cd my-auth-app
 docker build -t my-auth .
 ```
