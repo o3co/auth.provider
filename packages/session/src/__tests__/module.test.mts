@@ -220,6 +220,75 @@ describe("sessionModule", () => {
 		});
 	});
 
+	it("rethrows non-AdapterFactoryError failures from factory.create unchanged", async () => {
+		const originalError = new Error("custom provider builder crashed");
+		const factory = {
+			create: vi.fn().mockRejectedValue(originalError),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			federationProviderFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		// Unknown-type wrapping must only apply to AdapterFactoryError; other failures
+		// from custom builders must surface unchanged so operators see the real cause.
+		await expect(module.init(ctx)).rejects.toBe(originalError);
+	});
+
+	it("rethrows AdapterFactoryError with reason=duplicate unchanged", async () => {
+		const dupErr = new AdapterFactoryError({
+			reason: "duplicate",
+			kind: "FederationProvider",
+			type: "google",
+			registered: ["google"],
+		});
+		const factory = {
+			create: vi.fn().mockRejectedValue(dupErr),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			federationProviderFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		// Only reason='unknown' gets the install/register hint wrapping; duplicate
+		// (a builder-bug signal) must propagate verbatim.
+		await expect(module.init(ctx)).rejects.toBe(dupErr);
+	});
+
 	it("skips federations with enabled=false", async () => {
 		// Arrange: one federation entry with enabled=false
 		const factory = {
