@@ -50,6 +50,7 @@ jobs:
           fi
           echo "No vendor import leaks found in public .d.mts."
       - run: pnpm -r --if-present run typecheck
+      - run: pnpm run test
       - run: pnpm run test:coverage
 
       - name: Upload coverage to Codecov (core)
