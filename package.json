@@ -8,6 +8,7 @@
 		"docs": "typedoc",
 		"lint": "biome check packages/ templates/ create-app/",
 		"test": "pnpm -r run test",
+		"test:coverage": "pnpm -r --if-present run test:coverage",
 		"audit": "pnpm audit --audit-level=high"
 	},
 	"devDependencies": {
