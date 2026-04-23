@@ -1,11 +1,11 @@
-# create-o3co-auth-provider
+# @o3co/create-auth-provider
 
 auth.provider 用の CLI スキャフォルダーです。standalone テンプレートから新しいプロジェクトを生成します。
 
 ## 使い方
 
 ```bash
-npx create-o3co-auth-provider <project-name> [--dir <dir-name>]
+npx @o3co/create-auth-provider <project-name> [--dir <dir-name>]
 ```
 
 `<project-name>` はスコープ付き npm 名 (`@scope/pkg`) とスコープなしの名前 (`pkg`) のどちらでも指定できます。
@@ -13,7 +13,7 @@ npx create-o3co-auth-provider <project-name> [--dir <dir-name>]
 スコープなしの例:
 
 ```bash
-npx create-o3co-auth-provider my-auth-server
+npx @o3co/create-auth-provider my-auth-server
 cd my-auth-server
 npm install
 npm run debug
@@ -22,7 +22,7 @@ npm run debug
 スコープ付きの例（ディレクトリ名はパッケージ部分 `auth.provider` がデフォルト）:
 
 ```bash
-npx create-o3co-auth-provider @my-org/auth.provider
+npx @o3co/create-auth-provider @my-org/auth.provider
 cd auth.provider
 npm install
 npm run debug
@@ -31,7 +31,7 @@ npm run debug
 `--dir` でディレクトリ名を明示指定:
 
 ```bash
-npx create-o3co-auth-provider @my-org/auth.provider --dir provider
+npx @o3co/create-auth-provider @my-org/auth.provider --dir provider
 cd provider
 ```
 
@@ -90,7 +90,7 @@ cd provider
 ## プログラマティック API
 
 ```typescript
-import { scaffold, main } from "create-o3co-auth-provider";
+import { scaffold, main } from "@o3co/create-auth-provider";
 
 // 絶対パスにプロジェクトを生成する
 scaffold(targetDir: string, projectName: string): void;
