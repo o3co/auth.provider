@@ -50,4 +50,49 @@ jobs:
           fi
           echo "No vendor import leaks found in public .d.mts."
       - run: pnpm -r --if-present run typecheck
-      - run: pnpm run test
+      - run: pnpm run test:coverage
+
+      - name: Upload coverage to Codecov (core)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/core/coverage/coverage-final.json
+          flags: core
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload coverage to Codecov (did)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/did/coverage/coverage-final.json
+          flags: did
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload coverage to Codecov (foundation)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/foundation/coverage/coverage-final.json
+          flags: foundation
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload coverage to Codecov (oauth)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/oauth/coverage/coverage-final.json
+          flags: oauth
+          disable_search: true
+          fail_ci_if_error: false
+
+      - name: Upload coverage to Codecov (session)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/session/coverage/coverage-final.json
+          flags: session
+          disable_search: true
+          fail_ci_if_error: false
