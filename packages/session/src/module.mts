@@ -54,8 +54,6 @@ export type SessionModuleOptions = {
 };
 
 type SessionModuleInternalOptions = SessionModuleOptions & {
-	/** For testing only — inject a pre-configured factory to skip registration. */
-	_federationFactory?: FederationProviderFactory;
 	/** For testing only — replace sessionRoutes.createRouter to capture call arguments. */
 	_createSessionRouter?: typeof sessionRoutes.createRouter;
 	/** For testing only — replace federationRoutes.createRouter to capture call arguments. */
@@ -87,9 +85,7 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 		// Build federation provider factory (or use injected stub in tests).
 		const factory: FederationProviderFactory =
-			params.federationProviderFactory ??
-			params._federationFactory ??
-			createFederationProviderFactory();
+			params.federationProviderFactory ?? createFederationProviderFactory();
 
 		// Normalize federation config entries and build the provider Map.
 		const federationProviders = new Map<string, FederationProvider>();

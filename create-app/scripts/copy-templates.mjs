@@ -30,6 +30,9 @@ const versions = {
 	"@o3co/auth-provider-federation-google": readVersion(
 		"../../packages/federation-google/package.json",
 	),
+	"@o3co/auth-provider-federation-github": readVersion(
+		"../../packages/federation-github/package.json",
+	),
 	"@o3co/auth-provider-oauth": readVersion("../../packages/oauth/package.json"),
 	"@o3co/auth-provider-session": readVersion("../../packages/session/package.json"),
 	"@o3co/auth-provider-foundation": readVersion("../../packages/foundation/package.json"),

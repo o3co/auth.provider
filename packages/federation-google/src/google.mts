@@ -52,7 +52,10 @@ export interface GoogleProviderConfig {
 	endSessionEndpoint?: string;
 }
 
-type GoogleProvider = FederationProvider & SupportsRefresh & SupportsLogout & SupportsClaimMapping;
+export type GoogleProvider = FederationProvider &
+	SupportsRefresh &
+	SupportsLogout &
+	SupportsClaimMapping;
 
 function narrowGoogleConfig(config: Record<string, unknown>): GoogleProviderConfig {
 	const name = typeof config.name === "string" ? config.name : undefined;

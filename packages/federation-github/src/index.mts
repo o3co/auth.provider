@@ -14,5 +14,5 @@
  * limitations under the License.
  */
 
-export type { GithubProviderConfig } from "./github.mjs";
+export type { GithubProvider, GithubProviderConfig } from "./github.mjs";
 export { createGithubProvider, registerGithubFederation } from "./github.mjs";

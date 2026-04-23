@@ -29,6 +29,7 @@ import {
 	registerBuiltinUserSessionStores,
 } from "@o3co/auth-provider-core";
 import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
+// import { registerGithubFederation } from "@o3co/auth-provider-federation-github";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import {
 	oauthAuthorizationModule,
@@ -166,6 +167,7 @@ await (async (): Promise<void> => {
 
 	const federationProviderFactory = createFederationProviderFactory();
 	registerGoogleFederation(federationProviderFactory);
+	// registerGithubFederation(federationProviderFactory);
 
 	// Step 8: Compose the OAuth / session modules and build the app router.
 	const { init, router, grantRegistry } = createApp({

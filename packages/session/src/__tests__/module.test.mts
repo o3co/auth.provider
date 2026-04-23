@@ -232,7 +232,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -272,7 +272,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -313,7 +313,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -349,7 +349,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -393,7 +393,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -434,7 +434,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -513,7 +513,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -563,7 +563,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 			_createFederationRouter:
 				federationRouterSpy as unknown as typeof import("#/routes/Federation.mjs").createRouter,
@@ -610,7 +610,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 

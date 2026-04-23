@@ -51,7 +51,7 @@ export interface GithubProviderConfig {
 	endSessionEndpoint?: string;
 }
 
-type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
+export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
 
 function narrowGithubConfig(config: Record<string, unknown>): GithubProviderConfig {
 	const name = typeof config.name === "string" ? config.name : undefined;

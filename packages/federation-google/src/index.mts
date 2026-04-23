@@ -14,5 +14,5 @@
  * limitations under the License.
  */
 
-export type { GoogleProviderConfig } from "./google.mjs";
+export type { GoogleProvider, GoogleProviderConfig } from "./google.mjs";
 export { createGoogleProvider, registerGoogleFederation } from "./google.mjs";
