@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Added
+
+- `@o3co/auth-provider-federation-google` package with `createGoogleProvider()` and `registerGoogleFederation(factory)`.
+- `@o3co/auth-provider-federation-github` package with `createGithubProvider()` and `registerGithubFederation(factory)`.
+- `sessionModule({ federationProviderFactory })` option for composition roots that explicitly register federation provider packages.
+- `validateRedirect` and `resolveCallbackRedirect` exports from `@o3co/auth-provider-session` for provider package implementations. (`codeChallenge` was already exported since v0.4.0.)
+
+### Changed
+
+- **Breaking**: Google and GitHub federation providers are no longer bundled in `@o3co/auth-provider-session`. Consumers must install provider packages, register them with `createFederationProviderFactory()`, and pass the factory to `sessionModule`.
+- `templates/standalone` registers `@o3co/auth-provider-federation-google` explicitly for the default Google federation config.
+
+### Removed
+
+- **Breaking**: `registerBuiltinFederations`, `createGoogleProvider`, and `createGithubProvider` are removed from `@o3co/auth-provider-session`.
+- `openid-client` is no longer a runtime dependency of `@o3co/auth-provider-session`; it belongs to the concrete provider packages.
+
 ## [0.4.1] - 2026-04-22
 
 ### Added

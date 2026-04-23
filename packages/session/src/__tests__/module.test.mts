@@ -15,6 +15,7 @@
  */
 
 import {
+	AdapterFactoryError,
 	type AppConfig,
 	createSymmetricKeyStore,
 	type FederationTokenStoreBase,
@@ -144,6 +145,150 @@ describe("sessionModule", () => {
 		expect(sessionCalls.length).toBeGreaterThanOrEqual(2);
 	});
 
+	it("uses the public federationProviderFactory option for enabled federations", async () => {
+		const factory = {
+			create: vi.fn().mockResolvedValue({
+				name: "google",
+				scope: [],
+				validateRedirect: vi.fn(),
+				resolveCallbackRedirect: vi.fn(),
+				buildAuthorizationUrl: vi.fn(),
+				exchangeCode: vi.fn(),
+			}),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			federationProviderFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		await module.init(ctx);
+
+		expect(factory.create).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "google", name: "google" }),
+		);
+	});
+
+	it("does not register Google/GitHub providers by default", async () => {
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+		});
+
+		await expect(module.init(ctx)).rejects.toSatisfy((err) => {
+			if (!(err instanceof Error)) return false;
+			const cause = (err as Error & { cause?: unknown }).cause;
+			return (
+				/no provider registered for type "google"/.test(err.message) &&
+				/@o3co\/auth-provider-federation-google/.test(err.message) &&
+				/federationProviderFactory/.test(err.message) &&
+				cause instanceof AdapterFactoryError &&
+				cause.reason === "unknown" &&
+				cause.kind === "FederationProvider"
+			);
+		});
+	});
+
+	it("rethrows non-AdapterFactoryError failures from factory.create unchanged", async () => {
+		const originalError = new Error("custom provider builder crashed");
+		const factory = {
+			create: vi.fn().mockRejectedValue(originalError),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			federationProviderFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		// Unknown-type wrapping must only apply to AdapterFactoryError; other failures
+		// from custom builders must surface unchanged so operators see the real cause.
+		await expect(module.init(ctx)).rejects.toBe(originalError);
+	});
+
+	it("rethrows AdapterFactoryError with reason=duplicate unchanged", async () => {
+		const dupErr = new AdapterFactoryError({
+			reason: "duplicate",
+			kind: "FederationProvider",
+			type: "google",
+			registered: ["google"],
+		});
+		const factory = {
+			create: vi.fn().mockRejectedValue(dupErr),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			federationProviderFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		// Only reason='unknown' gets the install/register hint wrapping; duplicate
+		// (a builder-bug signal) must propagate verbatim.
+		await expect(module.init(ctx)).rejects.toBe(dupErr);
+	});
+
 	it("skips federations with enabled=false", async () => {
 		// Arrange: one federation entry with enabled=false
 		const factory = {
@@ -162,7 +307,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -202,7 +347,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -243,7 +388,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -279,7 +424,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -323,7 +468,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -364,7 +509,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -443,7 +588,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 
@@ -493,7 +638,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 			_createFederationRouter:
 				federationRouterSpy as unknown as typeof import("#/routes/Federation.mjs").createRouter,
@@ -540,7 +685,7 @@ describe("sessionModule", () => {
 				authenticate: vi.fn(),
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
-			_federationFactory:
+			federationProviderFactory:
 				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
 		});
 

@@ -2,7 +2,10 @@
 
 Session and federation routes module for [auth.provider](../../README.md).
 
-Handles username/password login, logout, and OAuth 2.0 federation (Google, GitHub, and any provider registered via `FederationProviderFactory`). Uses RFC 6749 authorization code flow internally, with built-in Google/GitHub providers backed by openid-client.
+Handles username/password login, logout, and OAuth 2.0 federation for providers
+registered with `FederationProviderFactory`. Uses RFC 6749 authorization code
+flow internally. Concrete providers such as Google and GitHub live in separate
+provider packages.
 
 ## Install
 
@@ -23,8 +26,6 @@ Peer dependencies (install separately in the workspace root):
 express@^5.0.0
 ```
 
-The built-in federation providers (Google, GitHub) use `openid-client ^6.8.3` (a `dependencies` entry, not a peer dep).
-
 ## Public API
 
 ### `sessionModule`
@@ -33,6 +34,7 @@ The built-in federation providers (Google, GitHub) use `openid-client ^6.8.3` (a
 function sessionModule(params: {
   userRepository: UserRepository;
   express?: ExpressLike;
+  federationProviderFactory?: FederationProviderFactory;
 }): Module;
 ```
 
@@ -57,52 +59,7 @@ The `:name` path parameter corresponds to the federation key in `config.federati
 function createFederationProviderFactory(): FederationProviderFactory;
 ```
 
-Creates an empty `FederationProviderFactory` (an `AdapterFactory<FederationProvider>` with no built-in types registered). Call `registerBuiltinFederations(factory)` to register the built-in `"google"` and `"github"` types, then call `factory.register(type, builder)` to add your own.
-
----
-
-### `registerBuiltinFederations`
-
-```typescript
-function registerBuiltinFederations(factory: FederationProviderFactory): void;
-```
-
-Registers the built-in federation adapters into `factory`:
-
-| Type       | Provider               | Dependency (bundled)  |
-|------------|------------------------|-----------------------|
-| `"google"` | `createGoogleProvider` | `openid-client ^6.8.3` |
-| `"github"` | `createGithubProvider` | `openid-client ^6.8.3` |
-
----
-
-### `createGoogleProvider`
-
-```typescript
-function createGoogleProvider(config: {
-  name: string;
-  clientId: string;
-  clientSecret: string;
-  callbackURL: string;
-}): FederationProvider;
-```
-
-Creates a `FederationProvider` for Google OIDC. Backed by `openid-client`; discovers endpoints from `https://accounts.google.com`. Supports multi-tenant usage (e.g. `google` and `google-work` as separate instances via distinct `name` values).
-
----
-
-### `createGithubProvider`
-
-```typescript
-function createGithubProvider(config: {
-  name: string;
-  clientId: string;
-  clientSecret: string;
-  callbackURL: string;
-}): FederationProvider;
-```
-
-Creates a `FederationProvider` for GitHub OAuth 2.0. Backed by `openid-client` with Arctic-style GitHub token endpoint. The default scope is `["read:user", "user:email"]`. The federation token format is `${federationName}:${profile.sub}` where `sub` is the GitHub numeric user ID.
+Creates an empty `FederationProviderFactory` (an `AdapterFactory<FederationProvider>` with no provider types registered). Install provider packages and register them in the composition root, then pass the factory to `sessionModule`.
 
 ---
 
@@ -166,7 +123,9 @@ function supportsLogout(
 ): provider is FederationProvider & SupportsLogout;
 ```
 
-The built-in `"google"` and `"github"` providers **do not** implement `SupportsLogout`: Google has no public OIDC end-session endpoint, and GitHub is OAuth2-only. External integrations (Microsoft Entra ID, Auth0, Okta, …) can add the capability by mixing it into their custom provider.
+Provider packages may implement `SupportsLogout` when the upstream IdP exposes
+an end-session endpoint. External integrations (Microsoft Entra ID, Auth0,
+Okta, etc.) can add the capability by mixing it into their custom provider.
 
 Minimum custom provider example:
 
@@ -252,7 +211,7 @@ function supportsClaimMapping(
 ): provider is FederationProvider & SupportsClaimMapping;
 ```
 
-Providers that implement `SupportsClaimMapping` translate a `FederationProfile` into OIDC-standard claim names. The built-in `"google"` and `"github"` providers implement this capability. Custom providers can add it by exposing a `mapClaims` method:
+Providers that implement `SupportsClaimMapping` translate a `FederationProfile` into OIDC-standard claim names. Custom providers can add it by exposing a `mapClaims` method:
 
 ```ts
 import { supportsClaimMapping } from "@o3co/auth-provider-session";
@@ -288,15 +247,15 @@ Providers implementing `SupportsRefresh` can keep federation tokens alive withou
 
 ---
 
-### Built-in provider notes
+### Provider package notes
 
-**Google provider (`createGoogleProvider`)**
+**`@o3co/auth-provider-federation-google`**
 
 - Requests `openid profile email` scope by default.
-- Discovers endpoints via OIDC discovery at `https://accounts.google.com`.
+- Uses stable Google OAuth/OIDC endpoints.
 - `FederationProfile.sub` is the Google numeric account ID.
 
-**GitHub provider (`createGithubProvider`)**
+**`@o3co/auth-provider-federation-github`**
 
 - Default scope is `["read:user", "user:email"]`.
 - When the primary profile object omits an `email` field, the provider enriches the profile by calling the GitHub `/user/emails` API to retrieve the primary verified email.
@@ -332,7 +291,14 @@ Discriminated union returned by `FederationProvider` methods. Check `ok` before 
 ```typescript
 import express from "express";
 import { createApp } from "@o3co/auth-provider-core";
-import { sessionModule } from "@o3co/auth-provider-session";
+import {
+  createFederationProviderFactory,
+  sessionModule,
+} from "@o3co/auth-provider-session";
+import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
+
+const federationProviderFactory = createFederationProviderFactory();
+registerGoogleFederation(federationProviderFactory);
 
 const app = createApp(express, {
   config,
@@ -340,13 +306,16 @@ const app = createApp(express, {
   modules: [
     sessionModule({
       userRepository,
+      federationProviderFactory,
     }),
   ],
 });
 await app.init();
 ```
 
-The `sessionModule` reads `config.federations` and wires up providers automatically using `createFederationProviderFactory` + `registerBuiltinFederations` internally.
+The `sessionModule` reads `config.federations` and creates providers using the
+factory supplied by the composition root. If a federation type is enabled in
+config but no package registered that type, boot fails fast.
 
 ### HOCON federation configuration
 
@@ -402,16 +371,13 @@ Mixed shape — top-level fields alongside a nested sub-section — is rejected 
 
 ```typescript
 import {
+  codeChallenge,
   createFederationProviderFactory,
-  registerBuiltinFederations,
   type FederationProvider,
   type FederationProviderFactory,
 } from "@o3co/auth-provider-session";
-import { codeChallenge } from "@o3co/auth-provider-session/federations/pkce.mjs";
 
-// Create factory and register built-ins
 const factory = createFederationProviderFactory();
-registerBuiltinFederations(factory);
 
 // Register a custom provider type
 factory.register("microsoft", async (config) => {
@@ -502,7 +468,7 @@ class CustomProvider implements FederationProviderBase {
 **After (v0.4.0, pure-function interface):**
 
 ```ts
-import { codeChallenge } from "@o3co/auth-provider-session/federations/pkce.mjs";
+import { codeChallenge } from "@o3co/auth-provider-session";
 
 class CustomProvider implements FederationProvider, SupportsClaimMapping {
   readonly name = "custom";

@@ -15,6 +15,7 @@
  */
 
 import {
+	AdapterFactoryError,
 	type AppConfig,
 	fullSectionsSchema,
 	type Module,
@@ -25,7 +26,6 @@ import type { RequestHandler, Router } from "express";
 import {
 	createFederationProviderFactory,
 	type FederationProviderFactory,
-	registerBuiltinFederations,
 } from "./federations/factory.mjs";
 import type { FederationProvider } from "./federations/types.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
@@ -50,11 +50,11 @@ export type SessionModuleOptions = {
 	express?: ExpressLike;
 	/** Session TTL in milliseconds for new federation-created UserSessions. Default 24h. */
 	sessionTtlMs?: number;
+	/** Federation provider factory configured by the composition root. Defaults to an empty factory. */
+	federationProviderFactory?: FederationProviderFactory;
 };
 
 type SessionModuleInternalOptions = SessionModuleOptions & {
-	/** For testing only — inject a pre-configured factory to skip registration. */
-	_federationFactory?: FederationProviderFactory;
 	/** For testing only — replace sessionRoutes.createRouter to capture call arguments. */
 	_createSessionRouter?: typeof sessionRoutes.createRouter;
 	/** For testing only — replace federationRoutes.createRouter to capture call arguments. */
@@ -86,12 +86,7 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 		// Build federation provider factory (or use injected stub in tests).
 		const factory: FederationProviderFactory =
-			params._federationFactory ??
-			(() => {
-				const f = createFederationProviderFactory();
-				registerBuiltinFederations(f);
-				return f;
-			})();
+			params.federationProviderFactory ?? createFederationProviderFactory();
 
 		// Normalize federation config entries and build the provider Map.
 		const federationProviders = new Map<string, FederationProvider>();
@@ -154,14 +149,28 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 				// config.endpoints.client: optional section — fallback URL when no redirectTo in session
 				config.endpoints.client?.url ?? undefined;
 
-			const provider = await factory.create({
-				type,
-				name,
-				...flatConfig,
-				sessionDomain,
-				authCallbackUrl,
-				clientUrl,
-			});
+			let provider: FederationProvider;
+			try {
+				provider = await factory.create({
+					type,
+					name,
+					...flatConfig,
+					sessionDomain,
+					authCallbackUrl,
+					clientUrl,
+				});
+			} catch (err) {
+				if (err instanceof AdapterFactoryError && err.reason === "unknown") {
+					throw new Error(
+						`federations.${name}: no provider registered for type "${type}". ` +
+							`Install @o3co/auth-provider-federation-${type} (or a custom provider package), ` +
+							`call its register*Federation(factory) helper, and pass the factory to sessionModule ` +
+							`via the federationProviderFactory option.`,
+						{ cause: err },
+					);
+				}
+				throw err;
+			}
 
 			// Invariant guard: the provider's name must equal the config key so that
 			// routes/Federation.mts can look up the provider by the :name route param.

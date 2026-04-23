@@ -14,11 +14,5 @@
  * limitations under the License.
  */
 
-import { type AdapterFactory, createAdapterFactory } from "@o3co/auth-provider-core";
-import type { FederationProvider } from "./types.mjs";
-
-export type FederationProviderFactory = AdapterFactory<FederationProvider>;
-
-export function createFederationProviderFactory(): FederationProviderFactory {
-	return createAdapterFactory<FederationProvider>("FederationProvider");
-}
+export type { GoogleProvider, GoogleProviderConfig } from "./google.mjs";
+export { createGoogleProvider, registerGoogleFederation } from "./google.mjs";

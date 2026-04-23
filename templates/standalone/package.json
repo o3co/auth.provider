@@ -19,6 +19,7 @@
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-federation-google": "workspace:*",
 		"@o3co/auth-provider-oauth": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",
 		"@o3co/auth-provider-foundation": "workspace:*",
