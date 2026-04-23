@@ -1,5 +1,7 @@
 # auth.provider
 
+> このリポジトリは、[auth](https://github.com/o3co/auth) スタックの 3 層責務分離（認証・トークン発行 / [認可判定](https://github.com/o3co/auth.policy-verifier) / [認可実施](https://github.com/o3co/protobuf.interceptors)）のうち **認証・トークン発行** を担当します。
+
 DID (分散型識別子) 認証対応の OAuth 2.0 プロバイダー。従来のログインフローでも DID ベースの暗号証明でも JWT を発行できる。トークン形式、イントロスペクション、下流での検証方法は同一。
 
 ## DID 認証
@@ -223,7 +225,7 @@ docker build -t my-auth .
 
 - [auth.policy-verifier](https://github.com/o3co/auth.policy-verifier) — 認可判定のための ABAC ポリシーエンジン
 - [auth.proxy](https://github.com/o3co/auth.proxy) — トークン検証リバースプロキシ
-- [grpc.authz](https://github.com/o3co/grpc.authz) — gRPC 認可ミドルウェア (auth.provider にイントロスペクション、auth.policy-verifier に認可を問い合わせ)
+- [protobuf.interceptors](https://github.com/o3co/protobuf.interceptors) — gRPC / ConnectRPC 向け protobuf option ベースの認可 interceptor (auth.provider にイントロスペクション、auth.policy-verifier に認可を問い合わせ)
 - [auth](https://github.com/o3co/auth) — アーキテクチャドキュメントと E2E テスト
 
 ## ライセンス
