@@ -1,6 +1,6 @@
 {
-	"name": "@o3co/auth-provider-session",
-	"description": "Session and federation routes module for auth.provider",
+	"name": "@o3co/auth-provider-federation-google",
+	"description": "Google federation provider for auth.provider",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"type": "module",
@@ -18,7 +18,7 @@
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/o3co/auth.provider.git",
-		"directory": "packages/session"
+		"directory": "packages/federation-google"
 	},
 	"imports": {
 		"#/*": {
@@ -34,20 +34,13 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"@o3co/auth-provider-core": "workspace:*",
-		"connect-redis": "^9.0.0",
-		"express-rate-limit": "^8.3.1",
-		"redis": "^5.12.1"
+		"openid-client": "^6.8.3"
 	},
 	"peerDependencies": {
-		"express": "^5.0.0"
+		"@o3co/auth-provider-session": "workspace:*"
 	},
 	"devDependencies": {
-		"@types/express": "^5.0.6",
-		"@types/express-session": "^1",
-		"@types/supertest": "^7.2.0",
-		"express": "^5.2.1",
-		"supertest": "^7.2.2",
+		"@o3co/auth-provider-session": "workspace:*",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.2",
 		"@vitest/coverage-v8": "^4.1.2"

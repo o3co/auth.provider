@@ -14,21 +14,23 @@
  * limitations under the License.
  */
 
+import {
+	codeChallenge,
+	type EndSessionRequest,
+	type EndSessionResult,
+	type FederationProfile,
+	type FederationProvider,
+	type FederationProviderFactory,
+	type FederationResult,
+	type MappedClaims,
+	type RefreshedTokens,
+	resolveCallbackRedirect,
+	type SupportsClaimMapping,
+	type SupportsLogout,
+	type SupportsRefresh,
+	validateRedirect,
+} from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
-import { resolveCallbackRedirect, validateRedirect } from "./helpers.mjs";
-import { codeChallenge } from "./pkce.mjs";
-import type {
-	EndSessionRequest,
-	EndSessionResult,
-	FederationProfile,
-	FederationProvider,
-	FederationResult,
-	MappedClaims,
-	RefreshedTokens,
-	SupportsClaimMapping,
-	SupportsLogout,
-	SupportsRefresh,
-} from "./types.mjs";
 
 const GOOGLE_ISSUER = "https://accounts.google.com";
 const SCOPES = ["openid", "profile", "email"] as const;
@@ -51,6 +53,32 @@ export interface GoogleProviderConfig {
 }
 
 type GoogleProvider = FederationProvider & SupportsRefresh & SupportsLogout & SupportsClaimMapping;
+
+function narrowGoogleConfig(config: Record<string, unknown>): GoogleProviderConfig {
+	const name = typeof config.name === "string" ? config.name : undefined;
+	const clientId = typeof config.clientId === "string" ? config.clientId : undefined;
+	const clientSecret = typeof config.clientSecret === "string" ? config.clientSecret : undefined;
+	const callbackURL = typeof config.callbackURL === "string" ? config.callbackURL : undefined;
+	if (!name || !clientId || !clientSecret || !callbackURL) {
+		throw new Error("Google federation requires name, clientId, clientSecret, and callbackURL");
+	}
+	return {
+		name,
+		clientId,
+		clientSecret,
+		callbackURL,
+		sessionDomain: typeof config.sessionDomain === "string" ? config.sessionDomain : undefined,
+		authCallbackUrl:
+			typeof config.authCallbackUrl === "string" ? config.authCallbackUrl : undefined,
+		clientUrl: typeof config.clientUrl === "string" ? config.clientUrl : undefined,
+		endSessionEndpoint:
+			typeof config.endSessionEndpoint === "string" ? config.endSessionEndpoint : undefined,
+	};
+}
+
+export function registerGoogleFederation(factory: FederationProviderFactory): void {
+	factory.register("google", async (config) => createGoogleProvider(narrowGoogleConfig(config)));
+}
 
 export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {

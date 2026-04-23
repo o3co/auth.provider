@@ -8,6 +8,7 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
+import { createFederationProviderFactory } from "@o3co/auth-provider-session";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -42,7 +43,7 @@ vi.mock("openid-client", () => ({
 	skipSubjectCheck: hoisted.skipSubjectCheckSym,
 }));
 
-import { createGithubProvider } from "../github.mjs";
+import { createGithubProvider, registerGithubFederation } from "../github.mjs";
 
 describe("createGithubProvider on openid-client", () => {
 	const baseConfig = {
@@ -60,6 +61,25 @@ describe("createGithubProvider on openid-client", () => {
 		const p = createGithubProvider(baseConfig);
 		expect(p.name).toBe("github");
 		expect([...p.scope]).toEqual(["read:user", "user:email"]);
+	});
+
+	it("registerGithubFederation registers the github factory type", async () => {
+		const factory = createFederationProviderFactory();
+		registerGithubFederation(factory);
+
+		const p = await factory.create({ type: "github", ...baseConfig });
+
+		expect(factory.registeredTypes()).toEqual(["github"]);
+		expect(p.name).toBe("github");
+	});
+
+	it("registerGithubFederation throws when required builder fields are missing", async () => {
+		const factory = createFederationProviderFactory();
+		registerGithubFederation(factory);
+
+		await expect(factory.create({ type: "github", name: "github" })).rejects.toThrow(
+			/clientId|clientSecret|callbackURL/i,
+		);
 	});
 
 	it("buildAuthorizationUrl forwards redirect_uri/state/code_challenge to openid-client with GitHub authorize URL", () => {

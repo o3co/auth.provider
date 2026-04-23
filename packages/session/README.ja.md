@@ -2,7 +2,7 @@
 
 [auth.provider](../../README.md) 向けセッション・フェデレーションルートモジュール。
 
-ユーザー名/パスワードログイン、ログアウト、OAuth 2.0 フェデレーション（Google、GitHub、およびカスタムプロバイダー）を担当する。内部的には RFC 6749 認可コードフローを使用し、組み込みの Google/GitHub プロバイダーは openid-client で実装されている。
+ユーザー名/パスワードログイン、ログアウト、`FederationProviderFactory` に登録されたプロバイダー向けの OAuth 2.0 フェデレーションを担当する。内部的には RFC 6749 認可コードフローを使用する。Google / GitHub などの具体プロバイダーは別パッケージに分離されている。
 
 ## インストール
 
@@ -23,9 +23,6 @@ peer dependencies（ワークスペースルートに別途インストール）
 express@^5.0.0
 ```
 
-組み込みフェデレーションプロバイダー（Google、GitHub）は `openid-client ^6.8.3` を使用する（peer dep ではなく `dependencies` エントリ）。
-
-
 ## パブリック API
 
 ### `sessionModule`
@@ -34,6 +31,7 @@ express@^5.0.0
 function sessionModule(params: {
   userRepository: UserRepository;
   express?: ExpressLike;
+  federationProviderFactory?: FederationProviderFactory;
 }): Module;
 ```
 
@@ -58,52 +56,7 @@ function sessionModule(params: {
 function createFederationProviderFactory(): FederationProviderFactory;
 ```
 
-組み込みタイプが未登録の空の `FederationProviderFactory`（`AdapterFactory<FederationProvider>`）を返す。`registerBuiltinFederations(factory)` を呼び出して組み込みの `"google"` と `"github"` を登録し、`factory.register(type, builder)` で独自タイプを追加できる。
-
----
-
-### `registerBuiltinFederations`
-
-```typescript
-function registerBuiltinFederations(factory: FederationProviderFactory): void;
-```
-
-組み込みフェデレーションアダプターを `factory` に登録する:
-
-| タイプ | プロバイダー | 依存ライブラリ（バンドル済み） |
-| --- | --- | --- |
-| `"google"` | `createGoogleProvider` | `openid-client ^6.8.3` |
-| `"github"` | `createGithubProvider` | `openid-client ^6.8.3` |
-
----
-
-### `createGoogleProvider`
-
-```typescript
-function createGoogleProvider(config: {
-  name: string;
-  clientId: string;
-  clientSecret: string;
-  callbackURL: string;
-}): FederationProvider;
-```
-
-Google OIDC 用の `FederationProvider` を生成する。`openid-client` を使って `https://accounts.google.com` から OIDC ディスカバリーでエンドポイントを取得する。`name` を変えることでマルチテナント構成（例: `google` と `google-work` を別インスタンスとして共存）が可能。
-
----
-
-### `createGithubProvider`
-
-```typescript
-function createGithubProvider(config: {
-  name: string;
-  clientId: string;
-  clientSecret: string;
-  callbackURL: string;
-}): FederationProvider;
-```
-
-GitHub OAuth 2.0 用の `FederationProvider` を生成する。`openid-client` を使用（追加の peer dep 不要）。デフォルトのスコープは `["read:user", "user:email"]`。`FederationProfile.sub` は GitHub の数値ユーザー ID。フェデレーショントークンのフォーマットは `${federationName}:${sub}`（`federationName` はプロバイダーに設定した `name`）。
+プロバイダータイプが未登録の空の `FederationProviderFactory`（`AdapterFactory<FederationProvider>`）を返す。具体プロバイダーパッケージをインストールして composition root で登録し、その factory を `sessionModule` に渡す。
 
 ---
 
@@ -167,7 +120,7 @@ function supportsLogout(
 ): provider is FederationProvider & SupportsLogout;
 ```
 
-組み込みの `"google"` / `"github"` は `SupportsLogout` を **実装しない**。Google は OIDC end-session endpoint を公開しておらず、GitHub は OAuth2 only のため、それぞれ end_session endpoint を持たない。Microsoft Entra ID / Auth0 / Okta 等の integration ではカスタム provider 側で capability を足すことで対応する。
+プロバイダーパッケージは、上流 IdP が end-session endpoint を提供する場合に `SupportsLogout` を実装できる。Microsoft Entra ID / Auth0 / Okta 等の integration ではカスタム provider 側で capability を足すことで対応する。
 
 カスタム provider の最小実装例:
 
@@ -252,7 +205,7 @@ function supportsClaimMapping(
 ): provider is FederationProvider & SupportsClaimMapping;
 ```
 
-`SupportsClaimMapping` を実装した provider は、`FederationProfile` を OIDC 標準のクレーム名に変換する。組み込みの `"google"` / `"github"` はこの capability を実装している。カスタム provider は `mapClaims` メソッドを追加することで対応できる:
+`SupportsClaimMapping` を実装した provider は、`FederationProfile` を OIDC 標準のクレーム名に変換する。カスタム provider は `mapClaims` メソッドを追加することで対応できる:
 
 ```ts
 import { supportsClaimMapping } from "@o3co/auth-provider-session";
@@ -297,15 +250,15 @@ if (supportsRefresh(provider)) {
 
 ---
 
-### 組み込みプロバイダーのメモ
+### プロバイダーパッケージのメモ
 
-**Google プロバイダー（`createGoogleProvider`）**
+**`@o3co/auth-provider-federation-google`**
 
 - デフォルトで `openid profile email` スコープをリクエストする。
-- `https://accounts.google.com` の OIDC ディスカバリーでエンドポイントを取得する。
+- 安定した Google OAuth/OIDC endpoint を使用する。
 - `FederationProfile.sub` は Google のアカウント数値 ID。
 
-**GitHub プロバイダー（`createGithubProvider`）**
+**`@o3co/auth-provider-federation-github`**
 
 - デフォルトスコープは `["read:user", "user:email"]`。
 - プロファイルオブジェクトに `email` フィールドが含まれない場合、GitHub `/user/emails` API を呼び出してプライマリの確認済みメールアドレスを取得することでプロファイルを補完する。
@@ -341,7 +294,14 @@ type FederationResult<T> =
 ```typescript
 import express from "express";
 import { createApp } from "@o3co/auth-provider-core";
-import { sessionModule } from "@o3co/auth-provider-session";
+import {
+  createFederationProviderFactory,
+  sessionModule,
+} from "@o3co/auth-provider-session";
+import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
+
+const federationProviderFactory = createFederationProviderFactory();
+registerGoogleFederation(federationProviderFactory);
 
 const app = createApp(express, {
   config,
@@ -349,13 +309,14 @@ const app = createApp(express, {
   modules: [
     sessionModule({
       userRepository,
+      federationProviderFactory,
     }),
   ],
 });
 await app.init();
 ```
 
-`sessionModule` は内部で `createFederationProviderFactory` + `registerBuiltinFederations` を使い、`config.federations` を読み込んでプロバイダーを自動的にセットアップする。
+`sessionModule` は composition root から渡された factory を使って `config.federations` のプロバイダーを生成する。設定で有効なタイプが未登録の場合は起動時に fail-fast する。
 
 ### HOCON フェデレーション設定
 
@@ -411,16 +372,13 @@ federations {
 
 ```typescript
 import {
+  codeChallenge,
   createFederationProviderFactory,
-  registerBuiltinFederations,
   type FederationProvider,
   type FederationProviderFactory,
 } from "@o3co/auth-provider-session";
-import { codeChallenge } from "@o3co/auth-provider-session/federations/pkce.mjs";
 
-// ファクトリーを生成して組み込みを登録
 const factory = createFederationProviderFactory();
-registerBuiltinFederations(factory);
 
 // カスタムプロバイダータイプを登録
 factory.register("microsoft", async (config) => {
@@ -511,7 +469,7 @@ class CustomProvider implements FederationProviderBase {
 **変更後（v0.4.0、純粋関数インターフェース）:**
 
 ```ts
-import { codeChallenge } from "@o3co/auth-provider-session/federations/pkce.mjs";
+import { codeChallenge } from "@o3co/auth-provider-session";
 
 class CustomProvider implements FederationProvider, SupportsClaimMapping {
   readonly name = "custom";

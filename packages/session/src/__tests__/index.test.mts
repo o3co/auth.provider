@@ -34,18 +34,20 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		).toBe("function");
 	});
 
-	it("exports createGoogleProvider as a runtime factory", async () => {
+	it("exports federation helper utilities for provider packages", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { createGoogleProvider?: unknown }).createGoogleProvider).toBe(
+		expect(typeof (mod as { validateRedirect?: unknown }).validateRedirect).toBe("function");
+		expect(typeof (mod as { resolveCallbackRedirect?: unknown }).resolveCallbackRedirect).toBe(
 			"function",
 		);
+		expect(typeof (mod as { codeChallenge?: unknown }).codeChallenge).toBe("function");
 	});
 
-	it("exports createGithubProvider as a runtime factory", async () => {
+	it("does NOT export concrete Google/GitHub provider factories", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { createGithubProvider?: unknown }).createGithubProvider).toBe(
-			"function",
-		);
+		expect((mod as Record<string, unknown>).createGoogleProvider).toBeUndefined();
+		expect((mod as Record<string, unknown>).createGithubProvider).toBeUndefined();
+		expect((mod as Record<string, unknown>).registerBuiltinFederations).toBeUndefined();
 	});
 
 	it("does NOT export createPassport (passport-era export removed)", async () => {

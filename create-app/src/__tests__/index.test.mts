@@ -52,6 +52,7 @@ describe("scaffold", () => {
 
 		// Specific checks
 		expect(pkg.dependencies["@o3co/auth-provider-core"]).toMatch(/^\^/);
+		expect(pkg.dependencies["@o3co/auth-provider-federation-google"]).toMatch(/^\^/);
 		expect(pkg.dependencies["@o3co/auth-provider-foundation"]).toMatch(/^\^/);
 	});
 

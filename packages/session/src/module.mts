@@ -25,7 +25,6 @@ import type { RequestHandler, Router } from "express";
 import {
 	createFederationProviderFactory,
 	type FederationProviderFactory,
-	registerBuiltinFederations,
 } from "./federations/factory.mjs";
 import type { FederationProvider } from "./federations/types.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
@@ -50,6 +49,8 @@ export type SessionModuleOptions = {
 	express?: ExpressLike;
 	/** Session TTL in milliseconds for new federation-created UserSessions. Default 24h. */
 	sessionTtlMs?: number;
+	/** Federation provider factory configured by the composition root. Defaults to an empty factory. */
+	federationProviderFactory?: FederationProviderFactory;
 };
 
 type SessionModuleInternalOptions = SessionModuleOptions & {
@@ -86,12 +87,9 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 		// Build federation provider factory (or use injected stub in tests).
 		const factory: FederationProviderFactory =
+			params.federationProviderFactory ??
 			params._federationFactory ??
-			(() => {
-				const f = createFederationProviderFactory();
-				registerBuiltinFederations(f);
-				return f;
-			})();
+			createFederationProviderFactory();
 
 		// Normalize federation config entries and build the provider Map.
 		const federationProviders = new Map<string, FederationProvider>();

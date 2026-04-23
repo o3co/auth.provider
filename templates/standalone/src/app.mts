@@ -28,6 +28,7 @@ import {
 	registerBuiltinKeyStores,
 	registerBuiltinUserSessionStores,
 } from "@o3co/auth-provider-core";
+import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import {
 	oauthAuthorizationModule,
@@ -35,6 +36,7 @@ import {
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
 import {
+	createFederationProviderFactory,
 	createSessionStoreFactory,
 	registerBuiltinSessionStores,
 	sessionModule,
@@ -162,6 +164,9 @@ await (async (): Promise<void> => {
 		),
 	);
 
+	const federationProviderFactory = createFederationProviderFactory();
+	registerGoogleFederation(federationProviderFactory);
+
 	// Step 8: Compose the OAuth / session modules and build the app router.
 	const { init, router, grantRegistry } = createApp({
 		express,
@@ -172,7 +177,7 @@ await (async (): Promise<void> => {
 		federationTokenStore,
 		modules: [
 			oauthModule({ clientRepository, codeRepository, express }),
-			sessionModule({ userRepository, express }),
+			sessionModule({ userRepository, express, federationProviderFactory }),
 			oauthSessionModule({ clientRepository }),
 			oauthAuthorizationModule({ codeRepository, clientRepository }),
 		],

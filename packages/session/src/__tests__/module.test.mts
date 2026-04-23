@@ -15,6 +15,7 @@
  */
 
 import {
+	AdapterFactoryError,
 	type AppConfig,
 	createSymmetricKeyStore,
 	type FederationTokenStoreBase,
@@ -142,6 +143,75 @@ describe("sessionModule", () => {
 		const calls = (routerMock.use as ReturnType<typeof vi.fn>).mock.calls;
 		const sessionCalls = calls.filter((call: unknown[]) => call[0] === "/session");
 		expect(sessionCalls.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("uses the public federationProviderFactory option for enabled federations", async () => {
+		const factory = {
+			create: vi.fn().mockResolvedValue({
+				name: "google",
+				scope: [],
+				validateRedirect: vi.fn(),
+				resolveCallbackRedirect: vi.fn(),
+				buildAuthorizationUrl: vi.fn(),
+				exchangeCode: vi.fn(),
+			}),
+		};
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			federationProviderFactory:
+				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		});
+
+		await module.init(ctx);
+
+		expect(factory.create).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "google", name: "google" }),
+		);
+	});
+
+	it("does not register Google/GitHub providers by default", async () => {
+		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
+		const config = {
+			...mockConfig,
+			federations: {
+				google: {
+					enabled: true,
+					clientId: "id",
+					clientSecret: "secret",
+					callbackURL: "https://example.com/cb",
+				},
+			},
+		} as unknown as AppConfig;
+		const ctx = makeContext({ router: routerMock, config });
+		const module = sessionModule({
+			userRepository: {
+				authenticate: vi.fn(),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+		});
+
+		await expect(module.init(ctx)).rejects.toSatisfy(
+			(err) =>
+				err instanceof AdapterFactoryError &&
+				err.reason === "unknown" &&
+				err.kind === "FederationProvider",
+		);
 	});
 
 	it("skips federations with enabled=false", async () => {
