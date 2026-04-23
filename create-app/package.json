@@ -1,5 +1,5 @@
 {
-	"name": "create-o3co-auth-provider",
+	"name": "@o3co/create-auth-provider",
 	"version": "0.0.0",
 	"description": "Scaffold a new o3co/auth.provider project from the standalone template",
 	"license": "Apache-2.0",
@@ -10,7 +10,7 @@
 		"directory": "create-app"
 	},
 	"bin": {
-		"create-o3co-auth-provider": "./dist/cli.mjs"
+		"create-auth-provider": "./dist/cli.mjs"
 	},
 	"files": [
 		"dist",

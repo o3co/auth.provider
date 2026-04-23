@@ -148,7 +148,7 @@ export const main = (): void => {
 		parsed = parseArgs(args);
 	} catch (e) {
 		console.error(`Error: ${(e as Error).message}`);
-		console.error("Usage: create-o3co-auth-provider <project-name> [--dir <dir-name>]");
+		console.error("Usage: @o3co/create-auth-provider <project-name> [--dir <dir-name>]");
 		console.error(
 			"<project-name> must be a valid npm package name (scoped like @scope/pkg, or unscoped).",
 		);
