@@ -30,7 +30,8 @@
 		"prebuild": "rimraf dist",
 		"build": "tsc",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
@@ -48,6 +49,7 @@
 		"express": "^5.2.1",
 		"supertest": "^7.2.2",
 		"typescript": "^5.9.3",
-		"vitest": "^4.1.2"
+		"vitest": "^4.1.2",
+		"@vitest/coverage-v8": "^4.1.2"
 	}
 }
