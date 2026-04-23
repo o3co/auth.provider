@@ -13,6 +13,12 @@
 - If code was written before its test, delete it and start over from the test.
 - When generating implementation plans, every task must include explicit RED → GREEN → REFACTOR steps.
 
+## Workspace Scripts
+
+- Every workspace under `packages/**`, `templates/**`, and `create-app` **must** define a `test` script.
+- The root `test` script runs `pnpm -r run test` **without** `--if-present` on purpose: if any workspace lacks `test`, CI fails loudly rather than silently skipping it. Do not add `--if-present` here — see issue #88 for the regression this prevents.
+- Coverage is a per-package concern. Only `packages/**` define `test:coverage`. The root `test:coverage` is filtered to `./packages/**` and keeps `--if-present` so that a future package without coverage wiring does not break CI.
+
 ## Module Resolution
 
 Each package uses Node.js [subpath imports](https://nodejs.org/api/packages.html#subpath-imports) with a conditional `development` / `default` mapping:
