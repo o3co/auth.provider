@@ -9,6 +9,14 @@
 		"url": "https://github.com/o3co/auth.provider.git",
 		"directory": "create-app"
 	},
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.mts",
+			"import": "./dist/index.mjs"
+		}
+	},
 	"bin": {
 		"create-auth-provider": "./dist/cli.mjs"
 	},
