@@ -206,12 +206,18 @@ describe("sessionModule", () => {
 			} as unknown as UserRepository,
 		});
 
-		await expect(module.init(ctx)).rejects.toSatisfy(
-			(err) =>
-				err instanceof AdapterFactoryError &&
-				err.reason === "unknown" &&
-				err.kind === "FederationProvider",
-		);
+		await expect(module.init(ctx)).rejects.toSatisfy((err) => {
+			if (!(err instanceof Error)) return false;
+			const cause = (err as Error & { cause?: unknown }).cause;
+			return (
+				/no provider registered for type "google"/.test(err.message) &&
+				/@o3co\/auth-provider-federation-google/.test(err.message) &&
+				/federationProviderFactory/.test(err.message) &&
+				cause instanceof AdapterFactoryError &&
+				cause.reason === "unknown" &&
+				cause.kind === "FederationProvider"
+			);
+		});
 	});
 
 	it("skips federations with enabled=false", async () => {

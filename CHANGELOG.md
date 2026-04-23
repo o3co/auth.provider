@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `@o3co/auth-provider-federation-google` package with `createGoogleProvider()` and `registerGoogleFederation(factory)`.
 - `@o3co/auth-provider-federation-github` package with `createGithubProvider()` and `registerGithubFederation(factory)`.
 - `sessionModule({ federationProviderFactory })` option for composition roots that explicitly register federation provider packages.
-- `validateRedirect`, `resolveCallbackRedirect`, and `codeChallenge` exports from `@o3co/auth-provider-session` for provider package implementations.
+- `validateRedirect` and `resolveCallbackRedirect` exports from `@o3co/auth-provider-session` for provider package implementations. (`codeChallenge` was already exported since v0.4.0.)
 
 ### Changed
 
