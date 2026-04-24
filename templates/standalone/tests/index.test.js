@@ -172,8 +172,8 @@ describe("POST /oauth/token", () => {
 		expect(res.status).toBe(400);
 	});
 
-	it("returns 400 for grant_type=authorization without a code", async () => {
-		const res = await client.post("/oauth/token", "grant_type=authorization", {
+	it("returns 400 for grant_type=authorization_code without a code", async () => {
+		const res = await client.post("/oauth/token", "grant_type=authorization_code", {
 			headers: { "Content-Type": "application/x-www-form-urlencoded" },
 		});
 		expect(res.status).toBe(400);

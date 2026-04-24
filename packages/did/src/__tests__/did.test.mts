@@ -38,7 +38,7 @@ const mockConfig = {
 		refreshToken: { expiresIn: 86400 },
 		grants: {
 			session: { enabled: true },
-			authorization: { enabled: true },
+			authorization_code: { enabled: true },
 			refresh_token: { enabled: true },
 			did: { enabled: true, algorithm: "ed25519_raw", messageMaxAgeSec: 300 },
 		},
@@ -721,7 +721,7 @@ describe("createDidGrant", () => {
 					refreshToken: { expiresIn: 86400 },
 					grants: {
 						session: { enabled: true },
-						authorization: { enabled: true },
+						authorization_code: { enabled: true },
 						refresh_token: { enabled: true },
 						did: {
 							enabled: true,

@@ -336,7 +336,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			const grantPolicy: GrantPolicyHookBase = {
 				kind: "spy",
 				async evaluate(request) {
-					expect(request.grantType).toBe("authorization");
+					expect(request.grantType).toBe("authorization_code");
 					expect(request.clientId).toBe("client-1");
 					expect(request.subject).toBe("user-1");
 					return {

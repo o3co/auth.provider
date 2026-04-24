@@ -32,7 +32,7 @@ export const oauthAuthorizationModule = (params: {
 		const config = context.config as AppConfig;
 		const grantsConfig = config.oauth.grants as Record<string, { enabled?: boolean }>;
 
-		if (grantsConfig.authorization?.enabled !== false) {
+		if (grantsConfig.authorization_code?.enabled !== false) {
 			const handler = createAuthorizationGrant({
 				config,
 				keyStore: context.keyStore,
@@ -42,7 +42,7 @@ export const oauthAuthorizationModule = (params: {
 				userSessionStore: context.userSessionStore,
 				grantPolicy: context.grantPolicy,
 			});
-			context.grantRegistry.register("authorization", handler);
+			context.grantRegistry.register("authorization_code", handler);
 		}
 
 		if (grantsConfig.refresh_token?.enabled !== false) {
