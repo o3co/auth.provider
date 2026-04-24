@@ -55,7 +55,7 @@ peer dependencies（ワークスペースルートに別途インストール）
 function oauthDidModule(options: DidModuleOptions): Module;
 ```
 
-モジュール（name: `"oauth-did"`）を返すファクトリ関数。`config.oauth.grants.did.enabled` が `true` のとき、grant レジストリに `"did"` grant type を登録する。DID 認証を有効化するには、戻り値を `createApp` の modules に渡すこと。
+モジュール（name: `"oauth-did"`）を返すファクトリ関数。`config.oauth.grants.did.enabled` が `true` のとき（`oauth.grants.did` は**設定キー**であり、ワイヤー値やレジストリキーではない）、grant レジストリに URN `urn:o3co:oauth:grant-type:did` で登録する。DID 認証を有効化するには、戻り値を `createApp` の modules に渡すこと。
 
 `DidModuleOptions` には DID ドキュメントリゾルバーを以下のいずれかの形式で渡す:
 
@@ -76,7 +76,7 @@ type DidModuleOptions =
 function createDidGrant(deps: GrantDependencies): GrantHandler;
 ```
 
-`"did"` grant ハンドラーを生成するファクトリ関数。ハンドラーが期待するリクエストボディフィールド:
+DID grant ハンドラー（URN `urn:o3co:oauth:grant-type:did` で登録される）を生成するファクトリ関数。ハンドラーが期待するリクエストボディフィールド:
 
 | フィールド           | 説明                                               |
 |---------------------|---------------------------------------------------|

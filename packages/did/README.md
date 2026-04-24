@@ -64,7 +64,7 @@ Peer dependencies (install separately in the workspace root):
 function oauthDidModule(options: DidModuleOptions): Module;
 ```
 
-Factory that returns a module (name: `"oauth-did"`). Registers the `"did"` grant type in the grant registry when `config.oauth.grants.did.enabled` is `true`. Pass the result to `createApp` as a module to enable DID authentication.
+Factory that returns a module (name: `"oauth-did"`). Registers the DID grant under the URN `urn:o3co:oauth:grant-type:did` in the grant registry when `config.oauth.grants.did.enabled` is `true` (note: `oauth.grants.did` is the **config key**, not the wire value or registry key). Pass the result to `createApp` as a module to enable DID authentication.
 
 `DidModuleOptions` must supply a DID document resolver in one of two forms:
 
@@ -85,7 +85,7 @@ type DidModuleOptions =
 function createDidGrant(deps: GrantDependencies): GrantHandler;
 ```
 
-Factory that creates the `"did"` grant handler. The handler expects the following request body fields:
+Factory that creates the DID grant handler (registered under the URN `urn:o3co:oauth:grant-type:did`). The handler expects the following request body fields:
 
 | Field                 | Description                                        |
 |-----------------------|----------------------------------------------------|
