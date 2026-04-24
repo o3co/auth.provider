@@ -463,7 +463,7 @@ export const createOAuthRouter = async (
 					try {
 						decision = await grantPolicy.evaluate(
 							{
-								grantType: "authorization",
+								grantType: "authorization_code",
 								clientId: client_id,
 								subject: subjectForPolicy,
 								requestedScope: requestedScopes.length > 0 ? requestedScopes : undefined,
