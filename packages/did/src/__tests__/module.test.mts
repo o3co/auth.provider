@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 import {
-	GrantRegistry,
 	createSymmetricKeyStore,
+	GrantRegistry,
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
@@ -30,9 +30,7 @@ const mockResolver: DidDocumentResolver = {
 	},
 };
 
-const buildContext = (
-	didConfig: Record<string, unknown> | undefined,
-): ModuleContext => ({
+const buildContext = (didConfig: Record<string, unknown> | undefined): ModuleContext => ({
 	pathResolver: (s: string) => s,
 	config: {
 		oauth: {
