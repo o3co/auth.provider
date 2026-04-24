@@ -57,19 +57,30 @@ function buildGrant(
 	overrides: {
 		validatorRegistry?: ExchangeTokenValidatorRegistry;
 		clientRepository?: ClientRepository;
-		refreshTokenStore?: ReturnType<typeof makeRefreshStore> | undefined;
+		/** Pass `null` to explicitly omit the store from deps (fail-closed tests). */
+		refreshTokenStore?: ReturnType<typeof makeRefreshStore> | null;
+		/** Store wired into the validator (defaults to same as refreshTokenStore). */
+		validatorRefreshStore?: ReturnType<typeof makeRefreshStore> | null;
 		config?: AppConfig;
 	} = {},
 ) {
 	const registry = overrides.validatorRegistry ?? new ExchangeTokenValidatorRegistry();
-	const refreshStore =
-		overrides.refreshTokenStore === undefined ? makeRefreshStore() : overrides.refreshTokenStore;
+	// null = explicitly absent; undefined = use default
+	const grantStore =
+		overrides.refreshTokenStore === null
+			? undefined
+			: (overrides.refreshTokenStore ?? makeRefreshStore());
+	// validatorRefreshStore defaults to same as grantStore unless explicitly overridden
+	const validatorStore =
+		"validatorRefreshStore" in overrides
+			? (overrides.validatorRefreshStore ?? undefined)
+			: (grantStore ?? undefined);
 	if (!overrides.validatorRegistry) {
 		registry.register(
 			ACCESS_TOKEN_TYPE,
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
-				refreshTokenStore: refreshStore,
+				refreshTokenStore: validatorStore,
 				issuer: ISSUER,
 			}),
 		);
@@ -77,7 +88,7 @@ function buildGrant(
 	return createTokenExchangeGrant({
 		config: overrides.config ?? mockConfig,
 		keyStore,
-		refreshTokenStore: refreshStore,
+		refreshTokenStore: grantStore,
 		validatorRegistry: registry,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
 	});
@@ -199,5 +210,166 @@ describe("createTokenExchangeGrant — request errors", () => {
 			// negative: the stub is gone, so we expect status NOT to be 501.
 			expect(result.result.status).not.toBe(501);
 		}
+	});
+});
+
+describe("createTokenExchangeGrant — token validation", () => {
+	it("returns invalid_grant when subject_token signature is invalid", async () => {
+		const g = buildGrant();
+		const token = `${(await signSelfIssuedAccessToken({})).slice(0, -4)}AAAA`;
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("returns invalid_grant/family_revoked when subject family is revoked", async () => {
+		const store = makeRefreshStore({
+			isFamilyRevoked: async (id) => id === "fam-bad",
+		});
+		// validatorRefreshStore: null → validator has no store, so it returns a
+		// ValidatedToken with familyId set (doesn't self-check revocation).
+		// The grant's re-surface block then consults `refreshTokenStore` and
+		// surfaces the `family_revoked` errorDescription.
+		const g = buildGrant({ refreshTokenStore: store, validatorRefreshStore: null });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-bad" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "family_revoked",
+		});
+	});
+
+	it("returns invalid_grant when refreshTokenStore is not wired (fail-closed)", async () => {
+		// refreshTokenStore: null → deps.refreshTokenStore is undefined (absent).
+		// validatorRefreshStore: null → validator has no store, so it returns a
+		// ValidatedToken with familyId (doesn't self-check revocation).
+		// The grant's fail-closed check fires: familyId present + no store → 400.
+		const g = buildGrant({ refreshTokenStore: null, validatorRefreshStore: null });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	it("returns temporarily_unavailable (503) when validator throws (runtime store failure)", async () => {
+		const store = makeRefreshStore({
+			isFamilyRevoked: async () => {
+				throw new Error("redis down");
+			},
+		});
+		const g = buildGrant({ refreshTokenStore: store });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+	});
+
+	it("returns invalid_grant when actor_token fails validation", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const badActor = `${(await signSelfIssuedAccessToken({ sub: "svc-a" })).slice(0, -4)}AAAA`;
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: badActor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+});
+
+describe("createTokenExchangeGrant — narrowing checks", () => {
+	it("returns invalid_scope when requested scope is a superset of subject scope", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: "read write",
+			}),
+		);
+		expect(result).toMatchObject({ status: 400, error: "invalid_scope" });
+	});
+
+	it("returns invalid_target when audience is not in allowlist", async () => {
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["billing"] })),
+		});
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "inventory",
+			}),
+		);
+		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
+	});
+
+	// The next 2 tests exercise the happy-path flow: narrowing passes, handler
+	// falls through to the Task 6 stub throw (will be replaced in Task 8).
+
+	it("narrowing passes when audience matches clientId even without allowlist — stub throws", async () => {
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
+		});
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		await expect(
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					audience: "client-a",
+				}),
+			),
+		).rejects.toThrow(/stub fall-through/);
+	});
+
+	it("narrowing passes when multi-value audience entries are in allowlist ∪ {clientId} — stub throws", async () => {
+		const g = buildGrant({
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["billing", "inventory"] }),
+			),
+		});
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		await expect(
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					audience: ["billing", "inventory"],
+				}),
+			),
+		).rejects.toThrow(/stub fall-through/);
 	});
 });
