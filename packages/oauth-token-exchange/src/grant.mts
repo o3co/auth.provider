@@ -384,4 +384,5 @@ function normalizeArrayParam(value: unknown): string[] | null {
 	return [String(value)];
 }
 
+export { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 export { GRANT_TYPE as TOKEN_EXCHANGE_GRANT_TYPE };
