@@ -27,7 +27,6 @@ import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAcce
 import { ISSUER, keyStore, makeRefreshStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
-const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
 
 const mockConfig = {
 	oauth: {
