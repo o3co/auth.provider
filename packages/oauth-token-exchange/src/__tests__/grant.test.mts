@@ -396,6 +396,70 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 	});
 });
 
+describe("createTokenExchangeGrant — audience inheritance", () => {
+	it("rejects inherited subject.aud when not in client allowlist (cross-client confusion)", async () => {
+		// Subject token was issued with aud="a-api" (for Client A).
+		// Our handler's client is client-a but has allowedAudiences=[].
+		// When audience request parameter is omitted, we must NOT silently
+		// inherit "a-api" (which would be permissive) — fall back to clientId.
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: "a-api", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		// aud must be the clientId (fallback), NOT the inherited subject.aud
+		expect(payload.aud).toBe("client-a");
+	});
+
+	it("inherits subject.aud when it matches client allowlist (happy path)", async () => {
+		// Subject issued with aud="billing". Client has allowedAudiences including "billing".
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["billing"] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: "billing", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("billing");
+	});
+
+	it("inherits subject.aud when it matches clientId (default allowlist)", async () => {
+		// Subject issued with aud=clientId. No allowedAudiences configured.
+		// This is the common case for non-Token-Exchange access_tokens.
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: "client-a", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("client-a");
+	});
+});
+
 const denyPolicy: GrantPolicyHookBase = {
 	kind: "deny-all",
 	async evaluate() {

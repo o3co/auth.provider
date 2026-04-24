@@ -326,7 +326,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			//     parameter OR a policy hook override. Policy overrides are NOT re-
 			//     validated against the client allowlist by design (spec §8.1 rule 4);
 			//     consumers with strict policies must enforce the boundary themselves.
-			//   omitted + subject single    → inherit subject.aud
+			//   omitted + subject single    → inherit subject.aud IFF in allowlist;
+			//                                   else fall back to clientId (prevents
+			//                                   cross-client audience confusion when a
+			//                                   stolen subject token is exchanged by a
+			//                                   client outside its intended audience)
 			//   omitted + subject multi/none → fall back to clientId (safe default)
 			// Note: generateToken accepts a single-valued audience; when grantedAudience
 			// has multiple entries only the first is used. This is a known limitation
@@ -335,7 +339,15 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const audienceForToken: string = (() => {
 				if (grantedAudience && grantedAudience.length > 0)
 					return grantedAudience[0] ?? client.clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
-				if (typeof subjectAud === "string") return subjectAud;
+				// When audience is omitted, only inherit subject.aud if it's in the
+				// calling client's allowlist. Otherwise fall back to clientId. This
+				// prevents cross-client audience confusion: a malicious client cannot
+				// use a stolen subject_token to mint a token for an audience outside
+				// its own allowlist just by omitting the audience parameter.
+				if (typeof subjectAud === "string") {
+					const allow = new Set([...(client.allowedAudiences ?? []), client.clientId]);
+					if (allow.has(subjectAud)) return subjectAud;
+				}
 				return client.clientId;
 			})();
 

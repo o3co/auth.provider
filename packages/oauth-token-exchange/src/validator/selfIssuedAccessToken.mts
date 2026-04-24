@@ -16,7 +16,11 @@
 
 import type { KeyStore, RefreshTokenStoreBase } from "@o3co/auth-provider-core";
 import { decodeProtectedHeader, jwtVerify } from "jose";
-import type { ExchangeTokenValidator, ValidatedToken } from "./types.mjs";
+import type {
+	ExchangeTokenValidationContext,
+	ExchangeTokenValidator,
+	ValidatedToken,
+} from "./types.mjs";
 
 export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -52,7 +56,10 @@ export function createSelfIssuedAccessTokenValidator(
 	const { keyStore, refreshTokenStore, issuer } = options;
 
 	return {
-		async validate(token: string): Promise<ValidatedToken | null> {
+		async validate(
+			token: string,
+			_context: ExchangeTokenValidationContext,
+		): Promise<ValidatedToken | null> {
 			let payload: Record<string, unknown>;
 			let header: Awaited<ReturnType<typeof decodeProtectedHeader>>;
 			try {

@@ -91,13 +91,15 @@ validatorRegistry.register(
 
 1. **refreshTokenStore must be wired into the grant dependencies (not into the validator)** so the handler can surface the specific `family_revoked` errorDescription (spec §5.3). Without `refreshTokenStore` in the grant deps, self-issued access_tokens carrying `family_id` cannot be revocation-checked; the handler returns `invalid_grant` (fail-closed). Leaving it absent from the validator is intentional — the handler owns revocation so the specific error can propagate. See the "Register the grant" example above.
 
-2. **Scope is always narrowed by the core handler.** `requested scope ⊆ subject_token.scope` is enforced unconditionally — a `GrantPolicyHook` cannot bypass this subset check for narrowing **through the request parameter**. However, see point 4 below about policy-level override.
+2. **Scope is always narrowed by the core handler.** `requested scope ⊆ subject_token.scope` is enforced unconditionally — a `GrantPolicyHook` cannot bypass this subset check for narrowing **through the request parameter**. However, see point 5 below about policy-level override.
 
 3. **Audience allowlist (client-scoped).** The `audience` request parameter must be in `client.allowedAudiences ∪ { client.clientId }`. This is enforced by the core handler before the policy hook runs. Empty `allowedAudiences` means only the client's own `clientId` is a valid exchange audience.
 
-4. **Policy hook widening is permitted by design.** The `GrantPolicyHook.evaluate()` result's `grantedScope` and `grantedAudience` override the handler's pre-narrowed values without re-verification. A first-party consumer policy CAN widen scope or audience if it wants to — this is the intentional escape hatch for operational needs (e.g., an admin flow that grants a superset). Consumers own the consequences of widening policies. If you want strict narrowing-only policies, write your `evaluate()` method defensively and never return `grantedScope`/`grantedAudience` that exceeds what you were given.
+4. **Cross-client audience confusion defense.** When the `audience` request parameter is omitted, the handler inherits `subject_token.aud` only if it is in `client.allowedAudiences ∪ { client.clientId }`. Otherwise it falls back to `clientId`. This prevents a malicious client from exchanging a stolen token outside its intended audience just by omitting the audience parameter.
 
-5. **Impersonation vs delegation.** An exchange without `actor_token` issues an impersonation token (no `act` claim). Deployments that require audit trails should add a `GrantPolicyHook` that rejects requests lacking `actor_token`:
+5. **Policy hook widening is permitted by design.** The `GrantPolicyHook.evaluate()` result's `grantedScope` and `grantedAudience` override the handler's pre-narrowed values without re-verification. A first-party consumer policy CAN widen scope or audience if it wants to — this is the intentional escape hatch for operational needs (e.g., an admin flow that grants a superset). Consumers own the consequences of widening policies. If you want strict narrowing-only policies, write your `evaluate()` method defensively and never return `grantedScope`/`grantedAudience` that exceeds what you were given.
+
+6. **Impersonation vs delegation.** An exchange without `actor_token` issues an impersonation token (no `act` claim). Deployments that require audit trails should add a `GrantPolicyHook` that rejects requests lacking `actor_token`:
 
    ```ts
    async evaluate(req) {
@@ -109,13 +111,13 @@ validatorRegistry.register(
    }
    ```
 
-6. **Family cascade.** Issued access_tokens inherit the subject's `family_id` claim. Revoking the subject's family (e.g. on logout) automatically invalidates every token exchanged from it. This is the same mechanism auth.provider's introspect and userinfo endpoints use.
+7. **Family cascade.** Issued access_tokens inherit the subject's `family_id` claim. Revoking the subject's family (e.g. on logout) automatically invalidates every token exchanged from it. This is the same mechanism auth.provider's introspect and userinfo endpoints use.
 
-7. **Refresh / ID tokens are never issued.** Per RFC 8693 §4.2.2 the handler only returns an access_token. The response always carries `issued_token_type: "urn:ietf:params:oauth:token-type:access_token"`.
+8. **Refresh / ID tokens are never issued.** Per RFC 8693 §4.2.2 the handler only returns an access_token. The response always carries `issued_token_type: "urn:ietf:params:oauth:token-type:access_token"`.
 
-8. **Missing subject claim rejection.** Self-issued access_tokens without a `sub` claim (or with an empty-string `sub`) are rejected with `invalid_grant`. This prevents a silently-anonymous token from reaching downstream services.
+9. **Missing subject claim rejection.** Self-issued access_tokens without a `sub` claim (or with an empty-string `sub`) are rejected with `invalid_grant`. This prevents a silently-anonymous token from reaching downstream services.
 
-9. **Validator registry is sealed at registration.** Once `grantRegistry.addModule(tokenExchangeModule, ...)` is called, the `validatorRegistry` passed in is frozen — subsequent `register()` calls throw. This prevents a consumer reference from replacing the built-in validator at runtime.
+10. **Validator registry is sealed at registration.** Once `grantRegistry.addModule(tokenExchangeModule, ...)` is called, the `validatorRegistry` passed in is frozen — subsequent `register()` calls throw. This prevents a consumer reference from replacing the built-in validator at runtime.
 
 ## Registration pattern summary
 

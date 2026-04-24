@@ -43,19 +43,20 @@ export const tokenExchangeModule: GrantModule = Object.freeze({
 	grants: Object.freeze({
 		[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: GrantDependencies) => {
 			const typedDeps = deps as unknown as Partial<TokenExchangeDependencies>;
-			const hasFreezeable =
+			const hasValidatorRegistry =
 				typedDeps.validatorRegistry !== null &&
 				typedDeps.validatorRegistry !== undefined &&
-				typeof (typedDeps.validatorRegistry as { freeze?: unknown }).freeze === "function";
+				typeof (typedDeps.validatorRegistry as { freeze?: unknown }).freeze === "function" &&
+				typeof (typedDeps.validatorRegistry as { get?: unknown }).get === "function";
 			const hasClientRepository =
 				typedDeps.clientRepository !== null &&
 				typedDeps.clientRepository !== undefined &&
 				typeof (typedDeps.clientRepository as { findById?: unknown }).findById === "function" &&
 				typeof (typedDeps.clientRepository as { authenticate?: unknown }).authenticate ===
 					"function";
-			if (!hasFreezeable || !hasClientRepository) {
+			if (!hasValidatorRegistry || !hasClientRepository) {
 				throw new Error(
-					"tokenExchangeModule requires validatorRegistry (with freeze()) and clientRepository (with findById/authenticate) in deps. " +
+					"tokenExchangeModule requires validatorRegistry (with freeze/get methods) and clientRepository (with findById/authenticate) in deps. " +
 						"See @o3co/auth-provider-oauth-token-exchange README for consumer registration.",
 				);
 			}
