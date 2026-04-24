@@ -364,8 +364,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	};
 }
 
-// TODO(task-9): after tokenExchangeConfigSchema is composed into AppConfig,
-// replace the manual casts below with typed access via the composed schema.
+// Manual cast: consumers compose tokenExchangeConfigSchema into their own
+// AppConfig if they want typed access. See README.
 function getExpiresIn(deps: TokenExchangeDependencies): number {
 	const grants = (deps.config.oauth.grants ?? {}) as Record<string, Record<string, unknown>>;
 	const tokenExchange = grants.token_exchange;

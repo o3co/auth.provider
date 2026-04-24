@@ -444,7 +444,6 @@ validatorRegistry.register(
 oauth {
   grants {
     token_exchange {
-      enabled = true
       accessToken {
         expiresIn = 300  # 省略時は oauth.accessToken.expiresIn を流用
       }
@@ -459,7 +458,6 @@ oauth {
 const tokenExchangeConfigSchema = z.object({
   token_exchange: z
     .object({
-      enabled: z.boolean().default(true),
       accessToken: z
         .object({
           expiresIn: z.number().int().positive().optional(),
@@ -472,11 +470,13 @@ const tokenExchangeConfigSchema = z.object({
 
 **audience allowlist は client 単位 (`Client.allowedAudiences`) のみで管理** (§8.3)。全 client 共通の shared allowlist は本 spec では導入しない。理由: 複数ソースの allowlist は merge/precedence を明示しないと security hole になる。必要になれば post-0.5 で `GrantPolicyHook` で consumer 側実装できる。
 
-### 11.3 Safe default
+### 11.3 Disable mechanism
 
-- `enabled: false` で封じられる (GrantRegistry.addModule の `enabled: false` 判定に既存対応)
-- default は `enabled: true` だが、**registration 自体が consumer opt-in** なので module を import しない限り無効
-- `expiresIn` は短命 (default 300s = 5min)。Token Exchange は短命が原則
+Consumers disable Token Exchange by **not importing `tokenExchangeModule`**. This matches the federation-package-split philosophy (v0.5.0 #17): registration is 100% consumer opt-in. There is no config-driven disable switch.
+
+Rationale: `GrantModule` in core dispatches handlers by grant-type key (the RFC 8693 URN `urn:ietf:params:oauth:grant-type:token-exchange`), but operator-friendly HOCON uses the `token_exchange` key. Bridging those two via a config-driven `enabled` flag would require a core interface change (adding `configKey?: string` to `GrantModule`) that v0.5.0 interface freeze avoids. Consumer-level opt-in via module import is both simpler and consistent with the rest of v0.5.0 scope.
+
+**`expiresIn` default:** short (300s = 5 min). Token Exchange is short-lived by RFC 8693 recommendation.
 
 ## 12. Test 戦略
 
@@ -540,6 +540,7 @@ const tokenExchangeConfigSchema = z.object({
 - Interface 追加のみ、既存 interface の変更は §8.3 で明示確定した `Client.allowedAudiences?: string[]` の 1 件のみ (optional field 追加なので backward compat)
 - `GrantDependencies` / `GrantHandler` / `RefreshTokenStoreBase` は無変更
 - Consumer が module を import しなければ完全に noop (breaking change なし)
+- `enabled` フィールドを config schema から削除 (C1 Option D): schema-level のみの変更。`tokenExchangeModule` は v0.5.0 初出なので `enabled` に依存していた consumer はいない。backward compat 問題なし。
 
 ## 15. post-0.5 に残す項目 (out-of-scope)
 

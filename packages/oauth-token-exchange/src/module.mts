@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { GrantModule } from "@o3co/auth-provider-core";
+import type { GrantDependencies, GrantModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import {
 	createTokenExchangeGrant,
@@ -24,19 +24,19 @@ import {
 
 /**
  * Config shape consumed by the Token Exchange GrantModule. All fields are
- * optional. `enabled: false` disables registration via GrantRegistry.addModule.
+ * optional. Disable Token Exchange by not importing this module — there is no
+ * config-driven disable switch. See §11.3 of the design spec for rationale.
  */
 export const tokenExchangeConfigSchema = z.object({
 	token_exchange: z
 		.object({
-			enabled: z.boolean().default(true),
 			accessToken: z
 				.object({
 					expiresIn: z.number().int().positive().optional(),
 				})
 				.optional(),
 		})
-		.default({ enabled: true }),
+		.default({}),
 });
 
 /**
@@ -47,16 +47,25 @@ export const tokenExchangeConfigSchema = z.object({
  *
  * At registration time, the module freezes the validator registry so post-
  * wire mutations are rejected — see `ExchangeTokenValidatorRegistry.freeze()`.
+ *
+ * The module object itself is frozen to prevent post-import tampering of the
+ * grants record.
  */
-export const tokenExchangeModule: GrantModule = {
-	grants: {
-		[TOKEN_EXCHANGE_GRANT_TYPE]: (deps) => {
+export const tokenExchangeModule: GrantModule = Object.freeze({
+	grants: Object.freeze({
+		[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: GrantDependencies) => {
+			if (!("validatorRegistry" in deps) || !("clientRepository" in deps)) {
+				throw new Error(
+					"tokenExchangeModule requires validatorRegistry and clientRepository in deps. " +
+						"See @o3co/auth-provider-oauth-token-exchange README for consumer registration.",
+				);
+			}
 			const typedDeps = deps as unknown as TokenExchangeDependencies;
 			// Freeze the registry at registration time — consumer's reference
 			// can no longer mutate it after addModule returns.
 			typedDeps.validatorRegistry.freeze();
 			return createTokenExchangeGrant(typedDeps);
 		},
-	},
+	}),
 	configSchema: tokenExchangeConfigSchema,
-};
+}) as GrantModule;
