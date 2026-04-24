@@ -18,8 +18,7 @@ import { describe, expect, it } from "vitest";
 import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import type { ExchangeTokenValidator } from "#/validator/types.mjs";
 
-const stubValidator = (tokenType: string): ExchangeTokenValidator => ({
-	tokenType,
+const stubValidator = (): ExchangeTokenValidator => ({
 	async validate() {
 		return null;
 	},
@@ -33,17 +32,40 @@ describe("ExchangeTokenValidatorRegistry", () => {
 
 	it("returns the registered validator by tokenType", () => {
 		const registry = new ExchangeTokenValidatorRegistry();
-		const v = stubValidator("urn:ietf:params:oauth:token-type:access_token");
+		const v = stubValidator();
 		registry.register("urn:ietf:params:oauth:token-type:access_token", v);
 		expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBe(v);
 	});
 
 	it("overwrites an existing registration on re-register", () => {
 		const registry = new ExchangeTokenValidatorRegistry();
-		const v1 = stubValidator("urn:ietf:params:oauth:token-type:access_token");
-		const v2 = stubValidator("urn:ietf:params:oauth:token-type:access_token");
+		const v1 = stubValidator();
+		const v2 = stubValidator();
 		registry.register("urn:ietf:params:oauth:token-type:access_token", v1);
 		registry.register("urn:ietf:params:oauth:token-type:access_token", v2);
 		expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBe(v2);
+	});
+
+	it("register throws after freeze()", () => {
+		const registry = new ExchangeTokenValidatorRegistry();
+		registry.freeze();
+		expect(() =>
+			registry.register("urn:ietf:params:oauth:token-type:access_token", stubValidator()),
+		).toThrow(/frozen/);
+	});
+
+	it("get() continues to work after freeze()", () => {
+		const registry = new ExchangeTokenValidatorRegistry();
+		const v = stubValidator();
+		registry.register("urn:ietf:params:oauth:token-type:access_token", v);
+		registry.freeze();
+		expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBe(v);
+	});
+
+	it("freeze() is idempotent", () => {
+		const registry = new ExchangeTokenValidatorRegistry();
+		registry.freeze();
+		registry.freeze(); // no throw, no state change
+		expect(() => registry.register("x", stubValidator())).toThrow(/frozen/);
 	});
 });

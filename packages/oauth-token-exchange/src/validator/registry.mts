@@ -17,18 +17,41 @@
 import type { ExchangeTokenValidator } from "./types.mjs";
 
 /**
- * Mutable registry keyed by RFC 8693 `token_type` URI. Used by the Token
- * Exchange grant handler to dispatch `subject_token` / `actor_token`
- * validation.
+ * Registry keyed by RFC 8693 `token_type` URI. Used by the Token Exchange
+ * grant handler to dispatch `subject_token` / `actor_token` validation.
+ *
+ * Mutability contract:
+ *   - Before `freeze()`: `register()` is idempotent; later registrations
+ *     overwrite earlier ones (useful during application wire-up).
+ *   - After `freeze()`: `register()` throws; `get()` continues to work.
+ *
+ * The GrantModule calls `freeze()` at `addModule` time, so once the grant
+ * handler is active the registry cannot be mutated — this prevents a
+ * consumer reference from silently replacing the built-in self-issued
+ * access_token validator after startup.
  */
 export class ExchangeTokenValidatorRegistry {
 	private validators = new Map<string, ExchangeTokenValidator>();
+	private frozen = false;
 
 	register(tokenType: string, validator: ExchangeTokenValidator): void {
+		if (this.frozen) {
+			throw new Error(
+				`ExchangeTokenValidatorRegistry is frozen; cannot register "${tokenType}" after freeze()`,
+			);
+		}
 		this.validators.set(tokenType, validator);
 	}
 
 	get(tokenType: string): ExchangeTokenValidator | undefined {
 		return this.validators.get(tokenType);
+	}
+
+	/**
+	 * Seal the registry. After freeze(), `register()` throws. Idempotent:
+	 * calling freeze() on an already-frozen registry is a no-op.
+	 */
+	freeze(): void {
+		this.frozen = true;
 	}
 }
