@@ -200,6 +200,42 @@ describe("createTokenExchangeGrant — request errors", () => {
 		);
 		expect(result.status).toBe(200);
 	});
+
+	it("rejects client_secret as array (prevents auth bypass via repeated params)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: ["x", "y"], // repeated params → array
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/client_secret/),
+		});
+	});
+
+	it("rejects actor_token_type without actor_token (prevents delegation-policy bypass)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token_type: ACCESS_TOKEN_TYPE, // no actor_token
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/actor_token is required/),
+		});
+	});
 });
 
 describe("createTokenExchangeGrant — token validation", () => {
@@ -393,6 +429,39 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
+	});
+
+	it("treats scope='' as omitted (inherits subject scope, not explicit empty)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: "",
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		// Scope was explicitly empty → normalized to "omitted" → inherited.
+		expect(result.tokens.scope).toBe("read write");
+	});
+
+	it("treats scope='  ' (whitespace-only) as omitted (inherits subject scope)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: "   ",
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		expect(result.tokens.scope).toBe("read write");
 	});
 });
 

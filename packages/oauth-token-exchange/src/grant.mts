@@ -47,7 +47,24 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const subjectTokenType =
 				typeof body.subject_token_type === "string" ? body.subject_token_type : null;
 			const clientId = typeof body.client_id === "string" ? body.client_id : null;
-			const clientSecret = typeof body.client_secret === "string" ? body.client_secret : null;
+			const clientSecretRaw = body.client_secret;
+			let clientSecret: string | null;
+			if (clientSecretRaw === undefined || clientSecretRaw === null) {
+				clientSecret = null; // genuinely omitted (public client path)
+			} else if (typeof clientSecretRaw === "string") {
+				clientSecret = clientSecretRaw;
+			} else {
+				// Present but not a string (e.g., repeated param producing string[]).
+				// Refuse to treat this as "omitted" — that path would bypass the
+				// confidential-client auth check.
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "client_secret must be a single string value",
+					},
+				};
+			}
 			const actorToken = typeof body.actor_token === "string" ? body.actor_token : null;
 			const actorTokenType =
 				typeof body.actor_token_type === "string" ? body.actor_token_type : null;
@@ -103,6 +120,20 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 
 			// Actor token type lookup — kept here so the validator reference is
 			// available for validation below without a second registry call.
+
+			// Reject actor_token_type without actor_token — prevents policies that
+			// gate on req.actorTokenType for delegation from being bypassed by a
+			// caller who only sets the type header.
+			if (actorToken === null && actorTokenType !== null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "actor_token is required when actor_token_type is provided",
+					},
+				};
+			}
+
 			if (actorToken !== null && actorTokenType === null) {
 				return {
 					result: {
@@ -234,7 +265,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// Scope narrowing: requested scope ⊆ subject scope.
 			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
 			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
-			const requestedScope = requestedScopeStr?.split(" ").filter(Boolean) ?? null;
+			const requestedScopeRaw = requestedScopeStr?.split(" ").filter(Boolean) ?? null;
+			// Normalize empty arrays to null — `scope=""` and `scope=" "` behave the
+			// same as scope omitted (inherit subject scope), per the same rationale
+			// that drives normalizeArrayParam for audience/resource.
+			const requestedScope =
+				requestedScopeRaw !== null && requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
 			if (requestedScope) {
 				const subjectScopeSet = new Set(subjectScope);
 				for (const s of requestedScope) {
@@ -282,7 +318,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					requestedAudience: requestedAudience ?? undefined,
 					originalScope: subjectScope.length > 0 ? subjectScope : undefined,
 					subjectTokenType,
-					actorTokenType: actorTokenType ?? undefined,
+					// actorTokenType is populated only when an actor_token was actually
+					// validated — prevents policies that gate on actorTokenType from being
+					// deceived by a request that supplied only the type header.
+					actorTokenType:
+						actorValidated !== null && actorTokenType !== null ? actorTokenType : undefined,
 					resource: requestedResource ?? undefined,
 				};
 				const policyContext: GrantPolicyContext = {
