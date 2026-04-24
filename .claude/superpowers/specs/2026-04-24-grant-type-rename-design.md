@@ -12,37 +12,72 @@
   - §4.3 updated to note `routes.mts:466` is grant-policy input (breaking for policy adapters)
   - §3.9 new section: "Grant Registration Skip — No Logger" decision + rationale
   - §4.1 Module init sketch updated to match §3.9 (no-log approach)
+- 2026-04-24 design revision (post brainstorming):
+  - URN 方針を「consumer が prefix を所有する config」から「wire protocol 定義者 (o3co) が
+    URN を所有する固定値」に転換
+  - `urnCustomGrantTypePrefix` config を撤回
+  - §1.1 新設: 現状 `did` grant の位置付け (「認証 → 認可変換 grant」)
+  - §3.2-§3.3 の URN 設計を固定値設計に刷新
+  - §4.1 Module init を簡素化 (prefix check 不要)
 
 ## 1. Background & Motivation
 
 v0.5.0 の Core GA must 項目のうち、interface freeze に直結する grant_type 整理を行う。現状の grant_type 値には以下の問題がある:
 
 1. **RFC 違反:** `grant_type=authorization` は RFC 6749 §4.1.3 違反。正式値は `authorization_code`。
-2. **DID grant の URN 化未実施:** 独自 grant `did` は裸の文字列で登録されているが、RFC 6755 に倣い独自 grant は URN 形式で識別すべき。
-3. **Namespace の vendor leak 懸念:** URN 化するときライブラリ側が `o3co` 等の namespace を押し付けると、consumer に library owner のアイデンティティが残留する。
+2. **独自 grant の URN 化未実施:** 独自 grant `did` は裸の文字列で登録されているが、RFC 6755 に倣い非 IETF grant は URN 形式で識別すべき。
+3. **Grant の所有者明示:** URN 化の際、`did` grant の wire protocol 定義者を URN sub-namespace で明示する必要がある (§1.1 参照)。
 
 v0.5.0 は 1.0 GA 前の最後の interface 調整ラウンド。ここで RFC 準拠形に倒しきり、1.0 で freeze する。
+
+### 1.1 現状の `did` grant の位置付け
+
+現状の `did` grant は、DID/VC による identity verification を OAuth 2.0 の token envelope に変換する **auth.provider 固有の wire protocol 拡張** である。OAuth 本来の認証 grant (RFC 6749 `password` / `client_credentials` 等) や RFC 7521/7523 の assertion framework とは異なり、以下の構造を持つ:
+
+- **Wire protocol**: `did` + `message` + `signature` の 3 パラメータで DID-signed assertion を表現
+- **Authentication**: DID 秘密鍵の占有確認 (秘密鍵で署名された message の検証) は OAuth token endpoint が実施。DID document resolver で公開鍵を取得するため、pre-established trust relationship (client_id による事前登録) を要求しない
+- **Identity semantics**: DID subject が誰で、信頼できるかの判断は OAuth の外側 (allow-list / policy layer) に委ねる
+- **能力・権限検証**: VC による能力・権限の検証は access_token 発行後、resource server 側 (auth.policy-verifier 等) に委譲する
+- **結果**: DID 認証と OAuth 認可レイヤーの接続点として機能する「認証 → 認可変換 grant」
+
+**論文的位置付け:**
+
+- 03-data-sovereignty ch4 原理 3 (DID 認証接続制御) はパイプライン間ハンドシェークの設計
+- 00-integrated ch5.5 は「OAuth 2.0 フローの認証主体として DID を使用する」提案を行い、同時に「この DID 統合は現行 MCP 仕様に含まれておらず、提案される拡張パス」「future specification work」と明記している
+
+現状 `did` grant はこの未標準化領域を埋める **実装例の一つ** であり、IETF 登録値に収まらない。ゆえに independent URN sub-namespace で識別するのが適切である。
+
+### 1.2 Wire protocol の所有者と URN sub-namespace
+
+RFC 6755 §3 は URN sub-namespace が grant の定義主体によって所有されることを定めている (IETF sub-namespace が IANA-registered grant の定義権を持つのと同じ構造)。
+
+現状の `did` grant wire protocol の定義者は **o3co/auth.provider** であり、consumer (dPLaaS など) は wire の利用者 (deployer) にすぎない。複数 deployment が同じ wire を使う場合、それらの grant_type URN は統一されているべきで、consumer ごとに異なる URN で表現すると client SDK / Agent 側の interop が破綻する。
+
+よって本 spec は `did` grant の URN を **`urn:o3co:oauth:grant-type:did` 固定** とする。ここでの `o3co` は library owner の vendor identifier ではなく、**wire protocol version の identifier** として機能する。IETF registry 値が IETF 固有値として consumer に変更不可であるのと同じ扱い。
+
+Consumer が将来 wire protocol を拡張する (VC Presentation を request に含める等) 場合、それは **consumer 固有の別 grant** として consumer 所有 URN (`urn:dplaas.io:oauth:grant-type:did-vp` 等) を別途定義すべきであり、既存の `urn:o3co:oauth:grant-type:did` を置き換えるべきではない。
 
 ## 2. Scope
 
 ### In Scope
 
 - `authorization` → `authorization_code` の rename (RFC 6749 準拠)
-- DID grant の URN 化 + `urnCustomGrantTypePrefix` config 新設
-- Audit event の grant_type 表記統一 (wire 値を記録)
+- `did` grant の URN 化 (`urn:o3co:oauth:grant-type:did` 固定)
+- Grant policy input + Audit event の grant_type 表記統一 (wire 値を記録)
 - Standalone template / README / CHANGELOG の追従
 
 ### Out of Scope
 
-本 spec は **rename と URN 設計のみ**。以下は別 spec で扱う:
+本 spec は **rename と URN 化のみ**。以下は別 spec で扱う:
 
 - Token Exchange (RFC 8693) 実装 — v0.5.0 #2
 - jwt-bearer (RFC 7523) 実装 — v0.5.0 #4
 - NonceStore interface — v0.5.0 #5
+- VC Presentation abstract interface — v0.5.0 #6
 - DPoP interface 予約 — v0.5.0 #19
 - dplaas.auth 追従 — v0.5.0 publish 完了後に一括
 
-ただし Token Exchange と jwt-bearer の URN は IETF 登録済み値なので、本 spec で URN 設計時に「IETF 標準 URN は `urnCustomGrantTypePrefix` の適用外、固定値で register」という棲み分けルールだけ確定させる。実装箇所は別 spec。
+Token Exchange と jwt-bearer の URN は IETF 登録済み値なので、本 spec で URN 設計時に「IETF 標準 URN は consumer 固有 URN と独立、固定値で register」という棲み分けルールだけ確定させる。
 
 ## 3. Design Decisions
 
@@ -58,65 +93,45 @@ v0.5.0 は 1.0 GA 前の最後の interface 調整ラウンド。ここで RFC �
 - v0.4.0 → v0.5.0 間で breaking は他にも複数発生 (passport 脱出済 / Token Exchange / jwt-bearer 等)。grant_type だけ dual-accept しても consumer の総移行コストは下がらない
 - 内製 consumer (dplaas.auth) は v0.5.0 publish 完了後に一括追従する方針 (Option X) が既に決定済み
 
-### 3.2 URN Structure — Consumer Owns the Prefix Granularity
+### 3.2 DID Grant URN — Fixed Value
 
-URN 形式の grant_type 値は以下で組み立てる:
-
-```text
-urn:${urnCustomGrantTypePrefix}:did
-```
-
-- `urn:` prefix と `:did` suffix はライブラリが付与
-- 中間部分 `urnCustomGrantTypePrefix` は **consumer が任意粒度で指定**
-- ライブラリは namespace 粒度を強制しない (RFC 6755 の `params:oauth:grant-type` 構造を押し付けない)
-
-**Examples:**
-
-| `urnCustomGrantTypePrefix` | Resulting `grant_type` |
-| --- | --- |
-| `o3co:oauth:grant-type` | `urn:o3co:oauth:grant-type:did` |
-| `acme:oauth:grant-type` | `urn:acme:oauth:grant-type:did` |
-| `example.com:grants` | `urn:example.com:grants:did` |
-| `acme` | `urn:acme:did` |
+- DID grant の URN は **`urn:o3co:oauth:grant-type:did` 固定**
+- Consumer config 不要、override 不可
+- `did.enabled` config のみで on/off を切り替える (`enabled = false` なら DID grant module は no-op)
 
 **Rationale:**
 
-- `ns` の粒度はライブラリではなく consumer が決めるべき (branding / governance 観点)
-- RFC 6755 の `params:oauth:grant-type:*` は IETF が自分の URN namespace 内で IANA parameter registry を指す含意を持つ規約であり、IETF 以外 (consumer 独自 namespace) に `params` を入れる必然性はない
-- Consumer が RFC 互換の見た目を望めば `ietf:params:oauth:grant-type` (ただし IETF registry 未登録値を流すのは規約違反なので通常しない) も書ける柔軟性を持たせる
+§1.2 の wire protocol 所有権モデルに従う:
 
-### 3.3 No Default — Omission Disables DID Grant (Pattern β)
+- Wire protocol を定義したのは o3co/auth.provider。dPLaaS や他 consumer は wire の利用者
+- 同じ wire を使う複数 deployment で URN が統一されていないと Agent/client SDK 側の interop が成立しない
+- `o3co` は vendor identifier ではなく **wire protocol version identifier** として機能。IETF registry 値が consumer に変更不可であるのと同じ扱い
+- Consumer が wire protocol を拡張する場合、それは consumer 固有の別 grant として別 URN で定義する (既存 URN を書き換えない)
 
-- `urnCustomGrantTypePrefix` は **Zod schema で optional、default なし**
-- 未指定なら:
-  - DID grant module は **register を skip**
-  - 起動は成功する
-  - Client が DID grant を使おうとすると `unsupported_grant_type` エラーが返る
+### 3.3 `did.enabled` Semantics
 
-通知方針 (ログ出力の有無) は §3.9 で詳述。
+- `did.enabled = true` (default): `oauthDidModule` の init で `urn:o3co:oauth:grant-type:did` を grant registry に register
+- `did.enabled = false`: init は no-op、何も register しない
+- `oauthDidModule` を `createApp` の `modules` 配列に含めない場合は当然 register されない (既存挙動、variation なし)
 
 **Rationale:**
 
-- デフォルト値 (`o3co` 等) を設定すると、そのまま使う consumer が必ず出て vendor leak が発生する
-- `did.enabled = true` と `urnCustomGrantTypePrefix` 未指定を config error にする (Pattern α) 案もあるが、Quickstart で DID を試さない consumer (OAuth のみの利用者) に起動障壁を課すことになる
-- Pattern β (silent skip) なら:
-  - OAuth のみ利用する consumer は config 不要で起動できる
-  - DID を使おうとした consumer は `unsupported_grant_type` で即座に気付く
+- §3.2 で config を URN から排除したため、「DID grant を有効化しつつ URN だけ未設定」という曖昧な状態がなくなる
+- `enabled` flag は引き続き明示的な on/off スイッチとして機能
 
-### 3.4 IETF-Registered URN Grants — Fixed Values, Not Customizable
+### 3.4 IETF-Registered URN Grants — Fixed Values, Independent
 
 Token Exchange (RFC 8693) / jwt-bearer (RFC 7523) は IETF 登録済み URN:
 
 - `urn:ietf:params:oauth:grant-type:token-exchange`
 - `urn:ietf:params:oauth:grant-type:jwt-bearer`
 
-これらは **config 不要の固定値として register** する。`urnCustomGrantTypePrefix` の影響を受けない。
+これらは **config 不要の固定値として register** する。`urn:o3co:` sub-namespace とは独立。
 
 **Rationale:**
 
-- IETF registry 値は RFC 6755 §3 により IETF URN namespace (`urn:ietf:params:*`) に固定される。consumer が prefix を変える余地がない
-- 仮に consumer が `ietf:params:oauth:grant-type` を `urnCustomGrantTypePrefix` に指定しても無視する (IETF 規約準拠側が優先)
-- 実装時は URN 文字列を const で持ち、comment で "IETF-registered URN per RFC 7523/8693, not customizable" を明示
+- IETF registry 値は RFC 6755 §3 により IETF URN namespace (`urn:ietf:params:*`) に固定される。auth.provider 側で prefix を変える余地がない
+- 実装時は URN 文字列を const で持ち、comment で "IETF-registered URN per RFC 7523/8693" を明示
 
 ### 3.5 `session` Grant — Unchanged
 
@@ -129,135 +144,83 @@ Token Exchange (RFC 8693) / jwt-bearer (RFC 7523) は IETF 登録済み URN:
 
 ### 3.6 Grant Policy Input + Audit Event — Wire Value
 
-`GrantPolicyRequest.grantType` (policy hook 入力) と audit event の `grantType` field の両方に **client が送った wire 値そのまま** を入れる:
+**異なる 2 つの surface に対する扱いを明示する:**
 
-- `grant_type=authorization_code` → `grantType: "authorization_code"`
-- `grant_type=urn:acme:oauth:grant-type:did` → `grantType: "urn:acme:oauth:grant-type:did"`
-- `grant_type=refresh_token` → `grantType: "refresh_token"` (変更なし、既に正しい)
-- `grant_type=session` → `grantType: "session"` (変更なし)
+#### 3.6.1 Grant Policy Input (`GrantPolicyRequest.grantType`)
 
-**Breaking surface — Grant Policy:**
+- Field 名: `grantType` (camelCase、TypeScript interface `GrantPolicyRequest`)
+- 現状 `packages/oauth/src/routes.mts:466` で authorize フェーズ時に `grantPolicy.evaluate()` に hardcoded `"authorization"` を渡している
+- これを `"authorization_code"` に修正 (wire 値に合わせる)
+- **変更箇所**: `routes.mts:466` のみ (`refreshToken.mts:161` の `"refresh_token"` は既に RFC 準拠、変更不要)
+- DID grant / session grant は現状 `grantPolicy.evaluate()` を呼び出していない。本 spec の scope 内では DID への policy 統合は行わない
 
-`GrantPolicyRequest.grantType` は public interface のパラメータ。Consumer が `grantPolicy.evaluate()` を実装して `switch (req.grantType) { case "authorization": ... }` のように分岐している場合、本 rename で **policy アダプタが破綻する**。
+**Breaking surface:**
 
-具体的には `packages/oauth/src/routes.mts:466` の `grantType: "authorization"` → `"authorization_code"` 変更により、authorization code flow 中の `/oauth/authorize` フェーズで policy に渡される値が変わる。
+Consumer が `grantPolicy.evaluate()` を実装して `switch (req.grantType) { case "authorization": ... }` のように分岐している場合、本 rename で policy アダプタが破綻する。Migration は `case "authorization":` → `case "authorization_code":` にリネーム。
 
-影響範囲:
+#### 3.6.2 Audit Event (`details.grant_type`)
 
-- `GrantPolicyRequest.grantType = "authorization"` → `"authorization_code"` (authorize フェーズ)
-- `GrantPolicyRequest.grantType = "refresh_token"` (変更なし、既に RFC 準拠)
-- DID grant / session grant は `grantPolicy.evaluate()` を呼び出していない (影響なし)
+- Field 名: `grant_type` (snake_case、`details` object の nested field)
+- 現状 `routes.mts:169`, `205`, `220` などで `details: { grant_type }` の形で audit event に出力される
+- 値は request body の `grant_type` wire 値をそのまま入れている (既存挙動)
+- **本 spec の影響**: schema (field 名) は変更しない。値が client wire と連動して自動的に変わるのみ
+  - `grant_type=authorization_code` → `details: { grant_type: "authorization_code" }`
+  - `grant_type=urn:o3co:oauth:grant-type:did` → `details: { grant_type: "urn:o3co:oauth:grant-type:did" }`
+  - `grant_type=refresh_token` / `session` は変更なし
 
-**Migration (consumers implementing `GrantPolicyHookBase`):**
+**Audit schema contract:**
 
-- `case "authorization":` を `case "authorization_code":` にリネーム
-- URN 形式の grant (例えば DID) を policy で判定する場合、文字列完全一致ではなく URN suffix パターン (`:did` で終わる等) で判定する設計に変更
+本 spec は audit event の schema (field 名 / 構造) を変更しない。`details.grant_type` field は snake_case のまま維持。値の変化は client が送る wire 値の rename に連動する自動変化であり、ライブラリ側の implementation 変更は不要 (dynamic lookup で wire 値をそのまま記録しているため)。
 
-**Rationale:**
+#### 3.6.3 Rationale
 
-- Audit log / policy input は「実際に何が起きたか」を記録するもの。wire 値を入れるのが最も正直
+- Policy 入力と audit event は **別の interface** であり、field 命名規約も異なる (前者 camelCase TypeScript interface、後者 snake_case wire-like)
+- Audit event は「実際に何が起きたか」を記録するもので、wire 値を入れるのが最も正直
 - 短縮 symbolic name (`did` 等) を別途持たせると audit に嘘が記録される (client は URN を送ったのに audit は裸 `did`) ことになり、監査目的に反する
-- Policy input で consumer が「意味論的な grant type 区別」を必要とする場合、本ライブラリは wire 値を渡すに留め、consumer 側でパターン判定を行う責務分担とする
-- 集計・正規化の都合は consumer 側の監査・policy システムで対応
+- Policy 入力も同じ理由で wire 値を渡す
 
-### 3.7 URN Prefix Validation
+### 3.7 DID Grant Registration — URN Only
 
-`urnCustomGrantTypePrefix` の構文制約:
-
-```typescript
-z.string()
-  .min(1)
-  .regex(
-    /^(?!urn:)[A-Za-z0-9][A-Za-z0-9:._-]*$/,
-    "invalid urn prefix (must not start with 'urn:')"
-  )
-  .optional()
-```
-
-- 先頭英数、以降は英数 + `:` `.` `_` `-` を許容
-- `urn:` で始まる値を reject (`urn:urn:acme:did` のような二重 `urn:` を防止)
-- 厳密な RFC 8141 準拠ではないが実用上十分
-- 違反時は起動時 Zod error で失敗
-
-### 3.8 DID Grant Registration — URN Only
-
-- DID grant は **URN 形式でのみ registry に登録** される
-- 裸の `did` は (URN prefix 設定の有無に関わらず) **一切登録されない**
+- DID grant は **`urn:o3co:oauth:grant-type:did` でのみ registry に登録** される
+- 裸の `did` は一切登録されない
 - よって `grant_type=did` (裸) は常に `unsupported_grant_type` エラー
-- この挙動は §3.3 (未設定時 skip) と合わせて grant registration の完全な仕様を定義する
-
-### 3.9 Grant Registration Skip — No Logger Call
-
-DID grant が `urnCustomGrantTypePrefix` 未指定により register されない場合の通知方針:
-
-- **採用: ログ出力を行わない (no-op skip)**
-- README (`packages/did/README.md`) で明示: 「`did.enabled = true` でも `urnCustomGrantTypePrefix` 未指定なら DID grant は登録されない」
-- Consumer が DID grant を使用しようとすると `unsupported_grant_type` エラーが返るので、その時点で設定不備に気付ける
-
-**Rationale:**
-
-- 現状 `Logger` capability (`packages/core/src/logging/Logger.mts:26`) は `warn(message, ...args)` のみ定義で、`info` は未実装
-- `ModuleContext` に `logger` field も未登録 (`packages/core/src/modules/types.mts:56-90`)
-- `info` 追加 + `ModuleContext.logger` 追加は 2 点の surface 変更を招き、本 spec (grant_type rename の整理) の scope を超える
-- `console.warn` 直接呼び出しは consumer のログ集約パイプラインと切り離れるため避ける
-- DID grant が無効化される状況は「consumer が明示的に DID を有効化せず未設定のまま動かす」ケースのため、**silent が問題になるのは DID grant を使おうとした時のみ**。`unsupported_grant_type` エラーで即座に気付けるので UX 上の実害は小さい
-
-**Alternatives considered:**
-
-1. `Logger.info` を追加 + `ModuleContext.logger` 追加 + `context.logger?.info(...)` 呼び出し — v0.5.0 の surface 変更を 2 点増やす。将来的に採用する場合は別 spec
-2. `console.warn` 直接 — consumer ログ集約と非連携で避ける
-3. `throw` で起動を失敗させる (Pattern α) — `did.enabled=true` が残る consumer の既存 config を壊すため回避
 
 ## 4. File-Level Changes
 
 ### 4.1 `packages/did/src/module.mts`
 
-**Schema extension:**
+**Module init (simplified — fixed URN):**
 
 ```typescript
-export const didConfigSchema = z.object({
-  did: z.object({
-    enabled: z.boolean().default(true),
-    urnCustomGrantTypePrefix: z
-      .string()
-      .min(1)
-      .regex(
-        /^(?!urn:)[A-Za-z0-9][A-Za-z0-9:._-]*$/,
-        "invalid urn prefix (must not start with 'urn:')"
-      )
-      .optional(),
-    // existing fields unchanged (algorithm deprecated, supportedAlgorithms, messageMaxAgeSec, allowedAudiences)
-  }).default({
-    // existing default preserved; urnCustomGrantTypePrefix is intentionally absent (no default)
-    enabled: true,
-    supportedAlgorithms: ["ed25519_raw"],
-    messageMaxAgeSec: 300,
-    allowedAudiences: [],
-  }),
+const DID_GRANT_TYPE = "urn:o3co:oauth:grant-type:did" as const;
+
+export const oauthDidModule = (options: DidModuleOptions): Module => ({
+  name: "oauth-did",
+  async init(context: ModuleContext): Promise<void> {
+    const grantConfig = (
+      context.config.oauth.grants as Record<string, Record<string, unknown> | undefined>
+    ).did;
+    if (grantConfig?.enabled === false) return;
+
+    const resolver =
+      "resolver" in options ? options.resolver : options.resolverFactory(grantConfig ?? {});
+
+    const handler = createDidGrant(
+      {
+        config: context.config,
+        keyStore: context.keyStore,
+        pathResolver: context.pathResolver,
+      },
+      { resolver, verifierRegistry: options.verifierRegistry },
+    );
+    context.grantRegistry.register(DID_GRANT_TYPE, handler);
+  },
 });
 ```
 
-**Module init (per §3.9 decision: no logger call):**
+**Schema (unchanged):**
 
-```typescript
-async init(context: ModuleContext): Promise<void> {
-  const grantConfig = (context.config.oauth.grants as Record<string, ...>).did;
-  if (grantConfig?.enabled === false) return;
-
-  const prefix = grantConfig?.urnCustomGrantTypePrefix;
-  if (!prefix) {
-    // Silent skip. See §3.9 rationale. Consumer is notified via README + the
-    // `unsupported_grant_type` error that surfaces when a DID grant request
-    // arrives without URN prefix configured.
-    return;
-  }
-
-  const resolver = /* existing */;
-  const handler = createDidGrant(/* existing */);
-  const grantType = `urn:${prefix}:did`;
-  context.grantRegistry.register(grantType, handler);
-}
-```
+`didConfigSchema` は既存のまま維持。`urnCustomGrantTypePrefix` のような新規 field は追加しない。
 
 ### 4.2 `packages/oauth/src/oauthAuthorization.mts`
 
@@ -292,18 +255,17 @@ grantType: "authorization_code",
 
 ### 4.6 Standalone template
 
-- `templates/standalone/config/application.conf`
-  - `did.urnCustomGrantTypePrefix = "example:oauth:grant-type"` を追加
-  - コメント: `# Override with your organization's URN namespace (e.g. "acme:oauth:grant-type")`
 - `templates/standalone/tests/did-grant.test.js`
-  - `grant_type: "did"` → `grant_type: "urn:example:oauth:grant-type:did"` (全 8 箇所)
+  - `grant_type: "did"` → `grant_type: "urn:o3co:oauth:grant-type:did"` (全 8 箇所)
 - `templates/standalone/tests/index.test.js`
   - `grant_type=authorization` → `grant_type=authorization_code`
 - `README.md` の ASCII 図 (`grant_type=did`) を URN 形式に更新
 
 ### 4.7 Docs
 
-- `packages/did/README.md`: URN 設計セクション + migration note
+- `packages/did/README.md`:
+  - URN 固定値の記載 (`urn:o3co:oauth:grant-type:did`)
+  - Migration note (裸 `did` → URN)
 - `packages/oauth/README.md`: `authorization_code` で既に記載済み、念のため全スキャン
 - Root `CHANGELOG.md` v0.5.0 Unreleased セクションに breaking change entry
 
@@ -314,22 +276,22 @@ grantType: "authorization_code",
 
 - **Wire value (`grant_type`):**
   - `grant_type=authorization` → `grant_type=authorization_code` (RFC 6749 §4.1.3 compliance)
-  - `grant_type=did` → `grant_type=urn:${did.urnCustomGrantTypePrefix}:did`
+  - `grant_type=did` → `grant_type=urn:o3co:oauth:grant-type:did`
   - `grant_type=session` unchanged
 - **Grant policy interface (`GrantPolicyRequest.grantType`):**
   - Authorize flow now passes `"authorization_code"` (was `"authorization"`) to `grantPolicy.evaluate()`
-  - DID grant now passes the full URN string (e.g. `"urn:acme:oauth:grant-type:did"`) to any policy — but note that the built-in DID grant handler does not invoke `grantPolicy.evaluate()` today, so this is a forward-looking interface note
+  - DID grant handler does not currently invoke `grantPolicy.evaluate()`, but if consumers
+    add policy logic for DID grants in the future, use the full URN string
+    (`"urn:o3co:oauth:grant-type:did"`) as the match value
   - `refresh_token` unchanged
-- **New required config for DID grant consumers:**
-  - `did.urnCustomGrantTypePrefix` must be set to register the DID grant handler
-  - Omitting the config silently disables DID grant registration; client requests to the DID URN grant receive `unsupported_grant_type`
 
 Migration:
 
-1. Update client requests: `grant_type=authorization` → `authorization_code`
-2. If implementing `GrantPolicyHookBase`: rename `case "authorization":` → `case "authorization_code":` in policy dispatch logic
-3. If using DID grant: add `did.urnCustomGrantTypePrefix = "<your-namespace>"` to config
-4. Update DID client requests: `grant_type=did` → `grant_type=urn:<your-namespace>:did`
+1. Update client requests:
+   - `grant_type=authorization` → `authorization_code`
+   - `grant_type=did` → `urn:o3co:oauth:grant-type:did`
+2. If implementing `GrantPolicyHookBase`: rename `case "authorization":` →
+   `case "authorization_code":` in policy dispatch logic
 ```
 
 ## 6. Test Plan (TDD outline)
@@ -344,41 +306,31 @@ Migration:
 
 ### 6.2 DID URN 化
 
-- **RED case A:** `urnCustomGrantTypePrefix = "test:oauth:grant-type"` で起動 → `grant_type=urn:test:oauth:grant-type:did` リクエストが通るテスト → registry lookup miss で fail
-- **GREEN A:** `module.mts` を URN 構築ロジックに修正 → pass
-- **RED case B:** `urnCustomGrantTypePrefix` 未指定で起動 → DID grant が register されないテスト (registry に URN も裸 `did` も存在しないことを assert)
-- **GREEN B:** Skip ロジック実装 → pass (ログ出力なし、§3.9 決定に整合)
-- **Negative side-effect test:** `urnCustomGrantTypePrefix` 未指定時、init が `console` に一切の出力を行わないことを確認 (`console.warn` / `console.info` / `console.log` spy の call count 0)。§3.9 で「`ModuleContext.logger` は未導入」と決定しているため logger stub のテストは対象外
-- **NEW RED → GREEN:** 裸の `grant_type=did` が `unsupported_grant_type` を返すテスト (URN prefix 設定時・未設定時の両ケース)
+- **RED:** `grant_type=urn:o3co:oauth:grant-type:did` リクエストが通るテスト → registry lookup miss で fail
+- **GREEN:** `module.mts` を固定 URN register に修正 → pass
+- **NEW RED → GREEN:** 裸の `grant_type=did` が `unsupported_grant_type` を返すテスト
+- **Config test:** `did.enabled = false` で module init が no-op になり、URN が registry に存在しないテスト
 
 ### 6.3 Grant Policy Input + Audit Event
 
-- **Grant Policy (`GrantPolicyRequest.grantType`):**
+- **Grant Policy Input (`GrantPolicyRequest.grantType`, camelCase):**
   - `/oauth/authorize` flow で `grantType: "authorization_code"` が `grantPolicy.evaluate()` に渡されるテスト (routes.mts:466 path)
   - `/oauth/token` (refresh_token grant) で `grantType: "refresh_token"` が渡されるテスト (回帰確認)
   - Policy hook の記録値は wire 値と一致すること
-- **Audit Event:**
-  - `grantType: "authorization_code"` が audit event に記録されるテスト
-  - URN DID grant の audit event に `grantType: "urn:test:oauth:grant-type:did"` (wire 値そのまま) が記録されるテスト
-  - 実装確認ポイント: `routes.mts` / grant handler の audit 発火箇所は registry lookup に使った `grant_type` 文字列を直接利用するため、`line 466` の hardcoded `"authorization"` 以外は追加修正不要のはず。実装時に全 audit 発火箇所を走査して確認する
-
-### 6.4 Schema validation
-
-- `urnCustomGrantTypePrefix = ""` (空文字) で起動 → Zod error で fail
-- `urnCustomGrantTypePrefix = "invalid chars!"` で起動 → Zod regex error で fail
-- `urnCustomGrantTypePrefix = "urn:acme"` (先頭 `urn:`) で起動 → Zod regex error で fail
-- `urnCustomGrantTypePrefix = "example.com:grants"` (dot 含む) で起動 → pass
-- `urnCustomGrantTypePrefix = "valid:prefix-123"` で起動 → pass
+  - DID grant は現状 `grantPolicy.evaluate()` を呼び出していないため policy input テストの対象外 (§3.6.1 参照)
+- **Audit Event (`details.grant_type`, snake_case nested):**
+  - `grant_type=authorization_code` wire 送信時、audit event の `details.grant_type` に `"authorization_code"` が記録されるテスト
+  - `grant_type=urn:o3co:oauth:grant-type:did` wire 送信時、audit event の `details.grant_type` に URN 値そのままが記録されるテスト
+  - 実装確認ポイント: `routes.mts:169/205/220` の audit 発火箇所は `details: { grant_type }` の dynamic destructuring で wire 値を直接記録しているため、schema / field 名の修正は不要。値のみが client wire の rename に連動して変化することを確認するテスト
 
 ## 7. Risks & Mitigations
 
 | Risk | Mitigation |
 | --- | --- |
-| Consumer が `urnCustomGrantTypePrefix` 未設定で DID を使おうとして混乱 | README で明記 + `unsupported_grant_type` エラー時に原因を推測しやすくする (§3.9 rationale: silent skip は DID grant 未使用 consumer への UX を優先) |
+| `urn:o3co:` が vendor lock-in と見られる | §1.2 で「wire protocol version identifier」としての意味を明文化 + README で理由説明 + RFC 6755 sub-namespace 所有権モデルに準拠していることを示す |
 | Audit log / policy input の grant_type が URN で肥大化 | 設計判断として受け入れる (§3.6 rationale)。consumer 側で正規化は可能 |
 | 既存 v0.4.x consumer への breaking impact | v0.5.0 全体が breaking ラウンドなので CHANGELOG で明示 + dplaas.auth は Option X で一括追従 |
-| `urnCustomGrantTypePrefix` に `urn:` を含めて指定された場合 (例: `urn:acme`) → `urn:urn:acme:did` になる | §3.7 の regex で `urn:` prefix を reject。起動時 Zod error で早期発見 |
-| Consumer が `urnCustomGrantTypePrefix = "ietf:params:oauth:grant-type"` を設定し、IETF 未登録値を流す | 本ライブラリは「IETF 値を consumer が自前で流す」シナリオには介入しない (§3.4 rationale)。CHANGELOG + README で「IETF 登録値以外に IETF namespace を使うのは RFC 6755 違反」と警告のみ |
+| Consumer が wire protocol を拡張したい (VC Presentation 追加等) が URN 固定で困る | 拡張は既存 URN の上書きではなく別 grant として扱う (consumer 所有 URN で新規定義)。本 spec で migration path を明示 |
 | Consumer 実装 `GrantPolicyHookBase` が `case "authorization":` で分岐していて v0.5.0 で機能停止 | §3.6 Migration で rename 手順を明示 + CHANGELOG で breaking surface として強調 + dplaas.auth Option X 一括追従で内製 consumer は同期 |
 
 ## 8. Acceptance Criteria
@@ -386,12 +338,11 @@ Migration:
 - [ ] `grant_type=authorization` が `unsupported_grant_type` を返す
 - [ ] `grant_type=authorization_code` が正常に token 発行する
 - [ ] `grant_type=did` (裸) が常に `unsupported_grant_type` を返す
-- [ ] `urnCustomGrantTypePrefix` 未指定時、DID grant module が silent skip (ログ出力なし、起動成功)
-- [ ] `urnCustomGrantTypePrefix` 設定時、`grant_type=urn:${prefix}:did` が正常に token 発行する
-- [ ] `GrantPolicyRequest.grantType` に wire 値 (`authorization_code` / URN / `refresh_token`) がそのまま渡される
-- [ ] Audit event の `grantType` field に wire 値がそのまま記録される
+- [ ] `grant_type=urn:o3co:oauth:grant-type:did` が正常に token 発行する
+- [ ] `did.enabled = false` 時、URN が registry に register されない
+- [ ] `GrantPolicyRequest.grantType` に authorization code / refresh_token path で wire 値がそのまま渡される (DID は現状 policy 呼び出さないため対象外)
+- [ ] Audit event の `details.grant_type` field に wire 値がそのまま記録される (既存 schema 維持、値のみ連動変化)
 - [ ] Standalone template が新 URN 形式で動作する
-- [ ] Zod schema が不正 prefix 値 (空文字 / 不正文字 / `urn:` prefix) を起動時に reject する
 - [ ] CHANGELOG に wire 値・policy interface 両方の migration note が記載される
-- [ ] `packages/did/README.md` に「prefix 未指定時は silent skip」が明記される
+- [ ] `packages/did/README.md` に URN 固定値とその rationale が明記される
 - [ ] 全パッケージのテストが pass する
