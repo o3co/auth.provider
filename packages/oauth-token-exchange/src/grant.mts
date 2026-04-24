@@ -20,7 +20,12 @@ import type {
 	GrantDependencies,
 	GrantHandler,
 	GrantHandlerResult,
+	GrantPolicyContext,
+	GrantPolicyDecision,
+	GrantPolicyRequest,
 } from "@o3co/auth-provider-core";
+import { formatObject, generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
+import { buildActClaim } from "./act.mjs";
 import type { ExchangeTokenValidatorRegistry } from "./validator/registry.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 import type { ValidatedToken } from "./validator/types.mjs";
@@ -251,16 +256,116 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// Minting + policy hook + act-claim construction come in Task 8.
-			// Stub: throw to prevent accidental 501 leak. See Task 6 comment below.
-			void actorValidated;
-			void requestedResource;
-			throw new Error(
-				"TokenExchange grant handler reached the Task 6 stub fall-through. " +
-					"Task 7/8 implementation is incomplete — report this as a bug.",
+			// Policy hook — existing GrantPolicyHookBase contract.
+			// grantedScope/grantedAudience start as the narrowed values from the
+			// request validation phase above; the policy hook may further override them.
+			let grantedScope: readonly string[] | undefined = requestedScope ?? subjectScope;
+			let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;
+			if (deps.grantPolicy) {
+				const policyRequest: GrantPolicyRequest = {
+					grantType: GRANT_TYPE,
+					clientId: client.clientId,
+					subject: subjectValidated.sub,
+					requestedScope: requestedScope ?? undefined,
+					requestedAudience: requestedAudience ?? undefined,
+					originalScope: subjectScope.length > 0 ? subjectScope : undefined,
+					subjectTokenType,
+					actorTokenType: actorTokenType ?? undefined,
+					resource: requestedResource ?? undefined,
+				};
+				const policyContext: GrantPolicyContext = {
+					ip: ctx.ip,
+					userAgent: ctx.userAgent,
+					issuer: ctx.issuer ?? "",
+				};
+				let decision: GrantPolicyDecision;
+				try {
+					decision = await deps.grantPolicy.evaluate(policyRequest, policyContext);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "grant policy evaluation failed",
+						},
+					};
+				}
+				if (decision.outcome === "deny") {
+					return {
+						result: {
+							status: decision.error === "access_denied" ? 403 : 400,
+							error: decision.error,
+							errorDescription: decision.errorDescription ?? "denied by policy",
+						},
+					};
+				}
+				if (decision.grantedScope) grantedScope = decision.grantedScope;
+				if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
+			}
+
+			// Audience derivation (spec §8.1 rule 2):
+			//   explicit narrowed audience  → use grantedAudience (already allowlist-validated)
+			//   omitted + subject single    → inherit subject.aud
+			//   omitted + subject multi/none → fall back to clientId (safe default)
+			// Note: generateToken accepts a single-valued audience; when grantedAudience
+			// has multiple entries only the first is used. This is a known limitation
+			// (spec §8.1.1 multi-audience requires token introspection by all parties).
+			const subjectAud = subjectValidated.aud;
+			const audienceForToken: string = (() => {
+				if (grantedAudience && grantedAudience.length > 0)
+					return grantedAudience[0] ?? client.clientId;
+				if (typeof subjectAud === "string") return subjectAud;
+				return client.clientId;
+			})();
+
+			const act = buildActClaim({
+				subject: subjectValidated,
+				actor: actorValidated ?? undefined,
+			});
+			const scopeClaim = grantedScope && grantedScope.length > 0 ? grantedScope.join(" ") : null;
+
+			const expiresIn = getExpiresIn(deps);
+
+			const accessToken = await generateToken(
+				formatObject({
+					family_id: subjectValidated.familyId,
+					act,
+				}),
+				{
+					expiresIn,
+					keyStore: deps.keyStore,
+					issuer: ctx.issuer,
+					audience: audienceForToken,
+					subject: subjectValidated.sub,
+					authorizedParty: client.clientId,
+					scope: scopeClaim,
+					tokenType: "at+jwt",
+				},
 			);
+
+			const tokens = generateTokenResponse({ accessToken });
+			const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
+				...tokens,
+				issued_token_type: ACCESS_TOKEN_TYPE,
+			};
+
+			return {
+				result: {
+					status: 200,
+					tokens: tokensWithIssuedType,
+				},
+			};
 		},
 	};
+}
+
+function getExpiresIn(deps: TokenExchangeDependencies): number {
+	const grants = (deps.config.oauth.grants ?? {}) as Record<string, Record<string, unknown>>;
+	const tokenExchange = grants.token_exchange;
+	const at = tokenExchange?.accessToken as { expiresIn?: number } | undefined;
+	if (typeof at?.expiresIn === "number" && at.expiresIn > 0) return at.expiresIn;
+	const top = (deps.config.oauth.accessToken as { expiresIn?: number } | undefined)?.expiresIn;
+	return typeof top === "number" && top > 0 ? top : 300;
 }
 
 function normalizeArrayParam(value: unknown): string[] | null {

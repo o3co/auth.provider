@@ -18,8 +18,12 @@ import type {
 	AppConfig,
 	ClientRepository,
 	GrantContext,
+	GrantPolicyContext,
+	GrantPolicyHookBase,
+	GrantPolicyRequest,
 	PublicClient,
 } from "@o3co/auth-provider-core";
+import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
 import { createTokenExchangeGrant } from "#/grant.mjs";
 import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
@@ -62,6 +66,7 @@ function buildGrant(
 		/** Store wired into the validator (defaults to same as refreshTokenStore). */
 		validatorRefreshStore?: ReturnType<typeof makeRefreshStore> | null;
 		config?: AppConfig;
+		grantPolicy?: GrantPolicyHookBase;
 	} = {},
 ) {
 	const registry = overrides.validatorRegistry ?? new ExchangeTokenValidatorRegistry();
@@ -91,6 +96,7 @@ function buildGrant(
 		refreshTokenStore: grantStore,
 		validatorRegistry: registry,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
+		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 	});
 }
 
@@ -182,34 +188,17 @@ describe("createTokenExchangeGrant — request errors", () => {
 		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
 	});
 
-	it("throws on the Task 6 stub fall-through (guards against non-RFC 501 leak)", async () => {
-		// This test guards against the 'not_implemented' stub silently leaking
-		// to clients. Once Tasks 7-8 are complete the stub is replaced; this
-		// test will still pass because a happy-path input will return a real
-		// successful response, not reach the throw. If Tasks 7-8 are
-		// accidentally INCOMPLETE and the stub is reachable, this test traps
-		// the regression at build time.
+	it("mints a token for the minimal happy-path input (was Task 6 stub guard)", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		// A minimal happy-path-ish input that passes all fast-fail checks.
-		const result = await g
-			.handle(
-				ctx({
-					client_id: "client-a",
-					subject_token: token,
-					subject_token_type: ACCESS_TOKEN_TYPE,
-				}),
-			)
-			.catch((err) => ({ thrown: err as Error }));
-		if ("thrown" in result) {
-			expect(result.thrown.message).toMatch(/Task 6 stub fall-through/);
-		} else {
-			// Once Tasks 7-8 land, this branch activates and the handler
-			// returns a real result (either 200 with tokens, or a real
-			// RFC-valid error). Test must not silently skip — assert the
-			// negative: the stub is gone, so we expect status NOT to be 501.
-			expect(result.result.status).not.toBe(501);
-		}
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
 	});
 });
 
@@ -334,76 +323,243 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
 	});
 
-	// The next 2 tests exercise the happy-path flow: narrowing passes, handler
-	// falls through to the Task 6 stub throw (will be replaced in Task 8).
-
-	it("narrowing passes when audience matches clientId even without allowlist — stub throws", async () => {
+	it("mints a token when audience matches clientId even without allowlist", async () => {
 		const g = buildGrant({
 			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
 		});
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		await expect(
-			g.handle(
-				ctx({
-					client_id: "client-a",
-					subject_token: token,
-					subject_token_type: ACCESS_TOKEN_TYPE,
-					audience: "client-a",
-				}),
-			),
-		).rejects.toThrow(/stub fall-through/);
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "client-a",
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status === 200) {
+			expect(result.tokens.access_token).toBeDefined();
+			expect(result.tokens.issued_token_type).toBe(ACCESS_TOKEN_TYPE);
+			expect(result.tokens.token_type).toBe("Bearer");
+			expect(result.tokens.refresh_token).toBeFalsy();
+		}
 	});
 
-	it("narrowing passes when multi-value audience entries are in allowlist ∪ {clientId} — stub throws", async () => {
+	it("mints a token when multi-value audience entries are in allowlist ∪ {clientId}", async () => {
 		const g = buildGrant({
 			clientRepository: mockClientRepository(
 				publicClient({ allowedAudiences: ["billing", "inventory"] }),
 			),
 		});
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		await expect(
-			g.handle(
-				ctx({
-					client_id: "client-a",
-					subject_token: token,
-					subject_token_type: ACCESS_TOKEN_TYPE,
-					audience: ["billing", "inventory"],
-				}),
-			),
-		).rejects.toThrow(/stub fall-through/);
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: ["billing", "inventory"],
+			}),
+		);
+		expect(result.status).toBe(200);
 	});
 
-	it("narrowing passes when audience is empty array (treated as no audience requested)", async () => {
+	it("mints a token when audience is empty array (treated as no audience requested)", async () => {
 		const g = buildGrant({
 			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
 		});
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		await expect(
-			g.handle(
-				ctx({
-					client_id: "client-a",
-					subject_token: token,
-					subject_token_type: ACCESS_TOKEN_TYPE,
-					audience: [],
-				}),
-			),
-		).rejects.toThrow(/stub fall-through/);
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: [],
+			}),
+		);
+		expect(result.status).toBe(200);
 	});
 
-	it("narrowing filters empty-string audience entries before allowlist check", async () => {
+	it("mints a token when audience array contains only empty strings (filtered to none)", async () => {
 		const g = buildGrant({
 			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["billing"] })),
 		});
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		await expect(
-			g.handle(
-				ctx({
-					client_id: "client-a",
-					subject_token: token,
-					subject_token_type: ACCESS_TOKEN_TYPE,
-					audience: ["", ""],
-				}),
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: ["", ""],
+			}),
+		);
+		expect(result.status).toBe(200);
+	});
+});
+
+const denyPolicy: GrantPolicyHookBase = {
+	kind: "deny-all",
+	async evaluate() {
+		return { outcome: "deny", error: "access_denied" };
+	},
+};
+
+const overridePolicy: GrantPolicyHookBase = {
+	kind: "override",
+	async evaluate(_req: GrantPolicyRequest, _ctx: GrantPolicyContext) {
+		return {
+			outcome: "allow",
+			grantedScope: ["read"],
+			grantedAudience: ["billing"],
+		};
+	},
+};
+
+describe("createTokenExchangeGrant — happy path", () => {
+	it("mints an access_token with issued_token_type set (minimal impersonation)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read write" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		expect(result.tokens.access_token).toBeDefined();
+		expect(result.tokens.issued_token_type).toBe(ACCESS_TOKEN_TYPE);
+		expect(result.tokens.refresh_token).toBeFalsy();
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.sub).toBe("user-1");
+		expect(payload.family_id).toBe("fam-1");
+		expect(payload.act).toBeUndefined();
+	});
+
+	it("inherits subject scope when scope parameter is omitted", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read write" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		expect(result.tokens.scope).toBe("read write");
+	});
+
+	it("narrows scope to requested subset", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read write" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: "read",
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		expect(result.tokens.scope).toBe("read");
+	});
+
+	it("adds act claim when actor_token is provided (delegation)", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-2" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.act).toEqual({ sub: "svc-a" });
+	});
+
+	it("nests subject.act inside new act for multi-step delegation", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			act: { sub: "svc-upstream" },
+		});
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-b", family_id: "fam-2" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.act).toEqual({ sub: "svc-b", act: { sub: "svc-upstream" } });
+	});
+
+	it("inherits family_id from subject (cascade revoke)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-xyz" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.family_id).toBe("fam-xyz");
+	});
+});
+
+describe("createTokenExchangeGrant — policy hook", () => {
+	it("rejects with access_denied when policy hook denies", async () => {
+		const g = buildGrant({ grantPolicy: denyPolicy });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 403, error: "access_denied" });
+	});
+
+	it("applies policy hook grantedScope / grantedAudience overrides", async () => {
+		const g = buildGrant({
+			grantPolicy: overridePolicy,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["billing", "inventory"] }),
 			),
-		).rejects.toThrow(/stub fall-through/);
+		});
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read write" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: "read write",
+				audience: ["billing", "inventory"],
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		expect(result.tokens.scope).toBe("read");
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("billing");
 	});
 });
