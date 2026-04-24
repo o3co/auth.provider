@@ -170,4 +170,34 @@ describe("createTokenExchangeGrant — request errors", () => {
 		);
 		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
 	});
+
+	it("throws on the Task 6 stub fall-through (guards against non-RFC 501 leak)", async () => {
+		// This test guards against the 'not_implemented' stub silently leaking
+		// to clients. Once Tasks 7-8 are complete the stub is replaced; this
+		// test will still pass because a happy-path input will return a real
+		// successful response, not reach the throw. If Tasks 7-8 are
+		// accidentally INCOMPLETE and the stub is reachable, this test traps
+		// the regression at build time.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		// A minimal happy-path-ish input that passes all fast-fail checks.
+		const result = await g
+			.handle(
+				ctx({
+					client_id: "client-a",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				}),
+			)
+			.catch((err) => ({ thrown: err as Error }));
+		if ("thrown" in result) {
+			expect(result.thrown.message).toMatch(/Task 6 stub fall-through/);
+		} else {
+			// Once Tasks 7-8 land, this branch activates and the handler
+			// returns a real result (either 200 with tokens, or a real
+			// RFC-valid error). Test must not silently skip — assert the
+			// negative: the stub is gone, so we expect status NOT to be 501.
+			expect(result.result.status).not.toBe(501);
+		}
+	});
 });

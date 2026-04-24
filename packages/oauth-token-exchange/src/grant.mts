@@ -118,15 +118,15 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// Subsequent steps (validate tokens, narrow scope/audience, call policy
-			// hook, mint new token) are added in Tasks 7-9.
-			return {
-				result: {
-					status: 501,
-					error: "not_implemented",
-					errorDescription: "Token Exchange handler is partially implemented",
-				},
-			};
+			// Task 6 stub — subsequent steps (validate tokens, narrow scope/audience,
+			// call policy hook, mint new token) are added in Tasks 7-9. If this line
+			// is reached at runtime, a Task 7/8 branch failed to replace the stub.
+			// We throw rather than returning a non-RFC status because HTTP 501 is not
+			// a valid OAuth error code and must never leak to clients.
+			throw new Error(
+				"TokenExchange grant handler reached the Task 6 stub fall-through. " +
+					"Task 7/8 implementation is incomplete — report this as a bug.",
+			);
 		},
 	};
 }
