@@ -36,7 +36,9 @@ export const createAuthorizationGrant = (
 	const { config, codeRepository, clientRepository, keyStore } = deps;
 
 	const grantsConfig = config.oauth.grants as Record<string, Record<string, unknown>> | undefined;
-	const authorizationConfig = grantsConfig?.authorization as Record<string, unknown> | undefined;
+	const authorizationConfig = grantsConfig?.authorization_code as
+		| Record<string, unknown>
+		| undefined;
 	const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
 
 	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it

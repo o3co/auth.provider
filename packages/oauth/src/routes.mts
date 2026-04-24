@@ -412,7 +412,7 @@ export const createOAuthRouter = async (
 				const grantsConfig = config.oauth.grants as
 					| Record<string, Record<string, unknown>>
 					| undefined;
-				const authorizationConfig = grantsConfig?.authorization as
+				const authorizationConfig = grantsConfig?.authorization_code as
 					| Record<string, unknown>
 					| undefined;
 				const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;

@@ -93,7 +93,7 @@ describe("schema open type", () => {
 				refreshToken: { expiresIn: 86400 },
 				grants: {
 					session: { enabled: true },
-					authorization: { enabled: true, pkce: { requireS256: false } },
+					authorization_code: { enabled: true, pkce: { requireS256: false } },
 					refresh_token: { enabled: true },
 				},
 			},

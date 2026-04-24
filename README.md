@@ -201,7 +201,7 @@ oauth.grants.did {
 **Authorization code grant (when `oauthAuthorizationModule` is registered):**
 
 ```hocon
-oauth.grants.authorization {
+oauth.grants.authorization_code {
   pkce {
     requireS256 = false   # Set to true to reject plain code_challenge_method (S256 only)
     requireS256 = ${?OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256}
