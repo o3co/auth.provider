@@ -325,7 +325,6 @@ import {
 	createSymmetricKeyStore,
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
-import type { Router } from "express";
 import { describe, expect, it } from "vitest";
 import { oauthDidModule } from "../module.mjs";
 import type { DidDocument, DidDocumentResolver } from "../resolver/types.mjs";
@@ -352,7 +351,9 @@ const buildContext = (
 	} as unknown as ModuleContext["config"],
 	keyStore: createSymmetricKeyStore("test-secret"),
 	grantRegistry: new GrantRegistry(),
-	router: {} as Router,
+	// Use ModuleContext["router"] to avoid coupling this package's tests
+	// to the `express` type dependency (not declared in packages/did).
+	router: {} as ModuleContext["router"],
 });
 
 describe("oauthDidModule", () => {
@@ -378,11 +379,12 @@ describe("oauthDidModule", () => {
 		expect(ctx.grantRegistry.get("did")).toBeUndefined();
 	});
 
-	it("registers when did config is missing (enabled defaults to true)", async () => {
+	it("registers when did config is undefined (no explicit disable)", async () => {
 		const ctx = buildContext(undefined);
 		await oauthDidModule({ resolver: mockResolver }).init(ctx);
 
-		// Current behavior: undefined config → enabled !== false, so registered
+		// Current behavior: undefined config → enabled !== false, so registered.
+		// Note: init() does not run the zod schema; it only checks `enabled === false`.
 		expect(ctx.grantRegistry.get(DID_URN)).toBeDefined();
 	});
 });
