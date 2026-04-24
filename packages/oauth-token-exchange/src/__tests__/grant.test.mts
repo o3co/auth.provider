@@ -562,4 +562,75 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		const payload = decodeJwt(result.tokens.access_token);
 		expect(payload.aud).toBe("billing");
 	});
+
+	it("returns temporarily_unavailable (503) when policy hook throws", async () => {
+		const throwing: GrantPolicyHookBase = {
+			kind: "throw",
+			async evaluate() {
+				throw new Error("policy infrastructure down");
+			},
+		};
+		const g = buildGrant({ grantPolicy: throwing });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+	});
+
+	it("documents that policy hook may widen scope beyond subject (by design — see spec §8.1 rule 4)", async () => {
+		// This test documents the intentional widening behavior. The built-in
+		// scope subset check (requested ⊆ subject) is NOT re-applied to policy
+		// hook output. Consumers who install a widening policy accept the
+		// consequences per spec §8.1.
+		const wideningPolicy: GrantPolicyHookBase = {
+			kind: "widening",
+			async evaluate() {
+				return {
+					outcome: "allow",
+					grantedScope: ["read", "write", "admin"], // wider than subject's "read"
+				};
+			},
+		};
+		const g = buildGrant({ grantPolicy: wideningPolicy });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		// Policy successfully widened scope — this is the documented behavior.
+		expect(result.tokens.scope).toBe("read write admin");
+	});
+
+	it("passes resource parameter through to the policy hook request", async () => {
+		let captured: GrantPolicyRequest | null = null;
+		const capturing: GrantPolicyHookBase = {
+			kind: "capture",
+			async evaluate(req) {
+				captured = req;
+				return { outcome: "allow" };
+			},
+		};
+		const g = buildGrant({ grantPolicy: capturing });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: "https://api.example.com",
+			}),
+		);
+		expect(captured).not.toBeNull();
+		expect(captured?.resource).toEqual(["https://api.example.com"]);
+	});
 });

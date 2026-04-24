@@ -299,6 +299,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
+				// By design: policy hook output is trusted without re-verification against
+				// the subject's scope/audience. Widening is permitted because the hook is
+				// a first-party consumer-installed extension (spec §8.1 rule 4). If a
+				// consumer's policy accidentally widens scope, the token reflects that
+				// intent — detect via tests, not runtime checks.
 				if (decision.grantedScope) grantedScope = decision.grantedScope;
 				if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
 			}
@@ -313,7 +318,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const subjectAud = subjectValidated.aud;
 			const audienceForToken: string = (() => {
 				if (grantedAudience && grantedAudience.length > 0)
-					return grantedAudience[0] ?? client.clientId;
+					return grantedAudience[0] ?? client.clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
 				if (typeof subjectAud === "string") return subjectAud;
 				return client.clientId;
 			})();
@@ -359,6 +364,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	};
 }
 
+// TODO(task-9): after tokenExchangeConfigSchema is composed into AppConfig,
+// replace the manual casts below with typed access via the composed schema.
 function getExpiresIn(deps: TokenExchangeDependencies): number {
 	const grants = (deps.config.oauth.grants ?? {}) as Record<string, Record<string, unknown>>;
 	const tokenExchange = grants.token_exchange;
