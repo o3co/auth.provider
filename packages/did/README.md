@@ -15,11 +15,13 @@ urn:o3co:oauth:grant-type:did
 Clients must send this exact string as the `grant_type` parameter. The
 bare string `"did"` is not supported.
 
-Note: internally the grant is still registered under the short identifier
-`"did"` in the `GrantRegistry`, and the config key remains
-`oauth.grants.did`. Only the client-facing *wire value* is the URN.
-References to `"did"` in the API reference below refer to the internal
-registry identifier, not a wire value.
+Note: the grant is registered in the `GrantRegistry` under the full URN
+`urn:o3co:oauth:grant-type:did`; the bare string `"did"` is not
+registered and returns `unsupported_grant_type`. The **config key**
+remains `oauth.grants.did` (method-name based, not URN based, because
+HOCON keys with colons require quoting). References to `"did"` in the
+API reference below refer to that config key only, not to a wire value
+or registry identifier.
 
 ### Why `urn:o3co:...`?
 

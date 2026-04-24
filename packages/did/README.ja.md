@@ -15,10 +15,12 @@ urn:o3co:oauth:grant-type:did
 クライアントはこの文字列を `grant_type` パラメータとして送信しなければならない。
 短縮形の `"did"` はワイヤー値としてはサポートされていない。
 
-注意: 内部的には grant は `GrantRegistry` 内で短縮識別子 `"did"` のまま登録されており、
-設定キーも `oauth.grants.did` のままである。クライアント側の*ワイヤー値*のみが URN になる。
-以下の API リファレンスで `"did"` と表記されている箇所は、内部レジストリ識別子を指しており、
-ワイヤー値ではない。
+注意: grant は `GrantRegistry` に完全な URN `urn:o3co:oauth:grant-type:did`
+でのみ登録される。短縮形の `"did"` は登録されず、`unsupported_grant_type`
+を返す。**設定キー**は `oauth.grants.did` のまま（メソッド名ベースで、
+URN ベースではない。HOCON のキーにコロンが含まれるとクォートが必要になり
+扱いにくいため）。以下の API リファレンスで `"did"` と表記されている箇所は
+この設定キーを指しており、ワイヤー値やレジストリ識別子ではない。
 
 ### なぜ `urn:o3co:...` なのか？
 
