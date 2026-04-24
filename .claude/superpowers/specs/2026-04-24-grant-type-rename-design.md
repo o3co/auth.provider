@@ -19,6 +19,11 @@
   - §1.1 新設: 現状 `did` grant の位置付け (「認証 → 認可変換 grant」)
   - §3.2-§3.3 の URN 設計を固定値設計に刷新
   - §4.1 Module init を簡素化 (prefix check 不要)
+- 2026-04-24 scope addition (pre plan writing):
+  - §3.8 新設: HOCON config key rename (`oauth.grants.authorization` → `oauth.grants.authorization_code`)
+  - §4.2 拡張: `oauthAuthorization.mts:35` の `grantsConfig.authorization` → `grantsConfig.authorization_code`
+  - §4.6 拡張: `packages/core/config/application.conf` と `templates/standalone/config/application.conf`
+    の HOCON section rename + env var rename (`OAUTH_GRANTS_AUTHORIZATION_*` → `OAUTH_GRANTS_AUTHORIZATION_CODE_*`)
 
 ## 1. Background & Motivation
 
@@ -185,6 +190,36 @@ Consumer が `grantPolicy.evaluate()` を実装して `switch (req.grantType) { 
 - 裸の `did` は一切登録されない
 - よって `grant_type=did` (裸) は常に `unsupported_grant_type` エラー
 
+### 3.8 HOCON Config Key Rename — `authorization` → `authorization_code`
+
+Wire 値 rename に合わせて、HOCON config section の key も rename する。
+
+| Before | After |
+| --- | --- |
+| `oauth.grants.authorization { ... }` | `oauth.grants.authorization_code { ... }` |
+| `oauth.grants.authorization.enabled` | `oauth.grants.authorization_code.enabled` |
+| `oauth.grants.authorization.pkce.requireS256` | `oauth.grants.authorization_code.pkce.requireS256` |
+| env `OAUTH_GRANTS_AUTHORIZATION_ENABLED` | env `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED` |
+| env `OAUTH_GRANTS_AUTHORIZATION_PKCE_REQUIRE_S256` | env `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256` |
+
+**変更理由:**
+
+- Wire 値 (`grant_type=authorization_code`) と config key (`grants.authorization`) がズレると、README / example / consumer コードで「どちらの名前で呼ぶのか」が混乱する
+- v0.5.0 は interface freeze ラウンド。中途半端な整合を残すと 1.0 GA まで引きずる
+- v0.5.0 は元々 breaking 集中ラウンドなので、追加の breaking でもトータルコストは変わらない
+
+**変更対象ファイル:**
+
+- `packages/oauth/src/oauthAuthorization.mts:33-35` (`grantsConfig.authorization` → `grantsConfig.authorization_code`)
+- `packages/core/config/application.conf:38` (grants block 内の key rename + env var rename)
+- `templates/standalone/config/application.conf:38-45` (grants block 内の key rename + env var rename)
+- `templates/standalone/README.md:72` / `templates/standalone/README.ja.md:72` (env var 表記更新)
+- `README.md:207` (env var 表記更新)
+
+**互換性方針:** Hard break (§3.1 と同じ方針)。旧 key / 旧 env var は一切 fallback しない。Consumer は HOCON ファイルを更新する。
+
+**備考:** `refresh_token` config key は RFC 値と既に一致 (snake_case)、`session` は §3.5 方針で変更なし、DID は `oauth.grants.did.*` (method 名) のまま維持 (URN を config key にすると HOCON syntax 上クォートが必要で扱いにくいため、method 名ベースで参照する現状を維持する)。
+
 ## 4. File-Level Changes
 
 ### 4.1 `packages/did/src/module.mts`
@@ -224,7 +259,16 @@ export const oauthDidModule = (options: DidModuleOptions): Module => ({
 
 ### 4.2 `packages/oauth/src/oauthAuthorization.mts`
 
+2 箇所修正:
+
 ```typescript
+// Line 35 — config key lookup (§3.8)
+// Before
+if (grantsConfig.authorization?.enabled !== false) {
+// After
+if (grantsConfig.authorization_code?.enabled !== false) {
+
+// Line 45 — grant registry key (§3.1)
 // Before
 context.grantRegistry.register("authorization", handler);
 // After
@@ -253,13 +297,56 @@ grantType: "authorization_code",
 
 変更なし (既に `"refresh_token"` で RFC 準拠)。
 
-### 4.6 Standalone template
+### 4.6 Standalone template / HOCON / README
+
+**Standalone template (tests):**
 
 - `templates/standalone/tests/did-grant.test.js`
   - `grant_type: "did"` → `grant_type: "urn:o3co:oauth:grant-type:did"` (全 8 箇所)
 - `templates/standalone/tests/index.test.js`
   - `grant_type=authorization` → `grant_type=authorization_code`
-- `README.md` の ASCII 図 (`grant_type=did`) を URN 形式に更新
+
+**HOCON config files (§3.8):**
+
+- `packages/core/config/application.conf:38`
+
+  ```hocon
+  # Before
+  authorization { enabled = true, enabled = ${?OAUTH_GRANTS_AUTHORIZATION_ENABLED} }
+  # After
+  authorization_code { enabled = true, enabled = ${?OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED} }
+  ```
+
+- `templates/standalone/config/application.conf:38-45`
+
+  ```hocon
+  # Before
+  authorization {
+    enabled = true
+    enabled = ${?OAUTH_GRANTS_AUTHORIZATION_ENABLED}
+    pkce {
+      requireS256 = false
+      requireS256 = ${?OAUTH_GRANTS_AUTHORIZATION_PKCE_REQUIRE_S256}
+    }
+  }
+  # After
+  authorization_code {
+    enabled = true
+    enabled = ${?OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED}
+    pkce {
+      requireS256 = false
+      requireS256 = ${?OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256}
+    }
+  }
+  ```
+
+**Documentation env var tables:**
+
+- `templates/standalone/README.md:72` / `templates/standalone/README.ja.md:72`
+  - `OAUTH_GRANTS_AUTHORIZATION_ENABLED` → `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED`
+- `README.md:207`
+  - `OAUTH_GRANTS_AUTHORIZATION_PKCE_REQUIRE_S256` → `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`
+- Root `README.md` の ASCII 図 (`grant_type=did`) を URN 形式に更新
 
 ### 4.7 Docs
 
@@ -290,7 +377,11 @@ Migration:
 1. Update client requests:
    - `grant_type=authorization` → `authorization_code`
    - `grant_type=did` → `urn:o3co:oauth:grant-type:did`
-2. If implementing `GrantPolicyHookBase`: rename `case "authorization":` →
+2. Update HOCON config files:
+   - `oauth.grants.authorization { ... }` → `oauth.grants.authorization_code { ... }`
+   - env var `OAUTH_GRANTS_AUTHORIZATION_ENABLED` → `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED`
+   - env var `OAUTH_GRANTS_AUTHORIZATION_PKCE_REQUIRE_S256` → `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`
+3. If implementing `GrantPolicyHookBase`: rename `case "authorization":` →
    `case "authorization_code":` in policy dispatch logic
 ```
 
@@ -340,9 +431,12 @@ Migration:
 - [ ] `grant_type=did` (裸) が常に `unsupported_grant_type` を返す
 - [ ] `grant_type=urn:o3co:oauth:grant-type:did` が正常に token 発行する
 - [ ] `did.enabled = false` 時、URN が registry に register されない
+- [ ] `oauth.grants.authorization_code.enabled = false` 時、`authorization_code` grant が register されない
+- [ ] 旧 config key `oauth.grants.authorization` を含む HOCON ファイルで起動しても新 grant が有効化されない (旧 key は silently 無視される)
+- [ ] 新 env var (`OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED` / `_PKCE_REQUIRE_S256`) が正しく適用される
 - [ ] `GrantPolicyRequest.grantType` に authorization code / refresh_token path で wire 値がそのまま渡される (DID は現状 policy 呼び出さないため対象外)
 - [ ] Audit event の `details.grant_type` field に wire 値がそのまま記録される (既存 schema 維持、値のみ連動変化)
-- [ ] Standalone template が新 URN 形式で動作する
-- [ ] CHANGELOG に wire 値・policy interface 両方の migration note が記載される
+- [ ] Standalone template が新 URN 形式・新 config key で動作する
+- [ ] CHANGELOG に wire 値・config key・env var・policy interface の migration note が記載される
 - [ ] `packages/did/README.md` に URN 固定値とその rationale が明記される
 - [ ] 全パッケージのテストが pass する
