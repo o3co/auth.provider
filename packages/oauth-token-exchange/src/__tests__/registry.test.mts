@@ -19,31 +19,31 @@ import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import type { ExchangeTokenValidator } from "#/validator/types.mjs";
 
 const stubValidator = (tokenType: string): ExchangeTokenValidator => ({
-  tokenType,
-  async validate() {
-    return null;
-  },
+	tokenType,
+	async validate() {
+		return null;
+	},
 });
 
 describe("ExchangeTokenValidatorRegistry", () => {
-  it("returns undefined for unregistered token type", () => {
-    const registry = new ExchangeTokenValidatorRegistry();
-    expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBeUndefined();
-  });
+	it("returns undefined for unregistered token type", () => {
+		const registry = new ExchangeTokenValidatorRegistry();
+		expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBeUndefined();
+	});
 
-  it("returns the registered validator by tokenType", () => {
-    const registry = new ExchangeTokenValidatorRegistry();
-    const v = stubValidator("urn:ietf:params:oauth:token-type:access_token");
-    registry.register("urn:ietf:params:oauth:token-type:access_token", v);
-    expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBe(v);
-  });
+	it("returns the registered validator by tokenType", () => {
+		const registry = new ExchangeTokenValidatorRegistry();
+		const v = stubValidator("urn:ietf:params:oauth:token-type:access_token");
+		registry.register("urn:ietf:params:oauth:token-type:access_token", v);
+		expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBe(v);
+	});
 
-  it("overwrites an existing registration on re-register", () => {
-    const registry = new ExchangeTokenValidatorRegistry();
-    const v1 = stubValidator("urn:ietf:params:oauth:token-type:access_token");
-    const v2 = stubValidator("urn:ietf:params:oauth:token-type:access_token");
-    registry.register("urn:ietf:params:oauth:token-type:access_token", v1);
-    registry.register("urn:ietf:params:oauth:token-type:access_token", v2);
-    expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBe(v2);
-  });
+	it("overwrites an existing registration on re-register", () => {
+		const registry = new ExchangeTokenValidatorRegistry();
+		const v1 = stubValidator("urn:ietf:params:oauth:token-type:access_token");
+		const v2 = stubValidator("urn:ietf:params:oauth:token-type:access_token");
+		registry.register("urn:ietf:params:oauth:token-type:access_token", v1);
+		registry.register("urn:ietf:params:oauth:token-type:access_token", v2);
+		expect(registry.get("urn:ietf:params:oauth:token-type:access_token")).toBe(v2);
+	});
 });

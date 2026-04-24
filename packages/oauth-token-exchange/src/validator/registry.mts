@@ -22,13 +22,13 @@ import type { ExchangeTokenValidator } from "./types.mjs";
  * validation.
  */
 export class ExchangeTokenValidatorRegistry {
-  private validators = new Map<string, ExchangeTokenValidator>();
+	private validators = new Map<string, ExchangeTokenValidator>();
 
-  register(tokenType: string, validator: ExchangeTokenValidator): void {
-    this.validators.set(tokenType, validator);
-  }
+	register(tokenType: string, validator: ExchangeTokenValidator): void {
+		this.validators.set(tokenType, validator);
+	}
 
-  get(tokenType: string): ExchangeTokenValidator | undefined {
-    return this.validators.get(tokenType);
-  }
+	get(tokenType: string): ExchangeTokenValidator | undefined {
+		return this.validators.get(tokenType);
+	}
 }

@@ -20,7 +20,7 @@
  * - "actor":   the token of the party performing the exchange (`actor_token`)
  */
 export interface ExchangeTokenValidationContext {
-  role: "subject" | "actor";
+	role: "subject" | "actor";
 }
 
 /**
@@ -33,11 +33,8 @@ export interface ExchangeTokenValidationContext {
  * `temporarily_unavailable` (503).
  */
 export interface ExchangeTokenValidator {
-  readonly tokenType: string;
-  validate(
-    token: string,
-    context: ExchangeTokenValidationContext,
-  ): Promise<ValidatedToken | null>;
+	readonly tokenType: string;
+	validate(token: string, context: ExchangeTokenValidationContext): Promise<ValidatedToken | null>;
 }
 
 /**
@@ -46,10 +43,10 @@ export interface ExchangeTokenValidator {
  * `family_id` claim (used for cascading revoke inheritance).
  */
 export interface ValidatedToken {
-  sub: string;
-  scope?: string;
-  aud?: string | string[];
-  familyId?: string;
-  act?: Record<string, unknown>;
-  claims: Record<string, unknown>;
+	sub: string;
+	scope?: string;
+	aud?: string | string[];
+	familyId?: string;
+	act?: Record<string, unknown>;
+	claims: Record<string, unknown>;
 }
