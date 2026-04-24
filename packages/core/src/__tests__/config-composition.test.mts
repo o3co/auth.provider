@@ -206,7 +206,7 @@ describe("AppConfigSchema backward compatibility", () => {
 				refreshToken: { expiresIn: 86400 },
 				grants: {
 					session: { enabled: true },
-					authorization: { enabled: true },
+					authorization_code: { enabled: true },
 					refresh_token: { enabled: true },
 				},
 			},

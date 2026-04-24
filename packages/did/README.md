@@ -2,7 +2,40 @@
 
 DID (Decentralized Identifier) authentication grant for [auth.provider](../../README.md).
 
-Adds a `"did"` OAuth 2.0 grant type. Clients present a DID and a signed message; the server verifies the signature using the public key resolved from the DID document. Supports four signature algorithms.
+Adds the DID OAuth 2.0 grant type. Clients present a DID and a signed message; the server verifies the signature using the public key resolved from the DID document. Supports four signature algorithms.
+
+## Grant Type URN
+
+The DID grant is registered under the fixed URN:
+
+```text
+urn:o3co:oauth:grant-type:did
+```
+
+Clients must send this exact string as the `grant_type` parameter. The
+bare string `"did"` is not supported.
+
+Note: the grant is registered in the `GrantRegistry` under the full URN
+`urn:o3co:oauth:grant-type:did`; the bare string `"did"` is not
+registered and returns `unsupported_grant_type`. The **config key**
+remains `oauth.grants.did` (method-name based, not URN based, because
+HOCON keys with colons require quoting). References to `"did"` in the
+API reference below refer to that config key only, not to a wire value
+or registry identifier.
+
+### Why `urn:o3co:...`?
+
+The DID wire protocol (`did` + `message` + `signature` form parameters)
+is defined by auth.provider. Under the RFC 6755 sub-namespace ownership
+model, the URN should be owned by the wire protocol definer. Here, the
+`o3co` segment acts as a **wire protocol version identifier**, not a
+vendor identifier — comparable to how IETF-registered grant URNs live
+under `urn:ietf:params:oauth:grant-type:*`.
+
+Consumer deployments that extend the wire protocol (e.g. to embed a
+Verifiable Presentation) should define a new grant under their own URN
+sub-namespace (e.g. `urn:example.com:oauth:grant-type:did-vp`) rather
+than overriding this one.
 
 ## Install
 
@@ -31,7 +64,7 @@ Peer dependencies (install separately in the workspace root):
 function oauthDidModule(options: DidModuleOptions): Module;
 ```
 
-Factory that returns a module (name: `"oauth-did"`). Registers the `"did"` grant type in the grant registry when `config.oauth.grants.did.enabled` is `true`. Pass the result to `createApp` as a module to enable DID authentication.
+Factory that returns a module (name: `"oauth-did"`). Registers the DID grant under the URN `urn:o3co:oauth:grant-type:did` in the grant registry when `config.oauth.grants.did.enabled` is `true` (note: `oauth.grants.did` is the **config key**, not the wire value or registry key). Pass the result to `createApp` as a module to enable DID authentication.
 
 `DidModuleOptions` must supply a DID document resolver in one of two forms:
 
@@ -52,7 +85,7 @@ type DidModuleOptions =
 function createDidGrant(deps: GrantDependencies): GrantHandler;
 ```
 
-Factory that creates the `"did"` grant handler. The handler expects the following request body fields:
+Factory that creates the DID grant handler (registered under the URN `urn:o3co:oauth:grant-type:did`). The handler expects the following request body fields:
 
 | Field                 | Description                                        |
 |-----------------------|----------------------------------------------------|

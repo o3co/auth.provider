@@ -110,7 +110,7 @@ const mockConfig = {
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {
-			authorization: { enabled: true },
+			authorization_code: { enabled: true },
 			refresh_token: { enabled: true },
 		},
 	},
@@ -143,7 +143,7 @@ describe("oauthAuthorizationModule", () => {
 
 		await module.init(ctx);
 
-		expect(ctx.grantRegistry.get("authorization")).toBeDefined();
+		expect(ctx.grantRegistry.get("authorization_code")).toBeDefined();
 		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
 	});
 
@@ -153,7 +153,7 @@ describe("oauthAuthorizationModule", () => {
 			oauth: {
 				...mockConfig.oauth,
 				grants: {
-					authorization: { enabled: false },
+					authorization_code: { enabled: false },
 					refresh_token: { enabled: true },
 				},
 			},
@@ -166,7 +166,7 @@ describe("oauthAuthorizationModule", () => {
 
 		await module.init(ctx);
 
-		expect(ctx.grantRegistry.get("authorization")).toBeUndefined();
+		expect(ctx.grantRegistry.get("authorization_code")).toBeUndefined();
 		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
 	});
 
@@ -257,7 +257,7 @@ describe("oauthAuthorizationModule", () => {
 
 		await module.init(ctx);
 
-		const handler = ctx.grantRegistry.get("authorization");
+		const handler = ctx.grantRegistry.get("authorization_code");
 		expect(handler).toBeDefined();
 		if (!handler) return;
 
@@ -291,7 +291,7 @@ describe("oauthAuthorizationModule", () => {
 
 		await module.init(ctx);
 
-		expect(ctx.grantRegistry.get("authorization")).toBeDefined();
+		expect(ctx.grantRegistry.get("authorization_code")).toBeDefined();
 		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
 	});
 
@@ -308,7 +308,7 @@ describe("oauthAuthorizationModule", () => {
 
 		await module.init(ctx);
 
-		const handler = ctx.grantRegistry.get("authorization");
+		const handler = ctx.grantRegistry.get("authorization_code");
 		expect(handler).toBeDefined();
 		if (!handler) return;
 

@@ -21,6 +21,11 @@ import { describe, expect, it } from "vitest";
 
 const BASE_URL = process.env.API_BASE_URL || "http://localhost:3000";
 
+// Wire value for the DID grant. Mirrors `DID_GRANT_TYPE` in
+// `packages/did/src/module.mts`. A future rename of the URN should
+// only touch the constant, not every test site.
+const DID_GRANT_TYPE = "urn:o3co:oauth:grant-type:did";
+
 const client = axios.create({
 	baseURL: BASE_URL,
 	validateStatus: () => true,
@@ -41,7 +46,7 @@ const createDidAuthRequest = async (overrides = {}) => {
 	const signature = await ed.signAsync(messageBytes, privateKey);
 
 	return {
-		grant_type: "did",
+		grant_type: DID_GRANT_TYPE,
 		did,
 		signature: Buffer.from(signature).toString("base64"),
 		message,
@@ -54,7 +59,7 @@ const createDidAuthRequest = async (overrides = {}) => {
 	};
 };
 
-describe("POST /oauth/token grant_type=did", () => {
+describe("POST /oauth/token grant_type=urn:o3co:oauth:grant-type:did", () => {
 	it("returns a JWT access token for a valid DID authentication", async () => {
 		const body = await createDidAuthRequest();
 		const res = await client.post("/oauth/token", body);
@@ -92,7 +97,7 @@ describe("POST /oauth/token grant_type=did", () => {
 		const signature = await ed.signAsync(messageBytes, privateKey);
 
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: DID_GRANT_TYPE,
 			did,
 			signature: Buffer.from(signature).toString("base64"),
 			message,
@@ -121,7 +126,7 @@ describe("POST /oauth/token grant_type=did", () => {
 	it("returns 400 when required fields are missing", async () => {
 		// Missing did
 		const res1 = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: DID_GRANT_TYPE,
 			signature: "abc",
 			message: "{}",
 		});
@@ -130,7 +135,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 		// Missing signature
 		const res2 = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: DID_GRANT_TYPE,
 			did: "did:example:test",
 			message: "{}",
 		});
@@ -138,7 +143,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 		// Missing message
 		const res3 = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: DID_GRANT_TYPE,
 			did: "did:example:test",
 			signature: "abc",
 		});
@@ -147,7 +152,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 	it("returns 400 when message is not valid JSON", async () => {
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: DID_GRANT_TYPE,
 			did: "did:example:test",
 			signature: "abc",
 			message: "not-json",
@@ -159,7 +164,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 	it("returns 400 when message.did does not match top-level did", async () => {
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: DID_GRANT_TYPE,
 			did: "did:example:one",
 			signature: "abc",
 			message: JSON.stringify({
@@ -182,7 +187,7 @@ describe("POST /oauth/token grant_type=did", () => {
 		});
 
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: DID_GRANT_TYPE,
 			did,
 			signature: "abc",
 			message,

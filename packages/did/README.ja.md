@@ -4,6 +4,30 @@
 
 OAuth 2.0 の `"did"` grant type を追加する。クライアントは DID と署名済みメッセージを提示し、サーバーは DID ドキュメントから解決した公開鍵で署名を検証する。4 種類の署名アルゴリズムをサポートする。
 
+## Grant Type URN
+
+DID grant は固定の URN で登録されている:
+
+```text
+urn:o3co:oauth:grant-type:did
+```
+
+クライアントはこの文字列を `grant_type` パラメータとして送信しなければならない。
+短縮形の `"did"` はワイヤー値としてはサポートされていない。
+
+注意: grant は `GrantRegistry` に完全な URN `urn:o3co:oauth:grant-type:did`
+でのみ登録される。短縮形の `"did"` は登録されず、`unsupported_grant_type`
+を返す。**設定キー**は `oauth.grants.did` のまま（メソッド名ベースで、
+URN ベースではない。HOCON のキーにコロンが含まれるとクォートが必要になり
+扱いにくいため）。以下の API リファレンスで `"did"` と表記されている箇所は
+この設定キーを指しており、ワイヤー値やレジストリ識別子ではない。
+
+### なぜ `urn:o3co:...` なのか？
+
+DID ワイヤープロトコル（`did` + `message` + `signature` のフォームパラメータ）は auth.provider が定義している。RFC 6755 のサブ名前空間所有モデルの下では、URN はワイヤープロトコルの定義者が所有すべきである。ここで `o3co` セグメントは**ワイヤープロトコルのバージョン識別子**として機能しており、ベンダー識別子ではない。IETF 登録の grant URN が `urn:ietf:params:oauth:grant-type:*` 配下にあるのと同様の位置づけである。
+
+ワイヤープロトコルを拡張したい（例: Verifiable Presentation を埋め込む）コンシューマーのデプロイメントは、この URN をオーバーライドするのではなく、自分の URN サブ名前空間（例: `urn:example.com:oauth:grant-type:did-vp`）で新しい grant を定義すること。
+
 ## インストール
 
 このパッケージは **private** です。npm には公開されておらず、`auth.provider` モノリポ内でのみ利用できます。
@@ -31,7 +55,7 @@ peer dependencies（ワークスペースルートに別途インストール）
 function oauthDidModule(options: DidModuleOptions): Module;
 ```
 
-モジュール（name: `"oauth-did"`）を返すファクトリ関数。`config.oauth.grants.did.enabled` が `true` のとき、grant レジストリに `"did"` grant type を登録する。DID 認証を有効化するには、戻り値を `createApp` の modules に渡すこと。
+モジュール（name: `"oauth-did"`）を返すファクトリ関数。`config.oauth.grants.did.enabled` が `true` のとき（`oauth.grants.did` は**設定キー**であり、ワイヤー値やレジストリキーではない）、grant レジストリに URN `urn:o3co:oauth:grant-type:did` で登録する。DID 認証を有効化するには、戻り値を `createApp` の modules に渡すこと。
 
 `DidModuleOptions` には DID ドキュメントリゾルバーを以下のいずれかの形式で渡す:
 
@@ -52,7 +76,7 @@ type DidModuleOptions =
 function createDidGrant(deps: GrantDependencies): GrantHandler;
 ```
 
-`"did"` grant ハンドラーを生成するファクトリ関数。ハンドラーが期待するリクエストボディフィールド:
+DID grant ハンドラー（URN `urn:o3co:oauth:grant-type:did` で登録される）を生成するファクトリ関数。ハンドラーが期待するリクエストボディフィールド:
 
 | フィールド           | 説明                                               |
 |---------------------|---------------------------------------------------|

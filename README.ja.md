@@ -9,20 +9,20 @@ DID (分散型識別子) 認証対応の OAuth 2.0 プロバイダー。従来�
 DID 認証を使うと、クライアントは [Decentralized Identifier](https://www.w3.org/TR/did-core/) に紐づく暗号鍵ペアで身元を証明できる。パスワードも事前共有シークレットも不要。サーバーがクライアントの DID Document を resolve し、公開鍵を取り出して署名を検証する。
 
 ```text
-Client                              auth.provider
-  │                                      │
-  │  POST /oauth/token                   │
-  │  grant_type=did                      │
-  │  did=did:example:org:abc123          │
-  │  message={"did":"...","nonce":"..."}  │
-  │  signature=<Ed25519 署名>            │
-  │ ──────────────────────────────────►  │
-  │                                      │  1. DID Document を resolve
-  │                                      │  2. 公開鍵を取得
-  │                                      │  3. 署名を検証
-  │                                      │  4. JWT を発行
-  │  ◄──────────────────────────────────  │
-  │  { access_token: "eyJ...", ... }     │
+Client                                    auth.provider
+  │                                            │
+  │  POST /oauth/token                         │
+  │  grant_type=urn:o3co:oauth:grant-type:did  │
+  │  did=did:example:org:abc123                │
+  │  message={"did":"...","nonce":"..."}       │
+  │  signature=<Ed25519 署名>                  │
+  │ ────────────────────────────────────────►  │
+  │                                            │  1. DID Document を resolve
+  │                                            │  2. 公開鍵を取得
+  │                                            │  3. 署名を検証
+  │                                            │  4. JWT を発行
+  │  ◄───────────────────────────────────────  │
+  │  { access_token: "eyJ...", ... }           │
 ```
 
 `DidDocumentResolver` インターフェースはプラグイン可能。自分の DID method (`did:web`, `did:key`, `did:ion`, その他任意) 向けの resolver を実装して起動時に注入する。

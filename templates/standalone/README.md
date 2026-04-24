@@ -69,7 +69,7 @@ fail fast rather than silently falling back to defaults.
 | Variable | Default | Description |
 |---|---|---|
 | `OAUTH_GRANTS_SESSION_ENABLED` | `true` | Enable the session grant type |
-| `OAUTH_GRANTS_AUTHORIZATION_ENABLED` | `true` | Enable the authorization code grant type |
+| `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED` | `true` | Enable the authorization code grant type |
 | `OAUTH_GRANTS_REFRESH_TOKEN_ENABLED` | `true` | Enable the refresh token grant type |
 
 ### Session
