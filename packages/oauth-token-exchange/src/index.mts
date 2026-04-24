@@ -15,6 +15,11 @@
  */
 
 export { ExchangeTokenValidatorRegistry } from "./validator/registry.mjs";
+export {
+	ACCESS_TOKEN_TYPE,
+	type CreateSelfIssuedAccessTokenValidatorOptions,
+	createSelfIssuedAccessTokenValidator,
+} from "./validator/selfIssuedAccessToken.mjs";
 export type {
 	ExchangeTokenValidationContext,
 	ExchangeTokenValidator,
