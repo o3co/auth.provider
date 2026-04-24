@@ -20,6 +20,8 @@ import { createDidGrant } from "./did.mjs";
 import type { DidDocumentResolver } from "./resolver/types.mjs";
 import type { VerifierRegistry } from "./verifiers/registry.mjs";
 
+const DID_GRANT_TYPE = "urn:o3co:oauth:grant-type:did" as const;
+
 export const didConfigSchema = z.object({
 	did: z
 		.object({
@@ -73,6 +75,6 @@ export const oauthDidModule = (options: DidModuleOptions): Module => ({
 			},
 			{ resolver, verifierRegistry: options.verifierRegistry },
 		);
-		context.grantRegistry.register("did", handler);
+		context.grantRegistry.register(DID_GRANT_TYPE, handler);
 	},
 });
