@@ -22,15 +22,18 @@ import {
 const validatorRegistry = new ExchangeTokenValidatorRegistry();
 validatorRegistry.register(
   "urn:ietf:params:oauth:token-type:access_token",
+  // Signature + typ + issuer check only. Revocation is handled by the
+  // grant handler via deps.refreshTokenStore so the specific
+  // `family_revoked` errorDescription can be surfaced (spec §5.3).
   createSelfIssuedAccessTokenValidator({
-    keyStore,            // your KeyStore (used to issue access_tokens)
-    refreshTokenStore,   // REQUIRED for cascading revoke; fail-closed if absent
-    issuer,              // your OIDC issuer URL
+    keyStore,
+    issuer,
   }),
 );
 
 grantRegistry.addModule(tokenExchangeModule, {
   ...deps,
+  refreshTokenStore,  // REQUIRED — handler uses this for cascading revoke
   validatorRegistry,
   clientRepository,
 });
@@ -58,7 +61,7 @@ clients:
     allowedAudiences: ["billing-service", "inventory-service"]
 ```
 
-When `allowedAudiences` is empty or omitted, the only accepted `audience` parameter value is the client's own `clientId`. The audience allowlist is enforced in addition to any `GrantPolicyHook` you register.
+When `allowedAudiences` is empty or omitted, the only accepted `audience` parameter value is the client's own `clientId`. This allowlist applies to the **request's `audience` parameter only** — a `GrantPolicyHook` can override `grantedAudience` in its decision, which is not re-validated against the allowlist (see Security note 4 for the rationale). If you want hard-boundary enforcement across both paths, write your policy hook defensively.
 
 ## External JWT subject_token
 
@@ -86,7 +89,7 @@ validatorRegistry.register(
 
 ## Security notes
 
-1. **refreshTokenStore is required.** Without it, self-issued access_tokens carrying `family_id` cannot be revocation-checked; the grant handler returns `invalid_grant` in that case (fail-closed). Token Exchange horizontally spreads access, so emitting tokens whose revocation cannot be observed is never acceptable.
+1. **refreshTokenStore must be wired into the grant dependencies (not into the validator)** so the handler can surface the specific `family_revoked` errorDescription (spec §5.3). Without `refreshTokenStore` in the grant deps, self-issued access_tokens carrying `family_id` cannot be revocation-checked; the handler returns `invalid_grant` (fail-closed). Leaving it absent from the validator is intentional — the handler owns revocation so the specific error can propagate. See the "Register the grant" example above.
 
 2. **Scope is always narrowed by the core handler.** `requested scope ⊆ subject_token.scope` is enforced unconditionally — a `GrantPolicyHook` cannot bypass this subset check for narrowing **through the request parameter**. However, see point 4 below about policy-level override.
 

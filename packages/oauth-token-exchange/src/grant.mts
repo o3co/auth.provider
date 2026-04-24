@@ -165,6 +165,18 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
+			// Revocation responsibility model (spec §7.2):
+			//   - The built-in self-issued validator accepts an OPTIONAL refreshTokenStore
+			//     as a convenience — but the RECOMMENDED wiring (used by integration
+			//     tests and README) leaves the validator storeless and lets this handler
+			//     own revocation.
+			//   - Handler-owned revocation has two benefits: (a) it can surface the
+			//     specific `family_revoked` errorDescription that RFC 8693 consumers
+			//     expect, and (b) it applies fail-closed semantics (spec §7.2 state 1)
+			//     when the store is not wired at the grant level.
+			//   - If a consumer wires the store into BOTH the validator AND the grant,
+			//     revocation is double-checked. Safe but wasteful — the validator's
+			//     early null short-circuits the handler's specific error reporting.
 			// Re-surface family_revoked for operators by consulting the store directly
 			// when a family_id was present. isFamilyRevoked is idempotent and cheap.
 			if (
@@ -309,7 +321,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 
 			// Audience derivation (spec §8.1 rule 2):
-			//   explicit narrowed audience  → use grantedAudience (already allowlist-validated)
+			//   explicit narrowed audience  → use grantedAudience (first element).
+			//     Note: grantedAudience reflects either the allowlist-validated request
+			//     parameter OR a policy hook override. Policy overrides are NOT re-
+			//     validated against the client allowlist by design (spec §8.1 rule 4);
+			//     consumers with strict policies must enforce the boundary themselves.
 			//   omitted + subject single    → inherit subject.aud
 			//   omitted + subject multi/none → fall back to clientId (safe default)
 			// Note: generateToken accepts a single-valued audience; when grantedAudience

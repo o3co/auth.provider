@@ -42,17 +42,28 @@ import {
 export const tokenExchangeModule: GrantModule = Object.freeze({
 	grants: Object.freeze({
 		[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: GrantDependencies) => {
-			if (!("validatorRegistry" in deps) || !("clientRepository" in deps)) {
+			const typedDeps = deps as unknown as Partial<TokenExchangeDependencies>;
+			const hasFreezeable =
+				typedDeps.validatorRegistry !== null &&
+				typedDeps.validatorRegistry !== undefined &&
+				typeof (typedDeps.validatorRegistry as { freeze?: unknown }).freeze === "function";
+			const hasClientRepository =
+				typedDeps.clientRepository !== null &&
+				typedDeps.clientRepository !== undefined &&
+				typeof (typedDeps.clientRepository as { findById?: unknown }).findById === "function" &&
+				typeof (typedDeps.clientRepository as { authenticate?: unknown }).authenticate ===
+					"function";
+			if (!hasFreezeable || !hasClientRepository) {
 				throw new Error(
-					"tokenExchangeModule requires validatorRegistry and clientRepository in deps. " +
+					"tokenExchangeModule requires validatorRegistry (with freeze()) and clientRepository (with findById/authenticate) in deps. " +
 						"See @o3co/auth-provider-oauth-token-exchange README for consumer registration.",
 				);
 			}
-			const typedDeps = deps as unknown as TokenExchangeDependencies;
+			// Now typedDeps.validatorRegistry and typedDeps.clientRepository are verified.
 			// Freeze the registry at registration time — consumer's reference
 			// can no longer mutate it after addModule returns.
-			typedDeps.validatorRegistry.freeze();
-			return createTokenExchangeGrant(typedDeps);
+			(typedDeps as TokenExchangeDependencies).validatorRegistry.freeze();
+			return createTokenExchangeGrant(typedDeps as TokenExchangeDependencies);
 		},
 	}),
 }) as GrantModule;

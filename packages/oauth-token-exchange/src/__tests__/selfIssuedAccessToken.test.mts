@@ -107,6 +107,13 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(result).toBeNull();
 	});
 
+	it("ignores payload.act when it is an array (non-plain-object guard)", async () => {
+		const token = await signSelfIssuedAccessToken({ act: [{ sub: "svc-a" }] });
+		const result = await validator().validate(token, { role: "subject" });
+		expect(result).not.toBeNull();
+		expect(result?.act).toBeUndefined();
+	});
+
 	it("returns null when typ header is not at+jwt (rejects id_token/logout_token/generic JWT)", async () => {
 		// Token signed with the same KeyStore but with typ=JWT (would be a
 		// generic id_token or developer-minted JWT). This scenario exists in

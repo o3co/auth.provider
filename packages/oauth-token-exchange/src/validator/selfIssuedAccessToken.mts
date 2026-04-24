@@ -100,7 +100,7 @@ export function createSelfIssuedAccessTokenValidator(
 				result.aud = payload.aud as string | string[];
 			}
 			if (familyId) result.familyId = familyId;
-			if (payload.act && typeof payload.act === "object") {
+			if (payload.act && typeof payload.act === "object" && !Array.isArray(payload.act)) {
 				result.act = payload.act as Record<string, unknown>;
 			}
 			return result;
