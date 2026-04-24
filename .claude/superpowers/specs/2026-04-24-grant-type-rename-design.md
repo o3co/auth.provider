@@ -275,6 +275,24 @@ context.grantRegistry.register("authorization", handler);
 context.grantRegistry.register("authorization_code", handler);
 ```
 
+### 4.2a Additional config-read sites (caught in post-PR review)
+
+These sites also read `grantsConfig.authorization` internally and must be renamed
+together with the module-init site (§4.2) to avoid silent PKCE config regression:
+
+- `packages/oauth/src/grants/authorization.mts:39` —
+  `grantsConfig?.authorization` → `grantsConfig?.authorization_code`
+- `packages/oauth/src/routes.mts:415` —
+  `grantsConfig?.authorization` → `grantsConfig?.authorization_code`
+
+**Lesson:** when renaming a config key, grep for ALL consumer-side reads, not
+just the registration site. Add pre-merge grep to verification step:
+
+```bash
+grep -rn 'grantsConfig?\.authorization\b\|grants\.authorization\b' packages/ \
+  --include='*.mts' --include='*.ts'
+```
+
 ### 4.3 `packages/oauth/src/routes.mts`
 
 **Grant policy input** (`line 466`) — これは `grantPolicy.evaluate()` の入力 (`GrantPolicyRequest.grantType`) であり、audit event ではない。Consumer 実装 policy アダプタへの breaking 影響は §3.6 で詳述。
