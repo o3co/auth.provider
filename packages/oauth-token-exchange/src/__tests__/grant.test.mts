@@ -372,4 +372,38 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 			),
 		).rejects.toThrow(/stub fall-through/);
 	});
+
+	it("narrowing passes when audience is empty array (treated as no audience requested)", async () => {
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
+		});
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		await expect(
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					audience: [],
+				}),
+			),
+		).rejects.toThrow(/stub fall-through/);
+	});
+
+	it("narrowing filters empty-string audience entries before allowlist check", async () => {
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["billing"] })),
+		});
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		await expect(
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					audience: ["", ""],
+				}),
+			),
+		).rejects.toThrow(/stub fall-through/);
+	});
 });

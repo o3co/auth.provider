@@ -23,6 +23,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import type { ExchangeTokenValidatorRegistry } from "./validator/registry.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
+import type { ValidatedToken } from "./validator/types.mjs";
 
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
 
@@ -37,7 +38,6 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const body = ctx.body as Record<string, unknown>;
-
 			const subjectToken = typeof body.subject_token === "string" ? body.subject_token : null;
 			const subjectTokenType =
 				typeof body.subject_token_type === "string" ? body.subject_token_type : null;
@@ -96,36 +96,35 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
-			if (actorToken !== null) {
-				if (actorTokenType === null) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "actor_token_type is required when actor_token is provided",
-						},
-					};
-				}
-				const actorValidator = validatorRegistry.get(actorTokenType);
-				if (!actorValidator) {
-					return {
-						result: {
-							status: 400,
-							error: "unsupported_token_type",
-							errorDescription: `actor_token_type "${actorTokenType}" is not supported`,
-						},
-					};
-				}
+			// Actor token type lookup — kept here so the validator reference is
+			// available for validation below without a second registry call.
+			if (actorToken !== null && actorTokenType === null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "actor_token_type is required when actor_token is provided",
+					},
+				};
+			}
+			const actorValidator =
+				actorToken !== null && actorTokenType !== null
+					? validatorRegistry.get(actorTokenType)
+					: null;
+			if (actorToken !== null && actorValidator === undefined) {
+				return {
+					result: {
+						status: 400,
+						error: "unsupported_token_type",
+						errorDescription: `actor_token_type "${actorTokenType}" is not supported`,
+					},
+				};
 			}
 
-			const subjectValidated = await (async () => {
-				try {
-					return await subjectValidator.validate(subjectToken, { role: "subject" });
-				} catch {
-					return "runtime_error" as const;
-				}
-			})();
-			if (subjectValidated === "runtime_error") {
+			let subjectValidated: ValidatedToken | null;
+			try {
+				subjectValidated = await subjectValidator.validate(subjectToken, { role: "subject" });
+			} catch {
 				return {
 					result: {
 						status: 503,
@@ -192,18 +191,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 
 			let actorValidated: typeof subjectValidated | null = null;
-			if (actorToken !== null && actorTokenType !== null) {
-				const actorValidator = validatorRegistry.get(actorTokenType);
-				// actorValidator existence already checked above, but narrow again.
-				if (!actorValidator) {
-					return {
-						result: {
-							status: 400,
-							error: "unsupported_token_type",
-							errorDescription: `actor_token_type "${actorTokenType}" is not supported`,
-						},
-					};
-				}
+			if (actorToken !== null && actorValidator) {
 				try {
 					actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
 				} catch {
@@ -277,7 +265,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 
 function normalizeArrayParam(value: unknown): string[] | null {
 	if (value === undefined || value === null || value === "") return null;
-	if (Array.isArray(value)) return value.map(String);
+	if (Array.isArray(value)) {
+		const filtered = value.map(String).filter((s) => s.length > 0);
+		return filtered.length === 0 ? null : filtered;
+	}
 	return [String(value)];
 }
 
