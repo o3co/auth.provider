@@ -41,7 +41,7 @@ const createDidAuthRequest = async (overrides = {}) => {
 	const signature = await ed.signAsync(messageBytes, privateKey);
 
 	return {
-		grant_type: "did",
+		grant_type: "urn:o3co:oauth:grant-type:did",
 		did,
 		signature: Buffer.from(signature).toString("base64"),
 		message,
@@ -54,7 +54,7 @@ const createDidAuthRequest = async (overrides = {}) => {
 	};
 };
 
-describe("POST /oauth/token grant_type=did", () => {
+describe("POST /oauth/token grant_type=urn:o3co:oauth:grant-type:did", () => {
 	it("returns a JWT access token for a valid DID authentication", async () => {
 		const body = await createDidAuthRequest();
 		const res = await client.post("/oauth/token", body);
@@ -92,7 +92,7 @@ describe("POST /oauth/token grant_type=did", () => {
 		const signature = await ed.signAsync(messageBytes, privateKey);
 
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: "urn:o3co:oauth:grant-type:did",
 			did,
 			signature: Buffer.from(signature).toString("base64"),
 			message,
@@ -121,7 +121,7 @@ describe("POST /oauth/token grant_type=did", () => {
 	it("returns 400 when required fields are missing", async () => {
 		// Missing did
 		const res1 = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: "urn:o3co:oauth:grant-type:did",
 			signature: "abc",
 			message: "{}",
 		});
@@ -130,7 +130,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 		// Missing signature
 		const res2 = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: "urn:o3co:oauth:grant-type:did",
 			did: "did:example:test",
 			message: "{}",
 		});
@@ -138,7 +138,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 		// Missing message
 		const res3 = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: "urn:o3co:oauth:grant-type:did",
 			did: "did:example:test",
 			signature: "abc",
 		});
@@ -147,7 +147,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 	it("returns 400 when message is not valid JSON", async () => {
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: "urn:o3co:oauth:grant-type:did",
 			did: "did:example:test",
 			signature: "abc",
 			message: "not-json",
@@ -159,7 +159,7 @@ describe("POST /oauth/token grant_type=did", () => {
 
 	it("returns 400 when message.did does not match top-level did", async () => {
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: "urn:o3co:oauth:grant-type:did",
 			did: "did:example:one",
 			signature: "abc",
 			message: JSON.stringify({
@@ -182,7 +182,7 @@ describe("POST /oauth/token grant_type=did", () => {
 		});
 
 		const res = await client.post("/oauth/token", {
-			grant_type: "did",
+			grant_type: "urn:o3co:oauth:grant-type:did",
 			did,
 			signature: "abc",
 			message,
