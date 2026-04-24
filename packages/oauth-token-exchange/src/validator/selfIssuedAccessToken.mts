@@ -28,9 +28,13 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 
 /**
  * Built-in validator for RFC 8693 subject_token_type=access_token when the
- * token was issued by this auth.provider instance. Verifies JWT signature
- * (KeyStore), standard claims (exp via jose), issuer match, and — when a
- * refreshTokenStore is wired — family_id cascading revoke.
+ * token was issued by this auth.provider instance. Verifies:
+ *   - JWT signature (via KeyStore)
+ *   - `typ: "at+jwt"` header (rejects id_tokens and logout_tokens even
+ *     when signed by the same KeyStore — prevents token-type-confusion)
+ *   - Standard claims (exp via jose)
+ *   - Issuer match
+ *   - When refreshTokenStore is wired: family_id cascading revoke
  *
  * When refreshTokenStore is absent, the family revoke check is silently
  * skipped here; the grant handler is responsible for detecting this
@@ -39,7 +43,7 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * misconfiguration.
  *
  * Throws on infrastructure failures (store unavailable during runtime).
- * Returns null on validation failures (bad signature, missing/empty sub,
+ * Returns null on validation failures (bad signature, wrong typ, missing/empty sub,
  * expired, revoked, issuer mismatch).
  */
 export function createSelfIssuedAccessTokenValidator(
@@ -50,14 +54,24 @@ export function createSelfIssuedAccessTokenValidator(
 	return {
 		async validate(token: string): Promise<ValidatedToken | null> {
 			let payload: Record<string, unknown>;
+			let header: Awaited<ReturnType<typeof decodeProtectedHeader>>;
 			try {
-				const header = decodeProtectedHeader(token);
+				header = decodeProtectedHeader(token);
 				const key = await keyStore.getVerificationKey(
 					header.kid ?? keyStore.getSigningKidFallback(),
 				);
 				const verified = await jwtVerify(token, key);
 				payload = verified.payload as Record<string, unknown>;
 			} catch {
+				return null;
+			}
+
+			// Token-type-confusion defense: the RFC 8693 `access_token` subject_token_type
+			// means "a token that was issued as an access_token". Reject any JWT whose
+			// `typ` header is anything other than `at+jwt` — in particular id_tokens
+			// (typ=JWT or typ=id+jwt) and logout_tokens (typ=logout+jwt) minted by the
+			// same KeyStore must never be accepted as a Token Exchange subject.
+			if (header.typ !== "at+jwt") {
 				return null;
 			}
 

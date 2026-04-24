@@ -106,4 +106,19 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		const result = await validator().validate(token, { role: "subject" });
 		expect(result).toBeNull();
 	});
+
+	it("returns null when typ header is not at+jwt (rejects id_token/logout_token/generic JWT)", async () => {
+		// Token signed with the same KeyStore but with typ=JWT (would be a
+		// generic id_token or developer-minted JWT). This scenario exists in
+		// real deployments where the KeyStore is shared across at+jwt issuance
+		// and id_token issuance.
+		const generic = await signSelfIssuedAccessToken({}, { typ: "JWT" });
+		expect(await validator().validate(generic, { role: "subject" })).toBeNull();
+
+		const idToken = await signSelfIssuedAccessToken({}, { typ: "id+jwt" });
+		expect(await validator().validate(idToken, { role: "subject" })).toBeNull();
+
+		const logoutToken = await signSelfIssuedAccessToken({}, { typ: "logout+jwt" });
+		expect(await validator().validate(logoutToken, { role: "subject" })).toBeNull();
+	});
 });

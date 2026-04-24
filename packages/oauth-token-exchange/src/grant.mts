@@ -364,13 +364,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	};
 }
 
-// Manual cast: consumers compose tokenExchangeConfigSchema into their own
-// AppConfig if they want typed access. See README.
 function getExpiresIn(deps: TokenExchangeDependencies): number {
-	const grants = (deps.config.oauth.grants ?? {}) as Record<string, Record<string, unknown>>;
-	const tokenExchange = grants.token_exchange;
-	const at = tokenExchange?.accessToken as { expiresIn?: number } | undefined;
-	if (typeof at?.expiresIn === "number" && at.expiresIn > 0) return at.expiresIn;
+	// Reads the global OAuth accessToken.expiresIn. The per-grant
+	// oauth.grants.token_exchange.accessToken.expiresIn path is unreachable
+	// because core's GrantRegistry.addModule keys module config by grant-type
+	// URN, not by friendly name. Consumers who want a different expiresIn
+	// for Token Exchange should wrap createTokenExchangeGrant() instead.
 	const top = (deps.config.oauth.accessToken as { expiresIn?: number } | undefined)?.expiresIn;
 	return typeof top === "number" && top > 0 ? top : 300;
 }

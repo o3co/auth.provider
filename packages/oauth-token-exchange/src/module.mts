@@ -15,29 +15,11 @@
  */
 
 import type { GrantDependencies, GrantModule } from "@o3co/auth-provider-core";
-import { z } from "zod";
 import {
 	createTokenExchangeGrant,
 	TOKEN_EXCHANGE_GRANT_TYPE,
 	type TokenExchangeDependencies,
 } from "./grant.mjs";
-
-/**
- * Config shape consumed by the Token Exchange GrantModule. All fields are
- * optional. Disable Token Exchange by not importing this module — there is no
- * config-driven disable switch. See §11.3 of the design spec for rationale.
- */
-export const tokenExchangeConfigSchema = z.object({
-	token_exchange: z
-		.object({
-			accessToken: z
-				.object({
-					expiresIn: z.number().int().positive().optional(),
-				})
-				.optional(),
-		})
-		.default({}),
-});
 
 /**
  * GrantModule for plugin-style registration via
@@ -50,6 +32,12 @@ export const tokenExchangeConfigSchema = z.object({
  *
  * The module object itself is frozen to prevent post-import tampering of the
  * grants record.
+ *
+ * Configuration is NOT driven by `oauth.grants.token_exchange.*` HOCON
+ * settings — those would be dropped during addModule parsing because core's
+ * GrantRegistry keys config blocks by grant-type URN, not by friendly name.
+ * Instead, consumers pass expiresIn + other settings via `createTokenExchangeGrant`
+ * options if they need customization.
  */
 export const tokenExchangeModule: GrantModule = Object.freeze({
 	grants: Object.freeze({
@@ -67,5 +55,4 @@ export const tokenExchangeModule: GrantModule = Object.freeze({
 			return createTokenExchangeGrant(typedDeps);
 		},
 	}),
-	configSchema: tokenExchangeConfigSchema,
 }) as GrantModule;

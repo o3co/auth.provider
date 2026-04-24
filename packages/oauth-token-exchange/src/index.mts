@@ -20,7 +20,7 @@ export {
 	TOKEN_EXCHANGE_GRANT_TYPE,
 	type TokenExchangeDependencies,
 } from "./grant.mjs";
-export { tokenExchangeConfigSchema, tokenExchangeModule } from "./module.mjs";
+export { tokenExchangeModule } from "./module.mjs";
 export { ExchangeTokenValidatorRegistry } from "./validator/registry.mjs";
 export {
 	type CreateSelfIssuedAccessTokenValidatorOptions,

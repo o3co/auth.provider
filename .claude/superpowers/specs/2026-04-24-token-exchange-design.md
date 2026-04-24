@@ -436,47 +436,35 @@ validatorRegistry.register(
 
 - Registry が `undefined` を返す → grant handler が `unsupported_token_type` で応答 (default deny)
 
-## 11. Config schema (HOCON)
+## 11. Configuration
 
-### 11.1 設定
+### 11.1 No module-specific config surface
 
-```hocon
-oauth {
-  grants {
-    token_exchange {
-      accessToken {
-        expiresIn = 300  # 省略時は oauth.accessToken.expiresIn を流用
-      }
-    }
-  }
-}
-```
-
-### 11.2 zod schema (GrantModule.configSchema)
-
-```ts
-const tokenExchangeConfigSchema = z.object({
-  token_exchange: z
-    .object({
-      accessToken: z
-        .object({
-          expiresIn: z.number().int().positive().optional(),
-        })
-        .optional(),
-    })
-    .default({}),
-});
-```
+This module does not expose a config schema. Per Task 9 spec note, the RFC
+8693 grant-type URN (`urn:ietf:params:oauth:grant-type:token-exchange`) is
+used as the `GrantModule.grants` key for handler dispatch, but core's
+`GrantRegistry.addModule` keys module config blocks by that same key.
+HOCON-friendly keys like `token_exchange.*` are therefore dropped during
+schema parsing.
 
 **audience allowlist は client 単位 (`Client.allowedAudiences`) のみで管理** (§8.3)。全 client 共通の shared allowlist は本 spec では導入しない。理由: 複数ソースの allowlist は merge/precedence を明示しないと security hole になる。必要になれば post-0.5 で `GrantPolicyHook` で consumer 側実装できる。
+
+### 11.2 expiresIn source
+
+Token Exchange access_tokens use `oauth.accessToken.expiresIn` (the global
+OAuth access_token lifetime config). This applies to all OAuth grants and is
+already configurable at the top level of HOCON. Consumers who want a
+different expiresIn specifically for Token Exchange should wrap
+`createTokenExchangeGrant()` and pass a custom config, rather than use the
+GrantModule pattern.
+
+**`expiresIn` default:** short (300s = 5 min). Token Exchange is short-lived by RFC 8693 recommendation.
 
 ### 11.3 Disable mechanism
 
 Consumers disable Token Exchange by **not importing `tokenExchangeModule`**. This matches the federation-package-split philosophy (v0.5.0 #17): registration is 100% consumer opt-in. There is no config-driven disable switch.
 
 Rationale: `GrantModule` in core dispatches handlers by grant-type key (the RFC 8693 URN `urn:ietf:params:oauth:grant-type:token-exchange`), but operator-friendly HOCON uses the `token_exchange` key. Bridging those two via a config-driven `enabled` flag would require a core interface change (adding `configKey?: string` to `GrantModule`) that v0.5.0 interface freeze avoids. Consumer-level opt-in via module import is both simpler and consistent with the rest of v0.5.0 scope.
-
-**`expiresIn` default:** short (300s = 5 min). Token Exchange is short-lived by RFC 8693 recommendation.
 
 ## 12. Test 戦略
 
@@ -541,6 +529,7 @@ Rationale: `GrantModule` in core dispatches handlers by grant-type key (the RFC 
 - `GrantDependencies` / `GrantHandler` / `RefreshTokenStoreBase` は無変更
 - Consumer が module を import しなければ完全に noop (breaking change なし)
 - `enabled` フィールドを config schema から削除 (C1 Option D): schema-level のみの変更。`tokenExchangeModule` は v0.5.0 初出なので `enabled` に依存していた consumer はいない。backward compat 問題なし。
+- `tokenExchangeConfigSchema` export を削除 (P2 / multi-agent-review follow-up): `GrantRegistry.addModule` が URN キーでモジュール config を管理するため、`token_exchange.*` キーは schema parsing 時に DROP されていた。実質 noop だったため依存 consumer はいない。backward compat 問題なし。
 
 ## 15. post-0.5 に残す項目 (out-of-scope)
 
