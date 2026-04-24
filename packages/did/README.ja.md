@@ -4,6 +4,28 @@
 
 OAuth 2.0 の `"did"` grant type を追加する。クライアントは DID と署名済みメッセージを提示し、サーバーは DID ドキュメントから解決した公開鍵で署名を検証する。4 種類の署名アルゴリズムをサポートする。
 
+## Grant Type URN
+
+DID grant は固定の URN で登録されている:
+
+```text
+urn:o3co:oauth:grant-type:did
+```
+
+クライアントはこの文字列を `grant_type` パラメータとして送信しなければならない。
+短縮形の `"did"` はワイヤー値としてはサポートされていない。
+
+注意: 内部的には grant は `GrantRegistry` 内で短縮識別子 `"did"` のまま登録されており、
+設定キーも `oauth.grants.did` のままである。クライアント側の*ワイヤー値*のみが URN になる。
+以下の API リファレンスで `"did"` と表記されている箇所は、内部レジストリ識別子を指しており、
+ワイヤー値ではない。
+
+### なぜ `urn:o3co:...` なのか？
+
+DID ワイヤープロトコル（`did` + `message` + `signature` のフォームパラメータ）は auth.provider が定義している。RFC 6755 のサブ名前空間所有モデルの下では、URN はワイヤープロトコルの定義者が所有すべきである。ここで `o3co` セグメントは**ワイヤープロトコルのバージョン識別子**として機能しており、ベンダー識別子ではない。IETF 登録の grant URN が `urn:ietf:params:oauth:grant-type:*` 配下にあるのと同様の位置づけである。
+
+ワイヤープロトコルを拡張したい（例: Verifiable Presentation を埋め込む）コンシューマーのデプロイメントは、この URN をオーバーライドするのではなく、自分の URN サブ名前空間（例: `urn:example.com:oauth:grant-type:did-vp`）で新しい grant を定義すること。
+
 ## インストール
 
 このパッケージは **private** です。npm には公開されておらず、`auth.provider` モノリポ内でのみ利用できます。

@@ -15,20 +15,20 @@ OAuth 2.0 provider with DID (Decentralized Identifier) authentication. Issue JWT
 DID authentication lets clients prove identity using cryptographic key pairs tied to a [Decentralized Identifier](https://www.w3.org/TR/did-core/), without passwords or pre-shared secrets. The server resolves the client's DID Document, extracts the public key, and verifies the signature.
 
 ```text
-Client                              auth.provider
-  │                                      │
-  │  POST /oauth/token                   │
-  │  grant_type=urn:o3co:oauth:grant-type:did    │
-  │  did=did:example:org:abc123          │
-  │  message={"did":"...","nonce":"..."}  │
-  │  signature=<Ed25519 signature>       │
-  │ ──────────────────────────────────►  │
-  │                                      │  1. Resolve DID Document
-  │                                      │  2. Extract public key
-  │                                      │  3. Verify signature
-  │                                      │  4. Issue JWT
-  │  ◄──────────────────────────────────  │
-  │  { access_token: "eyJ...", ... }     │
+Client                                    auth.provider
+  │                                            │
+  │  POST /oauth/token                         │
+  │  grant_type=urn:o3co:oauth:grant-type:did  │
+  │  did=did:example:org:abc123                │
+  │  message={"did":"...","nonce":"..."}       │
+  │  signature=<Ed25519 signature>             │
+  │ ────────────────────────────────────────►  │
+  │                                            │  1. Resolve DID Document
+  │                                            │  2. Extract public key
+  │                                            │  3. Verify signature
+  │                                            │  4. Issue JWT
+  │  ◄───────────────────────────────────────  │
+  │  { access_token: "eyJ...", ... }           │
 ```
 
 The `DidDocumentResolver` interface is pluggable — implement it for your DID method (`did:web`, `did:key`, `did:ion`, or any custom method) and inject it at startup.
