@@ -87,4 +87,23 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		const result = await validator().validate(token, { role: "subject" });
 		expect(result?.act).toEqual({ sub: "service-upstream" });
 	});
+
+	it("applies identical validation for role=actor (does not branch on role)", async () => {
+		const token = await signSelfIssuedAccessToken({});
+		const result = await validator().validate(token, { role: "actor" });
+		expect(result).not.toBeNull();
+		expect(result?.sub).toBe("user-1");
+	});
+
+	it("returns null when sub claim is missing", async () => {
+		const token = await signSelfIssuedAccessToken({ sub: undefined });
+		const result = await validator().validate(token, { role: "subject" });
+		expect(result).toBeNull();
+	});
+
+	it("returns null when sub claim is empty string", async () => {
+		const token = await signSelfIssuedAccessToken({ sub: "" });
+		const result = await validator().validate(token, { role: "subject" });
+		expect(result).toBeNull();
+	});
 });

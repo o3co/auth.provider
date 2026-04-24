@@ -32,8 +32,15 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * (KeyStore), standard claims (exp via jose), issuer match, and — when a
  * refreshTokenStore is wired — family_id cascading revoke.
  *
- * Throws on infrastructure failures (store unavailable). Returns null on
- * validation failures (bad signature, expired, revoked, issuer mismatch).
+ * When refreshTokenStore is absent, the family revoke check is silently
+ * skipped here; the grant handler is responsible for detecting this
+ * misconfiguration and responding with invalid_grant (spec §7.2 state 1:
+ * "not wired"). The validator alone is NOT fail-closed against store
+ * misconfiguration.
+ *
+ * Throws on infrastructure failures (store unavailable during runtime).
+ * Returns null on validation failures (bad signature, missing/empty sub,
+ * expired, revoked, issuer mismatch).
  */
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
@@ -58,6 +65,10 @@ export function createSelfIssuedAccessTokenValidator(
 				return null;
 			}
 
+			if (typeof payload.sub !== "string" || payload.sub.length === 0) {
+				return null;
+			}
+
 			const familyId = typeof payload.family_id === "string" ? payload.family_id : undefined;
 
 			if (familyId && refreshTokenStore) {
@@ -67,7 +78,7 @@ export function createSelfIssuedAccessTokenValidator(
 			}
 
 			const result: ValidatedToken = {
-				sub: String(payload.sub ?? ""),
+				sub: payload.sub,
 				claims: payload,
 			};
 			if (typeof payload.scope === "string") result.scope = payload.scope;
