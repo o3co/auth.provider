@@ -59,6 +59,7 @@ export const ClientEntrySchema = z
 		clientSecret: z.string().min(1),
 		allowedRedirectUris: z.array(z.string()).default([]),
 		allowedScopes: z.array(z.string()).default([]),
+		allowedAudiences: z.array(z.string()).default([]),
 		// NEW (TODO-F-5): Logout metadata.
 		// Use httpUrlSchema (not z.string().url()) for fields that end up in iframe src
 		// or redirect targets — rejects javascript:, data:, file: to prevent XSS.
@@ -99,6 +100,7 @@ export class InMemoryClientRepository implements ClientRepository {
 			clientId,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
+			allowedAudiences: entry.allowedAudiences,
 			...(entry.postLogoutRedirectUris !== undefined && {
 				postLogoutRedirectUris: entry.postLogoutRedirectUris,
 			}),
@@ -136,6 +138,7 @@ export class InMemoryClientRepository implements ClientRepository {
 			clientId,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
+			allowedAudiences: entry.allowedAudiences,
 			...(entry.postLogoutRedirectUris !== undefined && {
 				postLogoutRedirectUris: entry.postLogoutRedirectUris,
 			}),

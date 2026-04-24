@@ -251,6 +251,43 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
+	describe("allowedAudiences field round-trip (Token Exchange RFC 8693)", () => {
+		it("exposes allowedAudiences via findById (empty array when omitted)", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"client-a",
+						{
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("client-a");
+			expect(client?.allowedAudiences).toEqual([]);
+		});
+
+		it("exposes allowedAudiences via findById (preserves configured values)", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"client-b",
+						{
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							allowedAudiences: ["billing-service", "inventory-service"],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("client-b");
+			expect(client?.allowedAudiences).toEqual(["billing-service", "inventory-service"]);
+		});
+	});
+
 	describe("authenticate", () => {
 		it("returns client with correct plain text secret", async () => {
 			const repo = new InMemoryClientRepository(
