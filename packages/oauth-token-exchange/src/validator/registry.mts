@@ -14,9 +14,21 @@
  * limitations under the License.
  */
 
-export { ExchangeTokenValidatorRegistry } from "./validator/registry.mjs";
-export type {
-	ExchangeTokenValidationContext,
-	ExchangeTokenValidator,
-	ValidatedToken,
-} from "./validator/types.mjs";
+import type { ExchangeTokenValidator } from "./types.mjs";
+
+/**
+ * Mutable registry keyed by RFC 8693 `token_type` URI. Used by the Token
+ * Exchange grant handler to dispatch `subject_token` / `actor_token`
+ * validation.
+ */
+export class ExchangeTokenValidatorRegistry {
+  private validators = new Map<string, ExchangeTokenValidator>();
+
+  register(tokenType: string, validator: ExchangeTokenValidator): void {
+    this.validators.set(tokenType, validator);
+  }
+
+  get(tokenType: string): ExchangeTokenValidator | undefined {
+    return this.validators.get(tokenType);
+  }
+}
