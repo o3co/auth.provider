@@ -69,7 +69,7 @@ overlay の値は `application.conf` を上書きします。scaffold には
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `OAUTH_GRANTS_SESSION_ENABLED` | `true` | session グラントタイプを有効化 |
-| `OAUTH_GRANTS_AUTHORIZATION_ENABLED` | `true` | authorization code グラントタイプを有効化 |
+| `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED` | `true` | authorization code グラントタイプを有効化 |
 | `OAUTH_GRANTS_REFRESH_TOKEN_ENABLED` | `true` | refresh token グラントタイプを有効化 |
 
 ### Session

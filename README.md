@@ -18,7 +18,7 @@ DID authentication lets clients prove identity using cryptographic key pairs tie
 Client                              auth.provider
   │                                      │
   │  POST /oauth/token                   │
-  │  grant_type=did                      │
+  │  grant_type=urn:o3co:oauth:grant-type:did    │
   │  did=did:example:org:abc123          │
   │  message={"did":"...","nonce":"..."}  │
   │  signature=<Ed25519 signature>       │
@@ -204,7 +204,7 @@ oauth.grants.did {
 oauth.grants.authorization {
   pkce {
     requireS256 = false   # Set to true to reject plain code_challenge_method (S256 only)
-    requireS256 = ${?OAUTH_GRANTS_AUTHORIZATION_PKCE_REQUIRE_S256}
+    requireS256 = ${?OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256}
   }
 }
 ```

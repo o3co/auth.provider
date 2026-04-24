@@ -2,7 +2,32 @@
 
 DID (Decentralized Identifier) authentication grant for [auth.provider](../../README.md).
 
-Adds a `"did"` OAuth 2.0 grant type. Clients present a DID and a signed message; the server verifies the signature using the public key resolved from the DID document. Supports four signature algorithms.
+Adds the DID OAuth 2.0 grant type. Clients present a DID and a signed message; the server verifies the signature using the public key resolved from the DID document. Supports four signature algorithms.
+
+## Grant Type URN
+
+The DID grant is registered under the fixed URN:
+
+```text
+urn:o3co:oauth:grant-type:did
+```
+
+Clients must send this exact string as the `grant_type` parameter. The
+bare string `"did"` is not supported.
+
+### Why `urn:o3co:...`?
+
+The DID wire protocol (`did` + `message` + `signature` form parameters)
+is defined by auth.provider. Under the RFC 6755 sub-namespace ownership
+model, the URN should be owned by the wire protocol definer. Here, the
+`o3co` segment acts as a **wire protocol version identifier**, not a
+vendor identifier — comparable to how IETF-registered grant URNs live
+under `urn:ietf:params:oauth:grant-type:*`.
+
+Consumer deployments that extend the wire protocol (e.g. to embed a
+Verifiable Presentation) should define a new grant under their own URN
+sub-namespace (e.g. `urn:example.com:oauth:grant-type:did-vp`) rather
+than overriding this one.
 
 ## Install
 
