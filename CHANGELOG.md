@@ -24,13 +24,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **Breaking**: `registerBuiltinFederations`, `createGoogleProvider`, and `createGithubProvider` are removed from `@o3co/auth-provider-session`.
 - `openid-client` is no longer a runtime dependency of `@o3co/auth-provider-session`; it belongs to the concrete provider packages.
+- **Breaking**: `@o3co/auth-provider-did` package. The DID authentication grant is no longer part of this project. The package is no longer maintained here.
 
 ### Breaking Changes
 
 - **`grant_type` wire values (RFC compliance + URN-ification):**
   - `grant_type=authorization` → `grant_type=authorization_code` (RFC 6749 §4.1.3)
-  - `grant_type=did` → `grant_type=urn:o3co:oauth:grant-type:did` (RFC 6755
-    sub-namespace owned by auth.provider as the wire protocol definer)
   - `grant_type=session` unchanged
 - **HOCON config keys + env vars:**
   - `oauth.grants.authorization { ... }` → `oauth.grants.authorization_code { ... }`
@@ -40,15 +39,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `/oauth/authorize` flow now passes `"authorization_code"` (was `"authorization"`)
     to `grantPolicy.evaluate()`
   - `refresh_token` path unchanged
-  - DID grant does not currently invoke `grantPolicy.evaluate()`; if consumers
-    add policy logic for DID in the future, use the full URN
-    (`"urn:o3co:oauth:grant-type:did"`) as the match value
 
 **Migration checklist:**
 
 1. Update client requests:
    - `grant_type=authorization` → `authorization_code`
-   - `grant_type=did` → `urn:o3co:oauth:grant-type:did`
 2. Update HOCON config / environment:
    - Rename `oauth.grants.authorization` → `oauth.grants.authorization_code`
    - Rename `OAUTH_GRANTS_AUTHORIZATION_*` → `OAUTH_GRANTS_AUTHORIZATION_CODE_*`

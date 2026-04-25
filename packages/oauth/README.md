@@ -311,5 +311,4 @@ If you extend or replace the middleware for custom client-auth schemes, import `
 ## See Also
 
 - [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes
-- [`@o3co/auth-provider-did`](../did/README.md) — DID authentication grant
 - [`@o3co/auth-provider-core`](../core/README.md) — shared types (`Module`, `GrantRegistry`, `ClientRepository`, `CodeRepository`, `KeyStore`)

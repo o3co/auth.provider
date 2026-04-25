@@ -8,44 +8,11 @@
 
 > This repository handles **authentication and token issuance** in the three-layer separation of concerns (authentication & token issuance / [authorization decision](https://github.com/o3co/auth.policy-verifier) / [authorization enforcement](https://github.com/o3co/protobuf.interceptors)) of the [auth](https://github.com/o3co/auth) stack.
 
-OAuth 2.0 provider with DID (Decentralized Identifier) authentication. Issue JWTs from traditional login flows or DID-based cryptographic proof — same token format, same introspection endpoint, same downstream verification.
-
-## DID Authentication
-
-DID authentication lets clients prove identity using cryptographic key pairs tied to a [Decentralized Identifier](https://www.w3.org/TR/did-core/), without passwords or pre-shared secrets. The server resolves the client's DID Document, extracts the public key, and verifies the signature.
-
-```text
-Client                                    auth.provider
-  │                                            │
-  │  POST /oauth/token                         │
-  │  grant_type=urn:o3co:oauth:grant-type:did  │
-  │  did=did:example:org:abc123                │
-  │  message={"did":"...","nonce":"..."}       │
-  │  signature=<Ed25519 signature>             │
-  │ ────────────────────────────────────────►  │
-  │                                            │  1. Resolve DID Document
-  │                                            │  2. Extract public key
-  │                                            │  3. Verify signature
-  │                                            │  4. Issue JWT
-  │  ◄───────────────────────────────────────  │
-  │  { access_token: "eyJ...", ... }           │
-```
-
-The `DidDocumentResolver` interface is pluggable — implement it for your DID method (`did:web`, `did:key`, `did:ion`, or any custom method) and inject it at startup.
-
-### Supported signature algorithms
-
-| Algorithm | Format | Library |
-| --- | --- | --- |
-| `ed25519_raw` (default) | Raw Ed25519 signature + message | `@noble/ed25519` |
-| `ed25519_jws` | Compact JWS with `alg=EdDSA` | `jose` |
-| `es256_jws` | Compact JWS with `alg=ES256` | `jose` |
-| `es256k_jws` | Compact JWS with `alg=ES256K` | `jose` |
+OAuth 2.0 / OIDC provider. Issue JWTs via session-based login or the authorization code flow — same token format, same introspection endpoint, same downstream verification.
 
 ## Features
 
-- **DID authentication grant** — Pluggable `DidDocumentResolver` interface, signature verification from DID Document public keys
-- **Modular composition** — Pick only the modules you need. DID-only? Skip session, federation, authorization code entirely.
+- **Modular composition** — Pick only the modules you need. Skip session, federation, or authorization code for API-only deployments.
 - **JWT algorithm selection** — HS256, RS256, ES256, EdDSA. JWKS endpoint (`/.well-known/jwks.json`) for asymmetric algorithms.
 - **OAuth 2.0 compliance** — Authorization code flow with PKCE (RFC 7636), token introspection (RFC 7662), refresh tokens
 - **Session authentication** — Passport.js local strategy + OAuth federation (Google, GitHub, and custom providers via `FederationProviderFactory`)
@@ -61,78 +28,24 @@ pnpm install
 pnpm build
 ```
 
-For a DID-only deployment (no session, no federation):
-
-```typescript
-import express from "express";
-import { parseFile, validate } from "@o3co/ts.hocon";
-import {
-  AppConfigSchema,
-  createApp,
-  createKeyStoreFactory,
-  registerBuiltinKeyStores,
-} from "@o3co/auth-provider-core";
-import { oauthDidModule } from "@o3co/auth-provider-did";
-import { oauthModule } from "@o3co/auth-provider-oauth";
-
-// Load & validate HOCON config (see packages/core/config/application.conf
-// for the nested oauth.jwt.signingKey shape).
-const config = validate(parseFile("./config/application.conf"), AppConfigSchema);
-
-// flatten() normalises the nested adapter sub-section to { type, ...fields }.
-// Accepts both `type` (repositories.*, session.storage) and `provider`
-// (oauth.jwt.signingKey) selectors. See packages/core/README.md for the
-// full helper definition.
-const flatten = (section: { type?: string; provider?: string } & Record<string, unknown>) => {
-  const selector = section.type ?? section.provider;
-  if (typeof selector !== "string") throw new TypeError("missing selector");
-  const sub = section[selector];
-  return {
-    type: selector,
-    ...(typeof sub === "object" && sub !== null && !Array.isArray(sub)
-      ? (sub as Record<string, unknown>)
-      : {}),
-  };
-};
-
-const keyStoreFactory = createKeyStoreFactory();
-registerBuiltinKeyStores(keyStoreFactory);
-const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
-
-// ... wire up clientRepository / codeRepository / myDidResolver ...
-
-const { init, router } = createApp({
-  express,
-  config,
-  keyStore,
-  modules: [
-    oauthModule({ clientRepository, codeRepository }),
-    oauthDidModule({ resolver: myDidResolver }),
-  ],
-});
-
-await init();
-```
-
 ## Architecture
 
 ```text
-┌─────────────────────────────────────────────────┐
-│                 Composition Root                 │
-│     (standalone template or your own app)        │
-├─────────┬───────────┬───────────┬───────────────┤
-│  oauth  │  session  │    did    │  foundation   │
-│ /oauth  │ /session  │ DID grant │ Redis, HTTP   │
-│ routes  │  routes   │  handler  │  adapters     │
-├─────────┴───────────┴───────────┴───────────────┤
-│                      core                        │
-│  GrantRegistry · KeyStore · Repositories · Config│
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│             Composition Root              │
+│  (standalone template or your own app)   │
+├─────────┬───────────┬────────────────────┤
+│  oauth  │  session  │    foundation      │
+│ /oauth  │ /session  │  Redis, HTTP       │
+│ routes  │  routes   │  adapters          │
+├─────────┴───────────┴────────────────────┤
+│                   core                    │
+│  GrantRegistry · KeyStore · Repositories │
+└──────────────────────────────────────────┘
 ```
 
 - **core** — Interfaces, config schemas, token service, app factory. Always required.
 - **oauth** — OAuth routes (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`). Required for any token issuance.
-- **did** — DID authentication grant. Optional — only needed if you use DID-based auth.
 - **session** — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.
 - **federation-google / federation-github** — Concrete OAuth federation providers. Optional — install only the providers you register.
 - **foundation** — Production repository adapters (Redis code store, HTTP user lookup). Optional.
@@ -142,7 +55,6 @@ await init();
 | Package | npm | Description |
 | --- | --- | --- |
 | [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | Grant registry, token service, repository interfaces, config schemas |
-| [`packages/did`](packages/did/) | `@o3co/auth-provider-did` | DID authentication grant with pluggable resolver |
 | [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth routes: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
 | [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session routes and provider-registered OAuth federation |
 | [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google OAuth/OIDC federation provider |
@@ -155,7 +67,7 @@ await init();
 
 | Endpoint | Module | Description |
 | --- | --- | --- |
-| `POST /oauth/token` | oauth | Token issuance (session, authorization code, DID, refresh) |
+| `POST /oauth/token` | oauth | Token issuance (session, authorization code, refresh) |
 | `GET /oauth/authorize` | oauth | Authorization code flow (PKCE) |
 | `POST /oauth/introspect` | oauth | Token introspection (RFC 7662) |
 | `GET /.well-known/jwks.json` | core | JWKS endpoint (asymmetric algorithms only) |
@@ -185,16 +97,6 @@ oauth {
   }
   accessToken { expiresIn = 3600 }
   refreshToken { expiresIn = 86400 }
-}
-```
-
-**DID grant (when `oauthDidModule` is registered):**
-
-```hocon
-oauth.grants.did {
-  enabled = true
-  algorithm = "ed25519_raw"   # ed25519_raw | ed25519_jws | es256_jws | es256k_jws
-  messageMaxAgeSec = 300
 }
 ```
 

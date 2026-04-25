@@ -1,7 +1,6 @@
 {
 	"entryPoints": [
 		"packages/core",
-		"packages/did",
 		"packages/federation-google",
 		"packages/federation-github",
 		"packages/oauth",

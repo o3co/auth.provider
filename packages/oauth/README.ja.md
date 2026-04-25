@@ -311,5 +311,4 @@ v0.4.0 ではこのパッケージから passport を削除した。`/oauth/intr
 ## 関連
 
 - [`@o3co/auth-provider-session`](../session/README.ja.md) — セッションログイン / フェデレーションルート
-- [`@o3co/auth-provider-did`](../did/README.ja.md) — DID 認証 grant
 - [`@o3co/auth-provider-core`](../core/README.ja.md) — 共有型定義 (`Module`、`GrantRegistry`、`ClientRepository`、`CodeRepository`、`KeyStore`)
