@@ -2,7 +2,7 @@
 
 > このリポジトリは、[auth](https://github.com/o3co/auth) スタックの 3 層責務分離（認証・トークン発行 / [認可判定](https://github.com/o3co/auth.policy-verifier) / [認可実施](https://github.com/o3co/protobuf.interceptors)）のうち **認証・トークン発行** を担当します。
 
-OAuth 2.0 / OIDC プロバイダー。従来のログインフローや認可コードフローで JWT を発行できる。トークン形式、イントロスペクション、下流での検証方法は同一。
+OAuth 2.0 / OIDC プロバイダー。セッションベースのログインや認可コードフローで JWT を発行できる。トークン形式、イントロスペクション、下流での検証方法は同一。
 
 ## 特徴
 

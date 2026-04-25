@@ -8,7 +8,7 @@
 
 > This repository handles **authentication and token issuance** in the three-layer separation of concerns (authentication & token issuance / [authorization decision](https://github.com/o3co/auth.policy-verifier) / [authorization enforcement](https://github.com/o3co/protobuf.interceptors)) of the [auth](https://github.com/o3co/auth) stack.
 
-OAuth 2.0 / OIDC provider. Issue JWTs from traditional login flows or authorization code — same token format, same introspection endpoint, same downstream verification.
+OAuth 2.0 / OIDC provider. Issue JWTs via session-based login or the authorization code flow — same token format, same introspection endpoint, same downstream verification.
 
 ## Features
 
