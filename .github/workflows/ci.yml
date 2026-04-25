@@ -66,6 +66,32 @@ jobs:
             fi
           done
           echo "OK: no cross-project references in scanned paths"
+      - name: No cross-project references in PR commit messages
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Scan PR commit messages for the same forbidden pattern.
+          # File-content scan misses leaks that only live in commit bodies
+          # (e.g. "moved to project X" lines), and squash-merge promotes those
+          # bodies into the merge commit which becomes immutable history.
+          # The pattern is assembled from parts so this workflow does not match itself.
+          PAT="$(printf '%s' 'dpla' 'as|@dpla' 'asio')"
+          if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
+            echo "PR base or head SHA missing; skipping commit-message scan."
+            exit 0
+          fi
+          # actions/checkout uses fetch-depth:1 by default; deepen so the BASE..HEAD walk works.
+          git fetch --no-tags --prune --depth=200 origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true
+          MATCHES="$(git log --format='%H%n%B%n---' "$BASE_SHA..$HEAD_SHA" | grep -E "$PAT" || true)"
+          if [ -n "$MATCHES" ]; then
+            echo "ERROR: prohibited cross-project reference in PR commit messages:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "OK: no cross-project references in PR commit messages"
       - run: pnpm -r --if-present run typecheck
       - run: pnpm run test
       - run: pnpm run test:coverage
