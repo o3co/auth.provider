@@ -509,5 +509,4 @@ class CustomProvider implements FederationProvider, SupportsClaimMapping {
 ## 関連
 
 - [`@o3co/auth-provider-oauth`](../oauth/README.ja.md) — OAuth 2.0 トークン・認可ルート
-- [`@o3co/auth-provider-did`](../did/README.ja.md) — DID 認証 grant
 - [`@o3co/auth-provider-core`](../core/README.ja.md) — 共有型定義 (`Module`、`UserRepository`、`PathResolver`、`AppConfig`)
