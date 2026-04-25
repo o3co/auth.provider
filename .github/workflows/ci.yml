@@ -49,6 +49,23 @@ jobs:
             exit 1
           fi
           echo "No vendor import leaks found in public .d.mts."
+      - name: No cross-project references
+        run: |
+          set -euo pipefail
+          # Forbid cross-project namespace references from leaking into auth.provider sources.
+          # CHANGELOG.md is intentionally NOT scanned: it carries the one-line
+          # historical record of the removed DID package.
+          # The pattern is assembled from parts so this file does not match itself.
+          PAT="$(printf '%s' 'dpla' 'as|@dpla' 'asio')"
+          PATHS=(packages create-app templates docs .github README.md README.ja.md)
+          for p in "${PATHS[@]}"; do
+            if [ -e "$p" ] && grep -rEq "$PAT" "$p"; then
+              echo "ERROR: prohibited cross-project reference in $p"
+              grep -rnE "$PAT" "$p"
+              exit 1
+            fi
+          done
+          echo "OK: no cross-project references in scanned paths"
       - run: pnpm -r --if-present run typecheck
       - run: pnpm run test
       - run: pnpm run test:coverage
@@ -59,15 +76,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: packages/core/coverage/coverage-final.json
           flags: core
-          disable_search: true
-          fail_ci_if_error: false
-
-      - name: Upload coverage to Codecov (did)
-        uses: codecov/codecov-action@v5
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: packages/did/coverage/coverage-final.json
-          flags: did
           disable_search: true
           fail_ci_if_error: false
 
