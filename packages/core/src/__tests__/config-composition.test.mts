@@ -24,7 +24,7 @@ import {
 } from "#/config/application.schema.mjs";
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
-const minimalDIDConfig = {
+const minimalCoreConfig = {
 	http: { port: 3000, trustProxy: false },
 	oauth: {
 		jwt: {
@@ -40,13 +40,13 @@ const minimalDIDConfig = {
 };
 
 describe("CoreConfigSchema", () => {
-	it("validates minimal DID-only config (just http + oauth)", () => {
-		const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+	it("validates minimal core config (just http + oauth)", () => {
+		const result = CoreConfigSchema.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 	});
 
 	it("does not require session", () => {
-		const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+		const result = CoreConfigSchema.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 		if (result.success) {
 			expect((result.data as Record<string, unknown>).session).toBeUndefined();
@@ -54,7 +54,7 @@ describe("CoreConfigSchema", () => {
 	});
 
 	it("does not require federations", () => {
-		const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+		const result = CoreConfigSchema.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 		if (result.success) {
 			expect((result.data as Record<string, unknown>).federations).toBeUndefined();
@@ -62,7 +62,7 @@ describe("CoreConfigSchema", () => {
 	});
 
 	it("does not require endpoints", () => {
-		const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+		const result = CoreConfigSchema.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 		if (result.success) {
 			expect((result.data as Record<string, unknown>).endpoints).toBeUndefined();
@@ -70,7 +70,7 @@ describe("CoreConfigSchema", () => {
 	});
 
 	it("does not require cors", () => {
-		const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+		const result = CoreConfigSchema.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 		if (result.success) {
 			expect((result.data as Record<string, unknown>).cors).toBeUndefined();
@@ -78,7 +78,7 @@ describe("CoreConfigSchema", () => {
 	});
 
 	it("does not require repositories", () => {
-		const result = CoreConfigSchema.safeParse(minimalDIDConfig);
+		const result = CoreConfigSchema.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 		if (result.success) {
 			expect((result.data as Record<string, unknown>).repositories).toBeUndefined();
@@ -89,9 +89,9 @@ describe("CoreConfigSchema", () => {
 		// Schema no longer rejects this shape — the superRefine moved to the local builder.
 		// Verify that CoreConfigSchema parses successfully, then that the builder throws.
 		const result = CoreConfigSchema.safeParse({
-			...minimalDIDConfig,
+			...minimalCoreConfig,
 			oauth: {
-				...minimalDIDConfig.oauth,
+				...minimalCoreConfig.oauth,
 				jwt: { signingKey: { provider: "local", local: { algorithm: "HS256" } } },
 			},
 		});
@@ -113,7 +113,7 @@ describe("composeConfigSchema", () => {
 		});
 		const composed = composeConfigSchema([moduleSchema]);
 		const result = composed.safeParse({
-			...minimalDIDConfig,
+			...minimalCoreConfig,
 			myModule: { enabled: true },
 		});
 		expect(result.success).toBe(true);
@@ -125,7 +125,7 @@ describe("composeConfigSchema", () => {
 		});
 		const composed = composeConfigSchema([moduleSchema]);
 		// Missing myModule
-		const result = composed.safeParse(minimalDIDConfig);
+		const result = composed.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(false);
 	});
 
@@ -134,7 +134,7 @@ describe("composeConfigSchema", () => {
 		const moduleB = z.object({ moduleB: z.object({ count: z.number() }) });
 		const composed = composeConfigSchema([moduleA, moduleB]);
 		const result = composed.safeParse({
-			...minimalDIDConfig,
+			...minimalCoreConfig,
 			moduleA: { value: "hello" },
 			moduleB: { count: 42 },
 		});
@@ -143,7 +143,7 @@ describe("composeConfigSchema", () => {
 
 	it("returns CoreConfigSchema when no modules are provided", () => {
 		const composed = composeConfigSchema([]);
-		const result = composed.safeParse(minimalDIDConfig);
+		const result = composed.safeParse(minimalCoreConfig);
 		expect(result.success).toBe(true);
 	});
 });

@@ -34,7 +34,6 @@ const mockConfig = {
 			session: { enabled: true },
 			authorization_code: { enabled: true },
 			refresh_token: { enabled: true },
-			did: { enabled: true, messageMaxAgeSec: 300 },
 		},
 	},
 } as unknown as GrantDependencies["config"];
@@ -466,7 +465,6 @@ describe("createAuthorizationGrant", () => {
 							pkce: { requireS256: true },
 						},
 						refresh_token: { enabled: true },
-						did: { enabled: true, messageMaxAgeSec: 300 },
 					},
 				},
 			} as unknown as GrantDependencies["config"];
@@ -841,7 +839,6 @@ describe("createAuthorizationGrant", () => {
 						session: { enabled: true },
 						authorization_code: { enabled: true },
 						refresh_token: { enabled: true },
-						did: { enabled: true, messageMaxAgeSec: 300 },
 					},
 				},
 			} as unknown as GrantDependencies["config"];

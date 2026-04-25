@@ -93,7 +93,7 @@ const jwtSchema = z.preprocess((raw, ctx) => {
 
 /**
  * Minimal always-required config for the auth provider core.
- * DID-only deployments only need these sections.
+ * Token-only deployments (no session, no federation) only need these sections.
  */
 export const CoreConfigSchema = z.object({
 	http: z.object({

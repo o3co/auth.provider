@@ -537,7 +537,7 @@ v0.4.0 で追加された 5 つの拡張ポイント (詳細:
 
 - `GrantPolicyHookBase.evaluate(request, ctx)` は allow (narrowing 可) / deny を返す
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用 (authorization_code flow では再評価しない)
-- その他 grant (refresh / client_credentials / did / token-exchange) は token endpoint で評価
+- その他 grant (refresh / client_credentials / token-exchange) は token endpoint で評価
 
 全 adapter は optional — 未設定時は no-op default。
 
