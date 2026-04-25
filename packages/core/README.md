@@ -538,7 +538,7 @@ Five extension points introduced in v0.4.0 (see
 
 - `GrantPolicyHookBase.evaluate(request, ctx)` returns allow (with optional narrowing) or deny
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
-- Other grants (refresh / client_credentials / did / token-exchange) evaluate at the token endpoint
+- Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
 
 All five adapters are optional — absence = no-op default.
 
