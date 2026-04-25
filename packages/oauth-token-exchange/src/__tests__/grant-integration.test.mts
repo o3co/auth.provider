@@ -115,6 +115,7 @@ describe("token_exchange — integration", () => {
 		const { result } = await handler.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: subjectToken,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				audience: "billing",
@@ -140,6 +141,7 @@ describe("token_exchange — integration", () => {
 		const ok = await handler.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: subjectToken,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -153,6 +155,7 @@ describe("token_exchange — integration", () => {
 		const denied = await handler.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: subjectToken,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),

@@ -50,7 +50,16 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const clientSecretRaw = body.client_secret;
 			let clientSecret: string | null;
 			if (clientSecretRaw === undefined || clientSecretRaw === null) {
-				clientSecret = null; // genuinely omitted (public client path)
+				// Token Exchange currently supports confidential clients only — the
+				// core ClientRepository contract requires `clientSecret` (see
+				// packages/core/src/repositories/types.mts) and PublicClient is
+				// `Omit<Client, "clientSecret">`, so findById alone cannot
+				// distinguish "no secret configured" from "secret omitted by
+				// caller". Accepting an unauthenticated client_id here would let an
+				// attacker exchange a stolen subject_token under any client's
+				// allowlist. Refuse outright; revisit when a Client.public flag
+				// lands.
+				clientSecret = null;
 			} else if (typeof clientSecretRaw === "string") {
 				clientSecret = clientSecretRaw;
 			} else {
@@ -81,12 +90,19 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
-			// Client authentication: confidential clients send client_secret, public
-			// clients omit it. Either way, the client must exist.
-			const client =
-				clientSecret !== null
-					? await clientRepository.authenticate(clientId, clientSecret)
-					: await clientRepository.findById(clientId);
+			// Client authentication: confidential clients only. Reject when
+			// client_secret is omitted (see clientSecretRaw handling above for the
+			// rationale).
+			if (clientSecret === null) {
+				return {
+					result: {
+						status: 401,
+						error: "invalid_client",
+						errorDescription: "client_secret is required",
+					},
+				};
+			}
+			const client = await clientRepository.authenticate(clientId, clientSecret);
 			if (!client) {
 				return {
 					result: {
@@ -384,9 +400,21 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// prevents cross-client audience confusion: a malicious client cannot
 				// use a stolen subject_token to mint a token for an audience outside
 				// its own allowlist just by omitting the audience parameter.
-				if (typeof subjectAud === "string") {
+				//
+				// RFC 7519 §4.1.3 permits `aud` to be either a string or an array of
+				// strings. A single-element array is semantically equivalent to a
+				// bare string, so we accept both. Multi-element arrays cannot be
+				// represented as a single audience claim in the issued token (we
+				// emit a single-valued aud), so they fall back to clientId.
+				const single =
+					typeof subjectAud === "string"
+						? subjectAud
+						: Array.isArray(subjectAud) && subjectAud.length === 1
+							? subjectAud[0]
+							: undefined;
+				if (typeof single === "string") {
 					const allow = new Set([...(client.allowedAudiences ?? []), client.clientId]);
-					if (allow.has(subjectAud)) return subjectAud;
+					if (allow.has(single)) return single;
 				}
 				return client.clientId;
 			})();

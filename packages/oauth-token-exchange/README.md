@@ -119,6 +119,8 @@ validatorRegistry.register(
 
 10. **Validator registry is sealed at registration.** Once `grantRegistry.addModule(tokenExchangeModule, ...)` is called, the `validatorRegistry` passed in is frozen — subsequent `register()` calls throw. This prevents a consumer reference from replacing the built-in validator at runtime.
 
+11. **Confidential clients only (v0.5.0).** The handler requires `client_secret` and authenticates via `clientRepository.authenticate()`. Requests without a secret are rejected with `invalid_client` (401). The core `Client` type carries `clientSecret: string` as a required field and `PublicClient = Omit<Client, "clientSecret">`, so `findById()` alone cannot tell a "no secret configured" client from "secret omitted by caller" — accepting the unauthenticated path would let an attacker exchange a stolen `subject_token` under any client's allowlist. Public-client support is deferred until a `Client.public` flag (or equivalent) lands in core.
+
 ## Registration pattern summary
 
 - Consumer creates `ExchangeTokenValidatorRegistry` and registers validators for each supported `subject_token_type`

@@ -152,6 +152,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: "urn:ietf:params:oauth:token-type:saml2",
 			}),
@@ -165,6 +166,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				requested_token_type: "urn:ietf:params:oauth:token-type:id_token",
@@ -179,6 +181,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				actor_token: "any",
@@ -194,6 +197,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -225,6 +229,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				actor_token_type: ACCESS_TOKEN_TYPE, // no actor_token
@@ -236,6 +241,43 @@ describe("createTokenExchangeGrant — request errors", () => {
 			errorDescription: expect.stringMatching(/actor_token is required/),
 		});
 	});
+
+	it("rejects actor_token without actor_token_type (symmetric guard)", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-2" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor, // no actor_token_type
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/actor_token_type is required/),
+		});
+	});
+
+	it("rejects request when client_secret is omitted (confidential clients only)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 401,
+			error: "invalid_client",
+			errorDescription: expect.stringMatching(/client_secret/),
+		});
+	});
 });
 
 describe("createTokenExchangeGrant — token validation", () => {
@@ -245,6 +287,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -265,6 +308,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -286,6 +330,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -304,6 +349,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -318,6 +364,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: subject,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				actor_token: badActor,
@@ -335,6 +382,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				scope: "read write",
@@ -351,6 +399,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				audience: "inventory",
@@ -367,6 +416,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				audience: "client-a",
@@ -391,6 +441,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				audience: ["billing", "inventory"],
@@ -407,6 +458,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				audience: [],
@@ -423,6 +475,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				audience: ["", ""],
@@ -437,6 +490,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				scope: "",
@@ -454,6 +508,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				scope: "   ",
@@ -478,6 +533,7 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -498,6 +554,7 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -518,6 +575,75 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("client-a");
+	});
+
+	it("inherits subject.aud when encoded as a single-element array (RFC 7519 §4.1.3)", async () => {
+		// RFC 7519 permits aud as a string OR an array. A single-element array
+		// is semantically equivalent to a bare string and must not silently fall
+		// back to clientId.
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["billing"] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: ["billing"], family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("billing");
+	});
+
+	it("falls back to clientId when subject.aud is a multi-element array", async () => {
+		// Multi-valued audience cannot be represented in a single-aud token.
+		// Falling back to clientId is the safe choice (no surprise widening).
+		const g = buildGrant({
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["billing", "inventory"] }),
+			),
+		});
+		const token = await signSelfIssuedAccessToken({
+			aud: ["billing", "inventory"],
+			family_id: "fam-1",
+		});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("client-a");
+	});
+
+	it("rejects single-element-array subject.aud when not in allowlist", async () => {
+		// Same cross-client confusion defense as the string case.
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: ["a-api"], family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -554,6 +680,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -575,6 +702,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -590,6 +718,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				scope: "read",
@@ -607,6 +736,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: subject,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				actor_token: actor,
@@ -629,6 +759,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: subject,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				actor_token: actor,
@@ -647,6 +778,7 @@ describe("createTokenExchangeGrant — happy path", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -665,6 +797,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -683,6 +816,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				scope: "read write",
@@ -708,6 +842,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -734,6 +869,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
@@ -758,6 +894,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		await g.handle(
 			ctx({
 				client_id: "client-a",
+				client_secret: "any",
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				resource: "https://api.example.com",

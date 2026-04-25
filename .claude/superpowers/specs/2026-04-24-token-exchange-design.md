@@ -177,7 +177,7 @@ Content-Type: `application/x-www-form-urlencoded`
 | `scope` | optional | 発行 token の scope (subject の subset でなければ reject) |
 | `requested_token_type` | optional | 省略時は `access_token`。他値なら `unsupported_token_type` |
 | `client_id` | ✓ | 呼び出し client の ID |
-| `client_secret` | optional | confidential client の認証 |
+| `client_secret` | ✓ | confidential client の認証。**v0.5.0 では required** — core の `Client` は `clientSecret: string` 必須で `PublicClient = Omit<Client, "clientSecret">` のため、`findById()` だけでは public/confidential の区別がつかない。未認証の `client_id` を許すと盗まれた `subject_token` で任意 client を impersonate できるため、確認できないクライアント認証は素通しさせない。public client サポートは `Client.public` flag が入った後で再検討する |
 
 ### 5.2 Response (200 application/json)
 
