@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history needed by the "No cross-project references in PR commit
+          # messages" step below (it walks BASE..HEAD on the PR branch). Other
+          # steps don't depend on history depth.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -83,8 +88,15 @@ jobs:
             echo "PR base or head SHA missing; skipping commit-message scan."
             exit 0
           fi
-          # actions/checkout uses fetch-depth:1 by default; deepen so the BASE..HEAD walk works.
-          git fetch --no-tags --prune --depth=200 origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true
+          # Full history is fetched via actions/checkout fetch-depth:0 above,
+          # so both SHAs are reachable. Verify defensively — if either is
+          # missing, fail loudly rather than silently passing.
+          for sha in "$BASE_SHA" "$HEAD_SHA"; do
+            if ! git cat-file -e "$sha^{commit}" 2>/dev/null; then
+              echo "ERROR: commit $sha not present in checkout; cannot scan PR commit messages."
+              exit 1
+            fi
+          done
           MATCHES="$(git log --format='%H%n%B%n---' "$BASE_SHA..$HEAD_SHA" | grep -E "$PAT" || true)"
           if [ -n "$MATCHES" ]; then
             echo "ERROR: prohibited cross-project reference in PR commit messages:"
