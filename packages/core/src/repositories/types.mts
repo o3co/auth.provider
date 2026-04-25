@@ -19,6 +19,12 @@ export interface Client {
 	clientSecret: string;
 	allowedRedirectUris: string[];
 	allowedScopes: string[];
+	/**
+	 * Audience URIs that this client may request in Token Exchange (RFC 8693)
+	 * `audience` parameter. Empty or undefined means only the client's own
+	 * clientId is allowed as audience. Not used outside Token Exchange.
+	 */
+	allowedAudiences?: string[];
 	// NEW (TODO-F-5): Logout metadata.
 	postLogoutRedirectUris?: string[];
 	backchannelLogoutUri?: string;

@@ -251,6 +251,61 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
+	describe("allowedAudiences field round-trip (Token Exchange RFC 8693)", () => {
+		it("exposes allowedAudiences via findById (empty array when omitted)", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"client-a",
+						{
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("client-a");
+			expect(client?.allowedAudiences).toEqual([]);
+		});
+
+		it("exposes allowedAudiences via findById (preserves configured values)", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"client-b",
+						{
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							allowedAudiences: ["billing-service", "inventory-service"],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("client-b");
+			expect(client?.allowedAudiences).toEqual(["billing-service", "inventory-service"]);
+		});
+
+		it("exposes allowedAudiences via authenticate() (also propagates on auth path)", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"client-c",
+						{
+							clientSecret: "correct-horse-battery-staple",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							allowedAudiences: ["payment-service"],
+						},
+					],
+				]),
+			);
+			const client = await repo.authenticate("client-c", "correct-horse-battery-staple");
+			expect(client?.allowedAudiences).toEqual(["payment-service"]);
+		});
+	});
+
 	describe("authenticate", () => {
 		it("returns client with correct plain text secret", async () => {
 			const repo = new InMemoryClientRepository(
