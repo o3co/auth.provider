@@ -19,6 +19,10 @@ import {
   tokenExchangeModule,
 } from "@o3co/auth-provider-oauth-token-exchange";
 
+// `keyStore`, `issuer`, `refreshTokenStore`, `clientRepository`, and any other
+// fields in `deps` come from your app wiring (see auth-provider-core docs).
+const grantRegistry = new GrantRegistry();
+
 const validatorRegistry = new ExchangeTokenValidatorRegistry();
 validatorRegistry.register(
   "urn:ietf:params:oauth:token-type:access_token",
