@@ -223,6 +223,28 @@ describe("createTokenExchangeGrant — request errors", () => {
 		});
 	});
 
+	it.each([
+		["number", 123],
+		["object", { a: 1 }],
+		["boolean", true],
+	])("rejects client_secret with non-string type %s", async (_label, badValue) => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: badValue,
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/client_secret/),
+		});
+	});
+
 	it("rejects actor_token_type without actor_token (prevents delegation-policy bypass)", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
