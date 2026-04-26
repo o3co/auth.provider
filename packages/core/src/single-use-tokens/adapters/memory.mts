@@ -52,9 +52,18 @@ export function createInMemorySingleUseTokenStore(): SingleUseTokenStoreBase {
 			store.set(composite, { expiresAtMs: expMs, consumed: false });
 		},
 
-		async consume(_scope, _key): Promise<SingleUseConsumeOutcome> {
-			// Implemented in Task 4.
-			throw new Error("consume not implemented yet");
+		async consume(scope, key): Promise<SingleUseConsumeOutcome> {
+			const nowMs = Date.now();
+			const composite = canonicalKey(scope, key);
+			gc(composite, nowMs);
+			const e = store.get(composite);
+			if (e === undefined) return { outcome: "unknown" };
+			// Synchronous block: no `await` between `get` and `set`, so the JS
+			// event loop cannot interleave another consume into this critical
+			// section. This is what guarantees concurrent fairness.
+			if (e.consumed) return { outcome: "replayed" };
+			e.consumed = true;
+			return { outcome: "consumed" };
 		},
 
 		async markSeen(_scope, _key, _expiresAt): Promise<SingleUseMarkSeenOutcome> {

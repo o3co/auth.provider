@@ -76,3 +76,66 @@ describe("InMemorySingleUseTokenStore — issue", () => {
 		}
 	});
 });
+
+describe("InMemorySingleUseTokenStore — consume", () => {
+	it("returns 'unknown' when nothing was issued", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		const r = await s.consume("webauthn:reg", "never");
+		expect(r).toEqual({ outcome: "unknown" });
+	});
+
+	it("returns 'consumed' on first consume of an issued token", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
+		const r = await s.consume("webauthn:reg", "k1");
+		expect(r).toEqual({ outcome: "consumed" });
+	});
+
+	it("returns 'replayed' on second consume of an already-consumed token (within TTL)", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
+		await s.consume("webauthn:reg", "k1");
+		const r = await s.consume("webauthn:reg", "k1");
+		expect(r).toEqual({ outcome: "replayed" });
+	});
+
+	it("keeps returning 'replayed' until expiresAt elapses, then returns 'unknown'", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 30));
+		expect((await s.consume("webauthn:reg", "k1")).outcome).toBe("consumed");
+		expect((await s.consume("webauthn:reg", "k1")).outcome).toBe("replayed");
+		await new Promise((r) => setTimeout(r, 50));
+		expect((await s.consume("webauthn:reg", "k1")).outcome).toBe("unknown");
+	});
+
+	it("issue throws 'duplicate' for a (scope, key) that is consumed but not yet expired", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
+		await s.consume("webauthn:reg", "k1");
+		await expect(
+			s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000)),
+		).rejects.toMatchObject({ reason: "duplicate" });
+	});
+
+	it("concurrent consume calls for the same issued token yield exactly one 'consumed' and N-1 'replayed' (N=100)", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.issue("webauthn:reg", "race", new Date(Date.now() + 60_000));
+		const calls = await Promise.all(
+			Array.from({ length: 100 }, () => s.consume("webauthn:reg", "race")),
+		);
+		const counts = calls.reduce<Record<string, number>>((acc, r) => {
+			acc[r.outcome] = (acc[r.outcome] ?? 0) + 1;
+			return acc;
+		}, {});
+		expect(counts.consumed).toBe(1);
+		expect(counts.replayed).toBe(99);
+		expect(counts.unknown).toBeUndefined();
+	});
+
+	it("scope isolation: same key under different scopes do not collide", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.issue("scope:a", "k", new Date(Date.now() + 60_000));
+		const r = await s.consume("scope:b", "k");
+		expect(r).toEqual({ outcome: "unknown" });
+	});
+});
