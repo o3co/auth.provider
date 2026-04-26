@@ -16,19 +16,21 @@
 
 import type { RedisLikeClient } from "#/single-use-tokens/adapters/redis.mjs";
 
-interface Slot {
-	value: string;
-	expiresAtMs: number;
-}
+type Slot =
+	| { kind: "string"; value: string; expiresAtMs: number }
+	| { kind: "hash"; fields: Map<string, string>; expiresAtMs: number };
 
 /**
- * Hand-rolled fake redis client that supports just the four ops the
- * SingleUseTokenStore redis adapter calls: `set` (with NX/PX), `get`,
- * `pTTL`, and `eval` (executing the inlined Lua-equivalent JavaScript).
+ * Hand-rolled fake redis client supporting the four ops the SingleUseTokenStore
+ * redis adapter calls: `set` (with NX/PX), `hSetNX`, `hGet`, `pExpire`.
  *
- * Intentionally minimal — production Redis behaviour is the contract
- * the adapter targets; this fake just lets contract tests run without
- * a network dependency.
+ * Internally distinguishes string keys (used by `markSeen`) from hash keys
+ * (used by `issue`/`consume`). Mismatching the type produces a `WRONGTYPE`
+ * error matching real Redis.
+ *
+ * Intentionally minimal — production Redis behaviour is the contract the
+ * adapter targets; this fake just lets contract tests run without a network
+ * dependency.
  */
 export function createFakeRedis(): RedisLikeClient & { _store: Map<string, Slot> } {
 	const store = new Map<string, Slot>();
@@ -47,50 +49,48 @@ export function createFakeRedis(): RedisLikeClient & { _store: Map<string, Slot>
 			if (opts?.NX === true && store.has(key)) return null;
 			const ttl = opts?.PX;
 			if (ttl !== undefined && ttl <= 0) {
-				// Match real redis behaviour: SET with non-positive PX errors.
 				throw new Error("ERR invalid expire time in 'set' command");
 			}
 			const expiresAtMs = ttl === undefined ? Number.POSITIVE_INFINITY : nowMs + ttl;
-			store.set(key, { value, expiresAtMs });
+			store.set(key, { kind: "string", value, expiresAtMs });
 			return "OK";
 		},
 
-		async get(key) {
+		async hSetNX(key, field, value) {
+			const nowMs = Date.now();
+			gc(key, nowMs);
+			const slot = store.get(key);
+			if (slot === undefined) {
+				const fields = new Map<string, string>();
+				fields.set(field, value);
+				// Default TTL: never expires until pExpire is called.
+				store.set(key, { kind: "hash", fields, expiresAtMs: Number.POSITIVE_INFINITY });
+				return 1;
+			}
+			if (slot.kind !== "hash") {
+				throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+			}
+			if (slot.fields.has(field)) return 0;
+			slot.fields.set(field, value);
+			return 1;
+		},
+
+		async hGet(key, field) {
 			gc(key, Date.now());
-			return store.get(key)?.value ?? null;
+			const slot = store.get(key);
+			if (slot === undefined) return null;
+			if (slot.kind !== "hash") {
+				throw new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+			}
+			return slot.fields.get(field) ?? null;
 		},
 
-		async pTTL(key) {
-			const nowMs = Date.now();
-			gc(key, nowMs);
+		async pExpire(key, ms) {
+			gc(key, Date.now());
 			const slot = store.get(key);
-			if (slot === undefined) return -2;
-			if (slot.expiresAtMs === Number.POSITIVE_INFINITY) return -1;
-			return Math.max(0, slot.expiresAtMs - nowMs);
-		},
-
-		async eval(script, opts) {
-			// We accept ONLY the consume Lua script our adapter ships. Any other
-			// script means a test wrote a Lua we don't know — fail loudly so we
-			// notice at adapter changes.
-			if (!script.includes("issued") || !script.includes("consumed")) {
-				throw new Error("fakeRedis.eval: unrecognised script");
-			}
-			const key = opts.keys[0];
-			if (key === undefined) throw new Error("fakeRedis.eval: missing key");
-			const nowMs = Date.now();
-			gc(key, nowMs);
-			const slot = store.get(key);
-			if (slot === undefined) return "unknown";
-			if (slot.value === "consumed") return "replayed";
-			// issued -> consumed, preserving remaining TTL
-			const pttl = slot.expiresAtMs - nowMs;
-			if (pttl < 0) {
-				store.delete(key);
-				return "unknown";
-			}
-			store.set(key, { value: "consumed", expiresAtMs: slot.expiresAtMs });
-			return "consumed";
+			if (slot === undefined) return 0;
+			slot.expiresAtMs = Date.now() + ms;
+			return 1;
 		},
 	};
 }

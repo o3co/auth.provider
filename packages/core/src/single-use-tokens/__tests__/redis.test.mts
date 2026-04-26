@@ -25,22 +25,25 @@ describe("RedisSingleUseTokenStore — issue", () => {
 		expect(s.kind).toBe("redis");
 	});
 
-	it("issue stores an issued marker that survives until expiresAt", async () => {
+	it("issue stores an issued marker as a hash field that survives until expiresAt", async () => {
 		const client = createFakeRedis();
 		const s = createRedisSingleUseTokenStore({ client });
 		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
-		// The issued marker is the value `"issued"` under the prefixed canonical key.
 		const slots = [...client._store.values()];
 		expect(slots).toHaveLength(1);
-		expect(slots[0]?.value).toBe("issued");
+		const slot = slots[0];
+		expect(slot?.kind).toBe("hash");
+		if (slot?.kind === "hash") {
+			expect(slot.fields.get("issued")).toBe("1");
+		}
 	});
 
 	it("issue rejects expiresAt <= now with 'expired-at-issue' (no SET to redis)", async () => {
 		const client = createFakeRedis();
 		const s = createRedisSingleUseTokenStore({ client });
-		await expect(
-			s.issue("webauthn:reg", "k1", new Date(Date.now() - 1)),
-		).rejects.toMatchObject({ reason: "expired-at-issue" });
+		await expect(s.issue("webauthn:reg", "k1", new Date(Date.now() - 1))).rejects.toMatchObject({
+			reason: "expired-at-issue",
+		});
 		expect(client._store.size).toBe(0);
 	});
 
@@ -80,5 +83,55 @@ describe("RedisSingleUseTokenStore — markSeen", () => {
 		await expect(
 			s.markSeen("jwt-bearer:iss", "j1", new Date(Date.now() - 1)),
 		).rejects.toBeInstanceOf(SingleUseTokenError);
+	});
+});
+
+describe("RedisSingleUseTokenStore — consume", () => {
+	it("returns 'unknown' when nothing was issued", async () => {
+		const s = createRedisSingleUseTokenStore({ client: createFakeRedis() });
+		const r = await s.consume("webauthn:reg", "never");
+		expect(r).toEqual({ outcome: "unknown" });
+	});
+
+	it("returns 'consumed' on first consume of an issued token", async () => {
+		const s = createRedisSingleUseTokenStore({ client: createFakeRedis() });
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
+		const r = await s.consume("webauthn:reg", "k1");
+		expect(r).toEqual({ outcome: "consumed" });
+	});
+
+	it("returns 'replayed' on subsequent consume calls within TTL", async () => {
+		const s = createRedisSingleUseTokenStore({ client: createFakeRedis() });
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
+		await s.consume("webauthn:reg", "k1");
+		const r = await s.consume("webauthn:reg", "k1");
+		expect(r).toEqual({ outcome: "replayed" });
+	});
+
+	it("writes a 'consumed' field with a timestamp, preserving the 'issued' field and TTL", async () => {
+		const client = createFakeRedis();
+		const s = createRedisSingleUseTokenStore({ client });
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
+		const keyName = [...client._store.keys()][0] ?? "";
+		const slot = client._store.get(keyName);
+		const beforeExp = slot?.expiresAtMs ?? 0;
+		await s.consume("webauthn:reg", "k1");
+		const after = client._store.get(keyName);
+		expect(after?.kind).toBe("hash");
+		if (after?.kind === "hash") {
+			expect(after.fields.get("issued")).toBe("1");
+			expect(after.fields.get("consumed")).toMatch(/^\d+$/);
+		}
+		// TTL preserved (PEXPIRE was called only on issue).
+		expect(after?.expiresAtMs).toBe(beforeExp);
+	});
+
+	it("issue throws 'duplicate' for a (scope, key) that is consumed but not yet expired", async () => {
+		const s = createRedisSingleUseTokenStore({ client: createFakeRedis() });
+		await s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000));
+		await s.consume("webauthn:reg", "k1");
+		await expect(
+			s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000)),
+		).rejects.toMatchObject({ reason: "duplicate" });
 	});
 });

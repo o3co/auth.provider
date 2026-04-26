@@ -27,15 +27,15 @@ import {
  * existing convention (federation-tokens, user-sessions), each store defines
  * its own `RedisLikeClient` shape so the dependency is local and testable
  * with a hand-rolled fake.
+ *
+ * Naming follows redis v5 (`hSetNX`, `hGet`, `pExpire`); ioredis users can
+ * adapt with a thin wrapper.
  */
 export interface RedisLikeClient {
-	get(key: string): Promise<string | null>;
 	set(key: string, value: string, opts?: { PX?: number; NX?: boolean }): Promise<string | null>;
-	pTTL(key: string): Promise<number>;
-	eval(
-		script: string,
-		opts: { keys: string[]; arguments?: string[] },
-	): Promise<string | number | null>;
+	hSetNX(key: string, field: string, value: string): Promise<number>;
+	hGet(key: string, field: string): Promise<string | null>;
+	pExpire(key: string, ms: number): Promise<number>;
 }
 
 export interface RedisSingleUseTokenStoreOptions {
@@ -45,6 +45,9 @@ export interface RedisSingleUseTokenStoreOptions {
 }
 
 const DEFAULT_KEY_PREFIX = "stk:";
+
+const FIELD_ISSUED = "issued";
+const FIELD_CONSUMED = "consumed";
 
 export function createRedisSingleUseTokenStore(
 	opts: RedisSingleUseTokenStoreOptions,
@@ -62,14 +65,36 @@ export function createRedisSingleUseTokenStore(
 			if (ttlMs <= 0) {
 				throw new SingleUseTokenError({ reason: "expired-at-issue" });
 			}
-			const result = await client.set(fullKey(scope, key), "issued", { NX: true, PX: ttlMs });
-			if (result === null) {
+			const k = fullKey(scope, key);
+			// Atomically set the `issued` field only when it is absent.
+			// `HSETNX` returns 1 on first write, 0 if the field (or key) already exists.
+			const created = await client.hSetNX(k, FIELD_ISSUED, "1");
+			if (created !== 1) {
 				throw new SingleUseTokenError({ reason: "duplicate" });
 			}
+			// Apply TTL on the hash key. There is a small window between HSETNX and
+			// PEXPIRE where the process could die and leave a TTL-less hash; the
+			// next `issue` for the same (scope, key) will still surface `duplicate`,
+			// matching node-oidc-provider's behavior.
+			await client.pExpire(k, ttlMs);
 		},
 
-		async consume(_scope, _key): Promise<SingleUseConsumeOutcome> {
-			throw new Error("consume not implemented yet");
+		async consume(scope, key): Promise<SingleUseConsumeOutcome> {
+			const k = fullKey(scope, key);
+			// `HSETNX consumed <ts>` is the atomic "first wins" primitive: exactly
+			// one concurrent caller writes (returns 1), the rest return 0.
+			const won = await client.hSetNX(k, FIELD_CONSUMED, Date.now().toString());
+			if (won === 1) {
+				// We won the race. Confirm the entry was actually issued (not a stray
+				// consume against an attacker-fabricated key).
+				const issued = await client.hGet(k, FIELD_ISSUED);
+				if (issued === null) return { outcome: "unknown" };
+				return { outcome: "consumed" };
+			}
+			// Lost the race. Either someone consumed first, or the key never existed.
+			const consumed = await client.hGet(k, FIELD_CONSUMED);
+			if (consumed !== null) return { outcome: "replayed" };
+			return { outcome: "unknown" };
 		},
 
 		async markSeen(scope, key, expiresAt): Promise<SingleUseMarkSeenOutcome> {
