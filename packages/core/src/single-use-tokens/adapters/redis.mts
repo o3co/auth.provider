@@ -86,29 +86,21 @@ export function createRedisSingleUseTokenStore(
 
 		async consume(scope, key): Promise<SingleUseConsumeOutcome> {
 			const k = fullKey(scope, key);
-			// `HSETNX consumed <ts>` is the atomic "first wins" primitive: exactly
-			// one concurrent caller writes (returns 1), the rest return 0.
-			const won = await client.hSetNX(k, FIELD_CONSUMED, Date.now().toString());
-			if (won === 1) {
-				// We won the race. Confirm the entry was actually issued.
-				const issued = await client.hGet(k, FIELD_ISSUED);
-				if (issued === null) {
-					// Stray consume on a never-issued key. `HSETNX` just created a
-					// hash with `consumed` but no TTL. Clean up to:
-					//   1. Prevent future legitimate `issue` from being false-flagged
-					//      as `replayed` by our leftover `consumed` field (poisoning).
-					//   2. Avoid unbounded memory growth from attackers spamming
-					//      `consume` against random keys.
-					// See spec §5.2.2 "Poisoning attack mitigation".
-					await client.del(k);
-					return { outcome: "unknown" };
-				}
-				return { outcome: "consumed" };
+			// Non-mutating existence check first. Only issued entries are eligible
+			// for consumption. Reading `issued` before writing anything keeps stray
+			// consumes ZERO side-effect, so partial failures (crash / netsplit
+			// between commands) cannot leave behind a TTL-less hash that poisons
+			// future legitimate issue/consume for the same (scope, key).
+			// See spec §5.2.2 "Poisoning attack mitigation".
+			const issued = await client.hGet(k, FIELD_ISSUED);
+			if (issued === null) {
+				return { outcome: "unknown" };
 			}
-			// Lost the race. Either someone consumed first, or the key never existed.
-			const consumed = await client.hGet(k, FIELD_CONSUMED);
-			if (consumed !== null) return { outcome: "replayed" };
-			return { outcome: "unknown" };
+			// `HSETNX consumed <ts>` is the atomic "first wins" primitive for keys
+			// that are known to have been issued: exactly one concurrent caller
+			// writes (returns 1), the rest return 0.
+			const won = await client.hSetNX(k, FIELD_CONSUMED, Date.now().toString());
+			return won === 1 ? { outcome: "consumed" } : { outcome: "replayed" };
 		},
 
 		async markSeen(scope, key, expiresAt): Promise<SingleUseMarkSeenOutcome> {

@@ -167,6 +167,34 @@ describe("RedisSingleUseTokenStore — poisoning resistance", () => {
 		// All 10 consume calls should have cleaned up after themselves.
 		expect(client._store.size).toBe(0);
 	});
+
+	it("consume on a never-issued key is non-mutating (no hSetNX, no del invocation)", async () => {
+		// Stronger property than the previous tests: consume on unknown MUST NOT
+		// write anything to redis. This is what makes poisoning resistance robust
+		// to partial failures (crash / netsplit between hSetNX and del).
+		const inner = createFakeRedis();
+		let hSetNXCalls = 0;
+		let delCalls = 0;
+		const client = {
+			...inner,
+			async hSetNX(k: string, f: string, v: string) {
+				hSetNXCalls++;
+				return inner.hSetNX(k, f, v);
+			},
+			async del(k: string) {
+				delCalls++;
+				return inner.del(k);
+			},
+		};
+
+		const s = createRedisSingleUseTokenStore({ client });
+		const r = await s.consume("webauthn:reg", "never-issued");
+
+		expect(r).toEqual({ outcome: "unknown" });
+		expect(hSetNXCalls).toBe(0);
+		expect(delCalls).toBe(0);
+		expect(inner._store.size).toBe(0);
+	});
 });
 
 describe("RedisSingleUseTokenStore — issue PEXPIRE failure handling", () => {
