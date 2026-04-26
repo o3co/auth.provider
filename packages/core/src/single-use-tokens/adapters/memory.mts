@@ -66,9 +66,19 @@ export function createInMemorySingleUseTokenStore(): SingleUseTokenStoreBase {
 			return { outcome: "consumed" };
 		},
 
-		async markSeen(_scope, _key, _expiresAt): Promise<SingleUseMarkSeenOutcome> {
-			// Implemented in Task 5.
-			throw new Error("markSeen not implemented yet");
+		async markSeen(scope, key, expiresAt): Promise<SingleUseMarkSeenOutcome> {
+			const nowMs = Date.now();
+			const expMs = expiresAt.getTime();
+			if (expMs <= nowMs) {
+				throw new SingleUseTokenError({ reason: "expired-at-issue" });
+			}
+			const composite = canonicalKey(scope, key);
+			gc(composite, nowMs);
+			if (store.has(composite)) return { outcome: "replayed" };
+			// Reuse the same Entry shape — `consumed: false` is the natural
+			// state for markSeen records (they are never consumed; they expire).
+			store.set(composite, { expiresAtMs: expMs, consumed: false });
+			return { outcome: "fresh" };
 		},
 	};
 }

@@ -139,3 +139,55 @@ describe("InMemorySingleUseTokenStore — consume", () => {
 		expect(r).toEqual({ outcome: "unknown" });
 	});
 });
+
+describe("InMemorySingleUseTokenStore — markSeen", () => {
+	it("returns 'fresh' on first observation of (scope, key)", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		const r = await s.markSeen("jwt-bearer:iss", "jti-1", new Date(Date.now() + 60_000));
+		expect(r).toEqual({ outcome: "fresh" });
+	});
+
+	it("returns 'replayed' on second observation within TTL", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.markSeen("jwt-bearer:iss", "jti-1", new Date(Date.now() + 60_000));
+		const r = await s.markSeen("jwt-bearer:iss", "jti-1", new Date(Date.now() + 60_000));
+		expect(r).toEqual({ outcome: "replayed" });
+	});
+
+	it("returns 'fresh' again after the recorded expiresAt has passed", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.markSeen("jwt-bearer:iss", "jti-1", new Date(Date.now() + 30));
+		await new Promise((r) => setTimeout(r, 50));
+		const r = await s.markSeen("jwt-bearer:iss", "jti-1", new Date(Date.now() + 60_000));
+		expect(r).toEqual({ outcome: "fresh" });
+	});
+
+	it("rejects expiresAt <= now with 'expired-at-issue'", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await expect(
+			s.markSeen("jwt-bearer:iss", "jti-1", new Date(Date.now() - 1)),
+		).rejects.toMatchObject({ reason: "expired-at-issue" });
+	});
+
+	it("scope isolation: same jti under different issuers does not collide", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		await s.markSeen("jwt-bearer:a", "jti", new Date(Date.now() + 60_000));
+		const r = await s.markSeen("jwt-bearer:b", "jti", new Date(Date.now() + 60_000));
+		expect(r).toEqual({ outcome: "fresh" });
+	});
+
+	it("concurrent markSeen for the same key yields exactly one 'fresh' and N-1 'replayed'", async () => {
+		const s = createInMemorySingleUseTokenStore();
+		const calls = await Promise.all(
+			Array.from({ length: 100 }, () =>
+				s.markSeen("jwt-bearer:iss", "race", new Date(Date.now() + 60_000)),
+			),
+		);
+		const counts = calls.reduce<Record<string, number>>((acc, r) => {
+			acc[r.outcome] = (acc[r.outcome] ?? 0) + 1;
+			return acc;
+		}, {});
+		expect(counts.fresh).toBe(1);
+		expect(counts.replayed).toBe(99);
+	});
+});
