@@ -558,6 +558,56 @@ Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_to
 
 The `CodeRepository.createCode` params and `InMemoryCodeRepository` accept `nonce`, `sid`, and `grantedScope` in the same call. Consumers (the `authorization_code` grant) read `codeData.grantedScope` (set by `GrantPolicyHook` at `/oauth/authorize`) as the authoritative scope for token minting instead of `session.granted_scopes`.
 
+### `SingleUseTokenStore` (v0.5.0 #5)
+
+Server-issued challenge consume + client-supplied JWT `jti` replay protection.
+One interface, two op shapes:
+
+- `issue(scope, key, expiresAt)` — register a server-issued single-use token (e.g. WebAuthn challenge).
+- `consume(scope, key)` — atomically consume a previously-issued token. Returns `consumed` / `replayed` / `unknown`.
+- `markSeen(scope, key, expiresAt)` — record a client-supplied identifier (e.g. JWT `jti`). Returns `fresh` / `replayed`.
+
+Builtin adapters: `memory` (single-process / dev), `redis` (production multi-instance).
+
+Throws `SingleUseTokenError({ reason: "duplicate" | "expired-at-issue" })` for invalid inputs.
+
+The redis adapter uses Hash + `HSETNX consumed=<ts>` for atomic state transition (no Lua), aligned with the dominant Node.js auth ecosystem pattern (`node-oidc-provider`, Ory `fosite`). The "consumed" marker is retained as a hash field until the key's TTL elapses, which is what enables replay-vs-unknown distinction.
+
+```typescript
+import { createSingleUseTokenStoreFactory, registerBuiltinSingleUseTokenStores } from "@o3co/auth-provider-core";
+import { createClient } from "redis";
+
+const factory = createSingleUseTokenStoreFactory();
+registerBuiltinSingleUseTokenStores(factory);
+
+const redisClient = createClient({ url: process.env.REDIS_URL });
+await redisClient.connect();
+const store = await factory.create({ type: "redis", client: redisClient });
+
+// Server-issued challenge ceremony (e.g. WebAuthn registration)
+const challenge = crypto.randomBytes(32).toString("base64url");
+await store.issue("webauthn:register", challenge, new Date(Date.now() + 5 * 60_000));
+// ... client echoes the challenge back ...
+const result = await store.consume("webauthn:register", challenge);
+if (result.outcome !== "consumed") throw new Error("invalid challenge");
+
+// Client-supplied JWT jti (e.g. RFC 7523 jwt-bearer)
+const seen = await store.markSeen(`jwt-bearer:${decoded.iss}`, decoded.jti, new Date(decoded.exp * 1000));
+if (seen.outcome === "replayed") throw new Error("assertion replay detected");
+```
+
+Recommended `scope` conventions:
+
+| use case | scope | op |
+| --- | --- | --- |
+| WebAuthn registration challenge | `"webauthn:register"` | `issue` / `consume` |
+| WebAuthn authentication challenge | `"webauthn:auth"` | `issue` / `consume` |
+| MFA challenge (future) | `"mfa:<provider>"` | `issue` / `consume` |
+| jwt-bearer assertion jti | `"jwt-bearer:<issuer>"` | `markSeen` |
+| DPoP jti (post-1.0) | `"dpop:<htm>:<encoded-htu>"` | `markSeen` |
+
+Consumers MUST keep `scope` namespaces disjoint between `issue/consume` (Hash key) and `markSeen` (string key) — mismatching produces a `WRONGTYPE` error from Redis. See spec Section 3.2.
+
 ### OIDC id_token + claim filter (TODO-F-4)
 
 Two low-level helpers used by the `authorization_code` grant and the `/oauth/userinfo` endpoint.
