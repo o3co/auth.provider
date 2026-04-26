@@ -21,8 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `HSETNX consumed=<ts>` for atomic state transition (no Lua), aligned with
   the dominant Node.js auth ecosystem pattern. `consumed` marker is retained
   as a hash field until the key TTL elapses, which preserves the
-  replay-vs-unknown distinction. Wired as optional
-  `AppOptions.singleUseTokenStore`. (v0.5.0 #5)
+  replay-vs-unknown distinction. Redis `consume` includes
+  poisoning-attack mitigation (cleanup of stray hash residue when an
+  attacker calls `consume` on a never-issued key) and `PEXPIRE` failure
+  handling on `issue`. Wired as optional `AppOptions.singleUseTokenStore`.
+  (v0.5.0 #5)
 
 ### Changed
 
