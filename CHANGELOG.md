@@ -13,6 +13,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `sessionModule({ federationProviderFactory })` option for composition roots that explicitly register federation provider packages.
 - `validateRedirect` and `resolveCallbackRedirect` exports from `@o3co/auth-provider-session` for provider package implementations. (`codeChallenge` was already exported since v0.4.0.)
 - `@o3co/create-auth-provider` scoped scaffolder package. Replaces the unscoped `create-o3co-auth-provider` so the scaffolder lives under the `@o3co` npm org alongside the runtime packages. Consumers should switch to `npx @o3co/create-auth-provider my-auth-app`. The old `create-o3co-auth-provider` package on npm is deprecated.
+- `SingleUseTokenStore` interface in `@o3co/auth-provider-core` for replay
+  protection: server-issued challenge consume (`issue` / `consume`, used by
+  WebAuthn `ChallengeStore` and future MFA challenges) plus client-supplied
+  JWT `jti` replay detection (`markSeen`, used by jwt-bearer / DPoP).
+  Builtin `memory` + `redis` adapters; the redis adapter uses Hash +
+  `HSETNX consumed=<ts>` for atomic state transition (no Lua), aligned with
+  the dominant Node.js auth ecosystem pattern. `consumed` marker is retained
+  as a hash field until the key TTL elapses, which preserves the
+  replay-vs-unknown distinction. Wired as optional
+  `AppOptions.singleUseTokenStore`. (v0.5.0 #5)
 
 ### Changed
 
