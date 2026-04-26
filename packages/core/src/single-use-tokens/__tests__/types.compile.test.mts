@@ -5,9 +5,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
-	SingleUseTokenError,
 	type SingleUseConsumeOutcome,
 	type SingleUseMarkSeenOutcome,
+	SingleUseTokenError,
 } from "#/single-use-tokens/types.mjs";
 
 describe("SingleUseConsumeOutcome", () => {

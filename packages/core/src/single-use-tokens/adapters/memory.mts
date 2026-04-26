@@ -16,9 +16,9 @@
 
 import { canonicalKey } from "../keyEncoding.mjs";
 import {
-	SingleUseTokenError,
 	type SingleUseConsumeOutcome,
 	type SingleUseMarkSeenOutcome,
+	SingleUseTokenError,
 	type SingleUseTokenStoreBase,
 } from "../types.mjs";
 
