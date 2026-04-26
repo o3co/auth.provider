@@ -16,11 +16,35 @@
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 
+/**
+ * Outcome of consuming a server-issued single-use token (challenge).
+ *
+ * - `consumed`: token was registered at issue time, not yet consumed, within TTL.
+ *   Caller MAY proceed with the protected operation.
+ * - `unknown`:  no record matches `(scope, key)`. Either never issued, expired
+ *   (TTL elapsed), or already consumed and GC-ed. Caller MUST reject.
+ * - `replayed`: a record exists but was already consumed. Caller MUST reject
+ *   AND treat as a replay attack signal (audit log, increment counter).
+ *
+ * Implementations MUST NOT collapse `unknown` and `replayed` into one variant —
+ * the security distinction (audit-worthy vs not) is preserved by the contract.
+ */
 export type SingleUseConsumeOutcome =
 	| { readonly outcome: "consumed" }
 	| { readonly outcome: "unknown" }
 	| { readonly outcome: "replayed" };
 
+/**
+ * Outcome of recording a client-supplied JWT `jti` for replay protection.
+ *
+ * - `fresh`:    `(scope, key)` was not previously seen within `expiresAt`.
+ *   Caller MAY accept the assertion.
+ * - `replayed`: `(scope, key)` was already recorded. Caller MUST reject the
+ *   assertion as a replay.
+ *
+ * No `unknown` variant — `markSeen` always either records or detects replay;
+ * there is no third outcome.
+ */
 export type SingleUseMarkSeenOutcome =
 	| { readonly outcome: "fresh" }
 	| { readonly outcome: "replayed" };
@@ -32,8 +56,12 @@ export interface SingleUseTokenStoreBase {
 	 * Register a server-issued single-use token (e.g. WebAuthn challenge).
 	 *
 	 * Throws SingleUseTokenError({ reason: "duplicate" }) when (scope, key)
-	 * has any non-expired record (issued OR consumed) — re-issuing on top of
-	 * a consumed record would defeat replay detection.
+	 * has any non-expired record (issued OR consumed). Re-issuing on top of
+	 * a `consumed` record would defeat replay detection — the consumed flag
+	 * exists precisely to keep returning `replayed` until `expiresAt`.
+	 * Server-issued tokens are random with sufficient entropy that a
+	 * within-TTL collision implies a bug or programming error, never a
+	 * legitimate retry; callers MUST NOT wrap `issue` in a retry loop.
 	 *
 	 * Throws SingleUseTokenError({ reason: "expired-at-issue" }) when
 	 * expiresAt <= now at call time, before any state mutation.
