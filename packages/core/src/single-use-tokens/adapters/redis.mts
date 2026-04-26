@@ -36,6 +36,7 @@ export interface RedisLikeClient {
 	hSetNX(key: string, field: string, value: string): Promise<number>;
 	hGet(key: string, field: string): Promise<string | null>;
 	pExpire(key: string, ms: number): Promise<number>;
+	del(key: string): Promise<number>;
 }
 
 export interface RedisSingleUseTokenStoreOptions {
@@ -72,11 +73,15 @@ export function createRedisSingleUseTokenStore(
 			if (created !== 1) {
 				throw new SingleUseTokenError({ reason: "duplicate" });
 			}
-			// Apply TTL on the hash key. There is a small window between HSETNX and
-			// PEXPIRE where the process could die and leave a TTL-less hash; the
-			// next `issue` for the same (scope, key) will still surface `duplicate`,
-			// matching node-oidc-provider's behavior.
-			await client.pExpire(k, ttlMs);
+			// Apply TTL on the hash key. PEXPIRE returns 0 only if the key
+			// vanished between HSETNX and here (process kill / network partition).
+			// Clean up the orphaned hash so the next `issue` doesn't see a stale
+			// duplicate; surface the failure to the caller.
+			const expireResult = await client.pExpire(k, ttlMs);
+			if (expireResult !== 1) {
+				await client.del(k);
+				throw new Error("redis: failed to set TTL on issued single-use token");
+			}
 		},
 
 		async consume(scope, key): Promise<SingleUseConsumeOutcome> {
@@ -85,10 +90,19 @@ export function createRedisSingleUseTokenStore(
 			// one concurrent caller writes (returns 1), the rest return 0.
 			const won = await client.hSetNX(k, FIELD_CONSUMED, Date.now().toString());
 			if (won === 1) {
-				// We won the race. Confirm the entry was actually issued (not a stray
-				// consume against an attacker-fabricated key).
+				// We won the race. Confirm the entry was actually issued.
 				const issued = await client.hGet(k, FIELD_ISSUED);
-				if (issued === null) return { outcome: "unknown" };
+				if (issued === null) {
+					// Stray consume on a never-issued key. `HSETNX` just created a
+					// hash with `consumed` but no TTL. Clean up to:
+					//   1. Prevent future legitimate `issue` from being false-flagged
+					//      as `replayed` by our leftover `consumed` field (poisoning).
+					//   2. Avoid unbounded memory growth from attackers spamming
+					//      `consume` against random keys.
+					// See spec §5.2.2 "Poisoning attack mitigation".
+					await client.del(k);
+					return { outcome: "unknown" };
+				}
 				return { outcome: "consumed" };
 			}
 			// Lost the race. Either someone consumed first, or the key never existed.

@@ -135,3 +135,66 @@ describe("RedisSingleUseTokenStore — consume", () => {
 		).rejects.toMatchObject({ reason: "duplicate" });
 	});
 });
+
+describe("RedisSingleUseTokenStore — poisoning resistance", () => {
+	it("attacker pre-consume followed by legit issue → consume returns 'consumed' (not false 'replayed')", async () => {
+		const client = createFakeRedis();
+		const s = createRedisSingleUseTokenStore({ client });
+
+		// Attacker pre-poisons the (scope, key) by calling consume on a never-issued key.
+		const attackerOutcome = await s.consume("webauthn:reg", "guessable-key");
+		expect(attackerOutcome).toEqual({ outcome: "unknown" });
+
+		// The poison residue should have been cleaned up — verify by inspecting the store.
+		expect(client._store.size).toBe(0);
+
+		// Legitimate user issues + consumes the same (scope, key).
+		await s.issue("webauthn:reg", "guessable-key", new Date(Date.now() + 60_000));
+		const legitOutcome = await s.consume("webauthn:reg", "guessable-key");
+
+		// MUST return 'consumed', NOT 'replayed'. If this asserts 'replayed',
+		// the poisoning vulnerability has regressed.
+		expect(legitOutcome).toEqual({ outcome: "consumed" });
+	});
+
+	it("attacker spamming consume on random keys does not accumulate TTL-less hashes", async () => {
+		const client = createFakeRedis();
+		const s = createRedisSingleUseTokenStore({ client });
+
+		for (let i = 0; i < 10; i++) {
+			await s.consume("webauthn:reg", `attacker-${i}`);
+		}
+		// All 10 consume calls should have cleaned up after themselves.
+		expect(client._store.size).toBe(0);
+	});
+});
+
+describe("RedisSingleUseTokenStore — issue PEXPIRE failure handling", () => {
+	it("cleans up and throws when pExpire returns 0", async () => {
+		// Arrange: a fake client whose pExpire reports failure to set TTL.
+		const inner = createFakeRedis();
+		let pExpireCalls = 0;
+		let delCalls = 0;
+		const client = {
+			...inner,
+			async pExpire(_k: string, _ms: number) {
+				pExpireCalls++;
+				return 0; // simulate "key did not exist" response
+			},
+			async del(k: string) {
+				delCalls++;
+				return inner.del(k);
+			},
+		};
+
+		const s = createRedisSingleUseTokenStore({ client });
+		await expect(s.issue("webauthn:reg", "k1", new Date(Date.now() + 60_000))).rejects.toThrow(
+			/failed to set TTL/,
+		);
+
+		expect(pExpireCalls).toBe(1);
+		expect(delCalls).toBe(1);
+		// The hash should not survive the failed issue.
+		expect(inner._store.size).toBe(0);
+	});
+});

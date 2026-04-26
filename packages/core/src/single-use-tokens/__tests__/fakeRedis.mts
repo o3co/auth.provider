@@ -92,5 +92,9 @@ export function createFakeRedis(): RedisLikeClient & { _store: Map<string, Slot>
 			slot.expiresAtMs = Date.now() + ms;
 			return 1;
 		},
+
+		async del(key) {
+			return store.delete(key) ? 1 : 0;
+		},
 	};
 }
