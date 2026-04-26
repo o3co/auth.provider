@@ -25,6 +25,7 @@ import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "..
 import type { GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RateLimiterBase } from "../ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
+import type { SingleUseTokenStoreBase } from "../single-use-tokens/types.mjs";
 import type { UserSessionStoreBase } from "../user-sessions/types.mjs";
 
 /**
@@ -66,6 +67,7 @@ export interface ModuleContext {
 	rateLimiter?: RateLimiterBase;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
+	singleUseTokenStore?: SingleUseTokenStoreBase;
 	userSessionStore?: UserSessionStoreBase;
 	federationTokenStore?: FederationTokenStoreBase;
 	/**

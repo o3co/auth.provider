@@ -28,6 +28,7 @@ import type { RateLimiterBase } from "./ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
 import * as healthcheck from "./routes/Healthcheck.mjs";
 import * as jwks from "./routes/Jwks.mjs";
+import type { SingleUseTokenStoreBase } from "./single-use-tokens/types.mjs";
 import type { UserSessionStoreBase } from "./user-sessions/types.mjs";
 
 type ExpressLike = {
@@ -49,6 +50,7 @@ export interface AppOptions {
 	rateLimiter?: RateLimiterBase;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
+	singleUseTokenStore?: SingleUseTokenStoreBase;
 	userSessionStore?: UserSessionStoreBase;
 	federationTokenStore?: FederationTokenStoreBase;
 }
@@ -155,6 +157,7 @@ export function createApp(options: AppOptions): AppResult {
 		rateLimiter: options.rateLimiter,
 		refreshTokenStore: options.refreshTokenStore,
 		grantPolicy: options.grantPolicy,
+		singleUseTokenStore: options.singleUseTokenStore,
 		userSessionStore: options.userSessionStore,
 		federationTokenStore: options.federationTokenStore,
 	};

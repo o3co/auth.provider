@@ -193,3 +193,46 @@ describe("createApp", () => {
 		);
 	});
 });
+
+describe("AppOptions.singleUseTokenStore", () => {
+	it("is forwarded to ModuleContext when provided", async () => {
+		const { createInMemorySingleUseTokenStore } = await import(
+			"#/single-use-tokens/adapters/memory.mjs"
+		);
+		const singleUseTokenStore = createInMemorySingleUseTokenStore();
+		let captured: unknown = "not-touched";
+		const captureModule: Module = {
+			name: "capture-single-use",
+			async init(ctx) {
+				captured = (ctx as unknown as { singleUseTokenStore?: unknown }).singleUseTokenStore;
+			},
+		};
+		const { init } = createApp({
+			express: mockExpress,
+			config: mockConfig,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			modules: [captureModule],
+			singleUseTokenStore,
+		});
+		await init();
+		expect(captured).toBe(singleUseTokenStore);
+	});
+
+	it("is undefined on ModuleContext when AppOptions does not supply one", async () => {
+		let captured: unknown = "not-touched";
+		const captureModule: Module = {
+			name: "capture-single-use",
+			async init(ctx) {
+				captured = (ctx as unknown as { singleUseTokenStore?: unknown }).singleUseTokenStore;
+			},
+		};
+		const { init } = createApp({
+			express: mockExpress,
+			config: mockConfig,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			modules: [captureModule],
+		});
+		await init();
+		expect(captured).toBeUndefined();
+	});
+});
