@@ -753,6 +753,52 @@ describe("validateManifests — step 14: route-order-target-missing", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Step 13 — parsed config carried forward (MUST-FIX 1 regression test)
+// ---------------------------------------------------------------------------
+
+describe("validateManifests — step 13: parsed config carried forward in bootstrapComponents", () => {
+	it("substitutes the parsed config (with Zod defaults applied) into bootstrapComponents", () => {
+		// Use an independent namespace ("myModule") so the module schema adds a
+		// new optional key with a default to the composed schema. The key is
+		// absent from the input config; Zod applies the default during parse.
+		// The returned bootstrapComponents.config must carry the parsed value
+		// (with the default applied) so downstream stages see it.
+		const defaultTimeout = 42;
+		const m = defineModule({
+			name: "cfg",
+			configSchema: z.object({
+				myModule: z
+					.object({
+						timeout: z.number().default(defaultTimeout),
+					})
+					.optional()
+					.default({ timeout: defaultTimeout }),
+			}),
+		});
+		// Pass a valid CoreConfigSchema-compatible config but omit "myModule".
+		const result = validateManifests({
+			modules: [m],
+			bootstrapComponents: {
+				config: {
+					http: { port: 3000, trustProxy: false },
+					oauth: {
+						jwt: {},
+						accessToken: { expiresIn: 3600 },
+						refreshToken: { expiresIn: 86400 },
+						grants: {},
+					},
+				} as never,
+				pathResolver: (s: string) => s,
+			},
+		});
+		const cfg = result.bootstrapComponents.config as {
+			myModule?: { timeout?: number };
+		};
+		expect(cfg?.myModule?.timeout).toBe(defaultTimeout);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Happy path
 // ---------------------------------------------------------------------------
 

@@ -62,5 +62,6 @@ export function freezeWorld(registry: RegistryWorld): FrozenWorld {
 		registries: registry.registries,
 		routes: registry.routes,
 		cleanups: registry.material.cleanups,
+		externalKeys: registry.material.externalKeys,
 	};
 }

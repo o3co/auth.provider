@@ -39,6 +39,118 @@ import type {
 import { BootError } from "./types.mjs";
 
 // ---------------------------------------------------------------------------
+// Internal: post-apply route collision check (§5.6 pre-pass, MUST-FIX 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the same route-collision checks that validate-manifests performs for
+ * static contributions, but against the FULL materialised route list (which
+ * includes factory-produced routes that were opaque at stage 1).
+ *
+ * This is defence-in-depth: validate-manifests catches static violations
+ * early; this pass catches factory-produced violations at stage 6.
+ *
+ * Checks:
+ *  - Duplicate id (`duplicate-contribute` identityKind="id")
+ *  - Duplicate mountPath with no id (`duplicate-contribute` identityKind="mountPath")
+ *  - Effective (method, mountPath+adv.path) collision (`duplicate-contribute` identityKind="effective-method-path")
+ *  - RouteAdvertisement.path missing leading slash (`invalid-route-advertisement-path`)
+ *
+ * Per A2-β §5.1 step 7 (factory-produced extension), §5.6 pre-pass.
+ * @internal
+ */
+function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContribution[]): void {
+	// 7a: Duplicate id check
+	const seenIds = new Map<string, string>(); // id → module
+	for (const { contribution: route, contributedBy: module } of routes) {
+		if (route.id !== undefined) {
+			const prev = seenIds.get(route.id);
+			if (prev !== undefined) {
+				throw new BootError({
+					message: `assembleApp: duplicate route id "${route.id}" — modules "${prev}" and "${module}" both declare it.`,
+					reason: "duplicate-contribute",
+					stage: "assembleApp",
+					details: {
+						reason: "duplicate-contribute",
+						kind: "routes",
+						identity: route.id,
+						identityKind: "id",
+						modules: [prev, module],
+					},
+				});
+			}
+			seenIds.set(route.id, module);
+		}
+	}
+
+	// 7b: Duplicate mountPath (no id) check
+	const seenMountPaths = new Map<string, string>(); // mountPath → module
+	for (const { contribution: route, contributedBy: module } of routes) {
+		if (route.id === undefined) {
+			const prev = seenMountPaths.get(route.mountPath);
+			if (prev !== undefined) {
+				throw new BootError({
+					message: `assembleApp: duplicate mountPath "${route.mountPath}" (no id) — modules "${prev}" and "${module}" both declare it.`,
+					reason: "duplicate-contribute",
+					stage: "assembleApp",
+					details: {
+						reason: "duplicate-contribute",
+						kind: "routes",
+						identity: route.mountPath,
+						identityKind: "mountPath",
+						modules: [prev, module],
+					},
+				});
+			}
+			seenMountPaths.set(route.mountPath, module);
+		}
+	}
+
+	// 7c + 7d: RouteAdvertisement checks
+	const seenEffective = new Map<string, { module: string; mountPath: string }>();
+
+	for (const { contribution: route, contributedBy: module } of routes) {
+		if (!route.routes) continue;
+		for (const adv of route.routes) {
+			// 7d: leading-slash check
+			if (!adv.path.startsWith("/")) {
+				throw new BootError({
+					message: `assembleApp: RouteAdvertisement.path "${adv.path}" in module "${module}" (mountPath "${route.mountPath}") must start with "/".`,
+					reason: "invalid-route-advertisement-path",
+					stage: "assembleApp",
+					details: {
+						reason: "invalid-route-advertisement-path",
+						module,
+						mountPath: route.mountPath,
+						path: adv.path,
+						identityKind: "missing-leading-slash",
+					},
+				});
+			}
+
+			// 7c: effective method+path collision
+			const effectiveIdentity = `${adv.method} ${route.mountPath}${adv.path}`;
+			const prev = seenEffective.get(effectiveIdentity);
+			if (prev !== undefined) {
+				throw new BootError({
+					message: `assembleApp: effective route collision "${effectiveIdentity}" — modules "${prev.module}" and "${module}" both declare it.`,
+					reason: "duplicate-contribute",
+					stage: "assembleApp",
+					details: {
+						reason: "duplicate-contribute",
+						kind: "routes",
+						identity: effectiveIdentity,
+						identityKind: "effective-method-path",
+						modules: [prev.module, module],
+					},
+				});
+			}
+			seenEffective.set(effectiveIdentity, { module, mountPath: route.mountPath });
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Internal: mount-order computation (§5.6 step 1)
 // ---------------------------------------------------------------------------
 
@@ -257,12 +369,19 @@ function buildDispose(frozen: FrozenWorld): () => Promise<void> {
 			}
 
 			// Step 2: Symbol.asyncDispose fallback (§8.1 step 3).
-			// Only for components without an explicit lifecycle[K].cleanup.
+			// Only for components without an explicit lifecycle[K].cleanup AND
+			// that were NOT provided by the host environment (bootstrap or
+			// override). External values are consumer-owned: their lifecycle is
+			// outside the boot planner's responsibility. Per A2-β §5.3 / §8.1.
 			const explicitCleanupKeys = new Set<ComponentKey>(frozen.cleanups.map((r) => r.componentKey));
 
 			for (const [key, value] of Object.entries(frozen.components)) {
 				if (explicitCleanupKeys.has(key as ComponentKey)) {
 					// Explicit cleanup was declared for this key; skip Symbol.asyncDispose.
+					continue;
+				}
+				if (frozen.externalKeys.has(key as ComponentKey)) {
+					// Consumer-owned key (bootstrap or override); skip Symbol.asyncDispose.
 					continue;
 				}
 				if (value !== null && value !== undefined) {
@@ -312,6 +431,12 @@ export function assembleApp(
 	frozen: FrozenWorld,
 	options: { readonly express?: { Router: () => Router } } = {},
 ): AppHandle {
+	// Pre-pass: post-apply route collision check (MUST-FIX 2 / §5.6 pre-pass).
+	// Catches collisions produced by factory-generated routes that were opaque
+	// at validate-manifests time. Same checks as stage 1, but runs against the
+	// full materialised frozen.routes list.
+	checkMaterialisedRouteCollisions(frozen.routes);
+
 	// Step 1: Mount-order computation (§5.6 step 1).
 	const ordered = computeMountOrder(frozen.routes);
 

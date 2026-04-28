@@ -1008,11 +1008,13 @@ function checkLifecycleClosure(modules: readonly NormalisedModule[]): void {
 /**
  * Step 13: Compose all module `configSchema` entries into a single Zod
  * schema and validate `bootstrapComponents.config` against it.
+ * Returns the parsed config value (with Zod defaults / transforms applied)
+ * so the caller can substitute it back into bootstrapComponents.
  * On parse failure throws `config-validation-failed`.
  * Per A2-β §5.1 step 13.
  * @internal
  */
-function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): void {
+function validateAndComposeConfig(modules: readonly Module[], bootstrap: BootstrapMap): unknown {
 	const schemas: z.ZodObject<z.ZodRawShape>[] = [];
 	const participants: { readonly module: string; readonly schemaPath?: string }[] = [];
 
@@ -1023,12 +1025,15 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 		}
 	}
 
-	if (schemas.length === 0) return;
+	if (schemas.length === 0) {
+		// No schemas — return the original config value unchanged.
+		return (bootstrap as Record<string, unknown>).config;
+	}
 
 	const composedSchema = composeConfigSchema(schemas);
 
 	try {
-		composedSchema.parse((bootstrap as Record<string, unknown>).config);
+		return composedSchema.parse((bootstrap as Record<string, unknown>).config);
 	} catch (err) {
 		if (err instanceof z.ZodError) {
 			throw new BootError({
@@ -1173,8 +1178,15 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// Step 12: Lifecycle/provides closure
 	checkLifecycleClosure(normalisedModules);
 
-	// Step 13: Config schema composition and validation
-	validateAndComposeConfig(modules, bootstrapComponents);
+	// Step 13: Config schema composition and validation.
+	// The parsed value (with Zod defaults / transforms applied) replaces the
+	// original config in the returned bootstrapComponents so all downstream
+	// stages receive the fully-validated config. Per A2-β §5.1 step 13.
+	const parsedConfig = validateAndComposeConfig(modules, bootstrapComponents);
+	const substitutedBootstrap: BootstrapMap = {
+		...bootstrapComponents,
+		config: parsedConfig as BootstrapMap["config"],
+	};
 
 	// Step 14: Route-order edge sanity
 	checkRouteOrderEdges(modules);
@@ -1209,5 +1221,6 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		byName,
 		providers,
 		usedKinds: usedKindsSet,
+		bootstrapComponents: substitutedBootstrap,
 	};
 }

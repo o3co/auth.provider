@@ -147,6 +147,16 @@ export interface ValidatedManifests {
 	readonly providers: ReadonlyMap<ComponentKey, ValidatedModule>;
 	/** Set of contribution kinds actually used by some module. */
 	readonly usedKinds: ReadonlySet<ContributionKind>;
+	/**
+	 * The bootstrap map with `config` replaced by the parsed (Zod-validated)
+	 * value. Zod defaults, transforms, and stripping are applied. All downstream
+	 * stages (planBoot, materializeComponents, applyContributions) must use this
+	 * field instead of the raw `bootstrapComponents` passed to `createApp` so
+	 * that Zod defaults / transforms reach provider factories.
+	 *
+	 * Per A2-β §5.1 step 13.
+	 */
+	readonly bootstrapComponents: BootstrapMap;
 }
 
 /**
@@ -235,6 +245,17 @@ export interface ComponentWorld {
 	 * (forward); dispose() runs in reverse.
 	 */
 	readonly cleanups: readonly CleanupRecord[];
+	/**
+	 * The set of component keys that originated from the host environment
+	 * (`bootstrapComponents` or `overrideComponents`). These keys are
+	 * consumer-owned: the boot planner must NOT call `Symbol.asyncDispose` on
+	 * their values in `AppHandle.dispose()`. Populated by
+	 * `materializeComponents`; threaded through subsequent stages unchanged.
+	 *
+	 * Per A2-β §5.3 (consumer-owned lifecycle) / §8.1 (dispose fallback
+	 * exclusion).
+	 */
+	readonly externalKeys: ReadonlySet<ComponentKey>;
 }
 
 /**
@@ -280,6 +301,9 @@ export interface RegistryWorld {
 	readonly routes: readonly CollectedRouteContribution[];
 }
 
+// NOTE: RegistryWorld.material.externalKeys carries the external-key set
+// through to assembleApp. No separate field is needed on RegistryWorld.
+
 /**
  * Output of stage 5 (freezeWorld). Component map and registries are now
  * structurally immutable (Object.frozen + freeze() called on each registry).
@@ -297,6 +321,15 @@ export interface FrozenWorld {
 	/** Same shape as RegistryWorld.routes — mount-order resolution deferred to assembleApp. */
 	readonly routes: readonly CollectedRouteContribution[];
 	readonly cleanups: readonly CleanupRecord[];
+	/**
+	 * The set of component keys that originated from the host environment
+	 * (`bootstrapComponents` or `overrideComponents`). `assembleApp.buildDispose`
+	 * excludes these keys from the `Symbol.asyncDispose` fallback loop because
+	 * their lifecycle is the consumer's responsibility.
+	 *
+	 * Per A2-β §5.3 / §8.1.
+	 */
+	readonly externalKeys: ReadonlySet<ComponentKey>;
 }
 
 // ---------------------------------------------------------------------------

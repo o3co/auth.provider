@@ -83,18 +83,22 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	const merged = mergeWithBuiltins(contributionKinds);
 
 	// Stage 1: validateManifests. Per A2-β §5.1.
+	// validated.bootstrapComponents carries the parsed config (Zod defaults /
+	// transforms applied). All downstream stages must use it instead of the
+	// raw bootstrapComponents. Per A2-β §5.1 step 13.
 	const validated = validateManifests({
 		modules,
 		bootstrapComponents,
 		contributionKinds: merged,
 		overrideComponents,
 	});
+	const validatedBootstrap = validated.bootstrapComponents;
 
 	// Stage 2: planBoot. Per A2-β §5.2.
-	const plan = planBoot(validated, bootstrapComponents, overrideComponents);
+	const plan = planBoot(validated, validatedBootstrap, overrideComponents);
 
 	// Stage 3: materializeComponents. Per A2-β §5.3.
-	const material = await materializeComponents(plan, bootstrapComponents, overrideComponents);
+	const material = await materializeComponents(plan, validatedBootstrap, overrideComponents);
 
 	// Stage 4: applyContributions. Per A2-β §5.4.
 	const registry = await applyContributions(material, merged);

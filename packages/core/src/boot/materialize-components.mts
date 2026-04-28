@@ -136,9 +136,15 @@ export async function materializeComponents(
 	// Per-component cleanup records captured during successful materialisations.
 	const cleanups: CleanupRecord[] = [];
 
+	// Track which keys came from the host environment (bootstrap + override).
+	// These are consumer-owned: the boot planner must NOT call Symbol.asyncDispose
+	// on their values in AppHandle.dispose(). Per A2-β §5.3 / §8.1.
+	const externalKeys = new Set<ComponentKey>();
+
 	// Step 1: Pre-seed bootstrapComponents. Per A2-β §5.3 step 1.
 	for (const [key, value] of Object.entries(bootstrapComponents)) {
 		components[key] = value;
+		externalKeys.add(key as ComponentKey);
 	}
 
 	// Step 2: Apply overrideComponents. Per A2-β §5.3 step 2.
@@ -147,6 +153,7 @@ export async function materializeComponents(
 	if (overrideComponents !== undefined) {
 		for (const [key, value] of Object.entries(overrideComponents)) {
 			components[key] = value;
+			externalKeys.add(key as ComponentKey);
 		}
 	}
 
@@ -223,5 +230,6 @@ export async function materializeComponents(
 		plan,
 		components: components as Readonly<Partial<ComponentMap>>,
 		cleanups,
+		externalKeys,
 	};
 }

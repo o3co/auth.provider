@@ -40,6 +40,7 @@ function makeFrozenWorld(
 	routes: CollectedRouteContribution[],
 	cleanups: CleanupRecord[] = [],
 	components: Record<string, unknown> = {},
+	externalKeys: ReadonlySet<string> = new Set(),
 ): FrozenWorld {
 	const frozenComponents = Object.freeze({ ...components }) as FrozenWorld["components"];
 	return {
@@ -47,6 +48,7 @@ function makeFrozenWorld(
 		registries: new Map(),
 		routes,
 		cleanups,
+		externalKeys: externalKeys as FrozenWorld["externalKeys"],
 	};
 }
 
@@ -425,5 +427,161 @@ describe("assembleApp — 12. AppHandle itself is Object.frozen", () => {
 		});
 
 		expect(Object.isFrozen(handle)).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 13. MUST-FIX 2 — factory-produced route validation (duplicate mountPath)
+// ---------------------------------------------------------------------------
+
+describe("assembleApp — 13. MUST-FIX 2: factory-produced route validation", () => {
+	it("two factory-produced routes with the same mountPath throw duplicate-contribute(mountPath)", () => {
+		const handlerA = vi.fn();
+		const handlerB = vi.fn();
+
+		// Both routes have no id and the same mountPath — simulating what
+		// factory-produced routes can produce (only checked at assembleApp time).
+		const routes: CollectedRouteContribution[] = [
+			{
+				contribution: { mountPath: "/api/users", handler: handlerA as never },
+				contributedBy: "ModA",
+				declarationIndex: 0,
+			},
+			{
+				contribution: { mountPath: "/api/users", handler: handlerB as never },
+				contributedBy: "ModB",
+				declarationIndex: 1,
+			},
+		];
+
+		const mockRouter = makeMockRouter();
+		expect(() => {
+			assembleApp(makeFrozenWorld(routes), { express: { Router: () => mockRouter as never } });
+		}).toThrow(BootError);
+
+		let thrown: BootError | undefined;
+		try {
+			assembleApp(makeFrozenWorld(routes), { express: { Router: () => mockRouter as never } });
+		} catch (err) {
+			thrown = err as BootError;
+		}
+		expect(thrown?.reason).toBe("duplicate-contribute");
+		expect(thrown?.stage).toBe("assembleApp");
+		if (thrown?.details.reason === "duplicate-contribute") {
+			expect(thrown.details.identityKind).toBe("mountPath");
+			expect(thrown.details.modules).toContain("ModA");
+			expect(thrown.details.modules).toContain("ModB");
+		}
+	});
+
+	it("factory-produced route with advertisement path missing leading slash throws invalid-route-advertisement-path", () => {
+		const routes: CollectedRouteContribution[] = [
+			{
+				contribution: {
+					mountPath: "/api",
+					handler: vi.fn() as never,
+					routes: [{ method: "GET" as never, path: "users" }], // missing leading slash
+				},
+				contributedBy: "ModA",
+				declarationIndex: 0,
+			},
+		];
+
+		const mockRouter = makeMockRouter();
+		expect(() => {
+			assembleApp(makeFrozenWorld(routes), { express: { Router: () => mockRouter as never } });
+		}).toThrow(BootError);
+
+		let thrown: BootError | undefined;
+		try {
+			assembleApp(makeFrozenWorld(routes), { express: { Router: () => mockRouter as never } });
+		} catch (err) {
+			thrown = err as BootError;
+		}
+		expect(thrown?.reason).toBe("invalid-route-advertisement-path");
+		expect(thrown?.stage).toBe("assembleApp");
+		if (thrown?.details.reason === "invalid-route-advertisement-path") {
+			expect(thrown.details.path).toBe("users");
+			expect(thrown.details.module).toBe("ModA");
+		}
+	});
+
+	it("static route and factory-produced route with same mountPath throw duplicate-contribute", () => {
+		const handlerA = vi.fn();
+		const handlerFactory = vi.fn();
+
+		const routes: CollectedRouteContribution[] = [
+			{
+				contribution: { mountPath: "/shared", handler: handlerA as never },
+				contributedBy: "StaticMod",
+				declarationIndex: 0,
+			},
+			{
+				contribution: { mountPath: "/shared", handler: handlerFactory as never },
+				contributedBy: "FactoryMod",
+				declarationIndex: 1,
+			},
+		];
+
+		const mockRouter = makeMockRouter();
+		let thrown: BootError | undefined;
+		try {
+			assembleApp(makeFrozenWorld(routes), { express: { Router: () => mockRouter as never } });
+		} catch (err) {
+			thrown = err as BootError;
+		}
+		expect(thrown?.reason).toBe("duplicate-contribute");
+		expect(thrown?.stage).toBe("assembleApp");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 14. MUST-FIX 3 — Symbol.asyncDispose NOT called on override/bootstrap values
+// ---------------------------------------------------------------------------
+
+describe("assembleApp — 14. MUST-FIX 3: no asyncDispose on external (override/bootstrap) values", () => {
+	it("does NOT call Symbol.asyncDispose on override values (spec §5.3 — consumer-owned)", async () => {
+		const asyncDisposeSpy = vi.fn(async () => {});
+		const overrideValue = {
+			[Symbol.asyncDispose]: asyncDisposeSpy,
+		};
+
+		// "myService" came from overrideComponents — it is in externalKeys.
+		// dispose() must NOT call asyncDispose on it.
+		const mockRouter = makeMockRouter();
+		const handle = assembleApp(
+			makeFrozenWorld(
+				[],
+				[],
+				{ myService: overrideValue },
+				new Set(["myService"]), // externalKeys
+			),
+			{ express: { Router: () => mockRouter as never } },
+		);
+
+		await handle.dispose();
+		expect(asyncDisposeSpy).not.toHaveBeenCalled();
+	});
+
+	it("DOES call Symbol.asyncDispose on module-provided values (not in externalKeys)", async () => {
+		const asyncDisposeSpy = vi.fn(async () => {});
+		const moduleValue = {
+			[Symbol.asyncDispose]: asyncDisposeSpy,
+		};
+
+		// "myService" was produced by a module's provides factory — not external.
+		const mockRouter = makeMockRouter();
+		const handle = assembleApp(
+			makeFrozenWorld(
+				[],
+				[],
+				{ myService: moduleValue },
+				new Set(), // empty — this key is NOT external
+			),
+			{ express: { Router: () => mockRouter as never } },
+		);
+
+		await handle.dispose();
+		expect(asyncDisposeSpy).toHaveBeenCalledOnce();
 	});
 });
