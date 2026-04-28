@@ -1,0 +1,48 @@
+{
+	"name": "@o3co/auth-provider-redis",
+	"description": "Redis-backed adapters (ChallengeStore, ReplaySeenSet) for @o3co/auth-provider-core",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/redis"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run --passWithNoTests",
+		"test:coverage": "vitest run --coverage"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "^0.0.0"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@vitest/coverage-v8": "^4.1.2",
+		"ioredis": "^5.4.1",
+		"testcontainers": "^10.16.0",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.2",
+		"zod": "^4.3.6"
+	}
+}
