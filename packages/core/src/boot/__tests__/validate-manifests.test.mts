@@ -24,6 +24,8 @@ declare module "@o3co/auth-provider-core" {
 		readonly cfgA: { readonly v: number };
 		readonly cfgB: string;
 		readonly cfgC: number;
+		readonly cfgD: boolean;
+		readonly cfgE: { readonly tag: "missing" };
 	}
 }
 
@@ -307,6 +309,67 @@ describe("validateManifests — step 4: missing-required-component", () => {
 				expect(err.details.path).toEqual([
 					{ module: "A", requires: "cfgB", satisfiedBy: "B" },
 					{ module: "B", requires: "cfgC" },
+				]);
+			}
+			return;
+		}
+		expect.fail("should have thrown");
+	});
+
+	it("branching graph: path follows the chain that actually reaches the failing module, not the lex-smallest dead end", () => {
+		// Branching scenario the previous greedy lex-smallest walk produced an
+		// inconsistent diagnostic for. Per Claude S2 (multi-agent review).
+		//
+		// Structure:
+		//   - root: requires [cfgD, cfgC]   (lex-sorted: cfgC, cfgD)
+		//   - DeadEnd: provides cfgD        (lex-smallest from root → DeadEnd)
+		//   - A: provides cfgC, requires cfgB
+		//   - F: provides cfgB, requires cfgE   ← cfgE is the missing key
+		//
+		// The chain that reaches F is root → A → F (via cfgC → cfgB).
+		// The greedy walk would pick cfgC first (lex-smallest) — which is
+		// correct here only because cfgC < cfgD by accident; the real test is
+		// that the path does NOT terminate at DeadEnd. To force the bug,
+		// reorder root.requires so the greedy walk visits the dead end first
+		// when sorting picks cfgD before cfgC. Easiest: name the dead-end
+		// providing key cfgA (lex-smallest of all) so root.requires = [cfgA,
+		// cfgC] sorts to [cfgA, cfgC] and greedy DFS visits DeadEnd first.
+		const F = defineModule({
+			name: "F",
+			requires: ["cfgE"],
+			provides: { cfgB: () => "fb" },
+		});
+		const A = defineModule({
+			name: "A",
+			requires: ["cfgB"],
+			provides: { cfgC: () => 7 },
+		});
+		const DeadEnd = defineModule({
+			name: "DeadEnd",
+			provides: { cfgA: () => ({ v: 0 }) },
+		});
+		const root = defineModule({
+			name: "root",
+			requires: ["cfgA", "cfgC"],
+		});
+		try {
+			// Input order is intentional: F first so step 4's "first failing
+			// module by input order" picks F.
+			validateManifests({
+				modules: [F, A, DeadEnd, root],
+				bootstrapComponents: minBootstrap,
+			});
+		} catch (e) {
+			const err = e as BootError;
+			expect(err.reason).toBe("missing-required-component");
+			if (err.details.reason === "missing-required-component") {
+				expect(err.details.missingKey).toBe("cfgE");
+				expect(err.details.rootModule).toBe("root");
+				// Correct path: root → A → F (NOT root → DeadEnd → F).
+				expect(err.details.path).toEqual([
+					{ module: "root", requires: "cfgC", satisfiedBy: "A" },
+					{ module: "A", requires: "cfgB", satisfiedBy: "F" },
+					{ module: "F", requires: "cfgE" },
 				]);
 			}
 			return;

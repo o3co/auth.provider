@@ -352,11 +352,6 @@ function buildMissingRequiredPath(
 		readonly satisfiedBy?: string;
 	}[];
 } {
-	const moduleByName = new Map<string, NormalisedModule>();
-	for (const m of modules) {
-		moduleByName.set(m.name, m);
-	}
-
 	// Build index-by-name for tie-breaking (earliest input-array position)
 	const indexByName = new Map<string, number>();
 	for (let i = 0; i < modules.length; i++) {
@@ -364,9 +359,20 @@ function buildMissingRequiredPath(
 	}
 
 	// Backward walk: from F, find the "root" by stepping to the earliest-
-	// input-array requirer (the module whose requires is satisfied by F's provides).
-	// Tie-break by lexicographically smallest name.
-	// Halt when no requirer exists or visited-set hit.
+	// input-array requirer (the module whose requires is satisfied by F's
+	// provides). Tie-break by lexicographically smallest name. Halt when no
+	// requirer exists or visited-set hit.
+	//
+	// During the walk, record each step as a parent-pointer link
+	// `{ child, parent, viaKey }` where `viaKey` is the lexicographically
+	// smallest key in `child.requires` whose provider is `parent`. Reversing
+	// the recorded links yields the forward chain rootModule → ... → F with
+	// each link's `requires` key already chosen — no second forward walk is
+	// needed (and no chance the walk dead-ends short of F, which was the
+	// failure mode of the previous greedy reconstruction). Per multi-agent
+	// review (Claude S2).
+	const backwardChain: NormalisedModule[] = [failingModule];
+	const linkKeys: ComponentKey[] = []; // linkKeys[i] = key of backwardChain[i+1].requires whose provider is backwardChain[i]
 	const visited = new Set<string>();
 	let current = failingModule;
 	visited.add(current.name);
@@ -379,19 +385,23 @@ function buildMissingRequiredPath(
 		for (const m of modules) {
 			if (visited.has(m.name)) continue;
 			// Does m require a key that current provides?
+			let viaKeyForM: ComponentKey | undefined;
 			for (const reqKey of m.requires) {
 				const provider = providerIndex.get(reqKey);
 				if (provider?.name === current.name) {
-					const idx = indexByName.get(m.name) ?? Number.MAX_SAFE_INTEGER;
-					if (
-						idx < bestIndex ||
-						(idx === bestIndex && bestRequirer !== undefined && m.name < bestRequirer.name)
-					) {
-						bestIndex = idx;
-						bestRequirer = m;
+					if (viaKeyForM === undefined || reqKey < viaKeyForM) {
+						viaKeyForM = reqKey;
 					}
-					break;
 				}
+			}
+			if (viaKeyForM === undefined) continue;
+			const idx = indexByName.get(m.name) ?? Number.MAX_SAFE_INTEGER;
+			if (
+				idx < bestIndex ||
+				(idx === bestIndex && bestRequirer !== undefined && m.name < bestRequirer.name)
+			) {
+				bestIndex = idx;
+				bestRequirer = m;
 			}
 		}
 
@@ -399,96 +409,51 @@ function buildMissingRequiredPath(
 			// current is the root
 			break;
 		}
+
+		// Re-derive the lex-smallest viaKey for the chosen bestRequirer (cheap;
+		// avoids carrying it through the bestRequirer-selection dance).
+		let viaKey: ComponentKey | undefined;
+		for (const reqKey of bestRequirer.requires) {
+			const provider = providerIndex.get(reqKey);
+			if (provider?.name === current.name) {
+				if (viaKey === undefined || reqKey < viaKey) {
+					viaKey = reqKey;
+				}
+			}
+		}
+
 		visited.add(bestRequirer.name);
+		backwardChain.push(bestRequirer);
+		// viaKey is guaranteed non-undefined: bestRequirer was selected because
+		// some key of its requires has provider === current. The biome-ignore
+		// reflects that invariant.
+		// biome-ignore lint/style/noNonNullAssertion: bestRequirer-selection guarantees viaKey is defined
+		linkKeys.push(viaKey!);
 		current = bestRequirer;
 	}
 
 	const rootModule = current;
 
-	// Forward walk: from rootModule to failingModule, following the chain.
+	// Forward path: reverse backwardChain to get [rootModule, ..., failingModule],
+	// reverse linkKeys correspondingly. Each link i in the forward chain becomes
+	// `{ module: forwardChain[i].name, requires: forwardLinkKeys[i], satisfiedBy: forwardChain[i + 1].name }`.
+	const forwardChain = [...backwardChain].reverse();
+	const forwardLinkKeys = [...linkKeys].reverse();
+
 	const path: { module: string; requires: ComponentKey; satisfiedBy?: string }[] = [];
-	const moduleChain = buildModuleChain(rootModule, failingModule, providerIndex);
-
-	for (let i = 0; i < moduleChain.length - 1; i++) {
-		const from = moduleChain[i];
-		const to = moduleChain[i + 1];
-
-		// Find the requires key on `from` that is satisfied by `to`.
-		// Tie-break: lexicographically smallest key per spec §5.1 step 4.
-		let linkKey: ComponentKey | undefined;
-		for (const reqKey of from.requires) {
-			const provider = providerIndex.get(reqKey);
-			if (provider?.name === to.name) {
-				if (linkKey === undefined || reqKey < linkKey) {
-					linkKey = reqKey;
-				}
-			}
-		}
-
-		if (linkKey !== undefined) {
-			path.push({ module: from.name, requires: linkKey, satisfiedBy: to.name });
-		}
+	for (let i = 0; i < forwardChain.length - 1; i++) {
+		path.push({
+			module: forwardChain[i].name,
+			// biome-ignore lint/style/noNonNullAssertion: forwardLinkKeys.length === forwardChain.length - 1
+			requires: forwardLinkKeys[i]!,
+			satisfiedBy: forwardChain[i + 1].name,
+		});
 	}
 
 	// Terminal link: the failing module with the missing key (no satisfiedBy)
 	path.push({ module: failingModule.name, requires: missingKey });
 
 	return { rootModule: rootModule.name, path };
-}
-
-/**
- * Build an ordered chain of modules from `start` to `end` following
- * the requires→provides links. Per spec §5.1 step 4 determinism rule:
- * "When multiple `requires` keys on a single module reach F, the
- * lexicographically smallest key wins." This is a greedy DFS where at
- * each step the next hop is chosen by sorting `current.requires`
- * lexicographically and taking the first key whose provider is unvisited.
- *
- * Cycle-during-walk safety: a visited-set bounds the walk; if a previously-
- * visited module would be revisited, the walk stops cleanly. The resulting
- * (possibly partial) chain is still well-formed for diagnostic purposes
- * per spec §5.1 step 4.
- *
- * @internal
- */
-function buildModuleChain(
-	start: NormalisedModule,
-	end: NormalisedModule,
-	providerIndex: ReadonlyMap<ComponentKey, NormalisedModule>,
-): NormalisedModule[] {
-	if (start.name === end.name) {
-		return [start];
-	}
-
-	const chain: NormalisedModule[] = [start];
-	const visited = new Set<string>([start.name]);
-	let current = start;
-
-	while (current.name !== end.name) {
-		// Sort requires keys lexicographically; first unvisited provider wins.
-		// Per spec §5.1 step 4: "the lexicographically smallest key wins".
-		const sortedKeys = [...current.requires].sort();
-		let nextHop: NormalisedModule | undefined;
-		for (const reqKey of sortedKeys) {
-			const provider = providerIndex.get(reqKey);
-			if (provider !== undefined && !visited.has(provider.name)) {
-				nextHop = provider;
-				break;
-			}
-		}
-
-		if (nextHop === undefined) {
-			// Dead end: no unvisited next hop reachable from current. The chain
-			// is incomplete but well-formed for diagnostic purposes per spec.
-			break;
-		}
-
-		visited.add(nextHop.name);
-		chain.push(nextHop);
-		current = nextHop;
-	}
-
-	return chain;
 }
 
 /**
