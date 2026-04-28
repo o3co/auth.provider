@@ -30,8 +30,9 @@
  * Per A2-α §6.1 the v0.5.0 baseline slot set is added incrementally during
  * Phases 3–8 of the v0.5.0 redesign. This empty base is the foundation.
  *
- * Per the cross-spec X1 amendment (recorded in project_v050_redesign_complete
- * memory + A3 spec §5.5 line 391 + A4 spec §5.6): the v0.5.0 ComponentMap
+ * Per the cross-spec X1 amendment (documented in v0.5.0 redesign specs A3
+ * §5.5 line 391 and A4 §5.6 of this repository's design history): the
+ * v0.5.0 ComponentMap
  * does NOT contain the legacy `userSessionStore: UserSessionStoreBase` nor
  * `refreshTokenStore: RefreshTokenStoreBase` slots. Phase 5 (A1) and later
  * phases declaration-merge their replacement slots without those legacy

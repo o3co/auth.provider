@@ -16,7 +16,7 @@ test("ComponentMap does NOT contain v0.4.x legacy slots (X1/X2 amendment)", () =
   // The two slots have asymmetric invariants:
   //
   // - `userSessionStore`: A4 (Phase 8) reuses this slot name with a NARROW
-  //   3-method type (`create` / `findById` / `delete` only — no
+  //   3-method type (`create` / `get` / `delete` only — no
   //   `registerRP` / `linkFamily` / `updateClaims` / `removeFederation`).
   //   The discriminator below uses `registerRP` as the legacy-shape
   //   signature; a narrow A4 `userSessionStore` does NOT have `registerRP`,
@@ -27,10 +27,12 @@ test("ComponentMap does NOT contain v0.4.x legacy slots (X1/X2 amendment)", () =
   //   `refreshTokenFamilyStore`). The presence-based check below fires if
   //   the legacy name reappears at all in any phase.
 
-  type _LegacyUserSessionAbsent = ComponentMap extends {
-    userSessionStore: { registerRP: (...args: never[]) => unknown };
-  }
-    ? "FAIL: legacy userSessionStore (with registerRP) present"
+  type _LegacyUserSessionAbsent = "userSessionStore" extends keyof ComponentMap
+    ? NonNullable<ComponentMap["userSessionStore"]> extends {
+        registerRP: (...args: never[]) => unknown;
+      }
+      ? "FAIL: legacy userSessionStore (with registerRP) present"
+      : "PASS"
     : "PASS";
   type _A1 = _LegacyUserSessionAbsent extends "PASS" ? true : false;
   expectTypeOf<_A1>().toEqualTypeOf<true>();
