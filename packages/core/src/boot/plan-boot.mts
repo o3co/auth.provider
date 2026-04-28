@@ -97,8 +97,9 @@ function buildDependencyGraph(
 
 	/**
 	 * Add a directed edge from `from` (the requiring module) to `to` (the
-	 * providing module), unless `to === from` (self-loop prevention at graph
-	 * build time — Tarjan handles self-loops anyway).
+	 * providing module). Self-edges (from === to) are intentionally allowed so
+	 * that Tarjan's SCC + the cycle-detection escalation check can detect
+	 * self-cycles and throw `BootError reason="circular-dependency"`.
 	 */
 	function addEdge(from: string, to: string): void {
 		// biome-ignore lint/style/noNonNullAssertion: nodeOrder is built from validated.modules, adj and radj entries are pre-seeded
@@ -113,7 +114,7 @@ function buildDependencyGraph(
 		for (const key of norm.requires) {
 			if (virtualKeys.has(key)) continue;
 			const provider = providers.get(key);
-			if (provider && provider.manifest.name !== norm.name) {
+			if (provider) {
 				addEdge(norm.name, provider.manifest.name);
 			}
 		}
@@ -121,7 +122,7 @@ function buildDependencyGraph(
 		for (const key of norm.optional) {
 			if (virtualKeys.has(key)) continue;
 			const provider = providers.get(key);
-			if (provider && provider.manifest.name !== norm.name) {
+			if (provider) {
 				addEdge(norm.name, provider.manifest.name);
 			}
 		}
@@ -350,23 +351,13 @@ function topologicalSort(graph: DependencyGraph, validated: ValidatedManifests):
 		declOrder.set(validated.modules[i].manifest.name, i);
 	}
 
-	// Compute in-degrees (number of dependencies each module has within graph)
+	// inDegree[node] = number of other modules this node depends on
+	// (i.e. the count of outgoing requires/optional edges from this node).
+	// Kahn's algorithm pops nodes whose inDegree drops to 0, then walks the
+	// reverse adjacency to decrement dependents.
 	const inDegree = new Map<string, number>();
 	for (const node of graph.nodeOrder) {
-		inDegree.set(node, 0);
-	}
-	for (const [, deps] of graph.adj) {
-		for (const dep of deps) {
-			inDegree.set(dep, inDegree.get(dep) ?? 0); // providers are not incremented here
-		}
-	}
-	// inDegree[node] = number of other modules that this node depends on
-	// i.e. count how many "incoming" edges from the perspective of Kahn's
-	// (in topo sort, "in-degree" = how many prerequisites)
-	// For "A depends on B", B has no incoming edge from A in the prerequisite sense;
-	// A has B as a prerequisite. So in-degree[A] = number of modules A depends on.
-	for (const [node, deps] of graph.adj) {
-		inDegree.set(node, deps.size);
+		inDegree.set(node, graph.adj.get(node)?.size ?? 0);
 	}
 
 	// Ready queue: nodes whose in-degree is 0 (all prerequisites satisfied)

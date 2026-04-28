@@ -93,7 +93,40 @@ function validated(
 // Cycle detection (step 2)
 // ---------------------------------------------------------------------------
 
-describe("planBoot — step 2: cycle detection", () => {
+describe("planBoot — cycle detection (step 2)", () => {
+	it("step 2: detects self-cycle (module requires its own provided key)", () => {
+		const a = defineModule({
+			name: "A",
+			requires: ["slotA"] as const,
+			provides: { slotA: () => 1 },
+		});
+		const vm = validated([a]);
+		try {
+			planBoot(vm, minBootstrap, undefined);
+		} catch (e) {
+			const err = e as BootError;
+			expect(err.reason).toBe("circular-dependency");
+			expect(err.stage).toBe("planBoot");
+			if (err.details.reason === "circular-dependency") {
+				expect(err.details.cycle.length).toBeGreaterThanOrEqual(1);
+				expect(err.details.cycle[0]?.module).toBe("A");
+			}
+			return;
+		}
+		expect.fail("should have thrown");
+	});
+
+	it("step 2: detects self-cycle even when the slot is eager-seeded", () => {
+		const a = defineModule({
+			name: "A",
+			requires: ["slotA"] as const,
+			provides: { slotA: () => 1 },
+			lifecycle: { slotA: { eager: true } },
+		});
+		const vm = validated([a]);
+		expect(() => planBoot(vm, minBootstrap, undefined)).toThrowError(BootError);
+	});
+
 	it("throws circular-dependency with stage planBoot when A→B→A", () => {
 		// A requires slotB (provided by B); B requires slotA (provided by A).
 		const modA = defineModule({
