@@ -36,7 +36,7 @@ describe("createDefaultChallengeCeremony — 3-outcome path (memory backends)", 
 		expect(await set.contains("scope-A", "v")).toBe(true);
 		// Anchor the runtime-freeze contract: a future refactor that drops
 		// Object.freeze while keeping `as const` would still type-check but
-		// silently weaken immutability. Per Task 5 reviewer P5 (advisory).
+		// silently weaken immutability — fires here on the first such commit.
 		expect(Object.isFrozen(result)).toBe(true);
 	});
 

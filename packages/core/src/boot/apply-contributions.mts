@@ -265,12 +265,10 @@ function collectorFor(
  *      that are fully populated at request time.
  *   2. Name-keyed pass (in `BootPlan.initOrder`):
  *        - Pre-scan phase: validate no duplicate/missing-target in collector
- *          state BEFORE running any factory for this module. This is the Phase 3
- *          carry-forward from GrantRegistry.addModule fix (commit de1ddb92) —
- *          prevents factory side-effect leak when one module's contribution set
- *          fails midway.
- *          Per project_v050_phase3_complete memory: pre-scan pattern from
- *          GrantRegistry.addModule fix (de1ddb92).
+ *          state BEFORE running any factory for this module. The pre-scan
+ *          mirrors `GrantRegistry.addModule` (commit de1ddb92) — prevents
+ *          factory side-effect leak when one module's contribution set fails
+ *          midway.
  *        - Materialize+register phase: invoke factories, route to
  *          `collector.register` (contributes) or `collector.replace` (overrides).
  *   3. List-shaped pass (in INPUT-ARRAY order):
@@ -324,9 +322,8 @@ export async function applyContributions(
 		);
 
 		// ------------------------------------------------------------------
-		// Pre-scan phase (Phase 3 carry-forward — prevent side-effect leak).
-		// Per project_v050_phase3_complete memory: pre-scan pattern from
-		// GrantRegistry.addModule fix (de1ddb92).
+		// Pre-scan phase (mirrors GrantRegistry.addModule fix de1ddb92 to
+		// prevent factory side-effect leak).
 		//
 		// Validate ALL collector invariants for this module BEFORE invoking
 		// any factory. If any check fails, no factory for this module runs.

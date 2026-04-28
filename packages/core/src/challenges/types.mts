@@ -118,12 +118,12 @@ export interface ChallengeCeremony {
 //   - challengeCeremony?: ChallengeCeremony
 //
 // Per A1 §5.5: optional slots — modules MAY omit the entire challenge-related
-// stack. Per Phase 4 lesson (project_v050_phase4_complete memory): declare
-// module uses the PACKAGE NAME ("@o3co/auth-provider-core"), NOT a relative
-// path — only the package name pulls in consumer augmentations.
+// stack. The `declare module` block uses the PACKAGE NAME
+// ("@o3co/auth-provider-core"), NOT a relative path — only the package name
+// pulls in consumer augmentations to the same `ComponentMap` interface.
 //
-// Per master roadmap §3.1: unnamespaced names are reserved for o3co. Consumer
-// keys MUST namespace (e.g., "acme.cacheChallengeStore").
+// Unnamespaced names are reserved for first-party slots. Consumer keys MUST
+// namespace (e.g., "acme.cacheChallengeStore") to avoid collisions.
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStore?: ChallengeStore;

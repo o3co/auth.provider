@@ -19,15 +19,17 @@ import type { ReplaySeenSet } from "../types.mjs";
 
 /**
  * In-process Map-backed ReplaySeenSet. Same atomicity argument as the
- * memory ChallengeStore (Task 3): Node.js single-event-loop + no awaits
- * inside the critical section between Map.get/check and Map.set/delete.
+ * memory ChallengeStore: Node.js single-event-loop + no awaits inside the
+ * critical section between Map.get/check and Map.set/delete.
  *
  * GC is lazy (per-operation cleanup of expired entries). No background sweep.
  *
- * The duplicated `getLive` helper (mirroring memory ChallengeStore) is
- * deliberate — Task 3 reviewer S2 confirmed three similar lines is preferable
- * to a premature abstraction; the two stores have semantically distinct
- * contracts (issue throws on duplicate; markSeen returns false on duplicate).
+ * The `getLive` helper is deliberately duplicated rather than shared with
+ * the memory ChallengeStore — three similar lines is preferable to a
+ * premature abstraction here, since the two stores have semantically
+ * distinct contracts (`issue` throws on duplicate; `markSeen` returns false
+ * on duplicate). A shared helper would either branch on that distinction
+ * (defeating the purpose) or share trivial Map+TTL plumbing only.
  *
  * Per A1 §7.1.
  */
