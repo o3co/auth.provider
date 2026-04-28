@@ -10,6 +10,10 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
+		},
+		"./modules/manifest": {
+			"import": "./dist/modules/manifest/index.mjs",
+			"types": "./dist/modules/manifest/index.d.mts"
 		}
 	},
 	"files": [
