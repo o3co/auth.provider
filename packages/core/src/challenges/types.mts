@@ -108,3 +108,25 @@ export interface ChallengeCeremony {
 	 */
 	consume(scope: string, value: string): Promise<ChallengeCeremonyOutcome>;
 }
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge (A1 §5.5)
+// ---------------------------------------------------------------------------
+//
+// Slots:
+//   - challengeStore?: ChallengeStore
+//   - challengeCeremony?: ChallengeCeremony
+//
+// Per A1 §5.5: optional slots — modules MAY omit the entire challenge-related
+// stack. Per Phase 4 lesson (project_v050_phase4_complete memory): declare
+// module uses the PACKAGE NAME ("@o3co/auth-provider-core"), NOT a relative
+// path — only the package name pulls in consumer augmentations.
+//
+// Per master roadmap §3.1: unnamespaced names are reserved for o3co. Consumer
+// keys MUST namespace (e.g., "acme.cacheChallengeStore").
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly challengeStore?: ChallengeStore;
+		readonly challengeCeremony?: ChallengeCeremony;
+	}
+}

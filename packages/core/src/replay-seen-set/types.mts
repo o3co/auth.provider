@@ -55,3 +55,12 @@ export interface ReplaySeenSet {
 	 */
 	contains(scope: string, key: string): Promise<boolean>;
 }
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge (A1 §5.5)
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly replaySeenSet?: ReplaySeenSet;
+	}
+}
