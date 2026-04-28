@@ -14,11 +14,14 @@
  * limitations under the License.
  */
 import {
+	type AdapterBuilder,
 	type Challenge,
 	ChallengeStorageError,
 	type ChallengeStore,
 	canonicalChallengeKey,
+	defineModule,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { RedisClient } from "./types.mjs";
 
 /**
@@ -77,3 +80,47 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 		},
 	};
 }
+
+/**
+ * AdapterFactory builder for runtime-config-driven backend selection
+ * (composition pattern §8.4). Consumer registers via:
+ *   factory.register("redis", redisChallengeStoreBuilder);
+ * Then calls:
+ *   factory.create({ type: "redis", client, keyPrefix: "chal:" });
+ */
+export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (config) => {
+	const c = config as { client: RedisClient; keyPrefix?: string };
+	return createRedisChallengeStore({
+		client: c.client,
+		keyPrefix: c.keyPrefix ?? "chal:",
+	});
+};
+
+/**
+ * `defineModule` manifest for the Redis ChallengeStore. Static composition
+ * path (§8.1). For runtime-config-driven selection use the builder above.
+ *
+ * configSchema: top-level key `redisChallengeStore` (module-namespaced per
+ * master roadmap §3.5 — NO bare `keyPrefix` top-level key).
+ */
+export const redisChallengeStoreModule = defineModule({
+	name: "redis-challenge-store",
+	requires: ["redisClient", "config"] as const,
+	configSchema: z.object({
+		redisChallengeStore: z
+			.object({
+				keyPrefix: z.string().default("chal:"),
+			})
+			.default({ keyPrefix: "chal:" }),
+	}),
+	provides: {
+		challengeStore: (deps) => {
+			const cfg = (deps.config as { redisChallengeStore: { keyPrefix: string } })
+				.redisChallengeStore;
+			return createRedisChallengeStore({
+				client: deps.redisClient,
+				keyPrefix: cfg.keyPrefix,
+			});
+		},
+	},
+});

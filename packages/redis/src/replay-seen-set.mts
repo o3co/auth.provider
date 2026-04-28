@@ -14,10 +14,13 @@
  * limitations under the License.
  */
 import {
+	type AdapterBuilder,
 	ChallengeStorageError,
 	canonicalChallengeKey,
+	defineModule,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { RedisClient } from "./types.mjs";
 
 /**
@@ -70,3 +73,46 @@ export function createRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): Repla
 		},
 	};
 }
+
+/**
+ * AdapterFactory builder for runtime-config-driven backend selection
+ * (composition pattern §8.4). Consumer registers via:
+ *   factory.register("redis", redisReplaySeenSetBuilder);
+ * Then calls:
+ *   factory.create({ type: "redis", client, keyPrefix: "replay:" });
+ */
+export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = (config) => {
+	const c = config as { client: RedisClient; keyPrefix?: string };
+	return createRedisReplaySeenSet({
+		client: c.client,
+		keyPrefix: c.keyPrefix ?? "replay:",
+	});
+};
+
+/**
+ * `defineModule` manifest for the Redis ReplaySeenSet. Static composition
+ * path (§8.1). For runtime-config-driven selection use the builder above.
+ *
+ * configSchema: top-level key `redisReplaySeenSet` (module-namespaced per
+ * master roadmap §3.5 — NO bare `keyPrefix` top-level key).
+ */
+export const redisReplaySeenSetModule = defineModule({
+	name: "redis-replay-seen-set",
+	requires: ["redisClient", "config"] as const,
+	configSchema: z.object({
+		redisReplaySeenSet: z
+			.object({
+				keyPrefix: z.string().default("replay:"),
+			})
+			.default({ keyPrefix: "replay:" }),
+	}),
+	provides: {
+		replaySeenSet: (deps) => {
+			const cfg = (deps.config as { redisReplaySeenSet: { keyPrefix: string } }).redisReplaySeenSet;
+			return createRedisReplaySeenSet({
+				client: deps.redisClient,
+				keyPrefix: cfg.keyPrefix,
+			});
+		},
+	},
+});

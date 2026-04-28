@@ -19,4 +19,16 @@
 // inference for the redisClient slot.
 import "./component-map.mjs";
 
+export {
+	createRedisChallengeStore,
+	type RedisChallengeStoreOptions,
+	redisChallengeStoreBuilder,
+	redisChallengeStoreModule,
+} from "./challenges.mjs";
+export {
+	createRedisReplaySeenSet,
+	type RedisReplaySeenSetOptions,
+	redisReplaySeenSetBuilder,
+	redisReplaySeenSetModule,
+} from "./replay-seen-set.mjs";
 export type { RedisClient } from "./types.mjs";
