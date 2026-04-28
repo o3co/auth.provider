@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
-// Public surface populated by Tasks 10-13.
-// Intentionally empty in Task 9; the scaffold is the deliverable.
-export {};
+// Side-effect import: declaration-merge `redisClient` into core's ComponentMap.
+// Consumer's `import "@o3co/auth-provider-redis"` is enough to enable type
+// inference for the redisClient slot.
+import "./component-map.mjs";
+
+export type { RedisClient } from "./types.mjs";
