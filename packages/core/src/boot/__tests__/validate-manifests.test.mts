@@ -807,7 +807,7 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 // ---------------------------------------------------------------------------
 
 describe("validateManifests — step 14: route-order-target-missing", () => {
-	it("throws route-order-target-missing for unknown referenced id in before", () => {
+	it("throws route-order-target-missing for unknown referenced id in before (no factory routes)", () => {
 		const r = defineModule({
 			name: "r",
 			contributes: {
@@ -838,6 +838,44 @@ describe("validateManifests — step 14: route-order-target-missing", () => {
 			return;
 		}
 		expect.fail("should have thrown");
+	});
+
+	it("does NOT throw at validate when a static route's before targets an id that may be produced by a factory route in another module", () => {
+		// Per multi-agent review (Codex P2): factory routes return their
+		// RouteContribution at materialise time, so their `id` is opaque at
+		// validate-stage. Rejecting unknown refs here would block the
+		// documented mixed static/factory route ordering scenario. When at
+		// least one module has a factory-shaped route entry, validate-stage
+		// defers all unknown-ref checks to assembleApp's mount-order pass
+		// (§5.6 step 1) which sees the full materialised id set.
+		const consumer = defineModule({
+			name: "consumer",
+			contributes: {
+				routes: [
+					{
+						mountPath: "/consumer",
+						handler: stubHandler(),
+						id: "consumer-route",
+						before: ["factory-produced-id"],
+					},
+				],
+			},
+		});
+		const provider = defineModule({
+			name: "provider",
+			contributes: {
+				// Function-shaped entry — the factory produces the route at apply-time.
+				// Its `id` is not visible at validate-stage.
+				routes: [() => ({ mountPath: "/factory", handler: stubHandler() })],
+			},
+		});
+		expect(() =>
+			validateManifests({
+				modules: [consumer, provider],
+				bootstrapComponents: minBootstrap,
+				contributionKinds: { routes: makeStubRouteCollector() as never },
+			}),
+		).not.toThrow();
 	});
 });
 

@@ -1036,12 +1036,38 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 /**
  * Step 14: For each `RouteContribution.before` / `after` token, the
  * referenced `id` must exist among the `id`s declared by some other
- * `RouteContribution`. Unknown `id` throws `route-order-target-missing`.
+ * `RouteContribution`.
+ *
+ * Factory-shaped routes (`(deps) => RouteContribution`) produce their `id`
+ * at materialise time, so their ids are opaque at validate-stage. When at
+ * least one module declares a function-shaped routes entry anywhere,
+ * unknown refs are deferred to assembleApp's mount-order pass (§5.6
+ * step 1), which sees the full materialised id set. This carve-out keeps
+ * the documented mixed static/factory route ordering scenario reachable.
+ * Per multi-agent review (Codex P2).
+ *
+ * Pure-static apps (no factory route entries anywhere) get the typo-catch
+ * benefit of the early check.
+ *
  * Per A2-β §5.1 step 14.
  * @internal
  */
 function checkRouteOrderEdges(rawModules: readonly Module[]): void {
-	// Collect all declared route ids
+	// Detect any factory-shaped routes entries across all modules. A single
+	// factory route anywhere defers all unknown-ref checks to assembleApp.
+	let anyFactoryRouteEntry = false;
+	for (const m of rawModules) {
+		for (const entry of m.contributes?.routes ?? []) {
+			if (typeof entry === "function") {
+				anyFactoryRouteEntry = true;
+				break;
+			}
+		}
+		if (anyFactoryRouteEntry) break;
+	}
+	if (anyFactoryRouteEntry) return;
+
+	// Collect all declared route ids (pure-static path)
 	const declaredIds = new Set<string>();
 	for (const m of rawModules) {
 		for (const entry of m.contributes?.routes ?? []) {
