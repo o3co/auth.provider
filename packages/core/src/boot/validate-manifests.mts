@@ -30,7 +30,7 @@
 
 import { z } from "zod";
 import { composeConfigSchema } from "../config/application.schema.mjs";
-import type { ComponentKey } from "../modules/manifest/component-map.mjs";
+import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
@@ -60,7 +60,7 @@ export interface ValidateManifestsInput {
 	readonly modules: readonly Module[];
 	readonly bootstrapComponents: BootstrapMap;
 	readonly contributionKinds?: ContributionKindMap;
-	readonly overrideComponents?: Partial<Record<ComponentKey, unknown>>;
+	readonly overrideComponents?: Partial<ComponentMap>;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +250,7 @@ function checkProvidesClosure(modules: readonly NormalisedModule[]): void {
 function checkBootstrapAndSyntheticDisjointness(
 	modules: readonly NormalisedModule[],
 	bootstrap: BootstrapMap,
-	override: Partial<Record<ComponentKey, unknown>> | undefined,
+	override: Partial<ComponentMap> | undefined,
 ): void {
 	const bootstrapKeys = new Set<string>(Object.keys(bootstrap));
 	const overrideKeys = new Set<string>(Object.keys(override ?? {}));
@@ -547,7 +547,7 @@ function buildModuleChain(
 function checkRequiresClosure(
 	modules: readonly NormalisedModule[],
 	bootstrap: BootstrapMap,
-	override: Partial<Record<ComponentKey, unknown>> | undefined,
+	override: Partial<ComponentMap> | undefined,
 ): void {
 	const bootstrapKeys = new Set<string>(Object.keys(bootstrap));
 	const overrideKeys = new Set<string>(Object.keys(override ?? {}));
@@ -1143,15 +1143,11 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	checkBootstrapAndSyntheticDisjointness(
 		normalisedModules,
 		bootstrapComponents,
-		overrideComponents as Partial<Record<ComponentKey, unknown>> | undefined,
+		overrideComponents,
 	);
 
 	// Step 4: Requires closure
-	checkRequiresClosure(
-		normalisedModules,
-		bootstrapComponents,
-		overrideComponents as Partial<Record<ComponentKey, unknown>> | undefined,
-	);
+	checkRequiresClosure(normalisedModules, bootstrapComponents, overrideComponents);
 
 	// Step 5: Contribution kind coverage
 	checkContributionKindCoverage(normalisedModules, contributionKinds);

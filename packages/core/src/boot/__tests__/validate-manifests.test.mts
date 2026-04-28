@@ -204,6 +204,57 @@ describe("validateManifests — step 3: bootstrap + synthetic collisions", () =>
 		}
 		expect.fail("should have thrown");
 	});
+
+	it("step 3c: throws synthetic-key-collision when bootstrapComponents contains grantHandlerResolver", () => {
+		try {
+			validateManifests({
+				modules: [],
+				bootstrapComponents: {
+					...minBootstrap,
+					// grantHandlerResolver is a synthetic key — host environment cannot pre-seed it.
+					grantHandlerResolver: { get: () => undefined, entries: () => [][Symbol.iterator]() },
+				} as never,
+			});
+		} catch (e) {
+			const err = e as BootError;
+			expect(err.reason).toBe("synthetic-key-collision");
+			if (
+				err.details.reason === "synthetic-key-collision" &&
+				err.details.source === "bootstrapComponents"
+			) {
+				expect(err.details.componentKey).toBe("grantHandlerResolver");
+			}
+			return;
+		}
+		expect.fail("should have thrown");
+	});
+
+	it("step 3c: throws synthetic-key-collision when overrideComponents contains tokenExchangeValidatorResolver", () => {
+		try {
+			validateManifests({
+				modules: [],
+				bootstrapComponents: minBootstrap,
+				overrideComponents: {
+					// tokenExchangeValidatorResolver is a synthetic key — overrideComponents cannot supply it.
+					tokenExchangeValidatorResolver: {
+						get: () => undefined,
+						entries: () => [][Symbol.iterator](),
+					},
+				} as never,
+			});
+		} catch (e) {
+			const err = e as BootError;
+			expect(err.reason).toBe("synthetic-key-collision");
+			if (
+				err.details.reason === "synthetic-key-collision" &&
+				err.details.source === "overrideComponents"
+			) {
+				expect(err.details.componentKey).toBe("tokenExchangeValidatorResolver");
+			}
+			return;
+		}
+		expect.fail("should have thrown");
+	});
 });
 
 // ---------------------------------------------------------------------------
