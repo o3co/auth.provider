@@ -256,7 +256,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				error_description: "client repository unavailable",
 			});
 		}
-		if (!client || !client.allowedAzpForFederationToken) {
+		if (!client?.allowedAzpForFederationToken) {
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "federation.token.forbidden",

@@ -22,11 +22,7 @@ import type { FederationTokenStoreBase } from "./federation-tokens/types.mjs";
 import { GrantRegistry } from "./grants/registry.mjs";
 import type { KeyStore } from "./keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "./mfa/types.mjs";
-import type {
-	LegacyModule as Module,
-	ModuleContext,
-	PathResolver,
-} from "./modules/types.mjs";
+import type { LegacyModule as Module, ModuleContext, PathResolver } from "./modules/types.mjs";
 import type { GrantPolicyHookBase } from "./policy/types.mjs";
 import type { RateLimiterBase } from "./ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
