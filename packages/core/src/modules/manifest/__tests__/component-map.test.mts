@@ -1,11 +1,18 @@
 import { expectTypeOf, test } from "vitest";
 import type { ComponentKey, ComponentMap } from "../component-map.mjs";
 
-test("ComponentMap is declaration-mergeable (empty base accepts any consumer key)", () => {
-  // Sanity: ComponentMap is an interface (declaration-mergeable). The empty
-  // base has no keys, so ComponentKey is `never`. Phases 5+ will declaration-
-  // merge slots which expand the union.
-  expectTypeOf<ComponentKey>().toEqualTypeOf<never>();
+test("ComponentMap accumulates declaration-merged slots from each phase", () => {
+  // Sanity: ComponentMap is an interface (declaration-mergeable). Phase 1
+  // shipped with an empty base; Phase 4 (A2-β) adds `config` and
+  // `pathResolver` per spec §6.2's DefaultBootstrapMap contract; later
+  // phases expand the union further.
+  //
+  // This test asserts that the two Phase 4 bootstrap slots are present.
+  // It does NOT pin the full union — Phase 5/6/7/8 will add more slots,
+  // and a `toEqualTypeOf` here would force a churn-edit per phase. The
+  // narrower `Extract<...>` check fires only when a Phase 4 slot regresses.
+  type Bootstrap = Extract<ComponentKey, "config" | "pathResolver">;
+  expectTypeOf<Bootstrap>().toEqualTypeOf<"config" | "pathResolver">();
 });
 
 test("ComponentMap does NOT contain v0.4.x legacy slots (X1/X2 amendment)", () => {

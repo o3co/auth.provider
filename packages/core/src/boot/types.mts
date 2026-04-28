@@ -30,6 +30,7 @@
 import type { Server as HttpServer } from 'node:http';
 import type { Router } from 'express';
 import type { z } from 'zod';
+import type { AppConfig } from '../config/application.schema.mjs';
 import type { ComponentKey, ComponentMap } from '../modules/manifest/component-map.mjs';
 import type {
   AuditHook,
@@ -41,6 +42,27 @@ import type {
 } from '../modules/manifest/contributes-map.mjs';
 import type { Module } from '../modules/manifest/module-spec.mjs';
 import type { HttpMethod, RouteContribution } from '../modules/manifest/route-contribution.mjs';
+import type { PathResolver } from '../modules/types.mjs';
+
+// ---------------------------------------------------------------------------
+// ComponentMap bootstrap slots (per A2-β §6.2 DefaultBootstrapMap contract)
+// ---------------------------------------------------------------------------
+//
+// `config` and `pathResolver` are the two slots every createApp call MUST
+// receive from the host environment per spec §6.2's DefaultBootstrapMap
+// shape. They are declaration-merged into ComponentMap here (in the boot
+// package, where they originate) so that DefaultBootstrapMap satisfies
+// `B extends BootstrapMap` and so modules can declare them in `requires`.
+//
+// Per A2-α §6.1 the v0.5.0 baseline slot set lands incrementally during
+// Phases 3-8; these two are owned by Phase 4 / A2-β because they are
+// the boot-planner-imposed contract, not protocol features.
+declare module '@o3co/auth-provider-core' {
+  interface ComponentMap {
+    readonly config: AppConfig;
+    readonly pathResolver: PathResolver;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // ContributionKind
@@ -370,11 +392,16 @@ export type BootstrapMap = {
 
 /**
  * Default bootstrap map shape. The minimal host-environment contract for the
- * built-in createApp call.
+ * built-in createApp call. Closed shape per spec §6.2: independent of
+ * ComponentMap's slot set — defines what createApp requires from the host
+ * environment by default.
  *
  * Per A2-β §6.2.
  */
-export type DefaultBootstrapMap = BootstrapMap;
+export type DefaultBootstrapMap = {
+  readonly config: AppConfig;
+  readonly pathResolver: PathResolver;
+};
 
 /**
  * Options accepted by createApp. The generic B constrains bootstrapComponents

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import type { AppConfig } from '../../config/application.schema.mjs';
+import type { PathResolver } from '../../modules/types.mjs';
 import type {
   AppHandle,
   BootErrorDetails,
@@ -24,6 +26,7 @@ import type {
   ConfigValidationFailedDetails,
   ContributeAndOverrideSameKeyDetails,
   ContributeFactoryFailedDetails,
+  DefaultBootstrapMap,
   DuplicateContributeDetails,
   DuplicateModuleNameDetails,
   DuplicateOverrideDetails,
@@ -270,5 +273,18 @@ describe('BootError', () => {
 describe('AppHandle', () => {
   it('has exactly the four expected keys', () => {
     expectTypeOf<keyof AppHandle>().toEqualTypeOf<'router' | 'listen' | 'dispose' | 'components'>();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DefaultBootstrapMap shape (spec §6.2)
+// ---------------------------------------------------------------------------
+
+describe('DefaultBootstrapMap', () => {
+  it('declares the closed { config: AppConfig; pathResolver: PathResolver } shape per spec §6.2', () => {
+    expectTypeOf<DefaultBootstrapMap>().toEqualTypeOf<{
+      readonly config: AppConfig;
+      readonly pathResolver: PathResolver;
+    }>();
   });
 });
