@@ -5,6 +5,8 @@
 	},
 	"files": [
 		"src/modules/manifest/__tests__/component-map.test.mts",
-		"src/modules/manifest/__tests__/provider.test.mts"
+		"src/modules/manifest/__tests__/provider.test.mts",
+		"src/modules/manifest/__tests__/route-contribution.test.mts",
+		"src/modules/manifest/__tests__/contributes-map.test.mts"
 	]
 }
