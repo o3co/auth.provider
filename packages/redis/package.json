@@ -30,7 +30,7 @@
 		"prebuild": "rimraf dist",
 		"build": "tsc",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run --passWithNoTests",
+		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"
 	},
 	"peerDependencies": {
