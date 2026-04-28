@@ -47,13 +47,13 @@ export type ConfigSchema = z.ZodObject<z.ZodRawShape>;
  * Per A2-β §4.1.
  */
 export interface ComponentLifecycle<K extends ComponentKey> {
-  /** When `true`, eagerly instantiate this component at boot. Per A2-β §4.1. */
-  readonly eager?: boolean;
-  /**
-   * Called on dispose with the resolved component value. Per A2-β §4.1.
-   * Errors aggregate into the AggregateError that `dispose()` rejects with.
-   */
-  readonly cleanup?: (value: ComponentMap[K]) => void | Promise<void>;
+	/** When `true`, eagerly instantiate this component at boot. Per A2-β §4.1. */
+	readonly eager?: boolean;
+	/**
+	 * Called on dispose with the resolved component value. Per A2-β §4.1.
+	 * Errors aggregate into the AggregateError that `dispose()` rejects with.
+	 */
+	readonly cleanup?: (value: ComponentMap[K]) => void | Promise<void>;
 }
 
 /**
@@ -64,64 +64,61 @@ export interface ComponentLifecycle<K extends ComponentKey> {
  *
  * Per A2-α §2.1, §3.1.
  */
-export interface ModuleSpec<
-  R extends ComponentKey = never,
-  O extends ComponentKey = never,
-> {
-  /** Module identity — unique across all modules in a single createApp call. */
-  readonly name: string;
+export interface ModuleSpec<R extends ComponentKey = never, O extends ComponentKey = never> {
+	/** Module identity — unique across all modules in a single createApp call. */
+	readonly name: string;
 
-  /** Optional Zod schema declaring this module's config slice. */
-  readonly configSchema?: ConfigSchema;
+	/** Optional Zod schema declaring this module's config slice. */
+	readonly configSchema?: ConfigSchema;
 
-  /**
-   * Component keys this module reads from DI. Required keys appear as
-   * `readonly K: ComponentMap[K]` on the typed deps object passed to
-   * every provider in `provides` and every factory in `contributes`.
-   */
-  readonly requires?: readonly R[];
+	/**
+	 * Component keys this module reads from DI. Required keys appear as
+	 * `readonly K: ComponentMap[K]` on the typed deps object passed to
+	 * every provider in `provides` and every factory in `contributes`.
+	 */
+	readonly requires?: readonly R[];
 
-  /**
-   * Component keys this module reads opportunistically. Optional keys
-   * appear as `readonly K?: ComponentMap[K]` on the typed deps.
-   */
-  readonly optional?: readonly O[];
+	/**
+	 * Component keys this module reads opportunistically. Optional keys
+	 * appear as `readonly K?: ComponentMap[K]` on the typed deps.
+	 */
+	readonly optional?: readonly O[];
 
-  /**
-   * Component values this module materialises into the DI graph. Each
-   * value is `(deps) => ComponentMap[K] | Promise<ComponentMap[K]>`.
-   */
-  readonly provides?: {
-    readonly [K in ComponentKey]?: Provider<K, ProviderDeps<R, O>>;
-  };
+	/**
+	 * Component values this module materialises into the DI graph. Each
+	 * value is `(deps) => ComponentMap[K] | Promise<ComponentMap[K]>`.
+	 */
+	readonly provides?: {
+		readonly [K in ComponentKey]?: Provider<K, ProviderDeps<R, O>>;
+	};
 
-  /**
-   * Protocol-level features this module adds (grants, routes, federations,
-   * etc.). Per A2-α §4.
-   */
-  readonly contributes?: ContributesMap<ProviderDeps<R, O>>;
+	/**
+	 * Protocol-level features this module adds (grants, routes, federations,
+	 * etc.). Per A2-α §4.
+	 */
+	readonly contributes?: ContributesMap<ProviderDeps<R, O>>;
 
-  /**
-   * Protocol-level features this module REPLACES on an already-registered
-   * key. Mirrors `contributes` shape. Missing target key throws at boot.
-   * Per A2-α §5.
-   */
-  readonly overrides?: ContributesMap<ProviderDeps<R, O>>;
+	/**
+	 * Protocol-level features this module REPLACES on an already-registered
+	 * key. Mirrors `contributes` shape. Missing target key throws at boot.
+	 * Per A2-α §5.
+	 */
+	readonly overrides?: ContributesMap<ProviderDeps<R, O>>;
 
-  /**
-   * Per-component lifecycle hooks. Each key `K` in this map MUST also
-   * appear in `provides`; the boot planner's validate-manifests stage
-   * throws `"lifecycle-without-provides"` for any orphaned lifecycle entry
-   * (Phase 4 §6.1).
-   *
-   * The absence of this field is valid — all existing `(deps) => value`
-   * provider forms remain unaffected.
-   *
-   * Per A2-β §4.1.
-   */
-  readonly lifecycle?: {
-    readonly [K in ComponentKey]?: ComponentLifecycle<K>;
-  };
+	/**
+	 * Per-component lifecycle hooks. Each key `K` in this map MUST also
+	 * appear in `provides`; the boot planner's validate-manifests stage
+	 * throws `"lifecycle-without-provides"` for any orphaned lifecycle entry
+	 * (Phase 4 §6.1).
+	 *
+	 * The absence of this field is valid — all existing `(deps) => value`
+	 * provider forms remain unaffected.
+	 *
+	 * Per A2-β §4.1.
+	 */
+	readonly lifecycle?: {
+		readonly [K in ComponentKey]?: ComponentLifecycle<K>;
+	};
 }
 
 /**

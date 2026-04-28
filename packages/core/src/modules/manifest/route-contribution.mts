@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-import type {
-  ErrorRequestHandler,
-  RequestHandler,
-  Router,
-} from "express";
+import type { ErrorRequestHandler, RequestHandler, Router } from "express";
 
 /**
  * Express-compatible route handler shape. Per A2-α §4.6 + A2-β §5.7
@@ -36,15 +32,15 @@ export type RouteHandler = Router | RequestHandler | ErrorRequestHandler;
  * Per A2-β §4.2.
  */
 export type HttpMethod =
-  | "GET"
-  | "HEAD"
-  | "POST"
-  | "PUT"
-  | "PATCH"
-  | "DELETE"
-  | "OPTIONS"
-  | "CONNECT"
-  | "TRACE";
+	| "GET"
+	| "HEAD"
+	| "POST"
+	| "PUT"
+	| "PATCH"
+	| "DELETE"
+	| "OPTIONS"
+	| "CONNECT"
+	| "TRACE";
 
 /**
  * Fine-grained route advertisement attached to a `RouteContribution`.
@@ -54,17 +50,17 @@ export type HttpMethod =
  * Per A2-β §4.2.
  */
 export interface RouteAdvertisement {
-  /** HTTP method this advertisement covers. Per A2-β §4.2. */
-  readonly method: HttpMethod;
-  /**
-   * Path relative to the contribution's `mountPath`. MUST start with "/";
-   * the boot planner's `validateManifests` stage throws
-   * `invalid-route-advertisement-path` otherwise (A2-β §5.1 step 7,
-   * §6.1).
-   *
-   * Per A2-β §4.2.
-   */
-  readonly path: string;
+	/** HTTP method this advertisement covers. Per A2-β §4.2. */
+	readonly method: HttpMethod;
+	/**
+	 * Path relative to the contribution's `mountPath`. MUST start with "/";
+	 * the boot planner's `validateManifests` stage throws
+	 * `invalid-route-advertisement-path` otherwise (A2-β §5.1 step 7,
+	 * §6.1).
+	 *
+	 * Per A2-β §4.2.
+	 */
+	readonly path: string;
 }
 
 /**
@@ -89,24 +85,24 @@ export interface RouteAdvertisement {
  *   be mounted after. Resolved alongside `before`.
  */
 export interface RouteContribution {
-  readonly mountPath: string;
-  readonly handler: RouteHandler;
-  readonly id?: string;
-  /**
-   * Fine-grained route advertisements. Per A2-β §4.2.
-   * The boot planner uses these for sub-router collision detection.
-   */
-  readonly routes?: readonly RouteAdvertisement[];
-  /**
-   * Contribution `id` tokens this contribution must be mounted before.
-   * Per A2-β §4.2; resolved at assemble-app stage §5.6.
-   */
-  readonly before?: readonly string[];
-  /**
-   * Contribution `id` tokens this contribution must be mounted after.
-   * Per A2-β §4.2; resolved at assemble-app stage §5.6.
-   */
-  readonly after?: readonly string[];
+	readonly mountPath: string;
+	readonly handler: RouteHandler;
+	readonly id?: string;
+	/**
+	 * Fine-grained route advertisements. Per A2-β §4.2.
+	 * The boot planner uses these for sub-router collision detection.
+	 */
+	readonly routes?: readonly RouteAdvertisement[];
+	/**
+	 * Contribution `id` tokens this contribution must be mounted before.
+	 * Per A2-β §4.2; resolved at assemble-app stage §5.6.
+	 */
+	readonly before?: readonly string[];
+	/**
+	 * Contribution `id` tokens this contribution must be mounted after.
+	 * Per A2-β §4.2; resolved at assemble-app stage §5.6.
+	 */
+	readonly after?: readonly string[];
 }
 
 /**
@@ -114,7 +110,7 @@ export interface RouteContribution {
  * route handler must close over typed deps (per A2-α §4.6).
  */
 export type RouteContributionFactory<Deps> = (
-  deps: Deps,
+	deps: Deps,
 ) => RouteContribution | Promise<RouteContribution>;
 
 /**
@@ -122,6 +118,4 @@ export type RouteContributionFactory<Deps> = (
  * RouteContribution value (dep-free routes) or a factory returning one
  * (dep-using routes). Per A2-α §4.6 Amendment 1.
  */
-export type RouteContributionEntry<Deps> =
-  | RouteContribution
-  | RouteContributionFactory<Deps>;
+export type RouteContributionEntry<Deps> = RouteContribution | RouteContributionFactory<Deps>;

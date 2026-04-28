@@ -40,7 +40,16 @@
  *
  * Consumer-side augmentation MUST namespace consumer-specific keys (e.g.
  * `acme.cacheClient`) to avoid colliding with o3co-claimed slot names.
+ *
+ * v0.5.0 in-tree slot inventory (declaration-merged into this interface
+ * from elsewhere in the package; grep `declare module "@o3co/auth-provider-core"`
+ * for the authoritative list):
+ *
+ * - `config: AppConfig` — declared in `boot/types.mts` per A2-β §6.2
+ * - `pathResolver: PathResolver` — declared in `boot/types.mts` per A2-β §6.2
+ * - (Phase 5 onward adds storage / federation / session slots)
  */
+// biome-ignore lint/suspicious/noEmptyInterface: declaration-merge target — the empty base IS the contract
 export interface ComponentMap {}
 
 /**

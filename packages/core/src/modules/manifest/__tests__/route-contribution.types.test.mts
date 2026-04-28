@@ -16,59 +16,49 @@
 
 import { expectTypeOf, it } from "vitest";
 import type {
-  HttpMethod,
-  RouteAdvertisement,
-  RouteContribution,
-  RouteHandler,
+	HttpMethod,
+	RouteAdvertisement,
+	RouteContribution,
+	RouteHandler,
 } from "../route-contribution.mjs";
 
 it("HttpMethod is the 9-method literal union", () => {
-  expectTypeOf<HttpMethod>().toEqualTypeOf<
-    | "GET"
-    | "HEAD"
-    | "POST"
-    | "PUT"
-    | "PATCH"
-    | "DELETE"
-    | "OPTIONS"
-    | "CONNECT"
-    | "TRACE"
-  >();
+	expectTypeOf<HttpMethod>().toEqualTypeOf<
+		"GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "CONNECT" | "TRACE"
+	>();
 });
 
 it("RouteAdvertisement declares method + path", () => {
-  expectTypeOf<RouteAdvertisement>().toEqualTypeOf<{
-    readonly method: HttpMethod;
-    readonly path: string;
-  }>();
+	expectTypeOf<RouteAdvertisement>().toEqualTypeOf<{
+		readonly method: HttpMethod;
+		readonly path: string;
+	}>();
 });
 
 it("RouteContribution accepts an optional routes advertisement list", () => {
-  const contrib: RouteContribution = {
-    mountPath: "/api",
-    handler: {} as RouteHandler,
-    routes: [{ method: "GET", path: "/health" }],
-  };
-  expectTypeOf(contrib).toMatchTypeOf<RouteContribution>();
-  // routes field is optional readonly array of RouteAdvertisement
-  type RoutesType = RouteContribution["routes"];
-  expectTypeOf<RoutesType>().toEqualTypeOf<
-    readonly RouteAdvertisement[] | undefined
-  >();
+	const contrib: RouteContribution = {
+		mountPath: "/api",
+		handler: {} as RouteHandler,
+		routes: [{ method: "GET", path: "/health" }],
+	};
+	expectTypeOf(contrib).toMatchTypeOf<RouteContribution>();
+	// routes field is optional readonly array of RouteAdvertisement
+	type RoutesType = RouteContribution["routes"];
+	expectTypeOf<RoutesType>().toEqualTypeOf<readonly RouteAdvertisement[] | undefined>();
 });
 
 it("RouteContribution accepts optional before/after token arrays without an own id", () => {
-  const contrib: RouteContribution = {
-    mountPath: "/api/v1",
-    handler: {} as RouteHandler,
-    before: ["auth-router"],
-    after: ["cors-router"],
-    // id is intentionally absent
-  };
-  expectTypeOf(contrib).toMatchTypeOf<RouteContribution>();
+	const contrib: RouteContribution = {
+		mountPath: "/api/v1",
+		handler: {} as RouteHandler,
+		before: ["auth-router"],
+		after: ["cors-router"],
+		// id is intentionally absent
+	};
+	expectTypeOf(contrib).toMatchTypeOf<RouteContribution>();
 
-  type BeforeType = RouteContribution["before"];
-  type AfterType = RouteContribution["after"];
-  expectTypeOf<BeforeType>().toEqualTypeOf<readonly string[] | undefined>();
-  expectTypeOf<AfterType>().toEqualTypeOf<readonly string[] | undefined>();
+	type BeforeType = RouteContribution["before"];
+	type AfterType = RouteContribution["after"];
+	expectTypeOf<BeforeType>().toEqualTypeOf<readonly string[] | undefined>();
+	expectTypeOf<AfterType>().toEqualTypeOf<readonly string[] | undefined>();
 });

@@ -27,22 +27,22 @@
  * details), §6.2 (createApp options + collector contracts), §6.3 (AppHandle).
  */
 
-import type { Server as HttpServer } from 'node:http';
-import type { Router } from 'express';
-import type { z } from 'zod';
-import type { AppConfig } from '../config/application.schema.mjs';
-import type { ComponentKey, ComponentMap } from '../modules/manifest/component-map.mjs';
+import type { Server as HttpServer } from "node:http";
+import type { Router } from "express";
+import type { z } from "zod";
+import type { AppConfig } from "../config/application.schema.mjs";
+import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
-  AuditHook,
-  ExchangeTokenValidator,
-  FederationProvider,
-  GrantHandler,
-  GrantPolicyHook,
-  MfaFactor,
-} from '../modules/manifest/contributes-map.mjs';
-import type { Module } from '../modules/manifest/module-spec.mjs';
-import type { HttpMethod, RouteContribution } from '../modules/manifest/route-contribution.mjs';
-import type { PathResolver } from '../modules/types.mjs';
+	AuditHook,
+	ExchangeTokenValidator,
+	FederationProvider,
+	GrantHandler,
+	GrantPolicyHook,
+	MfaFactor,
+} from "../modules/manifest/contributes-map.mjs";
+import type { Module } from "../modules/manifest/module-spec.mjs";
+import type { HttpMethod, RouteContribution } from "../modules/manifest/route-contribution.mjs";
+import type { PathResolver } from "../modules/types.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots (per A2-β §6.2 DefaultBootstrapMap contract)
@@ -57,11 +57,11 @@ import type { PathResolver } from '../modules/types.mjs';
 // Per A2-α §6.1 the v0.5.0 baseline slot set lands incrementally during
 // Phases 3-8; these two are owned by Phase 4 / A2-β because they are
 // the boot-planner-imposed contract, not protocol features.
-declare module '@o3co/auth-provider-core' {
-  interface ComponentMap {
-    readonly config: AppConfig;
-    readonly pathResolver: PathResolver;
-  }
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly config: AppConfig;
+		readonly pathResolver: PathResolver;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -78,14 +78,14 @@ declare module '@o3co/auth-provider-core' {
  * Per A2-β §3.2.
  */
 export type ContributionKind =
-  | 'grants'
-  | 'federations'
-  | 'tokenExchangeValidators'
-  | 'mfaFactors'
-  | 'auditHooks'
-  | 'routes'
-  | 'grantPolicyHooks'
-  | (string & { readonly __consumerKind?: unique symbol });
+	| "grants"
+	| "federations"
+	| "tokenExchangeValidators"
+	| "mfaFactors"
+	| "auditHooks"
+	| "routes"
+	| "grantPolicyHooks"
+	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
 // Intermediate stage types — Per A2-β §3.2
@@ -98,12 +98,12 @@ export type ContributionKind =
  * Per A2-β §3.2.
  */
 export interface ContributionEntry {
-  readonly kind: ContributionKind;
-  /** Name for name-keyed kinds; instance reference for list-shaped kinds. */
-  readonly key: string | symbol;
-  /** Typed via per-kind contract; opaque at this layer. */
-  readonly factory: unknown;
-  readonly contributedBy: string;
+	readonly kind: ContributionKind;
+	/** Name for name-keyed kinds; instance reference for list-shaped kinds. */
+	readonly key: string | symbol;
+	/** Typed via per-kind contract; opaque at this layer. */
+	readonly factory: unknown;
+	readonly contributedBy: string;
 }
 
 /**
@@ -113,13 +113,13 @@ export interface ContributionEntry {
  * Per A2-β §3.2.
  */
 export interface NormalisedModule {
-  readonly name: string;
-  readonly requires: readonly ComponentKey[];
-  readonly optional: readonly ComponentKey[];
-  readonly providesKeys: readonly ComponentKey[];
-  readonly contributesEntries: readonly ContributionEntry[];
-  readonly overridesEntries: readonly ContributionEntry[];
-  readonly lifecycleKeys: readonly ComponentKey[];
+	readonly name: string;
+	readonly requires: readonly ComponentKey[];
+	readonly optional: readonly ComponentKey[];
+	readonly providesKeys: readonly ComponentKey[];
+	readonly contributesEntries: readonly ContributionEntry[];
+	readonly overridesEntries: readonly ContributionEntry[];
+	readonly lifecycleKeys: readonly ComponentKey[];
 }
 
 /**
@@ -128,8 +128,8 @@ export interface NormalisedModule {
  * Per A2-β §3.2.
  */
 export interface ValidatedModule {
-  readonly manifest: Module;
-  readonly normalised: NormalisedModule;
+	readonly manifest: Module;
+	readonly normalised: NormalisedModule;
 }
 
 /**
@@ -139,14 +139,14 @@ export interface ValidatedModule {
  * Per A2-β §3.2.
  */
 export interface ValidatedManifests {
-  /** Manifests in their original input order; immutable. */
-  readonly modules: readonly ValidatedModule[];
-  /** Index from module name to manifest, for fast lookup in subsequent stages. */
-  readonly byName: ReadonlyMap<string, ValidatedModule>;
-  /** Index from `provides` key to the providing module, for fast lookup. */
-  readonly providers: ReadonlyMap<ComponentKey, ValidatedModule>;
-  /** Set of contribution kinds actually used by some module. */
-  readonly usedKinds: ReadonlySet<ContributionKind>;
+	/** Manifests in their original input order; immutable. */
+	readonly modules: readonly ValidatedModule[];
+	/** Index from module name to manifest, for fast lookup in subsequent stages. */
+	readonly byName: ReadonlyMap<string, ValidatedModule>;
+	/** Index from `provides` key to the providing module, for fast lookup. */
+	readonly providers: ReadonlyMap<ComponentKey, ValidatedModule>;
+	/** Set of contribution kinds actually used by some module. */
+	readonly usedKinds: ReadonlySet<ContributionKind>;
 }
 
 /**
@@ -154,8 +154,8 @@ export interface ValidatedManifests {
  * materialisation time). Per A2-β §3.2.
  */
 export interface DepsBlueprint {
-  readonly requires: readonly ComponentKey[];
-  readonly optional: readonly ComponentKey[];
+	readonly requires: readonly ComponentKey[];
+	readonly optional: readonly ComponentKey[];
 }
 
 /**
@@ -166,14 +166,14 @@ export interface DepsBlueprint {
  * Per A2-β §3.2.
  */
 export interface ProviderActivation {
-  readonly module: string;
-  readonly componentKey: ComponentKey;
-  /**
-   * True when this entry is in the activation closure only because
-   * `lifecycle[componentKey].eager === true`. Used by diagnostics; does not
-   * change runtime behaviour.
-   */
-  readonly eager: boolean;
+	readonly module: string;
+	readonly componentKey: ComponentKey;
+	/**
+	 * True when this entry is in the activation closure only because
+	 * `lifecycle[componentKey].eager === true`. Used by diagnostics; does not
+	 * change runtime behaviour.
+	 */
+	readonly eager: boolean;
 }
 
 /**
@@ -184,20 +184,20 @@ export interface ProviderActivation {
  * Per A2-β §3.2.
  */
 export interface BootPlan {
-  readonly validated: ValidatedManifests;
-  /**
-   * Module names in topological + declaration-stable order. Used as a
-   * deterministic iteration order for applyContributions and for
-   * tie-breaking inside providerActivations.
-   */
-  readonly initOrder: readonly string[];
-  /**
-   * Per-provider activation list in topological + declaration-stable order.
-   * This is the unit materializeComponents iterates.
-   */
-  readonly providerActivations: readonly ProviderActivation[];
-  /** For each module touched by the plan, the typed deps view (lookup keys, not values). */
-  readonly depsBlueprint: ReadonlyMap<string, DepsBlueprint>;
+	readonly validated: ValidatedManifests;
+	/**
+	 * Module names in topological + declaration-stable order. Used as a
+	 * deterministic iteration order for applyContributions and for
+	 * tie-breaking inside providerActivations.
+	 */
+	readonly initOrder: readonly string[];
+	/**
+	 * Per-provider activation list in topological + declaration-stable order.
+	 * This is the unit materializeComponents iterates.
+	 */
+	readonly providerActivations: readonly ProviderActivation[];
+	/** For each module touched by the plan, the typed deps view (lookup keys, not values). */
+	readonly depsBlueprint: ReadonlyMap<string, DepsBlueprint>;
 }
 
 /**
@@ -207,11 +207,11 @@ export interface BootPlan {
  * Per A2-β §3.2.
  */
 export interface CleanupRecord {
-  readonly module: string;
-  readonly componentKey: ComponentKey;
-  readonly cleanup: (value: unknown) => void | Promise<void>;
-  /** Captured component value for dispose. */
-  readonly value: unknown;
+	readonly module: string;
+	readonly componentKey: ComponentKey;
+	readonly cleanup: (value: unknown) => void | Promise<void>;
+	/** Captured component value for dispose. */
+	readonly value: unknown;
 }
 
 /**
@@ -221,20 +221,20 @@ export interface CleanupRecord {
  * Per A2-β §3.2.
  */
 export interface ComponentWorld {
-  readonly plan: BootPlan;
-  /**
-   * Materialised component values. The TYPE is `Readonly<Partial<...>>` —
-   * the planner-internal contract is that no stage code mutates this map
-   * once it is handed forward. RUNTIME Object.freeze does NOT happen until
-   * freezeWorld; the type-level readonly is enforced at the stage boundary.
-   */
-  readonly components: Readonly<Partial<ComponentMap>>;
-  /**
-   * Per-module cleanup callbacks captured during materialisation. Empty
-   * when no module declares `lifecycle[K].cleanup`. Order: insertion
-   * (forward); dispose() runs in reverse.
-   */
-  readonly cleanups: readonly CleanupRecord[];
+	readonly plan: BootPlan;
+	/**
+	 * Materialised component values. The TYPE is `Readonly<Partial<...>>` —
+	 * the planner-internal contract is that no stage code mutates this map
+	 * once it is handed forward. RUNTIME Object.freeze does NOT happen until
+	 * freezeWorld; the type-level readonly is enforced at the stage boundary.
+	 */
+	readonly components: Readonly<Partial<ComponentMap>>;
+	/**
+	 * Per-module cleanup callbacks captured during materialisation. Empty
+	 * when no module declares `lifecycle[K].cleanup`. Order: insertion
+	 * (forward); dispose() runs in reverse.
+	 */
+	readonly cleanups: readonly CleanupRecord[];
 }
 
 /**
@@ -244,10 +244,10 @@ export interface ComponentWorld {
  * Per A2-β §3.2.
  */
 export interface CollectedRouteContribution {
-  readonly contribution: RouteContribution;
-  readonly contributedBy: string;
-  /** Position in module-declaration order across all modules (0-based). */
-  readonly declarationIndex: number;
+	readonly contribution: RouteContribution;
+	readonly contributedBy: string;
+	/** Position in module-declaration order across all modules (0-based). */
+	readonly declarationIndex: number;
 }
 
 /**
@@ -257,10 +257,10 @@ export interface CollectedRouteContribution {
  * Per A2-β §3.2.
  */
 export interface OrderedRouteContribution {
-  readonly contribution: RouteContribution;
-  readonly contributedBy: string;
-  /** Position in final mount order after before/after resolution (0-based). */
-  readonly mountIndex: number;
+	readonly contribution: RouteContribution;
+	readonly contributedBy: string;
+	/** Position in final mount order after before/after resolution (0-based). */
+	readonly mountIndex: number;
 }
 
 /**
@@ -270,14 +270,14 @@ export interface OrderedRouteContribution {
  * Per A2-β §3.2.
  */
 export interface RegistryWorld {
-  readonly material: ComponentWorld;
-  /** kind → registry instance */
-  readonly registries: ReadonlyMap<ContributionKind, unknown>;
-  /**
-   * Raw route records collected during applyContributions, in module
-   * declaration order. Mount-order computation happens in assembleApp.
-   */
-  readonly routes: readonly CollectedRouteContribution[];
+	readonly material: ComponentWorld;
+	/** kind → registry instance */
+	readonly registries: ReadonlyMap<ContributionKind, unknown>;
+	/**
+	 * Raw route records collected during applyContributions, in module
+	 * declaration order. Mount-order computation happens in assembleApp.
+	 */
+	readonly routes: readonly CollectedRouteContribution[];
 }
 
 /**
@@ -287,16 +287,16 @@ export interface RegistryWorld {
  * Per A2-β §3.2.
  */
 export interface FrozenWorld {
-  /**
-   * Materialised component map, Object.frozen. Typed as Partial because not
-   * every ComponentMap key is necessarily produced.
-   */
-  readonly components: Readonly<Partial<ComponentMap>>;
-  /** Each registry's freeze() called where applicable. kind → registry. */
-  readonly registries: ReadonlyMap<ContributionKind, unknown>;
-  /** Same shape as RegistryWorld.routes — mount-order resolution deferred to assembleApp. */
-  readonly routes: readonly CollectedRouteContribution[];
-  readonly cleanups: readonly CleanupRecord[];
+	/**
+	 * Materialised component map, Object.frozen. Typed as Partial because not
+	 * every ComponentMap key is necessarily produced.
+	 */
+	readonly components: Readonly<Partial<ComponentMap>>;
+	/** Each registry's freeze() called where applicable. kind → registry. */
+	readonly registries: ReadonlyMap<ContributionKind, unknown>;
+	/** Same shape as RegistryWorld.routes — mount-order resolution deferred to assembleApp. */
+	readonly routes: readonly CollectedRouteContribution[];
+	readonly cleanups: readonly CleanupRecord[];
 }
 
 // ---------------------------------------------------------------------------
@@ -311,15 +311,15 @@ export interface FrozenWorld {
  * Per A2-β §6.2.
  */
 export interface NameKeyedCollector<V> {
-  readonly kind: 'name-keyed';
-  /** Register a value by name. Throws on duplicate. */
-  register(name: string, value: V): void;
-  /** Replace an existing value by name. Throws if name is unknown. */
-  replace(name: string, value: V): void;
-  /** Optional activation boundary — throws further mutation attempts when defined. */
-  freeze?(): void;
-  get(name: string): V | undefined;
-  entries(): IterableIterator<readonly [string, V]>;
+	readonly kind: "name-keyed";
+	/** Register a value by name. Throws on duplicate. */
+	register(name: string, value: V): void;
+	/** Replace an existing value by name. Throws if name is unknown. */
+	replace(name: string, value: V): void;
+	/** Optional activation boundary — throws further mutation attempts when defined. */
+	freeze?(): void;
+	get(name: string): V | undefined;
+	entries(): IterableIterator<readonly [string, V]>;
 }
 
 /**
@@ -329,12 +329,12 @@ export interface NameKeyedCollector<V> {
  * Per A2-β §6.2.
  */
 export interface ListCollector<V> {
-  readonly kind: 'list';
-  /** Append a value. Same-instance duplicates are silently skipped. */
-  append(value: V): void;
-  /** Optional activation boundary. */
-  freeze?(): void;
-  values(): IterableIterator<V>;
+	readonly kind: "list";
+	/** Append a value. Same-instance duplicates are silently skipped. */
+	append(value: V): void;
+	/** Optional activation boundary. */
+	freeze?(): void;
+	values(): IterableIterator<V>;
 }
 
 /**
@@ -345,10 +345,10 @@ export interface ListCollector<V> {
  * Per A2-β §6.2.
  */
 export interface RouteCollector {
-  readonly kind: 'list-routes';
-  append(value: CollectedRouteContribution): void;
-  freeze(): void;
-  values(): IterableIterator<CollectedRouteContribution>;
+	readonly kind: "list-routes";
+	append(value: CollectedRouteContribution): void;
+	freeze(): void;
+	values(): IterableIterator<CollectedRouteContribution>;
 }
 
 /**
@@ -358,13 +358,13 @@ export interface RouteCollector {
  * Per A2-β §6.2.
  */
 export interface ContributionCollectorMap {
-  readonly grants?: NameKeyedCollector<GrantHandler>;
-  readonly federations?: NameKeyedCollector<FederationProvider>;
-  readonly tokenExchangeValidators?: NameKeyedCollector<ExchangeTokenValidator>;
-  readonly mfaFactors?: NameKeyedCollector<MfaFactor>;
-  readonly auditHooks?: ListCollector<AuditHook>;
-  readonly routes?: RouteCollector;
-  readonly grantPolicyHooks?: ListCollector<GrantPolicyHook>;
+	readonly grants?: NameKeyedCollector<GrantHandler>;
+	readonly federations?: NameKeyedCollector<FederationProvider>;
+	readonly tokenExchangeValidators?: NameKeyedCollector<ExchangeTokenValidator>;
+	readonly mfaFactors?: NameKeyedCollector<MfaFactor>;
+	readonly auditHooks?: ListCollector<AuditHook>;
+	readonly routes?: RouteCollector;
+	readonly grantPolicyHooks?: ListCollector<GrantPolicyHook>;
 }
 
 /**
@@ -387,7 +387,7 @@ export type ContributionKindMap = Partial<ContributionCollectorMap>;
  * Per A2-β §6.2.
  */
 export type BootstrapMap = {
-  readonly [K in ComponentKey]?: ComponentMap[K];
+	readonly [K in ComponentKey]?: ComponentMap[K];
 };
 
 /**
@@ -399,8 +399,8 @@ export type BootstrapMap = {
  * Per A2-β §6.2.
  */
 export type DefaultBootstrapMap = {
-  readonly config: AppConfig;
-  readonly pathResolver: PathResolver;
+	readonly config: AppConfig;
+	readonly pathResolver: PathResolver;
 };
 
 /**
@@ -411,35 +411,35 @@ export type DefaultBootstrapMap = {
  * Per A2-β §6.2.
  */
 export interface CreateAppOptions<B extends BootstrapMap = DefaultBootstrapMap> {
-  /** Module manifests in the order the consumer composed. */
-  readonly modules: readonly Module[];
+	/** Module manifests in the order the consumer composed. */
+	readonly modules: readonly Module[];
 
-  /**
-   * Component values originating from the host environment (config,
-   * pathResolver, etc.) — pre-seeded into the DI graph before any module
-   * factory runs.
-   */
-  readonly bootstrapComponents: B;
+	/**
+	 * Component values originating from the host environment (config,
+	 * pathResolver, etc.) — pre-seeded into the DI graph before any module
+	 * factory runs.
+	 */
+	readonly bootstrapComponents: B;
 
-  /**
-   * Optional consumer-provided collectors for contribution kinds added via
-   * `declare module` augmentation of ContributesMap. Built-in kinds are
-   * auto-wired by core; consumers do NOT pass them. A type-level kind
-   * without a collector throws `unknown-contribution-kind` at
-   * validateManifests.
-   */
-  readonly contributionKinds?: ContributionKindMap;
+	/**
+	 * Optional consumer-provided collectors for contribution kinds added via
+	 * `declare module` augmentation of ContributesMap. Built-in kinds are
+	 * auto-wired by core; consumers do NOT pass them. A type-level kind
+	 * without a collector throws `unknown-contribution-kind` at
+	 * validateManifests.
+	 */
+	readonly contributionKinds?: ContributionKindMap;
 
-  /**
-   * Optional composition-root substitutions for components. Keys present here
-   * REPLACE the value a module's `provides[K]` would have produced. The
-   * would-be provider factory is skipped. The override value's lifecycle is
-   * the consumer's responsibility.
-   *
-   * Mutually exclusive with `bootstrapComponents` for the same key (collision
-   * throws `bootstrap-component-collision` at validateManifests).
-   */
-  readonly overrideComponents?: Partial<ComponentMap>;
+	/**
+	 * Optional composition-root substitutions for components. Keys present here
+	 * REPLACE the value a module's `provides[K]` would have produced. The
+	 * would-be provider factory is skipped. The override value's lifecycle is
+	 * the consumer's responsibility.
+	 *
+	 * Mutually exclusive with `bootstrapComponents` for the same key (collision
+	 * throws `bootstrap-component-collision` at validateManifests).
+	 */
+	readonly overrideComponents?: Partial<ComponentMap>;
 }
 
 // ---------------------------------------------------------------------------
@@ -453,35 +453,35 @@ export interface CreateAppOptions<B extends BootstrapMap = DefaultBootstrapMap> 
  * Per A2-β §6.3.
  */
 export interface AppHandle {
-  /**
-   * Express router with all RouteContribution entries mounted in the order
-   * computed by assembleApp §5.6. Consumer code mounts this at its host
-   * server (`app.use(handle.router)`) or calls `handle.listen(port)`.
-   */
-  readonly router: Router;
+	/**
+	 * Express router with all RouteContribution entries mounted in the order
+	 * computed by assembleApp §5.6. Consumer code mounts this at its host
+	 * server (`app.use(handle.router)`) or calls `handle.listen(port)`.
+	 */
+	readonly router: Router;
 
-  /**
-   * Listen on the given port. Returns a Promise that resolves to a Server
-   * once listening. Composition roots that want their own express app may
-   * ignore this method and use `router` directly.
-   */
-  listen(port: number): Promise<HttpServer>;
+	/**
+	 * Listen on the given port. Returns a Promise that resolves to a Server
+	 * once listening. Composition roots that want their own express app may
+	 * ignore this method and use `router` directly.
+	 */
+	listen(port: number): Promise<HttpServer>;
 
-  /**
-   * Run cleanup callbacks in reverse-topological order against `requires`,
-   * then call Symbol.asyncDispose on values that implement it (where no
-   * `lifecycle[K].cleanup` was declared). Errors thrown during individual
-   * cleanup callbacks are aggregated; the returned Promise rejects with an
-   * AggregateError whose `errors` field contains every cleanup error.
-   */
-  dispose(): Promise<void>;
+	/**
+	 * Run cleanup callbacks in reverse-topological order against `requires`,
+	 * then call Symbol.asyncDispose on values that implement it (where no
+	 * `lifecycle[K].cleanup` was declared). Errors thrown during individual
+	 * cleanup callbacks are aggregated; the returned Promise rejects with an
+	 * AggregateError whose `errors` field contains every cleanup error.
+	 */
+	dispose(): Promise<void>;
 
-  /**
-   * Read-only typed view of the materialised component map, Object.frozen.
-   * Typed as Partial because keys are only present when a module produced them
-   * (or they were provided via bootstrapComponents / overrideComponents).
-   */
-  readonly components: Readonly<Partial<ComponentMap>>;
+	/**
+	 * Read-only typed view of the materialised component map, Object.frozen.
+	 * Typed as Partial because keys are only present when a module produced them
+	 * (or they were provided via bootstrapComponents / overrideComponents).
+	 */
+	readonly components: Readonly<Partial<ComponentMap>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -495,12 +495,12 @@ export interface AppHandle {
  * Per A2-β §6.1.
  */
 export type BootStage =
-  | 'validateManifests'
-  | 'planBoot'
-  | 'materializeComponents'
-  | 'applyContributions'
-  | 'freezeWorld'
-  | 'assembleApp';
+	| "validateManifests"
+	| "planBoot"
+	| "materializeComponents"
+	| "applyContributions"
+	| "freezeWorld"
+	| "assembleApp";
 
 // ---------------------------------------------------------------------------
 // BootErrorReason — exactly 19 literals, Per A2-β §6.1
@@ -514,25 +514,25 @@ export type BootStage =
  * Per A2-β §6.1.
  */
 export type BootErrorReason =
-  | 'duplicate-module-name'
-  | 'duplicate-provides'
-  | 'bootstrap-component-collision'
-  | 'synthetic-key-collision'
-  | 'missing-required-component'
-  | 'unknown-contribution-kind'
-  | 'duplicate-contribute'
-  | 'override-target-missing'
-  | 'duplicate-override'
-  | 'contribute-and-override-same-key'
-  | 'list-shaped-override-not-allowed'
-  | 'lifecycle-without-provides'
-  | 'invalid-route-advertisement-path'
-  | 'config-validation-failed'
-  | 'circular-dependency'
-  | 'provides-factory-failed'
-  | 'contribute-factory-failed'
-  | 'route-order-cycle'
-  | 'route-order-target-missing';
+	| "duplicate-module-name"
+	| "duplicate-provides"
+	| "bootstrap-component-collision"
+	| "synthetic-key-collision"
+	| "missing-required-component"
+	| "unknown-contribution-kind"
+	| "duplicate-contribute"
+	| "override-target-missing"
+	| "duplicate-override"
+	| "contribute-and-override-same-key"
+	| "list-shaped-override-not-allowed"
+	| "lifecycle-without-provides"
+	| "invalid-route-advertisement-path"
+	| "config-validation-failed"
+	| "circular-dependency"
+	| "provides-factory-failed"
+	| "contribute-factory-failed"
+	| "route-order-cycle"
+	| "route-order-target-missing";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — 19 total, Per A2-β §6.1
@@ -540,16 +540,16 @@ export type BootErrorReason =
 
 /** Per A2-β §6.1. */
 export interface DuplicateModuleNameDetails {
-  readonly reason: 'duplicate-module-name';
-  readonly name: string;
-  readonly modules: readonly [string, string];
+	readonly reason: "duplicate-module-name";
+	readonly name: string;
+	readonly modules: readonly [string, string];
 }
 
 /** Per A2-β §6.1. */
 export interface DuplicateProvidesDetails {
-  readonly reason: 'duplicate-provides';
-  readonly componentKey: ComponentKey;
-  readonly modules: readonly [string, string];
+	readonly reason: "duplicate-provides";
+	readonly componentKey: ComponentKey;
+	readonly modules: readonly [string, string];
 }
 
 /**
@@ -560,17 +560,17 @@ export interface DuplicateProvidesDetails {
  * Per A2-β §6.1.
  */
 export type BootstrapComponentCollisionDetails =
-  | {
-      readonly reason: 'bootstrap-component-collision';
-      readonly componentKey: ComponentKey;
-      readonly source: 'module-provides';
-      readonly module: string;
-    }
-  | {
-      readonly reason: 'bootstrap-component-collision';
-      readonly componentKey: ComponentKey;
-      readonly source: 'overrideComponents';
-    };
+	| {
+			readonly reason: "bootstrap-component-collision";
+			readonly componentKey: ComponentKey;
+			readonly source: "module-provides";
+			readonly module: string;
+	  }
+	| {
+			readonly reason: "bootstrap-component-collision";
+			readonly componentKey: ComponentKey;
+			readonly source: "overrideComponents";
+	  };
 
 /**
  * A synthetic ComponentMap key (federationProviders, tokenExchangeValidatorResolver,
@@ -584,22 +584,22 @@ export type BootstrapComponentCollisionDetails =
  * Per A2-β §6.1.
  */
 export type SyntheticKeyCollisionDetails =
-  | {
-      readonly reason: 'synthetic-key-collision';
-      readonly componentKey: ComponentKey;
-      readonly source: 'module-provides';
-      readonly module: string;
-    }
-  | {
-      readonly reason: 'synthetic-key-collision';
-      readonly componentKey: ComponentKey;
-      readonly source: 'bootstrapComponents';
-    }
-  | {
-      readonly reason: 'synthetic-key-collision';
-      readonly componentKey: ComponentKey;
-      readonly source: 'overrideComponents';
-    };
+	| {
+			readonly reason: "synthetic-key-collision";
+			readonly componentKey: ComponentKey;
+			readonly source: "module-provides";
+			readonly module: string;
+	  }
+	| {
+			readonly reason: "synthetic-key-collision";
+			readonly componentKey: ComponentKey;
+			readonly source: "bootstrapComponents";
+	  }
+	| {
+			readonly reason: "synthetic-key-collision";
+			readonly componentKey: ComponentKey;
+			readonly source: "overrideComponents";
+	  };
 
 /**
  * Per A2-β §6.1. The `path` chain follows the requires → provides graph from
@@ -607,21 +607,21 @@ export type SyntheticKeyCollisionDetails =
  * normative path-construction algorithm.
  */
 export interface MissingRequiredComponentDetails {
-  readonly reason: 'missing-required-component';
-  readonly missingKey: ComponentKey;
-  readonly rootModule: string;
-  readonly path: readonly {
-    readonly module: string;
-    readonly requires: ComponentKey;
-    readonly satisfiedBy?: string;
-  }[];
+	readonly reason: "missing-required-component";
+	readonly missingKey: ComponentKey;
+	readonly rootModule: string;
+	readonly path: readonly {
+		readonly module: string;
+		readonly requires: ComponentKey;
+		readonly satisfiedBy?: string;
+	}[];
 }
 
 /** Per A2-β §6.1. */
 export interface UnknownContributionKindDetails {
-  readonly reason: 'unknown-contribution-kind';
-  readonly kind: string;
-  readonly contributedBy: readonly string[];
+	readonly reason: "unknown-contribution-kind";
+	readonly kind: string;
+	readonly contributedBy: readonly string[];
 }
 
 /**
@@ -631,90 +631,90 @@ export interface UnknownContributionKindDetails {
  * (`"effective-method-path"`).
  */
 export interface DuplicateContributeDetails {
-  readonly reason: 'duplicate-contribute';
-  readonly kind: string;
-  /**
-   * Identity string. Format depends on identityKind:
-   * - "name": the contribution name.
-   * - "id": the RouteContribution.id.
-   * - "mountPath": the RouteContribution.mountPath (no id).
-   * - "effective-method-path": "<METHOD> <mountPath><advertisement.path>".
-   */
-  readonly identity: string;
-  readonly identityKind: 'name' | 'id' | 'mountPath' | 'effective-method-path';
-  readonly modules: readonly [string, string];
+	readonly reason: "duplicate-contribute";
+	readonly kind: string;
+	/**
+	 * Identity string. Format depends on identityKind:
+	 * - "name": the contribution name.
+	 * - "id": the RouteContribution.id.
+	 * - "mountPath": the RouteContribution.mountPath (no id).
+	 * - "effective-method-path": "<METHOD> <mountPath><advertisement.path>".
+	 */
+	readonly identity: string;
+	readonly identityKind: "name" | "id" | "mountPath" | "effective-method-path";
+	readonly modules: readonly [string, string];
 }
 
 /** Per A2-β §6.1. */
 export interface OverrideTargetMissingDetails {
-  readonly reason: 'override-target-missing';
-  readonly kind: string;
-  readonly name: string;
-  readonly overridingModule: string;
+	readonly reason: "override-target-missing";
+	readonly kind: string;
+	readonly name: string;
+	readonly overridingModule: string;
 }
 
 /** Per A2-β §6.1. */
 export interface DuplicateOverrideDetails {
-  readonly reason: 'duplicate-override';
-  readonly kind: string;
-  readonly name: string;
-  readonly modules: readonly [string, string];
+	readonly reason: "duplicate-override";
+	readonly kind: string;
+	readonly name: string;
+	readonly modules: readonly [string, string];
 }
 
 /** Per A2-β §6.1. */
 export interface ContributeAndOverrideSameKeyDetails {
-  readonly reason: 'contribute-and-override-same-key';
-  readonly kind: string;
-  readonly name: string;
-  readonly module: string;
+	readonly reason: "contribute-and-override-same-key";
+	readonly kind: string;
+	readonly name: string;
+	readonly module: string;
 }
 
 /** Per A2-β §6.1. */
 export interface ListShapedOverrideDetails {
-  readonly reason: 'list-shaped-override-not-allowed';
-  readonly kind: 'routes' | 'auditHooks' | 'grantPolicyHooks';
-  readonly module: string;
+	readonly reason: "list-shaped-override-not-allowed";
+	readonly kind: "routes" | "auditHooks" | "grantPolicyHooks";
+	readonly module: string;
 }
 
 /** Per A2-β §6.1. */
 export interface LifecycleWithoutProvidesDetails {
-  readonly reason: 'lifecycle-without-provides';
-  readonly componentKey: ComponentKey;
-  readonly module: string;
+	readonly reason: "lifecycle-without-provides";
+	readonly componentKey: ComponentKey;
+	readonly module: string;
 }
 
 /** Per A2-β §6.1. */
 export interface InvalidRouteAdvertisementPathDetails {
-  readonly reason: 'invalid-route-advertisement-path';
-  readonly module: string;
-  readonly mountPath: string;
-  /** The offending advertisement.path value. */
-  readonly path: string;
-  readonly identityKind: 'missing-leading-slash';
+	readonly reason: "invalid-route-advertisement-path";
+	readonly module: string;
+	readonly mountPath: string;
+	/** The offending advertisement.path value. */
+	readonly path: string;
+	readonly identityKind: "missing-leading-slash";
 }
 
 /** Per A2-β §6.1. */
 export interface ConfigValidationFailedDetails {
-  readonly reason: 'config-validation-failed';
-  /** Verbatim Zod issues from the failed parse. */
-  readonly issues: readonly z.ZodIssue[];
-  /** Modules whose configSchema participated in the composed schema. */
-  readonly modules: readonly { readonly module: string; readonly schemaPath?: string }[];
+	readonly reason: "config-validation-failed";
+	/** Verbatim Zod issues from the failed parse. */
+	readonly issues: readonly z.ZodIssue[];
+	/** Modules whose configSchema participated in the composed schema. */
+	readonly modules: readonly { readonly module: string; readonly schemaPath?: string }[];
 }
 
 /** Per A2-β §6.1. */
 export interface CircularDependencyDetails {
-  readonly reason: 'circular-dependency';
-  /**
-   * Cycle as a chain: A requires X (provided by B); B requires Y (provided
-   * by C); C requires Z (provided by A). The cycle closes from the last link
-   * back to the first.
-   */
-  readonly cycle: readonly {
-    readonly module: string;
-    readonly requires: ComponentKey;
-    readonly satisfiedBy: string;
-  }[];
+	readonly reason: "circular-dependency";
+	/**
+	 * Cycle as a chain: A requires X (provided by B); B requires Y (provided
+	 * by C); C requires Z (provided by A). The cycle closes from the last link
+	 * back to the first.
+	 */
+	readonly cycle: readonly {
+		readonly module: string;
+		readonly requires: ComponentKey;
+		readonly satisfiedBy: string;
+	}[];
 }
 
 /**
@@ -724,15 +724,15 @@ export interface CircularDependencyDetails {
  * run before the error propagates.
  */
 export interface ProvidesFactoryFailedDetails {
-  readonly reason: 'provides-factory-failed';
-  readonly module: string;
-  readonly componentKey: ComponentKey;
-  readonly originalError: unknown;
-  readonly cleanupErrors?: readonly {
-    readonly module: string;
-    readonly componentKey: ComponentKey;
-    readonly error: unknown;
-  }[];
+	readonly reason: "provides-factory-failed";
+	readonly module: string;
+	readonly componentKey: ComponentKey;
+	readonly originalError: unknown;
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
 }
 
 /**
@@ -740,41 +740,41 @@ export interface ProvidesFactoryFailedDetails {
  * populated for *-factory-failed reasons (Codex Session 03 verdict C3).
  */
 export interface ContributeFactoryFailedDetails {
-  readonly reason: 'contribute-factory-failed';
-  readonly module: string;
-  readonly kind: string;
-  readonly name: string;
-  readonly originalError: unknown;
-  readonly cleanupErrors?: readonly {
-    readonly module: string;
-    readonly componentKey: ComponentKey;
-    readonly error: unknown;
-  }[];
+	readonly reason: "contribute-factory-failed";
+	readonly module: string;
+	readonly kind: string;
+	readonly name: string;
+	readonly originalError: unknown;
+	readonly cleanupErrors?: readonly {
+		readonly module: string;
+		readonly componentKey: ComponentKey;
+		readonly error: unknown;
+	}[];
 }
 
 /** Per A2-β §6.1. */
 export interface RouteOrderCycleDetails {
-  readonly reason: 'route-order-cycle';
-  readonly cycle: readonly {
-    readonly id: string;
-    readonly before?: readonly string[];
-    readonly after?: readonly string[];
-  }[];
+	readonly reason: "route-order-cycle";
+	readonly cycle: readonly {
+		readonly id: string;
+		readonly before?: readonly string[];
+		readonly after?: readonly string[];
+	}[];
 }
 
 /** Per A2-β §6.1. */
 export interface RouteOrderTargetMissingDetails {
-  readonly reason: 'route-order-target-missing';
-  /** The referenced id that was not found. */
-  readonly id: string;
-  /**
-   * RouteContribution.id of the referencing route, or null when the
-   * referencing route has no `id` of its own.
-   */
-  readonly referencedBy: string | null;
-  /** Filled when `referencedBy` is null — the referencing route's mountPath. */
-  readonly referencedByMountPath?: string;
-  readonly direction: 'before' | 'after';
+	readonly reason: "route-order-target-missing";
+	/** The referenced id that was not found. */
+	readonly id: string;
+	/**
+	 * RouteContribution.id of the referencing route, or null when the
+	 * referencing route has no `id` of its own.
+	 */
+	readonly referencedBy: string | null;
+	/** Filled when `referencedBy` is null — the referencing route's mountPath. */
+	readonly referencedByMountPath?: string;
+	readonly direction: "before" | "after";
 }
 
 /**
@@ -784,25 +784,25 @@ export interface RouteOrderTargetMissingDetails {
  * Per A2-β §6.1.
  */
 export type BootErrorDetails =
-  | DuplicateModuleNameDetails
-  | DuplicateProvidesDetails
-  | BootstrapComponentCollisionDetails
-  | SyntheticKeyCollisionDetails
-  | MissingRequiredComponentDetails
-  | UnknownContributionKindDetails
-  | DuplicateContributeDetails
-  | OverrideTargetMissingDetails
-  | DuplicateOverrideDetails
-  | ContributeAndOverrideSameKeyDetails
-  | ListShapedOverrideDetails
-  | LifecycleWithoutProvidesDetails
-  | InvalidRouteAdvertisementPathDetails
-  | ConfigValidationFailedDetails
-  | CircularDependencyDetails
-  | ProvidesFactoryFailedDetails
-  | ContributeFactoryFailedDetails
-  | RouteOrderCycleDetails
-  | RouteOrderTargetMissingDetails;
+	| DuplicateModuleNameDetails
+	| DuplicateProvidesDetails
+	| BootstrapComponentCollisionDetails
+	| SyntheticKeyCollisionDetails
+	| MissingRequiredComponentDetails
+	| UnknownContributionKindDetails
+	| DuplicateContributeDetails
+	| OverrideTargetMissingDetails
+	| DuplicateOverrideDetails
+	| ContributeAndOverrideSameKeyDetails
+	| ListShapedOverrideDetails
+	| LifecycleWithoutProvidesDetails
+	| InvalidRouteAdvertisementPathDetails
+	| ConfigValidationFailedDetails
+	| CircularDependencyDetails
+	| ProvidesFactoryFailedDetails
+	| ContributeFactoryFailedDetails
+	| RouteOrderCycleDetails
+	| RouteOrderTargetMissingDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1
@@ -819,27 +819,27 @@ export type BootErrorDetails =
  * Per A2-β §6.1.
  */
 export class BootError extends Error {
-  override readonly name = 'BootError' as const;
-  readonly reason: BootErrorReason;
-  readonly stage: BootStage;
-  readonly details: BootErrorDetails;
-  override readonly cause?: unknown;
+	readonly reason: BootErrorReason;
+	readonly stage: BootStage;
+	readonly details: BootErrorDetails;
 
-  constructor(args: {
-    message: string;
-    reason: BootErrorReason;
-    stage: BootStage;
-    details: BootErrorDetails;
-    cause?: unknown;
-  }) {
-    super(args.message, { cause: args.cause });
-    this.reason = args.reason;
-    this.stage = args.stage;
-    this.details = args.details;
-    if (args.cause !== undefined) {
-      this.cause = args.cause;
-    }
-  }
+	constructor(args: {
+		message: string;
+		reason: BootErrorReason;
+		stage: BootStage;
+		details: BootErrorDetails;
+		cause?: unknown;
+	}) {
+		// Pass `cause` to super only when defined. Calling
+		// `super(message, { cause: undefined })` materialises an own `cause`
+		// property with value `undefined`, breaking the spec §6.1 contract that
+		// cause is populated only for *-factory-failed reasons.
+		super(args.message, args.cause !== undefined ? { cause: args.cause } : undefined);
+		this.name = "BootError";
+		this.reason = args.reason;
+		this.stage = args.stage;
+		this.details = args.details;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -851,4 +851,3 @@ export class BootError extends Error {
  * method literal union.
  */
 export type { HttpMethod };
-
