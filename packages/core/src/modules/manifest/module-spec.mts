@@ -87,5 +87,22 @@ export interface ModuleSpec<
  * planner accepts in `Module[]`. Per A2-α §2.1 / §3.1: authoring uses
  * `defineModule(...)` (which preserves R / O via inference); the boot
  * planner consumes the erased type.
+ *
+ * `R = ComponentKey` and `O = ComponentKey` (NOT the default `never`)
+ * is intentional: a `ModuleSpec<R', O'>` for any `R' ⊆ ComponentKey`
+ * and `O' ⊆ ComponentKey` is structurally assignable to this widened
+ * type via:
+ * - covariance of `requires?: readonly R[]` and `optional?: readonly O[]`
+ *   in their respective generics (R' ⊆ R is allowed)
+ * - contravariance of `Provider`'s `deps` parameter: a narrower
+ *   `ProviderDeps<R', O'>` (= the function takes fewer keys) is
+ *   assignable to a wider `ProviderDeps<R, O>` position
+ *
+ * Without this widening, `Module = ModuleSpec` (the default `never`
+ * args) would reject every consumer-authored `defineModule({ requires: [...] })`
+ * call once Phases 5–8 populate `ComponentMap` — `readonly "key"[]`
+ * does not extend `readonly never[]`. Phase 1 builds compile either
+ * way because `ComponentKey = never` in the empty baseline; the
+ * widening is the structurally-correct erasure for all later phases.
  */
-export type Module = ModuleSpec;
+export type Module = ModuleSpec<ComponentKey, ComponentKey>;

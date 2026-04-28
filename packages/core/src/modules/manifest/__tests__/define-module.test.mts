@@ -49,19 +49,23 @@ interface LocalModuleSpec<
   };
 }
 
+/**
+ * The widened "erased" form of LocalModuleSpec — mirrors the production
+ * pattern `Module = ModuleSpec<ComponentKey, ComponentKey>` so that
+ * `LocalModuleSpec<R, O>` (any subset R, O ⊆ LocalKey) is structurally
+ * assignable here without a cast. Without this widening, returning
+ * `LocalModuleSpec` (= `LocalModuleSpec<never, never>`) would reject
+ * the `const`-inferred narrow type at the function boundary.
+ *
+ * The same widening was applied to production `Module` in module-spec.mts.
+ */
+type LocalModule = LocalModuleSpec<LocalKey, LocalKey>;
+
 function defineLocalModule<
   const R extends LocalKey = never,
   const O extends LocalKey = never,
->(spec: LocalModuleSpec<R, O>): LocalModuleSpec {
-  // Cast required: LocalModuleSpec<R, O> is not assignable to
-  // LocalModuleSpec<never, never> when R/O are non-never (because the
-  // interface is invariant in R/O via the `provides` mapped type). This
-  // mirrors the runtime behaviour of production `defineModule`, which
-  // compiles without a cast only because ComponentKey = never in the
-  // Phase 1 baseline — once real slots exist, production code will need
-  // the same treatment. The test exercises the `const` inference pattern
-  // correctly regardless.
-  return spec as LocalModuleSpec;
+>(spec: LocalModuleSpec<R, O>): LocalModule {
+  return spec;
 }
 
 test("defineLocalModule infers requires literal array (no `as const` needed)", () => {
@@ -76,7 +80,7 @@ test("defineLocalModule infers requires literal array (no `as const` needed)", (
       },
     },
   });
-  expectTypeOf(m).toMatchTypeOf<LocalModuleSpec>();
+  expectTypeOf(m).toMatchTypeOf<LocalModule>();
 });
 
 test("defineLocalModule infers optional literal array", () => {
@@ -97,7 +101,7 @@ test("defineLocalModule infers optional literal array", () => {
       },
     },
   });
-  expectTypeOf(m).toMatchTypeOf<LocalModuleSpec>();
+  expectTypeOf(m).toMatchTypeOf<LocalModule>();
 });
 
 test("defineLocalModule with no requires/optional uses empty deps", () => {
@@ -111,7 +115,7 @@ test("defineLocalModule with no requires/optional uses empty deps", () => {
       },
     },
   });
-  expectTypeOf(m).toMatchTypeOf<LocalModuleSpec>();
+  expectTypeOf(m).toMatchTypeOf<LocalModule>();
 });
 
 test("production defineModule signature compiles (smoke check)", () => {
