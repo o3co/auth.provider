@@ -585,3 +585,39 @@ describe("assembleApp — 14. MUST-FIX 3: no asyncDispose on external (override/
 		expect(asyncDisposeSpy).toHaveBeenCalledOnce();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 17. listen(): wraps router in Express app for fall-through finalhandler
+// ---------------------------------------------------------------------------
+
+describe("assembleApp — 17. listen() wraps router in Express app", () => {
+	it("returns 404 (not crash with 'next is not a function') for unmatched paths", async () => {
+		// Regression: passing a bare Express Router to http.createServer means
+		// fall-through requests cause "TypeError: next is not a function"
+		// (Router is middleware expecting an outer (req, res, next) caller).
+		// listen() must wrap router in a real Express app so the standard
+		// finalhandler returns a 404 response.
+		const { default: express } = await import("express");
+		const handle = assembleApp(makeFrozenWorld([]), {
+			express: { Router: () => express.Router() },
+		});
+
+		const server = await handle.listen(0);
+		try {
+			const address = server.address();
+			if (address === null || typeof address === "string") {
+				throw new Error("listen() returned an unexpected address");
+			}
+			const response = await fetch(`http://127.0.0.1:${address.port}/nonexistent`, {
+				signal: AbortSignal.timeout(2000),
+			});
+			expect(response.status).toBe(404);
+			await response.text();
+		} finally {
+			await new Promise<void>((resolve, reject) => {
+				server.close((err) => (err ? reject(err) : resolve()));
+			});
+			await handle.dispose();
+		}
+	});
+});

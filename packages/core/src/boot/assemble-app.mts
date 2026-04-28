@@ -27,7 +27,7 @@
 
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import type { Router } from "express";
+import type { Express, Router } from "express";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import type {
 	AppHandle,
@@ -37,6 +37,15 @@ import type {
 	OrderedRouteContribution,
 } from "./types.mjs";
 import { BootError } from "./types.mjs";
+
+/**
+ * The `express` package's runtime shape: a callable factory that produces an
+ * `Express` app, with `Router` exposed as a property (CJS pattern). Captured
+ * here so `assembleApp` can both construct a router AND wrap it inside an app
+ * for `handle.listen()`.
+ * @internal
+ */
+type ExpressFactory = (() => Express) & { Router: () => Router };
 
 // ---------------------------------------------------------------------------
 // Internal: post-apply route collision check (§5.6 pre-pass, MUST-FIX 2)
@@ -459,14 +468,28 @@ export function assembleApp(
 
 	// Step 2: Construct router (§5.6 step 2).
 	// Resolve Router constructor: accept injected value (for tests/overrides)
-	// or fall back to a synchronous require of the express peer dep.
+	// or fall back to a synchronous require of the express peer dep. The
+	// require also yields the express() factory used by handle.listen() to
+	// wrap the router in a real Express app (Router is middleware and would
+	// crash with "next is not a function" if passed bare to createServer).
 	let RouterCtor = options.express?.Router;
-	if (RouterCtor === undefined) {
-		// express is declared as an optional peer dep; use sync require fallback.
+	let expressFactory: ExpressFactory | undefined;
+	try {
 		// createRequire is a built-in Node.js ESM helper (node:module).
 		const req = createRequire(import.meta.url);
-		const expressModule = req("express") as { Router: () => Router };
-		RouterCtor = expressModule.Router;
+		const expressModule = req("express") as ExpressFactory;
+		if (RouterCtor === undefined) RouterCtor = expressModule.Router;
+		expressFactory = expressModule;
+	} catch {
+		// express not installed; expressFactory stays undefined and listen()
+		// rejects at call time. RouterCtor is still usable when supplied via
+		// options.express (test mocks).
+	}
+
+	if (RouterCtor === undefined) {
+		throw new Error(
+			"assembleApp: cannot resolve express. Install `express` as a peer dependency or provide options.express.Router.",
+		);
 	}
 
 	const router: Router = RouterCtor();
@@ -483,7 +506,22 @@ export function assembleApp(
 		router,
 		listen(port: number) {
 			return new Promise((resolve, reject) => {
-				const server = createServer(router as never);
+				if (expressFactory === undefined) {
+					reject(
+						new Error(
+							"assembleApp.listen: express factory unavailable; install `express` as a peer dependency.",
+						),
+					);
+					return;
+				}
+				// Wrap the router in a real Express app so unmatched requests get
+				// the standard Express finalhandler (404) instead of crashing on
+				// "next is not a function". An Express Router is middleware that
+				// expects an outer (req, res, next) caller; createServer would
+				// invoke it with (req, res) only.
+				const app = expressFactory();
+				app.use(router);
+				const server = createServer(app);
 				server.listen(port, () => {
 					resolve(server);
 				});
