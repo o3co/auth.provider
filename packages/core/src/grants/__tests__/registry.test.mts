@@ -24,7 +24,7 @@ import type {
 } from "#/grants/types.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
-const makeHandler = (name: string): GrantHandler => ({
+const makeHandler = (_name: string): GrantHandler => ({
 	handle: vi.fn().mockResolvedValue({
 		result: { status: 200, tokens: {} },
 	}),
@@ -229,9 +229,7 @@ describe("GrantRegistry.register (A6+A7 §2.1: throw on duplicate)", () => {
 		const registry = new GrantRegistry();
 		const original = makeHandler("original");
 		registry.register("foo", original);
-		expect(() => registry.register("foo", makeHandler("replacement"))).toThrow(
-			GrantRegistryError,
-		);
+		expect(() => registry.register("foo", makeHandler("replacement"))).toThrow(GrantRegistryError);
 		expect(registry.get("foo")).toBe(original);
 	});
 });
@@ -337,10 +335,12 @@ describe("GrantRegistry.addModule no-side-effect-leak (Codex review P1)", () => 
 		registry.register("session", makeHandler("existing"));
 
 		const factoryRan: string[] = [];
-		const trackingFactory = (label: string): GrantFactory => () => {
-			factoryRan.push(label);
-			return makeHandler(label);
-		};
+		const trackingFactory =
+			(label: string): GrantFactory =>
+			() => {
+				factoryRan.push(label);
+				return makeHandler(label);
+			};
 		const module: GrantModule = {
 			grants: {
 				// "fresh" comes first in iteration order. Pre-check phase
@@ -365,10 +365,12 @@ describe("GrantRegistry.addModule no-side-effect-leak (Codex review P1)", () => 
 		registry.freeze();
 
 		const factoryRan: string[] = [];
-		const trackingFactory = (label: string): GrantFactory => () => {
-			factoryRan.push(label);
-			return makeHandler(label);
-		};
+		const trackingFactory =
+			(label: string): GrantFactory =>
+			() => {
+				factoryRan.push(label);
+				return makeHandler(label);
+			};
 		const module: GrantModule = {
 			grants: {
 				newGrant: trackingFactory("newGrant"),
