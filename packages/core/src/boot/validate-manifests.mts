@@ -759,13 +759,29 @@ function checkRouteCollisions(
 // ---------------------------------------------------------------------------
 
 /**
- * Step 8: Every `overrides[kind][name]` must have a matching
- * `contributes[kind][name]` in some module.
+ * Step 8: Every `overrides[kind][name]` must have a matching target. The
+ * target is satisfied by EITHER:
+ *   1. some module's `contributes[kind][name]`, OR
+ *   2. an entry pre-seeded in the consumer-supplied name-keyed collector
+ *      (`contributionKinds[kind].get(name) !== undefined`).
+ *
+ * Carve-out (2) keeps validate-stage and apply-stage in agreement: §5.4
+ * step 2 routes overrides through `collector.replace(name, value)`, which
+ * succeeds whenever the collector already has an entry for `name` —
+ * regardless of whether that entry came from a module or from a host-
+ * supplied pre-seeded collector. Without this carve-out, the documented
+ * "consumer extension via pre-loaded collector" path is rejected at
+ * validate-stage and would never reach apply-stage. Per multi-agent
+ * review (Codex P2).
+ *
  * Per A2-β §5.1 step 8.
  * @internal
  */
-function checkOverrideTargets(modules: readonly NormalisedModule[]): void {
-	// Build set of all contributes (kind, name) pairs
+function checkOverrideTargets(
+	modules: readonly NormalisedModule[],
+	contributionKinds: ContributionKindMap,
+): void {
+	// Build set of all contributes (kind, name) pairs across modules.
 	const contributed = new Set<string>(); // `${kind}:${name}`
 	for (const m of modules) {
 		for (const entry of m.contributesEntries) {
@@ -779,19 +795,28 @@ function checkOverrideTargets(modules: readonly NormalisedModule[]): void {
 		for (const entry of m.overridesEntries) {
 			if (typeof entry.key !== "string") continue;
 			const compoundKey = `${entry.kind}:${entry.key}`;
-			if (!contributed.has(compoundKey)) {
-				throw new BootError({
-					message: `Override target missing — module "${m.name}" overrides "${entry.kind}.${entry.key}" but no module contributes it.`,
-					reason: "override-target-missing",
-					stage: "validateManifests",
-					details: {
-						reason: "override-target-missing",
-						kind: entry.kind,
-						name: entry.key,
-						overridingModule: m.name,
-					},
-				});
+			if (contributed.has(compoundKey)) continue;
+
+			// Fallback: consumer-seeded name-keyed collector with a pre-existing
+			// entry under this name is also a valid override target.
+			const collector = (contributionKinds as Record<string, unknown>)[entry.kind] as
+				| { kind: string; get?: (name: string) => unknown }
+				| undefined;
+			if (collector?.kind === "name-keyed" && collector.get?.(entry.key) !== undefined) {
+				continue;
 			}
+
+			throw new BootError({
+				message: `Override target missing — module "${m.name}" overrides "${entry.kind}.${entry.key}" but no module contributes it and no consumer-seeded collector pre-loaded it.`,
+				reason: "override-target-missing",
+				stage: "validateManifests",
+				details: {
+					reason: "override-target-missing",
+					kind: entry.kind,
+					name: entry.key,
+					overridingModule: m.name,
+				},
+			});
 		}
 	}
 }
@@ -1116,7 +1141,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	checkRouteCollisions(normalisedModules, modules);
 
 	// Step 8: Override target existence
-	checkOverrideTargets(normalisedModules);
+	checkOverrideTargets(normalisedModules, contributionKinds ?? {});
 
 	// Step 9: Duplicate override check
 	checkOverrideDuplicates(normalisedModules);

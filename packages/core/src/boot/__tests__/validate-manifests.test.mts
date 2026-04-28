@@ -615,6 +615,32 @@ describe("validateManifests — step 8: override-target-missing", () => {
 		}
 		expect.fail("should have thrown");
 	});
+
+	it("accepts an override targeting an entry pre-seeded in a consumer-supplied name-keyed collector", () => {
+		// Per multi-agent review (Codex P2): the consumer extension path lets
+		// an integrator pre-load entries into a custom name-keyed collector
+		// before passing it to validateManifests. A module that overrides such
+		// a pre-seeded entry MUST be allowed — apply-contributions step 2 will
+		// route the override through `collector.replace(name, value)` and the
+		// seeded entry satisfies that contract. Without this carve-out, the
+		// validate stage rejects a structurally-valid extension scenario that
+		// the apply stage would happily handle.
+		const preSeededCollector = makeStubNameCollector();
+		preSeededCollector.register("preloaded_entry", { v: "from-host" });
+
+		const overrideModule = defineModule({
+			name: "ov",
+			overrides: { grants: { preloaded_entry: () => ({ v: "module-supplied" }) as never } },
+		});
+
+		expect(() =>
+			validateManifests({
+				modules: [overrideModule],
+				bootstrapComponents: minBootstrap,
+				contributionKinds: { grants: preSeededCollector as never },
+			}),
+		).not.toThrow();
+	});
 });
 
 // ---------------------------------------------------------------------------
