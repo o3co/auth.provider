@@ -37,17 +37,17 @@ import type { Module, ModuleSpec } from "./module-spec.mjs";
  * ```
  */
 export function defineModule<
-  const R extends ComponentKey = never,
-  const O extends ComponentKey = never,
+	const R extends ComponentKey = never,
+	const O extends ComponentKey = never,
 >(spec: ModuleSpec<R, O>): Module {
-  // Pure pass-through. The boot planner (Phase 4) consumes the erased
-  // Module type; the type-level R/O information is captured at the
-  // defineModule call site for inference but not used at runtime.
-  //
-  // Object.freeze omitted because the manifest is itself `readonly` at
-  // the type level; runtime freezing is a defensive belt the boot planner
-  // applies to projected views (synthetic resolvers per A2-α §6.5), not
-  // to user-authored manifests. Per principle spec Theme D guidance: the
-  // type-level readonly is the contract.
-  return spec;
+	// Pure pass-through. The boot planner (Phase 4) consumes the erased
+	// Module type; the type-level R/O information is captured at the
+	// defineModule call site for inference but not used at runtime.
+	//
+	// Object.freeze omitted because the manifest is itself `readonly` at
+	// the type level; runtime freezing is a defensive belt the boot planner
+	// applies to projected views (synthetic resolvers per A2-α §6.5), not
+	// to user-authored manifests. Per principle spec Theme D guidance: the
+	// type-level readonly is the contract.
+	return spec;
 }

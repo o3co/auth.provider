@@ -74,9 +74,7 @@ export type GrantPolicyHook = unknown;
 
 export type GrantFactory<Deps> = (deps: Deps) => GrantHandler;
 export type FederationFactory<Deps> = (deps: Deps) => FederationProvider;
-export type ExchangeTokenValidatorFactory<Deps> = (
-  deps: Deps,
-) => ExchangeTokenValidator;
+export type ExchangeTokenValidatorFactory<Deps> = (deps: Deps) => ExchangeTokenValidator;
 export type MfaFactorFactory<Deps> = (deps: Deps) => MfaFactor;
 export type AuditHookFactory<Deps> = (deps: Deps) => AuditHook;
 export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHook;
@@ -100,17 +98,17 @@ export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHook;
  * per-contribution dep declaration.
  */
 export interface ContributesMap<Deps = ProviderDeps<never, never>> {
-  readonly grants?: { readonly [grantType: string]: GrantFactory<Deps> };
-  readonly federations?: {
-    readonly [name: string]: FederationFactory<Deps>;
-  };
-  readonly tokenExchangeValidators?: {
-    readonly [tokenType: string]: ExchangeTokenValidatorFactory<Deps>;
-  };
-  readonly mfaFactors?: {
-    readonly [kind: string]: MfaFactorFactory<Deps>;
-  };
-  readonly auditHooks?: readonly AuditHookFactory<Deps>[];
-  readonly routes?: readonly RouteContributionEntry<Deps>[];
-  readonly grantPolicyHooks?: readonly GrantPolicyHookFactory<Deps>[];
+	readonly grants?: { readonly [grantType: string]: GrantFactory<Deps> };
+	readonly federations?: {
+		readonly [name: string]: FederationFactory<Deps>;
+	};
+	readonly tokenExchangeValidators?: {
+		readonly [tokenType: string]: ExchangeTokenValidatorFactory<Deps>;
+	};
+	readonly mfaFactors?: {
+		readonly [kind: string]: MfaFactorFactory<Deps>;
+	};
+	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
+	readonly routes?: readonly RouteContributionEntry<Deps>[];
+	readonly grantPolicyHooks?: readonly GrantPolicyHookFactory<Deps>[];
 }

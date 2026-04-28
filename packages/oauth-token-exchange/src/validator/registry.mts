@@ -16,10 +16,7 @@
 
 import type { ExchangeTokenValidator } from "./types.mjs";
 
-export type ExchangeTokenValidatorRegistryErrorReason =
-	| "duplicate"
-	| "unknown"
-	| "frozen";
+export type ExchangeTokenValidatorRegistryErrorReason = "duplicate" | "unknown" | "frozen";
 
 /**
  * Error class for ExchangeTokenValidatorRegistry mutation failures.
@@ -48,9 +45,7 @@ export class ExchangeTokenValidatorRegistryError extends Error {
 			args.registered.length > 0
 				? `Registered: ${args.registered.join(", ")}.`
 				: "Registered: (none).";
-		super(
-			`ExchangeTokenValidatorRegistryError [${args.reason}]: ${detail}. ${registeredSuffix}`,
-		);
+		super(`ExchangeTokenValidatorRegistryError [${args.reason}]: ${detail}. ${registeredSuffix}`);
 		this.name = "ExchangeTokenValidatorRegistryError";
 		this.reason = args.reason;
 		this.tokenType = args.tokenType;

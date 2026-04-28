@@ -29,7 +29,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly slotA: number;
 		readonly slotB: number;
 		readonly slotC: number;
-		readonly slotD: number;
 	}
 }
 

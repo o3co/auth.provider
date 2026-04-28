@@ -219,10 +219,13 @@ function buildCycleChain(
 		indexByName.set(validated.modules[i].manifest.name, i);
 	}
 
-	// Pick starting node — smallest declaration index in the SCC
+	// Pick starting node — smallest declaration index in the SCC.
+	// `scc` names came from `validated.modules`, so `indexByName.get(...)` is
+	// always defined here; the `!` reflects that invariant.
 	let start = scc[0];
 	for (const name of scc) {
-		if ((indexByName.get(name) ?? 0) < (indexByName.get(start) ?? 0)) {
+		// biome-ignore lint/style/noNonNullAssertion: indexByName covers every validated module
+		if (indexByName.get(name)! < indexByName.get(start)!) {
 			start = name;
 		}
 	}
@@ -411,6 +414,17 @@ interface ActivationClosure {
 
 /**
  * Compound key for activation closure sets.
+ *
+ * PRECONDITION: module names MUST NOT contain `"::"` (the chosen separator),
+ * and componentKey MUST be a string (not a symbol with a colliding description).
+ * Both invariants hold for v0.5.0 since: (a) module names are author-supplied
+ * identifiers conventionally lowercase-hyphen-only, and (b) ComponentKey is
+ * `keyof ComponentMap` which is currently string-only across all v0.5.0 slots.
+ *
+ * If a future spec extension introduces symbol-keyed ComponentMap slots or
+ * relaxes the module-name convention, replace this string-encoded compound
+ * with a `Map<string, Set<ComponentKey>>` keyed by module name.
+ *
  * @internal
  */
 function closureKey(module: string, componentKey: ComponentKey): string {

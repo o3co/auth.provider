@@ -14,11 +14,7 @@
  * limitations under the License.
  */
 
-import type {
-  ExchangeTokenValidator,
-  FederationProvider,
-  GrantHandler,
-} from "./contributes-map.mjs";
+import type { ExchangeTokenValidator, GrantHandler } from "./contributes-map.mjs";
 
 /**
  * Read-only projection of the boot planner's `grants` collector, exposed
@@ -30,8 +26,8 @@ import type {
  * exposes only `get` and `entries`, no write surface.
  */
 export interface GrantHandlerResolver {
-  readonly get: (grantType: string) => GrantHandler | undefined;
-  readonly entries: () => IterableIterator<readonly [string, GrantHandler]>;
+	readonly get: (grantType: string) => GrantHandler | undefined;
+	readonly entries: () => IterableIterator<readonly [string, GrantHandler]>;
 }
 
 /**
@@ -39,12 +35,8 @@ export interface GrantHandlerResolver {
  * collector. Per A2-α §6.5.
  */
 export interface TokenExchangeValidatorResolver {
-  readonly get: (
-    tokenType: string,
-  ) => ExchangeTokenValidator | undefined;
-  readonly entries: () => IterableIterator<
-    readonly [string, ExchangeTokenValidator]
-  >;
+	readonly get: (tokenType: string) => ExchangeTokenValidator | undefined;
+	readonly entries: () => IterableIterator<readonly [string, ExchangeTokenValidator]>;
 }
 
 /**
@@ -75,9 +67,5 @@ export type { FederationProvider } from "./contributes-map.mjs";
  * to mutate is explicitly bypassing the public type contract.
  */
 export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
-  new Set([
-    "federationProviders",
-    "tokenExchangeValidatorResolver",
-    "grantHandlerResolver",
-  ]),
+	new Set(["federationProviders", "tokenExchangeValidatorResolver", "grantHandlerResolver"]),
 );

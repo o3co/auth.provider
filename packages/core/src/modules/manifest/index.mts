@@ -15,9 +15,6 @@
  */
 
 export type { ComponentKey, ComponentMap } from "./component-map.mjs";
-
-export type { Provider, ProviderDeps } from "./provider.mjs";
-
 export type {
 	AuditHook,
 	AuditHookFactory,
@@ -33,7 +30,14 @@ export type {
 	MfaFactor,
 	MfaFactorFactory,
 } from "./contributes-map.mjs";
-
+export { defineModule } from "./define-module.mjs";
+export type {
+	ComponentLifecycle,
+	ConfigSchema,
+	Module,
+	ModuleSpec,
+} from "./module-spec.mjs";
+export type { Provider, ProviderDeps } from "./provider.mjs";
 export type {
 	HttpMethod,
 	RouteAdvertisement,
@@ -42,15 +46,6 @@ export type {
 	RouteContributionFactory,
 	RouteHandler,
 } from "./route-contribution.mjs";
-
-export type {
-	ComponentLifecycle,
-	ConfigSchema,
-	Module,
-	ModuleSpec,
-} from "./module-spec.mjs";
-
-export { defineModule } from "./define-module.mjs";
 
 export type {
 	GrantHandlerResolver,

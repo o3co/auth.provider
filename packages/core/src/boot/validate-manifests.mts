@@ -158,23 +158,6 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 ]);
 
 // ---------------------------------------------------------------------------
-// List-shaped contribution kinds — override is not allowed for these
-// ---------------------------------------------------------------------------
-
-const LIST_SHAPED_KINDS = new Set<string>(["routes", "auditHooks", "grantPolicyHooks"]);
-
-// ---------------------------------------------------------------------------
-// Name-keyed contribution kinds — subject to per-kind name collision check
-// ---------------------------------------------------------------------------
-
-const NAME_KEYED_KINDS = new Set<string>([
-	"grants",
-	"federations",
-	"tokenExchangeValidators",
-	"mfaFactors",
-]);
-
-// ---------------------------------------------------------------------------
 // Step 1 — Module identity uniqueness
 // Per A2-β §5.1 step 1.
 // ---------------------------------------------------------------------------
@@ -619,18 +602,32 @@ function checkContributionKindCoverage(
  * Step 6: For name-keyed kinds, (kind, name) collisions across modules throw
  * `duplicate-contribute`. List-shaped kinds are handled in step 7 (routes)
  * or silently deduplicated (auditHooks, grantPolicyHooks per A2-α §4.5).
+ *
+ * Dispatches on `collector.kind === "name-keyed"` rather than a hardcoded
+ * built-in name set, so consumer-defined name-keyed kinds (added via
+ * declare-module augmentation of ContributionCollectorMap) are also
+ * duplicate-checked. Mirrors the Task 6 fixup applied in
+ * apply-contributions.mts (commit 4d03cc0b).
+ *
  * Per A2-β §5.1 step 6.
  * @internal
  */
-function checkPerKindContributeDuplicates(modules: readonly NormalisedModule[]): void {
+function checkPerKindContributeDuplicates(
+	modules: readonly NormalisedModule[],
+	contributionKinds: ContributionKindMap,
+): void {
 	// Track (kind, name) → first contributing module
 	const seen = new Map<string, string>(); // key: `${kind}:${name}`
 
 	for (const m of modules) {
 		for (const entry of m.contributesEntries) {
 			const kind = entry.kind;
-			// Only check name-keyed kinds; list-shaped use different identity
-			if (!NAME_KEYED_KINDS.has(kind)) continue;
+			// Look up the collector for this kind; only name-keyed collectors
+			// participate in the (kind, name) duplicate check.
+			const collector = (contributionKinds as Record<string, unknown>)[kind] as
+				| { kind?: string }
+				| undefined;
+			if (collector?.kind !== "name-keyed") continue;
 			if (typeof entry.key !== "string") continue;
 
 			const compoundKey = `${kind}:${entry.key}`;
@@ -916,27 +913,45 @@ function checkSameModuleContributeOverride(modules: readonly NormalisedModule[])
 // ---------------------------------------------------------------------------
 
 /**
- * Step 11: A module's `overrides` carrying `routes`, `auditHooks`, or
- * `grantPolicyHooks` throws `list-shaped-override-not-allowed`.
+ * Step 11: A module's `overrides` carrying any list-shaped kind throws
+ * `list-shaped-override-not-allowed`.
+ *
+ * Dispatches on `collector.kind === "list" | "list-routes"` so consumer-
+ * defined list-shaped kinds are also caught. Mirrors the Task 6 fixup
+ * applied in apply-contributions.mts (commit 4d03cc0b). The built-in
+ * list-shaped kinds (routes, auditHooks, grantPolicyHooks) match by
+ * collector identity; consumer-defined kinds with list-shaped collectors
+ * match the same way.
+ *
+ * The `details.kind` literal is typed as the v0.5.0 built-in union
+ * `"routes" | "auditHooks" | "grantPolicyHooks"` per spec §6.1
+ * `ListShapedOverrideDetails`; a consumer-defined kind name is widened
+ * via cast since the Details type does not yet model consumer extensions.
+ *
  * Per A2-β §5.1 step 11.
  * @internal
  */
-function checkListShapedOverrides(rawModules: readonly Module[]): void {
+function checkListShapedOverrides(
+	rawModules: readonly Module[],
+	contributionKinds: ContributionKindMap,
+): void {
 	for (const m of rawModules) {
 		const overrides = m.overrides ?? {};
-		for (const kind of LIST_SHAPED_KINDS) {
-			if (kind in overrides) {
-				throw new BootError({
-					message: `Module "${m.name}" attempts to override list-shaped kind "${kind}", which is not allowed.`,
+		for (const kind of Object.keys(overrides)) {
+			const collector = (contributionKinds as Record<string, unknown>)[kind] as
+				| { kind?: string }
+				| undefined;
+			if (collector?.kind !== "list" && collector?.kind !== "list-routes") continue;
+			throw new BootError({
+				message: `Module "${m.name}" attempts to override list-shaped kind "${kind}", which is not allowed.`,
+				reason: "list-shaped-override-not-allowed",
+				stage: "validateManifests",
+				details: {
 					reason: "list-shaped-override-not-allowed",
-					stage: "validateManifests",
-					details: {
-						reason: "list-shaped-override-not-allowed",
-						kind: kind as "routes" | "auditHooks" | "grantPolicyHooks",
-						module: m.name,
-					},
-				});
-			}
+					kind: kind as "routes" | "auditHooks" | "grantPolicyHooks",
+					module: m.name,
+				},
+			});
 		}
 	}
 }
@@ -1130,7 +1145,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	checkContributionKindCoverage(normalisedModules, contributionKinds);
 
 	// Step 6: Per-kind name-keyed duplicate contributes
-	checkPerKindContributeDuplicates(normalisedModules);
+	checkPerKindContributeDuplicates(normalisedModules, contributionKinds ?? {});
 
 	// Step 7: Route collisions + advertisement path validation
 	checkRouteCollisions(normalisedModules, modules);
@@ -1145,7 +1160,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	checkSameModuleContributeOverride(normalisedModules);
 
 	// Step 11: List-shaped override rejection
-	checkListShapedOverrides(modules);
+	checkListShapedOverrides(modules, contributionKinds ?? {});
 
 	// Step 12: Lifecycle/provides closure
 	checkLifecycleClosure(normalisedModules);

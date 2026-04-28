@@ -27,11 +27,10 @@ import type { ComponentKey, ComponentMap } from "./component-map.mjs";
  *
  * Per A2-α §3.1.
  */
-export type ProviderDeps<
-  R extends ComponentKey = never,
-  O extends ComponentKey = never,
-> = { readonly [K in R]: ComponentMap[K] } & {
-  readonly [K in O]?: ComponentMap[K];
+export type ProviderDeps<R extends ComponentKey = never, O extends ComponentKey = never> = {
+	readonly [K in R]: ComponentMap[K];
+} & {
+	readonly [K in O]?: ComponentMap[K];
 };
 
 /**
@@ -44,5 +43,5 @@ export type ProviderDeps<
  * provider may return synchronously when no async work is needed.
  */
 export type Provider<K extends ComponentKey, Deps> = (
-  deps: Deps,
+	deps: Deps,
 ) => ComponentMap[K] | Promise<ComponentMap[K]>;

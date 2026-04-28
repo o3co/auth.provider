@@ -836,3 +836,70 @@ describe("validateManifests — happy path", () => {
 		expect(result.modules[1].manifest.name).toBe("consumer");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Consumer-defined kinds — collector.kind discriminant dispatch
+// (parallel to Task 6 fixup applied in apply-contributions.mts)
+// ---------------------------------------------------------------------------
+
+describe("validateManifests — consumer-defined kinds (spec §5.4 + §5.1 step 6/11)", () => {
+	it("step 6: duplicate-check applies to consumer-defined name-keyed kinds", () => {
+		const m1 = defineModule({
+			name: "c1",
+			contributes: { myCustomKind: { item: () => ({}) } } as never,
+		});
+		const m2 = defineModule({
+			name: "c2",
+			contributes: { myCustomKind: { item: () => ({}) } } as never,
+		});
+		try {
+			validateManifests({
+				modules: [m1, m2],
+				bootstrapComponents: minBootstrap,
+				contributionKinds: { myCustomKind: makeStubNameCollector() } as never,
+			});
+		} catch (e) {
+			const err = e as BootError;
+			expect(err.reason).toBe("duplicate-contribute");
+			if (err.details.reason === "duplicate-contribute") {
+				expect(err.details.kind).toBe("myCustomKind");
+				expect(err.details.identity).toBe("item");
+				expect(err.details.identityKind).toBe("name");
+			}
+			return;
+		}
+		expect.fail("should have thrown");
+	});
+
+	it("step 11: list-shaped-override rejection applies to consumer-defined list-shaped kinds", () => {
+		const base = defineModule({
+			name: "base",
+			contributes: { myListKind: [() => ({})] } as never,
+		});
+		const overrider = defineModule({
+			name: "ov",
+			overrides: { myListKind: [() => ({})] } as never,
+		});
+		try {
+			validateManifests({
+				modules: [base, overrider],
+				bootstrapComponents: minBootstrap,
+				contributionKinds: {
+					myListKind: {
+						kind: "list",
+						append: () => {},
+						values: () => [][Symbol.iterator](),
+					},
+				} as never,
+			});
+		} catch (e) {
+			const err = e as BootError;
+			expect(err.reason).toBe("list-shaped-override-not-allowed");
+			if (err.details.reason === "list-shaped-override-not-allowed") {
+				expect(err.details.module).toBe("ov");
+			}
+			return;
+		}
+		expect.fail("should have thrown");
+	});
+});
