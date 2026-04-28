@@ -22,7 +22,7 @@ export {
 	type BuilderContext,
 	createAdapterFactory,
 } from "./adapters/AdapterFactory.mjs";
-// App factory
+// App factory (legacy — v0.4.x createApp; stays until Phase 9 / A2-γ migration)
 export { type AppOptions, type AppResult, createApp } from "./app.mjs";
 export {
 	createAuditSinkFactory,
@@ -31,6 +31,49 @@ export {
 } from "./audit/factory.mjs";
 // Audit
 export type { AuditEvent, AuditSinkBase, AuditSinkFactory } from "./audit/types.mjs";
+export type {
+	AppHandle,
+	BootErrorDetails,
+	BootErrorReason,
+	BootStage,
+	BootstrapComponentCollisionDetails,
+	BootstrapMap,
+	CircularDependencyDetails,
+	CleanupRecord,
+	CollectedRouteContribution,
+	ConfigValidationFailedDetails,
+	ContributeAndOverrideSameKeyDetails,
+	ContributeFactoryFailedDetails,
+	ContributionCollectorMap,
+	ContributionKindMap,
+	CreateAppOptions,
+	DefaultBootstrapMap,
+	DuplicateContributeDetails,
+	DuplicateModuleNameDetails,
+	DuplicateOverrideDetails,
+	DuplicateProvidesDetails,
+	InvalidRouteAdvertisementPathDetails,
+	LifecycleWithoutProvidesDetails,
+	ListCollector,
+	ListShapedOverrideDetails,
+	MissingRequiredComponentDetails,
+	NameKeyedCollector,
+	OrderedRouteContribution,
+	OverrideTargetMissingDetails,
+	ProvidesFactoryFailedDetails,
+	RouteCollector,
+	RouteOrderCycleDetails,
+	RouteOrderTargetMissingDetails,
+	SyntheticKeyCollisionDetails,
+	UnknownContributionKindDetails,
+} from "./boot/index.mjs";
+// Boot planner — v0.5.0 createApp + AppHandle + BootError catalogue
+// `createBootApp` is a temporary alias; Phase 9 drops the alias and the legacy
+// createApp above, leaving a single `createApp` export from ./boot/index.mjs.
+export {
+	BootError,
+	createApp as createBootApp,
+} from "./boot/index.mjs";
 // Configuration
 export {
 	type AppConfig,
