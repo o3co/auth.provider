@@ -1,4 +1,5 @@
 import { expectTypeOf, test } from "vitest";
+import type { ComponentKey } from "../component-map.mjs";
 import type { Module, ModuleSpec } from "../module-spec.mjs";
 
 // ---------------------------------------------------------------------------
@@ -38,9 +39,14 @@ interface LocalModuleSpec<
   };
 }
 
-test("Module is the erased ModuleSpec alias (post-inference)", () => {
-  // Structural test: Module is ModuleSpec with no generic args (= never, never).
-  expectTypeOf<Module>().toEqualTypeOf<ModuleSpec>();
+test("Module is the widened ModuleSpec alias (post-inference)", () => {
+  // Structural test: Module is ModuleSpec<ComponentKey, ComponentKey> per
+  // the variance widening in module-spec.mts. Asserting against
+  // `ModuleSpec` (= `ModuleSpec<never, never>`) would pass by accident in
+  // Phase 1 (because ComponentKey = never in the empty baseline) and then
+  // silently fail in Phase 5+ when ComponentKey expands to real slots.
+  // The assertion below is Phase-5-stable: both sides expand identically.
+  expectTypeOf<Module>().toEqualTypeOf<ModuleSpec<ComponentKey, ComponentKey>>();
 });
 
 test("ModuleSpec has the 7 baseline fields, all readonly", () => {
