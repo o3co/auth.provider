@@ -21,7 +21,10 @@ export {
 	type TokenExchangeDependencies,
 } from "./grant.mjs";
 export { tokenExchangeModule } from "./module.mjs";
-export { ExchangeTokenValidatorRegistry } from "./validator/registry.mjs";
+export {
+	ExchangeTokenValidatorRegistry,
+	ExchangeTokenValidatorRegistryError,
+} from "./validator/registry.mjs";
 export {
 	type CreateSelfIssuedAccessTokenValidatorOptions,
 	createSelfIssuedAccessTokenValidator,
