@@ -56,7 +56,14 @@ export type HttpMethod =
 export interface RouteAdvertisement {
   /** HTTP method this advertisement covers. Per A2-β §4.2. */
   readonly method: HttpMethod;
-  /** Path relative to the contribution's `mountPath`. Per A2-β §4.2. */
+  /**
+   * Path relative to the contribution's `mountPath`. MUST start with "/";
+   * the boot planner's `validateManifests` stage throws
+   * `invalid-route-advertisement-path` otherwise (A2-β §5.1 step 7,
+   * §6.1).
+   *
+   * Per A2-β §4.2.
+   */
   readonly path: string;
 }
 
