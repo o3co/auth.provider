@@ -71,3 +71,40 @@ export interface ChallengeStore {
 	 */
 	consume(scope: string, value: string): Promise<boolean>;
 }
+
+/**
+ * Discriminated outcome of one ChallengeCeremony.consume call. The wrapper's
+ * complete return contract is one of these three values; system errors
+ * (Redis network, etc.) propagate as native errors and are NOT classified
+ * here.
+ *
+ * Per A1 §5.3 (lines 185-218).
+ *
+ *   "consumed": Atomically deleted by THIS call; recorded in ReplaySeenSet
+ *     for future replay detection. Caller MAY proceed with the protected op.
+ *   "replayed": Previously consumed (race-loss branch OR an earlier call
+ *     recorded in ReplaySeenSet). Caller MUST reject AND treat as a replay-
+ *     attack audit signal.
+ *   "unknown": No record matches (scope, value). Caller MUST reject. This is
+ *     the expected outcome for attacker probing of random values.
+ */
+export type ChallengeCeremonyOutcome =
+	| { readonly outcome: "consumed" }
+	| { readonly outcome: "replayed" }
+	| { readonly outcome: "unknown" };
+
+/**
+ * Composes ChallengeStore + ReplaySeenSet primitives into the 3-outcome
+ * server-issued challenge ceremony. The default implementation is in
+ * `./ceremony.mts`; consumers can replace it by providing their own module.
+ *
+ * Per A1 §5.3.
+ */
+export interface ChallengeCeremony {
+	/**
+	 * Returns one of the three discriminated outcomes. Does NOT throw
+	 * ChallengeStorageError or any other domain error in normal flow —
+	 * the union IS the complete return contract.
+	 */
+	consume(scope: string, value: string): Promise<ChallengeCeremonyOutcome>;
+}
