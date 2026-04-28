@@ -276,3 +276,47 @@ export type {
 	UserSessionStoreBase,
 	UserSessionStoreFactory,
 } from "./user-sessions/types.mjs";
+
+// ---------------------------------------------------------------------------
+// A1 — Challenge Store + Replay Seen Set + Default Ceremony (Phase 5)
+// ---------------------------------------------------------------------------
+
+// Memory adapters (re-exported so consumers can construct without going through modules)
+export { createMemoryChallengeStore } from "./challenges/adapters/memory.mjs";
+// Canonical key helper (exported for integrators writing their own adapters
+// to preserve cross-adapter parity per A1 §7.3)
+export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";
+// Default composition
+export {
+	createDefaultChallengeCeremony,
+	type DefaultChallengeCeremonyDeps,
+} from "./challenges/ceremony.mjs";
+export type { ChallengeStorageErrorReason } from "./challenges/errors.mjs";
+// Errors
+export { ChallengeStorageError } from "./challenges/errors.mjs";
+// Adapter factories
+export {
+	type ChallengeStoreFactory,
+	createChallengeStoreFactory,
+	registerBuiltinChallengeStores,
+} from "./challenges/factory.mjs";
+// Modules
+export {
+	defaultChallengeCeremonyModule,
+	memoryChallengeStoreModule,
+} from "./challenges/module.mjs";
+// Types
+export type {
+	Challenge,
+	ChallengeCeremony,
+	ChallengeCeremonyOutcome,
+	ChallengeStore,
+} from "./challenges/types.mjs";
+export { createMemoryReplaySeenSet } from "./replay-seen-set/adapters/memory.mjs";
+export {
+	createReplaySeenSetFactory,
+	type ReplaySeenSetFactory,
+	registerBuiltinReplaySeenSets,
+} from "./replay-seen-set/factory.mjs";
+export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
+export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
