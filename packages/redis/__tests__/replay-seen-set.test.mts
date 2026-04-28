@@ -5,9 +5,9 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
-import { createRedisChallengeStore } from "../src/challenges.mjs";
+import { createRedisReplaySeenSet } from "../src/replay-seen-set.mjs";
 import type { RedisClient } from "../src/types.mjs";
-import { runChallengeStoreContract } from "./adapters.challenge-store.contract.mjs";
+import { runReplaySeenSetContract } from "./adapters.replay-seen-set.contract.mjs";
 
 let container: StartedTestContainer;
 let client: Redis;
@@ -26,14 +26,12 @@ afterAll(async () => {
 	await container?.stop();
 });
 
-runChallengeStoreContract("redis", {
+runReplaySeenSetContract("redis", {
 	create: () => {
-		// Per-test prefix isolation so concurrency tests do not collide across
-		// shared container state.
 		keyCounter += 1;
-		return createRedisChallengeStore({
+		return createRedisReplaySeenSet({
 			client: client as unknown as RedisClient,
-			keyPrefix: `chal:test-${keyCounter}:`,
+			keyPrefix: `replay:test-${keyCounter}:`,
 		});
 	},
 });
