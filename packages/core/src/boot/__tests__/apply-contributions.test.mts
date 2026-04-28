@@ -482,3 +482,57 @@ describe("applyContributions — step 3: auditHooks same-instance dedup", () => 
 		expect(entries[0]).toBe(sharedHook);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 9. Consumer-defined kinds — spec §5.4 step 2 + step 3 discriminant routing
+// ---------------------------------------------------------------------------
+
+describe("applyContributions — consumer-defined kinds (spec §5.4)", () => {
+	it("routes consumer-defined name-keyed kinds to register via collector.kind discriminant", async () => {
+		// Module contributes a kind not in the built-in set.
+		// The "myCustomKind" doesn't appear in the built-in NAME_KEYED_KINDS
+		// set; routing must rely on collector.kind === "name-keyed".
+		const m = defineModule({
+			name: "consumer-kind-mod",
+			contributes: {
+				myCustomKind: { item1: () => ({ tag: "v1" }) },
+			} as never,
+		});
+		const validated = validateManifests({
+			modules: [m],
+			bootstrapComponents: minBoot,
+			contributionKinds: { myCustomKind: makeStubNameCollector() } as never,
+		});
+		const plan = planBoot(validated, minBoot, undefined);
+		const material = await materializeComponents(plan, minBoot, undefined);
+		const stubCollector = makeStubNameCollector();
+		await applyContributions(material, {
+			myCustomKind: stubCollector,
+		} as never);
+		expect(stubCollector.get("item1")).toBeDefined();
+	});
+
+	it("routes consumer-defined list-shaped kinds to append via collector.kind discriminant", async () => {
+		const hookA = () => ({});
+		const hookB = () => ({});
+		const m = defineModule({
+			name: "consumer-list-mod",
+			contributes: {
+				myListKind: [() => hookA, () => hookB],
+			} as never,
+		});
+		const validated = validateManifests({
+			modules: [m],
+			bootstrapComponents: minBoot,
+			contributionKinds: { myListKind: makeStubListCollector() } as never,
+		});
+		const plan = planBoot(validated, minBoot, undefined);
+		const material = await materializeComponents(plan, minBoot, undefined);
+		const stubCollector = makeStubListCollector();
+		await applyContributions(material, {
+			myListKind: stubCollector,
+		} as never);
+		const values = Array.from(stubCollector.values());
+		expect(values).toHaveLength(2);
+	});
+});

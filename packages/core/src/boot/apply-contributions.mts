@@ -42,8 +42,10 @@ import type {
 	ComponentWorld,
 	ContributionCollectorMap,
 	ContributionKind,
+	ListCollector,
 	NameKeyedCollector,
 	RegistryWorld,
+	RouteCollector,
 } from "./types.mjs";
 import { BootError } from "./types.mjs";
 
@@ -208,15 +210,29 @@ function prepareSyntheticProjections(
 }
 
 // ---------------------------------------------------------------------------
-// Name-keyed kinds set (mirrors validate-manifests.mts)
+// Collector-kind discriminant helpers
 // ---------------------------------------------------------------------------
 
-const NAME_KEYED_KINDS = new Set<string>([
-	"grants",
-	"federations",
-	"tokenExchangeValidators",
-	"mfaFactors",
-]);
+/**
+ * Return the collector for `kind` from the `ContributionCollectorMap`, or
+ * `undefined` when the kind has no entry. Typed as the union of all three
+ * collector shapes so callers can narrow via `collector.kind`.
+ *
+ * Per A2-β §5.4: routing MUST use `collector.kind` as discriminant so that
+ * consumer-defined kinds (added via `declare module` augmentation) are
+ * handled correctly without a hardcoded set lookup.
+ * @internal
+ */
+function collectorFor(
+	contributionKinds: ContributionCollectorMap,
+	kind: string,
+): NameKeyedCollector<unknown> | ListCollector<unknown> | RouteCollector | undefined {
+	return (contributionKinds as Record<string, unknown>)[kind] as
+		| NameKeyedCollector<unknown>
+		| ListCollector<unknown>
+		| RouteCollector
+		| undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Public API — applyContributions
@@ -285,11 +301,13 @@ export async function applyContributions(
 		const deps = buildDeps(components, blueprint?.requires ?? [], blueprint?.optional ?? []);
 
 		// Collect name-keyed contributes + overrides entries for this module.
-		const nameKeyedContributes = validatedModule.normalised.contributesEntries.filter((e) =>
-			NAME_KEYED_KINDS.has(e.kind),
+		// Routing uses collector.kind === "name-keyed" so that consumer-defined
+		// kinds (not in any hardcoded set) are handled correctly. Per A2-β §5.4.
+		const nameKeyedContributes = validatedModule.normalised.contributesEntries.filter(
+			(e) => collectorFor(contributionKinds, e.kind)?.kind === "name-keyed",
 		);
-		const nameKeyedOverrides = validatedModule.normalised.overridesEntries.filter((e) =>
-			NAME_KEYED_KINDS.has(e.kind),
+		const nameKeyedOverrides = validatedModule.normalised.overridesEntries.filter(
+			(e) => collectorFor(contributionKinds, e.kind)?.kind === "name-keyed",
 		);
 
 		// ------------------------------------------------------------------
@@ -426,98 +444,72 @@ export async function applyContributions(
 		const blueprint = material.plan.depsBlueprint.get(moduleName);
 		const deps = buildDeps(components, blueprint?.requires ?? [], blueprint?.optional ?? []);
 
-		// auditHooks
-		const auditEntries = validatedModule.normalised.contributesEntries.filter(
-			(e) => e.kind === "auditHooks",
-		);
-		for (const entry of auditEntries) {
-			const collector = contributionKinds.auditHooks;
+		// List-shaped and list-routes pass: dispatch on collector.kind.
+		// Handles built-in list kinds (auditHooks, grantPolicyHooks) AND any
+		// consumer-defined list-shaped kinds — per A2-β §5.4 step 3.
+		for (const entry of validatedModule.normalised.contributesEntries) {
+			const collector = collectorFor(contributionKinds, entry.kind);
 			if (collector === undefined) continue;
-			const factory = entry.factory as (deps: Record<string, unknown>) => unknown;
 
-			let value: unknown;
-			try {
-				value = await factory(deps);
-			} catch (thrownValue) {
-				const cleanupErrors = await runCleanupsReverse(material.cleanups);
-				throw new BootError({
-					message: `Module "${moduleName}" auditHook factory failed: ${String(thrownValue)}`,
-					reason: "contribute-factory-failed",
-					stage: "applyContributions",
-					details: {
-						reason: "contribute-factory-failed",
-						module: moduleName,
-						kind: "auditHooks",
-						name: "",
-						originalError: thrownValue,
-						...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
-					},
-					cause: thrownValue,
-				});
-			}
+			if (collector.kind === "list-routes") {
+				// Routes kind: entry.factory is a RouteContributionEntry<Deps> —
+				// either a bare RouteContribution value or a factory.
+				const entryValue = entry.factory;
+				let contribution: unknown;
 
-			collector.append(value);
-		}
+				if (typeof entryValue === "function") {
+					try {
+						contribution = await (entryValue as (deps: Record<string, unknown>) => unknown)(deps);
+					} catch (thrownValue) {
+						const cleanupErrors = await runCleanupsReverse(material.cleanups);
+						throw new BootError({
+							message: `Module "${moduleName}" route factory failed: ${String(thrownValue)}`,
+							reason: "contribute-factory-failed",
+							stage: "applyContributions",
+							details: {
+								reason: "contribute-factory-failed",
+								module: moduleName,
+								kind: entry.kind,
+								name: "",
+								originalError: thrownValue,
+								...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
+							},
+							cause: thrownValue,
+						});
+					}
+				} else {
+					// Static RouteContribution value — take directly.
+					contribution = entryValue;
+				}
 
-		// grantPolicyHooks
-		const policyEntries = validatedModule.normalised.contributesEntries.filter(
-			(e) => e.kind === "grantPolicyHooks",
-		);
-		for (const entry of policyEntries) {
-			const collector = contributionKinds.grantPolicyHooks;
-			if (collector === undefined) continue;
-			const factory = entry.factory as (deps: Record<string, unknown>) => unknown;
+				const collected: CollectedRouteContribution = {
+					contribution:
+						contribution as import("../modules/manifest/route-contribution.mjs").RouteContribution,
+					contributedBy: moduleName,
+					declarationIndex,
+				};
 
-			let value: unknown;
-			try {
-				value = await factory(deps);
-			} catch (thrownValue) {
-				const cleanupErrors = await runCleanupsReverse(material.cleanups);
-				throw new BootError({
-					message: `Module "${moduleName}" grantPolicyHook factory failed: ${String(thrownValue)}`,
-					reason: "contribute-factory-failed",
-					stage: "applyContributions",
-					details: {
-						reason: "contribute-factory-failed",
-						module: moduleName,
-						kind: "grantPolicyHooks",
-						name: "",
-						originalError: thrownValue,
-						...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
-					},
-					cause: thrownValue,
-				});
-			}
+				declarationIndex++;
+				routes.push(collected);
+				collector.append(collected);
+			} else if (collector.kind === "list") {
+				// Generic list-shaped kind (auditHooks, grantPolicyHooks, or any
+				// consumer-defined kind whose collector has kind === "list").
+				const factory = entry.factory as (deps: Record<string, unknown>) => unknown;
 
-			collector.append(value);
-		}
-
-		// routes
-		const routeEntries = validatedModule.normalised.contributesEntries.filter(
-			(e) => e.kind === "routes",
-		);
-		for (const entry of routeEntries) {
-			const routeCollector = contributionKinds.routes;
-
-			// entry.factory is a RouteContributionEntry<Deps>:
-			// either a bare RouteContribution value or a RouteContributionFactory<Deps>.
-			const entryValue = entry.factory;
-			let contribution: unknown;
-
-			if (typeof entryValue === "function") {
-				// Factory form — invoke with deps.
+				let value: unknown;
 				try {
-					contribution = await (entryValue as (deps: Record<string, unknown>) => unknown)(deps);
+					value = await factory(deps);
 				} catch (thrownValue) {
 					const cleanupErrors = await runCleanupsReverse(material.cleanups);
 					throw new BootError({
-						message: `Module "${moduleName}" route factory failed: ${String(thrownValue)}`,
+						message: `Module "${moduleName}" list-kind factory for "${entry.kind}" failed: ${String(thrownValue)}`,
 						reason: "contribute-factory-failed",
 						stage: "applyContributions",
 						details: {
 							reason: "contribute-factory-failed",
 							module: moduleName,
-							kind: "routes",
+							kind: entry.kind,
 							name: "",
 							originalError: thrownValue,
 							...(cleanupErrors.length > 0 ? { cleanupErrors } : {}),
@@ -525,25 +517,10 @@ export async function applyContributions(
 						cause: thrownValue,
 					});
 				}
-			} else {
-				// Static RouteContribution value — take directly.
-				contribution = entryValue;
+
+				collector.append(value);
 			}
-
-			const collected: CollectedRouteContribution = {
-				contribution:
-					contribution as import("../modules/manifest/route-contribution.mjs").RouteContribution,
-				contributedBy: moduleName,
-				declarationIndex,
-			};
-
-			declarationIndex++;
-
-			routes.push(collected);
-
-			if (routeCollector !== undefined) {
-				routeCollector.append(collected);
-			}
+			// kind === "name-keyed" entries are handled in step 2; skip here.
 		}
 	}
 
