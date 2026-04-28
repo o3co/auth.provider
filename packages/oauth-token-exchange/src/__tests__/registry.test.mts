@@ -136,6 +136,27 @@ describe("ExchangeTokenValidatorRegistry.freeze (A6+A7 §2.3: activation boundar
 		registry.freeze();
 		expect(() => registry.freeze()).not.toThrow();
 	});
+
+	it("frozen precedence: duplicate-after-freeze throws reason='frozen' (NOT 'duplicate')", () => {
+		// Per A6+A7 §2.3: "After freeze(): register throws with reason='frozen'".
+		// This is unconditional — when both freeze and duplicate conditions
+		// hold, "frozen" wins. The frozen check runs before the duplicate
+		// check in the impl to honour this precedence.
+		const registry = new ExchangeTokenValidatorRegistry();
+		registry.register(ACCESS_TOKEN_TYPE, stubValidator());
+		registry.freeze();
+		let caught: unknown;
+		try {
+			registry.register(ACCESS_TOKEN_TYPE, stubValidator());
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(ExchangeTokenValidatorRegistryError);
+		if (caught instanceof ExchangeTokenValidatorRegistryError) {
+			expect(caught.reason).toBe("frozen");
+			expect(caught.tokenType).toBe(ACCESS_TOKEN_TYPE);
+		}
+	});
 });
 
 describe("ExchangeTokenValidatorRegistryError (A6+A7 §2.4: error class shape)", () => {

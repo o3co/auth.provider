@@ -308,6 +308,27 @@ describe("GrantRegistry.freeze (A6+A7 §2.3: activation boundary)", () => {
 		registry.freeze();
 		expect(registry.get("foo")).toBeDefined();
 	});
+
+	it("frozen precedence: duplicate-after-freeze throws reason='frozen' (NOT 'duplicate')", () => {
+		// Per A6+A7 §2.3: "After freeze(): register throws with reason='frozen'".
+		// This is unconditional — when both freeze and duplicate conditions
+		// hold, "frozen" wins. The frozen check runs before the duplicate
+		// check in the impl to honour this precedence.
+		const registry = new GrantRegistry();
+		registry.register("foo", makeHandler("a"));
+		registry.freeze();
+		let caught: unknown;
+		try {
+			registry.register("foo", makeHandler("b"));
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(GrantRegistryError);
+		if (caught instanceof GrantRegistryError) {
+			expect(caught.reason).toBe("frozen");
+			expect(caught.grantType).toBe("foo");
+		}
+	});
 });
 
 describe("GrantRegistryError (A6+A7 §2.4: error class shape)", () => {
