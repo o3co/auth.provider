@@ -67,7 +67,7 @@ export {
 	generateLogoutToken,
 } from "./grants/logoutToken.mjs";
 // Grant types and interfaces
-export { GrantRegistry } from "./grants/registry.mjs";
+export { GrantRegistry, GrantRegistryError } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
 export {
 	formatObject,

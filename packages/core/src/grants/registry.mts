@@ -144,11 +144,40 @@ export class GrantRegistry {
 				}
 			: deps;
 
-		for (const [name, factory] of Object.entries(module.grants)) {
+		const isEnabled = (name: string): boolean => {
 			const grantConfig = (
 				effectiveDeps.config.oauth.grants as Record<string, { enabled?: boolean }>
 			)[name];
-			if (grantConfig?.enabled === false) continue;
+			return grantConfig?.enabled !== false;
+		};
+
+		// Pre-check phase: validate registry is not frozen and no enabled
+		// grant name conflicts with an already-registered handler. Done
+		// BEFORE any factory runs so factory side effects (e.g.
+		// tokenExchangeModule's `validatorRegistry.freeze()`) cannot leak
+		// when a later name in the same module conflicts. Per A6+A7 §2.1
+		// this preserves all-or-nothing semantics for addModule.
+		if (this.frozen) {
+			throw new GrantRegistryError({
+				reason: "frozen",
+				grantType: "<addModule>",
+				registered: [...this.handlers.keys()],
+			});
+		}
+		for (const name of Object.keys(module.grants)) {
+			if (!isEnabled(name)) continue;
+			if (this.handlers.has(name)) {
+				throw new GrantRegistryError({
+					reason: "duplicate",
+					grantType: name,
+					registered: [...this.handlers.keys()],
+				});
+			}
+		}
+
+		// Materialize + register phase: pre-check passed; factories may run.
+		for (const [name, factory] of Object.entries(module.grants)) {
+			if (!isEnabled(name)) continue;
 			this.register(name, factory(effectiveDeps));
 		}
 	}

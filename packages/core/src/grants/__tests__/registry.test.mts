@@ -331,6 +331,78 @@ describe("GrantRegistry.freeze (A6+A7 §2.3: activation boundary)", () => {
 	});
 });
 
+describe("GrantRegistry.addModule no-side-effect-leak (Codex review P1)", () => {
+	it("throws BEFORE running ANY factory when a name conflict exists", () => {
+		const registry = new GrantRegistry();
+		registry.register("session", makeHandler("existing"));
+
+		const factoryRan: string[] = [];
+		const trackingFactory = (label: string): GrantFactory => () => {
+			factoryRan.push(label);
+			return makeHandler(label);
+		};
+		const module: GrantModule = {
+			grants: {
+				// "fresh" comes first in iteration order. Pre-check phase
+				// MUST detect the "session" duplicate before fresh's factory
+				// runs.
+				fresh: trackingFactory("fresh"),
+				session: trackingFactory("session"),
+			},
+		};
+		const deps = makeDeps({
+			fresh: { enabled: true },
+			session: { enabled: true },
+		});
+
+		expect(() => registry.addModule(module, deps)).toThrow(GrantRegistryError);
+		// No factory should have run because pre-check caught the duplicate.
+		expect(factoryRan).toEqual([]);
+	});
+
+	it("throws frozen when registry is already sealed (no factory runs)", () => {
+		const registry = new GrantRegistry();
+		registry.freeze();
+
+		const factoryRan: string[] = [];
+		const trackingFactory = (label: string): GrantFactory => () => {
+			factoryRan.push(label);
+			return makeHandler(label);
+		};
+		const module: GrantModule = {
+			grants: {
+				newGrant: trackingFactory("newGrant"),
+			},
+		};
+		const deps = makeDeps({ newGrant: { enabled: true } });
+
+		expect(() => registry.addModule(module, deps)).toThrow(GrantRegistryError);
+		expect(factoryRan).toEqual([]);
+	});
+
+	it("skips disabled grants in the pre-check (no false-positive duplicate)", () => {
+		const registry = new GrantRegistry();
+		registry.register("session", makeHandler("existing"));
+
+		const module: GrantModule = {
+			grants: {
+				// session is in the module but disabled in config —
+				// pre-check must skip it (no duplicate error).
+				session: makeFactory("session"),
+				other: makeFactory("other"),
+			},
+		};
+		const deps = makeDeps({
+			session: { enabled: false },
+			other: { enabled: true },
+		});
+
+		// Should NOT throw because the disabled session entry is skipped.
+		registry.addModule(module, deps);
+		expect(registry.get("other")).toBeDefined();
+	});
+});
+
 describe("GrantRegistryError (A6+A7 §2.4: error class shape)", () => {
 	it("carries reason, grantType, and registered snapshot", () => {
 		const err = new GrantRegistryError({
