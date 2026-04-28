@@ -1,0 +1,10 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
+	"files": [
+		"src/modules/manifest/__tests__/component-map.test.mts",
+		"src/modules/manifest/__tests__/provider.test.mts"
+	]
+}

@@ -3,6 +3,11 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
 	test: {
 		include: ["src/**/__tests__/**/*.test.mts"],
+		typecheck: {
+			enabled: true,
+			include: ["src/modules/manifest/**/*.test.mts"],
+			tsconfig: "./tsconfig.test.json",
+		},
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "json", "json-summary"],
