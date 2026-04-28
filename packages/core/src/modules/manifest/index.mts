@@ -35,13 +35,20 @@ export type {
 } from "./contributes-map.mjs";
 
 export type {
+	HttpMethod,
+	RouteAdvertisement,
 	RouteContribution,
 	RouteContributionEntry,
 	RouteContributionFactory,
 	RouteHandler,
 } from "./route-contribution.mjs";
 
-export type { ConfigSchema, Module, ModuleSpec } from "./module-spec.mjs";
+export type {
+	ComponentLifecycle,
+	ConfigSchema,
+	Module,
+	ModuleSpec,
+} from "./module-spec.mjs";
 
 export { defineModule } from "./define-module.mjs";
 

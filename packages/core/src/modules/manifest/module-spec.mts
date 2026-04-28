@@ -15,7 +15,7 @@
  */
 
 import type { z } from "zod";
-import type { ComponentKey } from "./component-map.mjs";
+import type { ComponentKey, ComponentMap } from "./component-map.mjs";
 import type { ContributesMap } from "./contributes-map.mjs";
 import type { Provider, ProviderDeps } from "./provider.mjs";
 
@@ -28,6 +28,33 @@ import type { Provider, ProviderDeps } from "./provider.mjs";
  * Per A2-α §2.1.
  */
 export type ConfigSchema = z.ZodObject<z.ZodRawShape>;
+
+/**
+ * Per-component lifecycle hooks declared by a module for one of its
+ * provided component slots.
+ *
+ * - `eager`: When `true` the boot planner instantiates this component
+ *   unconditionally during `createApp`, even if no other component
+ *   declares it as a dependency. Default is `false` (lazy).
+ * - `cleanup`: Called during `app.dispose()` in reverse-topological
+ *   order. Errors from all cleanup functions are aggregated into an
+ *   `AggregateError` that `dispose()` rejects with (§6.3).
+ *
+ * The `K` parameter is a `ComponentKey`; `ComponentMap[K]` resolves to
+ * the exact value type for that slot, giving `cleanup` a typed `value`
+ * parameter.
+ *
+ * Per A2-β §4.1.
+ */
+export interface ComponentLifecycle<K extends ComponentKey> {
+  /** When `true`, eagerly instantiate this component at boot. Per A2-β §4.1. */
+  readonly eager?: boolean;
+  /**
+   * Called on dispose with the resolved component value. Per A2-β §4.1.
+   * Errors aggregate into the AggregateError that `dispose()` rejects with.
+   */
+  readonly cleanup?: (value: ComponentMap[K]) => void | Promise<void>;
+}
 
 /**
  * Parameterised manifest type. The R / O generics are inferred at the
@@ -80,6 +107,21 @@ export interface ModuleSpec<
    * Per A2-α §5.
    */
   readonly overrides?: ContributesMap<ProviderDeps<R, O>>;
+
+  /**
+   * Per-component lifecycle hooks. Each key `K` in this map MUST also
+   * appear in `provides`; the boot planner's validate-manifests stage
+   * throws `"lifecycle-without-provides"` for any orphaned lifecycle entry
+   * (Phase 4 §6.1).
+   *
+   * The absence of this field is valid — all existing `(deps) => value`
+   * provider forms remain unaffected.
+   *
+   * Per A2-β §4.1.
+   */
+  readonly lifecycle?: {
+    readonly [K in ComponentKey]?: ComponentLifecycle<K>;
+  };
 }
 
 /**
