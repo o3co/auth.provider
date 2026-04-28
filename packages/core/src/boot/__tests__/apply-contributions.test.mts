@@ -487,6 +487,49 @@ describe("applyContributions — step 3: auditHooks same-instance dedup", () => 
 // 9. Consumer-defined kinds — spec §5.4 step 2 + step 3 discriminant routing
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// 11. Defence-in-depth: missing required dep at apply-time throws (Claude S1)
+// ---------------------------------------------------------------------------
+
+describe("applyContributions — defence-in-depth: missing required dep", () => {
+	it("throws an invariant Error when a required dep is absent from the component map", async () => {
+		// validate-manifests step 4 + planBoot's activation closure should make
+		// this unreachable in normal flow. Test deliberately corrupts material
+		// after the upstream stages to assert the apply-time boundary catches
+		// it (mirrors materializeComponents.buildDeps's symmetric throw).
+		const modA = defineModule({
+			name: "ModA",
+			requires: ["slotAC"] as never,
+			contributes: {
+				grants: {
+					my_grant: () => ({ type: "grant" }),
+				},
+			},
+		});
+		const seededBoot = { ...minBoot, slotAC: 1 } as unknown as BootstrapMap;
+		const validated = validateManifests({
+			modules: [modA],
+			bootstrapComponents: seededBoot,
+			contributionKinds: { grants: makeStubNameCollector() },
+		});
+		const plan = planBoot(validated, seededBoot, undefined);
+		const material = await materializeComponents(plan, seededBoot, undefined);
+
+		// Corrupt: delete the required slot from material.components so the
+		// apply-time buildDeps boundary trips on the missing key.
+		const corruptedComponents = { ...material.components } as Record<string, unknown>;
+		delete corruptedComponents.slotAC;
+		const corruptedMaterial = {
+			...material,
+			components: corruptedComponents as ComponentWorld["components"],
+		};
+
+		await expect(
+			applyContributions(corruptedMaterial, { grants: makeStubNameCollector() }),
+		).rejects.toThrow(/missing required dep "slotAC"/);
+	});
+});
+
 describe("applyContributions — consumer-defined kinds (spec §5.4)", () => {
 	it("routes consumer-defined name-keyed kinds to register via collector.kind discriminant", async () => {
 		// Module contributes a kind not in the built-in set.

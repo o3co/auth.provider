@@ -57,6 +57,14 @@ import { BootError } from "./types.mjs";
  * Build a typed deps object for a module from the working component map,
  * using the module's DepsBlueprint from the plan.
  *
+ * `requires` keys MUST be present — if they are missing it means an invariant
+ * was violated by an earlier stage (validate-manifests step 4 or planBoot's
+ * activation closure). Missing required key throws a plain Error (programmer
+ * error, not a BootError). Mirrors materialize-components.buildDeps for
+ * symmetric defence-in-depth at the contribution-factory boundary.
+ *
+ * `optional` keys may be absent; they are included as `undefined`.
+ *
  * Per A2-β §5.4 step 2 (deps materialisation from ComponentWorld).
  * @internal
  */
@@ -67,6 +75,11 @@ function buildDeps(
 ): Record<string, unknown> {
 	const deps: Record<string, unknown> = {};
 	for (const key of requires) {
+		if (!(key in components)) {
+			throw new Error(
+				`invariant violated: missing required dep "${String(key)}" for contribute factory — stage 1/2 should have caught this`,
+			);
+		}
 		deps[key as string] = components[key as string];
 	}
 	for (const key of optional) {
