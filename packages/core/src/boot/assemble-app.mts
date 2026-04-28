@@ -356,7 +356,11 @@ function buildDispose(frozen: FrozenWorld): () => Promise<void> {
 		}
 
 		cachedPromise = (async () => {
-			const errors: unknown[] = [];
+			// Track errors alongside their (module, componentKey) origin so the
+			// AggregateError message names which cleanup failed (per spec §6.3 /
+			// §8.1: "errors are aggregated and surfaced through `dispose()`'s
+			// rejection — see §6.3").
+			const errorsWithOrigin: { module: string; componentKey: string; error: unknown }[] = [];
 
 			// Step 1: iterate cleanups in reverse order (§8.1 steps 1-2).
 			const reversedCleanups = [...frozen.cleanups].reverse() as CleanupRecord[];
@@ -364,7 +368,11 @@ function buildDispose(frozen: FrozenWorld): () => Promise<void> {
 				try {
 					await record.cleanup(record.value);
 				} catch (err) {
-					errors.push(err);
+					errorsWithOrigin.push({
+						module: record.module,
+						componentKey: String(record.componentKey),
+						error: err,
+					});
 				}
 			}
 
@@ -390,17 +398,26 @@ function buildDispose(frozen: FrozenWorld): () => Promise<void> {
 						try {
 							await (asyncDispose as () => Promise<void>).call(value);
 						} catch (err) {
-							errors.push(err);
+							errorsWithOrigin.push({
+								module: "(asyncDispose fallback)",
+								componentKey: key,
+								error: err,
+							});
 						}
 					}
 				}
 			}
 
 			// Step 4: reject with AggregateError if any errors accumulated (§8.1 step 4).
-			if (errors.length > 0) {
+			if (errorsWithOrigin.length > 0) {
+				const originSummary = errorsWithOrigin
+					.map((e) => `${e.module}:${e.componentKey}`)
+					.join(", ");
 				throw new AggregateError(
-					errors,
-					`AppHandle.dispose: ${errors.length} cleanup error${errors.length === 1 ? "" : "s"}`,
+					errorsWithOrigin.map((e) => e.error),
+					`AppHandle.dispose: ${errorsWithOrigin.length} cleanup error${
+						errorsWithOrigin.length === 1 ? "" : "s"
+					} (${originSummary})`,
 				);
 			}
 		})();

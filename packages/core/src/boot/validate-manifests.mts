@@ -423,29 +423,15 @@ function buildMissingRequiredPath(
 	const rootModule = current;
 
 	// Forward walk: from rootModule to failingModule, following the chain.
-	// Build path entries.
 	const path: { module: string; requires: ComponentKey; satisfiedBy?: string }[] = [];
-
-	// Walk forward: at each step, determine which requires key on the current
-	// module leads toward the failing module, following the provides chain.
-	const walker = rootModule;
-	const walkedPath: NormalisedModule[] = [rootModule];
-
-	// Build a path of modules from root to failing
-	const moduleChain = buildModuleChain(
-		rootModule,
-		failingModule,
-		modules,
-		providerIndex,
-		indexByName,
-	);
+	const moduleChain = buildModuleChain(rootModule, failingModule, providerIndex);
 
 	for (let i = 0; i < moduleChain.length - 1; i++) {
 		const from = moduleChain[i];
 		const to = moduleChain[i + 1];
 
-		// Find the requires key on `from` that is satisfied by `to`
-		// Tie-break: lexicographically smallest key
+		// Find the requires key on `from` that is satisfied by `to`.
+		// Tie-break: lexicographically smallest key per spec §5.1 step 4.
 		let linkKey: ComponentKey | undefined;
 		for (const reqKey of from.requires) {
 			const provider = providerIndex.get(reqKey);
@@ -460,8 +446,6 @@ function buildMissingRequiredPath(
 			path.push({ module: from.name, requires: linkKey, satisfiedBy: to.name });
 		}
 	}
-	void walker;
-	void walkedPath;
 
 	// Terminal link: the failing module with the missing key (no satisfiedBy)
 	path.push({ module: failingModule.name, requires: missingKey });
@@ -471,69 +455,57 @@ function buildMissingRequiredPath(
 
 /**
  * Build an ordered chain of modules from `start` to `end` following
- * the provides→requires links, using a BFS approach with earliest-
- * input-array-then-lexicographic tie-breaking.
+ * the requires→provides links. Per spec §5.1 step 4 determinism rule:
+ * "When multiple `requires` keys on a single module reach F, the
+ * lexicographically smallest key wins." This is a greedy DFS where at
+ * each step the next hop is chosen by sorting `current.requires`
+ * lexicographically and taking the first key whose provider is unvisited.
+ *
+ * Cycle-during-walk safety: a visited-set bounds the walk; if a previously-
+ * visited module would be revisited, the walk stops cleanly. The resulting
+ * (possibly partial) chain is still well-formed for diagnostic purposes
+ * per spec §5.1 step 4.
+ *
  * @internal
  */
 function buildModuleChain(
 	start: NormalisedModule,
 	end: NormalisedModule,
-	_modules: readonly NormalisedModule[],
 	providerIndex: ReadonlyMap<ComponentKey, NormalisedModule>,
-	indexByName: ReadonlyMap<string, number>,
 ): NormalisedModule[] {
 	if (start.name === end.name) {
 		return [start];
 	}
 
-	// BFS from start, following requires→provides edges
+	const chain: NormalisedModule[] = [start];
 	const visited = new Set<string>([start.name]);
-	const queue: { node: NormalisedModule; chain: NormalisedModule[] }[] = [
-		{ node: start, chain: [start] },
-	];
+	let current = start;
 
-	while (queue.length > 0) {
-		// Pop the entry with the earliest module in the queue (declaration order)
-		queue.sort((a, b) => {
-			const ia = indexByName.get(a.node.name) ?? 0;
-			const ib = indexByName.get(b.node.name) ?? 0;
-			if (ia !== ib) return ia - ib;
-			return a.node.name < b.node.name ? -1 : 1;
-		});
-		const shifted = queue.shift();
-		if (shifted === undefined) break; // unreachable: guarded by while (queue.length > 0)
-		const { node: current, chain } = shifted;
-
-		// Find all modules that current requires and that exist in the provides map
-		const nextCandidates: NormalisedModule[] = [];
-		for (const reqKey of current.requires) {
+	while (current.name !== end.name) {
+		// Sort requires keys lexicographically; first unvisited provider wins.
+		// Per spec §5.1 step 4: "the lexicographically smallest key wins".
+		const sortedKeys = [...current.requires].sort();
+		let nextHop: NormalisedModule | undefined;
+		for (const reqKey of sortedKeys) {
 			const provider = providerIndex.get(reqKey);
-			if (provider && !visited.has(provider.name)) {
-				nextCandidates.push(provider);
+			if (provider !== undefined && !visited.has(provider.name)) {
+				nextHop = provider;
+				break;
 			}
 		}
 
-		// Sort by input-array index, then lexicographic
-		nextCandidates.sort((a, b) => {
-			const ia = indexByName.get(a.name) ?? 0;
-			const ib = indexByName.get(b.name) ?? 0;
-			if (ia !== ib) return ia - ib;
-			return a.name < b.name ? -1 : 1;
-		});
-
-		for (const next of nextCandidates) {
-			if (visited.has(next.name)) continue;
-			visited.add(next.name);
-			const newChain = [...chain, next];
-			if (next.name === end.name) {
-				return newChain;
-			}
-			queue.push({ node: next, chain: newChain });
+		if (nextHop === undefined) {
+			// Dead end: no unvisited next hop reachable from current. The chain
+			// is incomplete but well-formed for diagnostic purposes per spec.
+			break;
 		}
+
+		visited.add(nextHop.name);
+		chain.push(nextHop);
+		current = nextHop;
 	}
 
-	// No path found (shouldn't happen in correct usage); return start→end directly
-	return [start, end];
+	return chain;
 }
 
 /**
