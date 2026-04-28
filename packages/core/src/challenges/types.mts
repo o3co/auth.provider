@@ -36,6 +36,9 @@ export interface Challenge {
  * Adapters MUST throw ChallengeStorageError per the throw matrix in
  * `./errors.mts`. find / consume MUST NOT throw on nonexistent / expired
  * entries (return null / false respectively).
+ * This contract is enforced by the shared adapter contract test suite
+ * (`__tests__/adapters.contract.mts`, established in Tasks 3 + 4 and re-imported
+ * by the Redis adapter tests in Tasks 11 + 12).
  */
 export interface ChallengeStore {
 	readonly kind: string;
@@ -53,6 +56,12 @@ export interface ChallengeStore {
 	/**
 	 * Non-mutating lookup. Returns null for absent / expired entries.
 	 * Reading does not mutate state; safe to call repeatedly.
+	 *
+	 * Note: Redis-backed adapters reconstruct expiresAt from PTTL and may
+	 * drift by <10ms vs the originally-issued Date. The drift is benign —
+	 * the wrapper layer (`ChallengeCeremony`, Task 5) only uses expiresAt
+	 * to set the subsequent `markSeen` TTL; the security window remains
+	 * TTL-bounded. Per A1 §5.1 (lines 117-122).
 	 */
 	find(scope: string, value: string): Promise<Challenge | null>;
 

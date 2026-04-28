@@ -41,13 +41,13 @@ export class ChallengeStorageError extends Error {
 		message?: string;
 		cause?: unknown;
 	}) {
-		// Conditional super() argument so absent `cause` does not materialise an
-		// own-property `cause` on the instance (matches Phase 4 BootError fix).
-		if (opts.cause !== undefined) {
-			super(opts.message ?? `ChallengeStorageError: ${opts.reason}`, { cause: opts.cause });
-		} else {
-			super(opts.message ?? `ChallengeStorageError: ${opts.reason}`);
-		}
+		// Conditional super-arg so absent `cause` does not materialise an
+		// own-property `cause` on the instance. Mirrors Phase 4 BootError
+		// (boot/types.mts:870) so future error-class authors find one idiom.
+		super(
+			opts.message ?? `ChallengeStorageError: ${opts.reason}`,
+			opts.cause !== undefined ? { cause: opts.cause } : undefined,
+		);
 		this.name = "ChallengeStorageError";
 		this.reason = opts.reason;
 	}

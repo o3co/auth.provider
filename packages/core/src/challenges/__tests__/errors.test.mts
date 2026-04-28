@@ -15,6 +15,13 @@ describe("ChallengeStorageError", () => {
 		expect(Object.hasOwn(err, "cause")).toBe(false);
 	});
 
+	it("explicit cause: undefined still does not materialise own-property cause", () => {
+		// Defensive regression: if a future maintainer "simplifies" the constructor
+		// to always pass `{ cause: opts.cause }`, this test fires immediately.
+		const err = new ChallengeStorageError({ reason: "duplicate", cause: undefined });
+		expect(Object.hasOwn(err, "cause")).toBe(false);
+	});
+
 	it("carries reason 'expired-at-issue' and propagates a custom message + cause", () => {
 		const inner = new Error("PEXPIREAT in the past");
 		const err = new ChallengeStorageError({
@@ -25,12 +32,5 @@ describe("ChallengeStorageError", () => {
 		expect(err.reason).toBe("expired-at-issue");
 		expect(err.message).toBe("expiresAt <= now()");
 		expect(err.cause).toBe(inner);
-	});
-
-	it("discriminates reason at the type level via narrowing", () => {
-		const err = new ChallengeStorageError({ reason: "duplicate" });
-		if (err.reason === "duplicate") {
-			expect(err.reason).toBe("duplicate");
-		}
 	});
 });
