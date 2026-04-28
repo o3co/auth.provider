@@ -32,7 +32,7 @@ export type ChallengeStoreFactory = AdapterFactory<ChallengeStore>;
  * (or call registerBuiltinChallengeStores for the in-tree memory builder).
  */
 export function createChallengeStoreFactory(): ChallengeStoreFactory {
-	return createAdapterFactory<ChallengeStore>("challenge-store");
+	return createAdapterFactory<ChallengeStore>("ChallengeStore");
 }
 
 /**

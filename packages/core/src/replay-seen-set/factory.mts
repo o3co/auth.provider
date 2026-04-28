@@ -25,7 +25,7 @@ import type { ReplaySeenSet } from "./types.mjs";
 export type ReplaySeenSetFactory = AdapterFactory<ReplaySeenSet>;
 
 export function createReplaySeenSetFactory(): ReplaySeenSetFactory {
-	return createAdapterFactory<ReplaySeenSet>("replay-seen-set");
+	return createAdapterFactory<ReplaySeenSet>("ReplaySeenSet");
 }
 
 export function registerBuiltinReplaySeenSets(factory: ReplaySeenSetFactory): void {
