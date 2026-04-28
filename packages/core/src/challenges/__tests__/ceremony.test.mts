@@ -28,12 +28,16 @@ describe("createDefaultChallengeCeremony — 3-outcome path (memory backends)", 
 		expect(result).toEqual({ outcome: "unknown" });
 	});
 
-	it("issued + first consume → outcome 'consumed'; replaySeenSet records the entry", async () => {
+	it("issued + first consume → outcome 'consumed'; replaySeenSet records the entry; outcome object is frozen", async () => {
 		const { store, set, ceremony } = makeCeremonyWithMemoryBackends();
 		await store.issue("scope-A", "v", future());
 		const result = await ceremony.consume("scope-A", "v");
 		expect(result).toEqual({ outcome: "consumed" });
 		expect(await set.contains("scope-A", "v")).toBe(true);
+		// Anchor the runtime-freeze contract: a future refactor that drops
+		// Object.freeze while keeping `as const` would still type-check but
+		// silently weaken immutability. Per Task 5 reviewer P5 (advisory).
+		expect(Object.isFrozen(result)).toBe(true);
 	});
 
 	it("consumed once + second consume → outcome 'replayed'", async () => {
