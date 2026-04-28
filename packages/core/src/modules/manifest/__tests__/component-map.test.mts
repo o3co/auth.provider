@@ -27,10 +27,10 @@ test("ComponentMap does NOT contain v0.4.x legacy slots (X1/X2 amendment)", () =
   //   `refreshTokenFamilyStore`). The presence-based check below fires if
   //   the legacy name reappears at all in any phase.
 
-  type _LegacyUserSessionAbsent = "userSessionStore" extends keyof ComponentMap
-    ? NonNullable<ComponentMap["userSessionStore"]> extends {
-        registerRP: (...args: never[]) => unknown;
-      }
+  type _LegacyUserSessionAbsent = ComponentMap extends {
+    userSessionStore?: infer V;
+  }
+    ? NonNullable<V> extends { registerRP: (...args: never[]) => unknown }
       ? "FAIL: legacy userSessionStore (with registerRP) present"
       : "PASS"
     : "PASS";
