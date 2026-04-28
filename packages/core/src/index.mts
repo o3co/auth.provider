@@ -128,12 +128,48 @@ export type {
 	SupportsRevocation,
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
-// Module system
+// Module system — v0.5.0 manifest types + legacy types for migration.
+// LegacyModule is the deprecated v0.4.x shape (init callback); will be
+// removed in Phase 9 (A2-γ caller migration). New code uses Module
+// (= v0.5.0 manifest type from defineModule()).
 export type {
+	AuditHook,
+	AuditHookFactory,
+	ComponentKey,
+	ComponentMap,
+	ConfigSchema,
+	ContributesMap,
+	ExchangeTokenValidator,
+	ExchangeTokenValidatorFactory,
+	FederationFactory,
+	FederationProvider,
 	FederationProviderHandle,
+	// GrantFactory, GrantHandler: excluded — names collide with legacy
+	// ./grants/types.mjs exports at this boundary. Import from
+	// @o3co/auth-provider-core/modules/manifest directly.
+	GrantHandlerResolver,
+	GrantPolicyHook,
+	LegacyModule,
+	// GrantPolicyHookFactory: excluded — name collides with legacy
+	// ./policy/types.mjs export at this boundary. Import from
+	// @o3co/auth-provider-core/modules/manifest directly.
+	MfaFactor,
+	MfaFactorFactory,
 	Module,
 	ModuleContext,
+	ModuleSpec,
 	PathResolver,
+	Provider,
+	ProviderDeps,
+	RouteContribution,
+	RouteContributionEntry,
+	RouteContributionFactory,
+	RouteHandler,
+	TokenExchangeValidatorResolver,
+} from "./modules/index.mjs";
+export {
+	defineModule,
+	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
 export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
 // Grant policy

@@ -18,7 +18,7 @@ import {
 	AdapterFactoryError,
 	type AppConfig,
 	fullSectionsSchema,
-	type Module,
+	type LegacyModule as Module,
 	type ModuleContext,
 	type UserRepository,
 } from "@o3co/auth-provider-core";

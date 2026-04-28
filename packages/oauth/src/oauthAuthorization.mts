@@ -17,7 +17,7 @@ import type {
 	AppConfig,
 	ClientRepository,
 	CodeRepository,
-	Module,
+	LegacyModule as Module,
 	ModuleContext,
 } from "@o3co/auth-provider-core";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";

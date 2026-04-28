@@ -19,7 +19,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	fullSectionsSchema,
-	type Module,
+	type LegacyModule as Module,
 	type ModuleContext,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";

@@ -13,4 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export type { FederationProviderHandle, Module, ModuleContext, PathResolver } from "./types.mjs";
+// v0.5.0 manifest exports — `Module` here is the v0.5.0 erased manifest type
+// (NOT the legacy LegacyModule).
+export * from "./manifest/index.mjs";
+
+// v0.4.x legacy exports — DEPRECATED, will be removed in Phase 9.
+export type {
+	FederationProviderHandle,
+	LegacyModule,
+	ModuleContext,
+	PathResolver,
+} from "./types.mjs";

@@ -20,7 +20,7 @@ import { createApp } from "#/app.mjs";
 import type { AppConfig } from "#/config/application.schema.mjs";
 import { GrantRegistry } from "#/grants/registry.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
-import type { Module } from "#/modules/types.mjs";
+import type { LegacyModule as Module } from "#/modules/types.mjs";
 
 const mockExpress = {
 	Router: () =>
