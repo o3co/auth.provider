@@ -24,14 +24,14 @@ import type { RefreshTokenFamily, RefreshTokenFamilyStore } from "../types.mjs";
  */
 export type RefreshTokenFamilyStoreContractFactory = () => Promise<RefreshTokenFamilyStore>;
 
-const FUTURE = (): Date => new Date(Date.now() + 60_000);
-const PAST = (): Date => new Date(Date.now() - 1);
+const FUTURE = (): number => Date.now() + 60_000;
+const PAST = (): number => Date.now() - 1;
 
 const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily => ({
 	familyId: overrides.familyId ?? "fam-1",
 	activeJti: overrides.activeJti ?? "jti-initial",
 	revoked: overrides.revoked ?? false,
-	expiresAt: overrides.expiresAt ?? FUTURE(),
+	expiresAtMs: overrides.expiresAtMs ?? FUTURE(),
 });
 
 export function runRefreshTokenFamilyStoreContract(
@@ -70,9 +70,9 @@ export function runRefreshTokenFamilyStoreContract(
 			});
 		});
 
-		it("registerFamily throws expired-at-issue when expiresAt is past", async () => {
+		it("registerFamily throws expired-at-issue when expiresAtMs is past", async () => {
 			const store = await factory();
-			const fam = FAMILY({ expiresAt: PAST() });
+			const fam = FAMILY({ expiresAtMs: PAST() });
 			await expect(store.registerFamily(fam)).rejects.toMatchObject({
 				name: "RefreshTokenStorageError",
 				reason: "expired-at-issue",
@@ -132,7 +132,7 @@ export function runRefreshTokenFamilyStoreContract(
 
 		it("findFamily returns null for expired family (lazy GC)", async () => {
 			const store = await factory();
-			const fam = FAMILY({ expiresAt: new Date(Date.now() + 50) });
+			const fam = FAMILY({ expiresAtMs: Date.now() + 50 });
 			await store.registerFamily(fam);
 			await new Promise((r) => setTimeout(r, 100));
 			expect(await store.findFamily(fam.familyId)).toBeNull();
@@ -140,16 +140,16 @@ export function runRefreshTokenFamilyStoreContract(
 
 		it("updateFamily returns not-found for expired family", async () => {
 			const store = await factory();
-			const fam = FAMILY({ expiresAt: new Date(Date.now() + 50) });
+			const fam = FAMILY({ expiresAtMs: Date.now() + 50 });
 			await store.registerFamily(fam);
 			await new Promise((r) => setTimeout(r, 100));
 			const result = await store.updateFamily(fam.familyId, (cur) => cur);
 			expect(result.outcome).toBe("not-found");
 		});
 
-		it("updateFamily throws expired-at-issue when updater returns past expiresAt (fail-closed parity with registerFamily)", async () => {
+		it("updateFamily throws expired-at-issue when updater returns past expiresAtMs (fail-closed parity with registerFamily)", async () => {
 			// Both adapters must fail-closed when the updater returns a family whose
-			// expiresAt is already in the past. Without this, memory and Redis
+			// expiresAtMs is already in the past. Without this, memory and Redis
 			// adapters silently diverge: memory would commit a dead-on-arrival entry
 			// (lazy-GC'd on next read) while Redis would map newTtlMs <= 0 to
 			// not-found. Symmetric with registerFamily's expired-at-issue throw.
@@ -159,7 +159,7 @@ export function runRefreshTokenFamilyStoreContract(
 			await expect(
 				store.updateFamily(fam.familyId, (current) => ({
 					...current,
-					expiresAt: new Date(Date.now() - 1),
+					expiresAtMs: Date.now() - 1,
 				})),
 			).rejects.toMatchObject({
 				name: "RefreshTokenStorageError",

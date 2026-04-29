@@ -24,13 +24,18 @@
  * (via `updateFamily`); revocation does NOT clear it (a revoked family
  * retains the jti that was active when it was revoked, for audit purposes).
  *
+ * `expiresAtMs` stores the expiry as a Unix epoch millisecond timestamp
+ * (number). Using epoch-ms eliminates the Date mutation surface that
+ * Object.freeze cannot defend against — a caller holding a reference to
+ * a Date object could call setTime(0) and corrupt store state.
+ *
  * Per A3 §5.1.
  */
 export interface RefreshTokenFamily {
 	readonly familyId: string;
 	readonly activeJti: string;
 	readonly revoked: boolean;
-	readonly expiresAt: Date;
+	readonly expiresAtMs: number;
 }
 
 /**
@@ -71,7 +76,7 @@ export interface RefreshTokenFamilyStore {
 	 * programming bug).
 	 *
 	 * MUST throw `RefreshTokenStorageError({ reason: "expired-at-issue" })`
-	 * if `family.expiresAt <= now()` at call time.
+	 * if `family.expiresAtMs <= now()` at call time.
 	 *
 	 * Concurrency contract: N concurrent calls with the same `familyId`
 	 * MUST result in exactly one success and N-1 throws of
@@ -122,12 +127,12 @@ export interface RefreshTokenFamilyStore {
 	 *     each updater invocation. This is the wrapper pattern used by
 	 *     `createDefaultRefreshTokenRotation` to translate "aborted"
 	 *     results into "replayed" or "revoked" outcomes.
-	 *   - Updater MUST NOT return a RefreshTokenFamily whose `expiresAt` is
+	 *   - Updater MUST NOT return a RefreshTokenFamily whose `expiresAtMs` is
 	 *     `<= now()`. Both adapters fail-closed by throwing
 	 *     `RefreshTokenStorageError({ reason: "expired-at-issue" })` —
 	 *     symmetric with `registerFamily` and prevents committing a
 	 *     dead-on-arrival entry. Callers shrinking TTL during rotation
-	 *     should compute the new `expiresAt` from a forward window.
+	 *     should compute the new `expiresAtMs` from a forward window.
 	 *
 	 * Return value:
 	 *   - `{ outcome: "committed", family }` — CAS succeeded; family is the
@@ -188,11 +193,11 @@ export interface RefreshTokenRotation {
 	 * MUST throw `RefreshTokenStorageError({ reason: "duplicate-family" })`
 	 * if `familyId` already exists. MUST throw
 	 * `RefreshTokenStorageError({ reason: "expired-at-issue" })` if
-	 * `expiresAt <= now()`.
+	 * `expiresAtMs <= now()`.
 	 *
 	 * Use this for **initial issue**, not for rotation.
 	 */
-	register(newJti: string, familyId: string, expiresAt: Date): Promise<void>;
+	register(newJti: string, familyId: string, expiresAtMs: number): Promise<void>;
 
 	/**
 	 * Compose the storage primitive into the 4-outcome rotation ceremony.
@@ -209,7 +214,7 @@ export interface RefreshTokenRotation {
 		previousJti: string,
 		newJti: string,
 		familyId: string,
-		expiresAt: Date,
+		expiresAtMs: number,
 	): Promise<RefreshTokenRotationOutcome>;
 }
 

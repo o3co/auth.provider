@@ -63,8 +63,8 @@ describe("A3 wiring — happy path with all-memory composition", () => {
 
 		const rotation = (handle.components as { refreshTokenRotation?: unknown })
 			.refreshTokenRotation as unknown as {
-			register(j: string, f: string, e: Date): Promise<void>;
-			rotate(p: string, n: string, f: string, e: Date): Promise<{ outcome: string }>;
+			register(j: string, f: string, e: number): Promise<void>;
+			rotate(p: string, n: string, f: string, e: number): Promise<{ outcome: string }>;
 		};
 		const revocation = (handle.components as { refreshTokenFamilyRevocation?: unknown })
 			.refreshTokenFamilyRevocation as unknown as {
@@ -74,8 +74,8 @@ describe("A3 wiring — happy path with all-memory composition", () => {
 		expect(rotation).toBeDefined();
 		expect(revocation).toBeDefined();
 
-		await rotation.register("jti-1", "fam-1", new Date(Date.now() + 60_000));
-		const rotated = await rotation.rotate("jti-1", "jti-2", "fam-1", new Date(Date.now() + 60_000));
+		await rotation.register("jti-1", "fam-1", Date.now() + 60_000);
+		const rotated = await rotation.rotate("jti-1", "jti-2", "fam-1", Date.now() + 60_000);
 		expect(rotated.outcome).toBe("rotated");
 
 		await revocation.revokeFamily("fam-1");
@@ -112,9 +112,9 @@ describe("A3 wiring — override path", () => {
 
 		const rotation = (handle.components as { refreshTokenRotation?: unknown })
 			.refreshTokenRotation as unknown as {
-			rotate(p: string, n: string, f: string, e: Date): Promise<{ outcome: string }>;
+			rotate(p: string, n: string, f: string, e: number): Promise<{ outcome: string }>;
 		};
-		const out = await rotation.rotate("a", "b", "c", new Date(Date.now() + 60_000));
+		const out = await rotation.rotate("a", "b", "c", Date.now() + 60_000);
 		expect(out.outcome).toBe("unknown_family"); // custom impl always returns this
 
 		await handle.dispose();

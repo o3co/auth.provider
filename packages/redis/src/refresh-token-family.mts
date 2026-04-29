@@ -46,22 +46,10 @@ interface SerializedFamily {
 }
 
 const serialize = (fam: RefreshTokenFamily): string =>
-	JSON.stringify({
-		familyId: fam.familyId,
-		activeJti: fam.activeJti,
-		revoked: fam.revoked,
-		expiresAtMs: fam.expiresAt.getTime(),
-	} satisfies SerializedFamily);
+	JSON.stringify(fam satisfies SerializedFamily);
 
-const deserialize = (raw: string): RefreshTokenFamily => {
-	const parsed = JSON.parse(raw) as SerializedFamily;
-	return Object.freeze({
-		familyId: parsed.familyId,
-		activeJti: parsed.activeJti,
-		revoked: parsed.revoked,
-		expiresAt: new Date(parsed.expiresAtMs),
-	});
-};
+const deserialize = (raw: string): RefreshTokenFamily =>
+	Object.freeze(JSON.parse(raw) as SerializedFamily);
 
 /**
  * Redis-backed RefreshTokenFamilyStore.
@@ -103,7 +91,7 @@ export function createRedisRefreshTokenFamilyStore(
 		kind: "redis",
 
 		async registerFamily(family) {
-			const ttlMs = family.expiresAt.getTime() - Date.now();
+			const ttlMs = family.expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 			}
@@ -126,8 +114,9 @@ export function createRedisRefreshTokenFamilyStore(
 			const pttl = await client.pttl(key);
 			if (pttl <= 0) return null; // -2 nonexistent, -1 no-TTL (defensive), 0 expired
 			const fam = deserialize(raw);
-			// Reconstruct expiresAt from PTTL to match A1's drift contract.
-			return Object.freeze({ ...fam, expiresAt: new Date(Date.now() + pttl) });
+			// Reconstruct expiresAtMs from PTTL to match the drift contract
+			// (epoch-ms eliminates the Date mutation surface).
+			return Object.freeze({ ...fam, expiresAtMs: Date.now() + pttl });
 		},
 
 		async updateFamily(familyId, updater): Promise<RefreshTokenFamilyUpdateResult> {
@@ -159,7 +148,7 @@ export function createRedisRefreshTokenFamilyStore(
 
 				const current = Object.freeze({
 					...deserialize(raw),
-					expiresAt: new Date(Date.now() + pttl),
+					expiresAtMs: Date.now() + pttl,
 				});
 				const next = updater(current);
 
@@ -168,9 +157,9 @@ export function createRedisRefreshTokenFamilyStore(
 					return { outcome: "aborted" };
 				}
 
-				const newTtlMs = next.expiresAt.getTime() - Date.now();
+				const newTtlMs = next.expiresAtMs - Date.now();
 				if (newTtlMs <= 0) {
-					// Updater returned past expiresAt — fail-closed parity with
+					// Updater returned past expiresAtMs — fail-closed parity with
 					// memory adapter (and symmetric with registerFamily's
 					// expired-at-issue throw). See updateFamily contract bullet
 					// in @o3co/auth-provider-core RefreshTokenFamilyStore.
@@ -191,7 +180,7 @@ export function createRedisRefreshTokenFamilyStore(
 
 				const committed = Object.freeze({
 					...next,
-					expiresAt: new Date(Date.now() + newTtlMs),
+					expiresAtMs: Date.now() + newTtlMs,
 				});
 				return { outcome: "committed", family: committed };
 			}

@@ -49,17 +49,17 @@ export function createDefaultRefreshTokenRotation(
 	deps: DefaultRefreshTokenRotationDeps,
 ): RefreshTokenRotation {
 	return {
-		async register(newJti, familyId, expiresAt) {
+		async register(newJti, familyId, expiresAtMs) {
 			const family: RefreshTokenFamily = Object.freeze({
 				familyId,
 				activeJti: newJti,
 				revoked: false,
-				expiresAt,
+				expiresAtMs,
 			});
 			await deps.refreshTokenFamilyStore.registerFamily(family);
 		},
 
-		async rotate(previousJti, newJti, familyId, expiresAt) {
+		async rotate(previousJti, newJti, familyId, expiresAtMs) {
 			let abortReason: "replayed" | "revoked" | null = null;
 
 			const result = await deps.refreshTokenFamilyStore.updateFamily(familyId, (current) => {
@@ -75,7 +75,7 @@ export function createDefaultRefreshTokenRotation(
 				return Object.freeze({
 					...current,
 					activeJti: newJti,
-					expiresAt,
+					expiresAtMs,
 				});
 			});
 

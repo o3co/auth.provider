@@ -141,8 +141,8 @@ describe("A3 wiring — full Redis composition (createBootApp + redis modules)",
 		try {
 			const rotation = (handle.components as { refreshTokenRotation?: unknown })
 				.refreshTokenRotation as unknown as {
-				register(j: string, f: string, e: Date): Promise<void>;
-				rotate(p: string, n: string, f: string, e: Date): Promise<{ outcome: string }>;
+				register(j: string, f: string, e: number): Promise<void>;
+				rotate(p: string, n: string, f: string, e: number): Promise<{ outcome: string }>;
 			};
 			const revocation = (handle.components as { refreshTokenFamilyRevocation?: unknown })
 				.refreshTokenFamilyRevocation as unknown as {
@@ -151,25 +151,25 @@ describe("A3 wiring — full Redis composition (createBootApp + redis modules)",
 			};
 
 			const familyId = `fam-wiring-${Date.now()}`;
-			const exp = new Date(Date.now() + 60_000);
+			const expMs = Date.now() + 60_000;
 
 			// 1. unknown_family probe before register
-			const unknown = await rotation.rotate("any", "any", familyId, exp);
+			const unknown = await rotation.rotate("any", "any", familyId, expMs);
 			expect(unknown.outcome).toBe("unknown_family");
 
 			// 2. register + first rotate
-			await rotation.register("jti-1", familyId, exp);
-			const rotated = await rotation.rotate("jti-1", "jti-2", familyId, exp);
+			await rotation.register("jti-1", familyId, expMs);
+			const rotated = await rotation.rotate("jti-1", "jti-2", familyId, expMs);
 			expect(rotated.outcome).toBe("rotated");
 
 			// 3. replay attempt with stale previousJti
-			const replayed = await rotation.rotate("jti-1", "jti-3", familyId, exp);
+			const replayed = await rotation.rotate("jti-1", "jti-3", familyId, expMs);
 			expect(replayed.outcome).toBe("replayed");
 
 			// 4. revoke + try to rotate
 			await revocation.revokeFamily(familyId);
 			expect(await revocation.isFamilyRevoked(familyId)).toBe(true);
-			const revoked = await rotation.rotate("jti-2", "jti-4", familyId, exp);
+			const revoked = await rotation.rotate("jti-2", "jti-4", familyId, expMs);
 			expect(revoked.outcome).toBe("revoked");
 		} finally {
 			await handle.dispose();

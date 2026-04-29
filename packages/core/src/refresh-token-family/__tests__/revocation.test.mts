@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { createMemoryRefreshTokenFamilyStore } from "../adapters/memory.mjs";
 import { createDefaultRefreshTokenFamilyRevocation } from "../revocation.mjs";
 
-const FUTURE = (): Date => new Date(Date.now() + 60_000);
+const FUTURE = (): number => Date.now() + 60_000;
 
 const seed = async () => {
 	const store = createMemoryRefreshTokenFamilyStore();
@@ -17,7 +17,7 @@ const seed = async () => {
 		familyId: "fam-1",
 		activeJti: "jti-1",
 		revoked: false,
-		expiresAt: FUTURE(),
+		expiresAtMs: FUTURE(),
 	});
 	return { store, revocation };
 };

@@ -7,7 +7,7 @@ import { createMemoryRefreshTokenFamilyStore } from "../adapters/memory.mjs";
 import { RefreshTokenStorageError } from "../errors.mjs";
 import { createDefaultRefreshTokenRotation } from "../rotation.mjs";
 
-const FUTURE = (): Date => new Date(Date.now() + 60_000);
+const FUTURE = (): number => Date.now() + 60_000;
 
 describe("createDefaultRefreshTokenRotation", () => {
 	it("register then findFamily shows the new family", async () => {
@@ -33,9 +33,9 @@ describe("createDefaultRefreshTokenRotation", () => {
 	it("register throws expired-at-issue when expiresAt is past", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
 		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
-		await expect(
-			rotation.register("jti-1", "fam-1", new Date(Date.now() - 1)),
-		).rejects.toBeInstanceOf(RefreshTokenStorageError);
+		await expect(rotation.register("jti-1", "fam-1", Date.now() - 1)).rejects.toBeInstanceOf(
+			RefreshTokenStorageError,
+		);
 	});
 
 	it("rotate returns 'rotated' when previousJti matches and family is healthy", async () => {

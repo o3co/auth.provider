@@ -58,7 +58,7 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 		kind: "memory",
 
 		async registerFamily(family) {
-			if (family.expiresAt.getTime() <= Date.now()) {
+			if (family.expiresAtMs <= Date.now()) {
 				throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 			}
 			if (getLive(family.familyId) !== null) {
@@ -66,7 +66,7 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 			}
 			families.set(family.familyId, {
 				family: Object.freeze({ ...family }),
-				expiresAtMs: family.expiresAt.getTime(),
+				expiresAtMs: family.expiresAtMs,
 			});
 		},
 
@@ -84,16 +84,16 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 				return { outcome: "aborted" };
 			}
 			// Fail-closed parity with registerFamily: an updater that returns a
-			// family with expiresAt <= now() would commit a dead-on-arrival entry
+			// family with expiresAtMs <= now() would commit a dead-on-arrival entry
 			// (lazy-GC'd on next read) and silently diverge from the Redis
 			// adapter's behavior. Symmetric throw aligns both adapters.
-			if (next.expiresAt.getTime() <= Date.now()) {
+			if (next.expiresAtMs <= Date.now()) {
 				throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 			}
 			const frozen = Object.freeze({ ...next });
 			families.set(familyId, {
 				family: frozen,
-				expiresAtMs: frozen.expiresAt.getTime(),
+				expiresAtMs: frozen.expiresAtMs,
 			});
 			return { outcome: "committed", family: frozen };
 		},

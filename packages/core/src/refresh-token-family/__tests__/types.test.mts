@@ -29,7 +29,7 @@ test("RefreshTokenFamily fields are readonly with correct types", () => {
 		readonly familyId: string;
 		readonly activeJti: string;
 		readonly revoked: boolean;
-		readonly expiresAt: Date;
+		readonly expiresAtMs: number;
 	}>();
 });
 
@@ -61,7 +61,7 @@ test("RefreshTokenFamilyUpdateResult committed variant carries family", () => {
 			familyId: "fam-1",
 			activeJti: "jti-1",
 			revoked: false,
-			expiresAt: new Date(),
+			expiresAtMs: Date.now() + 60_000,
 		},
 	};
 	if (r.outcome === "committed") {
@@ -80,12 +80,12 @@ test("RefreshTokenRotationOutcome is a 4-variant discriminated union", () => {
 
 test("RefreshTokenRotation exposes register and rotate methods", () => {
 	type RotationShape = {
-		register(newJti: string, familyId: string, expiresAt: Date): Promise<void>;
+		register(newJti: string, familyId: string, expiresAtMs: number): Promise<void>;
 		rotate(
 			previousJti: string,
 			newJti: string,
 			familyId: string,
-			expiresAt: Date,
+			expiresAtMs: number,
 		): Promise<RefreshTokenRotationOutcome>;
 	};
 	expectTypeOf<RefreshTokenRotation>().toEqualTypeOf<RotationShape>();
