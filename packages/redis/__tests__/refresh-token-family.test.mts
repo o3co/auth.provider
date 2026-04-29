@@ -7,6 +7,7 @@ import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { createRedisRefreshTokenFamilyStore } from "../src/refresh-token-family.mjs";
 import type { DisposableRedisClient, RedisClient, RedisMulti } from "../src/types.mjs";
+import { runRedisClientDuplicateContract } from "./adapters.redis-client.contract.mjs";
 import { runRefreshTokenFamilyStoreContract } from "./adapters.refresh-token-family.contract.mjs";
 
 let container: StartedTestContainer;
@@ -74,3 +75,10 @@ runRefreshTokenFamilyStoreContract(async () => {
 		casRetryLimit: 50, // generous limit for the concurrency property test
 	});
 });
+
+// T4 hardening (Claude review I1): RedisClient.duplicate() NORMATIVE contract
+// suite. The `adapt()` wrapper above is the canonical in-tree implementation;
+// running the contract against it ensures any future refactor of `adapt()`
+// (or any consumer's wrapper) preserves the WATCH-isolation guarantee that
+// A3 updateFamily depends on.
+runRedisClientDuplicateContract(() => adapt(client), `rtfam-contract-${++keyCounter}:`);

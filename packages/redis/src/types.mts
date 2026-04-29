@@ -69,11 +69,31 @@ export interface RedisClient {
 	 * paths. Direct call to `[Symbol.asyncDispose]()` is also supported
 	 * for environments without `await using`.
 	 *
-	 * Implementor responsibility (cross-library wrapper authors): the
-	 * `[Symbol.asyncDispose]` implementation MUST close the underlying
-	 * connection (e.g. ioredis `quit()`, node-redis v4+ `disconnect()`,
-	 * keyv-redis `disconnect()`) and return a Promise that resolves
-	 * after the close completes.
+	 * NORMATIVE — implementor MUST satisfy ALL of the following:
+	 *   1. Each invocation returns a DistinctDisposableRedisClient
+	 *      instance bound to a NEW underlying socket. Returning `this`,
+	 *      sharing the parent socket, or pooling sockets across
+	 *      duplicates is a contract violation. The CAS loop relies on
+	 *      WATCH state being scoped per-connection; sharing sockets
+	 *      causes concurrent updateFamily calls to interleave their
+	 *      WATCH/EXEC windows and corrupt the rotation primitive.
+	 *   2. `[Symbol.asyncDispose]` MUST close the underlying connection
+	 *      (e.g. ioredis `quit()`, node-redis v4+ `disconnect()`,
+	 *      keyv-redis `disconnect()`) and return a Promise that
+	 *      resolves after the close completes. Discarding non-void
+	 *      return values is the wrapper's responsibility:
+	 *      `[Symbol.asyncDispose]: async () => { await dup.quit(); }`
+	 *   3. The duplicate's own `duplicate()` method MUST also return a
+	 *      fresh DisposableRedisClient (the recursion is structurally
+	 *      bounded by per-call usage but each call still independently
+	 *      satisfies #1).
+	 *
+	 * Wrapper authors integrating new Redis libraries: the
+	 * `runRedisClientDuplicateContract` test suite in
+	 * `__tests__/adapters.redis-client.contract.mts` exercises these
+	 * MUSTs against a live Redis. Run it against your wrapper before
+	 * shipping — a passing memory-only stub is not sufficient evidence
+	 * of WATCH isolation.
 	 */
 	duplicate(): DisposableRedisClient;
 }
