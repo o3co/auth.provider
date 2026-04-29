@@ -101,11 +101,6 @@ export interface FederationProvider {
 		readonly codeVerifier: string;
 		readonly redirectUri: string;
 	}): Promise<FederationProfile>;
-
-	/** URL-pattern validation for a consumer-supplied `redirect_to` (retained from old interface). */
-	validateRedirect(url: string): FederationResult<void>;
-	/** Resolve the post-callback redirect URL from the session's `redirectTo`. */
-	resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
 }
 
 /**

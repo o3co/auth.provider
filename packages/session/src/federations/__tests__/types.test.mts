@@ -30,8 +30,6 @@ describe("FederationProvider type guards", () => {
 	const minimalProvider: FederationProvider = {
 		name: "test",
 		scope: ["openid"],
-		validateRedirect: () => ({ ok: true, value: undefined }),
-		resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
 		buildAuthorizationUrl: () => new URL("https://example.com/authorize"),
 		exchangeCode: async () => ({
 			issuer: "https://example.com",

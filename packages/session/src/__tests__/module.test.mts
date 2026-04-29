@@ -150,8 +150,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -323,8 +321,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -365,8 +361,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google-work",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -441,8 +435,6 @@ describe("sessionModule", () => {
 				return {
 					name: cfg.name as string,
 					scope: [],
-					validateRedirect: vi.fn(),
-					resolveCallbackRedirect: vi.fn(),
 					buildAuthorizationUrl: vi.fn(),
 					exchangeCode: vi.fn(),
 				};
@@ -490,8 +482,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "WRONG", // builder returned a different name
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -558,8 +548,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -612,8 +600,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -661,8 +647,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "corp",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),

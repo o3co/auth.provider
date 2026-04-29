@@ -132,8 +132,6 @@ function makeFakeProvider(overrides: Partial<FederationProvider> = {}): Federati
 	return {
 		name: "test",
 		scope: ["openid"],
-		validateRedirect: () => ({ ok: true, value: undefined }),
-		resolveCallbackRedirect: (s) => ({ ok: true, value: s.redirectTo ?? "/" }),
 		buildAuthorizationUrl: ({ state, codeVerifier }) => {
 			const url = new URL("https://idp.example.com/authorize");
 			url.searchParams.set("state", state);

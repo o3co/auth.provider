@@ -23,12 +23,9 @@ import {
 	type FederationProfile,
 	type FederationProvider,
 	type FederationProviderFactory,
-	type FederationResult,
 	type MappedClaims,
-	resolveCallbackRedirect,
 	type SupportsClaimMapping,
 	type SupportsLogout,
-	validateRedirect,
 } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 
@@ -111,14 +108,6 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 	return {
 		name: config.name,
 		scope: SCOPES,
-
-		validateRedirect(url: string): FederationResult<void> {
-			return validateRedirect(url, config);
-		},
-
-		resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
-			return resolveCallbackRedirect(session, config);
-		},
 
 		buildAuthorizationUrl(params: {
 			readonly redirectUri: string;
