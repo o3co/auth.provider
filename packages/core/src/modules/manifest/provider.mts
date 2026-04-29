@@ -20,15 +20,21 @@ import type { ComponentKey, ComponentMap } from "./component-map.mjs";
  * Typed dependency object derived from a module's `requires` and `optional`
  * key sets.
  *
- * - Keys in `R` (required) appear as `readonly` non-optional fields with
- *   the slot's value type from ComponentMap.
+ * - Keys in `R` (required) appear as `readonly` non-optional fields whose
+ *   value type is `NonNullable<ComponentMap[K]>`. The `NonNullable` strips
+ *   the `| undefined` introduced by ComponentMap's optional declaration
+ *   (every slot is declared `slot?: T` via declaration-merging so consumers
+ *   can opt into slots additively). The boot planner's missing-required-
+ *   component check at materialise-time guarantees the slot is present
+ *   whenever it appears in a module's `requires`, so the runtime value is
+ *   never undefined inside a `provides` callback.
  * - Keys in `O` (optional) appear as `readonly` optional fields with type
  *   `ComponentMap[K] | undefined`.
  *
  * Per A2-α §3.1.
  */
 export type ProviderDeps<R extends ComponentKey = never, O extends ComponentKey = never> = {
-	readonly [K in R]: ComponentMap[K];
+	readonly [K in R]: NonNullable<ComponentMap[K]>;
 } & {
 	readonly [K in O]?: ComponentMap[K];
 };

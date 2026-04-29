@@ -118,8 +118,7 @@ export const redisChallengeStoreModule = defineModule({
 			const cfg = (deps.config as unknown as { redisChallengeStore: { keyPrefix: string } })
 				.redisChallengeStore;
 			return createRedisChallengeStore({
-				// biome-ignore lint/style/noNonNullAssertion: boot planner guarantees redisClient via `requires`; the erased Module type cannot express it
-				client: deps.redisClient!,
+				client: deps.redisClient,
 				keyPrefix: cfg.keyPrefix,
 			});
 		},

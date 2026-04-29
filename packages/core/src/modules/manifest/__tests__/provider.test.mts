@@ -32,7 +32,7 @@ type LocalKey = keyof LocalComponentMap;
  * touching the shared ComponentMap interface.
  */
 type LocalProviderDeps<R extends LocalKey = never, O extends LocalKey = never> = {
-	readonly [K in R]: LocalComponentMap[K];
+	readonly [K in R]: NonNullable<LocalComponentMap[K]>;
 } & {
 	readonly [K in O]?: LocalComponentMap[K];
 };
@@ -48,6 +48,27 @@ test("ProviderDeps<R, O> derives required + optional shape", () => {
 		readonly _testConfig: { readonly host: string };
 		readonly _testStore: { readonly get: (k: string) => string };
 		readonly _testLogger?: { readonly debug: (m: string) => void };
+	}>();
+});
+
+test("ProviderDeps strips `| undefined` from required slots derived from optional ComponentMap entries", () => {
+	// The real ComponentMap declares every slot OPTIONAL via declaration-merging
+	// (`slot?: T`) so consumers can opt into slots additively. Without
+	// NonNullable, `ComponentMap[K]` for a required key would still resolve to
+	// `T | undefined`, forcing every `provides` callback to write `deps.slot!`
+	// to convince the type-checker. This test pins the behavior that required
+	// keys come out non-undefined even when the backing slot was declared `?`.
+	interface OptionalSlotMap {
+		readonly _testOptionalSlot?: { readonly value: string };
+	}
+	type OptionalKey = keyof OptionalSlotMap;
+	type OptionalSlotProviderDeps<R extends OptionalKey = never> = {
+		readonly [K in R]: NonNullable<OptionalSlotMap[K]>;
+	};
+
+	type Deps = OptionalSlotProviderDeps<"_testOptionalSlot">;
+	expectTypeOf<Deps>().branded.toEqualTypeOf<{
+		readonly _testOptionalSlot: { readonly value: string };
 	}>();
 });
 

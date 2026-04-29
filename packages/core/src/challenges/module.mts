@@ -43,10 +43,8 @@ export const defaultChallengeCeremonyModule = defineModule({
 	provides: {
 		challengeCeremony: (deps) =>
 			createDefaultChallengeCeremony({
-				// biome-ignore lint/style/noNonNullAssertion: boot planner guarantees challengeStore via `requires`; the erased Module type cannot express it
-				challengeStore: deps.challengeStore!,
-				// biome-ignore lint/style/noNonNullAssertion: boot planner guarantees replaySeenSet via `requires`; the erased Module type cannot express it
-				replaySeenSet: deps.replaySeenSet!,
+				challengeStore: deps.challengeStore,
+				replaySeenSet: deps.replaySeenSet,
 			}),
 	},
 });

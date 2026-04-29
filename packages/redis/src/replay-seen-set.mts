@@ -111,8 +111,7 @@ export const redisReplaySeenSetModule = defineModule({
 			const cfg = (deps.config as unknown as { redisReplaySeenSet: { keyPrefix: string } })
 				.redisReplaySeenSet;
 			return createRedisReplaySeenSet({
-				// biome-ignore lint/style/noNonNullAssertion: boot planner guarantees redisClient via `requires`; the erased Module type cannot express it
-				client: deps.redisClient!,
+				client: deps.redisClient,
 				keyPrefix: cfg.keyPrefix,
 			});
 		},
