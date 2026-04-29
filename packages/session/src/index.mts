@@ -19,6 +19,13 @@ export { createFederationProviderFactory } from "./federations/factory.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect, validateRedirect } from "./federations/helpers.mjs";
 export { codeChallenge } from "./federations/pkce.mjs";
+// A5 redirect-policy split (per A5 §5.2/§5.3/§9)
+export type {
+	DefaultFederationRedirectPolicyConfig,
+	FederationRedirectPolicy,
+	FederationRedirectPolicyFactory,
+} from "./federations/redirect-policy.mjs";
+export { createDefaultFederationRedirectPolicy } from "./federations/redirect-policy.mjs";
 export type {
 	EndSessionRequest,
 	EndSessionResult,
@@ -42,3 +49,6 @@ export {
 	createSessionStoreFactory,
 	registerBuiltinSessionStores,
 } from "./store/factory.mjs";
+
+// Side-effect: loads ContributesMap + ComponentMap declaration-merges for A5.
+import "./federations/contributes.mjs";
