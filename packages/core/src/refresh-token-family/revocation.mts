@@ -44,7 +44,11 @@ export function createDefaultRefreshTokenFamilyRevocation(
 		async revokeFamily(familyId) {
 			await deps.refreshTokenFamilyStore.updateFamily(familyId, (current) => {
 				if (current.revoked) return null; // already revoked, no-op
-				return { ...current, revoked: true };
+				// Freeze the updater return value mirroring rotation.mts (defence-in-depth).
+				// Adapters also freeze returned families, but freezing here is the
+				// declared updater convention so future wrapper code that reads the
+				// returned family does not encounter a mutable handle.
+				return Object.freeze({ ...current, revoked: true });
 			});
 			// All three RefreshTokenFamilyUpdateResult outcomes are valid success
 			// paths for an idempotent revoke:

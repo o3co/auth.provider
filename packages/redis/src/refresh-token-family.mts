@@ -178,6 +178,18 @@ export function createRedisRefreshTokenFamilyStore(
 					continue;
 				}
 
+				// Reconstructing expiresAtMs as `Date.now() + newTtlMs` here
+				// (post-EXEC) drifts forward by the EXEC round-trip vs PTTL
+				// reconstruction in findFamily, which counts down from the
+				// SET commit moment. Concretely, `findFamily(...)?.expiresAtMs
+				// <= updateFamily(...).committed.family.expiresAtMs` for the
+				// same write — typically by single-digit ms in healthy
+				// networks. The drift is benign: callers using expiresAtMs
+				// to populate JWT `exp` claims still respect the original
+				// caller-supplied window (TTL never extends beyond what the
+				// updater asked for), and JWT validators tolerate seconds-
+				// scale clock skew. PTTL-after-EXEC reconstruction would
+				// add a redundant round-trip with no security benefit.
 				const committed = Object.freeze({
 					...next,
 					expiresAtMs: Date.now() + newTtlMs,
