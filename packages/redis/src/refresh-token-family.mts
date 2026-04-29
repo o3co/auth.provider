@@ -14,11 +14,14 @@
  * limitations under the License.
  */
 import {
+	type AdapterBuilder,
+	defineModule,
 	type RefreshTokenFamily,
 	type RefreshTokenFamilyStore,
 	type RefreshTokenFamilyUpdateResult,
 	RefreshTokenStorageError,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { RedisClient } from "./types.mjs";
 
 /**
@@ -183,3 +186,56 @@ export function createRedisRefreshTokenFamilyStore(
 		},
 	};
 }
+
+/**
+ * AdapterFactory builder for runtime-config-driven backend selection
+ * (composition pattern §8.4). Consumer registers via:
+ *   factory.register("redis", redisRefreshTokenFamilyStoreBuilder);
+ * Then calls:
+ *   factory.create({ type: "redis", client, keyPrefix: "rtfam:", casRetryLimit: 3 });
+ */
+export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFamilyStore> = (
+	config,
+) => {
+	const c = config as { client: RedisClient; keyPrefix?: string; casRetryLimit?: number };
+	return createRedisRefreshTokenFamilyStore({
+		client: c.client,
+		keyPrefix: c.keyPrefix ?? "rtfam:",
+		casRetryLimit: c.casRetryLimit,
+	});
+};
+
+/**
+ * `defineModule` manifest for the Redis RefreshTokenFamilyStore. Static
+ * composition path (A3 §8.1). For runtime-config-driven selection use the
+ * builder above.
+ *
+ * configSchema: top-level key `redisRefreshTokenFamilyStore`
+ * (module-namespaced per master roadmap §3.5).
+ */
+export const redisRefreshTokenFamilyStoreModule = defineModule({
+	name: "redis-refresh-token-family-store",
+	requires: ["redisClient", "config"] as const,
+	configSchema: z.object({
+		redisRefreshTokenFamilyStore: z
+			.object({
+				keyPrefix: z.string().default("rtfam:"),
+				casRetryLimit: z.number().int().min(1).max(10).default(3),
+			})
+			.default({ keyPrefix: "rtfam:", casRetryLimit: 3 }),
+	}),
+	provides: {
+		refreshTokenFamilyStore: (deps) => {
+			const cfg = (
+				deps.config as unknown as {
+					redisRefreshTokenFamilyStore: { keyPrefix: string; casRetryLimit: number };
+				}
+			).redisRefreshTokenFamilyStore;
+			return createRedisRefreshTokenFamilyStore({
+				client: deps.redisClient,
+				keyPrefix: cfg.keyPrefix,
+				casRetryLimit: cfg.casRetryLimit,
+			});
+		},
+	},
+});

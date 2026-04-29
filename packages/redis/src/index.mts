@@ -26,6 +26,12 @@ export {
 	redisChallengeStoreModule,
 } from "./challenges.mjs";
 export {
+	createRedisRefreshTokenFamilyStore,
+	type RedisRefreshTokenFamilyStoreOptions,
+	redisRefreshTokenFamilyStoreBuilder,
+	redisRefreshTokenFamilyStoreModule,
+} from "./refresh-token-family.mjs";
+export {
 	createRedisReplaySeenSet,
 	type RedisReplaySeenSetOptions,
 	redisReplaySeenSetBuilder,
