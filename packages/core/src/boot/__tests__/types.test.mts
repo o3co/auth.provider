@@ -31,6 +31,7 @@ import type {
 	DuplicateModuleNameDetails,
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
+	FederationRedirectPolicyUnpairedDetails,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
 	ListShapedOverrideDetails,
@@ -62,11 +63,11 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 19 literals
+// BootErrorReason — exactly 20 literals
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 19 reason literals", () => {
+	it("contains exactly the 20 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "duplicate-module-name"
 			| "duplicate-provides"
@@ -87,12 +88,13 @@ describe("BootErrorReason", () => {
 			| "contribute-factory-failed"
 			| "route-order-cycle"
 			| "route-order-target-missing"
+			| "federation-redirect-policy-unpaired"
 		>();
 	});
 });
 
 // ---------------------------------------------------------------------------
-// Per-reason Details — discriminator type checks (all 19)
+// Per-reason Details — discriminator type checks (all 20)
 // ---------------------------------------------------------------------------
 
 describe("per-reason *Details discriminators", () => {
@@ -196,6 +198,12 @@ describe("per-reason *Details discriminators", () => {
 		expectTypeOf<
 			RouteOrderTargetMissingDetails["reason"]
 		>().toEqualTypeOf<"route-order-target-missing">();
+	});
+
+	it("FederationRedirectPolicyUnpairedDetails.reason", () => {
+		expectTypeOf<
+			FederationRedirectPolicyUnpairedDetails["reason"]
+		>().toEqualTypeOf<"federation-redirect-policy-unpaired">();
 	});
 });
 

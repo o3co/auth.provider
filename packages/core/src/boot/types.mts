@@ -565,7 +565,8 @@ export type BootErrorReason =
 	| "provides-factory-failed"
 	| "contribute-factory-failed"
 	| "route-order-cycle"
-	| "route-order-target-missing";
+	| "route-order-target-missing"
+	| "federation-redirect-policy-unpaired";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — 19 total, Per A2-β §6.1
@@ -811,10 +812,27 @@ export interface RouteOrderTargetMissingDetails {
 }
 
 /**
- * Discriminated union of all 19 per-reason Details interfaces.
+ * A federation contributing `federations[name]` lacks a matching
+ * `federationRedirectPolicies[name]` (or vice versa).
+ *
+ * `name`: the unmatched federation/policy key.
+ * `side`: which side is missing its pair.
+ * `contributedBy`: the module that contributed the unpaired side.
+ *
+ * Per A5 §8.2.
+ */
+export interface FederationRedirectPolicyUnpairedDetails {
+	readonly reason: "federation-redirect-policy-unpaired";
+	readonly name: string;
+	readonly side: "federation-without-policy" | "policy-without-federation";
+	readonly contributedBy: string;
+}
+
+/**
+ * Discriminated union of all 20 per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
- * Per A2-β §6.1.
+ * Per A2-β §6.1, extended by A5 §8.2.
  */
 export type BootErrorDetails =
 	| DuplicateModuleNameDetails
@@ -835,7 +853,8 @@ export type BootErrorDetails =
 	| ProvidesFactoryFailedDetails
 	| ContributeFactoryFailedDetails
 	| RouteOrderCycleDetails
-	| RouteOrderTargetMissingDetails;
+	| RouteOrderTargetMissingDetails
+	| FederationRedirectPolicyUnpairedDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

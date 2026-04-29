@@ -55,6 +55,7 @@ export type {
 	DuplicateModuleNameDetails,
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
+	FederationRedirectPolicyUnpairedDetails,
 	FrozenWorld,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
