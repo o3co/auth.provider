@@ -91,6 +91,23 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 // `federationProviders` is shaped as `ReadonlyMap<string, FederationProvider>`
 // — same shape as the runtime view returned by `makeFederationProviders` in
 // `apply-contributions.mts`.
+//
+// TRADE-OFF (NORMATIVE): merging these slots onto ComponentMap means the
+// type system NO LONGER rejects a module that writes
+// `provides: { grantHandlerResolver: () => ... }` or a host that supplies
+// `bootstrapComponents.grantHandlerResolver` / `overrideComponents.
+// grantHandlerResolver`. Those collisions are caught at RUNTIME by
+// `validate-manifests.mts` step 3a (provides), 3b (bootstrap), and 3c
+// (overrideComponents) — `BootError({ reason: "synthetic-key-collision" })`.
+//
+// The trade-off is deliberate: typed `requires` is the higher-value goal
+// for downstream module authors (it is the read path for the resolvers).
+// The write paths (provides / bootstrap / overrideComponents) are guarded
+// structurally by `SYNTHETIC_COMPONENT_KEYS` membership checks at boot
+// time, which is the same enforcement the planner relies on for non-typed
+// languages and dynamically loaded modules. The runtime check is
+// authoritative; the type system narrows the typical failure mode (typo
+// in `requires`) but does not gate the deliberate-collision case.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {

@@ -857,6 +857,35 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		const parsed = result.bootstrapComponents.config as { http: { port: number } };
 		expect(parsed.http.port).toBe(3000);
 	});
+
+	it("preserves top-level extra config keys not in any schema (Codex P2 strip-unknown regression)", () => {
+		// Codex P2 finding on commit 270914f5: CoreConfigSchema's top-level
+		// z.object strips unknown keys. With zero module-declared schemas, a
+		// host environment passing a full AppConfig (with session, repositories,
+		// rateLimit, etc.) would have those sections silently dropped, leaving
+		// `handle.components.config` typed as AppConfig but runtime-shaped as
+		// CoreConfig. The merge-back step in validateAndComposeConfig must
+		// preserve top-level extras while still applying CoreConfigSchema
+		// defaults at the keys it knows about.
+		const noSchema = defineModule({ name: "no-schema" });
+		const result = validateManifests({
+			modules: [noSchema],
+			bootstrapComponents: {
+				config: {
+					...minCoreConfig,
+					session: { strategy: "jwt-signed-cookie", cookieName: "_sess" },
+					customConsumerKey: { whatever: 42 },
+				} as never,
+				pathResolver: minBootstrap.pathResolver,
+			},
+		});
+		const cfg = result.bootstrapComponents.config as Record<string, unknown>;
+		// CoreConfigSchema defaults still applied
+		expect((cfg.http as { port: number }).port).toBe(3000);
+		// Top-level extras preserved
+		expect(cfg.session).toEqual({ strategy: "jwt-signed-cookie", cookieName: "_sess" });
+		expect(cfg.customConsumerKey).toEqual({ whatever: 42 });
+	});
 });
 
 // ---------------------------------------------------------------------------

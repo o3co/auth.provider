@@ -1011,7 +1011,22 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 	const composedSchema = composeConfigSchema(schemas);
 
 	try {
-		return composedSchema.parse((bootstrap as Record<string, unknown>).config);
+		const rawConfig = (bootstrap as Record<string, unknown>).config;
+		const parsed = composedSchema.parse(rawConfig) as Record<string, unknown>;
+		// CoreConfigSchema's top-level z.object strips unknown keys. When no
+		// module declares a configSchema, extras like `session`, `repositories`,
+		// `rateLimit`, `cors`, and consumer-specific top-level keys would be
+		// silently dropped — incompatible with `ComponentMap.config: AppConfig`
+		// (the typed slot promises a fuller shape than CoreConfig). Merge the
+		// parsed result over the raw input: parsed values win at every key the
+		// schema knows about (so Zod defaults apply); raw extras at the top
+		// level are preserved untouched. Per Codex P2 finding on the prior
+		// hardening commit (270914f5).
+		const rawObj =
+			rawConfig !== null && typeof rawConfig === "object"
+				? (rawConfig as Record<string, unknown>)
+				: {};
+		return { ...rawObj, ...parsed };
 	} catch (err) {
 		if (err instanceof z.ZodError) {
 			throw new BootError({
