@@ -79,11 +79,16 @@ const deserialize = (raw: string): RefreshTokenFamily => {
  *   - updateFamily uses single-key WATCH/GET/MULTI/SET/EXEC — the canonical
  *     Redis CAS primitive. Single-key only (not a multi-key transaction).
  *
- * Connection isolation: WATCH is connection-scoped in Redis, so concurrent
- * `updateFamily` calls obtain their own connection via `client.duplicate()`
- * and dispose it via `await using` so each CAS attempt has an isolated
- * WATCH context. The base `client` is used only for non-WATCH ops
- * (registerFamily, findFamily) where command serialisation is sufficient.
+ * Connection isolation: WATCH is connection-scoped in Redis, so each
+ * `updateFamily` call obtains its own connection via `client.duplicate()`
+ * (disposed via `await using` on function exit). Within that connection
+ * the CAS retry loop reuses the SAME duplicate across attempts — Redis
+ * auto-clears WATCH on every EXEC, so a fresh `WATCH` at the top of
+ * each iteration sets up a clean CAS context without churning
+ * connections per retry (1 connection per call, not per attempt).
+ *
+ * The base `client` is used only for non-WATCH ops (registerFamily,
+ * findFamily) where command serialisation is sufficient.
  *
  * Per A3 §7.2.
  */
@@ -128,13 +133,16 @@ export function createRedisRefreshTokenFamilyStore(
 		async updateFamily(familyId, updater): Promise<RefreshTokenFamilyUpdateResult> {
 			const key = fullKey(familyId);
 
-			for (let attempt = 0; attempt <= casRetryLimit; attempt++) {
-				// Per-attempt isolated connection: WATCH is connection-scoped in
-				// Redis, so concurrent updateFamily calls would interleave their
-				// WATCH contexts on a shared client. `await using` closes the
-				// duplicate on every exit path including thrown errors.
-				await using conn = client.duplicate();
+			// One isolated connection per call (NOT per retry): WATCH is
+			// connection-scoped in Redis, so concurrent updateFamily calls
+			// would interleave their WATCH contexts on a shared client.
+			// `await using` closes the duplicate on every exit path including
+			// thrown errors. Across retries we reuse this single connection;
+			// Redis auto-clears WATCH on every EXEC, and we re-WATCH at the
+			// top of each iteration.
+			await using conn = client.duplicate();
 
+			for (let attempt = 0; attempt <= casRetryLimit; attempt++) {
 				await conn.watch(key);
 				const raw = await conn.get(key);
 
@@ -162,8 +170,12 @@ export function createRedisRefreshTokenFamilyStore(
 
 				const newTtlMs = next.expiresAt.getTime() - Date.now();
 				if (newTtlMs <= 0) {
+					// Updater returned past expiresAt — fail-closed parity with
+					// memory adapter (and symmetric with registerFamily's
+					// expired-at-issue throw). See updateFamily contract bullet
+					// in @o3co/auth-provider-core RefreshTokenFamilyStore.
 					await conn.unwatch();
-					return { outcome: "not-found" }; // expired during updater run
+					throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 				}
 
 				const multi = conn.multi();
@@ -171,7 +183,9 @@ export function createRedisRefreshTokenFamilyStore(
 				const execResult = await multi.exec();
 
 				if (execResult === null) {
-					// CAS conflict — another caller modified the key. Loop and retry.
+					// CAS conflict — Redis auto-clears WATCH on EXEC; loop and
+					// re-WATCH at the top of the next iteration on the SAME
+					// connection (no per-retry duplicate churn).
 					continue;
 				}
 

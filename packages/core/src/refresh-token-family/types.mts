@@ -120,8 +120,14 @@ export interface RefreshTokenFamilyStore {
 	 *   - Updater MAY use a closure-captured variable to communicate the
 	 *     abort reason to the caller; the closure is reset at the top of
 	 *     each updater invocation. This is the wrapper pattern used by
-	 *     `createDefaultRefreshTokenRotation` (Task 6) to translate
-	 *     "aborted" results into "replayed" or "revoked" outcomes.
+	 *     `createDefaultRefreshTokenRotation` to translate "aborted"
+	 *     results into "replayed" or "revoked" outcomes.
+	 *   - Updater MUST NOT return a RefreshTokenFamily whose `expiresAt` is
+	 *     `<= now()`. Both adapters fail-closed by throwing
+	 *     `RefreshTokenStorageError({ reason: "expired-at-issue" })` —
+	 *     symmetric with `registerFamily` and prevents committing a
+	 *     dead-on-arrival entry. Callers shrinking TTL during rotation
+	 *     should compute the new `expiresAt` from a forward window.
 	 *
 	 * Return value:
 	 *   - `{ outcome: "committed", family }` — CAS succeeded; family is the
