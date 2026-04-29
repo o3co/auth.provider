@@ -6,35 +6,55 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import { createInMemoryUserSessionStore } from "./adapters/memory.mjs";
-import type { UserSessionStoreBase, UserSessionStoreFactory } from "./types.mjs";
+import type {
+	SessionFamilyIndex,
+	SessionFamilyIndexFactory,
+	SessionFederationIndex,
+	SessionFederationIndexFactory,
+	SessionRPRegistry,
+	SessionRPRegistryFactory,
+	UserSessionStore,
+	UserSessionStoreFactory,
+} from "./types.mjs";
 
+/**
+ * AdapterFactory builders for the 4 user-session stores. Per A6+A7 §2.3:
+ * register throws on duplicate, replace is the explicit override path,
+ * NO freeze() lifecycle. Per A4 §5.7 + §8.4.
+ *
+ * The composition-root path is for consumers that select adapters by name
+ * from configuration (e.g. SESSION_BACKEND=redis). The bundled module
+ * (memorySessionStoresModule / redisSessionStoresModule) is the recommended
+ * default — see A4 §8.1.
+ */
 export function createUserSessionStoreFactory(): UserSessionStoreFactory {
-	return createAdapterFactory<UserSessionStoreBase>("UserSessionStore");
+	return createAdapterFactory<UserSessionStore>("UserSessionStore");
 }
 
-export function registerBuiltinUserSessionStores(factory: UserSessionStoreFactory): void {
-	factory.register("memory", () => createInMemoryUserSessionStore());
-	factory.register("redis", async (config) => {
-		const client = (config as { client?: unknown }).client;
-		if (!client) {
-			throw new Error(
-				`userSessionStore.redis: 'client' option is required. Pass a connected 'redis' v5 client via AppOptions wiring.`,
-			);
-		}
-		const keyPrefix =
-			typeof (config as { keyPrefix?: unknown }).keyPrefix === "string"
-				? (config as { keyPrefix: string }).keyPrefix
-				: undefined;
-		const { createRedisUserSessionStore } = await import("./adapters/redis.mjs");
-		return createRedisUserSessionStore({
-			client: client as Parameters<typeof createRedisUserSessionStore>[0]["client"],
-			keyPrefix,
-		});
-	});
+export function createSessionRPRegistryFactory(): SessionRPRegistryFactory {
+	return createAdapterFactory<SessionRPRegistry>("SessionRPRegistry");
 }
 
-export type { UserSessionStoreFactory };
+export function createSessionFamilyIndexFactory(): SessionFamilyIndexFactory {
+	return createAdapterFactory<SessionFamilyIndex>("SessionFamilyIndex");
+}
+
+export function createSessionFederationIndexFactory(): SessionFederationIndexFactory {
+	return createAdapterFactory<SessionFederationIndex>("SessionFederationIndex");
+}
+
+export type {
+	UserSessionStoreFactory,
+	SessionRPRegistryFactory,
+	SessionFamilyIndexFactory,
+	SessionFederationIndexFactory,
+};

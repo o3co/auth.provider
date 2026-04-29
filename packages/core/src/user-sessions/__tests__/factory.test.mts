@@ -6,45 +6,71 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
 import { describe, expect, it } from "vitest";
-import { createUserSessionStoreFactory, registerBuiltinUserSessionStores } from "../factory.mjs";
+import {
+	createSessionFamilyIndexFactory,
+	createSessionFederationIndexFactory,
+	createSessionRPRegistryFactory,
+	createUserSessionStoreFactory,
+} from "../factory.mjs";
+import { createInMemorySessionFamilyIndex } from "../memory/sessionFamilyIndex.mjs";
+import { createInMemorySessionFederationIndex } from "../memory/sessionFederationIndex.mjs";
+import { createInMemorySessionRPRegistry } from "../memory/sessionRPRegistry.mjs";
+import { createInMemoryUserSessionStore } from "../memory/userSessionStore.mjs";
 
 describe("UserSessionStoreFactory", () => {
-	it("registerBuiltinUserSessionStores registers the 'memory' type", () => {
+	it("registers + resolves the memory builder", async () => {
 		const f = createUserSessionStoreFactory();
-		registerBuiltinUserSessionStores(f);
-		expect(f.registeredTypes()).toContain("memory");
-	});
-
-	it("built-in memory adapter is creatable", async () => {
-		const f = createUserSessionStoreFactory();
-		registerBuiltinUserSessionStores(f);
+		f.register("memory", () => createInMemoryUserSessionStore());
 		const store = await f.create({ type: "memory" });
 		expect(store.kind).toBe("memory");
 	});
 
-	it("unknown type throws AdapterFactoryError with UserSessionStore context", async () => {
+	it("register throws on duplicate", () => {
 		const f = createUserSessionStoreFactory();
-		registerBuiltinUserSessionStores(f);
-		await expect(f.create({ type: "unknown" })).rejects.toThrow(/UserSessionStore/);
+		f.register("memory", () => createInMemoryUserSessionStore());
+		expect(() => f.register("memory", () => createInMemoryUserSessionStore())).toThrow();
 	});
 
-	it("built-in redis adapter is registered and creates instance", async () => {
+	it("replace overwrites without throwing", async () => {
 		const f = createUserSessionStoreFactory();
-		registerBuiltinUserSessionStores(f);
-		// Provide an already-connected client to avoid dynamic import in tests.
-		const fakeClient = {
-			get: async () => null,
-			set: async () => "OK",
-			del: async () => 0,
-		};
-		const store = await f.create({
-			type: "redis",
-			client: fakeClient,
-			keyPrefix: "x:",
-		});
-		expect(store.kind).toBe("redis");
+		f.register("memory", () => createInMemoryUserSessionStore());
+		f.replace("memory", () => createInMemoryUserSessionStore());
+		const store = await f.create({ type: "memory" });
+		expect(store.kind).toBe("memory");
+	});
+});
+
+describe("SessionRPRegistryFactory", () => {
+	it("registers + resolves the memory builder", async () => {
+		const f = createSessionRPRegistryFactory();
+		f.register("memory", () => createInMemorySessionRPRegistry());
+		const reg = await f.create({ type: "memory" });
+		expect(reg.kind).toBe("memory");
+	});
+});
+
+describe("SessionFamilyIndexFactory", () => {
+	it("registers + resolves the memory builder", async () => {
+		const f = createSessionFamilyIndexFactory();
+		f.register("memory", () => createInMemorySessionFamilyIndex());
+		const idx = await f.create({ type: "memory" });
+		expect(idx.kind).toBe("memory");
+	});
+});
+
+describe("SessionFederationIndexFactory", () => {
+	it("registers + resolves the memory builder", async () => {
+		const f = createSessionFederationIndexFactory();
+		f.register("memory", () => createInMemorySessionFederationIndex());
+		const idx = await f.create({ type: "memory" });
+		expect(idx.kind).toBe("memory");
 	});
 });
