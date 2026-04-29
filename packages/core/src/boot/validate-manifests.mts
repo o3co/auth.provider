@@ -1002,11 +1002,12 @@ function validateAndComposeConfig(modules: readonly Module[], bootstrap: Bootstr
 		}
 	}
 
-	if (schemas.length === 0) {
-		// No schemas — return the original config value unchanged.
-		return (bootstrap as Record<string, unknown>).config;
-	}
-
+	// Always run composeConfigSchema — it always includes CoreConfigSchema as
+	// the base, even when no module declares a configSchema. Skipping the
+	// parse when `schemas.length === 0` would let an invalid `oauth` / `http`
+	// section through and deny module-less consumers the CoreConfigSchema
+	// defaults that downstream code (and the bootstrap.config slot type)
+	// assumes are present.
 	const composedSchema = composeConfigSchema(schemas);
 
 	try {

@@ -25,8 +25,11 @@ import {
 	memoryReplaySeenSetModule,
 } from "../../index.mjs";
 
+// Minimum config that satisfies CoreConfigSchema (Codex P2-A hardening:
+// validateAndComposeConfig now always runs CoreConfigSchema). All required
+// nested objects present as empty so Zod defaults populate every leaf.
 const minBoot = {
-	config: {} as never,
+	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } } as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 

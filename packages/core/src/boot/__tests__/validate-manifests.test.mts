@@ -33,8 +33,18 @@ declare module "@o3co/auth-provider-core" {
 // the full AppConfig shape (which would require all nested required fields).
 import type { BootstrapMap } from "../types.mjs";
 
+// Minimum config that satisfies CoreConfigSchema — all required nested
+// objects present as empty so Zod defaults populate every leaf.
+// Per Codex P2-A hardening: validateAndComposeConfig now ALWAYS runs
+// CoreConfigSchema, even when no module declares a configSchema, so this
+// stub must satisfy CoreConfigSchema's required structure.
+const minCoreConfig = {
+	http: {},
+	oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} },
+};
+
 const minBootstrap = {
-	config: {} as never,
+	config: minCoreConfig as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 
@@ -785,7 +795,7 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 			validateManifests({
 				modules: [m],
 				bootstrapComponents: {
-					config: { port: "not-a-number" } as never,
+					config: { ...minCoreConfig, port: "not-a-number" } as never,
 					pathResolver: minBootstrap.pathResolver,
 				},
 			});
@@ -799,6 +809,53 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 			return;
 		}
 		expect.fail("should have thrown");
+	});
+
+	it("CoreConfigSchema is enforced even when zero modules declare configSchema (Codex P2-A)", () => {
+		// Codex P2-A regression: previously, when no module declared a
+		// configSchema, validateAndComposeConfig early-returned the raw
+		// bootstrap.config without parsing CoreConfigSchema. A boot app
+		// composed only of schema-less modules could thus pass through
+		// missing/invalid `oauth` or `http` sections silently. This test
+		// asserts the gap is closed: an invalid config (missing required
+		// `oauth` object) must throw `config-validation-failed` even with
+		// zero configSchema-declaring modules.
+		const noSchema = defineModule({ name: "no-schema" });
+		try {
+			validateManifests({
+				modules: [noSchema],
+				bootstrapComponents: {
+					config: { http: {} } as never, // missing required `oauth`
+					pathResolver: minBootstrap.pathResolver,
+				},
+			});
+		} catch (e) {
+			const err = e as BootError;
+			expect(err.reason).toBe("config-validation-failed");
+			if (err.details.reason === "config-validation-failed") {
+				expect(err.details.issues.length).toBeGreaterThan(0);
+				// participants list is empty (no module-declared schemas)
+				// but CoreConfigSchema's issues are still surfaced.
+				expect(err.details.modules).toEqual([]);
+			}
+			return;
+		}
+		expect.fail("should have thrown");
+	});
+
+	it("CoreConfigSchema defaults are applied even when zero modules declare configSchema", () => {
+		// Companion to the regression above: with zero configSchema modules and
+		// a minimal valid config, the parsed config carries CoreConfigSchema's
+		// Zod defaults (e.g. http.port=3000) into bootstrapComponents.
+		const noSchema = defineModule({ name: "no-schema" });
+		const result = validateManifests({
+			modules: [noSchema],
+			bootstrapComponents: minBootstrap,
+		});
+		// The parsed config substituted into bootstrapComponents should carry
+		// CoreConfigSchema defaults applied.
+		const parsed = result.bootstrapComponents.config as { http: { port: number } };
+		expect(parsed.http.port).toBe(3000);
 	});
 });
 

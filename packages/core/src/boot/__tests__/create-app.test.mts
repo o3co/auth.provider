@@ -53,8 +53,11 @@ declare module "@o3co/auth-provider-core" {
 // Minimal bootstrap stub
 // ---------------------------------------------------------------------------
 
+// Minimum config that satisfies CoreConfigSchema (Codex P2-A hardening:
+// validateAndComposeConfig now always runs CoreConfigSchema). All required
+// nested objects present as empty so Zod defaults populate every leaf.
 const minBoot = {
-	config: {} as never,
+	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } } as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 
@@ -153,7 +156,10 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		expect(Object.isFrozen(handle)).toBe(true);
 		// components map is accessible and contains the bootstrap keys
 		expect(handle.components).toBeDefined();
-		expect(handle.components.config).toBe(minBoot.config);
+		// config is now the parsed (CoreConfigSchema-validated) result with
+		// Zod defaults applied — not the raw bootstrap reference. See
+		// validateAndComposeConfig substitution per Codex P2-A hardening.
+		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 		// The slot provided by the module is materialised (eager activation)
 		expect(handle.components.slotCA).toBe(42);
@@ -174,7 +180,10 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		expect(Object.isFrozen(handle)).toBe(true);
 		expect(Object.isFrozen(handle.components)).toBe(true);
 		// Bootstrap components are present in the frozen component map.
-		expect(handle.components.config).toBe(minBoot.config);
+		// config is now the parsed (CoreConfigSchema-validated) result with
+		// Zod defaults applied — not the raw bootstrap reference. See
+		// validateAndComposeConfig substitution per Codex P2-A hardening.
+		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 	});
 });

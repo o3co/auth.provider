@@ -65,8 +65,11 @@ declare module "@o3co/auth-provider-core" {
 // Shared bootstrap stub
 // ---------------------------------------------------------------------------
 
+// Minimum config that satisfies CoreConfigSchema (Codex P2-A hardening:
+// validateAndComposeConfig now always runs CoreConfigSchema). All required
+// nested objects present as empty so Zod defaults populate every leaf.
 const minBoot = {
-	config: {} as never,
+	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } } as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 
@@ -167,7 +170,10 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 		expect(handle.components.auditSink).toBe(stubAuditSink);
 
 		// Bootstrap components are accessible.
-		expect(handle.components.config).toBe(minBoot.config);
+		// config is now the parsed (CoreConfigSchema-validated) result with
+		// Zod defaults applied — not the raw bootstrap reference. See
+		// validateAndComposeConfig substitution per Codex P2-A hardening.
+		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 
 		// Router is a real Express Router instance with a callable .use method.
