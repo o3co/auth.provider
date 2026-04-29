@@ -5,7 +5,7 @@ export default defineConfig({
 		include: ["src/**/__tests__/**/*.test.mts"],
 		typecheck: {
 			enabled: true,
-			include: ["src/modules/manifest/**/*.test.mts", "src/boot/**/*.test.mts"],
+			include: ["src/modules/manifest/**/*.test.mts", "src/boot/**/*.test.mts", "src/refresh-token-family/**/*.test.mts"],
 			tsconfig: "./tsconfig.test.json",
 		},
 		coverage: {

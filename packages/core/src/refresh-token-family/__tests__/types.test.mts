@@ -18,6 +18,8 @@ import type {
 	RefreshTokenFamily,
 	RefreshTokenFamilyStore,
 	RefreshTokenFamilyUpdateResult,
+	RefreshTokenRotation,
+	RefreshTokenRotationOutcome,
 } from "../types.mjs";
 
 test("RefreshTokenFamily fields are readonly with correct types", () => {
@@ -63,4 +65,26 @@ test("RefreshTokenFamilyUpdateResult committed variant carries family", () => {
 	if (r.outcome === "committed") {
 		expectTypeOf(r.family).toEqualTypeOf<RefreshTokenFamily>();
 	}
+});
+
+test("RefreshTokenRotationOutcome is a 4-variant discriminated union", () => {
+	expectTypeOf<RefreshTokenRotationOutcome>().toEqualTypeOf<
+		| { readonly outcome: "rotated" }
+		| { readonly outcome: "replayed" }
+		| { readonly outcome: "revoked" }
+		| { readonly outcome: "unknown_family" }
+	>();
+});
+
+test("RefreshTokenRotation exposes register and rotate methods", () => {
+	type RotationShape = {
+		register(newJti: string, familyId: string, expiresAt: Date): Promise<void>;
+		rotate(
+			previousJti: string,
+			newJti: string,
+			familyId: string,
+			expiresAt: Date,
+		): Promise<RefreshTokenRotationOutcome>;
+	};
+	expectTypeOf<RefreshTokenRotation>().toEqualTypeOf<RotationShape>();
 });

@@ -3,6 +3,6 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	"include": ["src/modules/manifest/**/*.mts", "src/boot/**/*.mts"],
+	"include": ["src/modules/manifest/**/*.mts", "src/boot/**/*.mts", "src/refresh-token-family/**/*.mts"],
 	"exclude": ["node_modules", "dist"]
 }
