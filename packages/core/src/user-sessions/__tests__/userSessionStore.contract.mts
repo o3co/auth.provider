@@ -89,12 +89,26 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 
 		it("mutating returned UserSession does not affect storage (defensive copy)", async () => {
 			const store = await factory();
-			await store.create(INPUT({ sid: "iso" }));
+			await store.create(
+				INPUT({ sid: "iso", claims: { email: "u@example.com", groups: ["alpha", "beta"] } }),
+			);
 			const s1 = await store.get("iso");
 			expect(s1).not.toBeNull();
+			// Stress all three defensive-copy axes: claims index signature,
+			// claims.groups array, and Date fields. The contract suite is the
+			// load-bearing artifact that the redis adapter MUST satisfy as well —
+			// a redis adapter that forgets to clone Dates on retrieve must fail here.
 			(s1?.claims as Record<string, unknown>).injected = "evil";
+			(s1?.claims.groups as string[] | undefined)?.push("admin");
+			s1?.authTime.setTime(0);
+			s1?.expiresAt.setTime(0);
+			s1?.createdAt.setTime(0);
 			const s2 = await store.get("iso");
 			expect((s2?.claims as Record<string, unknown>).injected).toBeUndefined();
+			expect(s2?.claims.groups).toEqual(["alpha", "beta"]);
+			expect(s2?.authTime.getTime()).not.toBe(0);
+			expect(s2?.expiresAt.getTime()).not.toBe(0);
+			expect(s2?.createdAt.getTime()).not.toBe(0);
 		});
 
 		it("readonly kind field present", async () => {
