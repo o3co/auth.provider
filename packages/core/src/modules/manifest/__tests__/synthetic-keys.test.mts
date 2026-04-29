@@ -12,10 +12,10 @@ import {
 } from "../synthetic-keys.mjs";
 
 describe("SYNTHETIC_COMPONENT_KEYS", () => {
-	test("contains exactly the v0.5.0 baseline 3 synthetic keys", () => {
-		// Per A2-α §6.5: 3 baseline keys at v0.5.0. A5 (Phase 7) adds a
-		// 4th (federationRedirectPolicyResolver). Phase 1 ships the 3.
-		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(3);
+	test("contains exactly the v0.5.0 baseline 4 synthetic keys", () => {
+		// Per A2-α §6.5: 4 keys after A5 (Phase 7) added
+		// federationRedirectPolicyResolver. Phase 1 shipped 3; A5 adds the 4th.
+		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(4);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("federationProviders")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("tokenExchangeValidatorResolver")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("grantHandlerResolver")).toBe(true);

@@ -57,8 +57,9 @@ export type { FederationProvider };
  * - any `bootstrapComponents[K]`
  * - any `overrideComponents[K]`
  *
- * A5 (Phase 7) adds `federationRedirectPolicyResolver` to this set when
- * the federation redirect-policy split lands.
+ * A5 (Phase 7) added `federationRedirectPolicyResolver` — the synthetic
+ * projection for `federationRedirectPolicies` contributions (typed in
+ * `@o3co/auth-provider-session/src/federations/contributes.mts`).
  *
  * Per A2-α §6.5 NORMATIVE constraints. The PRIMARY immutability guard
  * is the TypeScript declared type `ReadonlySet<string>` — `.add()`,
@@ -71,7 +72,12 @@ export type { FederationProvider };
  * to mutate is explicitly bypassing the public type contract.
  */
 export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
-	new Set(["federationProviders", "tokenExchangeValidatorResolver", "grantHandlerResolver"]),
+	new Set([
+		"federationProviders",
+		"tokenExchangeValidatorResolver",
+		"grantHandlerResolver",
+		"federationRedirectPolicyResolver",
+	]),
 );
 
 // ---------------------------------------------------------------------------
