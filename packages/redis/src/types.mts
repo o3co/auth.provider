@@ -35,6 +35,14 @@
  *   - watch(...keys) → CAS setup (A3 updateFamily)
  *   - unwatch() → CAS release without commit (A3 updateFamily abort)
  *   - multi() → chainable transaction pipeline (A3 updateFamily commit)
+ *   - duplicate() → return a new independent client connection for
+ *     per-operation CAS isolation (A3 updateFamily). Required because
+ *     WATCH is connection-scoped in Redis: concurrent updateFamily calls
+ *     sharing one connection would race their WATCH/EXEC windows. The
+ *     returned `DisposableRedisClient` carries `[Symbol.asyncDispose]`
+ *     so the wrapper uses `await using conn = client.duplicate()` and
+ *     the duplicate is closed automatically on scope exit. The base
+ *     client is never used for WATCH.
  *
  * Future cross-cutting adapters (user sessions, federation tokens) will
  * extend this surface additively per A1 §5.5.
@@ -50,6 +58,44 @@ export interface RedisClient {
 	watch(...keys: string[]): Promise<"OK">;
 	unwatch(): Promise<"OK">;
 	multi(): RedisMulti;
+	/**
+	 * Return a new independent client connection bound to its own
+	 * underlying network socket. Required for A3 updateFamily's
+	 * WATCH/MULTI/EXEC CAS loop because WATCH is connection-scoped.
+	 *
+	 * The returned client is `AsyncDisposable`: callers SHOULD use
+	 * `await using conn = client.duplicate()` so the duplicate is
+	 * closed automatically when the scope exits, regardless of error
+	 * paths. Direct call to `[Symbol.asyncDispose]()` is also supported
+	 * for environments without `await using`.
+	 *
+	 * Implementor responsibility (cross-library wrapper authors): the
+	 * `[Symbol.asyncDispose]` implementation MUST close the underlying
+	 * connection (e.g. ioredis `quit()`, node-redis v4+ `disconnect()`,
+	 * keyv-redis `disconnect()`) and return a Promise that resolves
+	 * after the close completes.
+	 */
+	duplicate(): DisposableRedisClient;
+}
+
+/**
+ * A `RedisClient` that owns a single network connection and is responsible
+ * for closing it. Returned by `RedisClient.duplicate()` so consumer code
+ * can use `await using conn = client.duplicate()` for scoped, exception-safe
+ * connection lifetime.
+ *
+ * The `[Symbol.asyncDispose]` return type is `Promise<void>` to satisfy
+ * TypeScript's built-in `AsyncDisposable` contract (required by `await
+ * using`). Wrapper authors whose underlying disconnect call resolves to
+ * a value (e.g. ioredis `quit()` returns `Promise<"OK">`) await and
+ * discard:
+ *
+ *     [Symbol.asyncDispose]: async () => { await dup.quit(); }
+ *
+ * Per A3 §7.2.
+ */
+export interface DisposableRedisClient extends RedisClient, AsyncDisposable {
+	[Symbol.asyncDispose](): Promise<void>;
 }
 
 /**

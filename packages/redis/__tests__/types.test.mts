@@ -6,7 +6,7 @@ import type { ComponentMap } from "@o3co/auth-provider-core";
 import { describe, expectTypeOf, it, test } from "vitest";
 // Importing for side-effect: declares redisClient slot via declare module
 import "../src/component-map.mjs";
-import type { RedisMulti } from "../src/index.mjs";
+import type { DisposableRedisClient, RedisMulti } from "../src/index.mjs";
 import type { RedisClient } from "../src/types.mjs";
 
 describe("RedisClient", () => {
@@ -32,7 +32,7 @@ describe("ComponentMap declaration-merge", () => {
 	});
 });
 
-test("RedisClient additively exposes get / watch / unwatch / multi for A3 CAS", () => {
+test("RedisClient additively exposes get / watch / unwatch / multi / duplicate for A3 CAS", () => {
 	type ClientShape = {
 		// A1 (existing)
 		set(
@@ -50,6 +50,7 @@ test("RedisClient additively exposes get / watch / unwatch / multi for A3 CAS", 
 		watch(...keys: string[]): Promise<"OK">;
 		unwatch(): Promise<"OK">;
 		multi(): RedisMulti;
+		duplicate(): DisposableRedisClient;
 	};
 	expectTypeOf<RedisClient>().toEqualTypeOf<ClientShape>();
 });
@@ -59,4 +60,12 @@ test("RedisMulti exposes chainable set + exec returning null on CAS conflict", (
 		set(key: string, value: string, mode: "PX", ttlMs: number): RedisMulti;
 		exec(): Promise<unknown[] | null>;
 	}>();
+});
+
+test("DisposableRedisClient extends RedisClient + AsyncDisposable", () => {
+	expectTypeOf<DisposableRedisClient>().toMatchTypeOf<RedisClient>();
+	expectTypeOf<DisposableRedisClient>().toMatchTypeOf<AsyncDisposable>();
+	expectTypeOf<DisposableRedisClient[typeof Symbol.asyncDispose]>().toEqualTypeOf<
+		() => Promise<void>
+	>();
 });

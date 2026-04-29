@@ -31,4 +31,4 @@ export {
 	redisReplaySeenSetBuilder,
 	redisReplaySeenSetModule,
 } from "./replay-seen-set.mjs";
-export type { RedisClient, RedisMulti } from "./types.mjs";
+export type { DisposableRedisClient, RedisClient, RedisMulti } from "./types.mjs";
