@@ -55,6 +55,14 @@ describe("SessionRPRegistryFactory", () => {
 		const reg = await f.create({ type: "memory" });
 		expect(reg.kind).toBe("memory");
 	});
+
+	it("kind label is 'SessionRPRegistry' (pins per-factory label, prevents typo regression)", () => {
+		const f = createSessionRPRegistryFactory();
+		f.register("memory", () => createInMemorySessionRPRegistry());
+		expect(() => f.register("memory", () => createInMemorySessionRPRegistry())).toThrow(
+			/SessionRPRegistry/,
+		);
+	});
 });
 
 describe("SessionFamilyIndexFactory", () => {
@@ -64,6 +72,14 @@ describe("SessionFamilyIndexFactory", () => {
 		const idx = await f.create({ type: "memory" });
 		expect(idx.kind).toBe("memory");
 	});
+
+	it("kind label is 'SessionFamilyIndex' (pins per-factory label, prevents typo regression)", () => {
+		const f = createSessionFamilyIndexFactory();
+		f.register("memory", () => createInMemorySessionFamilyIndex());
+		expect(() => f.register("memory", () => createInMemorySessionFamilyIndex())).toThrow(
+			/SessionFamilyIndex/,
+		);
+	});
 });
 
 describe("SessionFederationIndexFactory", () => {
@@ -72,5 +88,13 @@ describe("SessionFederationIndexFactory", () => {
 		f.register("memory", () => createInMemorySessionFederationIndex());
 		const idx = await f.create({ type: "memory" });
 		expect(idx.kind).toBe("memory");
+	});
+
+	it("kind label is 'SessionFederationIndex' (pins per-factory label, prevents typo regression)", () => {
+		const f = createSessionFederationIndexFactory();
+		f.register("memory", () => createInMemorySessionFederationIndex());
+		expect(() => f.register("memory", () => createInMemorySessionFederationIndex())).toThrow(
+			/SessionFederationIndex/,
+		);
 	});
 });
