@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 import { expectTypeOf, test } from "vitest";
+import type { ComponentMap } from "../../modules/manifest/component-map.mjs";
 import type {
 	RefreshTokenFamily,
+	RefreshTokenFamilyRevocation,
 	RefreshTokenFamilyStore,
 	RefreshTokenFamilyUpdateResult,
 	RefreshTokenRotation,
@@ -87,4 +89,24 @@ test("RefreshTokenRotation exposes register and rotate methods", () => {
 		): Promise<RefreshTokenRotationOutcome>;
 	};
 	expectTypeOf<RefreshTokenRotation>().toEqualTypeOf<RotationShape>();
+});
+
+test("RefreshTokenFamilyRevocation exposes revokeFamily + isFamilyRevoked", () => {
+	type RevocationShape = {
+		revokeFamily(familyId: string): Promise<void>;
+		isFamilyRevoked(familyId: string): Promise<boolean>;
+	};
+	expectTypeOf<RefreshTokenFamilyRevocation>().toEqualTypeOf<RevocationShape>();
+});
+
+test("ComponentMap exposes the 3 A3 slots as readonly optional", () => {
+	expectTypeOf<ComponentMap["refreshTokenFamilyStore"]>().toEqualTypeOf<
+		RefreshTokenFamilyStore | undefined
+	>();
+	expectTypeOf<ComponentMap["refreshTokenRotation"]>().toEqualTypeOf<
+		RefreshTokenRotation | undefined
+	>();
+	expectTypeOf<ComponentMap["refreshTokenFamilyRevocation"]>().toEqualTypeOf<
+		RefreshTokenFamilyRevocation | undefined
+	>();
 });

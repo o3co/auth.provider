@@ -206,3 +206,61 @@ export interface RefreshTokenRotation {
 		expiresAt: Date,
 	): Promise<RefreshTokenRotationOutcome>;
 }
+
+/**
+ * Family revocation wrapper. Distinct from rotation per Theme B
+ * (per `feedback_split_interface_unless_responsibility_intersects`):
+ * different triggers (admin operation / logout cascade vs. normal
+ * authentication flow), different callers, different expected outcomes.
+ *
+ * Idempotent revoke + read-only check. The default impl
+ * (`createDefaultRefreshTokenFamilyRevocation`) ships as
+ * `defaultRefreshTokenFamilyRevocationModule`.
+ *
+ * Per A3 §5.3.
+ */
+export interface RefreshTokenFamilyRevocation {
+	/**
+	 * Mark a refresh-token family as revoked. Idempotent:
+	 *   - family exists, not revoked → set revoked: true, commit
+	 *   - family exists, already revoked → no-op success
+	 *   - family does not exist → no-op success (target was already GC'd or
+	 *     never existed; admin tools / logout cascade should not fail in
+	 *     that case)
+	 *
+	 * Per A3 §5.3.
+	 */
+	revokeFamily(familyId: string): Promise<void>;
+
+	/**
+	 * Read-only check whether a family is revoked.
+	 *
+	 * Returns `true` iff a family record exists AND its `revoked` flag is
+	 * set. Returns `false` if the family does not exist OR is not revoked.
+	 *
+	 * Hot-path operation (called per request from token-validation routes).
+	 *
+	 * Per A3 §5.3.
+	 */
+	isFamilyRevoked(familyId: string): Promise<boolean>;
+}
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge (A3 §5.5).
+//
+// All three A3 slots are declared via declaration-merging so consumers can
+// opt into them additively. The slots are non-synthetic — boot planner
+// resolves them from module `provides` at boot time per A2-beta §5.3.
+//
+// Slot-name reservation policy (A1 §5.5): unnamespaced names
+// (refreshTokenFamilyStore, refreshTokenRotation, refreshTokenFamilyRevocation)
+// are reserved for o3co packages. Consumers augmenting ComponentMap for
+// their own use MUST namespace their key (e.g. acme.refreshTokenStore).
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly refreshTokenFamilyStore?: RefreshTokenFamilyStore;
+		readonly refreshTokenRotation?: RefreshTokenRotation;
+		readonly refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
+	}
+}
