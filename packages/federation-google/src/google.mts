@@ -251,7 +251,16 @@ export const googleFederationModule = defineModule({
 	requires: ["googleFederationConfig"] as const,
 	contributes: {
 		federations: {
-			google: (deps) => createGoogleProvider(deps.googleFederationConfig),
+			// const-module path is single-tenant: `provider.name` is forced to the
+			// contribution key "google" regardless of `config.name`. The route
+			// layer keys session state, callback URL lookup, and redirect-policy
+			// resolution by `provider.name`; a divergent `config.name` would
+			// cause silent runtime mismatch (provider.name="MyGoogle" registered
+			// at federations.google → resolver lookup with key "MyGoogle" fails).
+			// Multi-tenant consumers wrap with `(config) => Module` per
+			// A5 §10.1 + A2-α §7.1 — that path supplies the contribution key
+			// and `config.name` together.
+			google: (deps) => ({ ...createGoogleProvider(deps.googleFederationConfig), name: "google" }),
 		},
 		federationRedirectPolicies: {
 			google: (deps) => createDefaultFederationRedirectPolicy(deps.googleFederationConfig),

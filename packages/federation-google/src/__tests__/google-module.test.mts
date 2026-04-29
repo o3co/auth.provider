@@ -34,4 +34,22 @@ describe("googleFederationModule const Module", () => {
 			"function",
 		);
 	});
+
+	it("forces provider.name to 'google' regardless of config.name (Codex P2 fix)", () => {
+		// const-module path is single-tenant — provider.name MUST equal the
+		// contribution key, even if config.name diverges. The route layer keys
+		// session state / callback URL / redirect-policy lookup by provider.name;
+		// a divergent config.name would silently break runtime resolution.
+		const factory = googleFederationModule.contributes?.federations?.google;
+		if (typeof factory !== "function") throw new Error("factory missing");
+		const provider = factory({
+			googleFederationConfig: {
+				name: "MyTenantGoogle", // intentionally divergent
+				clientId: "abc",
+				clientSecret: "xyz",
+				callbackURL: "https://example.com/cb",
+			},
+		} as never);
+		expect(provider.name).toBe("google");
+	});
 });

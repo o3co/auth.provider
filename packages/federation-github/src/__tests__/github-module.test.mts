@@ -34,4 +34,20 @@ describe("githubFederationModule const Module", () => {
 			"function",
 		);
 	});
+
+	it("forces provider.name to 'github' regardless of config.name (Codex P2 fix)", () => {
+		// const-module path is single-tenant — provider.name MUST equal the
+		// contribution key. See google-module.test.mts for the full rationale.
+		const factory = githubFederationModule.contributes?.federations?.github;
+		if (typeof factory !== "function") throw new Error("factory missing");
+		const provider = factory({
+			githubFederationConfig: {
+				name: "MyTenantGithub", // intentionally divergent
+				clientId: "abc",
+				clientSecret: "xyz",
+				callbackURL: "https://example.com/cb",
+			},
+		} as never);
+		expect(provider.name).toBe("github");
+	});
 });

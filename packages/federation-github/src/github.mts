@@ -273,7 +273,14 @@ export const githubFederationModule = defineModule({
 	requires: ["githubFederationConfig"] as const,
 	contributes: {
 		federations: {
-			github: (deps) => createGithubProvider(deps.githubFederationConfig),
+			// const-module path is single-tenant: see google.mts for the full
+			// rationale. provider.name forced to the contribution key "github"
+			// regardless of config.name. Multi-tenant consumers use a factory
+			// wrap per A5 §10.1 + A2-α §7.1.
+			github: (deps) => ({
+				...createGithubProvider(deps.githubFederationConfig),
+				name: "github",
+			}),
 		},
 		federationRedirectPolicies: {
 			github: (deps) => createDefaultFederationRedirectPolicy(deps.githubFederationConfig),
