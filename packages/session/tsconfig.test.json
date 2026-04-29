@@ -1,0 +1,25 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
+	"//": "Scoped to A5 type-only tests only. Pre-existing federation tests (factory/types/supportsLogout/Federation/fixtures) use partial FederationProfile mocks; including them surfaces type debt unrelated to A5 (tracked separately).",
+	"include": [
+		"src/**/*.mts",
+		"src/federations/__tests__/redirect-policy-types.test.mts",
+		"src/federations/__tests__/redirect-policy.test.mts",
+		"src/federations/__tests__/contributes-map-augment.test.mts",
+		"src/federations/__tests__/federation-provider-slim.test.mts",
+		"src/routes/__tests__/federation-rewire.test.mts"
+	],
+	"exclude": [
+		"node_modules",
+		"dist",
+		"src/federations/__tests__/factory.test.mts",
+		"src/federations/__tests__/fixtures.mts",
+		"src/federations/__tests__/supportsLogout.test.mts",
+		"src/federations/__tests__/types.test.mts",
+		"src/routes/__tests__/Federation.test.mts",
+		"src/__tests__/module.test.mts"
+	]
+}
