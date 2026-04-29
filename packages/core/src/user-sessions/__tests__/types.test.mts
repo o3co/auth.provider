@@ -115,6 +115,10 @@ test("MutableUserSessionStore extends UserSessionStore with synchronous claims-o
 	>();
 });
 
+test("MutableUserSessionStore is assignable to UserSessionStore (extends relationship)", () => {
+	expectTypeOf<MutableUserSessionStore>().toMatchTypeOf<UserSessionStore>();
+});
+
 test("ComponentMap declaration-merge: 4 store slots + 1 mutable slot, all optional", () => {
 	expectTypeOf<ComponentMap["userSessionStore"]>().toEqualTypeOf<UserSessionStore | undefined>();
 	expectTypeOf<ComponentMap["sessionRPRegistry"]>().toEqualTypeOf<
