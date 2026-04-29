@@ -33,6 +33,9 @@
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"
 	},
+	"dependencies": {
+		"zod": "^4.3.6"
+	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "^0.0.0"
 	},
@@ -42,7 +45,6 @@
 		"ioredis": "^5.4.1",
 		"testcontainers": "^10.16.0",
 		"typescript": "^5.9.3",
-		"vitest": "^4.1.2",
-		"zod": "^4.3.6"
+		"vitest": "^4.1.2"
 	}
 }

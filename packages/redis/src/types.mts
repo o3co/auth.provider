@@ -16,9 +16,14 @@
 
 /**
  * Minimal structural Redis client interface consumed by every adapter in this
- * package. Consumers wrap their preferred library (ioredis, node-redis,
- * keyv-redis, etc.) and provide an instance via the `redisClient` ComponentMap
- * slot or directly to adapter `create*(opts)` constructors.
+ * package. The signature is shaped to match ioredis's variadic-positional
+ * `set(key, value, "PX", ttlMs, "NX")` form because that is the in-tree
+ * reference implementation. Consumers using a Redis library with a different
+ * call shape (e.g. node-redis v4+'s options-object form
+ * `client.set(key, value, { PX: ttl, NX: true })`, keyv-redis, in-cluster
+ * Redis wrappers, sharded fakes) provide a thin adapter wrapper that
+ * normalises the call and pass that wrapper as the `redisClient` ComponentMap
+ * slot or directly to `create*(opts)` constructors.
  *
  * The shape covers ONLY the ops Phase 5 adapters need:
  *   - set(key, value, "PX", ttlMs, "NX") → atomic SET with TTL + NX condition

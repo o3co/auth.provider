@@ -13,6 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+// The bare type-only import below is required: without it, the `declare
+// module "@o3co/auth-provider-core"` block is parsed as an AMBIENT module
+// declaration (declaring a brand-new module of that name) rather than as
+// AUGMENTATION of the existing one (TS2664 in some compiler versions, silent
+// override in others). The empty named-imports list `{}` keeps the import
+// type-only and emits no runtime side-effect.
 import type {} from "@o3co/auth-provider-core";
 import type { RedisClient } from "./types.mjs";
 
