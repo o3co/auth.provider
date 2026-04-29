@@ -157,6 +157,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		grants: makeGrantCollector(),
 		tokenExchangeValidators: makeMapNameKeyedCollector(),
 		federations: makeMapNameKeyedCollector(),
+		federationRedirectPolicies: makeMapNameKeyedCollector(),
 		mfaFactors: makeMapNameKeyedCollector(),
 		auditHooks: makeIdentityDedupListCollector(),
 		routes: makeRouteCollector(),

@@ -393,6 +393,14 @@ export interface RouteCollector {
 export interface ContributionCollectorMap {
 	readonly grants?: NameKeyedCollector<GrantHandler>;
 	readonly federations?: NameKeyedCollector<FederationProvider>;
+	/**
+	 * Collector for `federationRedirectPolicies` contributions.
+	 * The concrete policy type (`FederationRedirectPolicy`) is declared in the
+	 * session package via `declare module` augmentation; core stores it as
+	 * `unknown` to avoid a cross-package dependency.
+	 * Per A5 §8.1.
+	 */
+	readonly federationRedirectPolicies?: NameKeyedCollector<unknown>;
 	readonly tokenExchangeValidators?: NameKeyedCollector<ExchangeTokenValidator>;
 	readonly mfaFactors?: NameKeyedCollector<MfaFactor>;
 	readonly auditHooks?: ListCollector<AuditHook>;

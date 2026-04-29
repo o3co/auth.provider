@@ -186,6 +186,45 @@ function makeFederationProviders(
 }
 
 /**
+ * Instantiate a stable collector-backed read-through view of the
+ * `federationRedirectPolicies` collector — structurally
+ * `ReadonlyMap<string, unknown>` whose delegates read from the live collector
+ * at call time.
+ *
+ * Per A5 §8.1: the view reference is stable from step 0 onward; collector
+ * contents become fully populated after applyContributions step 2.
+ * NOT a snapshot — reads through at request time.
+ * Mirrors `makeFederationProviders` in shape.
+ * @internal
+ */
+function makeFederationRedirectPolicyResolver(
+	collector: NameKeyedCollector<unknown>,
+): ReadonlyMap<string, unknown> {
+	function snapshot(): Map<string, unknown> {
+		return new Map(collector.entries());
+	}
+	return {
+		get: (key: string) => collector.get(key),
+		has: (key: string) => collector.get(key) !== undefined,
+		entries: () => snapshot().entries(),
+		keys: () => snapshot().keys(),
+		values: () => snapshot().values(),
+		forEach: (
+			cb: (value: unknown, key: string, map: ReadonlyMap<string, unknown>) => void,
+			thisArg?: unknown,
+		) => {
+			snapshot().forEach((v, k) => {
+				cb.call(thisArg, v, k, snapshot());
+			});
+		},
+		get size() {
+			return snapshot().size;
+		},
+		[Symbol.iterator]: () => snapshot()[Symbol.iterator](),
+	};
+}
+
+/**
  * Step 0 — prepareSyntheticProjections.
  *
  * For each name-keyed collector that has a corresponding synthetic
@@ -219,6 +258,12 @@ function prepareSyntheticProjections(
 			contributionKinds.federations as NameKeyedCollector<unknown>,
 		);
 		components.federationProviders = view;
+	}
+	if (contributionKinds.federationRedirectPolicies !== undefined) {
+		const view = makeFederationRedirectPolicyResolver(
+			contributionKinds.federationRedirectPolicies as NameKeyedCollector<unknown>,
+		);
+		components.federationRedirectPolicyResolver = view;
 	}
 }
 

@@ -150,6 +150,7 @@ function normaliseModule(m: Module): NormalisedModule {
 const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"grants",
 	"federations",
+	"federationRedirectPolicies",
 	"tokenExchangeValidators",
 	"mfaFactors",
 	"auditHooks",
@@ -754,6 +755,70 @@ function checkRouteCollisions(
 }
 
 // ---------------------------------------------------------------------------
+// Step 7.5 — Federation / federationRedirectPolicies pairing invariant
+// Per A5 §8.2.
+// ---------------------------------------------------------------------------
+
+/**
+ * Step 7.5: Every `federations[name]` contribution MUST have a matching
+ * `federationRedirectPolicies[name]` contribution and vice versa.
+ *
+ * Throws BootError({ reason: "federation-redirect-policy-unpaired" }).
+ * Per A5 §8.2.
+ * @internal
+ */
+function checkFederationRedirectPolicyPairing(modules: readonly NormalisedModule[]): void {
+	const federationNames = new Map<string, string>(); // name → first contributing module
+	const policyNames = new Map<string, string>(); // name → first contributing module
+
+	for (const m of modules) {
+		for (const entry of m.contributesEntries) {
+			if (entry.kind === "federations" && typeof entry.key === "string") {
+				if (!federationNames.has(entry.key)) {
+					federationNames.set(entry.key, m.name);
+				}
+			} else if (entry.kind === "federationRedirectPolicies" && typeof entry.key === "string") {
+				if (!policyNames.has(entry.key)) {
+					policyNames.set(entry.key, m.name);
+				}
+			}
+		}
+	}
+
+	for (const [name, contributedBy] of federationNames) {
+		if (!policyNames.has(name)) {
+			throw new BootError({
+				message: `Federation "${name}" (contributed by "${contributedBy}") has no matching federationRedirectPolicies["${name}"] contribution.`,
+				reason: "federation-redirect-policy-unpaired",
+				stage: "validateManifests",
+				details: {
+					reason: "federation-redirect-policy-unpaired",
+					name,
+					side: "federation-without-policy",
+					contributedBy,
+				},
+			});
+		}
+	}
+
+	for (const [name, contributedBy] of policyNames) {
+		if (!federationNames.has(name)) {
+			throw new BootError({
+				message: `federationRedirectPolicies["${name}"] (contributed by "${contributedBy}") has no matching federations["${name}"] contribution.`,
+				reason: "federation-redirect-policy-unpaired",
+				stage: "validateManifests",
+				details: {
+					reason: "federation-redirect-policy-unpaired",
+					name,
+					side: "policy-without-federation",
+					contributedBy,
+				},
+			});
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Step 8 — Override target existence
 // Per A2-β §5.1 step 8.
 // ---------------------------------------------------------------------------
@@ -1181,6 +1246,9 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 
 	// Step 7: Route collisions + advertisement path validation
 	checkRouteCollisions(normalisedModules, modules);
+
+	// Step 7.5: Federation / federationRedirectPolicies pairing invariant
+	checkFederationRedirectPolicyPairing(normalisedModules);
 
 	// Step 8: Override target existence
 	checkOverrideTargets(normalisedModules, contributionKinds ?? {});
