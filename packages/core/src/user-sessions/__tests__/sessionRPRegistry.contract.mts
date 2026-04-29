@@ -114,6 +114,33 @@ export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory):
 			expect(list2[0]?.registeredAt.getTime()).not.toBe(0);
 		});
 
+		it("optional fields round-trip cleanly (undefined stays undefined; not coerced)", async () => {
+			// Redis HGETALL implementations sometimes coerce undefined fields to ""
+			// or omit them entirely on parse. Pin the contract so the redis adapter
+			// (T15) cannot ship a subtle drift (e.g., undefined → "" or → false).
+			const reg = await factory();
+			await reg.registerRP(
+				"sid-1",
+				{
+					clientId: "c-opt",
+					// All optional fields explicitly undefined.
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutUri: undefined,
+					frontchannelLogoutSessionRequired: undefined,
+					registeredAt: new Date(),
+				},
+				FUTURE(),
+			);
+			const list = await reg.listRPs("sid-1");
+			expect(list).toHaveLength(1);
+			const rp = list[0];
+			expect(rp?.backchannelLogoutUri).toBeUndefined();
+			expect(rp?.backchannelLogoutSessionRequired).toBeUndefined();
+			expect(rp?.frontchannelLogoutUri).toBeUndefined();
+			expect(rp?.frontchannelLogoutSessionRequired).toBeUndefined();
+		});
+
 		it("readonly kind field present", async () => {
 			const reg = await factory();
 			expect(typeof reg.kind).toBe("string");
