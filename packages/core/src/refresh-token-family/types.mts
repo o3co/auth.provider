@@ -93,15 +93,42 @@ export interface RefreshTokenFamilyStore {
 	/**
 	 * Atomically read-modify-write the family aggregate.
 	 *
-	 * The updater is a pure function invoked with the current
-	 * `RefreshTokenFamily` value. It MAY be invoked multiple times due to
-	 * CAS retry; consumers MUST NOT rely on exactly-once invocation.
-	 * Returning a new `RefreshTokenFamily` commits; returning `null` aborts.
+	 * Adapter performs:
+	 *   1. Read current family state (or null if non-existent).
+	 *   2. Invoke `updater(current)`.
+	 *   3. If updater returns a new RefreshTokenFamily, attempt atomic CAS
+	 *      commit using an adapter-internal version token (NOT exposed in
+	 *      RefreshTokenFamily — adapters may use a separate version field,
+	 *      ETag, Redis WATCH, or any backend-native CAS primitive).
+	 *   4. On CAS conflict, retry by re-reading state and re-invoking updater
+	 *      up to a bounded retry limit; on exhaustion, throws
+	 *      `RefreshTokenStorageError({ reason: "conflict-exhausted" })`.
+	 *   5. If updater returns null, abort without state change (no retry).
 	 *
-	 * On CAS conflict (concurrent caller committed first), the adapter
-	 * retries by re-reading state and re-invoking `updater`. Retry limit is
-	 * implementation-defined but MUST be bounded; on exhaustion, throws
-	 * `RefreshTokenStorageError({ reason: "conflict-exhausted" })`.
+	 * Updater contract (NORMATIVE):
+	 *   - Updater is invoked with the current RefreshTokenFamily value (NEVER
+	 *     null — when the family does not exist, the adapter returns
+	 *     `{ outcome: "not-found" }` directly without invoking the updater).
+	 *   - Updater MUST be a pure function (no observable side effects, no
+	 *     async I/O). Adapter MAY invoke updater multiple times due to CAS
+	 *     retry; consumers MUST NOT rely on exactly-once invocation.
+	 *   - Updater MUST NOT mutate the input RefreshTokenFamily (it is
+	 *     `readonly` at the type level; runtime adapters MAY freeze it
+	 *     additionally as defence-in-depth).
+	 *   - Updater MUST return either a new RefreshTokenFamily (commit) or
+	 *     null (abort).
+	 *   - Updater MAY use a closure-captured variable to communicate the
+	 *     abort reason to the caller; the closure is reset at the top of
+	 *     each updater invocation. This is the wrapper pattern used by
+	 *     `createDefaultRefreshTokenRotation` (Task 6) to translate
+	 *     "aborted" results into "replayed" or "revoked" outcomes.
+	 *
+	 * Return value:
+	 *   - `{ outcome: "committed", family }` — CAS succeeded; family is the
+	 *     newly-persisted state.
+	 *   - `{ outcome: "not-found" }` — family did not exist; updater not
+	 *     invoked.
+	 *   - `{ outcome: "aborted" }` — updater returned null; no state change.
 	 *
 	 * Per A3 §5.1.
 	 */
