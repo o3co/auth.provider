@@ -15,8 +15,13 @@
  */
 
 export type FederationResult<T> =
-	| { ok: true; value: T }
-	| { ok: false; status: number; error: string; errorDescription: string };
+	| { readonly ok: true; readonly value: T }
+	| {
+			readonly ok: false;
+			readonly status: number;
+			readonly error: string;
+			readonly errorDescription: string;
+	  };
 
 /**
  * Snapshot of a successful federation callback: identity + OIDC-standard claims + OAuth 2 tokens.
