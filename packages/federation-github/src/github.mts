@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
+import { defineModule } from "@o3co/auth-provider-core";
 import {
 	codeChallenge,
+	createDefaultFederationRedirectPolicy,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -29,6 +31,15 @@ import {
 	validateRedirect,
 } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
+
+// ComponentMap slot declaration-merge: exposes githubFederationConfig as a typed
+// DI slot. Consumers supply this via a small bootstrap module that reads from
+// app config (per A5 §10.2 const-Module pattern).
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly githubFederationConfig?: GithubProviderConfig;
+	}
+}
 
 const GITHUB_ISSUER = "https://github.com";
 const SCOPES = ["read:user", "user:email"] as const;
@@ -255,3 +266,28 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 		},
 	};
 }
+
+/**
+ * Const Module for the GitHub federation integration.
+ *
+ * Contributes both `federations.github` (FederationProvider — upstream OAuth 2
+ * protocol) and `federationRedirectPolicies.github` (FederationRedirectPolicy
+ * — consumer redirect URL policy).
+ *
+ * Config supplied via the `githubFederationConfig` ComponentMap slot
+ * (per A5 §10.2 const-Module pattern).
+ *
+ * Per A5 §10.2.
+ */
+export const githubFederationModule = defineModule({
+	name: "federation:github",
+	requires: ["githubFederationConfig"] as const,
+	contributes: {
+		federations: {
+			github: (deps) => createGithubProvider(deps.githubFederationConfig),
+		},
+		federationRedirectPolicies: {
+			github: (deps) => createDefaultFederationRedirectPolicy(deps.githubFederationConfig),
+		},
+	},
+});
