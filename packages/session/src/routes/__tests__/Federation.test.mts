@@ -206,25 +206,43 @@ function makeFederationTokenStore(): FederationTokenStoreBase & {
 
 const TEST_CALLBACK_URL = "https://app.example.com/session/oauth/federation/test/callback";
 
+/** Default permissive redirect policy for test providers. */
+function makePermissivePolicy() {
+	return {
+		validateRedirect: () => ({ ok: true as const, value: undefined }),
+		resolveCallbackRedirect: (s: { redirectTo?: string }) => ({
+			ok: true as const,
+			value: s.redirectTo ?? "/",
+		}),
+	};
+}
+
 function buildStatelessApp({
 	providers,
 	providerCallbackUrls,
+	federationRedirectPolicyResolver,
 	userRepository,
 	userSessionStore,
 	federationTokenStore,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
+	federationRedirectPolicyResolver?: ReadonlyMap<string, ReturnType<typeof makePermissivePolicy>>;
 	userRepository?: UserRepository;
 	userSessionStore?: UserSessionStoreBase;
 	federationTokenStore?: FederationTokenStoreBase;
 }) {
 	const store: SessionStore = new Map();
 	const app = makeSessionApp(store);
+	// Default: permissive policy for every registered provider name
+	const defaultResolver = new Map(
+		[...providers.keys()].map((name) => [name, makePermissivePolicy()]),
+	);
 	app.use(
 		createRouter(express, {
 			config: {} as never,
 			federationProviders: providers,
+			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
@@ -241,6 +259,7 @@ function buildStatelessApp({
 function buildCallbackApp({
 	providers,
 	providerCallbackUrls,
+	federationRedirectPolicyResolver,
 	federation,
 	userRepository,
 	userSessionStore,
@@ -249,6 +268,7 @@ function buildCallbackApp({
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
+	federationRedirectPolicyResolver?: ReadonlyMap<string, ReturnType<typeof makePermissivePolicy>>;
 	federation: Record<string, unknown>;
 	userRepository?: UserRepository;
 	userSessionStore?: UserSessionStoreBase;
@@ -264,10 +284,15 @@ function buildCallbackApp({
 
 	if (saveInterceptor) app.use(saveInterceptor);
 
+	// Default: permissive policy for every registered provider name
+	const defaultResolver = new Map(
+		[...providers.keys()].map((name) => [name, makePermissivePolicy()]),
+	);
 	app.use(
 		createRouter(express, {
 			config: {} as never,
 			federationProviders: providers,
+			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
@@ -309,6 +334,7 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: undefined as never,
 					federationTokenStore: makeFederationTokenStore(),
@@ -322,6 +348,7 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
 					federationTokenStore: undefined as never,
@@ -335,6 +362,7 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: undefined as never,
 					userSessionStore: makeUserSessionStore(),
 					federationTokenStore: makeFederationTokenStore(),
@@ -348,6 +376,7 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
 					federationTokenStore: makeFederationTokenStore(),

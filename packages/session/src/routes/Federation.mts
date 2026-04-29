@@ -23,6 +23,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
+import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
 import { type FederationProvider, supportsClaimMapping } from "../federations/types.mjs";
 
 declare module "express-session" {
@@ -53,6 +54,7 @@ export const createRouter = (
 	{
 		config: _config,
 		federationProviders,
+		federationRedirectPolicyResolver,
 		providerCallbackUrls,
 		userRepository,
 		userSessionStore,
@@ -61,6 +63,7 @@ export const createRouter = (
 	}: {
 		config: AppConfig;
 		federationProviders: ReadonlyMap<string, FederationProvider>;
+		federationRedirectPolicyResolver: ReadonlyMap<string, FederationRedirectPolicy>;
 		providerCallbackUrls: ReadonlyMap<string, string>;
 		userRepository: UserRepository;
 		userSessionStore: UserSessionStoreBase;
@@ -98,7 +101,16 @@ export const createRouter = (
 						error_description: "redirect_to must be a string",
 					});
 				}
-				const validation = provider.validateRedirect(redirect_to);
+				const policy = federationRedirectPolicyResolver.get(provider.name);
+				if (!policy) {
+					// Pairing invariant fires at boot; this branch is defence-in-depth
+					// against a hypothetical bug bypassing the invariant at runtime.
+					return res.status(500).json({
+						error: "internal_error",
+						error_description: "redirect policy not registered for provider",
+					});
+				}
+				const validation = policy.validateRedirect(redirect_to);
 				if (!validation.ok) {
 					return res.status(validation.status).json({
 						error: validation.error,
@@ -325,8 +337,15 @@ export const createRouter = (
 					req.session.save((err) => (err ? reject(err as Error) : resolve()));
 				});
 
-				// Resolve redirect URL via provider
-				const redirectResult = provider.resolveCallbackRedirect({ redirectTo });
+				// Resolve redirect URL via policy (Theme B: redirect concerns separated from IdP protocol)
+				const callbackPolicy = federationRedirectPolicyResolver.get(provider.name);
+				if (!callbackPolicy) {
+					return res.status(500).json({
+						error: "internal_error",
+						error_description: "redirect policy not registered for provider",
+					});
+				}
+				const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
 				if (!redirectResult.ok) {
 					return res.status(redirectResult.status).json({
 						error: redirectResult.error,
