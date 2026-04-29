@@ -15,4 +15,8 @@
  */
 
 export type { GoogleProvider, GoogleProviderConfig } from "./google.mjs";
-export { createGoogleProvider, registerGoogleFederation } from "./google.mjs";
+export {
+	createGoogleProvider,
+	googleFederationModule,
+	registerGoogleFederation,
+} from "./google.mjs";
