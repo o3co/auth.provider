@@ -97,12 +97,18 @@ export type DefaultFederationRedirectPolicyConfig = Pick<
 export function createDefaultFederationRedirectPolicy(
 	config: DefaultFederationRedirectPolicyConfig,
 ): FederationRedirectPolicy {
+	// Defensive snapshot: detach from caller's reference so post-construction
+	// mutation of the supplied config (e.g. `config.sessionDomain = "evil.com"`
+	// later) cannot retroactively change validateRedirect/resolveCallbackRedirect
+	// behavior. Shallow freeze + spread suffices because the picked
+	// RedirectConfig fields are primitive strings (no nested mutability).
+	const frozenConfig = Object.freeze({ ...config });
 	return Object.freeze({
 		validateRedirect(url: string): FederationResult<void> {
-			return validateRedirect(url, config);
+			return validateRedirect(url, frozenConfig);
 		},
 		resolveCallbackRedirect(session: { readonly redirectTo?: string }): FederationResult<string> {
-			return resolveCallbackRedirect(session, config);
+			return resolveCallbackRedirect(session, frozenConfig);
 		},
 	});
 }

@@ -70,16 +70,18 @@ declare module "@o3co/auth-provider-core" {
 
 /**
  * The set of contribution kinds used internally by the boot planner.
- * Built-in kinds are the seven listed; the structural escape
+ * Built-in kinds are the eight listed (the 7 v0.5.0 originals + A5's
+ * `federationRedirectPolicies`); the structural escape
  * `(string & { readonly __consumerKind?: unique symbol })` admits
  * consumer-defined kinds added via `declare module` augmentation of
  * ContributesMap without widening to plain `string`.
  *
- * Per A2-β §3.2.
+ * Per A2-β §3.2 + A5 §6.
  */
 export type ContributionKind =
 	| "grants"
 	| "federations"
+	| "federationRedirectPolicies"
 	| "tokenExchangeValidators"
 	| "mfaFactors"
 	| "auditHooks"

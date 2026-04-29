@@ -771,8 +771,18 @@ function checkFederationRedirectPolicyPairing(modules: readonly NormalisedModule
 	const federationNames = new Map<string, string>(); // name → first contributing module
 	const policyNames = new Map<string, string>(); // name → first contributing module
 
+	// Inspect both contributes and overrides: a name is considered "registered"
+	// for pairing-invariant purposes if EITHER side declares it (per spec §8.2
+	// intent — "policy is registered for this name from somewhere"). Walking
+	// only contributesEntries would mis-diagnose the case where Module A
+	// contributes federations[google] and Module B overrides
+	// federationRedirectPolicies[google]: pairing would fire
+	// "federation-without-policy" for google before step 8 (override-target-
+	// missing) could surface the more precise "override has no contribute
+	// target" error.
 	for (const m of modules) {
-		for (const entry of m.contributesEntries) {
+		const allEntries = [...m.contributesEntries, ...m.overridesEntries];
+		for (const entry of allEntries) {
 			if (entry.kind === "federations" && typeof entry.key === "string") {
 				if (!federationNames.has(entry.key)) {
 					federationNames.set(entry.key, m.name);
