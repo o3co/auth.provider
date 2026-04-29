@@ -34,6 +34,7 @@ describe("FederationProvider type guards", () => {
 		exchangeCode: async () => ({
 			issuer: "https://example.com",
 			sub: "u1",
+			expiresAt: null,
 		}),
 	};
 

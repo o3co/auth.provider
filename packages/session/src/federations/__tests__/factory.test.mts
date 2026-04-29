@@ -49,7 +49,7 @@ describe("createFederationProviderFactory", () => {
 			name: "stub",
 			scope: [],
 			buildAuthorizationUrl: () => new URL("https://example.com"),
-			exchangeCode: async () => ({ issuer: "https://example.com", sub: "x" }),
+			exchangeCode: async () => ({ issuer: "https://example.com", sub: "x", expiresAt: null }),
 		};
 		const asElem: Elem = baseValue;
 		const asBase: FederationProvider = asElem;

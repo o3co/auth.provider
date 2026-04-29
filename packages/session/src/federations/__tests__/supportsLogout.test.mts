@@ -28,7 +28,7 @@ function makeBaseProvider(name: string): FederationProvider {
 		name,
 		scope: [],
 		buildAuthorizationUrl: () => new URL("https://example.com/authorize"),
-		exchangeCode: async () => ({ issuer: "https://example.com", sub: "test-sub" }),
+		exchangeCode: async () => ({ issuer: "https://example.com", sub: "test-sub", expiresAt: null }),
 	};
 }
 

@@ -518,6 +518,7 @@ describe("Federation routes", () => {
 					issuer: "https://idp.example.com",
 					sub: "", // empty
 					accessToken: "at",
+					expiresAt: null,
 				})),
 			});
 			const providers = new Map([["test", provider]]);
@@ -816,7 +817,7 @@ describe("Federation routes", () => {
 			let regenerateCalled = false;
 			const regenerateInterceptor: express.RequestHandler = (req, _res, next) => {
 				const origRegenerate = req.session.regenerate.bind(req.session);
-				req.session.regenerate = (cb?: (err: unknown) => void) => {
+				req.session.regenerate = (cb: (err: unknown) => void) => {
 					regenerateCalled = true;
 					return origRegenerate(cb);
 				};
