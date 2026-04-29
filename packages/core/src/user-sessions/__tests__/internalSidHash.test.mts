@@ -56,10 +56,13 @@ describe("createMemorySidHash", () => {
 
 	it("listValues GCs entries past expiry", async () => {
 		const h = createMemorySidHash<Item>(idOf);
-		const expiresSoon = new Date(Date.now() + 20);
+		// Widen timing margins to avoid CI flake: setTimeout granularity can
+		// drift on loaded macOS GH runners — 50ms expiry + 100ms wait gives
+		// a comfortable buffer.
+		const expiresSoon = new Date(Date.now() + 50);
 		h.setField("sid-1", { id: "a", payload: "v1" }, expiresSoon);
 		expect(h.listValues("sid-1")).toEqual([{ id: "a", payload: "v1" }]);
-		await new Promise((resolve) => setTimeout(resolve, 30));
+		await new Promise((resolve) => setTimeout(resolve, 100));
 		expect(h.listValues("sid-1")).toEqual([]);
 	});
 
