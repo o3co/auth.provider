@@ -9,6 +9,7 @@ export default defineConfig({
 				"src/modules/manifest/**/*.test.mts",
 				"src/boot/**/*.test.mts",
 				"src/refresh-token-family/**/*.test.mts",
+				"src/user-sessions/__tests__/**/*.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},

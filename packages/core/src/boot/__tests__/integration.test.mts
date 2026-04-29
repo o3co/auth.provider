@@ -47,7 +47,7 @@ declare module "@o3co/auth-provider-core" {
 		readonly codeRepository: { readonly stub: "codeRepository" };
 		readonly userRepository: { readonly stub: "userRepository" };
 		readonly auditSink: { readonly stub: "auditSink" };
-		readonly userSessionStore: { readonly stub: "userSessionStore" };
+		readonly userSessionStore?: { readonly stub: "userSessionStore" };
 		// NOTE: refreshTokenStore is intentionally NOT declared here — the
 		// X1 cross-spec constraint (legacy-slots-absent.test.mts) prohibits
 		// it from appearing in ComponentMap. Scenario 2 injects the key via a
