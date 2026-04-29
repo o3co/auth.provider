@@ -16,10 +16,12 @@
 
 /**
  * Server-issued challenge metadata returned by ChallengeStore.find().
+ * Epoch ms instead of Date eliminates the mutation surface that
+ * `Object.freeze` cannot defend against on a Date instance.
  * Per A1 §5.1 (lines 89-95).
  */
 export interface Challenge {
-	readonly expiresAt: Date;
+	readonly expiresAtMs: number;
 }
 
 /**
@@ -49,17 +51,17 @@ export interface ChallengeStore {
 	 * @throws ChallengeStorageError({ reason: "duplicate" }) when (scope, value)
 	 *   has a non-expired entry.
 	 * @throws ChallengeStorageError({ reason: "expired-at-issue" }) when
-	 *   expiresAt <= now() at call time.
+	 *   expiresAtMs <= now() at call time.
 	 */
-	issue(scope: string, value: string, expiresAt: Date): Promise<void>;
+	issue(scope: string, value: string, expiresAtMs: number): Promise<void>;
 
 	/**
 	 * Non-mutating lookup. Returns null for absent / expired entries.
 	 * Reading does not mutate state; safe to call repeatedly.
 	 *
-	 * Note: Redis-backed adapters reconstruct expiresAt from PTTL and may
-	 * drift by <10ms vs the originally-issued Date. The drift is benign —
-	 * the wrapper layer (`ChallengeCeremony`, Task 5) only uses expiresAt
+	 * Note: Redis-backed adapters reconstruct expiresAtMs from PTTL and may
+	 * drift by <10ms vs the originally-issued epoch ms. The drift is benign —
+	 * the wrapper layer (`ChallengeCeremony`, Task 5) only uses expiresAtMs
 	 * to set the subsequent `markSeen` TTL; the security window remains
 	 * TTL-bounded. Per A1 §5.1 (lines 117-122).
 	 */

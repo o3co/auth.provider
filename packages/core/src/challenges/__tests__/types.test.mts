@@ -7,14 +7,14 @@ import type { ChallengeStorageErrorReason } from "../errors.mjs";
 import type { Challenge, ChallengeStore } from "../types.mjs";
 
 describe("ChallengeStore type contract", () => {
-	it("Challenge has readonly expiresAt: Date", () => {
-		expectTypeOf<Challenge>().toEqualTypeOf<{ readonly expiresAt: Date }>();
+	it("Challenge has readonly expiresAtMs: number", () => {
+		expectTypeOf<Challenge>().toEqualTypeOf<{ readonly expiresAtMs: number }>();
 	});
 
 	it("ChallengeStore exposes readonly kind + issue/find/consume signatures", () => {
 		expectTypeOf<ChallengeStore["kind"]>().toEqualTypeOf<string>();
 		expectTypeOf<ChallengeStore["issue"]>().toEqualTypeOf<
-			(scope: string, value: string, expiresAt: Date) => Promise<void>
+			(scope: string, value: string, expiresAtMs: number) => Promise<void>
 		>();
 		expectTypeOf<ChallengeStore["find"]>().toEqualTypeOf<
 			(scope: string, value: string) => Promise<Challenge | null>

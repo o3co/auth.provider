@@ -20,14 +20,14 @@
  * (the read path is `contains`, which never writes).
  *
  * Per A1 §5.2 (lines 146-177). Concurrency contract:
- *   - markSeen(scope, key, expiresAt): N parallel for same key → exactly 1
+ *   - markSeen(scope, key, expiresAtMs): N parallel for same key → exactly 1
  *     returns true ("fresh, this call wrote"), N-1 return false ("replay").
  *   - contains(scope, key): read-only; atomicity vs concurrent markSeen NOT
  *     required (the wrapper layer queries contains only when find returned
  *     null, so the read-vs-write race window is benign).
  *
  * markSeen MUST throw ChallengeStorageError({ reason: "expired-at-issue" })
- * for expiresAt <= now(). contains MUST NOT throw domain errors.
+ * for expiresAtMs <= now(). contains MUST NOT throw domain errors.
  *
  * `contains` is the security-friendly disambiguation primitive — attacker
  * probing via ChallengeCeremony.consume hits `contains` (read-only, zero
@@ -45,9 +45,9 @@ export interface ReplaySeenSet {
 	 * @returns true iff this call wrote (= first observation = fresh).
 	 *          false iff (scope, key) already had a non-expired record (= replay).
 	 * @throws ChallengeStorageError({ reason: "expired-at-issue" }) for
-	 *   expiresAt <= now().
+	 *   expiresAtMs <= now().
 	 */
-	markSeen(scope: string, key: string, expiresAt: Date): Promise<boolean>;
+	markSeen(scope: string, key: string, expiresAtMs: number): Promise<boolean>;
 
 	/**
 	 * Read-only check. Returns true iff a non-expired record exists.

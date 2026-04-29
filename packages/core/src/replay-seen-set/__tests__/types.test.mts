@@ -9,7 +9,7 @@ describe("ReplaySeenSet type contract", () => {
 	it("exposes readonly kind + markSeen/contains signatures", () => {
 		expectTypeOf<ReplaySeenSet["kind"]>().toEqualTypeOf<string>();
 		expectTypeOf<ReplaySeenSet["markSeen"]>().toEqualTypeOf<
-			(scope: string, key: string, expiresAt: Date) => Promise<boolean>
+			(scope: string, key: string, expiresAtMs: number) => Promise<boolean>
 		>();
 		expectTypeOf<ReplaySeenSet["contains"]>().toEqualTypeOf<
 			(scope: string, key: string) => Promise<boolean>

@@ -9,7 +9,7 @@ import { createMemoryChallengeStore } from "../adapters/memory.mjs";
 import { createDefaultChallengeCeremony } from "../ceremony.mjs";
 import { ChallengeStorageError } from "../errors.mjs";
 
-const future = (): Date => new Date(Date.now() + 60_000);
+const future = (): number => Date.now() + 60_000;
 
 function makeCeremonyWithMemoryBackends() {
 	const store = createMemoryChallengeStore();
@@ -61,7 +61,7 @@ describe("createDefaultChallengeCeremony — 3-outcome path (memory backends)", 
 
 	it("TTL-elapsed path: issue + wait > TTL → outcome 'unknown' (replay window closed)", async () => {
 		const { store, ceremony } = makeCeremonyWithMemoryBackends();
-		await store.issue("scope-A", "expires", new Date(Date.now() + 50));
+		await store.issue("scope-A", "expires", Date.now() + 50);
 		await new Promise((r) => setTimeout(r, 100));
 		const result = await ceremony.consume("scope-A", "expires");
 		expect(result).toEqual({ outcome: "unknown" });

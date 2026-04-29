@@ -108,9 +108,9 @@ describe("A1 wiring — full Redis composition (createBootApp + redis modules)",
 
 			const store = (handle.components as { challengeStore?: { issue: typeof Function } })
 				.challengeStore as unknown as {
-				issue: (s: string, v: string, exp: Date) => Promise<void>;
+				issue: (s: string, v: string, expMs: number) => Promise<void>;
 			};
-			await store.issue("scope-A", "live-value", new Date(Date.now() + 60_000));
+			await store.issue("scope-A", "live-value", Date.now() + 60_000);
 			const consumed = await ceremony.consume("scope-A", "live-value");
 			expect(consumed.outcome).toBe("consumed");
 

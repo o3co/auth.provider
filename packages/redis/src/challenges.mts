@@ -54,8 +54,8 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 	return {
 		kind: "redis",
 
-		async issue(scope, value, expiresAt) {
-			const ttlMs = expiresAt.getTime() - Date.now();
+		async issue(scope, value, expiresAtMs) {
+			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}
@@ -71,7 +71,7 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 				// -2 absent, -1 no-TTL, 0 expired exactly now → all treated as null.
 				return null;
 			}
-			return { expiresAt: new Date(Date.now() + pttl) };
+			return { expiresAtMs: Date.now() + pttl };
 		},
 
 		async consume(scope, value) {

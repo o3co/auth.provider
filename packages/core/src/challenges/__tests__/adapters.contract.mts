@@ -26,7 +26,7 @@ export function runChallengeStoreContract(
 	factory: ChallengeStoreContractFactory,
 ): void {
 	describe(`ChallengeStore contract — ${factoryName}`, () => {
-		const future = (): Date => new Date(Date.now() + 60_000);
+		const future = (): number => Date.now() + 60_000;
 
 		async function withStore(body: (store: ChallengeStore) => Promise<void>): Promise<void> {
 			const store = await factory.create();
@@ -42,7 +42,7 @@ export function runChallengeStoreContract(
 				await store.issue("scope-A", "value-1", future());
 				const challenge = await store.find("scope-A", "value-1");
 				expect(challenge).not.toBeNull();
-				expect(challenge?.expiresAt).toBeInstanceOf(Date);
+				expect(typeof challenge?.expiresAtMs).toBe("number");
 				expect(await store.consume("scope-A", "value-1")).toBe(true);
 				expect(await store.consume("scope-A", "value-1")).toBe(false);
 			});
@@ -58,9 +58,9 @@ export function runChallengeStoreContract(
 			});
 		});
 
-		it("issue throws 'expired-at-issue' for expiresAt <= now()", async () => {
+		it("issue throws 'expired-at-issue' for expiresAtMs <= now()", async () => {
 			await withStore(async (store) => {
-				const past = new Date(Date.now() - 1_000);
+				const past = Date.now() - 1_000;
 				await expect(store.issue("scope-A", "v", past)).rejects.toBeInstanceOf(
 					ChallengeStorageError,
 				);
@@ -84,7 +84,7 @@ export function runChallengeStoreContract(
 
 		it("expired entries are treated as nonexistent (find=null, consume=false)", async () => {
 			await withStore(async (store) => {
-				const soon = new Date(Date.now() + 50);
+				const soon = Date.now() + 50;
 				await store.issue("scope-A", "ttl", soon);
 				await new Promise((r) => setTimeout(r, 100));
 				expect(await store.find("scope-A", "ttl")).toBeNull();

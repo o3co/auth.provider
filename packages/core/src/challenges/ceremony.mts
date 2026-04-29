@@ -67,7 +67,7 @@ export function createDefaultChallengeCeremony(
 				// between find and markSeen; replay window already closed by the
 				// atomic delete. Other errors (system / network) propagate.
 				try {
-					await deps.replaySeenSet.markSeen(scope, value, challenge.expiresAt);
+					await deps.replaySeenSet.markSeen(scope, value, challenge.expiresAtMs);
 				} catch (e) {
 					if (!(e instanceof ChallengeStorageError && e.reason === "expired-at-issue")) {
 						throw e;

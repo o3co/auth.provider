@@ -22,7 +22,7 @@ export function runReplaySeenSetContract(
 	factory: ReplaySeenSetContractFactory,
 ): void {
 	describe(`ReplaySeenSet contract — ${factoryName}`, () => {
-		const future = (): Date => new Date(Date.now() + 60_000);
+		const future = (): number => Date.now() + 60_000;
 
 		async function withSet(body: (set: ReplaySeenSet) => Promise<void>): Promise<void> {
 			const set = await factory.create();
@@ -48,9 +48,9 @@ export function runReplaySeenSetContract(
 			});
 		});
 
-		it("markSeen throws 'expired-at-issue' for past expiresAt", async () => {
+		it("markSeen throws 'expired-at-issue' for past expiresAtMs", async () => {
 			await withSet(async (set) => {
-				const past = new Date(Date.now() - 1_000);
+				const past = Date.now() - 1_000;
 				await expect(set.markSeen("scope-A", "k3", past)).rejects.toMatchObject({
 					name: "ChallengeStorageError",
 					reason: "expired-at-issue",
@@ -60,7 +60,7 @@ export function runReplaySeenSetContract(
 
 		it("expired entries treated as absent (contains=false after TTL)", async () => {
 			await withSet(async (set) => {
-				const soon = new Date(Date.now() + 50);
+				const soon = Date.now() + 50;
 				await set.markSeen("scope-A", "k4", soon);
 				await new Promise((r) => setTimeout(r, 100));
 				expect(await set.contains("scope-A", "k4")).toBe(false);

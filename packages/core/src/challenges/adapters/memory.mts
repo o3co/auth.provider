@@ -28,12 +28,12 @@ import type { Challenge, ChallengeStore } from "../types.mjs";
  * Per A1 §7.1.
  */
 export function createMemoryChallengeStore(): ChallengeStore {
-	const map = new Map<string, { expiresAt: number }>();
+	const map = new Map<string, { expiresAtMs: number }>();
 
-	function getLive(key: string, nowMs: number): { expiresAt: number } | undefined {
+	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
 		if (entry === undefined) return undefined;
-		if (entry.expiresAt <= nowMs) {
+		if (entry.expiresAtMs <= nowMs) {
 			map.delete(key);
 			return undefined;
 		}
@@ -43,22 +43,22 @@ export function createMemoryChallengeStore(): ChallengeStore {
 	return {
 		kind: "memory",
 
-		async issue(scope, value, expiresAt) {
+		async issue(scope, value, expiresAtMs) {
 			const nowMs = Date.now();
-			if (expiresAt.getTime() <= nowMs) {
+			if (expiresAtMs <= nowMs) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}
 			const key = canonicalKey(scope, value);
 			if (getLive(key, nowMs) !== undefined) {
 				throw new ChallengeStorageError({ reason: "duplicate" });
 			}
-			map.set(key, { expiresAt: expiresAt.getTime() });
+			map.set(key, { expiresAtMs });
 		},
 
 		async find(scope, value): Promise<Challenge | null> {
 			const entry = getLive(canonicalKey(scope, value), Date.now());
 			if (entry === undefined) return null;
-			return { expiresAt: new Date(entry.expiresAt) };
+			return { expiresAtMs: entry.expiresAtMs };
 		},
 
 		async consume(scope, value) {

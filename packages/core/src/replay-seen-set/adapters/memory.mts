@@ -34,12 +34,12 @@ import type { ReplaySeenSet } from "../types.mjs";
  * Per A1 §7.1.
  */
 export function createMemoryReplaySeenSet(): ReplaySeenSet {
-	const map = new Map<string, { expiresAt: number }>();
+	const map = new Map<string, { expiresAtMs: number }>();
 
-	function getLive(key: string, nowMs: number): { expiresAt: number } | undefined {
+	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
 		if (entry === undefined) return undefined;
-		if (entry.expiresAt <= nowMs) {
+		if (entry.expiresAtMs <= nowMs) {
 			map.delete(key);
 			return undefined;
 		}
@@ -49,16 +49,16 @@ export function createMemoryReplaySeenSet(): ReplaySeenSet {
 	return {
 		kind: "memory",
 
-		async markSeen(scope, key, expiresAt) {
+		async markSeen(scope, key, expiresAtMs) {
 			const nowMs = Date.now();
-			if (expiresAt.getTime() <= nowMs) {
+			if (expiresAtMs <= nowMs) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}
 			const k = canonicalKey(scope, key);
 			if (getLive(k, nowMs) !== undefined) {
 				return false;
 			}
-			map.set(k, { expiresAt: expiresAt.getTime() });
+			map.set(k, { expiresAtMs });
 			return true;
 		},
 

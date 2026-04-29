@@ -58,8 +58,8 @@ export function createRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): Repla
 	return {
 		kind: "redis",
 
-		async markSeen(scope, key, expiresAt) {
-			const ttlMs = expiresAt.getTime() - Date.now();
+		async markSeen(scope, key, expiresAtMs) {
+			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}
