@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import type { ExchangeTokenValidator, GrantHandler } from "./contributes-map.mjs";
+import type {
+	ExchangeTokenValidator,
+	FederationProvider,
+	GrantHandler,
+} from "./contributes-map.mjs";
 
 /**
  * Read-only projection of the boot planner's `grants` collector, exposed
@@ -44,7 +48,7 @@ export interface TokenExchangeValidatorResolver {
  * structural placeholder. The concrete type is wired in Phase 9 when the
  * federation packages migrate to manifest shape.
  */
-export type { FederationProvider } from "./contributes-map.mjs";
+export type { FederationProvider };
 
 /**
  * The set of synthetic ComponentMap keys at v0.5.0. The boot planner
@@ -69,3 +73,29 @@ export type { FederationProvider } from "./contributes-map.mjs";
 export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 	new Set(["federationProviders", "tokenExchangeValidatorResolver", "grantHandlerResolver"]),
 );
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge for synthetic resolver slots.
+//
+// The boot planner injects these projections into the working component map
+// at `applyContributions` step 0 (see `boot/apply-contributions.mts`). Without
+// declaration-merging them onto ComponentMap, downstream modules cannot
+// declare `requires: ["grantHandlerResolver"]` etc. through the typed
+// `defineModule` surface — `ComponentKey = keyof ComponentMap` would not
+// include these keys and authoring would require a private augmentation.
+//
+// Slot-name reservation (A1 §5.5): unnamespaced names
+// (grantHandlerResolver, tokenExchangeValidatorResolver, federationProviders)
+// are reserved for o3co. Consumers MUST namespace their own keys.
+//
+// `federationProviders` is shaped as `ReadonlyMap<string, FederationProvider>`
+// — same shape as the runtime view returned by `makeFederationProviders` in
+// `apply-contributions.mts`.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly grantHandlerResolver?: GrantHandlerResolver;
+		readonly tokenExchangeValidatorResolver?: TokenExchangeValidatorResolver;
+		readonly federationProviders?: ReadonlyMap<string, FederationProvider>;
+	}
+}

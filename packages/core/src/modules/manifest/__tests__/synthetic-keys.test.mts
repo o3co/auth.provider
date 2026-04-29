@@ -1,5 +1,10 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
-import type { ExchangeTokenValidator, GrantHandler } from "../contributes-map.mjs";
+import type { ComponentMap } from "../component-map.mjs";
+import type {
+	ExchangeTokenValidator,
+	FederationProvider,
+	GrantHandler,
+} from "../contributes-map.mjs";
 import {
 	type GrantHandlerResolver,
 	SYNTHETIC_COMPONENT_KEYS,
@@ -52,5 +57,31 @@ describe("TokenExchangeValidatorResolver", () => {
 			readonly get: (tokenType: string) => ExchangeTokenValidator | undefined;
 			readonly entries: () => IterableIterator<readonly [string, ExchangeTokenValidator]>;
 		}>();
+	});
+});
+
+describe("ComponentMap synthetic-resolver slots (declaration-merge)", () => {
+	// Without these slots on ComponentMap, downstream modules cannot
+	// `requires: ["grantHandlerResolver"]` etc. through the typed
+	// defineModule surface (ComponentKey = keyof ComponentMap would not
+	// include the synthetic keys). The boot planner injects these
+	// projections at applyContributions step 0, so authoring must be able
+	// to reference them.
+	test("grantHandlerResolver slot is GrantHandlerResolver | undefined", () => {
+		expectTypeOf<ComponentMap["grantHandlerResolver"]>().toEqualTypeOf<
+			GrantHandlerResolver | undefined
+		>();
+	});
+
+	test("tokenExchangeValidatorResolver slot is TokenExchangeValidatorResolver | undefined", () => {
+		expectTypeOf<ComponentMap["tokenExchangeValidatorResolver"]>().toEqualTypeOf<
+			TokenExchangeValidatorResolver | undefined
+		>();
+	});
+
+	test("federationProviders slot is ReadonlyMap<string, FederationProvider> | undefined", () => {
+		expectTypeOf<ComponentMap["federationProviders"]>().toEqualTypeOf<
+			ReadonlyMap<string, FederationProvider> | undefined
+		>();
 	});
 });
