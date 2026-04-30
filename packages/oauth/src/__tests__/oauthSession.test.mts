@@ -15,89 +15,100 @@
  */
 
 import {
-	type AppConfig,
 	type ClientRepository,
 	createSymmetricKeyStore,
-	GrantRegistry,
-	type ModuleContext,
+	defineModule,
+	type GrantHandler,
 } from "@o3co/auth-provider-core";
-import type { Router } from "express";
-import { describe, expect, it, vi } from "vitest";
+import {
+	createTestApp,
+	makeValidAppConfig,
+} from "@o3co/auth-provider-core/testing";
+import { describe, expect, it } from "vitest";
 import { oauthSessionModule } from "#/oauthSession.mjs";
 
-const mockConfig = {
-	oauth: {
-		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {
-			session: { enabled: true },
-		},
-	},
-} as unknown as AppConfig;
+// ---------------------------------------------------------------------------
+// Shared test-only stubs
+// ---------------------------------------------------------------------------
 
-const makeContext = (overrides?: Partial<ModuleContext>): ModuleContext => ({
-	pathResolver: (s: string) => s,
-	config: mockConfig,
-	keyStore: createSymmetricKeyStore("test-secret"),
-	grantRegistry: new GrantRegistry(),
-	router: { use: vi.fn().mockReturnThis() } as unknown as Router,
-	...overrides,
+const fakeClientRepository: ClientRepository = {
+	findById: async () => null,
+	authenticate: async () => null,
+};
+
+/** Inline module that satisfies `requires: ["clientRepository"]`. */
+const clientRepositoryModule = defineModule({
+	name: "test:client-repository",
+	provides: {
+		clientRepository: () => fakeClientRepository,
+	},
 });
+
+/** Inline module that satisfies `requires: ["keyStore"]`. */
+const keyStoreModule = defineModule({
+	name: "test:key-store",
+	provides: {
+		keyStore: () => createSymmetricKeyStore("test-secret-for-session-grant"),
+	},
+});
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 describe("oauthSessionModule", () => {
 	it("has name 'oauth-session'", () => {
-		const module = oauthSessionModule({
-			clientRepository: {} as ClientRepository,
-		});
+		const config = makeValidAppConfig();
+		const module = oauthSessionModule({ config });
 		expect(module.name).toBe("oauth-session");
 	});
 
-	it("registers session grant handler on grantRegistry", async () => {
-		const ctx = makeContext();
-		const module = oauthSessionModule({
-			clientRepository: {} as ClientRepository,
+	it("registers the session grant when config.oauth.grants.session.enabled is not false", async () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: true } } },
+		};
+		const handle = await createTestApp({
+			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-
-		await module.init(ctx);
-
-		expect(ctx.grantRegistry.get("session")).toBeDefined();
+		expect(handle.inspect.grants.has("session")).toBe(true);
+		await handle.dispose();
 	});
 
-	it("does not register session grant when config says enabled=false", async () => {
-		const disabledConfig = {
-			...mockConfig,
-			oauth: {
-				...mockConfig.oauth,
-				grants: { session: { enabled: false } },
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ config: disabledConfig });
-		const module = oauthSessionModule({
-			clientRepository: {} as ClientRepository,
+	it("contributes no grant when config.oauth.grants.session.enabled === false", async () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: false } } },
+		};
+		const handle = await createTestApp({
+			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-
-		await module.init(ctx);
-
-		expect(ctx.grantRegistry.get("session")).toBeUndefined();
+		expect(handle.inspect.grants.has("session")).toBe(false);
+		await handle.dispose();
 	});
 
 	it("registered handler returns 401 for unauthenticated session", async () => {
-		const ctx = makeContext();
-		const module = oauthSessionModule({
-			clientRepository: {} as ClientRepository,
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-
-		await module.init(ctx);
-
-		const handler = ctx.grantRegistry.get("session")!;
+		// TestInspect.grants is ReadonlyMap<string, unknown> because contributes-map.mts
+		// uses a structural placeholder for GrantHandler until Phase 9 substitutes the
+		// concrete type. Cast to the concrete GrantHandler from grants/types.mts here.
+		const handler = handle.inspect.grants.get("session") as GrantHandler | undefined;
+		if (!handler) throw new Error("expected session grant to be registered");
 		const { result } = await handler.handle({
 			body: {},
 			session: { isAuthenticated: false },
 			issuer: "localhost",
 			metadata: {},
 		});
-
 		expect(result.status).toBe(401);
+		await handle.dispose();
 	});
 });

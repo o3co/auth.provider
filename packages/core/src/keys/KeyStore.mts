@@ -185,3 +185,20 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 		},
 	};
 }
+
+// ---------------------------------------------------------------------------
+// ComponentMap slot declaration (per A2-α §6.1)
+//
+// `keyStore` is a core component produced by a composition-root-local module
+// (e.g. `keyStoreModule` in A2-γ §3.8 standalone template). Modules that
+// need the KeyStore to sign or verify tokens declare `requires: ["keyStore"]`
+// and receive the instance through the typed DI graph.
+//
+// Per A2-γ §3.2.3 / §3.2.2 / §3.2.1: oauthSessionModule, oauthAuthorization-
+// Module, and oauthModule all require keyStore in their defineModule manifests.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly keyStore: KeyStore;
+	}
+}
