@@ -29,9 +29,9 @@
 
 import { Router } from "express";
 import { describe, expect, it } from "vitest";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createBootApp } from "../../index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
 

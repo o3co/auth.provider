@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { planBoot } from "../plan-boot.mjs";
 import type { BootstrapMap as BM, BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";

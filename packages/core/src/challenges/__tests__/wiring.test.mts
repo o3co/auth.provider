@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import type { BootstrapMap } from "../../boot/types.mjs";
 import {
 	createBootApp,
@@ -25,6 +24,7 @@ import {
 	memoryChallengeStoreModule,
 	memoryReplaySeenSetModule,
 } from "../../index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
 // hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the

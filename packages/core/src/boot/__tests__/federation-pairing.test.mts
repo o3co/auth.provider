@@ -26,8 +26,8 @@
  * Per A5 §8.1, §8.2.
  */
 import { describe, expect, it } from "vitest";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createBootApp, defineModule } from "../../index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
 const minBoot = {

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { BootError, createBootApp, defineModule } from "@o3co/auth-provider-core";
+import { createBootApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";

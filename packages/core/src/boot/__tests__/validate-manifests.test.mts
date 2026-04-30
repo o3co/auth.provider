@@ -15,8 +15,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
 

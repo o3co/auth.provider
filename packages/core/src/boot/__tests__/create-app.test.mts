@@ -28,8 +28,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createApp } from "../create-app.mjs";
 import type {
 	AppHandle,

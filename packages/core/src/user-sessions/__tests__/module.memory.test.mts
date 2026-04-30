@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { createBootApp, defineModule } from "../../index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { memorySessionStoresModule } from "../modules/memory.mjs";
 
 const minBoot = {
