@@ -1128,7 +1128,7 @@ describe("audit events", () => {
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "logout.cascade_failed",
-					details: expect.objectContaining({ sid: "sid-1", step: 1 }),
+					details: expect.objectContaining({ sid: "sid-1", step: 2 }),
 				}),
 			);
 		});

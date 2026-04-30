@@ -1,113 +1,338 @@
 import type {
 	FederationTokenStoreBase,
 	RefreshTokenStoreBase,
-	UserSessionStoreBase,
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import { cascadeLogout } from "../cascadeLogout.mjs";
 
-const okRefresh = () =>
-	({ revokeFamily: vi.fn().mockResolvedValue(undefined) }) as unknown as RefreshTokenStoreBase;
-const okFederation = () =>
-	({
-		deleteBySession: vi.fn().mockResolvedValue(undefined),
-	}) as unknown as FederationTokenStoreBase;
-const okSession = () =>
-	({ delete: vi.fn().mockResolvedValue(undefined) }) as unknown as UserSessionStoreBase;
+// ---------------------------------------------------------------------------
+// Mock factories
+// ---------------------------------------------------------------------------
 
-describe("cascadeLogout (spec Section 14.2)", () => {
-	it("executes in fixed order: revokeFamily (each) → deleteBySession → delete", async () => {
-		const rts = okRefresh();
-		const fts = okFederation();
-		const uss = okSession();
+function makeRefreshStore(override?: Partial<RefreshTokenStoreBase>): RefreshTokenStoreBase {
+	return {
+		kind: "memory",
+		isFamilyRevoked: vi.fn().mockResolvedValue(false),
+		rotate: vi.fn(),
+		revokeFamily: vi.fn().mockResolvedValue(undefined),
+		...override,
+	} as unknown as RefreshTokenStoreBase;
+}
+
+function makeFedStore(override?: Partial<FederationTokenStoreBase>): FederationTokenStoreBase {
+	return {
+		kind: "memory",
+		attach: vi.fn(),
+		get: vi.fn().mockResolvedValue(null),
+		update: vi.fn(),
+		deleteBySession: vi.fn().mockResolvedValue(undefined),
+		delete: vi.fn(),
+		...override,
+	} as unknown as FederationTokenStoreBase;
+}
+
+function makeUserSessionStore(override?: Partial<UserSessionStore>): UserSessionStore {
+	return {
+		kind: "memory",
+		create: vi.fn(),
+		get: vi.fn().mockResolvedValue(null),
+		delete: vi.fn().mockResolvedValue(undefined),
+		...override,
+	} as unknown as UserSessionStore;
+}
+
+function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRPRegistry {
+	return {
+		kind: "memory",
+		registerRP: vi.fn(async () => {}),
+		listRPs: vi.fn(async () => []),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionRPRegistry;
+}
+
+function makeSessionFamilyIndex(override?: Partial<SessionFamilyIndex>): SessionFamilyIndex {
+	return {
+		kind: "memory",
+		addFamilyId: vi.fn(async () => {}),
+		listFamilyIds: vi.fn(async () => []),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionFamilyIndex;
+}
+
+function makeSessionFederationIndex(
+	override?: Partial<SessionFederationIndex>,
+): SessionFederationIndex {
+	return {
+		kind: "memory",
+		addFederation: vi.fn(async () => {}),
+		listFederations: vi.fn(async () => []),
+		removeFederation: vi.fn(async () => {}),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionFederationIndex;
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe("cascadeLogout (A4 §6.2)", () => {
+	it("executes in §6.2 order: listFamilyIds → revokeFamily (each) → deleteBySession → removeBySid (×3) → delete", async () => {
+		const sessionFamilyIndex = makeSessionFamilyIndex({
+			listFamilyIds: vi.fn(async () => ["fam-1", "fam-2"]),
+		});
+		const rts = makeRefreshStore();
+		const fts = makeFedStore();
+		const uss = makeUserSessionStore();
+		const sessionRPRegistry = makeSessionRPRegistry();
+		const sessionFederationIndex = makeSessionFederationIndex();
+
 		const result = await cascadeLogout({
 			sid: "sid-1",
-			familyIds: ["fam-1", "fam-2"],
 			refreshTokenStore: rts,
 			federationTokenStore: fts,
 			userSessionStore: uss,
+			sessionRPRegistry,
+			sessionFamilyIndex,
+			sessionFederationIndex,
 		});
+
 		expect(result.outcome).toBe("done");
-		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenCalledTimes(
-			2,
-		);
-		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenNthCalledWith(
-			1,
-			"fam-1",
-		);
-		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).toHaveBeenNthCalledWith(
-			2,
-			"fam-2",
-		);
-		expect(
-			(fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession,
-		).toHaveBeenCalledWith("sid-1");
-		expect((uss as unknown as { delete: typeof vi.fn }).delete).toHaveBeenCalledWith("sid-1");
+		// Step 1: listFamilyIds called
+		expect(sessionFamilyIndex.listFamilyIds).toHaveBeenCalledWith("sid-1");
+		// Step 2: revokeFamily called for each family
+		expect(rts.revokeFamily).toHaveBeenCalledTimes(2);
+		expect(rts.revokeFamily).toHaveBeenNthCalledWith(1, "fam-1");
+		expect(rts.revokeFamily).toHaveBeenNthCalledWith(2, "fam-2");
+		// Step 2: federation tokens deleted
+		expect(fts.deleteBySession).toHaveBeenCalledWith("sid-1");
+		// Step 3: all three reverse-index removeBySid called
+		expect(sessionRPRegistry.removeBySid).toHaveBeenCalledWith("sid-1");
+		expect(sessionFamilyIndex.removeBySid).toHaveBeenCalledWith("sid-1");
+		expect(sessionFederationIndex.removeBySid).toHaveBeenCalledWith("sid-1");
+		// Step 4: session deleted last
+		expect(uss.delete).toHaveBeenCalledWith("sid-1");
 	});
 
-	it("step-1 throw → outcome: failed, step: 1; steps 2/3 NOT executed", async () => {
-		const rts = { revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")) };
-		const fts = okFederation();
-		const uss = okSession();
-		const result = await cascadeLogout({
+	it("empty familyIds skips revokeFamily loop and still runs Steps 2–4", async () => {
+		const sessionFamilyIndex = makeSessionFamilyIndex({
+			listFamilyIds: vi.fn(async () => []),
+		});
+		const rts = makeRefreshStore();
+		const fts = makeFedStore();
+		const uss = makeUserSessionStore();
+
+		await cascadeLogout({
 			sid: "s",
-			familyIds: ["f"],
-			refreshTokenStore: rts as unknown as RefreshTokenStoreBase,
+			refreshTokenStore: rts,
 			federationTokenStore: fts,
 			userSessionStore: uss,
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex,
+			sessionFederationIndex: makeSessionFederationIndex(),
 		});
+
+		expect(rts.revokeFamily).not.toHaveBeenCalled();
+		expect(fts.deleteBySession).toHaveBeenCalled();
+		expect(uss.delete).toHaveBeenCalled();
+	});
+
+	// -------------------------------------------------------------------------
+	// Step 1 failures
+	// -------------------------------------------------------------------------
+
+	it("Step 1 (sessionFamilyIndex.listFamilyIds) failure → step:1, errors:[err]", async () => {
+		const result = await cascadeLogout({
+			sid: "s1",
+			refreshTokenStore: makeRefreshStore(),
+			federationTokenStore: makeFedStore(),
+			userSessionStore: makeUserSessionStore(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex: makeSessionFamilyIndex({
+				listFamilyIds: vi.fn(async () => {
+					throw new Error("read fail");
+				}),
+			}),
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
 		expect(result.outcome).toBe("failed");
 		if (result.outcome === "failed") {
 			expect(result.step).toBe(1);
-			expect(result.error).toBeInstanceOf(Error);
+			expect(result.errors).toHaveLength(1);
+			expect(result.errors[0]).toBeInstanceOf(Error);
 		}
-		expect(
-			(fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession,
-		).not.toHaveBeenCalled();
-		expect((uss as unknown as { delete: typeof vi.fn }).delete).not.toHaveBeenCalled();
 	});
 
-	it("step-2 throw → outcome: done, continues to step 3 (best-effort)", async () => {
-		const rts = okRefresh();
-		const fts = { deleteBySession: vi.fn().mockRejectedValue(new Error("net")) };
-		const uss = okSession();
-		const warnings: unknown[] = [];
-		const originalWarn = console.warn;
-		console.warn = (...args: unknown[]) => {
-			warnings.push(args);
-		};
-		try {
-			const result = await cascadeLogout({
-				sid: "s",
-				familyIds: ["f"],
-				refreshTokenStore: rts,
-				federationTokenStore: fts as unknown as FederationTokenStoreBase,
-				userSessionStore: uss,
-			});
-			expect(result.outcome).toBe("done");
-			expect((uss as unknown as { delete: typeof vi.fn }).delete).toHaveBeenCalled();
-			expect(warnings.length).toBeGreaterThan(0);
-		} finally {
-			console.warn = originalWarn;
+	it("Step 1 failure → Steps 2/3/4 NOT executed", async () => {
+		const rts = makeRefreshStore();
+		const fts = makeFedStore();
+		const uss = makeUserSessionStore();
+		const sessionRPRegistry = makeSessionRPRegistry();
+		const sessionFamilyIndex = makeSessionFamilyIndex({
+			listFamilyIds: vi.fn(async () => {
+				throw new Error("redis down");
+			}),
+		});
+		const sessionFederationIndex = makeSessionFederationIndex();
+
+		await cascadeLogout({
+			sid: "s",
+			refreshTokenStore: rts,
+			federationTokenStore: fts,
+			userSessionStore: uss,
+			sessionRPRegistry,
+			sessionFamilyIndex,
+			sessionFederationIndex,
+		});
+
+		expect(rts.revokeFamily).not.toHaveBeenCalled();
+		expect(fts.deleteBySession).not.toHaveBeenCalled();
+		expect(sessionRPRegistry.removeBySid).not.toHaveBeenCalled();
+		expect(sessionFamilyIndex.removeBySid).not.toHaveBeenCalled();
+		expect(sessionFederationIndex.removeBySid).not.toHaveBeenCalled();
+		expect(uss.delete).not.toHaveBeenCalled();
+	});
+
+	// -------------------------------------------------------------------------
+	// Step 2 failures (collect-and-tally + HALT)
+	// -------------------------------------------------------------------------
+
+	it("Step 2 revokeFamily failure → outcome: failed, step:2, errors with that error", async () => {
+		const rts = makeRefreshStore({
+			revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
+		});
+		const result = await cascadeLogout({
+			sid: "s",
+			refreshTokenStore: rts,
+			federationTokenStore: makeFedStore(),
+			userSessionStore: makeUserSessionStore(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex: makeSessionFamilyIndex({
+				listFamilyIds: vi.fn(async () => ["f"]),
+			}),
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result.outcome).toBe("failed");
+		if (result.outcome === "failed") {
+			expect(result.step).toBe(2);
+			expect(result.errors).toHaveLength(1);
+			expect(result.errors[0]).toBeInstanceOf(Error);
 		}
+	});
+
+	it("Step 2 partial failure HALTS — Step 3 reverse-index cleanup NOT called, Step 4 NOT called", async () => {
+		const sessionRPRegistry = makeSessionRPRegistry();
+		const sessionFamilyIndex = makeSessionFamilyIndex({
+			listFamilyIds: vi.fn(async () => ["fam-1", "fam-2"]),
+		});
+		const sessionFederationIndex = makeSessionFederationIndex();
+		const uss = makeUserSessionStore();
+		const rts = makeRefreshStore({
+			revokeFamily: vi.fn(async (id: string) => {
+				if (id === "fam-2") throw new Error("revoke fail");
+			}),
+		});
+
+		const result = await cascadeLogout({
+			sid: "s1",
+			refreshTokenStore: rts,
+			federationTokenStore: makeFedStore(),
+			userSessionStore: uss,
+			sessionRPRegistry,
+			sessionFamilyIndex,
+			sessionFederationIndex,
+		});
+
+		expect(result.outcome).toBe("failed");
+		if (result.outcome === "failed") expect(result.step).toBe(2);
+
+		// CRITICAL: §6.2 invariant — reverse-index cleanup MUST NOT have run
+		expect(sessionRPRegistry.removeBySid).not.toHaveBeenCalled();
+		expect(sessionFamilyIndex.removeBySid).not.toHaveBeenCalled();
+		expect(sessionFederationIndex.removeBySid).not.toHaveBeenCalled();
+		// Step 4 MUST NOT have run
+		expect(uss.delete).not.toHaveBeenCalled();
+	});
+
+	it("Step 2 collect-and-tally: all revokeFamily failures collected before HALT", async () => {
+		const rts = makeRefreshStore({
+			revokeFamily: vi.fn().mockRejectedValue(new Error("fail")),
+		});
+		const result = await cascadeLogout({
+			sid: "s",
+			refreshTokenStore: rts,
+			federationTokenStore: makeFedStore({
+				deleteBySession: vi.fn().mockRejectedValue(new Error("fed fail")),
+			}),
+			userSessionStore: makeUserSessionStore(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex: makeSessionFamilyIndex({
+				listFamilyIds: vi.fn(async () => ["fam-1", "fam-2"]),
+			}),
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result.outcome).toBe("failed");
+		if (result.outcome === "failed") {
+			expect(result.step).toBe(2);
+			// 2 revokeFamily failures + 1 deleteBySession failure = 3 errors
+			expect(result.errors).toHaveLength(3);
+		}
+	});
+
+	it("Step 2 federationTokenStore.deleteBySession failure → outcome: failed, step:2 (no longer best-effort standalone)", async () => {
+		const fts = makeFedStore({
+			deleteBySession: vi.fn().mockRejectedValue(new Error("net")),
+		});
+		const uss = makeUserSessionStore();
+		const result = await cascadeLogout({
+			sid: "s",
+			refreshTokenStore: makeRefreshStore(),
+			federationTokenStore: fts,
+			userSessionStore: uss,
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex: makeSessionFamilyIndex({
+				listFamilyIds: vi.fn(async () => []),
+			}),
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result.outcome).toBe("failed");
+		if (result.outcome === "failed") {
+			expect(result.step).toBe(2);
+			expect(result.errors).toHaveLength(1);
+		}
+		// HALT: Step 4 must NOT have run
+		expect(uss.delete).not.toHaveBeenCalled();
 	});
 
 	it("routes step-2 warning to opts.logger when provided (not console.warn)", async () => {
-		const rts = okRefresh();
-		const fts = { deleteBySession: vi.fn().mockRejectedValue(new Error("net")) };
-		const uss = okSession();
+		const rts = makeRefreshStore({
+			revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
+		});
 		const loggerWarn = vi.fn();
 		const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
-			const result = await cascadeLogout({
+			await cascadeLogout({
 				sid: "s",
-				familyIds: ["f"],
 				refreshTokenStore: rts,
-				federationTokenStore: fts as unknown as FederationTokenStoreBase,
-				userSessionStore: uss,
+				federationTokenStore: makeFedStore(),
+				userSessionStore: makeUserSessionStore(),
+				sessionRPRegistry: makeSessionRPRegistry(),
+				sessionFamilyIndex: makeSessionFamilyIndex({
+					listFamilyIds: vi.fn(async () => ["f"]),
+				}),
+				sessionFederationIndex: makeSessionFederationIndex(),
 				logger: { warn: loggerWarn },
 			});
-			expect(result.outcome).toBe("done");
 			expect(loggerWarn).toHaveBeenCalledTimes(1);
 			expect(loggerWarn.mock.calls[0]?.[0]).toMatch(/cascadeLogout/);
 			expect(consoleWarnSpy).not.toHaveBeenCalled();
@@ -116,38 +341,87 @@ describe("cascadeLogout (spec Section 14.2)", () => {
 		}
 	});
 
-	it("step-3 throw → outcome: failed, step: 3", async () => {
-		const rts = okRefresh();
-		const fts = okFederation();
-		const uss = { delete: vi.fn().mockRejectedValue(new Error("redis down")) };
-		const result = await cascadeLogout({
-			sid: "s",
-			familyIds: ["f"],
-			refreshTokenStore: rts,
-			federationTokenStore: fts,
-			userSessionStore: uss as unknown as UserSessionStoreBase,
+	// -------------------------------------------------------------------------
+	// Step 3 (best-effort — never halts)
+	// -------------------------------------------------------------------------
+
+	it("Step 3 reverse-index removeBySid failure does NOT halt Step 4", async () => {
+		const sessionFamilyIndex = makeSessionFamilyIndex({
+			listFamilyIds: vi.fn(async () => []),
 		});
-		expect(result.outcome).toBe("failed");
-		if (result.outcome === "failed") {
-			expect(result.step).toBe(3);
-		}
+		const uss = makeUserSessionStore();
+		const sessionRPRegistry = makeSessionRPRegistry({
+			removeBySid: vi.fn(async () => {
+				throw new Error("transient blip");
+			}),
+		});
+
+		const result = await cascadeLogout({
+			sid: "s1",
+			refreshTokenStore: makeRefreshStore(),
+			federationTokenStore: makeFedStore(),
+			userSessionStore: uss,
+			sessionRPRegistry,
+			sessionFamilyIndex,
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result.outcome).toBe("done");
+		// Step 4 still ran — orphan rp-registry entry is naturally bounded by TTL
+		expect(uss.delete).toHaveBeenCalledWith("s1");
 	});
 
-	it("empty familyIds array skips step 1 and still runs 2+3", async () => {
-		const rts = okRefresh();
-		const fts = okFederation();
-		const uss = okSession();
-		await cascadeLogout({
-			sid: "s",
-			familyIds: [],
-			refreshTokenStore: rts,
-			federationTokenStore: fts,
-			userSessionStore: uss,
+	it("Step 3 all removeBySid failures do NOT halt Step 4", async () => {
+		const throwFn = vi.fn(async () => {
+			throw new Error("blip");
 		});
-		expect((rts as unknown as { revokeFamily: typeof vi.fn }).revokeFamily).not.toHaveBeenCalled();
-		expect(
-			(fts as unknown as { deleteBySession: typeof vi.fn }).deleteBySession,
-		).toHaveBeenCalled();
-		expect((uss as unknown as { delete: typeof vi.fn }).delete).toHaveBeenCalled();
+		const uss = makeUserSessionStore();
+
+		const result = await cascadeLogout({
+			sid: "s1",
+			refreshTokenStore: makeRefreshStore(),
+			federationTokenStore: makeFedStore(),
+			userSessionStore: uss,
+			sessionRPRegistry: makeSessionRPRegistry({ removeBySid: throwFn }),
+			sessionFamilyIndex: makeSessionFamilyIndex({
+				listFamilyIds: vi.fn(async () => []),
+				removeBySid: throwFn,
+			}),
+			sessionFederationIndex: makeSessionFederationIndex({ removeBySid: throwFn }),
+		});
+
+		expect(result.outcome).toBe("done");
+		expect(uss.delete).toHaveBeenCalledWith("s1");
+	});
+
+	// -------------------------------------------------------------------------
+	// Step 4 failures
+	// -------------------------------------------------------------------------
+
+	it("Step 4 (userSessionStore.delete) failure → step:4, errors:[err]", async () => {
+		const uss = makeUserSessionStore({
+			delete: vi.fn(async () => {
+				throw new Error("persistence failure");
+			}),
+		});
+
+		const result = await cascadeLogout({
+			sid: "s1",
+			refreshTokenStore: makeRefreshStore(),
+			federationTokenStore: makeFedStore(),
+			userSessionStore: uss,
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex: makeSessionFamilyIndex({
+				listFamilyIds: vi.fn(async () => []),
+			}),
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result.outcome).toBe("failed");
+		if (result.outcome === "failed") {
+			expect(result.step).toBe(4);
+			expect(result.errors).toHaveLength(1);
+			expect(result.errors[0]).toBeInstanceOf(Error);
+		}
 	});
 });

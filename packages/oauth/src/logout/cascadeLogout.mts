@@ -17,17 +17,22 @@ import type {
 	FederationTokenStoreBase,
 	Logger,
 	RefreshTokenStoreBase,
-	UserSessionStoreBase,
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 
 export interface CascadeLogoutOptions {
 	readonly sid: string;
-	readonly familyIds: ReadonlyArray<string>;
 	readonly refreshTokenStore: RefreshTokenStoreBase;
 	readonly federationTokenStore: FederationTokenStoreBase;
-	readonly userSessionStore: UserSessionStoreBase;
+	readonly userSessionStore: UserSessionStore;
+	readonly sessionRPRegistry: SessionRPRegistry;
+	readonly sessionFamilyIndex: SessionFamilyIndex;
+	readonly sessionFederationIndex: SessionFederationIndex;
 	/**
-	 * Optional structured logger for the step-2 best-effort warning.
+	 * Optional structured logger for warning emissions on best-effort ops.
 	 * Defaults to `console`. Provide a pino/winston/etc instance with a compatible
 	 * `warn(message, ...args)` signature to route failures into your observability stack.
 	 */
@@ -36,51 +41,112 @@ export interface CascadeLogoutOptions {
 
 export type CascadeLogoutResult =
 	| { readonly outcome: "done" }
-	| { readonly outcome: "failed"; readonly step: 1 | 2 | 3; readonly error: unknown };
+	| {
+			readonly outcome: "failed";
+			readonly step: 1 | 2 | 4;
+			readonly errors: ReadonlyArray<unknown>;
+	  };
 
 /**
- * Executes the three-step logout cascade in the fixed order mandated by spec
- * Section 14.2:
- *   1. revokeFamily (all families) — throw ⇒ 503 (steps 2+3 skipped; retry safe).
- *   2. deleteBySession (federation tokens) — best-effort; throw ⇒ warn + continue.
- *      Orphaned federation tokens eventually GC by TTL.
- *   3. delete (session record) — throw ⇒ 503 (steps 1+2 are idempotent, retry converges).
+ * Executes the four-step logout cascade in the fixed order mandated by A4 §6.2:
+ *   Step 1: Read fanout context — sessionFamilyIndex.listFamilyIds(sid).
+ *           Fail → return failed step:1 (steps 2–4 skipped; retry safe).
+ *   Step 2: Fanout — collect-and-tally.
+ *           - revokeFamily loop (per family; continues on per-op failure, tallies errors)
+ *           - federationTokenStore.deleteBySession (tallied on failure)
+ *           If ANY failure → return failed step:2 with all errors (HALT before step 3).
+ *           §6.2 critical rule: HALT preserves bookkeeping for retry. Running step 3
+ *           would erase reverse-index entries and silently mark the cascade complete
+ *           despite an un-revoked family.
+ *   Step 3: Reverse-index cleanup — only if step 2 fully succeeded. Per-op best-effort
+ *           (log + continue; orphan entries bounded by TTL).
+ *           - sessionRPRegistry.removeBySid
+ *           - sessionFamilyIndex.removeBySid
+ *           - sessionFederationIndex.removeBySid
+ *           Never returns failed (step 3 best-effort; hence step range is 1|2|4 not 1|2|3|4).
+ *   Step 4: Primary invalidation — userSessionStore.delete LAST (must succeed).
+ *           Fail → return failed step:4.
+ *
+ * Note: broadcastBackchannelLogout is invoked by routes/logout.mts BEFORE cascadeLogout
+ * (it is "best-effort — never throws" per its own contract), so its position is
+ * functionally equivalent to being a no-throw step-2 op inside the cascade per §6.2 model.
+ * Moving it here would require pulling in sub/issuer/keyStore/fetchImpl/auditSink as new
+ * deps — a surface change beyond this helper's scope.
  *
  * Caller responsibilities:
  *   - Map `outcome: "failed"` to HTTP 503.
- *   - Run Back-Channel / Front-Channel / IdP-logout phases separately — this helper
- *     only handles the store cascade.
+ *   - Invoke broadcastBackchannelLogout (best-effort) BEFORE calling this function.
+ *   - Run Front-Channel / IdP-logout phases separately — this helper only handles
+ *     the store cascade.
  *
- * @param opts.logger - Optional structured logger for the step-2 best-effort warning.
- *   Defaults to `console`. Provide a pino/winston/etc instance with a compatible
- *   `warn(message, ...args)` signature to route failures into your observability stack.
+ * @param opts.logger - Optional structured logger for best-effort warning emissions.
+ *   Defaults to `console`.
  */
 export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<CascadeLogoutResult> {
-	// Step 1: revoke each family.
-	for (const familyId of opts.familyIds) {
+	const logger = opts.logger ?? console;
+
+	// §6.2 Step 1: read fanout context.
+	let familyIds: ReadonlyArray<string>;
+	try {
+		familyIds = await opts.sessionFamilyIndex.listFamilyIds(opts.sid);
+	} catch (error) {
+		return { outcome: "failed", step: 1, errors: [error] };
+	}
+
+	// §6.2 Step 2: fanout — collect-and-tally.
+	// Per §6.2 critical rule: HALT before Step 3 if ANY op failed (preserves
+	// bookkeeping for retry — orphan family revocation MUST be visible to a
+	// retry attempt; running Step 3 would erase that bookkeeping and silently
+	// mark the cascade complete despite an un-revoked family).
+	//
+	// Note: broadcastBackchannelLogout is invoked by routes/logout.mts BEFORE
+	// cascadeLogout (it's "best-effort — never throws" per its own contract),
+	// so it is functionally equivalent to being a no-throw Step 2 op here.
+	const stepTwoFailures: unknown[] = [];
+
+	for (const familyId of familyIds) {
 		try {
 			await opts.refreshTokenStore.revokeFamily(familyId);
 		} catch (error) {
-			return { outcome: "failed", step: 1, error };
+			stepTwoFailures.push(error);
+			logger.warn(
+				`cascadeLogout: refreshTokenStore.revokeFamily(${familyId}) failed (continuing tally):`,
+				error,
+			);
 		}
 	}
 
-	// Step 2: delete federation tokens. Best-effort.
 	try {
 		await opts.federationTokenStore.deleteBySession(opts.sid);
 	} catch (error) {
-		const logger = opts.logger ?? console;
+		stepTwoFailures.push(error);
 		logger.warn(
-			`cascadeLogout: FederationTokenStore.deleteBySession(${opts.sid}) failed (continuing):`,
+			`cascadeLogout: federationTokenStore.deleteBySession(${opts.sid}) failed (continuing tally):`,
 			error,
 		);
 	}
 
-	// Step 3: delete session record.
+	if (stepTwoFailures.length > 0) {
+		return { outcome: "failed", step: 2, errors: stepTwoFailures };
+	}
+
+	// §6.2 Step 3: reverse-index cleanup. Best-effort — log + continue, never
+	// halt. Orphan reverse-index entries are bounded by TTL.
+	await opts.sessionRPRegistry.removeBySid(opts.sid).catch((error) => {
+		logger.warn(`cascadeLogout: sessionRPRegistry.removeBySid(${opts.sid}) failed:`, error);
+	});
+	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
+		logger.warn(`cascadeLogout: sessionFamilyIndex.removeBySid(${opts.sid}) failed:`, error);
+	});
+	await opts.sessionFederationIndex.removeBySid(opts.sid).catch((error) => {
+		logger.warn(`cascadeLogout: sessionFederationIndex.removeBySid(${opts.sid}) failed:`, error);
+	});
+
+	// §6.2 Step 4: primary invalidation — must succeed.
 	try {
 		await opts.userSessionStore.delete(opts.sid);
 	} catch (error) {
-		return { outcome: "failed", step: 3, error };
+		return { outcome: "failed", step: 4, errors: [error] };
 	}
 
 	return { outcome: "done" };

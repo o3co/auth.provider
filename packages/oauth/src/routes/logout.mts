@@ -442,15 +442,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				return res.status(200).json({ logged_out: true });
 			}
 
-			// A4 §6.2 Step 1: read all reverse-index source data once.
+			// A4 §6.2 Step 1 (route-level read for pre-cascade ops):
+			//   - rps: needed by broadcastBackchannelLogout (best-effort, before cascade)
+			//   - federations: needed for IdP endSession redirect (route handler step 5)
+			// familyIds is read internally by cascadeLogout per §6.2 Step 1.
 			let rps: Awaited<ReturnType<typeof opts.sessionRPRegistry.listRPs>>;
 			let federations: ReadonlyArray<string>;
-			let familyIds: ReadonlyArray<string>;
 			try {
-				[rps, federations, familyIds] = await Promise.all([
+				[rps, federations] = await Promise.all([
 					opts.sessionRPRegistry.listRPs(sid),
 					opts.sessionFederationIndex.listFederations(sid),
-					opts.sessionFamilyIndex.listFamilyIds(sid),
 				]);
 			} catch (err) {
 				const logger = opts.logger ?? console;
@@ -508,10 +509,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Step 6: Cascade logout.
 			const cascade = await cascadeLogout({
 				sid,
-				familyIds,
 				refreshTokenStore: opts.refreshTokenStore,
 				federationTokenStore: opts.federationTokenStore,
 				userSessionStore: opts.userSessionStore,
+				sessionRPRegistry: opts.sessionRPRegistry,
+				sessionFamilyIndex: opts.sessionFamilyIndex,
+				sessionFederationIndex: opts.sessionFederationIndex,
 				logger: opts.logger,
 			});
 
