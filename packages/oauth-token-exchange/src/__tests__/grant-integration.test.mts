@@ -79,6 +79,10 @@ function buildHandler(store: RefreshTokenStoreBase) {
 			issuer: ISSUER,
 		}),
 	);
+	// ExchangeTokenValidatorRegistry is structurally compatible with
+	// TokenExchangeValidatorResolver (both expose .get); A2-γ §3.3 removed
+	// the registry from the public surface but the class remains for
+	// test scaffolding.
 	return createTokenExchangeGrant({
 		config: {
 			oauth: {
@@ -91,7 +95,7 @@ function buildHandler(store: RefreshTokenStoreBase) {
 		} as any,
 		keyStore,
 		refreshTokenStore: store,
-		validatorRegistry: registry,
+		tokenExchangeValidatorResolver: registry,
 		clientRepository,
 	});
 }
@@ -167,40 +171,42 @@ describe("token_exchange — integration", () => {
 		});
 	});
 
-	it("registers successfully via GrantRegistry.addModule", async () => {
-		// Guard against drift between the GrantModule wiring and the grant handler.
-		const { GrantRegistry } = await import("@o3co/auth-provider-core");
+	it("registers token_exchange grant + access_token validator via createTestApp boot", async () => {
+		// Guard against drift between the defineModule manifest and the grant
+		// handler. Per A2-γ §3.3: tokenExchangeModule is a static defineModule
+		// value; addModule is replaced by createTestApp boot. The built-in
+		// validator contribution flows through the planner's
+		// tokenExchangeValidators collector and is read back via deps.
+		const { defineModule } = await import("@o3co/auth-provider-core");
+		const { createTestApp, makeValidAppConfig } = await import("@o3co/auth-provider-core/testing");
 		const { tokenExchangeModule } = await import("#/module.mjs");
-		const store = makeStatefulStore();
-		const registry = new ExchangeTokenValidatorRegistry();
-		registry.register(
-			ACCESS_TOKEN_TYPE,
-			createSelfIssuedAccessTokenValidator({
-				keyStore,
-				refreshTokenStore: store,
-				issuer: ISSUER,
-			}),
-		);
 
-		const grantRegistry = new GrantRegistry();
-		grantRegistry.addModule(tokenExchangeModule, {
-			config: {
-				oauth: {
-					jwt: { issuer: ISSUER },
-					accessToken: { expiresIn: 300 },
-					refreshToken: { expiresIn: 86400 },
-					grants: {},
-				},
-				// biome-ignore lint/suspicious/noExplicitAny: test scaffold
-			} as any,
-			keyStore,
-			refreshTokenStore: store,
-			validatorRegistry: registry,
-			clientRepository,
-			// biome-ignore lint/suspicious/noExplicitAny: extra deps beyond GrantDependencies base type
-		} as any);
+		const clientRepositoryModule = defineModule({
+			name: "test:client-repository",
+			provides: { clientRepository: () => clientRepository },
+		});
+		const keyStoreModule = defineModule({
+			name: "test:key-store",
+			provides: { keyStore: () => keyStore },
+		});
 
-		const handler = grantRegistry.get(TOKEN_EXCHANGE_GRANT_TYPE);
-		expect(handler).toBeDefined();
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: ISSUER },
+			},
+		};
+
+		const handle = await createTestApp({
+			modules: [tokenExchangeModule, clientRepositoryModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+
+		expect(handle.inspect.grants.has(TOKEN_EXCHANGE_GRANT_TYPE)).toBe(true);
+		expect(handle.inspect.tokenExchangeValidators.get(ACCESS_TOKEN_TYPE)).toBeDefined();
+
+		await handle.dispose();
 	});
 });

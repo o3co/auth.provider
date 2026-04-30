@@ -26,19 +26,30 @@ import type {
 } from "@o3co/auth-provider-core";
 import { formatObject, generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
 import { buildActClaim } from "./act.mjs";
-import type { ExchangeTokenValidatorRegistry } from "./validator/registry.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
-import type { ValidatedToken } from "./validator/types.mjs";
+import type { ExchangeTokenValidator, ValidatedToken } from "./validator/types.mjs";
 
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
 
+/**
+ * Local resolver shape that narrows core's
+ * `TokenExchangeValidatorResolver.get(): unknown | undefined` to the
+ * concrete `ExchangeTokenValidator` type used internally. Core declares
+ * the value as `unknown` to avoid a cross-package import cycle (per
+ * contributes-map.mts placeholder pattern). This grant package owns the
+ * concrete type, so the narrowed shape is local.
+ */
+export interface ExchangeTokenValidatorResolver {
+	get(tokenType: string): ExchangeTokenValidator | undefined;
+}
+
 export interface TokenExchangeDependencies extends GrantDependencies {
-	validatorRegistry: ExchangeTokenValidatorRegistry;
+	tokenExchangeValidatorResolver: ExchangeTokenValidatorResolver;
 	clientRepository: ClientRepository;
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
-	const { validatorRegistry, clientRepository } = deps;
+	const { tokenExchangeValidatorResolver, clientRepository } = deps;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -123,7 +134,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
-			const subjectValidator = validatorRegistry.get(subjectTokenType);
+			const subjectValidator = tokenExchangeValidatorResolver.get(subjectTokenType);
 			if (!subjectValidator) {
 				return {
 					result: {
@@ -161,7 +172,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 			const actorValidator =
 				actorToken !== null && actorTokenType !== null
-					? validatorRegistry.get(actorTokenType)
+					? tokenExchangeValidatorResolver.get(actorTokenType)
 					: null;
 			if (actorToken !== null && actorValidator === undefined) {
 				return {
