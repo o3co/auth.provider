@@ -15,15 +15,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import {
-	type AppConfig,
-	extractUserClaims,
-	type User,
-	type UserRepository,
-	type UserSessionStoreBase,
-} from "@o3co/auth-provider-core";
+import type { AppConfig, User, UserRepository, UserSessionStore } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
+import { extractUserClaims } from "#/internal/extractUserClaims.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -51,7 +46,7 @@ export const createRouter = (
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
-		userSessionStore?: UserSessionStoreBase;
+		userSessionStore?: UserSessionStore;
 		/** Session TTL in milliseconds. Default: 24h. */
 		sessionTtlMs?: number;
 	},
@@ -172,7 +167,6 @@ export const createRouter = (
 							sub: user.id,
 							authTime: now,
 							expiresAt: new Date(now.getTime() + sessionTtlMs),
-							federations: [],
 							claims,
 						});
 					} catch {

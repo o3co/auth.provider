@@ -48,10 +48,8 @@ describe("createFederationProviderFactory", () => {
 		const baseValue: FederationProvider = {
 			name: "stub",
 			scope: [],
-			validateRedirect: () => ({ ok: true, value: undefined }),
-			resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
 			buildAuthorizationUrl: () => new URL("https://example.com"),
-			exchangeCode: async () => ({ issuer: "https://example.com", sub: "x" }),
+			exchangeCode: async () => ({ issuer: "https://example.com", sub: "x", expiresAt: null }),
 		};
 		const asElem: Elem = baseValue;
 		const asBase: FederationProvider = asElem;

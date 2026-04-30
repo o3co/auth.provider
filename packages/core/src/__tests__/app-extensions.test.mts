@@ -21,7 +21,10 @@ import { createInMemoryFederationTokenStore } from "#/federation-tokens/adapters
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "#/mfa/types.mjs";
 import type { GrantPolicyHookBase } from "#/policy/types.mjs";
-import { createInMemoryUserSessionStore } from "#/user-sessions/adapters/memory.mjs";
+import { createInMemorySessionFamilyIndex } from "#/user-sessions/memory/sessionFamilyIndex.mjs";
+import { createInMemorySessionFederationIndex } from "#/user-sessions/memory/sessionFederationIndex.mjs";
+import { createInMemorySessionRPRegistry } from "#/user-sessions/memory/sessionRPRegistry.mjs";
+import { createInMemoryUserSessionStore } from "#/user-sessions/memory/userSessionStore.mjs";
 
 const mockExpress = {
 	Router: () =>
@@ -233,6 +236,56 @@ describe("createApp — grantPolicy / jwt.issuer consistency guard (CP-20)", () 
 	});
 });
 
+describe("createApp — A4 composition-root invariant (any user-session store ⟹ all 4)", () => {
+	it("composition-root invariant: providing only userSessionStore (without federations configured) throws", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: mockConfig,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				// sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex omitted
+			}),
+		).toThrow(/A4 composition-root invariant/);
+	});
+
+	it("composition-root invariant: error message enumerates provided and missing slots", () => {
+		let thrown: Error | undefined;
+		try {
+			createApp({
+				express: mockExpress,
+				config: mockConfig,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				// sessionFamilyIndex and sessionFederationIndex omitted
+			});
+		} catch (e) {
+			thrown = e as Error;
+		}
+		expect(thrown).toBeDefined();
+		expect(thrown?.message).toMatch(/Provided: \[userSessionStore, sessionRPRegistry\]/);
+		expect(thrown?.message).toMatch(/Missing: \[sessionFamilyIndex, sessionFederationIndex\]/);
+	});
+
+	it("composition-root invariant: providing all 4 (without federations configured) does NOT throw", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: mockConfig,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+				sessionFederationIndex: createInMemorySessionFederationIndex(),
+			}),
+		).not.toThrow();
+	});
+});
+
 describe("createApp — TODO-F-1 federation store plumbing", () => {
 	const configWithFederations = {
 		...mockConfig,
@@ -247,6 +300,8 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 	} as unknown as AppConfig;
 
 	it("throws when federations configured without federationTokenStore", () => {
+		// Supply all 4 sibling stores so the composition-root invariant (A4 §3.4)
+		// is satisfied and the federation-specific guard fires instead.
 		expect(() =>
 			createApp({
 				express: mockExpress,
@@ -254,6 +309,10 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 				keyStore: createSymmetricKeyStore("test-secret"),
 				modules: [],
 				userSessionStore: createInMemoryUserSessionStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+				sessionFederationIndex: createInMemorySessionFederationIndex(),
+				// federationTokenStore deliberately omitted
 			}),
 		).toThrow(/federationTokenStore/);
 	});
@@ -270,7 +329,7 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 		).toThrow(/userSessionStore/);
 	});
 
-	it("accepts federation config when both stores are wired", () => {
+	it("throws when federations configured without sessionRPRegistry", () => {
 		expect(() =>
 			createApp({
 				express: mockExpress,
@@ -279,6 +338,54 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 				modules: [],
 				userSessionStore: createInMemoryUserSessionStore(),
 				federationTokenStore: createInMemoryFederationTokenStore(),
+				// sessionRPRegistry deliberately omitted
+			}),
+		).toThrow(/sessionRPRegistry/);
+	});
+
+	it("throws when federations configured without sessionFamilyIndex", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				// sessionFamilyIndex deliberately omitted
+			}),
+		).toThrow(/sessionFamilyIndex/);
+	});
+
+	it("throws when federations configured without sessionFederationIndex", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+				// sessionFederationIndex deliberately omitted
+			}),
+		).toThrow(/sessionFederationIndex/);
+	});
+
+	it("accepts federation config when all sibling stores are wired", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+				sessionFederationIndex: createInMemorySessionFederationIndex(),
 			}),
 		).not.toThrow();
 	});

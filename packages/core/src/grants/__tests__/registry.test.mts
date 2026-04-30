@@ -15,7 +15,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { GrantRegistry } from "#/grants/registry.mjs";
+import { GrantRegistry, GrantRegistryError } from "#/grants/registry.mjs";
 import type {
 	GrantDependencies,
 	GrantFactory,
@@ -24,7 +24,7 @@ import type {
 } from "#/grants/types.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
-const makeHandler = (name: string): GrantHandler => ({
+const makeHandler = (_name: string): GrantHandler => ({
 	handle: vi.fn().mockResolvedValue({
 		result: { status: 200, tokens: {} },
 	}),
@@ -198,5 +198,244 @@ describe("GrantRegistry.addModule", () => {
 
 		// deps passed through unmodified
 		expect(receivedDeps).toBe(deps);
+	});
+});
+
+describe("GrantRegistry.register (A6+A7 §2.1: throw on duplicate)", () => {
+	it("registers a handler under a fresh name", () => {
+		const registry = new GrantRegistry();
+		registry.register("foo", makeHandler("a"));
+		expect(registry.get("foo")).toBeDefined();
+	});
+
+	it("throws GrantRegistryError reason='duplicate' on duplicate name", () => {
+		const registry = new GrantRegistry();
+		registry.register("foo", makeHandler("a"));
+		let caught: unknown;
+		try {
+			registry.register("foo", makeHandler("b"));
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(GrantRegistryError);
+		if (caught instanceof GrantRegistryError) {
+			expect(caught.reason).toBe("duplicate");
+			expect(caught.grantType).toBe("foo");
+			expect(caught.registered).toEqual(["foo"]);
+		}
+	});
+
+	it("does NOT silently overwrite — original handler remains after duplicate throw", () => {
+		const registry = new GrantRegistry();
+		const original = makeHandler("original");
+		registry.register("foo", original);
+		expect(() => registry.register("foo", makeHandler("replacement"))).toThrow(GrantRegistryError);
+		expect(registry.get("foo")).toBe(original);
+	});
+});
+
+describe("GrantRegistry.replace (A6+A7 §2.2: explicit override)", () => {
+	it("overwrites a registered handler (happy path)", () => {
+		const registry = new GrantRegistry();
+		const original = makeHandler("original");
+		const replacement = makeHandler("replacement");
+		registry.register("foo", original);
+		registry.replace("foo", replacement);
+		expect(registry.get("foo")).toBe(replacement);
+	});
+
+	it("throws GrantRegistryError reason='unknown' when name is not registered", () => {
+		const registry = new GrantRegistry();
+		let caught: unknown;
+		try {
+			registry.replace("absent", makeHandler("x"));
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(GrantRegistryError);
+		if (caught instanceof GrantRegistryError) {
+			expect(caught.reason).toBe("unknown");
+			expect(caught.grantType).toBe("absent");
+			expect(caught.registered).toEqual([]);
+		}
+	});
+
+	it("throws GrantRegistryError reason='frozen' on a frozen registry", () => {
+		const registry = new GrantRegistry();
+		registry.register("foo", makeHandler("a"));
+		registry.freeze();
+		let caught: unknown;
+		try {
+			registry.replace("foo", makeHandler("b"));
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(GrantRegistryError);
+		if (caught instanceof GrantRegistryError) {
+			expect(caught.reason).toBe("frozen");
+			expect(caught.grantType).toBe("foo");
+		}
+	});
+});
+
+describe("GrantRegistry.freeze (A6+A7 §2.3: activation boundary)", () => {
+	it("blocks register on a frozen registry with reason='frozen'", () => {
+		const registry = new GrantRegistry();
+		registry.freeze();
+		let caught: unknown;
+		try {
+			registry.register("foo", makeHandler("a"));
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(GrantRegistryError);
+		if (caught instanceof GrantRegistryError) {
+			expect(caught.reason).toBe("frozen");
+		}
+	});
+
+	it("is idempotent (calling freeze twice is a no-op)", () => {
+		const registry = new GrantRegistry();
+		registry.freeze();
+		expect(() => registry.freeze()).not.toThrow();
+	});
+
+	it("allows get on a frozen registry", () => {
+		const registry = new GrantRegistry();
+		registry.register("foo", makeHandler("a"));
+		registry.freeze();
+		expect(registry.get("foo")).toBeDefined();
+	});
+
+	it("frozen precedence: duplicate-after-freeze throws reason='frozen' (NOT 'duplicate')", () => {
+		// Per A6+A7 §2.3: "After freeze(): register throws with reason='frozen'".
+		// This is unconditional — when both freeze and duplicate conditions
+		// hold, "frozen" wins. The frozen check runs before the duplicate
+		// check in the impl to honour this precedence.
+		const registry = new GrantRegistry();
+		registry.register("foo", makeHandler("a"));
+		registry.freeze();
+		let caught: unknown;
+		try {
+			registry.register("foo", makeHandler("b"));
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(GrantRegistryError);
+		if (caught instanceof GrantRegistryError) {
+			expect(caught.reason).toBe("frozen");
+			expect(caught.grantType).toBe("foo");
+		}
+	});
+});
+
+describe("GrantRegistry.addModule no-side-effect-leak (Codex review P1)", () => {
+	it("throws BEFORE running ANY factory when a name conflict exists", () => {
+		const registry = new GrantRegistry();
+		registry.register("session", makeHandler("existing"));
+
+		const factoryRan: string[] = [];
+		const trackingFactory =
+			(label: string): GrantFactory =>
+			() => {
+				factoryRan.push(label);
+				return makeHandler(label);
+			};
+		const module: GrantModule = {
+			grants: {
+				// "fresh" comes first in iteration order. Pre-check phase
+				// MUST detect the "session" duplicate before fresh's factory
+				// runs.
+				fresh: trackingFactory("fresh"),
+				session: trackingFactory("session"),
+			},
+		};
+		const deps = makeDeps({
+			fresh: { enabled: true },
+			session: { enabled: true },
+		});
+
+		expect(() => registry.addModule(module, deps)).toThrow(GrantRegistryError);
+		// No factory should have run because pre-check caught the duplicate.
+		expect(factoryRan).toEqual([]);
+	});
+
+	it("throws frozen when registry is already sealed (no factory runs)", () => {
+		const registry = new GrantRegistry();
+		registry.freeze();
+
+		const factoryRan: string[] = [];
+		const trackingFactory =
+			(label: string): GrantFactory =>
+			() => {
+				factoryRan.push(label);
+				return makeHandler(label);
+			};
+		const module: GrantModule = {
+			grants: {
+				newGrant: trackingFactory("newGrant"),
+			},
+		};
+		const deps = makeDeps({ newGrant: { enabled: true } });
+
+		expect(() => registry.addModule(module, deps)).toThrow(GrantRegistryError);
+		expect(factoryRan).toEqual([]);
+	});
+
+	it("skips disabled grants in the pre-check (no false-positive duplicate)", () => {
+		const registry = new GrantRegistry();
+		registry.register("session", makeHandler("existing"));
+
+		const module: GrantModule = {
+			grants: {
+				// session is in the module but disabled in config —
+				// pre-check must skip it (no duplicate error).
+				session: makeFactory("session"),
+				other: makeFactory("other"),
+			},
+		};
+		const deps = makeDeps({
+			session: { enabled: false },
+			other: { enabled: true },
+		});
+
+		// Should NOT throw because the disabled session entry is skipped.
+		registry.addModule(module, deps);
+		expect(registry.get("other")).toBeDefined();
+	});
+});
+
+describe("GrantRegistryError (A6+A7 §2.4: error class shape)", () => {
+	it("carries reason, grantType, and registered snapshot", () => {
+		const err = new GrantRegistryError({
+			reason: "duplicate",
+			grantType: "foo",
+			registered: ["foo", "bar"],
+		});
+		expect(err.reason).toBe("duplicate");
+		expect(err.grantType).toBe("foo");
+		expect(err.registered).toEqual(["foo", "bar"]);
+		expect(err.name).toBe("GrantRegistryError");
+		expect(err.message).toContain("duplicate");
+		expect(err.message).toContain("foo");
+	});
+
+	it("formats unknown-reason message with empty registered list", () => {
+		const err = new GrantRegistryError({
+			reason: "unknown",
+			grantType: "absent",
+			registered: [],
+		});
+		expect(err.message).toContain("unknown");
+		expect(err.message).toContain("absent");
+	});
+
+	it("formats frozen-reason message", () => {
+		const err = new GrantRegistryError({
+			reason: "frozen",
+			grantType: "foo",
+			registered: ["foo"],
+		});
+		expect(err.message).toContain("frozen");
 	});
 });

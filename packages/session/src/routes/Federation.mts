@@ -14,15 +14,17 @@
  * limitations under the License.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import type { AppConfig } from "@o3co/auth-provider-core";
-import {
-	extractUserClaims,
-	type FederationTokenStoreBase,
-	type UserRepository,
-	type UserSessionStoreBase,
+import type {
+	AppConfig,
+	FederationTokenStoreBase,
+	SessionFederationIndex,
+	UserRepository,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { extractUserClaims } from "#/internal/extractUserClaims.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
+import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
 import { type FederationProvider, supportsClaimMapping } from "../federations/types.mjs";
 
 declare module "express-session" {
@@ -53,22 +55,27 @@ export const createRouter = (
 	{
 		config: _config,
 		federationProviders,
+		federationRedirectPolicyResolver,
 		providerCallbackUrls,
 		userRepository,
 		userSessionStore,
+		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 	}: {
 		config: AppConfig;
 		federationProviders: ReadonlyMap<string, FederationProvider>;
+		federationRedirectPolicyResolver: ReadonlyMap<string, FederationRedirectPolicy>;
 		providerCallbackUrls: ReadonlyMap<string, string>;
 		userRepository: UserRepository;
-		userSessionStore: UserSessionStoreBase;
+		userSessionStore: UserSessionStore;
+		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStoreBase;
 		sessionTtlMs?: number;
 	},
 ): Router => {
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
+	if (!sessionFederationIndex) throw new Error("federation routes require sessionFederationIndex");
 	if (!federationTokenStore) throw new Error("federation routes require federationTokenStore");
 	if (!userRepository) throw new Error("federation routes require userRepository");
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
@@ -98,7 +105,16 @@ export const createRouter = (
 						error_description: "redirect_to must be a string",
 					});
 				}
-				const validation = provider.validateRedirect(redirect_to);
+				const policy = federationRedirectPolicyResolver.get(provider.name);
+				if (!policy) {
+					// Pairing invariant fires at boot; this branch is defence-in-depth
+					// against a hypothetical bug bypassing the invariant at runtime.
+					return res.status(500).json({
+						error: "internal_error",
+						error_description: "redirect policy not registered for provider",
+					});
+				}
+				const validation = policy.validateRedirect(redirect_to);
 				if (!validation.ok) {
 					return res.status(validation.status).json({
 						error: validation.error,
@@ -258,7 +274,6 @@ export const createRouter = (
 					sub: user.id,
 					authTime,
 					expiresAt,
-					federations: [provider.name],
 					claims,
 				});
 			} catch (err) {
@@ -269,19 +284,57 @@ export const createRouter = (
 				});
 			}
 
+			// A4 §5.2: federation linkage recorded as a sibling-store operation.
+			// Per A4 §6.1, this call is NOT atomic with userSessionStore.create above.
+			// If addFederation fails, the orphan UserSession is rolled back below; the
+			// caller can re-login to re-establish the link. Compound atomic call rejected
+			// — would violate Theme B (re-coupling of responsibilities).
+			try {
+				await sessionFederationIndex.addFederation(sid, provider.name, expiresAt);
+			} catch (err) {
+				// Rollback the orphan UserSession (created above; addFederation failure
+				// means the session has no federation linkage, which would silently
+				// bypass federation logout / token-attach paths).
+				try {
+					await userSessionStore.delete(sid);
+				} catch {
+					// best-effort — ignore (the original error is the one returned)
+				}
+				console.warn(
+					{ err, provider: provider.name },
+					"sessionFederationIndex.addFederation failed",
+				);
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "Session store unavailable",
+				});
+			}
+
 			// Session fixation mitigation: regenerate the session ID before writing auth state.
-			// This must happen AFTER userSessionStore.create (so we have a sid to restore) but
-			// BEFORE attaching federation tokens or writing session fields.
+			// This must happen AFTER userSessionStore.create + sessionFederationIndex.addFederation
+			// (so we have a sid to restore) but BEFORE attaching federation tokens or writing
+			// session fields.
 			//
 			// Rollback responsibility:
-			//  - If regenerate fails: only userSessionStore.create needs to be rolled back
-			//    (no tokens have been attached yet).
-			//  - If post-regenerate work fails: rollback in REVERSE order (token → userSession).
+			//  - If regenerate fails: both stores need to be rolled back in REVERSE order
+			//    (sessionFederationIndex first, then userSessionStore).
+			//  - If post-regenerate work fails: rollback in REVERSE order
+			//    (token → federationIndex → userSession).
 			const regenerateErr = await new Promise<Error | null>((resolve) => {
 				req.session.regenerate((err: Error | null) => resolve(err));
 			});
 			if (regenerateErr) {
-				// Rollback the orphaned UserSession record.
+				// Rollback in REVERSE order of creation:
+				//   1. sessionFederationIndex.removeBySid (created last — added in step above)
+				//   2. userSessionStore.delete (created first)
+				// Per A4 §6.1: cross-store atomicity is not promised; reverse-order rollback
+				// is best-effort but minimizes the window where one store has the linkage
+				// and the other doesn't.
+				try {
+					await sessionFederationIndex.removeBySid(sid);
+				} catch {
+					// best-effort — ignore
+				}
 				try {
 					await userSessionStore.delete(sid);
 				} catch {
@@ -325,8 +378,15 @@ export const createRouter = (
 					req.session.save((err) => (err ? reject(err as Error) : resolve()));
 				});
 
-				// Resolve redirect URL via provider
-				const redirectResult = provider.resolveCallbackRedirect({ redirectTo });
+				// Resolve redirect URL via policy (Theme B: redirect concerns separated from IdP protocol)
+				const callbackPolicy = federationRedirectPolicyResolver.get(provider.name);
+				if (!callbackPolicy) {
+					return res.status(500).json({
+						error: "internal_error",
+						error_description: "redirect policy not registered for provider",
+					});
+				}
+				const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
 				if (!redirectResult.ok) {
 					return res.status(redirectResult.status).json({
 						error: redirectResult.error,
@@ -336,13 +396,21 @@ export const createRouter = (
 
 				return res.redirect(redirectResult.value);
 			} catch (err) {
-				// Rollback in REVERSE order of creation
+				// Rollback in REVERSE order of creation:
+				//   1. federationTokenStore (attached last, undone first — already here)
+				//   2. sessionFederationIndex.removeBySid (NEW — undone before session)
+				//   3. userSessionStore.delete (created first, undone last)
 				if (attachedToFederation) {
 					try {
 						await federationTokenStore.delete(sid, provider.name);
 					} catch {
 						// best-effort — ignore
 					}
+				}
+				try {
+					await sessionFederationIndex.removeBySid(sid);
+				} catch {
+					// best-effort — ignore
 				}
 				try {
 					await userSessionStore.delete(sid);

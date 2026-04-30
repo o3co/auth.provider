@@ -29,7 +29,10 @@ import {
 	type PublicClient,
 	type RateLimiterBase,
 	type RefreshTokenStoreBase,
-	type UserSessionStoreBase,
+	type SessionFamilyIndex,
+	type SessionFederationIndex,
+	type SessionRPRegistry,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
@@ -70,6 +73,9 @@ export const createOAuthRouter = async (
 		grantPolicy,
 		refreshTokenStore,
 		userSessionStore,
+		sessionRPRegistry,
+		sessionFamilyIndex,
+		sessionFederationIndex,
 		federationTokenStore,
 		getFederationProviders = () => undefined,
 	}: {
@@ -82,7 +88,10 @@ export const createOAuthRouter = async (
 		auditSink?: AuditSinkBase;
 		grantPolicy?: GrantPolicyHookBase;
 		refreshTokenStore?: RefreshTokenStoreBase;
-		userSessionStore?: UserSessionStoreBase;
+		userSessionStore?: UserSessionStore;
+		sessionRPRegistry?: SessionRPRegistry;
+		sessionFamilyIndex?: SessionFamilyIndex;
+		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStoreBase;
 		/**
 		 * Lazy getter for the federation providers Map. Evaluated at request time so
@@ -602,20 +611,44 @@ export const createOAuthRouter = async (
 
 	// Logout (back-channel logout_token signing requires issuer).
 	const logoutSupported =
-		!!userSessionStore && !!federationTokenStore && !!refreshTokenStore && hasIssuer;
+		!!userSessionStore &&
+		!!sessionRPRegistry &&
+		!!sessionFamilyIndex &&
+		!!sessionFederationIndex &&
+		!!federationTokenStore &&
+		!!refreshTokenStore &&
+		hasIssuer;
 
 	// Federation-token endpoint forwards upstream; does NOT need our issuer.
+	// Symmetry with logoutSupported: gates on all 4 sibling stores even
+	// though federationToken only consumes 3 of them. Mirrors A4 §3.4 /
+	// §8.1 composition-root invariant (now structurally enforced in
+	// createApp — when ANY is wired, ALL are wired).
 	const federationTokenSupported =
-		!!userSessionStore && !!federationTokenStore && !!refreshTokenStore;
+		!!userSessionStore &&
+		!!sessionRPRegistry &&
+		!!sessionFamilyIndex &&
+		!!sessionFederationIndex &&
+		!!federationTokenStore &&
+		!!refreshTokenStore;
 
 	if (logoutSupported) {
 		router.use(
 			logoutRoute.createRouter(express, {
 				keyStore,
 				issuer: issuer as string,
-				userSessionStore,
-				federationTokenStore,
-				refreshTokenStore,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				userSessionStore: userSessionStore!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				sessionRPRegistry: sessionRPRegistry!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				sessionFamilyIndex: sessionFamilyIndex!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				sessionFederationIndex: sessionFederationIndex!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				federationTokenStore: federationTokenStore!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				refreshTokenStore: refreshTokenStore!,
 				clientRepository,
 				getFederationProviders,
 				auditSink,
@@ -627,9 +660,14 @@ export const createOAuthRouter = async (
 		router.use(
 			federationTokenRoute.createRouter(express, {
 				keyStore,
-				refreshTokenStore,
-				userSessionStore,
-				federationTokenStore,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				refreshTokenStore: refreshTokenStore!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				userSessionStore: userSessionStore!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				sessionFederationIndex: sessionFederationIndex!,
+				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
+				federationTokenStore: federationTokenStore!,
 				clientRepository,
 				getFederationProviders,
 				auditSink,

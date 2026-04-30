@@ -25,7 +25,12 @@ import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "..
 import type { GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RateLimiterBase } from "../ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
-import type { UserSessionStoreBase } from "../user-sessions/types.mjs";
+import type {
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	UserSessionStore,
+} from "../user-sessions/types.mjs";
 
 /**
  * Resolves a module specifier to a URL/path that can be passed to dynamic import().
@@ -66,7 +71,10 @@ export interface ModuleContext {
 	rateLimiter?: RateLimiterBase;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
-	userSessionStore?: UserSessionStoreBase;
+	userSessionStore?: UserSessionStore;
+	sessionRPRegistry?: SessionRPRegistry;
+	sessionFamilyIndex?: SessionFamilyIndex;
+	sessionFederationIndex?: SessionFederationIndex;
 	federationTokenStore?: FederationTokenStoreBase;
 	/**
 	 * Federation providers Map, populated by the session module during its init phase.
@@ -90,10 +98,18 @@ export interface ModuleContext {
 }
 
 /**
+ * @deprecated v0.4.x manifest shape with imperative `init(context)` callback.
+ * Will be deleted in Phase 9 (A2-γ caller migration). New code MUST use the
+ * v0.5.0 `Module` from `@o3co/auth-provider-core/modules/manifest` instead,
+ * authored via `defineModule({...})`.
+ *
+ * Renamed from `Module` to `LegacyModule` in Phase 1 to free the `Module`
+ * name for the v0.5.0 manifest type at the package boundary.
+ *
  * A composable unit that registers routes and/or grant handlers.
  * Modules are initialized asynchronously to allow dynamic imports via pathResolver.
  */
-export interface Module {
+export interface LegacyModule {
 	name: string;
 	/**
 	 * Optional Zod schema declaring the config shape this module requires.

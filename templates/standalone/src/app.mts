@@ -22,11 +22,13 @@ import {
 	createApp,
 	createDefaultFactories,
 	createFederationTokenStoreFactory,
+	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionRPRegistry,
+	createInMemoryUserSessionStore,
 	createKeyStoreFactory,
-	createUserSessionStoreFactory,
 	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
-	registerBuiltinUserSessionStores,
 } from "@o3co/auth-provider-core";
 import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
 // import { registerGithubFederation } from "@o3co/auth-provider-federation-github";
@@ -146,15 +148,15 @@ await (async (): Promise<void> => {
 	registerBuiltinKeyStores(keyStoreFactory);
 	const keyStore = await keyStoreFactory.create(flattenAdapterConfig(config.oauth.jwt.signingKey));
 
-	// Step 7: Build UserSessionStore and FederationTokenStore (required by sessionModule).
-	const userSessionStoreFactory = createUserSessionStoreFactory();
-	registerBuiltinUserSessionStores(userSessionStoreFactory);
-	const userSessionStore = await userSessionStoreFactory.create(
-		flattenAdapterConfig(
-			(config as { userSessionStore?: { type: string } & Record<string, unknown> })
-				.userSessionStore ?? { type: "memory" },
-		),
-	);
+	// Step 7: Build UserSessionStore and sibling stores (required by sessionModule).
+	// A4 — 4 sibling stores via direct construction.
+	// (v0.4.x factory ergonomics for env-var-driven adapter selection deferred
+	// to issue #98 / Cl-M4. For consumers using the templates, switching to a
+	// redis adapter requires explicit construction with the new module API.)
+	const userSessionStore = createInMemoryUserSessionStore();
+	const sessionRPRegistry = createInMemorySessionRPRegistry();
+	const sessionFamilyIndex = createInMemorySessionFamilyIndex();
+	const sessionFederationIndex = createInMemorySessionFederationIndex();
 
 	const federationTokenStoreFactory = createFederationTokenStoreFactory();
 	registerBuiltinFederationTokenStores(federationTokenStoreFactory);
@@ -176,6 +178,9 @@ await (async (): Promise<void> => {
 		config,
 		keyStore,
 		userSessionStore,
+		sessionRPRegistry,
+		sessionFamilyIndex,
+		sessionFederationIndex,
 		federationTokenStore,
 		modules: [
 			oauthModule({ clientRepository, codeRepository, express }),

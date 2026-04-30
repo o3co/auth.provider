@@ -37,9 +37,11 @@
 		"openid-client": "^6.8.3"
 	},
 	"peerDependencies": {
+		"@o3co/auth-provider-core": "^0.0.0",
 		"@o3co/auth-provider-session": "^0.0.0"
 	},
 	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.2",

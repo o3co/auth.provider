@@ -21,8 +21,9 @@ import {
 	type FederationTokenStoreBase,
 	GrantRegistry,
 	type ModuleContext,
+	type SessionFederationIndex,
 	type UserRepository,
-	type UserSessionStoreBase,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import { describe, expect, it, vi } from "vitest";
@@ -52,19 +53,27 @@ const mockConfig = {
 	},
 } as unknown as AppConfig;
 
-function makeUserSessionStore(): UserSessionStoreBase {
+function makeUserSessionStore(): UserSessionStore {
 	return {
 		kind: "memory",
 		async create() {},
 		async get() {
 			return null;
 		},
-		async registerRP() {},
-		async linkFamily() {},
-		async updateClaims() {},
-		async removeFederation() {},
 		async delete() {},
-	} as unknown as UserSessionStoreBase;
+	};
+}
+
+function makeSessionFederationIndex(): SessionFederationIndex {
+	return {
+		kind: "memory",
+		async addFederation() {},
+		async listFederations() {
+			return [];
+		},
+		async removeFederation() {},
+		async removeBySid() {},
+	};
 }
 
 function makeFederationTokenStore(): FederationTokenStoreBase {
@@ -90,6 +99,7 @@ const makeContext = (overrides?: Partial<ModuleContext>): ModuleContext => ({
 	} as unknown as Router,
 	userSessionStore: makeUserSessionStore(),
 	federationTokenStore: makeFederationTokenStore(),
+	sessionFederationIndex: makeSessionFederationIndex(),
 	...overrides,
 });
 
@@ -110,7 +120,9 @@ describe("sessionModule", () => {
 			} as unknown as UserRepository,
 		});
 
-		await expect(module.init(ctx)).rejects.toThrow(/userSessionStore and federationTokenStore/i);
+		await expect(module.init(ctx)).rejects.toThrow(
+			/userSessionStore, federationTokenStore, and sessionFederationIndex/i,
+		);
 	});
 
 	it("throws when federationTokenStore is missing from context", async () => {
@@ -122,7 +134,9 @@ describe("sessionModule", () => {
 			} as unknown as UserRepository,
 		});
 
-		await expect(module.init(ctx)).rejects.toThrow(/userSessionStore and federationTokenStore/i);
+		await expect(module.init(ctx)).rejects.toThrow(
+			/userSessionStore, federationTokenStore, and sessionFederationIndex/i,
+		);
 	});
 
 	it("mounts /session routes on context.router", async () => {
@@ -150,8 +164,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -323,8 +335,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -365,8 +375,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google-work",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -441,8 +449,6 @@ describe("sessionModule", () => {
 				return {
 					name: cfg.name as string,
 					scope: [],
-					validateRedirect: vi.fn(),
-					resolveCallbackRedirect: vi.fn(),
 					buildAuthorizationUrl: vi.fn(),
 					exchangeCode: vi.fn(),
 				};
@@ -490,8 +496,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "WRONG", // builder returned a different name
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -558,8 +562,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -612,8 +614,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "google",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),
@@ -661,8 +661,6 @@ describe("sessionModule", () => {
 			create: vi.fn().mockResolvedValue({
 				name: "corp",
 				scope: [],
-				validateRedirect: vi.fn(),
-				resolveCallbackRedirect: vi.fn(),
 				buildAuthorizationUrl: vi.fn(),
 				exchangeCode: vi.fn(),
 			}),

@@ -23,7 +23,9 @@ import {
 	GrantRegistry,
 	type ModuleContext,
 	type RefreshTokenStoreBase,
-	type UserSessionStoreBase,
+	type SessionFamilyIndex,
+	type SessionRPRegistry,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import express from "express";
@@ -226,23 +228,28 @@ describe("oauthAuthorizationModule", () => {
 			authTime: new Date(),
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 3600_000),
-			federations: [],
-			activeRPs: [],
-			familyIds: [],
 			claims: {},
 		});
-		const userSessionStore: UserSessionStoreBase = {
+		const userSessionStore: UserSessionStore = {
 			kind: "spy",
 			get: getSpy,
 			create: vi.fn(),
-			registerRP: vi.fn(),
-			linkFamily: vi.fn(),
-			updateClaims: vi.fn(),
-			removeFederation: vi.fn(),
 			delete: vi.fn(),
 		};
+		const sessionRPRegistry: SessionRPRegistry = {
+			kind: "spy",
+			registerRP: vi.fn(async () => {}),
+			listRPs: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const sessionFamilyIndex: SessionFamilyIndex = {
+			kind: "spy",
+			addFamilyId: vi.fn(async () => {}),
+			listFamilyIds: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
-		const ctx = makeContext({ userSessionStore, keyStore });
+		const ctx = makeContext({ userSessionStore, sessionRPRegistry, sessionFamilyIndex, keyStore });
 
 		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code", sid: "sid-wired" });
 		const module = oauthAuthorizationModule({

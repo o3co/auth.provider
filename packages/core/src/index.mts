@@ -22,7 +22,7 @@ export {
 	type BuilderContext,
 	createAdapterFactory,
 } from "./adapters/AdapterFactory.mjs";
-// App factory
+// App factory (legacy — v0.4.x createApp; stays until Phase 9 / A2-γ migration)
 export { type AppOptions, type AppResult, createApp } from "./app.mjs";
 export {
 	createAuditSinkFactory,
@@ -31,6 +31,50 @@ export {
 } from "./audit/factory.mjs";
 // Audit
 export type { AuditEvent, AuditSinkBase, AuditSinkFactory } from "./audit/types.mjs";
+export type {
+	AppHandle,
+	BootErrorDetails,
+	BootErrorReason,
+	BootStage,
+	BootstrapComponentCollisionDetails,
+	BootstrapMap,
+	CircularDependencyDetails,
+	CleanupRecord,
+	CollectedRouteContribution,
+	ConfigValidationFailedDetails,
+	ContributeAndOverrideSameKeyDetails,
+	ContributeFactoryFailedDetails,
+	ContributionCollectorMap,
+	ContributionKindMap,
+	CreateAppOptions,
+	DefaultBootstrapMap,
+	DuplicateContributeDetails,
+	DuplicateModuleNameDetails,
+	DuplicateOverrideDetails,
+	DuplicateProvidesDetails,
+	FederationRedirectPolicyUnpairedDetails,
+	InvalidRouteAdvertisementPathDetails,
+	LifecycleWithoutProvidesDetails,
+	ListCollector,
+	ListShapedOverrideDetails,
+	MissingRequiredComponentDetails,
+	NameKeyedCollector,
+	OrderedRouteContribution,
+	OverrideTargetMissingDetails,
+	ProvidesFactoryFailedDetails,
+	RouteCollector,
+	RouteOrderCycleDetails,
+	RouteOrderTargetMissingDetails,
+	SyntheticKeyCollisionDetails,
+	UnknownContributionKindDetails,
+} from "./boot/index.mjs";
+// Boot planner — v0.5.0 createApp + AppHandle + BootError catalogue
+// `createBootApp` is a temporary alias; Phase 9 drops the alias and the legacy
+// createApp above, leaving a single `createApp` export from ./boot/index.mjs.
+export {
+	BootError,
+	createApp as createBootApp,
+} from "./boot/index.mjs";
 // Configuration
 export {
 	type AppConfig,
@@ -67,7 +111,7 @@ export {
 	generateLogoutToken,
 } from "./grants/logoutToken.mjs";
 // Grant types and interfaces
-export { GrantRegistry } from "./grants/registry.mjs";
+export { GrantRegistry, GrantRegistryError } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
 export {
 	formatObject,
@@ -128,12 +172,48 @@ export type {
 	SupportsRevocation,
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
-// Module system
+// Module system — v0.5.0 manifest types + legacy types for migration.
+// LegacyModule is the deprecated v0.4.x shape (init callback); will be
+// removed in Phase 9 (A2-γ caller migration). New code uses Module
+// (= v0.5.0 manifest type from defineModule()).
 export type {
+	AuditHook,
+	AuditHookFactory,
+	ComponentKey,
+	ComponentMap,
+	ConfigSchema,
+	ContributesMap,
+	ExchangeTokenValidator,
+	ExchangeTokenValidatorFactory,
+	FederationFactory,
+	FederationProvider,
 	FederationProviderHandle,
+	// GrantFactory, GrantHandler: excluded — names collide with legacy
+	// ./grants/types.mjs exports at this boundary. Import from
+	// @o3co/auth-provider-core/modules/manifest directly.
+	GrantHandlerResolver,
+	GrantPolicyHook,
+	LegacyModule,
+	// GrantPolicyHookFactory: excluded — name collides with legacy
+	// ./policy/types.mjs export at this boundary. Import from
+	// @o3co/auth-provider-core/modules/manifest directly.
+	MfaFactor,
+	MfaFactorFactory,
 	Module,
 	ModuleContext,
+	ModuleSpec,
 	PathResolver,
+	Provider,
+	ProviderDeps,
+	RouteContribution,
+	RouteContributionEntry,
+	RouteContributionFactory,
+	RouteHandler,
+	TokenExchangeValidatorResolver,
+} from "./modules/index.mjs";
+export {
+	defineModule,
+	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
 export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
 // Grant policy
@@ -183,17 +263,114 @@ export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
-export { extractUserClaims } from "./user-sessions/claims.mjs";
 export {
+	createSessionFamilyIndexFactory,
+	createSessionFederationIndexFactory,
+	createSessionRPRegistryFactory,
 	createUserSessionStoreFactory,
-	registerBuiltinUserSessionStores,
 } from "./user-sessions/factory.mjs";
-// UserSessionStore — TODO-F-1
+export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
+export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
+export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
+export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
+export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
+// ---------------------------------------------------------------------------
+// A4 user-sessions (post v0.5.0 redesign): 4-way decomposition + Future-Use
+// MutableUserSessionStore. Per spec §5.1-§5.7, §7.1, §8.1.
+// ---------------------------------------------------------------------------
 export type {
 	CreateUserSessionInput,
+	MutableUserSessionStore,
 	RegisteredRP,
+	SessionFamilyIndex,
+	SessionFamilyIndexFactory,
+	SessionFederationIndex,
+	SessionFederationIndexFactory,
+	SessionRPRegistry,
+	SessionRPRegistryFactory,
 	UserSession,
 	UserSessionClaims,
-	UserSessionStoreBase,
+	UserSessionStore,
 	UserSessionStoreFactory,
 } from "./user-sessions/types.mjs";
+
+// ---------------------------------------------------------------------------
+// A1 — Challenge Store + Replay Seen Set + Default Ceremony (Phase 5)
+// ---------------------------------------------------------------------------
+
+// Memory adapters (re-exported so consumers can construct without going through modules)
+export { createMemoryChallengeStore } from "./challenges/adapters/memory.mjs";
+// Canonical key helper (exported for integrators writing their own adapters
+// to preserve cross-adapter parity per A1 §7.3)
+export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";
+// Default composition
+export {
+	createDefaultChallengeCeremony,
+	type DefaultChallengeCeremonyDeps,
+} from "./challenges/ceremony.mjs";
+export type { ChallengeStorageErrorReason } from "./challenges/errors.mjs";
+// Errors
+export { ChallengeStorageError } from "./challenges/errors.mjs";
+// Adapter factories
+export {
+	type ChallengeStoreFactory,
+	createChallengeStoreFactory,
+	registerBuiltinChallengeStores,
+} from "./challenges/factory.mjs";
+// Modules
+export {
+	defaultChallengeCeremonyModule,
+	memoryChallengeStoreModule,
+} from "./challenges/module.mjs";
+// Types
+export type {
+	Challenge,
+	ChallengeCeremony,
+	ChallengeCeremonyOutcome,
+	ChallengeStore,
+} from "./challenges/types.mjs";
+export { createMemoryReplaySeenSet } from "./replay-seen-set/adapters/memory.mjs";
+export {
+	createReplaySeenSetFactory,
+	type ReplaySeenSetFactory,
+	registerBuiltinReplaySeenSets,
+} from "./replay-seen-set/factory.mjs";
+export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
+export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
+
+// ===========================================================================
+// A3 — RefreshTokenFamilyStore + RefreshTokenRotation + RefreshTokenFamilyRevocation
+// ===========================================================================
+
+export { createMemoryRefreshTokenFamilyStore } from "./refresh-token-family/adapters/memory.mjs";
+export {
+	RefreshTokenStorageError,
+	type RefreshTokenStorageErrorReason,
+} from "./refresh-token-family/errors.mjs";
+export {
+	createRefreshTokenFamilyStoreFactory,
+	type RefreshTokenFamilyStoreFactory,
+	registerBuiltinRefreshTokenFamilyStores,
+} from "./refresh-token-family/factory.mjs";
+export {
+	defaultRefreshTokenFamilyRevocationModule,
+	defaultRefreshTokenRotationModule,
+	memoryRefreshTokenFamilyStoreModule,
+} from "./refresh-token-family/module.mjs";
+
+export {
+	createDefaultRefreshTokenFamilyRevocation,
+	type DefaultRefreshTokenFamilyRevocationDeps,
+} from "./refresh-token-family/revocation.mjs";
+export {
+	createDefaultRefreshTokenRotation,
+	type DefaultRefreshTokenRotationDeps,
+} from "./refresh-token-family/rotation.mjs";
+export type {
+	RefreshTokenFamily,
+	RefreshTokenFamilyRevocation,
+	RefreshTokenFamilyStore,
+	RefreshTokenFamilyUpdateResult,
+	RefreshTokenRotation,
+	RefreshTokenRotationOutcome,
+} from "./refresh-token-family/types.mjs";

@@ -243,3 +243,62 @@ describe("createAdapterFactory", () => {
 		expect(receivedTag).toBe("hello");
 	});
 });
+
+describe("AdapterFactory.replace (A6+A7 §2.2: explicit override)", () => {
+	it("overwrites a registered builder (happy path)", async () => {
+		const factory = createAdapterFactory<MockAdapter>("Mock");
+		factory.register("memory", () => ({ name: "v1" }));
+		factory.replace("memory", () => ({ name: "v2" }));
+
+		const adapter = await factory.create({ type: "memory" });
+
+		expect(adapter.name).toBe("v2");
+	});
+
+	it("throws AdapterFactoryError reason='unknown-replace' when type is not registered", () => {
+		const factory = createAdapterFactory<MockAdapter>("Mock");
+		factory.register("a", () => ({ name: "a" }));
+
+		let caught: unknown;
+		try {
+			factory.replace("absent", () => ({ name: "x" }));
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(AdapterFactoryError);
+		if (caught instanceof AdapterFactoryError) {
+			expect(caught.reason).toBe("unknown-replace");
+			expect(caught.kind).toBe("Mock");
+			expect(caught.type).toBe("absent");
+			expect(caught.registered).toEqual(["a"]);
+		}
+	});
+
+	it("formats unknown-replace error message with registered types", () => {
+		const factory = createAdapterFactory<MockAdapter>("Mock");
+		factory.register("a", () => ({ name: "a" }));
+		factory.register("b", () => ({ name: "b" }));
+
+		expect(() => factory.replace("absent", () => ({ name: "x" }))).toThrow(
+			/AdapterFactoryError \[Mock\]: cannot replace type "absent" — not registered\. Registered types: a, b/,
+		);
+	});
+
+	it("formats unknown-replace error message when nothing is registered", () => {
+		const factory = createAdapterFactory<MockAdapter>("Mock");
+
+		expect(() => factory.replace("absent", () => ({ name: "x" }))).toThrow(
+			/AdapterFactoryError \[Mock\]: cannot replace type "absent" — not registered\. No types registered/,
+		);
+	});
+});
+
+describe("AdapterFactory contract: no freeze method (A6+A7 §2.3)", () => {
+	it("does NOT expose a freeze method (composition-root concern)", () => {
+		// Per A6+A7 §2.3: "AdapterFactory does not participate in module
+		// init phases and therefore has no freeze()." Infrastructure builder
+		// composition is not protocol-module registration.
+		const factory = createAdapterFactory<MockAdapter>("Mock");
+		expect("freeze" in factory).toBe(false);
+	});
+});

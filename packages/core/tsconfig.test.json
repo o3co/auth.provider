@@ -1,0 +1,14 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
+	"include": [
+		"src/modules/manifest/**/*.mts",
+		"src/boot/**/*.mts",
+		"src/refresh-token-family/**/*.mts",
+		"src/user-sessions/**/*.mts",
+		"src/adapters/**/*.mts"
+	],
+	"exclude": ["node_modules", "dist"]
+}

@@ -179,7 +179,7 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 			previousKeys: [],
 		});
 
-		const oldToken = await generateToken(
+		const _oldToken = await generateToken(
 			{ sub: "user-expired" },
 			{ keyStore: oldKeyStore, expiresIn: 3600 },
 		);

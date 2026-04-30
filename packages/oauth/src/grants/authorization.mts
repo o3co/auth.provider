@@ -333,8 +333,9 @@ export const createAuthorizationGrant = (
 				}
 			}
 
-			// TODO-F-3: link the new token family to the user session and register
-			// the RP for back/front-channel logout. All calls are fail-closed: if the
+			// TODO-F-3: link the new token family to the user session (via
+			// sessionFamilyIndex.addFamilyId) and register the RP for back/front-channel
+			// logout (via sessionRPRegistry.registerRP). All calls are fail-closed: if the
 			// session store is unavailable or the session was deleted between /authorize
 			// and /token, we return a controlled error rather than issuing tokens that
 			// are invisible to logout orchestration.
@@ -374,23 +375,34 @@ export const createAuthorizationGrant = (
 				// express default handler as an unhandled HTML 500.
 				try {
 					const clientRecord = await clientRepository.findById(client_id);
-					await deps.userSessionStore.linkFamily(sid, familyId);
-					await deps.userSessionStore.registerRP(sid, {
-						clientId: client_id,
-						backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
-							?.backchannelLogoutUri as string | undefined,
-						backchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
-							?.backchannelLogoutSessionRequired as boolean | undefined,
-						frontchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
-							?.frontchannelLogoutUri as string | undefined,
-						frontchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
-							?.frontchannelLogoutSessionRequired as boolean | undefined,
-						registeredAt: new Date(),
-					});
+					// Composition-root invariant (A4 §3.4/§8): the bundled session-stores
+					// module wires all 4 sibling stores together. When deps.userSessionStore is
+					// present (outer guard), sessionFamilyIndex and sessionRPRegistry are also
+					// present. Using ?. would silently no-op on a misconfigured root instead of
+					// surfacing the bug at the throw site.
+					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
+					await deps.sessionFamilyIndex!.addFamilyId(sid, familyId, userSession.expiresAt);
+					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
+					await deps.sessionRPRegistry!.registerRP(
+						sid,
+						{
+							clientId: client_id,
+							backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
+								?.backchannelLogoutUri as string | undefined,
+							backchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
+								?.backchannelLogoutSessionRequired as boolean | undefined,
+							frontchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
+								?.frontchannelLogoutUri as string | undefined,
+							frontchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
+								?.frontchannelLogoutSessionRequired as boolean | undefined,
+							registeredAt: new Date(),
+						},
+						userSession.expiresAt,
+					);
 				} catch {
 					// Fail-closed for any downstream dependency throw in this block —
-					// clientRepository.findById, userSessionStore.linkFamily, or
-					// userSessionStore.registerRP. The errorDescription is intentionally
+					// clientRepository.findById, sessionFamilyIndex.addFamilyId, or
+					// sessionRPRegistry.registerRP. The errorDescription is intentionally
 					// generic because the try spans both client lookup and session-store
 					// mutations; a more specific message would misattribute failures.
 					return {

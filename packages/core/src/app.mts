@@ -22,13 +22,18 @@ import type { FederationTokenStoreBase } from "./federation-tokens/types.mjs";
 import { GrantRegistry } from "./grants/registry.mjs";
 import type { KeyStore } from "./keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "./mfa/types.mjs";
-import type { Module, ModuleContext, PathResolver } from "./modules/types.mjs";
+import type { LegacyModule as Module, ModuleContext, PathResolver } from "./modules/types.mjs";
 import type { GrantPolicyHookBase } from "./policy/types.mjs";
 import type { RateLimiterBase } from "./ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
 import * as healthcheck from "./routes/Healthcheck.mjs";
 import * as jwks from "./routes/Jwks.mjs";
-import type { UserSessionStoreBase } from "./user-sessions/types.mjs";
+import type {
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	UserSessionStore,
+} from "./user-sessions/types.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -49,7 +54,10 @@ export interface AppOptions {
 	rateLimiter?: RateLimiterBase;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
-	userSessionStore?: UserSessionStoreBase;
+	userSessionStore?: UserSessionStore;
+	sessionRPRegistry?: SessionRPRegistry;
+	sessionFamilyIndex?: SessionFamilyIndex;
+	sessionFederationIndex?: SessionFederationIndex;
 	federationTokenStore?: FederationTokenStoreBase;
 }
 
@@ -69,6 +77,41 @@ export function createApp(options: AppOptions): AppResult {
 		if (!options.mfaTransactionStore) {
 			throw new Error("createApp: mfaTransactionStore is required when mfaCoordinator is set");
 		}
+	}
+
+	// Composition-root invariant per A4 §3.4 / §8.1: when ANY of the 4
+	// user-session sibling stores is provided, ALL 4 must be provided.
+	// Partial wiring would leave grant/route handlers with non-null
+	// assertions that throw at runtime (e.g. authorization grant's
+	// deps.sessionFamilyIndex! / sessionRPRegistry! calls inside the
+	// userSessionStore-guarded block).
+	//
+	// The bundled `memorySessionStoresModule` / `redisSessionStoresModule`
+	// wires all 4 in a single decision; consumers using individual
+	// adapter constructors must supply all 4 in AppOptions together.
+	const sessionSlotsProvidedCount = [
+		options.userSessionStore,
+		options.sessionRPRegistry,
+		options.sessionFamilyIndex,
+		options.sessionFederationIndex,
+	].filter((s) => s != null).length;
+	if (sessionSlotsProvidedCount > 0 && sessionSlotsProvidedCount < 4) {
+		const provided: string[] = [];
+		const missing: string[] = [];
+		if (options.userSessionStore != null) provided.push("userSessionStore");
+		else missing.push("userSessionStore");
+		if (options.sessionRPRegistry != null) provided.push("sessionRPRegistry");
+		else missing.push("sessionRPRegistry");
+		if (options.sessionFamilyIndex != null) provided.push("sessionFamilyIndex");
+		else missing.push("sessionFamilyIndex");
+		if (options.sessionFederationIndex != null) provided.push("sessionFederationIndex");
+		else missing.push("sessionFederationIndex");
+		throw new Error(
+			`createApp: A4 composition-root invariant — when ANY user-session sibling store is provided, ALL 4 must be provided. ` +
+				`Provided: [${provided.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
+				`Use memorySessionStoresModule (or redisSessionStoresModule) for single-line wiring of all 4, ` +
+				`or supply all 4 individual adapters via AppOptions.`,
+		);
 	}
 
 	// Spec Section 10.1 — federations configured means stores are required.
@@ -107,6 +150,24 @@ export function createApp(options: AppOptions): AppResult {
 		throw new Error(
 			"createApp: federations are configured but userSessionStore was not provided. " +
 				"Register a UserSessionStore adapter in AppOptions.",
+		);
+	}
+	if (federationsConfigured && !options.sessionRPRegistry) {
+		throw new Error(
+			"createApp: federations are configured but sessionRPRegistry was not provided. " +
+				"Register a SessionRPRegistry adapter in AppOptions (or use memorySessionStoresModule).",
+		);
+	}
+	if (federationsConfigured && !options.sessionFamilyIndex) {
+		throw new Error(
+			"createApp: federations are configured but sessionFamilyIndex was not provided. " +
+				"Register a SessionFamilyIndex adapter in AppOptions (or use memorySessionStoresModule).",
+		);
+	}
+	if (federationsConfigured && !options.sessionFederationIndex) {
+		throw new Error(
+			"createApp: federations are configured but sessionFederationIndex was not provided. " +
+				"Register a SessionFederationIndex adapter in AppOptions (or use memorySessionStoresModule).",
 		);
 	}
 
@@ -156,6 +217,9 @@ export function createApp(options: AppOptions): AppResult {
 		refreshTokenStore: options.refreshTokenStore,
 		grantPolicy: options.grantPolicy,
 		userSessionStore: options.userSessionStore,
+		sessionRPRegistry: options.sessionRPRegistry,
+		sessionFamilyIndex: options.sessionFamilyIndex,
+		sessionFederationIndex: options.sessionFederationIndex,
 		federationTokenStore: options.federationTokenStore,
 	};
 

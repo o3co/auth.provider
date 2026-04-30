@@ -22,7 +22,10 @@ import type {
 	KeyStore,
 	Logger,
 	RefreshTokenStoreBase,
-	UserSessionStoreBase,
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { emitAuditEvent } from "@o3co/auth-provider-core";
 import accepts from "accepts";
@@ -69,7 +72,10 @@ export interface LogoutRouterOptions {
 	keyStore: KeyStore;
 	/** Issuer URL of this auth provider — used for logout_token `iss` claim and iframe `iss` param. */
 	issuer: string;
-	userSessionStore: UserSessionStoreBase;
+	userSessionStore: UserSessionStore;
+	sessionRPRegistry: SessionRPRegistry;
+	sessionFamilyIndex: SessionFamilyIndex;
+	sessionFederationIndex: SessionFederationIndex;
 	federationTokenStore: FederationTokenStoreBase;
 	refreshTokenStore: RefreshTokenStoreBase;
 	clientRepository: ClientRepository;
@@ -247,7 +253,22 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			}
 
 			// Step 7: Verify the named federation is linked to this session.
-			if (!session.federations.includes(name)) {
+			// A4 §6.2 Step 1: read federation index once for membership check.
+			let federations: ReadonlyArray<string>;
+			try {
+				federations = await opts.sessionFederationIndex.listFederations(sid);
+			} catch (error) {
+				logger.warn(
+					`/oauth/federation/${name}/logout: sessionFederationIndex.listFederations failed:`,
+					error,
+				);
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
+
+			if (!federations.includes(name)) {
 				return res.status(404).json({
 					error: "federation_not_linked",
 					error_description: `federation "${name}" is not linked to this session`,
@@ -279,10 +300,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 			// Step 10: Remove federation link from session.
 			try {
-				await opts.userSessionStore.removeFederation(sid, name);
+				await opts.sessionFederationIndex.removeFederation(sid, name);
 			} catch (error) {
 				logger.warn(
-					`/oauth/federation/${name}/logout: userSessionStore.removeFederation failed:`,
+					`/oauth/federation/${name}/logout: sessionFederationIndex.removeFederation failed:`,
 					error,
 				);
 				return res.status(503).json({
@@ -421,10 +442,30 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				return res.status(200).json({ logged_out: true });
 			}
 
+			// A4 §6.2 Step 1 (route-level read for pre-cascade ops):
+			//   - rps: needed by broadcastBackchannelLogout (best-effort, before cascade)
+			//   - federations: needed for IdP endSession redirect (route handler step 5)
+			// familyIds is read internally by cascadeLogout per §6.2 Step 1.
+			let rps: Awaited<ReturnType<typeof opts.sessionRPRegistry.listRPs>>;
+			let federations: ReadonlyArray<string>;
+			try {
+				[rps, federations] = await Promise.all([
+					opts.sessionRPRegistry.listRPs(sid),
+					opts.sessionFederationIndex.listFederations(sid),
+				]);
+			} catch (err) {
+				const logger = opts.logger ?? console;
+				logger.warn("POST /oauth/logout: reverse-index read failed", err);
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "session store unavailable",
+				});
+			}
+
 			// Step 4: Broadcast Back-Channel Logout (best-effort — never throws).
 			if (sub) {
 				await broadcastBackchannelLogout({
-					rps: session.activeRPs,
+					rps,
 					issuer: opts.issuer,
 					sub,
 					sid,
@@ -437,7 +478,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Step 5: Resolve IdP end-session URI for the FIRST federation (spec Open Issue #2).
 			// getFederationProviders() is called at request time so module init order does not matter.
 			let endSessionUri: string | undefined;
-			const firstFederation = session.federations[0];
+			const firstFederation = federations[0];
 			if (firstFederation) {
 				const providers = opts.getFederationProviders();
 				const provider = providers?.get(firstFederation);
@@ -468,10 +509,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Step 6: Cascade logout.
 			const cascade = await cascadeLogout({
 				sid,
-				familyIds: session.familyIds,
 				refreshTokenStore: opts.refreshTokenStore,
 				federationTokenStore: opts.federationTokenStore,
 				userSessionStore: opts.userSessionStore,
+				sessionRPRegistry: opts.sessionRPRegistry,
+				sessionFamilyIndex: opts.sessionFamilyIndex,
+				sessionFederationIndex: opts.sessionFederationIndex,
 				logger: opts.logger,
 			});
 
@@ -502,7 +545,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
-				details: { sid, federations: session.federations },
+				details: { sid, federations },
 			});
 
 			// Validate post_logout_redirect_uri against the initiating client's allowlist ONCE.
@@ -525,12 +568,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
 			const negotiated = accepts(req).type(["application/json", "text/html"]);
 			const acceptsHtml = negotiated === "text/html";
-			const hasFrontchannel = session.activeRPs.some(
+			const hasFrontchannel = rps.some(
 				(rp) => typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0,
 			);
 			if (acceptsHtml && hasFrontchannel) {
 				const html = renderFrontchannelLogoutHtml({
-					rps: session.activeRPs,
+					rps,
 					issuer: opts.issuer,
 					sid,
 					// Use the allowlist-validated URI — prevents open redirect via HTML branch.

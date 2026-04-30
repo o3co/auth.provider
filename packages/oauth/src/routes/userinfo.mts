@@ -18,7 +18,7 @@ import {
 	filterClaimsByScope,
 	type KeyStore,
 	type RefreshTokenStoreBase,
-	type UserSessionStoreBase,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
@@ -31,7 +31,7 @@ type ExpressLike = {
 
 export interface UserinfoRouterOptions {
 	keyStore: KeyStore;
-	userSessionStore?: UserSessionStoreBase;
+	userSessionStore?: UserSessionStore;
 	refreshTokenStore?: RefreshTokenStoreBase;
 }
 

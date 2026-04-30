@@ -14,23 +14,31 @@
  * limitations under the License.
  */
 
+import { defineModule } from "@o3co/auth-provider-core";
 import {
 	codeChallenge,
+	createDefaultFederationRedirectPolicy,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
 	type FederationProvider,
 	type FederationProviderFactory,
-	type FederationResult,
 	type MappedClaims,
 	type RefreshedTokens,
-	resolveCallbackRedirect,
 	type SupportsClaimMapping,
 	type SupportsLogout,
 	type SupportsRefresh,
-	validateRedirect,
 } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
+
+// ComponentMap slot declaration-merge: exposes googleFederationConfig as a typed
+// DI slot. Consumers supply this via a small bootstrap module that reads from
+// app config (per A5 §10.1 const-Module pattern).
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly googleFederationConfig?: GoogleProviderConfig;
+	}
+}
 
 const GOOGLE_ISSUER = "https://accounts.google.com";
 const SCOPES = ["openid", "profile", "email"] as const;
@@ -104,14 +112,6 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	return {
 		name: config.name,
 		scope: SCOPES,
-
-		validateRedirect(url: string): FederationResult<void> {
-			return validateRedirect(url, config);
-		},
-
-		resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string> {
-			return resolveCallbackRedirect(session, config);
-		},
 
 		buildAuthorizationUrl(params: {
 			readonly redirectUri: string;
@@ -231,3 +231,39 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		},
 	};
 }
+
+/**
+ * Const Module for the Google federation integration.
+ *
+ * Contributes both `federations.google` (FederationProvider — upstream OIDC
+ * protocol) and `federationRedirectPolicies.google` (FederationRedirectPolicy
+ * — consumer redirect URL policy).
+ *
+ * Config supplied via the `googleFederationConfig` ComponentMap slot
+ * (per A5 §10.1 const-Module pattern). Single-tenant baseline: one Google
+ * federation under name "google". Multi-tenant consumers wrap with a factory
+ * per A2-α §7.1.
+ *
+ * Per A5 §10.1.
+ */
+export const googleFederationModule = defineModule({
+	name: "federation:google",
+	requires: ["googleFederationConfig"] as const,
+	contributes: {
+		federations: {
+			// const-module path is single-tenant: `provider.name` is forced to the
+			// contribution key "google" regardless of `config.name`. The route
+			// layer keys session state, callback URL lookup, and redirect-policy
+			// resolution by `provider.name`; a divergent `config.name` would
+			// cause silent runtime mismatch (provider.name="MyGoogle" registered
+			// at federations.google → resolver lookup with key "MyGoogle" fails).
+			// Multi-tenant consumers wrap with `(config) => Module` per
+			// A5 §10.1 + A2-α §7.1 — that path supplies the contribution key
+			// and `config.name` together.
+			google: (deps) => ({ ...createGoogleProvider(deps.googleFederationConfig), name: "google" }),
+		},
+		federationRedirectPolicies: {
+			google: (deps) => createDefaultFederationRedirectPolicy(deps.googleFederationConfig),
+		},
+	},
+});

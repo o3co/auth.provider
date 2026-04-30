@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { AppConfig, UserRepository, UserSessionStoreBase } from "@o3co/auth-provider-core";
+import type { AppConfig, UserRepository, UserSessionStore } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -30,7 +30,7 @@ const stubConfig: AppConfig = {
 } as unknown as AppConfig;
 
 /** In-memory UserSessionStore fake that exposes created sessions for assertions */
-function makeUserSessionStore(): UserSessionStoreBase & { sessions: unknown[] } {
+function makeUserSessionStore(): UserSessionStore & { sessions: unknown[] } {
 	const sessions: unknown[] = [];
 	return {
 		kind: "memory",
@@ -41,12 +41,8 @@ function makeUserSessionStore(): UserSessionStoreBase & { sessions: unknown[] } 
 		async get() {
 			return null;
 		},
-		async registerRP() {},
-		async linkFamily() {},
-		async updateClaims() {},
-		async removeFederation() {},
 		async delete() {},
-	} as UserSessionStoreBase & { sessions: unknown[] };
+	} as UserSessionStore & { sessions: unknown[] };
 }
 
 /**
@@ -63,7 +59,7 @@ function makeUserSessionStore(): UserSessionStoreBase & { sessions: unknown[] } 
 function buildApp(
 	opts: {
 		userRepository?: UserRepository;
-		userSessionStore?: UserSessionStoreBase;
+		userSessionStore?: UserSessionStore;
 		sessionTtlMs?: number;
 	} = {},
 ) {
@@ -170,7 +166,6 @@ describe("Session routes — POST /session/login", () => {
 			const saved = store.sessions[0] as {
 				sid: string;
 				sub: string;
-				federations: unknown[];
 				claims: Record<string, unknown>;
 				authTime: unknown;
 				expiresAt: unknown;
@@ -182,9 +177,6 @@ describe("Session routes — POST /session/login", () => {
 
 			// sub matches user.id
 			expect(saved.sub).toBe("u-local-1");
-
-			// federations is explicitly set to []
-			expect(saved.federations).toEqual([]);
 
 			// claims extracted from user
 			expect(saved.claims).toMatchObject({
@@ -295,7 +287,7 @@ describe("Session routes — POST /session/login", () => {
 		});
 
 		it("returns 503 temporarily_unavailable when userSessionStore.create throws (fail-closed)", async () => {
-			const throwingStore: UserSessionStoreBase = {
+			const throwingStore: UserSessionStore = {
 				kind: "memory",
 				async create() {
 					throw new Error("redis down");
@@ -303,10 +295,6 @@ describe("Session routes — POST /session/login", () => {
 				async get() {
 					return null;
 				},
-				async registerRP() {},
-				async linkFamily() {},
-				async updateClaims() {},
-				async removeFederation() {},
 				async delete() {},
 			};
 

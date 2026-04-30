@@ -44,14 +44,31 @@ export type AdapterBuilder<T> = (
  * Name-based adapter registry. Consumers create one factory per "kind" (domain),
  * register a builder per concrete adapter type, and resolve an instance at startup
  * via {@link AdapterFactory.create}.
+ *
+ * Per A6+A7 §2.3: `AdapterFactory` is a composition-root concern and intentionally
+ * has NO `freeze()` method. Infrastructure builder composition is not protocol-
+ * module registration; there is no temporal boundary at which mutation becomes a
+ * contract violation. Throw-on-duplicate `register` + explicit `replace` is
+ * sufficient defence.
  */
 export interface AdapterFactory<T> {
 	/**
-	 * Register a builder for `type`. Throws if `type` is already registered
-	 * (silent-override prevention). Consumers needing override semantics must
-	 * create a new factory instance.
+	 * Register a builder for `type`. Throws {@link AdapterFactoryError} with
+	 * `reason: "duplicate"` if `type` is already registered (silent-override
+	 * prevention). To intentionally override an existing registration, use
+	 * {@link AdapterFactory.replace}.
 	 */
 	register(type: string, builder: AdapterBuilder<T>): void;
+
+	/**
+	 * Overwrite a previously-registered builder. Per A6+A7 §2.2.
+	 *
+	 * - If `type` is registered: replace the builder. Returns `void`.
+	 * - If `type` is NOT registered: throws {@link AdapterFactoryError} with
+	 *   `reason: "unknown-replace"`. Replacing a non-existent entry is an
+	 *   error — the caller's mental model is wrong about what is registered.
+	 */
+	replace(type: string, builder: AdapterBuilder<T>): void;
 
 	/**
 	 * Resolve an adapter from config. The `type` field selects the builder;
@@ -91,6 +108,18 @@ export function createAdapterFactory<T>(kind: string, ctx: BuilderContext = {}):
 			builders.set(type, builder);
 		},
 
+		replace(type: string, builder: AdapterBuilder<T>): void {
+			if (!builders.has(type)) {
+				throw new AdapterFactoryError({
+					reason: "unknown-replace",
+					kind,
+					type,
+					registered: [...builders.keys()],
+				});
+			}
+			builders.set(type, builder);
+		},
+
 		async create(config: { type: string } & Record<string, unknown>): Promise<T> {
 			const builder = builders.get(config.type);
 			if (!builder) {
@@ -110,14 +139,16 @@ export function createAdapterFactory<T>(kind: string, ctx: BuilderContext = {}):
 	};
 }
 
+export type AdapterFactoryErrorReason = "unknown" | "duplicate" | "unknown-replace";
+
 export class AdapterFactoryError extends Error {
-	public readonly reason: "unknown" | "duplicate";
+	public readonly reason: AdapterFactoryErrorReason;
 	public readonly kind: string;
 	public readonly type: string;
 	public readonly registered: readonly string[];
 
 	constructor(args: {
-		reason: "unknown" | "duplicate";
+		reason: AdapterFactoryErrorReason;
 		kind: string;
 		type: string;
 		registered: readonly string[];
@@ -129,7 +160,9 @@ export class AdapterFactoryError extends Error {
 		const detail =
 			args.reason === "unknown"
 				? `unknown type "${args.type}"`
-				: `type "${args.type}" is already registered`;
+				: args.reason === "duplicate"
+					? `type "${args.type}" is already registered`
+					: `cannot replace type "${args.type}" — not registered`;
 		super(`AdapterFactoryError [${args.kind}]: ${detail}. ${registeredSuffix}`);
 		this.name = "AdapterFactoryError";
 		this.reason = args.reason;

@@ -18,7 +18,7 @@ import {
 	AdapterFactoryError,
 	type AppConfig,
 	fullSectionsSchema,
-	type Module,
+	type LegacyModule as Module,
 	type ModuleContext,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
@@ -27,6 +27,10 @@ import {
 	createFederationProviderFactory,
 	type FederationProviderFactory,
 } from "./federations/factory.mjs";
+import {
+	createDefaultFederationRedirectPolicy,
+	type FederationRedirectPolicy,
+} from "./federations/redirect-policy.mjs";
 import type { FederationProvider } from "./federations/types.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
@@ -78,9 +82,13 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 		const config = context.config as AppConfig;
 
 		// Validate that required stores are present before proceeding.
-		if (!context.userSessionStore || !context.federationTokenStore) {
+		if (
+			!context.userSessionStore ||
+			!context.federationTokenStore ||
+			!context.sessionFederationIndex
+		) {
 			throw new Error(
-				"session module requires userSessionStore and federationTokenStore in ModuleContext",
+				"session module requires userSessionStore, federationTokenStore, and sessionFederationIndex in ModuleContext",
 			);
 		}
 
@@ -90,6 +98,9 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 		// Normalize federation config entries and build the provider Map.
 		const federationProviders = new Map<string, FederationProvider>();
+
+		// Build the redirect policy resolver — one entry per enabled federation.
+		const federationRedirectPolicies = new Map<string, FederationRedirectPolicy>();
 
 		// Build the providerCallbackUrls map from config.federations.
 		const providerCallbackUrls = new Map<string, string>();
@@ -184,6 +195,18 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 
 			federationProviders.set(name, provider);
 
+			// Build the default redirect policy for this provider from its config fields.
+			// flatConfig structurally satisfies DefaultFederationRedirectPolicyConfig
+			// (sessionDomain / authCallbackUrl / clientUrl were injected above).
+			federationRedirectPolicies.set(
+				name,
+				createDefaultFederationRedirectPolicy({
+					sessionDomain,
+					authCallbackUrl,
+					clientUrl,
+				}),
+			);
+
 			// Extract callbackURL for this provider's providerCallbackUrls entry.
 			// The callbackURL lives in flatConfig (already extracted from nested/flat shape).
 			const callbackURL =
@@ -219,9 +242,11 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 			_cfr(express, {
 				config,
 				federationProviders,
+				federationRedirectPolicyResolver: federationRedirectPolicies,
 				providerCallbackUrls,
 				userRepository: params.userRepository,
 				userSessionStore: context.userSessionStore,
+				sessionFederationIndex: context.sessionFederationIndex,
 				federationTokenStore: context.federationTokenStore,
 				sessionTtlMs: params.sessionTtlMs,
 			}),

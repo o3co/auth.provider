@@ -31,10 +31,8 @@ export function createTestBaseProvider(name: string): FederationProvider {
 	return {
 		name,
 		scope: [],
-		validateRedirect: () => ({ ok: true, value: undefined }),
-		resolveCallbackRedirect: () => ({ ok: true, value: "/" }),
 		buildAuthorizationUrl: () => new URL("https://example.com/authorize"),
-		exchangeCode: async () => ({ issuer: "https://example.com", sub: "test-sub" }),
+		exchangeCode: async () => ({ issuer: "https://example.com", sub: "test-sub", expiresAt: null }),
 	};
 }
 

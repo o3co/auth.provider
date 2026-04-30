@@ -20,7 +20,12 @@ import type { KeyStore } from "../keys/KeyStore.mjs";
 import type { PathResolver } from "../modules/types.mjs";
 import type { GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
-import type { UserSessionStoreBase } from "../user-sessions/types.mjs";
+import type {
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	UserSessionStore,
+} from "../user-sessions/types.mjs";
 
 export interface SessionData {
 	user?: Record<string, unknown>;
@@ -75,7 +80,10 @@ export interface GrantDependencies {
 	pathResolver?: PathResolver;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
-	userSessionStore?: UserSessionStoreBase;
+	userSessionStore?: UserSessionStore;
+	sessionRPRegistry?: SessionRPRegistry;
+	sessionFamilyIndex?: SessionFamilyIndex;
+	sessionFederationIndex?: SessionFederationIndex;
 }
 
 /**

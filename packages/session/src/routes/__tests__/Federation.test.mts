@@ -16,8 +16,9 @@
 
 import type {
 	FederationTokenStoreBase,
+	SessionFederationIndex,
 	UserRepository,
-	UserSessionStoreBase,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
@@ -132,8 +133,6 @@ function makeFakeProvider(overrides: Partial<FederationProvider> = {}): Federati
 	return {
 		name: "test",
 		scope: ["openid"],
-		validateRedirect: () => ({ ok: true, value: undefined }),
-		resolveCallbackRedirect: (s) => ({ ok: true, value: s.redirectTo ?? "/" }),
 		buildAuthorizationUrl: ({ state, codeVerifier }) => {
 			const url = new URL("https://idp.example.com/authorize");
 			url.searchParams.set("state", state);
@@ -170,7 +169,7 @@ function makeUserRepository(
 	};
 }
 
-function makeUserSessionStore(): UserSessionStoreBase & {
+function makeUserSessionStore(): UserSessionStore & {
 	create: ReturnType<typeof vi.fn>;
 	delete: ReturnType<typeof vi.fn>;
 } {
@@ -178,12 +177,21 @@ function makeUserSessionStore(): UserSessionStoreBase & {
 		kind: "memory",
 		create: vi.fn(async () => {}),
 		get: vi.fn(async () => null),
-		registerRP: vi.fn(async () => {}),
-		linkFamily: vi.fn(async () => {}),
-		updateClaims: vi.fn(async () => {}),
-		removeFederation: vi.fn(async () => {}),
 		delete: vi.fn(async () => {}),
 	};
+}
+
+function makeSessionFederationIndex(
+	override?: Partial<SessionFederationIndex>,
+): SessionFederationIndex {
+	return {
+		kind: "memory",
+		addFederation: vi.fn(async () => {}),
+		listFederations: vi.fn(async () => []),
+		removeFederation: vi.fn(async () => {}),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionFederationIndex;
 }
 
 function makeFederationTokenStore(): FederationTokenStoreBase & {
@@ -206,28 +214,49 @@ function makeFederationTokenStore(): FederationTokenStoreBase & {
 
 const TEST_CALLBACK_URL = "https://app.example.com/session/oauth/federation/test/callback";
 
+/** Default permissive redirect policy for test providers. */
+function makePermissivePolicy() {
+	return {
+		validateRedirect: () => ({ ok: true as const, value: undefined }),
+		resolveCallbackRedirect: (s: { redirectTo?: string }) => ({
+			ok: true as const,
+			value: s.redirectTo ?? "/",
+		}),
+	};
+}
+
 function buildStatelessApp({
 	providers,
 	providerCallbackUrls,
+	federationRedirectPolicyResolver,
 	userRepository,
 	userSessionStore,
+	sessionFederationIndex,
 	federationTokenStore,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
+	federationRedirectPolicyResolver?: ReadonlyMap<string, ReturnType<typeof makePermissivePolicy>>;
 	userRepository?: UserRepository;
-	userSessionStore?: UserSessionStoreBase;
+	userSessionStore?: UserSessionStore;
+	sessionFederationIndex?: SessionFederationIndex;
 	federationTokenStore?: FederationTokenStoreBase;
 }) {
 	const store: SessionStore = new Map();
 	const app = makeSessionApp(store);
+	// Default: permissive policy for every registered provider name
+	const defaultResolver = new Map(
+		[...providers.keys()].map((name) => [name, makePermissivePolicy()]),
+	);
 	app.use(
 		createRouter(express, {
 			config: {} as never,
 			federationProviders: providers,
+			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
+			sessionFederationIndex: sessionFederationIndex ?? makeSessionFederationIndex(),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
 		}),
 	);
@@ -241,17 +270,21 @@ function buildStatelessApp({
 function buildCallbackApp({
 	providers,
 	providerCallbackUrls,
+	federationRedirectPolicyResolver,
 	federation,
 	userRepository,
 	userSessionStore,
+	sessionFederationIndex,
 	federationTokenStore,
 	saveInterceptor,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
+	federationRedirectPolicyResolver?: ReadonlyMap<string, ReturnType<typeof makePermissivePolicy>>;
 	federation: Record<string, unknown>;
 	userRepository?: UserRepository;
-	userSessionStore?: UserSessionStoreBase;
+	userSessionStore?: UserSessionStore;
+	sessionFederationIndex?: SessionFederationIndex;
 	federationTokenStore?: FederationTokenStoreBase;
 	/** Optional middleware inserted AFTER session shim to intercept req.session.save. */
 	saveInterceptor?: express.RequestHandler;
@@ -264,13 +297,19 @@ function buildCallbackApp({
 
 	if (saveInterceptor) app.use(saveInterceptor);
 
+	// Default: permissive policy for every registered provider name
+	const defaultResolver = new Map(
+		[...providers.keys()].map((name) => [name, makePermissivePolicy()]),
+	);
 	app.use(
 		createRouter(express, {
 			config: {} as never,
 			federationProviders: providers,
+			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
+			sessionFederationIndex: sessionFederationIndex ?? makeSessionFederationIndex(),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
 		}),
 	);
@@ -309,12 +348,29 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: undefined as never,
+					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
 				}),
 			).toThrow("federation routes require userSessionStore");
+		});
+
+		it("throws if sessionFederationIndex is missing", () => {
+			expect(() =>
+				createRouter(express, {
+					config: {} as never,
+					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
+					userRepository: makeUserRepository(),
+					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: undefined as never,
+					federationTokenStore: makeFederationTokenStore(),
+					providerCallbackUrls: new Map(),
+				}),
+			).toThrow("federation routes require sessionFederationIndex");
 		});
 
 		it("throws if federationTokenStore is missing", () => {
@@ -322,8 +378,10 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: undefined as never,
 					providerCallbackUrls: new Map(),
 				}),
@@ -335,8 +393,10 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: undefined as never,
 					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: new Map(),
 				}),
@@ -348,8 +408,10 @@ describe("Federation routes", () => {
 				createRouter(express, {
 					config: {} as never,
 					federationProviders: new Map(),
+					federationRedirectPolicyResolver: new Map(),
 					userRepository: makeUserRepository(),
 					userSessionStore: makeUserSessionStore(),
+					sessionFederationIndex: makeSessionFederationIndex(),
 					federationTokenStore: makeFederationTokenStore(),
 					providerCallbackUrls: undefined as never,
 				}),
@@ -491,6 +553,7 @@ describe("Federation routes", () => {
 					issuer: "https://idp.example.com",
 					sub: "", // empty
 					accessToken: "at",
+					expiresAt: null,
 				})),
 			});
 			const providers = new Map([["test", provider]]);
@@ -529,11 +592,12 @@ describe("Federation routes", () => {
 		});
 
 		// Test 10 — happy path
-		it("happy path: creates UserSession, attaches token, sets req.session.sid, redirects to redirectTo", async () => {
+		it("happy path: creates UserSession, addFederation, attaches token, sets req.session.sid, redirects to redirectTo", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const repo = makeUserRepository({ id: "user-1", username: "alice" });
 			const uss = makeUserSessionStore();
+			const sfi = makeSessionFederationIndex();
 			const fts = makeFederationTokenStore();
 
 			const { app } = buildCallbackApp({
@@ -541,6 +605,7 @@ describe("Federation routes", () => {
 				federation: { name: "test", state: "s1", codeVerifier: "v1", redirectTo: "/dashboard" },
 				userRepository: repo,
 				userSessionStore: uss,
+				sessionFederationIndex: sfi,
 				federationTokenStore: fts,
 			});
 			const agent = await plantAndGetAgent(app);
@@ -550,15 +615,23 @@ describe("Federation routes", () => {
 			// resolveCallbackRedirect returns the stored redirectTo
 			expect(res.headers.location).toBe("/dashboard");
 
-			// UserSessionStore.create was called with correct fields
+			// UserSessionStore.create was called with correct fields — NO federations field
 			expect(uss.create).toHaveBeenCalledOnce();
 			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
 				string,
 				unknown
 			>;
 			expect(createArg.sub).toBe("user-1");
-			expect(createArg.federations).toEqual(["test"]);
+			expect(createArg.federations).toBeUndefined();
 			expect(typeof createArg.sid).toBe("string");
+
+			// sessionFederationIndex.addFederation called with (sid, "test", expiresAt)
+			expect(sfi.addFederation).toHaveBeenCalledOnce();
+			const [addSid, addName, addExpiresAt] = (sfi.addFederation as ReturnType<typeof vi.fn>).mock
+				.calls[0] as [string, string, Date];
+			expect(addSid).toBe(createArg.sid);
+			expect(addName).toBe("test");
+			expect(addExpiresAt).toBeInstanceOf(Date);
 
 			// FederationTokenStore.attach called with correct tokens
 			expect(fts.attach).toHaveBeenCalledOnce();
@@ -789,7 +862,7 @@ describe("Federation routes", () => {
 			let regenerateCalled = false;
 			const regenerateInterceptor: express.RequestHandler = (req, _res, next) => {
 				const origRegenerate = req.session.regenerate.bind(req.session);
-				req.session.regenerate = (cb?: (err: unknown) => void) => {
+				req.session.regenerate = (cb: (err: unknown) => void) => {
 					regenerateCalled = true;
 					return origRegenerate(cb);
 				};
@@ -982,6 +1055,189 @@ describe("Federation routes", () => {
 			expect(res.status).toBe(400);
 			expect(JSON.parse(res.text)).toMatchObject({ error: "invalid_request" });
 			expect(provider.exchangeCode).not.toHaveBeenCalled();
+		});
+
+		// -----------------------------------------------------------------------
+		// A4 sibling-store invariants (§6.1 + §13.5)
+		// -----------------------------------------------------------------------
+
+		describe("federation login: A4 sibling-store invariants", () => {
+			// A4-1: Both stores populated on success
+			it("create succeeds + addFederation succeeds → both stores called, no federations in create input", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+				const uss = makeUserSessionStore();
+				const sfi = makeSessionFederationIndex();
+
+				const { app } = buildCallbackApp({
+					providers,
+					federation: { name: "test", state: "s1", codeVerifier: "v1" },
+					userSessionStore: uss,
+					sessionFederationIndex: sfi,
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(302);
+
+				// userSessionStore.create called once with no federations field
+				expect(uss.create).toHaveBeenCalledOnce();
+				const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+					string,
+					unknown
+				>;
+				expect(createArg.federations).toBeUndefined();
+
+				// sessionFederationIndex.addFederation called with (sid, "test", expiresAt)
+				expect(sfi.addFederation).toHaveBeenCalledOnce();
+				const [addSid, addName, addExpiresAt] = (sfi.addFederation as ReturnType<typeof vi.fn>).mock
+					.calls[0] as [string, string, Date];
+				expect(addSid).toBe(createArg.sid);
+				expect(addName).toBe("test");
+				expect(addExpiresAt).toBeInstanceOf(Date);
+			});
+
+			// A4-2: addFederation failure rolls back orphan UserSession → 503
+			it("addFederation failure after create → orphan session rolled back, 503 returned", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+				const uss = makeUserSessionStore();
+				const sfi = makeSessionFederationIndex({
+					addFederation: vi.fn(async () => {
+						throw new Error("redis blip");
+					}),
+				});
+
+				const { app } = buildCallbackApp({
+					providers,
+					federation: { name: "test", state: "s1", codeVerifier: "v1" },
+					userSessionStore: uss,
+					sessionFederationIndex: sfi,
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(503);
+				expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
+
+				// userSessionStore.create was called
+				expect(uss.create).toHaveBeenCalledOnce();
+				// Orphan UserSession rolled back
+				expect(uss.delete).toHaveBeenCalledOnce();
+				const deleteSid = (uss.delete as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+				const createSid = (
+					(uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<string, unknown>
+				).sid as string;
+				expect(deleteSid).toBe(createSid);
+				// No federation token attached
+				expect(sfi.addFederation).toHaveBeenCalledOnce();
+			});
+
+			// A4-3: regenerate failure rolls back BOTH stores in reverse order (federation index first)
+			it("regenerate failure after addFederation rolls back BOTH stores in reverse order (fed first)", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+				const uss = makeUserSessionStore();
+				const sfi = makeSessionFederationIndex();
+
+				const regenerateFailInterceptor: express.RequestHandler = (req, _res, next) => {
+					req.session.regenerate = (cb?: (err: unknown) => void) => {
+						cb?.(new Error("regenerate failed"));
+						return req.session;
+					};
+					next();
+				};
+
+				const { app } = buildCallbackApp({
+					providers,
+					federation: { name: "test", state: "s1", codeVerifier: "v1" },
+					userSessionStore: uss,
+					sessionFederationIndex: sfi,
+					saveInterceptor: regenerateFailInterceptor,
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(500);
+				expect(JSON.parse(res.text)).toMatchObject({ error: "session_create_failed" });
+
+				// Both stores were rolled back
+				expect(sfi.removeBySid).toHaveBeenCalledOnce();
+				expect(uss.delete).toHaveBeenCalledOnce();
+
+				// Verify reverse order: removeBySid (fed index, created last) before delete (session, created first)
+				const removeFedOrder = (sfi.removeBySid as ReturnType<typeof vi.fn>).mock
+					.invocationCallOrder[0];
+				const deleteSessionOrder = (uss.delete as ReturnType<typeof vi.fn>).mock
+					.invocationCallOrder[0];
+				expect(removeFedOrder).toBeLessThan(deleteSessionOrder);
+			});
+
+			// A4-4: post-regenerate failure unwinds federation index before session (REVERSE order)
+			it("post-regenerate rollback also unwinds federation index before session (REVERSE order)", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+				const uss = makeUserSessionStore();
+				const sfi = makeSessionFederationIndex();
+				const fts = makeFederationTokenStore();
+				// Make session.save fail on the post-regenerate save (save 2) to trigger the catch block
+				const saveFailInterceptor: express.RequestHandler = (req, _res, next) => {
+					let saveCalls = 0;
+
+					function patchSave(session: import("express-session").Session) {
+						const orig = session.save.bind(session);
+						session.save = (cb?: (err: unknown) => void) => {
+							saveCalls++;
+							if (saveCalls === 2 && typeof cb === "function") {
+								cb(new Error("session save failed"));
+								return session;
+							}
+							return orig(cb);
+						};
+					}
+
+					patchSave(req.session);
+
+					const origRegenerate = req.session.regenerate.bind(req.session);
+					req.session.regenerate = (cb?: (err: unknown) => void) => {
+						return origRegenerate((err: unknown) => {
+							patchSave(req.session);
+							cb?.(err);
+						});
+					};
+
+					next();
+				};
+
+				const { app } = buildCallbackApp({
+					providers,
+					federation: { name: "test", state: "s1", codeVerifier: "v1" },
+					userSessionStore: uss,
+					sessionFederationIndex: sfi,
+					federationTokenStore: fts,
+					saveInterceptor: saveFailInterceptor,
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(500);
+
+				// federationTokenStore.delete called (token was attached before save failed)
+				expect(fts.delete).toHaveBeenCalledOnce();
+				// sessionFederationIndex.removeBySid called
+				expect(sfi.removeBySid).toHaveBeenCalledOnce();
+				// userSessionStore.delete called
+				expect(uss.delete).toHaveBeenCalledOnce();
+
+				// Verify reverse order: fts.delete → sfi.removeBySid → uss.delete
+				const deleteFtsOrder = (fts.delete as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+				const removeFedOrder = (sfi.removeBySid as ReturnType<typeof vi.fn>).mock
+					.invocationCallOrder[0];
+				const deleteSessionOrder = (uss.delete as ReturnType<typeof vi.fn>).mock
+					.invocationCallOrder[0];
+				expect(deleteFtsOrder).toBeLessThan(removeFedOrder);
+				expect(removeFedOrder).toBeLessThan(deleteSessionOrder);
+			});
 		});
 	});
 });
