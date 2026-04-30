@@ -28,7 +28,12 @@ import type { RateLimiterBase } from "./ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
 import * as healthcheck from "./routes/Healthcheck.mjs";
 import * as jwks from "./routes/Jwks.mjs";
-import type { UserSessionStore } from "./user-sessions/types.mjs";
+import type {
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+	UserSessionStore,
+} from "./user-sessions/types.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -50,6 +55,9 @@ export interface AppOptions {
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
 	userSessionStore?: UserSessionStore;
+	sessionRPRegistry?: SessionRPRegistry;
+	sessionFamilyIndex?: SessionFamilyIndex;
+	sessionFederationIndex?: SessionFederationIndex;
 	federationTokenStore?: FederationTokenStoreBase;
 }
 
@@ -156,6 +164,9 @@ export function createApp(options: AppOptions): AppResult {
 		refreshTokenStore: options.refreshTokenStore,
 		grantPolicy: options.grantPolicy,
 		userSessionStore: options.userSessionStore,
+		sessionRPRegistry: options.sessionRPRegistry,
+		sessionFamilyIndex: options.sessionFamilyIndex,
+		sessionFederationIndex: options.sessionFederationIndex,
 		federationTokenStore: options.federationTokenStore,
 	};
 

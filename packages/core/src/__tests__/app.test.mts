@@ -21,6 +21,11 @@ import type { AppConfig } from "#/config/application.schema.mjs";
 import { GrantRegistry } from "#/grants/registry.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { LegacyModule as Module } from "#/modules/types.mjs";
+import type {
+	SessionFamilyIndex,
+	SessionFederationIndex,
+	SessionRPRegistry,
+} from "#/user-sessions/types.mjs";
 
 const mockExpress = {
 	Router: () =>
@@ -166,6 +171,36 @@ describe("createApp", () => {
 		});
 
 		await expect(result.init()).rejects.toThrow();
+	});
+
+	it("propagates sibling-store slots to ModuleContext", async () => {
+		const stubRPRegistry = { kind: "memory" } as SessionRPRegistry;
+		const stubFamilyIndex = { kind: "memory" } as SessionFamilyIndex;
+		const stubFederationIndex = { kind: "memory" } as SessionFederationIndex;
+
+		let capturedCtx: Record<string, unknown> | undefined;
+		const capturingModule: Module = {
+			name: "sibling-stores-capture",
+			async init(context) {
+				capturedCtx = context as unknown as Record<string, unknown>;
+			},
+		};
+
+		const result = createApp({
+			express: mockExpress,
+			config: mockConfig,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			modules: [capturingModule],
+			sessionRPRegistry: stubRPRegistry,
+			sessionFamilyIndex: stubFamilyIndex,
+			sessionFederationIndex: stubFederationIndex,
+		});
+
+		await result.init();
+
+		expect(capturedCtx?.sessionRPRegistry).toBe(stubRPRegistry);
+		expect(capturedCtx?.sessionFamilyIndex).toBe(stubFamilyIndex);
+		expect(capturedCtx?.sessionFederationIndex).toBe(stubFederationIndex);
 	});
 
 	it("wires healthcheck and jwks routes on router", () => {
