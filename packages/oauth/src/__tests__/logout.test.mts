@@ -23,8 +23,11 @@ import {
 	type FederationTokenStoreBase,
 	type Logger,
 	type RefreshTokenStoreBase,
+	type SessionFamilyIndex,
+	type SessionFederationIndex,
+	type SessionRPRegistry,
 	type UserSession,
-	type UserSessionStoreBase,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { SignJWT } from "jose";
@@ -69,31 +72,57 @@ async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<str
 		.sign(secretKey);
 }
 
-// A minimal valid UserSession with no federations (simplifies most test cases)
+// A minimal valid UserSession (v0.5.0 shape — no derived fields)
 const baseSession: UserSession = {
 	sid: "sid-1",
 	sub: "u-1",
 	authTime: new Date(),
 	createdAt: new Date(),
 	expiresAt: new Date(Date.now() + 3_600_000),
-	federations: [],
-	activeRPs: [],
-	familyIds: ["fam-1"],
 	claims: { email: "alice@example.com" },
 };
 
-function makeSessionStore(override?: Partial<UserSessionStoreBase>): UserSessionStoreBase {
+function makeSessionStore(override?: Partial<UserSessionStore>): UserSessionStore {
 	return {
 		kind: "memory",
 		create: vi.fn(),
 		get: vi.fn().mockResolvedValue(baseSession),
-		registerRP: vi.fn(),
-		linkFamily: vi.fn(),
-		updateClaims: vi.fn(),
-		removeFederation: vi.fn(),
 		delete: vi.fn(),
 		...override,
 	};
+}
+
+function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRPRegistry {
+	return {
+		kind: "memory",
+		registerRP: vi.fn(async () => {}),
+		listRPs: vi.fn(async () => []),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionRPRegistry;
+}
+
+function makeSessionFamilyIndex(override?: Partial<SessionFamilyIndex>): SessionFamilyIndex {
+	return {
+		kind: "memory",
+		addFamilyId: vi.fn(async () => {}),
+		listFamilyIds: vi.fn(async () => ["fam-1"]),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionFamilyIndex;
+}
+
+function makeSessionFederationIndex(
+	override?: Partial<SessionFederationIndex>,
+): SessionFederationIndex {
+	return {
+		kind: "memory",
+		addFederation: vi.fn(async () => {}),
+		listFederations: vi.fn(async () => []),
+		removeFederation: vi.fn(async () => {}),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionFederationIndex;
 }
 
 function makeRefreshStore(override?: Partial<RefreshTokenStoreBase>): RefreshTokenStoreBase {
@@ -127,7 +156,10 @@ function makeClientRepo(override?: Partial<ClientRepository>): ClientRepository 
 }
 
 interface BuildAppOpts {
-	sessionStore?: UserSessionStoreBase;
+	sessionStore?: UserSessionStore;
+	sessionRPRegistry?: SessionRPRegistry;
+	sessionFamilyIndex?: SessionFamilyIndex;
+	sessionFederationIndex?: SessionFederationIndex;
 	refreshStore?: RefreshTokenStoreBase;
 	fedTokenStore?: FederationTokenStoreBase;
 	clientRepo?: ClientRepository;
@@ -145,6 +177,9 @@ function buildApp(opts: BuildAppOpts = {}) {
 		keyStore,
 		issuer: "https://auth.example.com",
 		userSessionStore: opts.sessionStore ?? makeSessionStore(),
+		sessionRPRegistry: opts.sessionRPRegistry ?? makeSessionRPRegistry(),
+		sessionFamilyIndex: opts.sessionFamilyIndex ?? makeSessionFamilyIndex(),
+		sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
 		refreshTokenStore: opts.refreshStore ?? makeRefreshStore(),
 		federationTokenStore: opts.fedTokenStore ?? makeFedTokenStore(),
 		clientRepository: opts.clientRepo ?? makeClientRepo(),
@@ -263,20 +298,17 @@ describe("POST /oauth/logout", () => {
 				if (init?.body) capturedBodies.push(String(init.body));
 				return { ok: true };
 			});
-			const sessionWithRP: UserSession = {
-				...baseSession,
-				sub: "u-1",
-				activeRPs: [
-					{
-						clientId: "rp-no-sid",
-						backchannelLogoutUri: "https://rp.example.com/back-logout",
-						backchannelLogoutSessionRequired: false,
-						registeredAt: new Date(),
-					},
-				],
-			};
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
-			const app = buildApp({ sessionStore, fetchImpl: fetchSpy });
+			const rpData = [
+				{
+					clientId: "rp-no-sid",
+					backchannelLogoutUri: "https://rp.example.com/back-logout",
+					backchannelLogoutSessionRequired: false,
+					registeredAt: new Date(),
+				},
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry, fetchImpl: fetchSpy });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -299,18 +331,16 @@ describe("POST /oauth/logout", () => {
 
 	describe("front-channel HTML response", () => {
 		it("Accept: text/html + session has frontchannelLogoutUri RP → 200 text/html with <iframe>", async () => {
-			const sessionWithRP: UserSession = {
-				...baseSession,
-				activeRPs: [
-					{
-						clientId: "rp-1",
-						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-						registeredAt: new Date(),
-					},
-				],
-			};
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
-			const app = buildApp({ sessionStore });
+			const rpData = [
+				{
+					clientId: "rp-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+				},
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -324,16 +354,13 @@ describe("POST /oauth/logout", () => {
 
 	describe("HTML branch open-redirect defense", () => {
 		it("unregistered post_logout_redirect_uri is NOT embedded in redirect script (open redirect defense)", async () => {
-			const sessionWithRP: UserSession = {
-				...baseSession,
-				activeRPs: [
-					{
-						clientId: "client-1",
-						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-						registeredAt: new Date(),
-					},
-				],
-			};
+			const rpData = [
+				{
+					clientId: "client-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+				},
+			];
 			// Client does NOT include evil.example in postLogoutRedirectUris
 			const clientRepo = makeClientRepo({
 				findById: vi.fn().mockResolvedValue({
@@ -343,8 +370,9 @@ describe("POST /oauth/logout", () => {
 					postLogoutRedirectUris: ["https://trusted.example.com/logged-out"],
 				}),
 			});
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
-			const app = buildApp({ sessionStore, clientRepo });
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry, clientRepo });
 			const token = await mintIdToken();
 
 			const res = await postLogout(
@@ -363,16 +391,13 @@ describe("POST /oauth/logout", () => {
 		});
 
 		it("registered post_logout_redirect_uri IS embedded in HTML redirect script", async () => {
-			const sessionWithRP: UserSession = {
-				...baseSession,
-				activeRPs: [
-					{
-						clientId: "client-1",
-						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-						registeredAt: new Date(),
-					},
-				],
-			};
+			const rpData = [
+				{
+					clientId: "client-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+				},
+			];
 			const clientRepo = makeClientRepo({
 				findById: vi.fn().mockResolvedValue({
 					clientId: "client-1",
@@ -381,8 +406,9 @@ describe("POST /oauth/logout", () => {
 					postLogoutRedirectUris: ["https://trusted.example.com/logged-out"],
 				}),
 			});
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
-			const app = buildApp({ sessionStore, clientRepo });
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry, clientRepo });
 			const token = await mintIdToken();
 
 			const res = await postLogout(
@@ -451,11 +477,10 @@ describe("POST /oauth/logout", () => {
 
 	describe("federation end-session redirect", () => {
 		it("session.federations has provider with endSession → 303 to mock endSession URL", async () => {
-			const sessionWithFed: UserSession = {
-				...baseSession,
-				federations: ["google"],
-			};
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithFed) });
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn(async () => ["google"]),
+			});
 
 			const mockEndSessionUrl = new URL("https://accounts.google.com/logout?id_token_hint=x");
 			const mockProvider: FederationProviderHandle & {
@@ -468,7 +493,11 @@ describe("POST /oauth/logout", () => {
 				["google", mockProvider],
 			]);
 
-			const app = buildApp({ sessionStore, getFederationProviders: () => federationProviders });
+			const app = buildApp({
+				sessionStore,
+				sessionFederationIndex,
+				getFederationProviders: () => federationProviders,
+			});
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -496,6 +525,23 @@ describe("POST /oauth/logout", () => {
 				get: vi.fn().mockRejectedValue(new Error("redis down")),
 			});
 			const app = buildApp({ sessionStore: throwingStore });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+	});
+
+	describe("reverse-index pre-fetch throws (fail-closed)", () => {
+		it("POST /logout returns 503 when reverse-index pre-fetch fails", async () => {
+			const sessionRPRegistry = makeSessionRPRegistry({
+				listRPs: vi.fn(async () => {
+					throw new Error("redis down");
+				}),
+			});
+			const app = buildApp({ sessionRPRegistry });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -542,18 +588,16 @@ describe("POST /oauth/logout", () => {
 		});
 
 		it("200 HTML front-channel response sets Cache-Control: no-store and Pragma: no-cache", async () => {
-			const sessionWithRP: UserSession = {
-				...baseSession,
-				activeRPs: [
-					{
-						clientId: "rp-1",
-						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-						registeredAt: new Date(),
-					},
-				],
-			};
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
-			const app = buildApp({ sessionStore });
+			const rpData = [
+				{
+					clientId: "rp-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+				},
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
@@ -566,18 +610,16 @@ describe("POST /oauth/logout", () => {
 
 	describe("q-weighted Accept header content negotiation", () => {
 		it("application/json > text/html returns JSON (not HTML)", async () => {
-			const sessionWithRP: UserSession = {
-				...baseSession,
-				activeRPs: [
-					{
-						clientId: "rp-1",
-						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-						registeredAt: new Date(),
-					},
-				],
-			};
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
-			const app = buildApp({ sessionStore });
+			const rpData = [
+				{
+					clientId: "rp-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+				},
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry });
 			const token = await mintIdToken();
 
 			const res = await postLogout(
@@ -591,18 +633,16 @@ describe("POST /oauth/logout", () => {
 		});
 
 		it("Accept: */* falls back to JSON (not HTML)", async () => {
-			const sessionWithRP: UserSession = {
-				...baseSession,
-				activeRPs: [
-					{
-						clientId: "rp-1",
-						frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
-						registeredAt: new Date(),
-					},
-				],
-			};
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithRP) });
-			const app = buildApp({ sessionStore });
+			const rpData = [
+				{
+					clientId: "rp-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+				},
+			];
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionRPRegistry = makeSessionRPRegistry({ listRPs: vi.fn(async () => rpData) });
+			const app = buildApp({ sessionStore, sessionRPRegistry });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token }, { Accept: "*/*" });
@@ -614,11 +654,10 @@ describe("POST /oauth/logout", () => {
 
 	describe("logger routing for handler-level warnings", () => {
 		it("routes federation endSession failure warning to opts.logger (not console)", async () => {
-			const sessionWithFed: UserSession = {
-				...baseSession,
-				federations: ["google"],
-			};
-			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithFed) });
+			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn(async () => ["google"]),
+			});
 			const throwingProvider: FederationProviderHandle & {
 				endSession: () => Promise<never>;
 			} = {
@@ -629,6 +668,7 @@ describe("POST /oauth/logout", () => {
 			const logger: Logger = { warn: warnSpy };
 			const app = buildApp({
 				sessionStore,
+				sessionFederationIndex,
 				getFederationProviders: () =>
 					new Map<string, FederationProviderHandle>([["google", throwingProvider]]),
 				logger,
@@ -653,15 +693,16 @@ describe("POST /oauth/logout", () => {
 // POST /oauth/federation/:name/logout
 // ---------------------------------------------------------------------------
 
-/** Session that has google linked */
-const sessionWithGoogle: UserSession = {
-	...baseSession,
-	federations: ["google"],
-};
+/** Session that has google linked (v0.5.0 shape — no derived fields) */
+const sessionWithGoogle: UserSession = { ...baseSession };
+const googleFederations = ["google"];
 
 function buildFedLogoutApp(opts: BuildAppOpts = {}) {
 	return buildApp({
 		sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithGoogle) }),
+		sessionFederationIndex: makeSessionFederationIndex({
+			listFederations: vi.fn(async () => googleFederations),
+		}),
 		...opts,
 	});
 }
@@ -711,9 +752,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 	describe("happy path WITHOUT endSession capability", () => {
 		it("returns 200 JSON { disconnected: true } when provider has no endSession method", async () => {
 			const bareProvider: FederationProviderHandle = { name: "github" };
-			const sessionWithGithub: UserSession = { ...baseSession, federations: ["github"] };
 			const app = buildApp({
-				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithGithub) }),
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn(async () => ["github"]),
+				}),
 				getFederationProviders: () =>
 					new Map<string, FederationProviderHandle>([["github", bareProvider]]),
 			});
@@ -1023,10 +1066,12 @@ describe("audit events", () => {
 				record: vi.fn().mockResolvedValue(undefined),
 			};
 			const bareProvider: FederationProviderHandle = { name: "github" };
-			const sessionWithGithub: UserSession = { ...baseSession, federations: ["github"] };
 			const app = buildApp({
 				auditSink,
-				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(sessionWithGithub) }),
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn(async () => ["github"]),
+				}),
 				getFederationProviders: () =>
 					new Map<string, FederationProviderHandle>([["github", bareProvider]]),
 			});
