@@ -94,14 +94,16 @@ describe("SessionFederationIndex concurrency", () => {
 		expect(list.length === 0 || (list.length === 1 && list[0] === "fed-x")).toBe(true);
 	});
 
-	it("insertion-order preserved across serial adds (5ms sleeps for distinct ms scores)", async () => {
+	it("insertion-order preserved across serial adds (load-bearing per A4 §5.4)", async () => {
+		// The internal helper uses a module-level monotonic counter as score
+		// (see redisSidSortedSet.mts), so no inter-add sleep is needed to
+		// guarantee strict insertion order even within the same millisecond.
 		const client = makeIoredisRedisClient(raw);
 		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:order1:" });
 		const expiresAt = new Date(Date.now() + 60_000);
 		const names = ["alpha", "beta", "gamma", "delta", "epsilon"];
 		for (const name of names) {
 			await idx.addFederation("sid-order", name, expiresAt);
-			await new Promise((r) => setTimeout(r, 5));
 		}
 		const list = await idx.listFederations("sid-order");
 		expect(list).toEqual(names);
@@ -112,10 +114,9 @@ describe("SessionFederationIndex concurrency", () => {
 		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:order2:" });
 		const expiresAt = new Date(Date.now() + 60_000);
 		await idx.addFederation("sid-promote", "first", expiresAt);
-		await new Promise((r) => setTimeout(r, 5));
 		await idx.addFederation("sid-promote", "second", expiresAt);
-		await new Promise((r) => setTimeout(r, 5));
-		// Re-add "first" — should NOT move it after "second"
+		// Re-add "first" — must NOT move it after "second" (ZADD NX preserves
+		// the original counter score).
 		await idx.addFederation("sid-promote", "first", expiresAt);
 		const list = await idx.listFederations("sid-promote");
 		expect(list).toEqual(["first", "second"]);
