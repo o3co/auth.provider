@@ -13,33 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { gracefulShutdown } from "@o3co/auth.utils";
-import {
-	type AppConfig,
-	AppConfigSchema,
-	createApp,
-	createDefaultFactories,
-	createFederationTokenStoreFactory,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
-	createInMemorySessionRPRegistry,
-	createInMemoryUserSessionStore,
-	createKeyStoreFactory,
-	registerBuiltinFederationTokenStores,
-	registerBuiltinKeyStores,
-} from "@o3co/auth-provider-core";
-import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
-// import { registerGithubFederation } from "@o3co/auth-provider-federation-github";
-import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
+import { type AppConfig, AppConfigSchema, createApp } from "@o3co/auth-provider-core";
+import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 import {
 	oauthAuthorizationModule,
 	oauthModule,
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
 import {
-	createFederationProviderFactory,
 	createSessionStoreFactory,
 	registerBuiltinSessionStores,
 	sessionModule,
@@ -52,11 +35,15 @@ import helmet from "helmet";
 
 import logger from "#/logger.mjs";
 import { resolveConfigPaths } from "./configPath.mjs";
+import {
+	googleFederationConfigModule,
+	keyStoreModule,
+	repositoriesModule,
+	storesModule,
+} from "./modules.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
-// Layering: {ENV}.conf overrides application.conf.
-// ENV = CONFIG_ENV || NODE_ENV || "development". A missing {ENV}.conf is a
-// boot-time error (fail-fast on typos or unconfigured environments).
+// ENV = CONFIG_ENV || NODE_ENV || "development"; missing {ENV}.conf is fatal.
 const env = process.env.CONFIG_ENV || process.env.NODE_ENV || "development";
 const configDir = new URL("../config/", import.meta.url);
 const configDirPath = fileURLToPath(configDir);
@@ -66,47 +53,9 @@ const config: AppConfig = validate(
 	AppConfigSchema,
 );
 
-const flattenAdapterConfig = (
-	section: ({ type: string } | { provider: string }) & Record<string, unknown>,
-): { type: string } & Record<string, unknown> => {
-	const selector =
-		(section as { type?: string; provider?: string }).type ??
-		(section as { provider?: string }).provider;
-	if (typeof selector !== "string") {
-		throw new TypeError("flattenAdapterConfig: section requires 'type' or 'provider' string");
-	}
-	const sub = section[selector];
-	const flattenedSub =
-		typeof sub === "object" && sub !== null && !Array.isArray(sub)
-			? (sub as Record<string, unknown>)
-			: {};
-	return { type: selector, ...flattenedSub };
-};
-
 await (async (): Promise<void> => {
-	// Step 2: Build repository factories and register built-in adapters (memory / file / etc.).
-	const appDir = path.dirname(fileURLToPath(import.meta.url));
-	const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
-	registerBuiltinAdapters({ userFactory, codeFactory, pathResolver: import.meta.resolve });
-
-	// Step 3: Instantiate client / user / code repositories from config.
-	const clientConfig = flattenAdapterConfig(
-		config.repositories.client as { type: string } & Record<string, unknown>,
-	);
-	if (typeof clientConfig.path === "string") {
-		clientConfig.path = path.resolve(appDir, "..", clientConfig.path);
-	}
-	const clientRepository = await clientFactory.create(clientConfig);
-	const userRepository = await userFactory.create(
-		flattenAdapterConfig(config.repositories.user as { type: string } & Record<string, unknown>),
-	);
-	const codeRepository = await codeFactory.create(
-		flattenAdapterConfig(config.repositories.code as { type: string } & Record<string, unknown>),
-	);
-
-	// Step 4: Create the Express app and apply base security middleware (trust proxy + helmet).
+	// Step 2: Create the Express app and apply base security middleware.
 	const app = express();
-
 	app.set("trust proxy", config.http.trustProxy);
 	app.use(
 		helmet({
@@ -119,19 +68,24 @@ await (async (): Promise<void> => {
 		}),
 	);
 
-	// Step 5: Build the session store from config and mount express-session middleware.
+	// Step 3: Build the Express session store and mount express-session.
+	// (express-session is host-environment middleware, not part of the auth
+	// boot pipeline — wired before createApp so it sits ahead of the router.)
 	const sessionStoreFactory = createSessionStoreFactory();
 	registerBuiltinSessionStores(sessionStoreFactory);
-	const store = await sessionStoreFactory.create(
-		flattenAdapterConfig(config.session.storage as { type: string } & Record<string, unknown>),
-	);
-
+	const sessionStorageSlice = config.session.storage as {
+		type: string;
+	} & Record<string, unknown>;
+	const sessionStore = await sessionStoreFactory.create({
+		type: sessionStorageSlice.type,
+		...((sessionStorageSlice[sessionStorageSlice.type] ?? {}) as Record<string, unknown>),
+	});
 	app.use(
 		session({
 			secret: config.session.secret,
 			resave: false,
 			saveUninitialized: false,
-			store,
+			store: sessionStore,
 			cookie: {
 				path: "/",
 				httpOnly: true,
@@ -143,64 +97,41 @@ await (async (): Promise<void> => {
 		}),
 	);
 
-	// Step 6: Build the JWT signing KeyStore used to issue access / ID tokens.
-	const keyStoreFactory = createKeyStoreFactory();
-	registerBuiltinKeyStores(keyStoreFactory);
-	const keyStore = await keyStoreFactory.create(flattenAdapterConfig(config.oauth.jwt.signingKey));
-
-	// Step 7: Build UserSessionStore and sibling stores (required by sessionModule).
-	// A4 — 4 sibling stores via direct construction.
-	// (v0.4.x factory ergonomics for env-var-driven adapter selection deferred
-	// to issue #98 / Cl-M4. For consumers using the templates, switching to a
-	// redis adapter requires explicit construction with the new module API.)
-	const userSessionStore = createInMemoryUserSessionStore();
-	const sessionRPRegistry = createInMemorySessionRPRegistry();
-	const sessionFamilyIndex = createInMemorySessionFamilyIndex();
-	const sessionFederationIndex = createInMemorySessionFederationIndex();
-
-	const federationTokenStoreFactory = createFederationTokenStoreFactory();
-	registerBuiltinFederationTokenStores(federationTokenStoreFactory);
-	const federationTokenStore = await federationTokenStoreFactory.create(
-		flattenAdapterConfig(
-			(config as { federationTokenStore?: { type: string } & Record<string, unknown> })
-				.federationTokenStore ?? { type: "memory" },
-		),
-	);
-
-	const federationProviderFactory = createFederationProviderFactory();
-	registerGoogleFederation(federationProviderFactory);
-	// registerGithubFederation(federationProviderFactory);
-
-	// Step 8: Compose the OAuth / session modules and build the app router.
-	const { init, router, grantRegistry } = createApp({
-		express,
-		pathResolver: import.meta.resolve,
-		config,
-		keyStore,
-		userSessionStore,
-		sessionRPRegistry,
-		sessionFamilyIndex,
-		sessionFederationIndex,
-		federationTokenStore,
+	// Step 4: Boot the auth pipeline. bootstrapComponents carries only host-
+	// environment values (config + pathResolver per A2-γ §4 worked example);
+	// every other component flows through composition-root-local modules.
+	const handle = await createApp({
 		modules: [
-			oauthModule({ clientRepository, codeRepository, express }),
-			sessionModule({ userRepository, express, federationProviderFactory }),
-			oauthSessionModule({ clientRepository }),
-			oauthAuthorizationModule({ codeRepository, clientRepository }),
+			oauthModule({ config }),
+			oauthSessionModule({ config }),
+			oauthAuthorizationModule({ config }),
+			sessionModule,
+			googleFederationModule,
+			googleFederationConfigModule,
+			keyStoreModule,
+			repositoriesModule,
+			storesModule,
 		],
+		bootstrapComponents: {
+			config,
+			pathResolver: import.meta.resolve,
+		},
 	});
 
-	// Step 9: Run async module init (resolves external deps via pathResolver).
-	await init();
+	// Step 5: Wire host-level routes (healthcheck) before the auth router so
+	// they remain reachable even when the auth pipeline is degraded.
+	app.get("/_healthcheck", (_req, res) => {
+		res.status(200).json({ status: "ok" });
+	});
 
-	// Step 10: Mount the composed router onto the Express app.
-	app.use(router);
-
-	// Step 11: Start the HTTP server.
+	// Step 6: Mount the composed auth router and start the HTTP server.
+	app.use(handle.router);
 	const server = app.listen(config.http.port, (): void => {
 		logger.info(`Server is running on http://localhost:${config.http.port}`);
 	});
 
-	// Step 12: Register graceful shutdown so in-flight grants are cleaned up on SIGTERM / SIGINT.
-	gracefulShutdown(server, () => grantRegistry.cleanup());
+	// Step 7: Graceful shutdown — handle.dispose() runs reverse-topological
+	// per-component cleanup (per A2-β §8.1). Replaces the v0.4.x
+	// grantRegistry.cleanup() bridge.
+	gracefulShutdown(server, () => handle.dispose());
 })();

@@ -17,17 +17,12 @@
 import {
 	type AppConfig,
 	createApp,
-	createFederationTokenStoreFactory,
-	createInMemorySessionFamilyIndex,
-	createInMemorySessionFederationIndex,
-	createInMemorySessionRPRegistry,
-	createInMemoryUserSessionStore,
 	createKeyStoreFactory,
+	defineModule,
 	generateToken,
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
-	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import {
@@ -38,7 +33,8 @@ import {
 import { sessionModule } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { storesModule } from "../modules.mjs";
 
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false },
@@ -85,107 +81,96 @@ const config: AppConfig = {
 	cors: { allowedOrigins: [] },
 };
 
+/**
+ * Test-only repository module — bypasses the file-system-backed repositories
+ * that `repositoriesModule` provides in production. Smoke tests use in-memory
+ * empty repositories to verify the boot pipeline shape, not the data layer.
+ */
+const testRepositoriesModule = defineModule({
+	name: "test:repositories",
+	provides: {
+		clientRepository: () => new InMemoryClientRepository(new Map()),
+		userRepository: () => new InMemoryUserRepository(new Map()),
+		codeRepository: () => new InMemoryCodeRepository(),
+	},
+});
+
+const testKeyStoreModule = defineModule({
+	name: "test:key-store",
+	requires: ["config"] as const,
+	provides: {
+		keyStore: async ({ config: c }) => {
+			const factory = createKeyStoreFactory();
+			registerBuiltinKeyStores(factory);
+			return factory.create({
+				type: "local",
+				...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+			});
+		},
+	},
+});
+
 describe("standalone smoke test", () => {
-	let grantRegistryRef: Awaited<ReturnType<typeof buildApp>>["grantRegistry"];
-	let _appRef: ReturnType<typeof express>;
+	let handleRef: Awaited<ReturnType<typeof buildApp>>["handle"] | undefined;
 
 	async function buildApp() {
-		const clientRepository = new InMemoryClientRepository(new Map());
-		const userRepository = new InMemoryUserRepository(new Map());
-		const codeRepository = new InMemoryCodeRepository();
-
-		const keyStoreFactory = createKeyStoreFactory();
-		registerBuiltinKeyStores(keyStoreFactory);
-		const keyStore = await keyStoreFactory.create({
-			type: "local",
-			...(config.oauth.jwt.signingKey.local ?? {}),
-		});
-
-		// A4 — 4 sibling stores via direct construction (factory pattern removed in v0.5.0).
-		const userSessionStore = createInMemoryUserSessionStore();
-		const sessionRPRegistry = createInMemorySessionRPRegistry();
-		const sessionFamilyIndex = createInMemorySessionFamilyIndex();
-		const sessionFederationIndex = createInMemorySessionFederationIndex();
-
-		const federationTokenStoreFactory = createFederationTokenStoreFactory();
-		registerBuiltinFederationTokenStores(federationTokenStoreFactory);
-		const federationTokenStore = await federationTokenStoreFactory.create({ type: "memory" });
-
-		const { init, router, grantRegistry } = createApp({
-			express,
-			config,
-			keyStore,
-			userSessionStore,
-			sessionRPRegistry,
-			sessionFamilyIndex,
-			sessionFederationIndex,
-			federationTokenStore,
+		const handle = await createApp({
 			modules: [
-				oauthModule({ clientRepository, codeRepository, express }),
-				sessionModule({ userRepository, express }),
-				oauthSessionModule({ clientRepository }),
-				oauthAuthorizationModule({ codeRepository, clientRepository }),
+				oauthModule({ config }),
+				oauthSessionModule({ config }),
+				oauthAuthorizationModule({ config }),
+				sessionModule,
+				testKeyStoreModule,
+				testRepositoriesModule,
+				storesModule,
 			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-
-		await init();
 
 		const app = express();
-		app.use(router);
-
-		return { app, grantRegistry };
+		app.get("/_healthcheck", (_req, res) => {
+			res.status(200).json({ status: "ok" });
+		});
+		app.use(handle.router);
+		return { app, handle };
 	}
 
-	afterAll(async () => {
-		await grantRegistryRef?.cleanup();
+	afterEach(async () => {
+		await handleRef?.dispose();
+		handleRef = undefined;
 	});
 
 	it("GET /_healthcheck returns 200", async () => {
-		const { app, grantRegistry } = await buildApp();
-		grantRegistryRef = grantRegistry;
-		_appRef = app;
-
+		const { app, handle } = await buildApp();
+		handleRef = handle;
 		const res = await request(app).get("/_healthcheck");
 		expect(res.status).toBe(200);
 	});
 
 	it("POST /oauth/token with unsupported grant_type returns 400", async () => {
-		const { app, grantRegistry } = await buildApp();
-		grantRegistryRef = grantRegistry;
-		_appRef = app;
-
+		const { app, handle } = await buildApp();
+		handleRef = handle;
 		const res = await request(app)
 			.post("/oauth/token")
 			.type("form")
 			.send({ grant_type: "unsupported" });
-
 		expect(res.status).toBe(400);
 	});
 
-	it("POST /oauth/token successful response has Cache-Control: no-store", async () => {
-		// We cannot easily trigger a full token issuance without a session,
-		// so we verify the header via a session grant with an authenticated session.
-		// Instead, test that 400 responses do NOT have Cache-Control (only successes do).
-		// The Cache-Control header is set only when "tokens" in result — covered by
-		// the introspect test below which exercises the full response path.
-		const { app, grantRegistry } = await buildApp();
-		grantRegistryRef = grantRegistry;
-		_appRef = app;
-
-		// 400 responses must NOT have Cache-Control: no-store
+	it("POST /oauth/token 400 responses do NOT have Cache-Control: no-store", async () => {
+		const { app, handle } = await buildApp();
+		handleRef = handle;
 		const res = await request(app)
 			.post("/oauth/token")
 			.type("form")
 			.send({ grant_type: "unsupported" });
-
 		expect(res.status).toBe(400);
 		expect(res.headers["cache-control"]).not.toBe("no-store");
 	});
 
 	it("POST /oauth/introspect returns iat in active token response", async () => {
-		const { app, grantRegistry } = await buildApp();
-		grantRegistryRef = grantRegistry;
-		_appRef = app;
+		const { app, handle } = await buildApp();
+		handleRef = handle;
 
 		const ksf = createKeyStoreFactory();
 		registerBuiltinKeyStores(ksf);
