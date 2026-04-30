@@ -20,6 +20,8 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	type SessionFamilyIndex,
+	type SessionRPRegistry,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
@@ -58,6 +60,26 @@ function makeDeps(
 		} as unknown as CodeRepository,
 		clientRepository: clientRepository ?? mockClientRepository,
 	};
+}
+
+function makeSessionFamilyIndex(override?: Partial<SessionFamilyIndex>): SessionFamilyIndex {
+	return {
+		kind: "memory",
+		addFamilyId: vi.fn(async () => {}),
+		listFamilyIds: vi.fn(async () => []),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionFamilyIndex;
+}
+
+function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRPRegistry {
+	return {
+		kind: "memory",
+		registerRP: vi.fn(async () => {}),
+		listRPs: vi.fn(async () => []),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionRPRegistry;
 }
 
 describe("createAuthorizationGrant", () => {
@@ -868,8 +890,6 @@ describe("createAuthorizationGrant", () => {
 			}) {
 				return {
 					kind: "spy",
-					linkFamily: vi.fn(async (_sid: string, _fam: string) => {}),
-					registerRP: vi.fn(async (_sid: string, _rp: unknown) => {}),
 					async create() {},
 					async get(querySid: string) {
 						if (querySid !== session.sid) return null;
@@ -879,14 +899,9 @@ describe("createAuthorizationGrant", () => {
 							authTime: session.authTime,
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3600_000),
-							federations: [] as ReadonlyArray<string>,
-							activeRPs: [] as ReadonlyArray<{ clientId: string; registeredAt: Date }>,
-							familyIds: [] as ReadonlyArray<string>,
 							claims: session.claims,
 						};
 					},
-					async updateClaims() {},
-					async removeFederation() {},
 					async delete() {},
 				};
 			}
@@ -909,6 +924,8 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionFamilyIndex: makeSessionFamilyIndex(),
+					sessionRPRegistry: makeSessionRPRegistry(),
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -953,6 +970,8 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionFamilyIndex: makeSessionFamilyIndex(),
+					sessionRPRegistry: makeSessionRPRegistry(),
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -985,6 +1004,8 @@ describe("createAuthorizationGrant", () => {
 						}),
 					),
 					userSessionStore,
+					sessionFamilyIndex: makeSessionFamilyIndex(),
+					sessionRPRegistry: makeSessionRPRegistry(),
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1062,15 +1083,11 @@ describe("createAuthorizationGrant", () => {
 				// When the store is wired, sid is required so the store can link/register.
 				const userSessionStore = {
 					kind: "spy",
-					linkFamily: vi.fn(),
-					registerRP: vi.fn(),
-					create: vi.fn(),
+					async create() {},
 					async get() {
 						return null;
 					},
-					updateClaims: vi.fn(),
-					removeFederation: vi.fn(),
-					delete: vi.fn(),
+					async delete() {},
 				};
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc" /* no sid */ })),
@@ -1119,35 +1136,34 @@ describe("createAuthorizationGrant", () => {
 				expect(Object.hasOwn(decoded, "sid")).toBe(false);
 			});
 
-			it("calls linkFamily and registerRP when userSessionStore is wired (F-3-3)", async () => {
-				const linkFamilySpy = vi.fn(async (_sid: string, _fam: string) => {});
-				const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown) => {});
+			it("calls addFamilyId and registerRP on sibling stores when userSessionStore is wired (F-3-3)", async () => {
+				const sessionExpiresAt = new Date(Date.now() + 3600_000);
+				const addFamilyIdSpy = vi.fn(async (_sid: string, _fam: string, _exp: Date) => {});
+				const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
 				const userSessionStore = {
 					kind: "spy",
-					linkFamily: linkFamilySpy,
-					registerRP: registerRPSpy,
 					async create() {},
 					async get() {
-						// Return a minimal session so the existence check passes
+						// Return a minimal session so the existence check passes.
+						// expiresAt is captured as sessionExpiresAt for assertion below.
 						return {
 							sid: "session-xyz",
 							sub: "u1",
 							authTime: new Date(),
 							createdAt: new Date(),
-							expiresAt: new Date(Date.now() + 3600_000),
-							federations: [],
-							activeRPs: [],
-							familyIds: [],
+							expiresAt: sessionExpiresAt,
 							claims: {},
 						};
 					},
-					async updateClaims() {},
-					async removeFederation() {},
 					async delete() {},
 				};
+				const sessionFamilyIndex = makeSessionFamilyIndex({ addFamilyId: addFamilyIdSpy });
+				const sessionRPRegistry = makeSessionRPRegistry({ registerRP: registerRPSpy });
 				const deps = {
 					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz" })),
 					userSessionStore,
+					sessionFamilyIndex,
+					sessionRPRegistry,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
@@ -1163,17 +1179,29 @@ describe("createAuthorizationGrant", () => {
 				});
 
 				expect(result.status).toBe(200);
-				expect(linkFamilySpy).toHaveBeenCalledTimes(1);
-				const [sidArg, familyIdArg] = linkFamilySpy.mock.calls[0] as [string, string];
+				expect(addFamilyIdSpy).toHaveBeenCalledTimes(1);
+				const [sidArg, familyIdArg, expiresAtArg] = addFamilyIdSpy.mock.calls[0] as [
+					string,
+					string,
+					Date,
+				];
 				expect(sidArg).toBe("session-xyz");
 				expect(familyIdArg).toMatch(
 					/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
 				);
+				// Per A4 §5.3 TTL contract: expiresAt MUST be passed from session.expiresAt
+				expect(expiresAtArg).toBe(sessionExpiresAt);
 				expect(registerRPSpy).toHaveBeenCalledTimes(1);
-				const [rpSid, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>];
+				const [rpSid, rpData, rpExpiresAt] = registerRPSpy.mock.calls[0] as [
+					string,
+					Record<string, unknown>,
+					Date,
+				];
 				expect(rpSid).toBe("session-xyz");
 				expect(rpData.clientId).toBe("client1");
 				expect(rpData.registeredAt).toBeInstanceOf(Date);
+				// Per A4 §5.2 TTL contract: expiresAt MUST match session.expiresAt
+				expect(rpExpiresAt).toBe(sessionExpiresAt);
 			});
 
 			it("backward compat: issues tokens without userSessionStore (F-3-4)", async () => {
@@ -1204,14 +1232,10 @@ describe("createAuthorizationGrant", () => {
 				// Session deleted after /authorize was issued — get(sid) returns null.
 				const userSessionStore = {
 					kind: "spy",
-					linkFamily: vi.fn(),
-					registerRP: vi.fn(),
 					async create() {},
 					async get() {
 						return null; // session gone
 					},
-					async updateClaims() {},
-					async removeFederation() {},
 					async delete() {},
 				};
 				const deps = {
@@ -1241,14 +1265,10 @@ describe("createAuthorizationGrant", () => {
 				// Store is wired but unavailable when get() is called.
 				const userSessionStore = {
 					kind: "broken",
-					linkFamily: vi.fn(),
-					registerRP: vi.fn(),
 					async create() {},
 					async get() {
 						throw new Error("store down");
 					},
-					async updateClaims() {},
-					async removeFederation() {},
 					async delete() {},
 				};
 				const deps = {
@@ -1281,8 +1301,6 @@ describe("createAuthorizationGrant", () => {
 				};
 				const userSessionStore = {
 					kind: "spy",
-					linkFamily: vi.fn(),
-					registerRP: vi.fn(),
 					async create() {},
 					async get() {
 						return {
@@ -1291,14 +1309,9 @@ describe("createAuthorizationGrant", () => {
 							authTime: new Date(),
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3600_000),
-							federations: [] as ReadonlyArray<string>,
-							activeRPs: [] as ReadonlyArray<{ clientId: string; registeredAt: Date }>,
-							familyIds: [] as ReadonlyArray<string>,
 							claims: {},
 						};
 					},
-					async updateClaims() {},
-					async removeFederation() {},
 					async delete() {},
 				};
 				const deps = {
@@ -1307,6 +1320,8 @@ describe("createAuthorizationGrant", () => {
 						throwingClientRepo,
 					),
 					userSessionStore,
+					sessionFamilyIndex: makeSessionFamilyIndex(),
+					sessionRPRegistry: makeSessionRPRegistry(),
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
