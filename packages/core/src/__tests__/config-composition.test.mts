@@ -92,7 +92,12 @@ describe("CoreConfigSchema", () => {
 			...minimalCoreConfig,
 			oauth: {
 				...minimalCoreConfig.oauth,
-				jwt: { signingKey: { provider: "local", local: { algorithm: "HS256" } } },
+				jwt: {
+					signingKey: {
+						provider: "local",
+						local: { algorithm: "HS256", kid: "v0", previousKeys: [] },
+					},
+				},
 			},
 		});
 		expect(result.success).toBe(true);

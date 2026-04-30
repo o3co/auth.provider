@@ -15,10 +15,11 @@
  */
 import { describe, expect, it } from "vitest";
 import { createBootApp, defineModule } from "../../index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { memorySessionStoresModule } from "../modules/memory.mjs";
 
 const minBoot = {
-	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } },
+	config: makeValidCoreConfig(),
 	pathResolver: (p: string) => p,
 } as never;
 

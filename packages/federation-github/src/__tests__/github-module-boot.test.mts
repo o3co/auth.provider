@@ -34,12 +34,13 @@
  * Per A5 §10.1 + Cl-M2.
  */
 import { createBootApp, defineModule } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import type { FederationProvider, FederationRedirectPolicy } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { type GithubProviderConfig, githubFederationModule } from "../github.mjs";
 
 const minBoot = {
-	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } },
+	config: makeValidCoreConfig(),
 	pathResolver: (p: string) => p,
 } as never;
 

@@ -13,6 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/**
+ * Schema design principle: pure type contract.
+ *
+ * Schemas in this file describe the SHAPE that is required to be present at
+ * the boundary, not the value that is "reasonable to default to." Defaults
+ * live in a single place — `packages/core/config/application.conf` — and
+ * `${?ENV_VAR}` substitutions in that file are the only override surface.
+ *
+ * Consequence: schema parse rejects bare `{}` inputs. Tests that need a
+ * valid config must either (a) load it through `parseFile` against the
+ * built-in hocon, or (b) supply a minimal schema-valid baseline (e.g.
+ * the `makeValidCoreConfig` factory exposed via the
+ * `@o3co/auth-provider-core/testing` subpath, which intentionally
+ * diverges from `application.conf` for test ergonomics). See
+ * ADR 2026-04-30.
+ */
 import { z } from "zod";
 
 const rateLimitSchema = z.object({
@@ -22,29 +38,27 @@ const rateLimitSchema = z.object({
 
 const signingKeyLocalSchema = z
 	.object({
-		algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]).default("HS256"),
-		kid: z.string().default("v0"),
+		algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]),
+		kid: z.string(),
 		secret: z.string().optional(),
 		privateKey: z.string().optional(),
 		privateKeyPath: z.string().optional(),
 		publicKey: z.string().optional(),
 		publicKeyPath: z.string().optional(),
-		previousKeys: z
-			.array(
-				z.object({
-					kid: z.string(),
-					publicKey: z.string().optional(),
-					publicKeyPath: z.string().optional(),
-					expiresAt: z.string(),
-				}),
-			)
-			.default([]),
+		previousKeys: z.array(
+			z.object({
+				kid: z.string(),
+				publicKey: z.string().optional(),
+				publicKeyPath: z.string().optional(),
+				expiresAt: z.string(),
+			}),
+		),
 	})
 	.passthrough();
 
 const signingKeySchema = z
 	.object({
-		provider: z.string().default("local"),
+		provider: z.string(),
 		local: signingKeyLocalSchema.optional(),
 	})
 	.passthrough();
@@ -62,7 +76,7 @@ const LEGACY_JWT_FIELDS = [
 
 const jwtSchemaBase = z.object({
 	issuer: z.string().optional(),
-	signingKey: signingKeySchema.default({ provider: "local" }),
+	signingKey: signingKeySchema,
 });
 
 /**
@@ -97,16 +111,16 @@ const jwtSchema = z.preprocess((raw, ctx) => {
  */
 export const CoreConfigSchema = z.object({
 	http: z.object({
-		port: z.coerce.number().default(3000),
-		trustProxy: z.boolean().default(false),
+		port: z.coerce.number(),
+		trustProxy: z.boolean(),
 	}),
 	oauth: z.object({
 		jwt: jwtSchema,
 		accessToken: z.object({
-			expiresIn: z.coerce.number().default(3600),
+			expiresIn: z.coerce.number(),
 		}),
 		refreshToken: z.object({
-			expiresIn: z.coerce.number().default(86400),
+			expiresIn: z.coerce.number(),
 		}),
 		grants: z.object({}).passthrough(),
 	}),
@@ -140,17 +154,15 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
  *   boolean             → pass-through unchanged
  *   other values        → forwarded to z.boolean() which rejects with a type error
  */
-const coerceBooleanFromEnv = z
-	.preprocess((val) => {
-		if (typeof val === "boolean") return val;
-		if (typeof val === "string") {
-			const normalized = val.trim().toLowerCase();
-			if (normalized === "true" || normalized === "1") return true;
-			if (normalized === "false" || normalized === "0" || normalized === "") return false;
-		}
-		return val; // zod rejects with a type error for other values
-	}, z.boolean())
-	.default(false);
+const coerceBooleanFromEnv = z.preprocess((val) => {
+	if (typeof val === "boolean") return val;
+	if (typeof val === "string") {
+		const normalized = val.trim().toLowerCase();
+		if (normalized === "true" || normalized === "1") return true;
+		if (normalized === "false" || normalized === "0" || normalized === "") return false;
+	}
+	return val; // zod rejects with a type error for other values
+}, z.boolean());
 
 const federationEntrySchema = z
 	.object({
@@ -162,16 +174,16 @@ const federationEntrySchema = z
 export const fullSectionsSchema = z.object({
 	session: z.object({
 		secret: z.string(),
-		maxAge: z.coerce.number().default(3600000),
-		secure: z.boolean().default(true),
-		sameSite: z.enum(["lax", "none", "strict"]).default("lax"),
-		domain: z.string().nullable().default(null),
+		maxAge: z.coerce.number(),
+		secure: z.boolean(),
+		sameSite: z.enum(["lax", "none", "strict"]),
+		domain: z.string().nullable(),
 		storage: z
 			.object({
-				type: z.string().default("redis"),
+				type: z.string(),
 				redis: z
 					.object({
-						url: z.string().default("redis://localhost:6379"),
+						url: z.string(),
 						password: z.string().optional(),
 					})
 					.optional(),
@@ -181,21 +193,21 @@ export const fullSectionsSchema = z.object({
 	rateLimit: z.object({
 		login: rateLimitSchema,
 	}),
-	federations: z.record(z.string(), federationEntrySchema).default({}),
+	federations: z.record(z.string(), federationEntrySchema),
 	repositories: z.object({
 		client: z
 			.object({
-				type: z.string().default("yaml"),
+				type: z.string(),
 			})
 			.passthrough(),
 		user: z
 			.object({
-				type: z.string().default("yaml"),
+				type: z.string(),
 			})
 			.passthrough(),
 		code: z
 			.object({
-				type: z.string().default("memory"),
+				type: z.string(),
 			})
 			.passthrough(),
 	}),
@@ -205,7 +217,7 @@ export const fullSectionsSchema = z.object({
 		authCallback: z.object({ url: z.string().optional() }).optional(),
 	}),
 	cors: z.object({
-		allowedOrigins: z.array(z.string()).default([]),
+		allowedOrigins: z.array(z.string()),
 	}),
 });
 

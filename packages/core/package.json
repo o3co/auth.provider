@@ -14,6 +14,10 @@
 		"./modules/manifest": {
 			"import": "./dist/modules/manifest/index.mjs",
 			"types": "./dist/modules/manifest/index.d.mts"
+		},
+		"./testing": {
+			"types": "./dist/testing/index.d.mts",
+			"import": "./dist/testing/index.mjs"
 		}
 	},
 	"files": [

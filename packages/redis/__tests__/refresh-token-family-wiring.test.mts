@@ -20,6 +20,7 @@ import {
 	defaultRefreshTokenRotationModule,
 	defineModule,
 } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -115,8 +116,7 @@ describe("A3 wiring — full Redis composition (createBootApp + redis modules)",
 		});
 
 		const config = {
-			http: {},
-			oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} },
+			...makeValidCoreConfig(),
 			redisRefreshTokenFamilyStore: {
 				keyPrefix: `rtfam:wiring-${Date.now()}:`,
 				casRetryLimit: 3,

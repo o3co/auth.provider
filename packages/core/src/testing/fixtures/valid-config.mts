@@ -1,0 +1,120 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import type { z } from "zod";
+import type {
+	AppConfig,
+	CoreConfig,
+	fullSectionsSchema,
+} from "../../config/application.schema.mjs";
+
+/**
+ * Minimal schema-valid config factories for tests that need to satisfy
+ * `CoreConfigSchema` or `AppConfigSchema` parse without exercising the
+ * HOCON load pipeline.
+ *
+ * These factories return the smallest object shape that passes schema
+ * validation; they intentionally diverge from `packages/core/config/
+ * application.conf` for test ergonomics. The deliberate divergences are:
+ *
+ * - `session.storage.type` is `"memory"` (hocon defaults to `"redis"`).
+ * - `federations` is `{}` (hocon ships a built-in `federations.google`
+ *   block with `enabled = false`).
+ * - `oauth.jwt.signingKey.local.secret` carries an inline test secret
+ *   (hocon uses `${?OAUTH_JWT_SECRET}` substitution).
+ * - `repositories.{client,user,code}` declare only the discriminator
+ *   `type` field; nested adapter-specific fields (`yaml.path`,
+ *   `memory.defaultExpiresIn`, …) are omitted because the schema marks
+ *   them optional or the adapter-specific factory is not exercised.
+ * - `endpoints.client` and `endpoints.authCallback` are omitted because
+ *   the schema marks them `.optional()`. Callers exercising those
+ *   endpoints' behaviour should add the missing fields per-test.
+ *
+ * If you need fixture values that match production defaults, parse
+ * `application.conf` directly via the test harness.
+ *
+ * Background: per ADR 2026-04-30 (schema-strict defaults from hocon),
+ * defaults live exclusively in `application.conf`. Tests that previously
+ * relied on schema-side `.default(X)` to populate bare `{}` inputs must
+ * now supply explicit values; these factories provide the canonical
+ * minimal shape so each call site does not re-invent it.
+ *
+ * The factories use `satisfies` against `CoreConfig` / `AppConfig` so
+ * the returned object is type-checked against the schema *and* preserves
+ * the narrow inferred shape (literal enum values such as `algorithm:
+ * "HS256"` are not widened to `string`), so consumer tests can assign
+ * the result to typed variables without casts.
+ *
+ * Each factory returns a fresh, mutable object so callers can apply
+ * local overrides without bleeding into siblings.
+ */
+
+type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
+
+export function makeValidCoreConfig() {
+	return {
+		http: { port: 3000, trustProxy: false },
+		oauth: {
+			jwt: {
+				signingKey: {
+					provider: "local",
+					local: {
+						algorithm: "HS256",
+						kid: "v0",
+						secret: "test-secret",
+						previousKeys: [],
+					},
+				},
+			},
+			accessToken: { expiresIn: 3600 },
+			refreshToken: { expiresIn: 86400 },
+			grants: {},
+		},
+	} satisfies CoreConfig;
+}
+
+export function makeValidFullSections() {
+	return {
+		session: {
+			secret: "test-session-secret",
+			maxAge: 3600000,
+			secure: true,
+			sameSite: "lax",
+			domain: null,
+			storage: { type: "memory" },
+		},
+		rateLimit: {
+			login: { windowMs: 900000, limit: 20 },
+		},
+		federations: {},
+		repositories: {
+			client: { type: "yaml" },
+			user: { type: "yaml" },
+			code: { type: "memory" },
+		},
+		endpoints: {
+			login: {},
+		},
+		cors: { allowedOrigins: [] },
+	} satisfies FullSectionsConfig;
+}
+
+export function makeValidAppConfig() {
+	return {
+		...makeValidCoreConfig(),
+		...makeValidFullSections(),
+	} satisfies AppConfig;
+}

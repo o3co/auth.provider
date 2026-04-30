@@ -22,24 +22,41 @@ import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.m
  */
 const jwtSchema = CoreConfigSchema.shape.oauth.shape.jwt;
 
+/**
+ * Per ADR 2026-04-30: signingKey.local fields are required at the schema
+ * level — defaults live in hocon. Tests assemble valid-shape inputs by
+ * supplying every required field; per-test overrides target only the
+ * field-under-test.
+ */
+function validLocal(overrides: Record<string, unknown> = {}) {
+	return {
+		algorithm: "HS256",
+		kid: "v0",
+		secret: "s3cret",
+		previousKeys: [],
+		...overrides,
+	};
+}
+
 describe("oauth.jwt.signingKey schema", () => {
 	it("accepts nested signingKey.provider = 'local' with local sub-section", () => {
 		const parsed = jwtSchema.parse({
 			issuer: "https://auth.example.com",
-			signingKey: {
-				provider: "local",
-				local: { algorithm: "HS256", kid: "v0", secret: "s3cret", previousKeys: [] },
-			},
+			signingKey: { provider: "local", local: validLocal() },
 		});
 		expect(parsed.signingKey.provider).toBe("local");
 		expect((parsed.signingKey.local as { secret: string }).secret).toBe("s3cret");
 	});
 
-	it("defaults signingKey.provider to 'local'", () => {
-		const parsed = jwtSchema.parse({
-			signingKey: { local: { secret: "x" } },
+	it("rejects signingKey when provider is omitted (schema is strict — defaults live in hocon)", () => {
+		const result = jwtSchema.safeParse({
+			signingKey: { local: validLocal() },
 		});
-		expect(parsed.signingKey.provider).toBe("local");
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const paths = result.error.issues.map((i) => i.path.join("."));
+			expect(paths).toContain("signingKey.provider");
+		}
 	});
 
 	it("preserves unknown provider sub-sections via passthrough", () => {
@@ -54,17 +71,22 @@ describe("oauth.jwt.signingKey schema", () => {
 	it("accepts issuer at oauth.jwt.issuer (not under signingKey)", () => {
 		const parsed = jwtSchema.parse({
 			issuer: "https://auth.example.com",
-			signingKey: { local: { secret: "x" } },
+			signingKey: { provider: "local", local: validLocal() },
 		});
 		expect(parsed.issuer).toBe("https://auth.example.com");
 	});
 
 	it("does NOT superRefine-reject missing secret for HS256 (schema does shape only; builder enforces field presence)", () => {
-		// Previously the schema would reject { algorithm: "HS256" } without secret.
-		// After this migration the schema only enforces shape; the builder throws at create() time.
+		// Previously the schema would reject HS256 without a secret. After
+		// migration the schema only enforces shape (field presence per the
+		// type contract); the builder throws at create() time when the
+		// algorithm-specific key material is absent.
 		expect(() =>
 			jwtSchema.parse({
-				signingKey: { provider: "local", local: { algorithm: "HS256" } },
+				signingKey: {
+					provider: "local",
+					local: { algorithm: "HS256", kid: "v0", previousKeys: [] },
+				},
 			}),
 		).not.toThrow();
 	});
@@ -107,10 +129,7 @@ describe("jwtSchema - legacy flat field detection", () => {
 	it("accepts valid nested signingKey shape without triggering legacy detection", () => {
 		const result = jwtSchema.safeParse({
 			issuer: "https://auth.example.com",
-			signingKey: {
-				provider: "local",
-				local: { algorithm: "HS256", kid: "v0", secret: "s3cret" },
-			},
+			signingKey: { provider: "local", local: validLocal() },
 		});
 		expect(result.success).toBe(true);
 	});

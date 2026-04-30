@@ -19,6 +19,7 @@ import {
 	defaultChallengeCeremonyModule,
 	defineModule,
 } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -70,13 +71,12 @@ describe("A1 wiring — full Redis composition (createBootApp + redis modules)",
 			},
 		});
 
-		// CoreConfigSchema (always composed in by composeConfigSchema) requires
-		// `http` and `oauth` top-level sections. Provide minimal stubs so the
-		// schema parses; the redis modules' own namespaced keys carry the
-		// per-test isolation prefixes.
+		// `makeValidCoreConfig` supplies the schema-required core sections
+		// (CoreConfigSchema is always composed in via composeConfigSchema).
+		// The redis modules' own namespaced keys carry per-test isolation
+		// prefixes appended after the core baseline.
 		const config = {
-			http: {},
-			oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} },
+			...makeValidCoreConfig(),
 			redisChallengeStore: { keyPrefix: `chal:wiring-${Date.now()}:` },
 			redisReplaySeenSet: { keyPrefix: `replay:wiring-${Date.now()}:` },
 		};

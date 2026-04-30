@@ -16,6 +16,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
 
@@ -33,15 +34,11 @@ declare module "@o3co/auth-provider-core" {
 // the full AppConfig shape (which would require all nested required fields).
 import type { BootstrapMap } from "../types.mjs";
 
-// Minimum config that satisfies CoreConfigSchema — all required nested
-// objects present as empty so Zod defaults populate every leaf.
-// Per Codex P2-A hardening: validateAndComposeConfig now ALWAYS runs
-// CoreConfigSchema, even when no module declares a configSchema, so this
-// stub must satisfy CoreConfigSchema's required structure.
-const minCoreConfig = {
-	http: {},
-	oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} },
-};
+// Per ADR 2026-04-30: schema is a pure type contract; defaults live in
+// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
+// fixture supplies a minimal schema-valid baseline (intentionally
+// diverges from application.conf — see makeValidCoreConfig docstring).
+const minCoreConfig = makeValidCoreConfig();
 
 const minBootstrap = {
 	config: minCoreConfig as never,
@@ -787,15 +784,17 @@ describe("validateManifests — step 12: lifecycle-without-provides", () => {
 
 describe("validateManifests — step 13: config-validation-failed", () => {
 	it("composes configSchemas and throws config-validation-failed on parse error", () => {
+		// Module-specific top-level key (`cfgModRetries`) chosen so it cannot
+		// visually collide with `http.port` from CoreConfigSchema's `minCoreConfig`.
 		const m = defineModule({
 			name: "cfg-mod",
-			configSchema: z.object({ port: z.number() }),
+			configSchema: z.object({ cfgModRetries: z.number() }),
 		});
 		try {
 			validateManifests({
 				modules: [m],
 				bootstrapComponents: {
-					config: { ...minCoreConfig, port: "not-a-number" } as never,
+					config: { ...minCoreConfig, cfgModRetries: "not-a-number" } as never,
 					pathResolver: minBootstrap.pathResolver,
 				},
 			});
@@ -843,19 +842,18 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 		expect.fail("should have thrown");
 	});
 
-	it("CoreConfigSchema defaults are applied even when zero modules declare configSchema", () => {
+	it("propagates parsed config through bootstrapComponents even with zero configSchema modules", () => {
 		// Companion to the regression above: with zero configSchema modules and
-		// a minimal valid config, the parsed config carries CoreConfigSchema's
-		// Zod defaults (e.g. http.port=3000) into bootstrapComponents.
+		// a minimal valid config, the parsed config (which now carries no
+		// schema-injected values per ADR 2026-04-30 — defaults live in hocon)
+		// must still flow into bootstrapComponents intact.
 		const noSchema = defineModule({ name: "no-schema" });
 		const result = validateManifests({
 			modules: [noSchema],
 			bootstrapComponents: minBootstrap,
 		});
-		// The parsed config substituted into bootstrapComponents should carry
-		// CoreConfigSchema defaults applied.
 		const parsed = result.bootstrapComponents.config as { http: { port: number } };
-		expect(parsed.http.port).toBe(3000);
+		expect(parsed.http.port).toBe(minCoreConfig.http.port);
 	});
 
 	it("preserves top-level extra config keys not in any schema (Codex P2 strip-unknown regression)", () => {
@@ -880,8 +878,8 @@ describe("validateManifests — step 13: config-validation-failed", () => {
 			},
 		});
 		const cfg = result.bootstrapComponents.config as Record<string, unknown>;
-		// CoreConfigSchema defaults still applied
-		expect((cfg.http as { port: number }).port).toBe(3000);
+		// Parsed config flows through with the values supplied at the boundary
+		expect((cfg.http as { port: number }).port).toBe(minCoreConfig.http.port);
 		// Top-level extras preserved
 		expect(cfg.session).toEqual({ strategy: "jwt-signed-cookie", cookieName: "_sess" });
 		expect(cfg.customConsumerKey).toEqual({ whatever: 42 });
@@ -992,15 +990,7 @@ describe("validateManifests — step 13: parsed config carried forward in bootst
 		const result = validateManifests({
 			modules: [m],
 			bootstrapComponents: {
-				config: {
-					http: { port: 3000, trustProxy: false },
-					oauth: {
-						jwt: {},
-						accessToken: { expiresIn: 3600 },
-						refreshToken: { expiresIn: 86400 },
-						grants: {},
-					},
-				} as never,
+				config: minCoreConfig as never,
 				pathResolver: (s: string) => s,
 			},
 		});

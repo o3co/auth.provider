@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { defineModule } from "../../modules/manifest/index.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { planBoot } from "../plan-boot.mjs";
 import type { BootstrapMap as BM, BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -65,11 +66,12 @@ function makeStubListCollector() {
 	};
 }
 
-// Minimum config that satisfies CoreConfigSchema (Codex P2-A hardening:
-// validateAndComposeConfig now always runs CoreConfigSchema). All required
-// nested objects present as empty so Zod defaults populate every leaf.
+// Per ADR 2026-04-30: schema is a pure type contract; defaults live in
+// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
+// fixture supplies a minimal schema-valid baseline (intentionally
+// diverges from application.conf — see makeValidCoreConfig docstring).
 const minBootstrap = {
-	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } } as never,
+	config: makeValidCoreConfig() as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BM;
 

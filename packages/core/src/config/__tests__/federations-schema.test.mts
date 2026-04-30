@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema.mjs";
+import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 
 /**
  * Access the federations schema directly for sub-schema-level tests.
@@ -23,34 +24,14 @@ import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema
 const federationsSchema = fullSectionsSchema.shape.federations;
 
 /**
- * Minimal config for a full AppConfigSchema.parse() call.
- * Derived by observing which fields are required (have no defaults).
+ * Per ADR 2026-04-30: schema is a pure type contract; defaults live in
+ * hocon. AppConfigSchema.parse rejects bare `{}` inputs, so the fixture
+ * supplies a minimal schema-valid baseline (intentionally diverges from
+ * application.conf — see makeValidAppConfig docstring). Per-test
+ * overrides target only the field-under-test (e.g. add `federations`
+ * for federation-specific assertions).
  */
-const minimalConfig = {
-	http: {},
-	oauth: {
-		jwt: { signingKey: { local: { secret: "s3cret" } } },
-		accessToken: {},
-		refreshToken: {},
-		grants: {},
-	},
-	session: {
-		secret: "session-secret",
-		storage: { type: "memory" },
-	},
-	rateLimit: {
-		login: { windowMs: 60000, limit: 10 },
-	},
-	repositories: {
-		client: {},
-		user: {},
-		code: {},
-	},
-	endpoints: {
-		login: {},
-	},
-	cors: {},
-};
+const minimalConfig = makeValidAppConfig();
 
 describe("federations schema — open to z.record with passthrough", () => {
 	it("accepts shorthand: federations.google { enabled: true, clientId, clientSecret, callbackURL }", () => {
@@ -72,6 +53,7 @@ describe("federations schema — open to z.record with passthrough", () => {
 	it("accepts explicit multi-tenant: federations['google-work'] { type: 'google', google: { clientId, ... } }", () => {
 		const parsed = federationsSchema.parse({
 			"google-work": {
+				enabled: false,
 				type: "google",
 				google: {
 					clientId: "work-client-id",
@@ -89,6 +71,7 @@ describe("federations schema — open to z.record with passthrough", () => {
 	it("accepts arbitrary custom type: federations['corporate-sso'] { type: 'saml', saml: { entityId: '...' } }", () => {
 		const parsed = federationsSchema.parse({
 			"corporate-sso": {
+				enabled: false,
 				type: "saml",
 				saml: {
 					entityId: "https://idp.example.com/saml",
@@ -102,18 +85,24 @@ describe("federations schema — open to z.record with passthrough", () => {
 		expect(saml.entityId).toBe("https://idp.example.com/saml");
 	});
 
-	it("defaults enabled to false when section is present but enabled is omitted", () => {
-		const parsed = federationsSchema.parse({
+	it("rejects entries that omit enabled (schema is strict — defaults live in hocon)", () => {
+		const result = federationsSchema.safeParse({
 			google: {
 				clientId: "test-client-id",
 				clientSecret: "test-client-secret",
 				callbackURL: "https://example.com/callback",
 			},
 		});
-		expect(parsed.google.enabled).toBe(false);
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const paths = result.error.issues.map((i) => i.path.join("."));
+			expect(paths).toContain("google.enabled");
+		}
 	});
 
-	it("defaults federations to empty object when entire section is omitted (AppConfigSchema.parse)", () => {
+	it("preserves an empty federations record passed by the caller (no schema-side default)", () => {
+		// hocon supplies the default federations record at runtime; the schema
+		// itself does not inject `{}` when the section is omitted.
 		const parsed = AppConfigSchema.parse(minimalConfig);
 		expect(parsed.federations).toEqual({});
 	});
