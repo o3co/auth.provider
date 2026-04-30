@@ -15,7 +15,7 @@ OAuth 2.0 / OIDC provider. Issue JWTs via session-based login or the authorizati
 - **Modular composition** — Pick only the modules you need. Skip session, federation, or authorization code for API-only deployments.
 - **JWT algorithm selection** — HS256, RS256, ES256, EdDSA. JWKS endpoint (`/.well-known/jwks.json`) for asymmetric algorithms.
 - **OAuth 2.0 compliance** — Authorization code flow with PKCE (RFC 7636), token introspection (RFC 7662), refresh tokens
-- **Session authentication** — Passport.js local strategy + OAuth federation (Google, GitHub, and custom providers via `FederationProviderFactory`)
+- **Session authentication** — Local username/password login + OAuth federation (Google, GitHub, and custom providers via per-federation `defineModule(...)` modules)
 - **Rate limiting** — Per-endpoint configurable limits
 - **HOCON configuration** — Type-safe config with Zod validation and environment variable overrides
 
