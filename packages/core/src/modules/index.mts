@@ -13,14 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// v0.5.0 manifest exports — `Module` here is the v0.5.0 erased manifest type
-// (NOT the legacy LegacyModule).
+// v0.5.0 manifest exports — `Module` here is the v0.5.0 erased manifest type.
 export * from "./manifest/index.mjs";
 
-// v0.4.x legacy exports — DEPRECATED, will be removed in Phase 9.
-export type {
-	FederationProviderHandle,
-	LegacyModule,
-	ModuleContext,
-	PathResolver,
-} from "./types.mjs";
+// PathResolver remains — it is the type for `bootstrapComponents.pathResolver`.
+// FederationProviderHandle remains — it is the structural narrowing of the
+// `federationProviders` synthetic key for core-adjacent route consumers
+// (oauth/logout + oauth/federationToken). The legacy v0.4.x `LegacyModule` /
+// `ModuleContext` types were deleted in Phase 9 (A2-γ caller migration).
+export type { FederationProviderHandle, PathResolver } from "./types.mjs";

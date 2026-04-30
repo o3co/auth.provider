@@ -115,7 +115,7 @@ class GrantRegistry {
 }
 ```
 
-`addModule` はモジュール内のすべての `GrantFactory` を実行してハンドラーを登録します。シャットダウン時に `cleanup()` を呼び出すと、各ハンドラーの `cleanup()` メソッド（存在する場合）が実行されます。
+`addModule` はモジュール内のすべての `GrantFactory` を実行してハンドラーを登録します。`cleanup()` は legacy のシャットダウンフックで、登録された各 grant handler の `cleanup()` メソッド（存在する場合）を呼び出します。新規コードは `createApp` が返す `handle.dispose()` を使うこと — `AppHandle.dispose()` は A2-β §8.1 に従い、コンポーネント単位の `lifecycle[K].cleanup` コールバックを reverse-topological 順で実行します。`GrantRegistry.cleanup()` は backwards compatibility のため残してありますが、将来の minor で削除予定です。
 
 ### トークンユーティリティ
 
@@ -350,42 +350,43 @@ function createDefaultFactories(): {
 
 ### モジュールシステム
 
-モジュールはルート、ミドルウェア、グラントタイプをアプリに追加するための拡張ポイントです。各モジュールは初期化時に `ModuleContext` を受け取ります。
+モジュールはルート、グラントハンドラー、DI グラフのコンポーネントをアプリに追加するための拡張ポイントです。v0.5.0 のモジュールは `defineModule({...})` で書く宣言的 manifest であり、`requires` / `optional`（型付きの `ProviderDeps` キー）を宣言し、`grants` / `routes` / `federations` などの `ContributesMap` slot に contribute します。
 
 ```typescript
 type PathResolver = (specifier: string) => string;
 
-interface ModuleContext {
-  pathResolver: PathResolver;
-  config: AppConfig;
-  keyStore: KeyStore;
-  grantRegistry: GrantRegistry;
-  router: Router; // Express Router
-}
-
-interface Module {
-  name: string;
-  init(context: ModuleContext): Promise<void>;
-}
+const myModule = defineModule({
+  name: "my-module",
+  requires: ["config", "clientRepository"] as const,
+  contributes: {
+    routes: [
+      (deps) => ({ id: "my-route", mountPath: "/my", handler: makeRouter(deps) }),
+    ],
+  },
+});
 ```
+
+> Note: v0.4.x の `LegacyModule` / `ModuleContext` 形（`{ name, init(context) }` を返す関数）は v0.5.0 redesign の Phase 9 で削除されました。boot planner が型付きの deps を contribution lambda に直接注入するため、モジュールが共有 `ModuleContext` を mutate することはありません。
 
 ### アプリファクトリー
 
 ```typescript
-interface AppOptions {
-  pathResolver?: PathResolver;
-  config: AppConfig;
-  keyStore: KeyStore;
-  modules: Module[];
+interface CreateAppOptions {
+  modules: readonly Module[];
+  bootstrapComponents: { config: AppConfig; pathResolver: PathResolver };
+  contributionKinds?: ContributionKindMap;
+  overrideComponents?: Partial<ComponentMap>;
 }
 
-interface AppResult {
-  init(): Promise<void>;
+interface AppHandle {
   router: Router;
-  grantRegistry: GrantRegistry;
+  components: Partial<ComponentMap>;
+  routes: readonly OrderedRouteContribution[];
+  listen(port: number): Promise<HttpServer>;
+  dispose(): Promise<void>;
 }
 
-function createApp(express: ExpressLike, options: AppOptions): AppResult;
+function createApp(options: CreateAppOptions): Promise<AppHandle>;
 ```
 
 `createApp` は設定、キーストア、グラントレジストリ、モジュールを単一の Express Router にまとめます。`init()` を呼び出すとすべてのモジュール初期化処理が実行されます。Router は `init()` が解決した後にマウント可能になります。

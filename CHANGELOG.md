@@ -33,6 +33,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Breaking**: `registerBuiltinFederations`, `createGoogleProvider`, and `createGithubProvider` are removed from `@o3co/auth-provider-session`.
 - `openid-client` is no longer a runtime dependency of `@o3co/auth-provider-session`; it belongs to the concrete provider packages.
 - **Breaking**: `@o3co/auth-provider-did` package. The DID authentication grant is no longer part of this project. The package is no longer maintained here.
+- **Breaking**: `LegacyModule` and `ModuleContext` types are removed from `@o3co/auth-provider-core`. v0.4.x modules (functions returning `{ name, init(context) }`) must be rewritten as v0.5.0 manifests authored via `defineModule({...})` per A2-α §3 and migrated to use typed `ProviderDeps` instead of `ModuleContext`. `PathResolver` and `FederationProviderHandle` remain — `PathResolver` is the type for `bootstrapComponents.pathResolver`; `FederationProviderHandle` is the structural narrowing of the `federationProviders` synthetic key for core-adjacent route consumers.
+
+### Boot lifecycle
+
+- **Recommended graceful-shutdown shape moves from `grantRegistry.cleanup()`
+  to `handle.dispose()`.** The v0.4.x bridge
+  `gracefulShutdown(server, () => grantRegistry.cleanup())` becomes
+  `gracefulShutdown(server, () => handle.dispose())`, where `handle` is the
+  awaited result of `createApp(...)`. `AppHandle.dispose()` runs
+  per-component `lifecycle[K].cleanup` callbacks in reverse-topological
+  order per A2-β §8.1. `GrantRegistry.cleanup()` itself remains in this
+  release for backwards compatibility (it still iterates registered grants
+  and calls each handler's optional `cleanup()`); a follow-up minor will
+  remove it once all consumers and templates migrate to
+  `handle.dispose()`.
+
+- Per-contribution-kind disposal hooks (e.g. for grants holding owned
+  resources) are NOT structurally supported by the new boot planner in
+  v0.5.0. The `GrantHandler.cleanup` field on the type continues to be
+  invoked by the legacy `GrantRegistry.cleanup()` path described above,
+  but no v0.5.0 built-in grant declares it. A future minor (or A2-β
+  reopening) may add per-contribution-kind disposal at the collector
+  level — see A2-γ §5.3 for the structural-gap discussion.
 
 ### Breaking Changes
 

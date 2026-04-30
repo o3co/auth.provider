@@ -168,11 +168,10 @@ export type {
 	SupportsRevocation,
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
-// Module system — v0.5.0 manifest types + legacy types for migration.
-// LegacyModule is the deprecated v0.4.x shape (init callback); a follow-up
-// task in Phase 9 (#10/#11/#12) deletes it from this surface once all
-// fixture / template callers migrate. New code uses Module (= v0.5.0
-// manifest type from defineModule()).
+// Module system — v0.5.0 manifest types. The v0.4.x `LegacyModule` /
+// `ModuleContext` interfaces were deleted in Phase 9 (A2-γ caller migration);
+// authoring code uses `Module` and `defineModule()` from
+// `@o3co/auth-provider-core/modules/manifest`.
 export type {
 	AuditHook,
 	AuditHookFactory,
@@ -190,14 +189,12 @@ export type {
 	// @o3co/auth-provider-core/modules/manifest directly.
 	GrantHandlerResolver,
 	GrantPolicyHook,
-	LegacyModule,
 	// GrantPolicyHookFactory: excluded — name collides with legacy
 	// ./policy/types.mjs export at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
 	MfaFactor,
 	MfaFactorFactory,
 	Module,
-	ModuleContext,
 	ModuleSpec,
 	PathResolver,
 	Provider,
