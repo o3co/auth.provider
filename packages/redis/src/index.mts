@@ -25,6 +25,7 @@ export {
 	redisChallengeStoreBuilder,
 	redisChallengeStoreModule,
 } from "./challenges.mjs";
+export { redisSessionStoresModule } from "./modules/redisSessionStores.mjs";
 export {
 	createRedisRefreshTokenFamilyStore,
 	type RedisRefreshTokenFamilyStoreOptions,
@@ -37,4 +38,24 @@ export {
 	redisReplaySeenSetBuilder,
 	redisReplaySeenSetModule,
 } from "./replay-seen-set.mjs";
+export {
+	createRedisSessionFamilyIndex,
+	type RedisSessionFamilyIndexOptions,
+} from "./sessionFamilyIndex.mjs";
+export {
+	createRedisSessionFederationIndex,
+	type RedisSessionFederationIndexOptions,
+} from "./sessionFederationIndex.mjs";
+export {
+	createRedisSessionRPRegistry,
+	type RedisSessionRPRegistryOptions,
+} from "./sessionRPRegistry.mjs";
 export type { DisposableRedisClient, RedisClient, RedisMulti } from "./types.mjs";
+// ---------------------------------------------------------------------------
+// A4 user-session adapters (Phase 8b).
+// Per A4 §8.1 + §11.2.
+// ---------------------------------------------------------------------------
+export {
+	createRedisUserSessionStore,
+	type RedisUserSessionStoreOptions,
+} from "./userSessionStore.mjs";
