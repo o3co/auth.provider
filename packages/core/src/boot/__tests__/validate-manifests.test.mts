@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { makeValidCoreConfig } from "../../__tests__/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
@@ -783,15 +783,17 @@ describe("validateManifests — step 12: lifecycle-without-provides", () => {
 
 describe("validateManifests — step 13: config-validation-failed", () => {
 	it("composes configSchemas and throws config-validation-failed on parse error", () => {
+		// Module-specific top-level key (`cfgModRetries`) chosen so it cannot
+		// visually collide with `http.port` from CoreConfigSchema's `minCoreConfig`.
 		const m = defineModule({
 			name: "cfg-mod",
-			configSchema: z.object({ port: z.number() }),
+			configSchema: z.object({ cfgModRetries: z.number() }),
 		});
 		try {
 			validateManifests({
 				modules: [m],
 				bootstrapComponents: {
-					config: { ...minCoreConfig, port: "not-a-number" } as never,
+					config: { ...minCoreConfig, cfgModRetries: "not-a-number" } as never,
 					pathResolver: minBootstrap.pathResolver,
 				},
 			});

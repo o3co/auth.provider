@@ -15,17 +15,25 @@
  */
 
 /**
- * Valid-config fixtures for tests that need to satisfy CoreConfigSchema or
- * AppConfigSchema parse.
+ * Minimal schema-valid config factories for tests that need to satisfy
+ * `CoreConfigSchema` or `AppConfigSchema` parse without exercising the
+ * HOCON load pipeline.
  *
- * Background: per ADR 2026-04-30, schema is a pure type contract — defaults
- * live exclusively in `packages/core/config/application.conf`. Tests that
- * previously relied on schema-side `.default(X)` to populate bare `{}`
- * inputs must now supply the same values that hocon would have produced.
+ * These factories return the smallest object shape that passes schema
+ * validation; they intentionally diverge from `packages/core/config/
+ * application.conf` for test ergonomics (e.g. raw secrets instead of
+ * env-substituted placeholders, no signing-key alternatives). They are
+ * NOT a hocon mirror — if you need fixture values that match production
+ * defaults, parse `application.conf` directly via the test harness.
  *
- * These factories return fresh, mutable objects so each test can apply local
- * overrides without bleeding into siblings. The values mirror
- * `application.conf` defaults; if hocon defaults change, update here.
+ * Background: per ADR 2026-04-30 (schema-strict defaults from hocon),
+ * defaults live exclusively in `application.conf`. Tests that previously
+ * relied on schema-side `.default(X)` to populate bare `{}` inputs must
+ * now supply explicit values; these factories provide the canonical
+ * minimal shape so each call site does not re-invent it.
+ *
+ * Each factory returns a fresh, mutable object so callers can apply
+ * local overrides without bleeding into siblings.
  */
 
 export function makeValidCoreConfig() {

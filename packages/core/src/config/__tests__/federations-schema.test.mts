@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema.mjs";
-import { makeValidAppConfig } from "../../__tests__/fixtures/valid-config.mjs";
+import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 
 /**
  * Access the federations schema directly for sub-schema-level tests.

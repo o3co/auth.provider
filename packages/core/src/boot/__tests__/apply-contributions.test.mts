@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { makeValidCoreConfig } from "../../__tests__/fixtures/valid-config.mjs";
+import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { applyContributions } from "../apply-contributions.mjs";
 import { materializeComponents } from "../materialize-components.mjs";

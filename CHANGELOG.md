@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- `@o3co/auth-provider-core/testing` subpath. Exposes the
+  `makeValidCoreConfig` / `makeValidFullSections` / `makeValidAppConfig`
+  fixture factories so sibling packages and downstream test suites can
+  build a schema-valid config baseline without re-implementing it. The
+  subpath is consumer-test-only — production runtime code MUST NOT
+  import from it.
 - `@o3co/auth-provider-federation-google` package with `createGoogleProvider()` and `registerGoogleFederation(factory)`.
 - `@o3co/auth-provider-federation-github` package with `createGithubProvider()` and `registerGithubFederation(factory)`.
 - `sessionModule({ federationProviderFactory })` option for composition roots that explicitly register federation provider packages.
@@ -28,6 +34,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Breaking Changes
 
+- **Config schema is strict; defaults live exclusively in HOCON.**
+  `application.schema.mts` no longer carries `.default(X)` for fields
+  that hocon already supplies. Operators see the same effective
+  defaults at boot — `application.conf` continues to provide them —
+  but the schema layer no longer fills in missing values. Two
+  concrete operator-facing consequences:
+  - **`federations.<name>.enabled` is strict.** Pre-PR the schema-side
+    `enabled` carried `.default(false)`, but its composition with
+    surrounding `z.preprocess` / `z.optional` was fragile: a bare
+    federation entry sometimes parsed as `enabled = false` and
+    sometimes caused boot to reject the entry (the trap that
+    motivated this refactor). The schema-side default is now
+    removed. Each federation entry must declare
+    `enabled = true` / `enabled = false` explicitly, or be omitted
+    from the config entirely. Bare `federations { google {} }`
+    shapes will now fail validation at boot deterministically. If
+    you want a federation provider to be active, write
+    `enabled = true` in its entry; if you want it inactive, either
+    write `enabled = false` or remove the entry.
+  - **Library consumers** who construct `AppConfig` from a non-HOCON
+    source (TOML, env-only, in-memory object, etc.) must now supply
+    every required leaf themselves before calling `validate()` /
+    `composeConfigSchema().parse()`. Previously, schema-side
+    `.default()` masked missing leaves; that path is gone. See
+    `packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md`
+    (consequences I2 / I4) for the rationale and the
+    `@o3co/auth-provider-core/testing` subpath for a reference
+    fixture baseline. Note that the `testing` factory is intentionally
+    a minimal schema-valid baseline rather than a hocon mirror —
+    consumers that want the production hocon defaults should load
+    `application.conf` directly.
 - **`grant_type` wire values (RFC compliance + URN-ification):**
   - `grant_type=authorization` → `grant_type=authorization_code` (RFC 6749 §4.1.3)
   - `grant_type=session` unchanged

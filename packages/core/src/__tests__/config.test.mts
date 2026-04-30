@@ -32,7 +32,8 @@ describe("provider config", () => {
 		expect(local).toBeDefined();
 		expect(local.secret).toBe("test-secret");
 
-		// algorithm and kid defaults applied
+		// algorithm and kid come from hocon (`application.conf`); the schema
+		// is strict and supplies no defaults of its own (ADR 2026-04-30).
 		expect(local.algorithm).toBe("HS256");
 		expect(local.kid).toBe("v0");
 	});
@@ -67,7 +68,7 @@ describe("provider config", () => {
 		// federation entries is tested in federations-schema.test.mts.
 	});
 
-	it("repositories.client.type defaults to yaml", () => {
+	it("repositories.client.type is yaml when application.conf is loaded with no override", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
@@ -80,7 +81,7 @@ describe("provider config", () => {
 		expect(config.repositories.client.type).toBe("yaml");
 	});
 
-	it("repositories.user.type defaults to yaml", () => {
+	it("repositories.user.type is yaml when application.conf is loaded with no override", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
@@ -91,7 +92,7 @@ describe("provider config", () => {
 		expect(config.repositories.user.type).toBe("yaml");
 	});
 
-	it("repositories.code.type defaults to memory", () => {
+	it("repositories.code.type is memory when application.conf is loaded with no override", () => {
 		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",

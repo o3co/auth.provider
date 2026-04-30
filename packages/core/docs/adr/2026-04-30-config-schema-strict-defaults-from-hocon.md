@@ -57,8 +57,17 @@ Concretely:
   (e.g. `oauth.jwt.issuer`, `signingKey.local.{secret,privateKey,...}`,
   `endpoints.*.url`).
 - Tests that previously relied on schema-side defaults to populate bare
-  `{}` inputs now supply the same values that hocon would have produced,
-  via the shared fixture `src/__tests__/fixtures/valid-config.mts`.
+  `{}` inputs now supply explicit values via the shared factory in
+  `src/testing/fixtures/valid-config.mts`. The factory returns a
+  minimal schema-valid baseline rather than a hocon mirror —
+  `session.storage.type` is `memory` and `federations` is `{}` for
+  test ergonomics, which intentionally diverges from
+  `application.conf` (where `storage.type = "redis"` and a built-in
+  `federations.google` block is shipped). The factory is exposed to
+  consumer test code through the `./testing` subpath in
+  `package.json#exports` (per A2-γ spec §6.1 + §7), so sibling
+  packages and downstream applications can reuse the same baseline
+  without copying it.
 
 ## Rationale
 
@@ -97,12 +106,40 @@ Concretely:
 
 - Tests that need a parsable config must now supply every required leaf.
   Bare `{ http: {}, oauth: { jwt: {}, ... } }` inputs no longer parse.
-  The shared fixture in `src/__tests__/fixtures/valid-config.mts`
-  centralises this to prevent inline duplication.
+  The shared fixture in `src/testing/fixtures/valid-config.mts`,
+  re-exported from `@o3co/auth-provider-core/testing`, centralises this
+  to prevent inline duplication across packages.
 - A future contributor who adds `default(X)` back to the schema would
   re-introduce the drift hazard. This ADR plus the docstring at the top
   of `application.schema.mts` are the only guards against that
   regression.
+- **I2 — library-consumer perspective.** Consumers that embed
+  `@o3co/auth-provider-core` outside the standalone deployment shape
+  (e.g. composing modules manually, loading config from TOML / env
+  vars / an in-memory object instead of `application.conf`) are
+  responsible for supplying the defaults that hocon would otherwise
+  inject before passing the object to `validate()` /
+  `composeConfigSchema().parse()`. The hocon-default coupling is
+  intentional for the standalone deployment path, but library
+  consumers see it as an additional integration constraint rather
+  than a hidden default. The exported `makeValidCoreConfig` /
+  `makeValidAppConfig` factories from
+  `@o3co/auth-provider-core/testing` provide a reference baseline
+  consumers can adapt; production consumers should encode their own
+  defaulting layer rather than depend on test fixtures at runtime.
+- **I4 — `federations.<name>.enabled` is now strict.** Pre-PR the
+  schema-side `coerceBooleanFromEnv` carried `.default(false)`, but the
+  composition with surrounding `z.preprocess` / `z.optional` / object
+  shape was fragile: absent `enabled` sometimes parsed as `false` and
+  sometimes caused boot to reject the entry outright (the trap that
+  motivated this refactor — see Context). With the schema-side default
+  removed, both branches collapse into a single contract: operators
+  must write `enabled = true` / `enabled = false` explicitly inside
+  each federation entry, or omit the entry entirely. Configurations
+  that relied on a bare `federations { google {} }` shape now fail
+  validation at boot deterministically. The hardening is intentional
+  (no ambiguity about which providers are active) but is breaking and
+  operator-visible; see `CHANGELOG.md` for the migration note.
 
 ### Neutral
 
@@ -117,8 +154,8 @@ Fields that are optional and have no hocon-side default — only an
 schema. Examples:
 
 - `oauth.jwt.issuer`
-- `signingKey.local.{secret,privateKey,privateKeyPath,publicKey,publicKeyPath}`
-- `redis.password`
+- `oauth.jwt.signingKey.local.{secret,privateKey,privateKeyPath,publicKey,publicKeyPath}`
+- `session.storage.redis.password`
 - `endpoints.{login,client,authCallback}.url`
 
 These are not "schema defaults"; they are valid-when-absent fields whose
