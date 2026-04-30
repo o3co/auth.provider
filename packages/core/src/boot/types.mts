@@ -525,6 +525,12 @@ export interface AppHandle {
 	 * (or they were provided via bootstrapComponents / overrideComponents).
 	 */
 	readonly components: Readonly<Partial<ComponentMap>>;
+
+	/**
+	 * Ordered route contributions in final mount order after before/after
+	 * resolution. Populated by assembleApp (stage 6). Per A2-β §6.3 / A2-γ §7.2.
+	 */
+	readonly routes: readonly OrderedRouteContribution[];
 }
 
 // ---------------------------------------------------------------------------

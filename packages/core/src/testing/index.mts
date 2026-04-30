@@ -24,16 +24,18 @@
  *
  * A2-γ spec §6.1 + §7 prescribes this subpath; PR α (orthogonal
  * schema/default cleanup) lands the initial export surface (config-fixture
- * factories). The `createTestApp` / `TestInspect` helpers prescribed by
- * §7.2 will be added in a later PR (Phase 9 caller migration).
+ * factories). `createTestApp` / `TestInspect` are added in this PR
+ * (Phase 9 caller migration).
  *
  * Stability: identifiers exported here follow the same semver discipline
  * as the main `.` export — additions are minor, signature changes are
  * major.
  */
 
+export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
 export {
 	makeValidAppConfig,
 	makeValidCoreConfig,
 	makeValidFullSections,
 } from "./fixtures/valid-config.mjs";
+export type { TestInspect } from "./test-inspect.mjs";

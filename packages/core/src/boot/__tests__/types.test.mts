@@ -319,8 +319,10 @@ describe("BootError", () => {
 // ---------------------------------------------------------------------------
 
 describe("AppHandle", () => {
-	it("has exactly the four expected keys", () => {
-		expectTypeOf<keyof AppHandle>().toEqualTypeOf<"router" | "listen" | "dispose" | "components">();
+	it("has exactly the five expected keys", () => {
+		expectTypeOf<keyof AppHandle>().toEqualTypeOf<
+			"router" | "listen" | "dispose" | "components" | "routes"
+		>();
 	});
 });
 
