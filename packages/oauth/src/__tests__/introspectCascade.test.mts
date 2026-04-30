@@ -16,17 +16,16 @@
 
 import { createSecretKey } from "node:crypto";
 import {
-	type AppConfig,
 	type AuditEvent,
 	type AuditSinkBase,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	defineModule,
 	GrantRegistry,
-	type ModuleContext,
 	type RefreshTokenStoreBase,
 } from "@o3co/auth-provider-core";
-import type { Router } from "express";
+import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
@@ -36,7 +35,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
-const secretKey = createSecretKey(Buffer.from(SECRET));
+const secretKeyPromise = createSecretKey(Buffer.from(SECRET));
 
 const mockConfig = {
 	oauth: {
@@ -48,7 +47,7 @@ const mockConfig = {
 	endpoints: {
 		login: { url: "/login" },
 	},
-} as unknown as AppConfig;
+} as unknown as import("@o3co/auth-provider-core").AppConfig;
 
 const mockClientRepository: ClientRepository = {
 	findById: async () => null,
@@ -66,7 +65,7 @@ async function makeAccessToken(overrides: Record<string, unknown> = {}): Promise
 	return new SignJWT({ sub: "u1", scope: "read", ...overrides })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
 		.setExpirationTime("1h")
-		.sign(secretKey);
+		.sign(secretKeyPromise);
 }
 
 async function buildApp(refreshTokenStore?: RefreshTokenStoreBase, auditSink?: AuditSinkBase) {
@@ -256,16 +255,23 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 	});
 });
 
-describe("oauthModule.init — refreshTokenStore composition (C1)", () => {
-	it("threads refreshTokenStore through to /introspect so family revocation returns active:false", async () => {
-		// This test proves C1 is fixed at the module layer: oauthModule.init must
-		// pass context.refreshTokenStore into createOAuthRouter. A revoked family
-		// must yield active:false even when the app is wired via oauthModule.
-		const app = express();
-		app.set("trust proxy", 1);
-		app.use(express.json());
-		app.use(express.urlencoded({ extended: false }));
+// ---------------------------------------------------------------------------
+// oauthModule — refreshTokenStore composition (C1) via createTestApp
+//
+// Migrated to createTestApp pattern: oauthModule is booted via the Phase 4
+// planner; refreshTokenStore flows through the DI graph. The family-revoke
+// cascade must still fire because createOAuthRouter receives the store from
+// typed deps (not legacy ModuleContext.refreshTokenStore).
+//
+// Note: RefreshTokenStoreBase is the v0.4.x legacy shape used by createOAuthRouter
+// for the introspect cascade. It is NOT a declared ComponentMap slot in v0.5.0
+// (replaced by refreshTokenFamilyStore / refreshTokenRotation / etc. per A3).
+// Wiring to the A3 slots is deferred; this test exercises the createOAuthRouter
+// call-site forwarding that oauthModule must perform via the deps object cast.
+// ---------------------------------------------------------------------------
 
+describe("oauthModule — refreshTokenStore composition (C1) via createTestApp", () => {
+	it("threads refreshTokenStore through to /introspect so family revocation returns active:false", async () => {
 		const familyId = "fam-module-revoked";
 		const token = await makeAccessToken({ family_id: familyId });
 
@@ -276,32 +282,63 @@ describe("oauthModule.init — refreshTokenStore composition (C1)", () => {
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		};
 
-		const rootRouter = express.Router() as Router;
-		const ctx: ModuleContext = {
-			pathResolver: (s: string) => s,
-			config: mockConfig,
-			keyStore,
-			grantRegistry: new GrantRegistry(),
-			router: rootRouter,
-			refreshTokenStore,
-		};
-
-		const module = oauthModule({
-			clientRepository: mockClientRepository,
-			codeRepository: mockCodeRepository,
-			express,
+		// refreshTokenStore is not a declared ComponentMap slot in v0.5.0 (A3 replaced it).
+		// We use an any cast to thread it through the DI graph as an ad-hoc component;
+		// oauthModule reads it from deps in the route factory and forwards to createOAuthRouter.
+		const refreshTokenStoreModule = defineModule({
+			name: "test:refresh-token-store",
+			// biome-ignore lint/suspicious/noExplicitAny: v0.4.x slot not in ComponentMap; deferred to A3 wiring task
+			provides: { refreshTokenStore: () => refreshTokenStore } as any,
 		});
 
-		await module.init(ctx);
-		app.use(rootRouter);
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://auth.example" },
+			},
+		};
+
+		const keyStoreForC1 = defineModule({
+			name: "test:key-store-c1",
+			provides: { keyStore: () => createSymmetricKeyStore(SECRET) },
+		});
+		const clientRepositoryModule = defineModule({
+			name: "test:client-repository-c1",
+			provides: { clientRepository: () => mockClientRepository },
+		});
+		const codeRepositoryModule = defineModule({
+			name: "test:code-repository-c1",
+			provides: { codeRepository: () => mockCodeRepository },
+		});
+
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreForC1,
+				refreshTokenStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+
+		const app = express();
+		app.set("trust proxy", 1);
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		for (const route of handle.inspect.routes) {
+			app.use(route.contribution.mountPath, route.contribution.handler);
+		}
 
 		const res = await introspect(app, token);
 
 		// If C1 is fixed, the store was consulted and the family is revoked → inactive.
-		// If C1 were broken (store not threaded), isFamilyRevoked would not be called
-		// and the token would appear active:true.
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(false);
 		expect(refreshTokenStore.isFamilyRevoked).toHaveBeenCalledWith(familyId);
+
+		await handle.dispose();
 	});
 });

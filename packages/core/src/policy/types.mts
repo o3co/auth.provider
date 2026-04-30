@@ -53,3 +53,16 @@ export interface GrantPolicyHookBase {
 }
 
 export type GrantPolicyHookFactory = AdapterFactory<GrantPolicyHookBase>;
+
+// ---------------------------------------------------------------------------
+// ComponentMap slot declaration (per A2-α §6.1)
+//
+// `grantPolicy` is an optional component consumed by oauthModule routes
+// (POST /oauth/token grantPolicy.evaluate gate). When absent, grant
+// authorization proceeds with the default policy (allow-all).
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly grantPolicy: GrantPolicyHookBase;
+	}
+}

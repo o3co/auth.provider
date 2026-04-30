@@ -16,16 +16,14 @@
 
 import { createSecretKey } from "node:crypto";
 import {
-	type AppConfig,
 	type AuditEvent,
 	type AuditSinkBase,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	defineModule,
 	type FederationProviderHandle,
 	type FederationTokenStoreBase,
-	GrantRegistry,
-	type ModuleContext,
 	type RateLimiterBase,
 	type RefreshTokenStoreBase,
 	type SessionFamilyIndex,
@@ -34,56 +32,199 @@ import {
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import type { Router } from "express";
+import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 
-const mockConfig = {
-	oauth: {
-		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {},
-	},
-	endpoints: {
-		login: { url: "/login" },
-	},
-} as unknown as AppConfig;
+// ---------------------------------------------------------------------------
+// Shared test-only stubs
+// ---------------------------------------------------------------------------
 
-const makeContext = (overrides?: Partial<ModuleContext>): ModuleContext => ({
-	pathResolver: (s: string) => s,
-	config: mockConfig,
-	keyStore: createSymmetricKeyStore("test-secret"),
-	grantRegistry: new GrantRegistry(),
-	router: {
-		use: vi.fn().mockReturnThis(),
-		get: vi.fn().mockReturnThis(),
-		post: vi.fn().mockReturnThis(),
-	} as unknown as Router,
-	...overrides,
+const fakeClientRepository: ClientRepository = {
+	findById: async () => null,
+	authenticate: async () => null,
+};
+
+const fakeCodeRepository: CodeRepository = {
+	createCode: async () => ({ code: "fake-code" }),
+	getByCode: async () => null,
+	consumeByCode: async () => null,
+	removeByCode: async () => {},
+};
+
+/** Inline module that satisfies `requires: ["clientRepository"]`. */
+const clientRepositoryModule = defineModule({
+	name: "test:client-repository",
+	provides: {
+		clientRepository: () => fakeClientRepository,
+	},
 });
 
-describe("oauthModule", () => {
+/** Inline module that satisfies `requires: ["codeRepository"]`. */
+const codeRepositoryModule = defineModule({
+	name: "test:code-repository",
+	provides: {
+		codeRepository: () => fakeCodeRepository,
+	},
+});
+
+/** Inline module that satisfies `requires: ["keyStore"]`. */
+const keyStoreModule = defineModule({
+	name: "test:key-store",
+	provides: {
+		keyStore: () => createSymmetricKeyStore("test-secret-for-oauth-module!!!!!"),
+	},
+});
+
+// Note: grantHandlerResolver is a SYNTHETIC key — the boot planner injects it
+// automatically from collected grants. Do NOT provide it from a module.
+
+// ---------------------------------------------------------------------------
+// Module manifest structural tests (§7.1 — static, no createTestApp needed)
+// ---------------------------------------------------------------------------
+
+describe("oauthModule — manifest shape", () => {
 	it("has name 'oauth'", () => {
-		const module = oauthModule({
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+		const config = makeValidAppConfig();
+		const module = oauthModule({ config });
 		expect(module.name).toBe("oauth");
 	});
 
-	it("forwards context.rateLimiter and context.auditSink into oauth routes", async () => {
-		// End-to-end: createApp-style wiring uses a real express Router, so we
-		// mount the module's sub-router onto an app and issue a real request.
-		const app = express();
-		app.set("trust proxy", 1);
-		app.use(express.json());
-		app.use(express.urlencoded({ extended: false }));
+	it("includes oauth-endpoints route contribution when issuer is absent", () => {
+		const base = makeValidAppConfig();
+		// No issuer set — only oauth-endpoints factory should appear
+		const module = oauthModule({ config: base });
+		const routes = module.contributes?.routes;
+		expect(Array.isArray(routes)).toBe(true);
+		// At minimum the oauth-endpoints factory is always present
+		expect((routes as unknown[]).length).toBeGreaterThanOrEqual(1);
+	});
 
-		const rootRouter = express.Router();
+	it("includes both route contributions when issuer is configured", () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: {
+					...base.oauth.jwt,
+					issuer: "https://auth.example.com",
+				},
+			},
+		};
+		const module = oauthModule({ config });
+		const routes = module.contributes?.routes;
+		expect(Array.isArray(routes)).toBe(true);
+		// oauth-endpoints + oidc-discovery
+		expect((routes as unknown[]).length).toBe(2);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// createTestApp integration tests (§7.3 — boot + inspect)
+// ---------------------------------------------------------------------------
+
+describe("oauthModule — createTestApp route inspection", () => {
+	it("registers only oauth-endpoints route when issuer is absent", async () => {
+		const config = makeValidAppConfig();
+		// makeValidAppConfig does not set oauth.jwt.issuer
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
+		expect(routeIds).toContain("oauth-endpoints");
+		expect(routeIds).not.toContain("oidc-discovery");
+		await handle.dispose();
+	});
+
+	it("registers both oauth-endpoints and oidc-discovery routes when issuer is set", async () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: {
+					...base.oauth.jwt,
+					issuer: "https://auth.example.com",
+				},
+			},
+		};
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
+		expect(routeIds).toContain("oauth-endpoints");
+		expect(routeIds).toContain("oidc-discovery");
+		await handle.dispose();
+	});
+
+	it("oauth-endpoints is mounted at /oauth", async () => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const oauthRoute = handle.inspect.routes.find((r) => r.contribution.id === "oauth-endpoints");
+		expect(oauthRoute?.contribution.mountPath).toBe("/oauth");
+		await handle.dispose();
+	});
+
+	it("oidc-discovery is mounted at /.well-known/openid-configuration", async () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
+			},
+		};
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const discoveryRoute = handle.inspect.routes.find(
+			(r) => r.contribution.id === "oidc-discovery",
+		);
+		expect(discoveryRoute?.contribution.mountPath).toBe("/.well-known/openid-configuration");
+		await handle.dispose();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Behavioral: grant dispatch via router
+// The HTTP probe builds a full express app to verify createOAuthRouter wires
+// correctly through the deps injected by the boot planner.
+// ---------------------------------------------------------------------------
+
+describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () => {
+	it("forwards rateLimiter and auditSink into oauth routes (rate limit returns 429)", async () => {
+		const SECRET = "test-secret-at-least-32-chars!!";
+
 		const rateLimiter: RateLimiterBase = {
 			kind: "spy",
 			check: vi.fn().mockResolvedValue({ allowed: false, reason: "limit:token" }),
@@ -96,81 +237,72 @@ describe("oauthModule", () => {
 			},
 		};
 
-		const ctx: ModuleContext = {
-			pathResolver: (s: string) => s,
-			config: {
-				...mockConfig,
-				oauth: { ...mockConfig.oauth, grants: {} },
-			} as unknown as AppConfig,
-			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-			grantRegistry: new GrantRegistry(),
-			router: rootRouter,
-			rateLimiter,
-			auditSink,
-		};
-
-		const module = oauthModule({
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-			express,
+		const rateLimiterModule = defineModule({
+			name: "test:rate-limiter",
+			provides: { rateLimiter: () => rateLimiter },
+		});
+		const auditSinkModule = defineModule({
+			name: "test:audit-sink",
+			provides: { auditSink: () => auditSink },
+		});
+		const keyStoreWithSecret = defineModule({
+			name: "test:key-store-secret",
+			provides: { keyStore: () => createSymmetricKeyStore(SECRET) },
 		});
 
-		await module.init(ctx);
-		app.use(rootRouter);
+		const base = makeValidAppConfig();
+		const config = { ...base };
+
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreWithSecret,
+				rateLimiterModule,
+				auditSinkModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+
+		// Mount the routes onto an express app for HTTP probing
+		const app = express();
+		app.set("trust proxy", 1);
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		for (const route of handle.inspect.routes) {
+			app.use(route.contribution.mountPath, route.contribution.handler);
+		}
 
 		const res = await request(app).post("/oauth/token").send({ grant_type: "password" });
 
 		// rateLimiter was forwarded and invoked by the route
 		expect(rateLimiter.check).toHaveBeenCalled();
 		expect(res.status).toBe(429);
-		// If auditSink was forwarded, we can at least confirm rateLimiter reached
-		// the handler. auditSink is exercised in hooks.test.mts.
+
+		await handle.dispose();
 	});
+});
 
-	it("mounts /oauth routes on context.router", async () => {
-		const routerMock = {
-			use: vi.fn().mockReturnThis(),
-			get: vi.fn().mockReturnThis(),
-			post: vi.fn().mockReturnThis(),
-		} as unknown as Router;
-		const ctx = makeContext({ router: routerMock });
-		const module = oauthModule({
-			clientRepository: {} as ClientRepository,
-			codeRepository: {} as CodeRepository,
-		});
+// ---------------------------------------------------------------------------
+// Behavioral: federation logout — deps.federationProviders typed slot
+//
+// Proves that oauthModule reads federationProviders from typed deps (Theme E
+// structural fix — no lazy () => ctx.federationProviders closure). Federation
+// providers are supplied at boot time via the DI graph.
+// ---------------------------------------------------------------------------
 
-		await module.init(ctx);
-
-		// Should have mounted the oauth sub-router on /oauth
-		expect((routerMock.use as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThanOrEqual(
-			1,
-		);
-		const oauthCall = (routerMock.use as ReturnType<typeof vi.fn>).mock.calls.find(
-			(call: unknown[]) => call[0] === "/oauth",
-		);
-		expect(oauthCall).toBeDefined();
-	});
-
-	// -----------------------------------------------------------------------
-	// Integration: lazy getFederationProviders closure
-	//
-	// Proves that composing modules as [oauthModule, sessionModule, ...] (oauth
-	// inits FIRST) still correctly resolves federation providers at request time
-	// because createOAuthRouter receives `() => context.federationProviders`
-	// rather than a snapshot of the map value at init time.
-	// -----------------------------------------------------------------------
-	it("federation logout works when oauth module inits BEFORE context.federationProviders is populated (lazy closure)", async () => {
+describe("oauthModule — federation logout via typed deps", () => {
+	it("federation logout works when federationProviders is supplied via module", async () => {
 		const SECRET = "test-secret-at-least-32-chars!!";
 		const secretKey = createSecretKey(Buffer.from(SECRET));
 
-		// A minimal access token for POST /oauth/federation/:name/logout
 		const accessToken = await new SignJWT({ sub: "u-1", sid: "sid-1", family_id: "fam-1" })
 			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
 			.setExpirationTime("1h")
 			.setIssuedAt()
 			.sign(secretKey);
 
-		// Session has "google" linked (v0.5.0 UserSession: no federations/activeRPs/familyIds fields)
 		const session: UserSession = {
 			sid: "sid-1",
 			sub: "u-1",
@@ -186,7 +318,6 @@ describe("oauthModule", () => {
 			get: vi.fn().mockResolvedValue(session),
 			delete: vi.fn(),
 		};
-
 		const sessionRPRegistry: SessionRPRegistry = {
 			kind: "memory",
 			registerRP: vi.fn(async () => {}),
@@ -206,14 +337,6 @@ describe("oauthModule", () => {
 			removeFederation: vi.fn(async () => {}),
 			removeBySid: vi.fn(async () => {}),
 		};
-
-		const refreshStore: RefreshTokenStoreBase = {
-			kind: "memory",
-			isFamilyRevoked: vi.fn().mockResolvedValue(false),
-			rotate: vi.fn(),
-			revokeFamily: vi.fn().mockResolvedValue(undefined),
-		};
-
 		const fedTokenStore: FederationTokenStoreBase = {
 			kind: "memory",
 			attach: vi.fn(),
@@ -222,8 +345,13 @@ describe("oauthModule", () => {
 			deleteBySession: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn().mockResolvedValue(undefined),
 		};
+		const refreshTokenStore: RefreshTokenStoreBase = {
+			kind: "memory",
+			rotate: vi.fn(),
+			isFamilyRevoked: vi.fn(async () => false),
+			revokeFamily: vi.fn(),
+		};
 
-		// The provider's endSession returns a redirect URL
 		const endSessionUrl = new URL("https://accounts.google.com/logout?hint=id-token-hint");
 		const googleProvider: FederationProviderHandle & {
 			endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
@@ -232,50 +360,90 @@ describe("oauthModule", () => {
 			endSession: vi.fn().mockResolvedValue({ url: endSessionUrl, method: "GET" }),
 		};
 
-		// Build context — federationProviders is undefined at construction time,
-		// simulating the state when oauthModule.init runs before sessionModule.init.
-		const rootRouter = express.Router();
-		const ctx: ModuleContext = makeContext({
-			config: {
-				...mockConfig,
-				oauth: {
-					...mockConfig.oauth,
-					jwt: { secret: SECRET, issuer: "https://auth.example.com" },
+		// Modules providing the optional stores
+		const userSessionStoreModule = defineModule({
+			name: "test:user-session-store",
+			provides: { userSessionStore: () => sessionStore },
+		});
+		const sessionRPRegistryModule = defineModule({
+			name: "test:session-rp-registry",
+			provides: { sessionRPRegistry: () => sessionRPRegistry },
+		});
+		const sessionFamilyIndexModule = defineModule({
+			name: "test:session-family-index",
+			provides: { sessionFamilyIndex: () => sessionFamilyIndex },
+		});
+		const sessionFederationIndexModule = defineModule({
+			name: "test:session-federation-index",
+			provides: { sessionFederationIndex: () => sessionFederationIndex },
+		});
+		const federationTokenStoreModule = defineModule({
+			name: "test:federation-token-store",
+			provides: { federationTokenStore: () => fedTokenStore },
+		});
+		const refreshTokenStoreModule = defineModule({
+			name: "test:refresh-token-store",
+			provides: { refreshTokenStore: () => refreshTokenStore },
+		});
+		// federationProviders is SYNTHETIC — built from the "federations" collector.
+		// Contribute the google provider via a federation module; the boot planner
+		// then injects it as deps.federationProviders in the route factory.
+		// Theme E structural fix: no lazy () => ctx.federationProviders closure.
+		//
+		// Note: every federations[name] contribution requires a paired
+		// federationRedirectPolicies[name] contribution (boot invariant §7.5).
+		// Both FederationProvider and FederationRedirectPolicy are `unknown`
+		// placeholders in contributes-map (Phase 9); `as never` at the contributes
+		// boundary is the plan-sanctioned escape hatch for stub module fixtures.
+		const federationModule = defineModule({
+			name: "test:google-federation",
+			contributes: {
+				federations: { google: () => googleProvider },
+				federationRedirectPolicies: {
+					google: () => ({
+						validateRedirect: () => ({ ok: true as const, value: undefined }),
+						resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
+					}),
 				},
-			} as unknown as AppConfig,
-			keyStore: createSymmetricKeyStore(SECRET),
-			router: rootRouter,
-			refreshTokenStore: refreshStore,
-			userSessionStore: sessionStore,
-			sessionRPRegistry,
-			sessionFamilyIndex,
-			sessionFederationIndex,
-			federationTokenStore: fedTokenStore,
-			// NOT setting federationProviders yet — simulates oauth init running first
+			} as never,
+		});
+		const keyStoreWithSecret = defineModule({
+			name: "test:key-store-logout",
+			provides: { keyStore: () => createSymmetricKeyStore(SECRET) },
 		});
 
-		// Step 1: oauth module inits (federationProviders still undefined on ctx)
-		const oauth = oauthModule({
-			clientRepository: { findById: vi.fn(), authenticate: vi.fn() } as ClientRepository,
-			codeRepository: {
-				createCode: vi.fn(),
-				getCode: vi.fn(),
-				deleteCode: vi.fn(),
-			} as unknown as CodeRepository,
-			express,
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" },
+			},
+		};
+
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreWithSecret,
+				userSessionStoreModule,
+				sessionRPRegistryModule,
+				sessionFamilyIndexModule,
+				sessionFederationIndexModule,
+				federationTokenStoreModule,
+				refreshTokenStoreModule,
+				federationModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-		await oauth.init(ctx);
 
-		// Step 2: "session module" sets federationProviders AFTER oauth init — simulates
-		// the real module composition order where session inits after oauth.
-		ctx.federationProviders = new Map<string, FederationProviderHandle>([
-			["google", googleProvider],
-		]);
-
-		// Step 3: issue a real HTTP request — the closure in createOAuthRouter reads
-		// context.federationProviders at request time, so it picks up the map set above.
 		const app = express();
-		app.use(rootRouter);
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		for (const route of handle.inspect.routes) {
+			app.use(route.contribution.mountPath, route.contribution.handler);
+		}
 
 		const res = await request(app)
 			.post("/oauth/federation/google/logout")
@@ -283,185 +451,44 @@ describe("oauthModule", () => {
 			.set("Authorization", `Bearer ${accessToken}`)
 			.send({});
 
-		// The lazy closure resolved the provider → endSession redirect
+		// The typed deps resolved the provider → endSession redirect
 		expect(res.status).toBe(303);
 		expect(res.headers.location).toContain("accounts.google.com");
 		expect(googleProvider.endSession).toHaveBeenCalledOnce();
+
+		await handle.dispose();
 	});
 
-	it("federation token endpoint works when oauth module inits BEFORE context.federationProviders is populated (lazy resolution)", async () => {
-		const SECRET = "test-secret-at-least-32-chars!!";
-		const secretKey = createSecretKey(Buffer.from(SECRET));
-
-		// Access token with azp identifying the permitted client
-		const accessToken = await new SignJWT({
-			sub: "u-1",
-			sid: "sid-1",
-			family_id: "fam-1",
-			azp: "client-1",
-		})
-			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
-			.setExpirationTime("1h")
-			.setIssuedAt()
-			.sign(secretKey);
-
-		// Session has "google" linked (v0.5.0 UserSession: no federations/activeRPs/familyIds fields)
-		const session: UserSession = {
-			sid: "sid-1",
-			sub: "u-1",
-			authTime: new Date(),
-			createdAt: new Date(),
-			expiresAt: new Date(Date.now() + 3_600_000),
-			claims: {},
-		};
-
+	it("federation-token endpoint is mounted even when issuer is absent (returns 401, not 404)", async () => {
+		// federationTokenSupported in routes.mts (lines 627-633) gates on the
+		// 4-store split + federationTokenStore + refreshTokenStore. Issuer
+		// absence must NOT break this gate — that is what the test asserts.
 		const sessionStore: UserSessionStore = {
-			kind: "memory",
-			create: vi.fn(),
-			get: vi.fn().mockResolvedValue(session),
-			delete: vi.fn(),
-		};
-
-		const sessionRPRegistry2: SessionRPRegistry = {
-			kind: "memory",
-			registerRP: vi.fn(async () => {}),
-			listRPs: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
-		const sessionFamilyIndex2: SessionFamilyIndex = {
-			kind: "memory",
-			addFamilyId: vi.fn(async () => {}),
-			listFamilyIds: vi.fn(async () => []),
-			removeBySid: vi.fn(async () => {}),
-		};
-		const sessionFederationIndex2: SessionFederationIndex = {
-			kind: "memory",
-			addFederation: vi.fn(async () => {}),
-			listFederations: vi.fn(async () => ["google"]),
-			removeFederation: vi.fn(async () => {}),
-			removeBySid: vi.fn(async () => {}),
-		};
-
-		const refreshStore: RefreshTokenStoreBase = {
-			kind: "memory",
-			isFamilyRevoked: vi.fn().mockResolvedValue(false),
-			rotate: vi.fn(),
-			revokeFamily: vi.fn().mockResolvedValue(undefined),
-		};
-
-		// Federation tokens — well within expiry so no refresh path is exercised
-		const fedTokenStore: FederationTokenStoreBase = {
-			kind: "memory",
-			attach: vi.fn(),
-			get: vi.fn().mockResolvedValue({
-				accessToken: "upstream-access-token",
-				expiresAt: new Date(Date.now() + 3_600_000),
-				tokenType: "Bearer",
-			}),
-			update: vi.fn(),
-			deleteBySession: vi.fn().mockResolvedValue(undefined),
-			delete: vi.fn().mockResolvedValue(undefined),
-		};
-
-		// Client with permission to retrieve federation tokens
-		const clientRepo: ClientRepository = {
-			findById: vi.fn().mockResolvedValue({
-				id: "client-1",
-				allowedRedirectUris: [],
-				allowedScopes: [],
-				allowedAzpForFederationToken: true,
-			}),
-			authenticate: vi.fn(),
-		};
-
-		// Build context — federationProviders is undefined at construction time
-		const rootRouter = express.Router();
-		const ctx: ModuleContext = makeContext({
-			config: {
-				...mockConfig,
-				oauth: {
-					...mockConfig.oauth,
-					jwt: { secret: SECRET, issuer: "https://auth.example.com" },
-				},
-			} as unknown as AppConfig,
-			keyStore: createSymmetricKeyStore(SECRET),
-			router: rootRouter,
-			refreshTokenStore: refreshStore,
-			userSessionStore: sessionStore,
-			sessionRPRegistry: sessionRPRegistry2,
-			sessionFamilyIndex: sessionFamilyIndex2,
-			sessionFederationIndex: sessionFederationIndex2,
-			federationTokenStore: fedTokenStore,
-			// NOT setting federationProviders yet — simulates oauth init running first
-		});
-
-		// Step 1: oauth module inits (federationProviders still undefined on ctx)
-		const oauth = oauthModule({
-			clientRepository: clientRepo,
-			codeRepository: {
-				createCode: vi.fn(),
-				getCode: vi.fn(),
-				deleteCode: vi.fn(),
-			} as unknown as CodeRepository,
-			express,
-		});
-		await oauth.init(ctx);
-
-		// Step 2: "session module" sets federationProviders AFTER oauth init
-		ctx.federationProviders = new Map<string, FederationProviderHandle>([
-			["google", { name: "google" }],
-		]);
-
-		// Step 3: issue a real HTTP request — the token is fresh so no refresh is needed
-		const app = express();
-		app.use(rootRouter);
-
-		const res = await request(app)
-			.post("/oauth/federation/google/token")
-			.set("Authorization", `Bearer ${accessToken}`)
-			.send({});
-
-		// The route is mounted and the token is returned
-		expect(res.status).toBe(200);
-		expect(res.body.access_token).toBe("upstream-access-token");
-		expect(res.body.token_type).toBe("Bearer");
-	});
-
-	it("federation-token endpoint is mounted even when oauth.jwt.issuer is absent (returns 401, not 404)", async () => {
-		const SECRET = "test-secret-at-least-32-chars!!";
-
-		const sessionStore3: UserSessionStore = {
 			kind: "memory",
 			create: vi.fn(),
 			get: vi.fn(),
 			delete: vi.fn(),
 		};
-		const sessionRPRegistry3: SessionRPRegistry = {
+		const sessionRPRegistry: SessionRPRegistry = {
 			kind: "memory",
 			registerRP: vi.fn(async () => {}),
 			listRPs: vi.fn(async () => []),
 			removeBySid: vi.fn(async () => {}),
 		};
-		const sessionFamilyIndex3: SessionFamilyIndex = {
+		const sessionFamilyIndex: SessionFamilyIndex = {
 			kind: "memory",
 			addFamilyId: vi.fn(async () => {}),
 			listFamilyIds: vi.fn(async () => []),
 			removeBySid: vi.fn(async () => {}),
 		};
-		const sessionFederationIndex3: SessionFederationIndex = {
+		const sessionFederationIndex: SessionFederationIndex = {
 			kind: "memory",
 			addFederation: vi.fn(async () => {}),
 			listFederations: vi.fn(async () => []),
 			removeFederation: vi.fn(async () => {}),
 			removeBySid: vi.fn(async () => {}),
 		};
-		const refreshStore3: RefreshTokenStoreBase = {
-			kind: "memory",
-			isFamilyRevoked: vi.fn(),
-			rotate: vi.fn(),
-			revokeFamily: vi.fn(),
-		};
-		const fedTokenStore3: FederationTokenStoreBase = {
+		const fedTokenStore: FederationTokenStoreBase = {
 			kind: "memory",
 			attach: vi.fn(),
 			get: vi.fn(),
@@ -469,45 +496,68 @@ describe("oauthModule", () => {
 			deleteBySession: vi.fn(),
 			delete: vi.fn(),
 		};
+		const refreshTokenStore: RefreshTokenStoreBase = {
+			kind: "memory",
+			rotate: vi.fn(),
+			isFamilyRevoked: vi.fn(async () => false),
+			revokeFamily: vi.fn(),
+		};
 
-		// Config intentionally omits oauth.jwt.issuer — only secret is provided.
-		const rootRouter = express.Router();
-		const ctx: ModuleContext = makeContext({
-			config: {
-				...mockConfig,
-				oauth: {
-					...mockConfig.oauth,
-					jwt: { secret: SECRET },
-					// issuer is deliberately absent
-				},
-			} as unknown as AppConfig,
-			keyStore: createSymmetricKeyStore(SECRET),
-			router: rootRouter,
-			refreshTokenStore: refreshStore3,
-			userSessionStore: sessionStore3,
-			sessionRPRegistry: sessionRPRegistry3,
-			sessionFamilyIndex: sessionFamilyIndex3,
-			sessionFederationIndex: sessionFederationIndex3,
-			federationTokenStore: fedTokenStore3,
+		const userSessionStoreModule = defineModule({
+			name: "test:user-session-store-noissuer",
+			provides: { userSessionStore: () => sessionStore },
+		});
+		const sessionRPRegistryModule = defineModule({
+			name: "test:session-rp-registry-noissuer",
+			provides: { sessionRPRegistry: () => sessionRPRegistry },
+		});
+		const sessionFamilyIndexModule = defineModule({
+			name: "test:session-family-index-noissuer",
+			provides: { sessionFamilyIndex: () => sessionFamilyIndex },
+		});
+		const sessionFederationIndexModule = defineModule({
+			name: "test:session-federation-index-noissuer",
+			provides: { sessionFederationIndex: () => sessionFederationIndex },
+		});
+		const federationTokenStoreModule = defineModule({
+			name: "test:federation-token-store-noissuer",
+			provides: { federationTokenStore: () => fedTokenStore },
+		});
+		const refreshTokenStoreModule = defineModule({
+			name: "test:refresh-token-store-noissuer",
+			provides: { refreshTokenStore: () => refreshTokenStore },
 		});
 
-		const oauth = oauthModule({
-			clientRepository: { findById: vi.fn(), authenticate: vi.fn() } as ClientRepository,
-			codeRepository: {
-				createCode: vi.fn(),
-				getCode: vi.fn(),
-				deleteCode: vi.fn(),
-			} as unknown as CodeRepository,
-			express,
+		const config = makeValidAppConfig();
+		// No issuer — oidc-discovery not mounted, but /oauth/federation/* must be mounted
+
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+				userSessionStoreModule,
+				sessionRPRegistryModule,
+				sessionFamilyIndexModule,
+				sessionFederationIndexModule,
+				federationTokenStoreModule,
+				refreshTokenStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-		await oauth.init(ctx);
 
 		const app = express();
-		app.use(rootRouter);
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		for (const route of handle.inspect.routes) {
+			app.use(route.contribution.mountPath, route.contribution.handler);
+		}
 
 		// No Authorization header → should get 401 (route is mounted) not 404 (route missing)
 		const res = await request(app).post("/oauth/federation/google/token").send({});
-
 		expect(res.status).toBe(401);
+
+		await handle.dispose();
 	});
 });

@@ -55,6 +55,22 @@ export interface FederationTokenStoreBase {
 
 export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStoreBase>;
 
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge (A2-α §6.1 — optional slot)
+//
+// Declared here so oauthModule can list "federationTokenStore" in its
+// `optional` array and the DI graph types deps.federationTokenStore as
+// FederationTokenStoreBase | undefined.
+// The slot is optional: when absent, federation-token routes return 503
+// (no store available to retrieve / refresh upstream tokens).
+// Phase 9 Task 4 augmentation.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly federationTokenStore?: FederationTokenStoreBase;
+	}
+}
+
 /**
  * Input for acquireLock — identifies the lock by (sid, federationName) pair
  * and provides timeout knobs.
