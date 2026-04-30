@@ -140,15 +140,17 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
  *   boolean             → pass-through unchanged
  *   other values        → forwarded to z.boolean() which rejects with a type error
  */
-const coerceBooleanFromEnv = z.preprocess((val) => {
-	if (typeof val === "boolean") return val;
-	if (typeof val === "string") {
-		const normalized = val.trim().toLowerCase();
-		if (normalized === "true" || normalized === "1") return true;
-		if (normalized === "false" || normalized === "0" || normalized === "") return false;
-	}
-	return val; // zod rejects with a type error for other values
-}, z.boolean().default(false));
+const coerceBooleanFromEnv = z
+	.preprocess((val) => {
+		if (typeof val === "boolean") return val;
+		if (typeof val === "string") {
+			const normalized = val.trim().toLowerCase();
+			if (normalized === "true" || normalized === "1") return true;
+			if (normalized === "false" || normalized === "0" || normalized === "") return false;
+		}
+		return val; // zod rejects with a type error for other values
+	}, z.boolean())
+	.default(false);
 
 const federationEntrySchema = z
 	.object({
