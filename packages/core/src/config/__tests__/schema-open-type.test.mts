@@ -16,26 +16,44 @@
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema.mjs";
 
+/**
+ * Per ADR 2026-04-30: schema is a pure type contract; defaults live in
+ * hocon. session.{maxAge,secure,sameSite,domain} are required at the
+ * schema boundary, so each test supplies them explicitly.
+ */
+function validSession(overrides: Record<string, unknown> = {}) {
+	return {
+		secret: "s",
+		maxAge: 3600000,
+		secure: true,
+		sameSite: "lax" as const,
+		domain: null,
+		...overrides,
+	};
+}
+
 describe("schema open type", () => {
 	it("accepts non-builtin session storage type (validated at factory level, not schema)", () => {
-		const parsed = fullSectionsSchema.shape.session.parse({
-			secret: "s",
-			storage: {
-				type: "memcached",
-				redis: { url: "redis://localhost:6379" },
-			},
-		});
+		const parsed = fullSectionsSchema.shape.session.parse(
+			validSession({
+				storage: {
+					type: "memcached",
+					redis: { url: "redis://localhost:6379" },
+				},
+			}),
+		);
 		expect(parsed.storage.type).toBe("memcached");
 	});
 
 	it("preserves custom session storage sub-section (passthrough carries memcached.servers)", () => {
-		const parsed = fullSectionsSchema.shape.session.parse({
-			secret: "s",
-			storage: {
-				type: "memcached",
-				memcached: { servers: ["mc1.example.com:11211", "mc2.example.com:11211"] },
-			},
-		});
+		const parsed = fullSectionsSchema.shape.session.parse(
+			validSession({
+				storage: {
+					type: "memcached",
+					memcached: { servers: ["mc1.example.com:11211", "mc2.example.com:11211"] },
+				},
+			}),
+		);
 		expect(parsed.storage.type).toBe("memcached");
 		expect(
 			(parsed.storage as unknown as { memcached?: { servers?: string[] } }).memcached?.servers,
@@ -43,22 +61,24 @@ describe("schema open type", () => {
 	});
 
 	it("allows omitting the redis sub-section when type != 'redis'", () => {
-		const parsed = fullSectionsSchema.shape.session.parse({
-			secret: "s",
-			storage: { type: "memory" },
-		});
+		const parsed = fullSectionsSchema.shape.session.parse(
+			validSession({
+				storage: { type: "memory" },
+			}),
+		);
 		expect(parsed.storage.type).toBe("memory");
 	});
 
 	it("still accepts the builtin session storage types", () => {
 		for (const type of ["redis", "memory"]) {
-			const parsed = fullSectionsSchema.shape.session.parse({
-				secret: "s",
-				storage: {
-					type,
-					redis: { url: "redis://localhost:6379" },
-				},
-			});
+			const parsed = fullSectionsSchema.shape.session.parse(
+				validSession({
+					storage: {
+						type,
+						redis: { url: "redis://localhost:6379" },
+					},
+				}),
+			);
 			expect(parsed.storage.type).toBe(type);
 		}
 	});

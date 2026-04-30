@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it, vi } from "vitest";
+import { makeValidCoreConfig } from "../../__tests__/fixtures/valid-config.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { materializeComponents } from "../materialize-components.mjs";
 import { planBoot } from "../plan-boot.mjs";
@@ -38,11 +39,11 @@ declare module "@o3co/auth-provider-core" {
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Minimum config that satisfies CoreConfigSchema (Codex P2-A hardening:
-// validateAndComposeConfig now always runs CoreConfigSchema). All required
-// nested objects present as empty so Zod defaults populate every leaf.
+// Per ADR 2026-04-30: schema is a pure type contract; defaults live in
+// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so this
+// fixture must mirror what hocon would have produced.
 const minBoot = {
-	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } } as never,
+	config: makeValidCoreConfig() as never,
 	pathResolver: (s: string) => s,
 } satisfies Record<string, unknown> as BootstrapMap;
 

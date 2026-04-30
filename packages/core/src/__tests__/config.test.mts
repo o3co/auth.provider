@@ -104,27 +104,27 @@ describe("provider config", () => {
 });
 
 describe("jwt config schema", () => {
-	// Schema-level acceptance tests — verify the nested signingKey shape is accepted
-	// and that schema-level defaults are applied inside signingKey.local.
+	// Schema-level acceptance tests — verify the nested signingKey shape is
+	// accepted. Per ADR 2026-04-30 the schema is a pure type contract:
+	// algorithm/kid/previousKeys are required at the schema boundary, and
+	// hocon (`packages/core/config/application.conf`) supplies the runtime
+	// defaults that production callers rely on.
 
-	it("algorithm defaults to HS256", () => {
-		// When local sub-section is absent, signingKey.local is undefined (schema: optional).
-		// The default lives in signingKeyLocalSchema; test via parse with explicit local: {}.
-		const result = jwtSchema.parse({ signingKey: { local: {} } });
-		const local = result.signingKey.local as Record<string, unknown>;
-		expect(local.algorithm).toBe("HS256");
-	});
-
-	it("kid defaults to v0", () => {
-		const result = jwtSchema.parse({ signingKey: { local: {} } });
-		const local = result.signingKey.local as Record<string, unknown>;
-		expect(local.kid).toBe("v0");
-	});
-
-	it("previousKeys defaults to empty array", () => {
-		const result = jwtSchema.parse({ signingKey: { local: {} } });
-		const local = result.signingKey.local as Record<string, unknown>;
-		expect(local.previousKeys).toEqual([]);
+	it("rejects bare local sub-section (algorithm/kid/previousKeys are required at the schema boundary)", () => {
+		const result = jwtSchema.safeParse({
+			signingKey: { provider: "local", local: { secret: "x" } },
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const paths = result.error.issues.map((i) => i.path.join("."));
+			expect(paths).toEqual(
+				expect.arrayContaining([
+					"signingKey.local.algorithm",
+					"signingKey.local.kid",
+					"signingKey.local.previousKeys",
+				]),
+			);
+		}
 	});
 
 	it("accepts RS256 with key fields", () => {
@@ -133,6 +133,8 @@ describe("jwt config schema", () => {
 				provider: "local",
 				local: {
 					algorithm: "RS256",
+					kid: "v0",
+					previousKeys: [],
 					privateKey: "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
 					publicKey: "-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----",
 				},
@@ -146,12 +148,30 @@ describe("jwt config schema", () => {
 
 	it("accepts ES256 and EdDSA algorithms", () => {
 		const es256 = jwtSchema.parse({
-			signingKey: { local: { algorithm: "ES256", privateKey: "pk", publicKey: "pub" } },
+			signingKey: {
+				provider: "local",
+				local: {
+					algorithm: "ES256",
+					kid: "v0",
+					previousKeys: [],
+					privateKey: "pk",
+					publicKey: "pub",
+				},
+			},
 		});
 		expect((es256.signingKey.local as Record<string, unknown>).algorithm).toBe("ES256");
 
 		const eddsa = jwtSchema.parse({
-			signingKey: { local: { algorithm: "EdDSA", privateKey: "pk", publicKey: "pub" } },
+			signingKey: {
+				provider: "local",
+				local: {
+					algorithm: "EdDSA",
+					kid: "v0",
+					previousKeys: [],
+					privateKey: "pk",
+					publicKey: "pub",
+				},
+			},
 		});
 		expect((eddsa.signingKey.local as Record<string, unknown>).algorithm).toBe("EdDSA");
 	});
@@ -159,8 +179,10 @@ describe("jwt config schema", () => {
 	it("accepts previousKeys array with valid entries", () => {
 		const result = jwtSchema.parse({
 			signingKey: {
+				provider: "local",
 				local: {
 					algorithm: "ES256",
+					kid: "v1",
 					privateKey: "pk",
 					publicKey: "pub",
 					previousKeys: [
@@ -186,7 +208,16 @@ describe("jwt config schema", () => {
 
 	it("secret is optional for asymmetric algorithms", () => {
 		const result = jwtSchema.parse({
-			signingKey: { local: { algorithm: "ES256", privateKey: "pk", publicKey: "pub" } },
+			signingKey: {
+				provider: "local",
+				local: {
+					algorithm: "ES256",
+					kid: "v0",
+					previousKeys: [],
+					privateKey: "pk",
+					publicKey: "pub",
+				},
+			},
 		});
 		const local = result.signingKey.local as Record<string, unknown>;
 		expect(local.secret).toBeUndefined();
@@ -198,7 +229,12 @@ describe("jwt config schema", () => {
 
 	it("rejects HS256 without secret (builder-level)", async () => {
 		// Schema parse succeeds — no secret required at schema level.
-		const parsed = jwtSchema.parse({ signingKey: { local: { algorithm: "HS256" } } });
+		const parsed = jwtSchema.parse({
+			signingKey: {
+				provider: "local",
+				local: { algorithm: "HS256", kid: "v0", previousKeys: [] },
+			},
+		});
 		const local = parsed.signingKey.local as Record<string, unknown>;
 		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
 			/secret is required for HS256 algorithm/i,
@@ -207,7 +243,10 @@ describe("jwt config schema", () => {
 
 	it("rejects asymmetric algorithm without privateKey (builder-level)", async () => {
 		const parsed = jwtSchema.parse({
-			signingKey: { local: { algorithm: "ES256", publicKey: "pub" } },
+			signingKey: {
+				provider: "local",
+				local: { algorithm: "ES256", kid: "v0", previousKeys: [], publicKey: "pub" },
+			},
 		});
 		const local = parsed.signingKey.local as Record<string, unknown>;
 		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
@@ -217,7 +256,10 @@ describe("jwt config schema", () => {
 
 	it("rejects asymmetric algorithm without publicKey (builder-level)", async () => {
 		const parsed = jwtSchema.parse({
-			signingKey: { local: { algorithm: "RS256", privateKey: "pk" } },
+			signingKey: {
+				provider: "local",
+				local: { algorithm: "RS256", kid: "v0", previousKeys: [], privateKey: "pk" },
+			},
 		});
 		const local = parsed.signingKey.local as Record<string, unknown>;
 		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
@@ -231,8 +273,10 @@ describe("jwt config schema", () => {
 		// throws before it attempts to import them, so actual crypto validity is irrelevant here.
 		const parsed = jwtSchema.parse({
 			signingKey: {
+				provider: "local",
 				local: {
 					algorithm: "ES256",
+					kid: "v0",
 					privateKey: "pk",
 					publicKey: "pub",
 					previousKeys: [{ kid: "old", expiresAt: "2099-01-01T00:00:00Z" }],
