@@ -96,6 +96,50 @@ export interface RedisClient {
 	 * of WATCH isolation.
 	 */
 	duplicate(): DisposableRedisClient;
+	/**
+	 * Set a single hash field. Returns 1 if the field is new, 0 if updated.
+	 * Used by `createRedisSidHash.setField` (A4 §7.2.1) for clientId-keyed
+	 * upsert in `SessionRPRegistry`.
+	 */
+	hSet(key: string, field: string, value: string): Promise<number>;
+	/**
+	 * Return all hash values. Empty array on missing key.
+	 * Used by `createRedisSidHash.listValues` (A4 §7.2.1).
+	 */
+	hVals(key: string): Promise<string[]>;
+	/**
+	 * Set absolute expiry on a key (millisecond Unix timestamp). Returns 1
+	 * if applied, 0 if key does not exist. Per A4 §7.2 ABSOLUTE-EXPIRY rule:
+	 * MUST be PEXPIREAT (absolute), NOT EX/PX (relative) — relative timeouts
+	 * drift across nodes when concurrent writes execute on different
+	 * application instances.
+	 */
+	pExpireAt(key: string, msTimestamp: number): Promise<number>;
+	/**
+	 * Add a member to a sorted set with insertion-time score. The `NX` option
+	 * means "do not update existing entry's score" — preserves original
+	 * insertion order on idempotent re-adds. Returns count of NEW members.
+	 * Used by `createRedisSidSortedSet.add` (A4 §7.2.2) for `SessionFamilyIndex`
+	 * and `SessionFederationIndex` insertion-order semantics.
+	 */
+	zAdd(
+		key: string,
+		entry: { score: number; value: string },
+		opts?: { NX: true },
+	): Promise<number>;
+	/**
+	 * Return sorted-set members in ascending score order over an inclusive
+	 * index range. `0, -1` returns all members. Used by
+	 * `createRedisSidSortedSet.list` (A4 §7.2.2) — ascending score = insertion
+	 * order under ZADD NX.
+	 */
+	zRange(key: string, start: number, stop: number): Promise<string[]>;
+	/**
+	 * Remove a single member from a sorted set. Returns 1 if removed, 0 if
+	 * absent. Used by `createRedisSidSortedSet.remove` (A4 §7.2.2) for
+	 * `SessionFederationIndex.removeFederation`.
+	 */
+	zRem(key: string, member: string): Promise<number>;
 }
 
 /**
@@ -138,5 +182,12 @@ export interface DisposableRedisClient extends RedisClient, AsyncDisposable {
  */
 export interface RedisMulti {
 	set(key: string, value: string, mode: "PX", ttlMs: number): RedisMulti;
+	hSet(key: string, field: string, value: string): RedisMulti;
+	pExpireAt(key: string, msTimestamp: number): RedisMulti;
+	zAdd(
+		key: string,
+		entry: { score: number; value: string },
+		opts?: { NX: true },
+	): RedisMulti;
 	exec(): Promise<unknown[] | null>;
 }
