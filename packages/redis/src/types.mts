@@ -122,11 +122,7 @@ export interface RedisClient {
 	 * Used by `createRedisSidSortedSet.add` (A4 §7.2.2) for `SessionFamilyIndex`
 	 * and `SessionFederationIndex` insertion-order semantics.
 	 */
-	zAdd(
-		key: string,
-		entry: { score: number; value: string },
-		opts?: { NX: true },
-	): Promise<number>;
+	zAdd(key: string, entry: { score: number; value: string }, opts?: { NX: true }): Promise<number>;
 	/**
 	 * Return sorted-set members in ascending score order over an inclusive
 	 * index range. `0, -1` returns all members. Used by
@@ -184,10 +180,6 @@ export interface RedisMulti {
 	set(key: string, value: string, mode: "PX", ttlMs: number): RedisMulti;
 	hSet(key: string, field: string, value: string): RedisMulti;
 	pExpireAt(key: string, msTimestamp: number): RedisMulti;
-	zAdd(
-		key: string,
-		entry: { score: number; value: string },
-		opts?: { NX: true },
-	): RedisMulti;
+	zAdd(key: string, entry: { score: number; value: string }, opts?: { NX: true }): RedisMulti;
 	exec(): Promise<unknown[] | null>;
 }

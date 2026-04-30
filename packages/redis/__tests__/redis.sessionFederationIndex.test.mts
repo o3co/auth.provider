@@ -51,9 +51,7 @@ describe("SessionFederationIndex concurrency", () => {
 		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:conc1:" });
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
-			Array.from({ length: 100 }, (_, i) =>
-				idx.addFederation("sid-conc", `fed-${i}`, expiresAt),
-			),
+			Array.from({ length: 100 }, (_, i) => idx.addFederation("sid-conc", `fed-${i}`, expiresAt)),
 		);
 		const list = await idx.listFederations("sid-conc");
 		expect(list).toHaveLength(100);
@@ -69,9 +67,7 @@ describe("SessionFederationIndex concurrency", () => {
 		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:conc2:" });
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
-			Array.from({ length: 100 }, () =>
-				idx.addFederation("sid-dedup", "fed-dedup", expiresAt),
-			),
+			Array.from({ length: 100 }, () => idx.addFederation("sid-dedup", "fed-dedup", expiresAt)),
 		);
 		const list = await idx.listFederations("sid-dedup");
 		expect(list).toHaveLength(1);
@@ -85,9 +81,7 @@ describe("SessionFederationIndex concurrency", () => {
 		// Run 50 add and 50 remove operations concurrently; result is valid if
 		// it's either fully present or fully absent — never a corrupted state.
 		await Promise.all([
-			...Array.from({ length: 50 }, () =>
-				idx.addFederation("sid-race", "fed-x", expiresAt),
-			),
+			...Array.from({ length: 50 }, () => idx.addFederation("sid-race", "fed-x", expiresAt)),
 			...Array.from({ length: 50 }, () => idx.removeFederation("sid-race", "fed-x")),
 		]);
 		const list = await idx.listFederations("sid-race");

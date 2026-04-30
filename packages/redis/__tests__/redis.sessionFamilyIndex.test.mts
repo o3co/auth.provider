@@ -51,9 +51,7 @@ describe("SessionFamilyIndex concurrency", () => {
 		const idx = createRedisSessionFamilyIndex({ client, keyPrefix: "t16:conc1:" });
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
-			Array.from({ length: 100 }, (_, i) =>
-				idx.addFamilyId("sid-conc", `fam-${i}`, expiresAt),
-			),
+			Array.from({ length: 100 }, (_, i) => idx.addFamilyId("sid-conc", `fam-${i}`, expiresAt)),
 		);
 		const list = await idx.listFamilyIds("sid-conc");
 		expect(list).toHaveLength(100);
@@ -69,9 +67,7 @@ describe("SessionFamilyIndex concurrency", () => {
 		const idx = createRedisSessionFamilyIndex({ client, keyPrefix: "t16:conc2:" });
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
-			Array.from({ length: 100 }, () =>
-				idx.addFamilyId("sid-dedup", "fam-dedup", expiresAt),
-			),
+			Array.from({ length: 100 }, () => idx.addFamilyId("sid-dedup", "fam-dedup", expiresAt)),
 		);
 		const list = await idx.listFamilyIds("sid-dedup");
 		expect(list).toHaveLength(1);

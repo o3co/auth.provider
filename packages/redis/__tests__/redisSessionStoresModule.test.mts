@@ -13,10 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
-import Redis from "ioredis";
+
 import { BootError, createBootApp, defineModule } from "@o3co/auth-provider-core";
+import Redis from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisSessionStoresModule } from "../src/modules/redisSessionStores.mjs";
 import { makeIoredisRedisClient } from "./helpers/wrapper.mjs";
 
@@ -55,8 +56,9 @@ describe("redisSessionStoresModule manifest", () => {
 
 	it("configSchema parses defaults under redisSessionStores key", () => {
 		const parsed = redisSessionStoresModule.configSchema?.parse({});
-		expect((parsed as { redisSessionStores: { keyPrefix: string } }).redisSessionStores.keyPrefix)
-			.toBe("ss:");
+		expect(
+			(parsed as { redisSessionStores: { keyPrefix: string } }).redisSessionStores.keyPrefix,
+		).toBe("ss:");
 	});
 });
 

@@ -13,12 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { afterAll, beforeAll } from "vitest";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
+
 import Redis from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { afterAll, beforeAll } from "vitest";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
-import { runUserSessionStoreContract } from "./userSessionStore.contract.mjs";
 import { makeIoredisRedisClient } from "./helpers/wrapper.mjs"; // shared wrapper helper (Task 14.3)
+import { runUserSessionStoreContract } from "./userSessionStore.contract.mjs";
 
 let container: StartedTestContainer;
 let raw: Redis;

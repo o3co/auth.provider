@@ -53,8 +53,8 @@ export function createSessionFederationIndexFactory(): SessionFederationIndexFac
 }
 
 export type {
-	UserSessionStoreFactory,
-	SessionRPRegistryFactory,
 	SessionFamilyIndexFactory,
 	SessionFederationIndexFactory,
+	SessionRPRegistryFactory,
+	UserSessionStoreFactory,
 };

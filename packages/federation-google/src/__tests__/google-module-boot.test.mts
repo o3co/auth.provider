@@ -36,7 +36,7 @@
 import { createBootApp, defineModule } from "@o3co/auth-provider-core";
 import type { FederationProvider, FederationRedirectPolicy } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
-import { googleFederationModule, type GoogleProviderConfig } from "../google.mjs";
+import { type GoogleProviderConfig, googleFederationModule } from "../google.mjs";
 
 const minBoot = {
 	config: { http: {}, oauth: { jwt: {}, accessToken: {}, refreshToken: {}, grants: {} } },
@@ -87,8 +87,9 @@ describe("googleFederationModule boot integration (Cl-M2)", () => {
 			bootstrapComponents: minBoot,
 		});
 
-		const providers = (handle.components as Record<string, unknown>)
-			.federationProviders as ReadonlyMap<string, FederationProvider> | undefined;
+		const providers = (handle.components as Record<string, unknown>).federationProviders as
+			| ReadonlyMap<string, FederationProvider>
+			| undefined;
 		expect(providers).toBeDefined();
 		const provider = providers?.get("google");
 		expect(provider).toBeDefined();

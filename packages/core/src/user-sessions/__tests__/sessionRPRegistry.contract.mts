@@ -43,11 +43,7 @@ export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory):
 		it("same clientId upserts — replaces earlier registration", async () => {
 			const reg = await factory();
 			await reg.registerRP("sid-1", RP({ backchannelLogoutUri: "https://v1" }), FUTURE());
-			await reg.registerRP(
-				"sid-1",
-				RP({ backchannelLogoutUri: "https://v2" }),
-				FUTURE(),
-			);
+			await reg.registerRP("sid-1", RP({ backchannelLogoutUri: "https://v2" }), FUTURE());
 			const list = await reg.listRPs("sid-1");
 			expect(list).toHaveLength(1);
 			expect(list[0]?.backchannelLogoutUri).toBe("https://v2");
@@ -101,13 +97,18 @@ export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory):
 
 		it("mutating returned RegisteredRP does not affect storage (defensive copy)", async () => {
 			const reg = await factory();
-			await reg.registerRP("sid-1", RP({ clientId: "c1", backchannelLogoutUri: "https://orig" }), FUTURE());
+			await reg.registerRP(
+				"sid-1",
+				RP({ clientId: "c1", backchannelLogoutUri: "https://orig" }),
+				FUTURE(),
+			);
 			const list1 = await reg.listRPs("sid-1");
 			const rp1 = list1[0];
 			expect(rp1).toBeDefined();
 			// Stress: mutate the returned RP's mutable Date and string fields.
 			// The store MUST return a fresh clone each call.
-			(rp1 as unknown as { backchannelLogoutUri?: string }).backchannelLogoutUri = "https://injected";
+			(rp1 as unknown as { backchannelLogoutUri?: string }).backchannelLogoutUri =
+				"https://injected";
 			rp1?.registeredAt.setTime(0);
 			const list2 = await reg.listRPs("sid-1");
 			expect(list2[0]?.backchannelLogoutUri).toBe("https://orig");

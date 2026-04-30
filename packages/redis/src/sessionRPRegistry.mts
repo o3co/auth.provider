@@ -15,8 +15,8 @@
  */
 
 import type { RegisteredRP, SessionRPRegistry } from "@o3co/auth-provider-core";
-import type { RedisClient } from "./types.mjs";
 import { createRedisSidHash } from "./internal/redisSidHash.mjs";
+import type { RedisClient } from "./types.mjs";
 
 export interface RedisSessionRPRegistryOptions {
 	readonly client: RedisClient;

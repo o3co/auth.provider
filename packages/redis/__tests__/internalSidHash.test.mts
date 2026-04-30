@@ -13,9 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
+
 import Redis from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
 import type { RedisClient } from "../src/types.mjs";
 

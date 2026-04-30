@@ -73,9 +73,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
  *    the key).
  *  - `delete` is single-key DEL.
  */
-export function createRedisUserSessionStore(
-	opts: RedisUserSessionStoreOptions,
-): UserSessionStore {
+export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions): UserSessionStore {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
 	return {
 		kind: "redis",

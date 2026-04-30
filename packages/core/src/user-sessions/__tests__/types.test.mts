@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import type { ComponentMap } from "@o3co/auth-provider-core";
 import { expectTypeOf, test } from "vitest";
 import type { AdapterFactory } from "../../adapters/AdapterFactory.mjs";
 import type {
@@ -30,7 +32,6 @@ import type {
 	UserSessionStore,
 	UserSessionStoreFactory,
 } from "../types.mjs";
-import type { ComponentMap } from "@o3co/auth-provider-core";
 
 test("UserSessionStore exposes 3 methods (create/get/delete) — no mutation methods", () => {
 	expectTypeOf<UserSessionStore["kind"]>().toEqualTypeOf<string>();
@@ -121,9 +122,7 @@ test("MutableUserSessionStore is assignable to UserSessionStore (extends relatio
 
 test("ComponentMap declaration-merge: 4 store slots + 1 mutable slot, all optional", () => {
 	expectTypeOf<ComponentMap["userSessionStore"]>().toEqualTypeOf<UserSessionStore | undefined>();
-	expectTypeOf<ComponentMap["sessionRPRegistry"]>().toEqualTypeOf<
-		SessionRPRegistry | undefined
-	>();
+	expectTypeOf<ComponentMap["sessionRPRegistry"]>().toEqualTypeOf<SessionRPRegistry | undefined>();
 	expectTypeOf<ComponentMap["sessionFamilyIndex"]>().toEqualTypeOf<
 		SessionFamilyIndex | undefined
 	>();
@@ -142,7 +141,9 @@ test("Factory aliases are AdapterFactory<T> over the 4 stores", () => {
 	expectTypeOf<UserSessionStoreFactory>().toEqualTypeOf<AdapterFactory<UserSessionStore>>();
 	expectTypeOf<SessionRPRegistryFactory>().toEqualTypeOf<AdapterFactory<SessionRPRegistry>>();
 	expectTypeOf<SessionFamilyIndexFactory>().toEqualTypeOf<AdapterFactory<SessionFamilyIndex>>();
-	expectTypeOf<SessionFederationIndexFactory>().toEqualTypeOf<AdapterFactory<SessionFederationIndex>>();
+	expectTypeOf<SessionFederationIndexFactory>().toEqualTypeOf<
+		AdapterFactory<SessionFederationIndex>
+	>();
 });
 
 test("RegisteredRP exposes immutable fields with optional logout URIs", () => {
