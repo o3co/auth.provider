@@ -22,7 +22,8 @@ import type {
 	KeyStore,
 	Logger,
 	RefreshTokenStoreBase,
-	UserSessionStoreBase,
+	SessionFederationIndex,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { emitAuditEvent, supportsLock } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -71,7 +72,8 @@ function supportsRefresh(
 export interface FederationTokenRouterOptions {
 	keyStore: KeyStore;
 	refreshTokenStore: RefreshTokenStoreBase;
-	userSessionStore: UserSessionStoreBase;
+	userSessionStore: UserSessionStore;
+	sessionFederationIndex: SessionFederationIndex;
 	federationTokenStore: FederationTokenStoreBase;
 	clientRepository: ClientRepository;
 	/**
@@ -245,6 +247,21 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			});
 		}
 
+		// A4 §6.2 Step 1: read federation index once for membership check + cleanup paths.
+		let federations: ReadonlyArray<string>;
+		try {
+			federations = await opts.sessionFederationIndex.listFederations(sid);
+		} catch (error) {
+			logger.warn(
+				`POST /oauth/federation/${name}/token: sessionFederationIndex.listFederations failed:`,
+				error,
+			);
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+		}
+
 		// Step 7: Client must exist AND have allowedAzpForFederationToken === true.
 		let client: Awaited<ReturnType<typeof opts.clientRepository.findById>>;
 		try {
@@ -272,7 +289,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		}
 
 		// Step 8: Federation must be linked to this session.
-		if (!session.federations.includes(name)) {
+		if (!federations.includes(name)) {
 			return res.status(404).json({
 				error: "federation_not_linked",
 				error_description: `federation "${name}" is not linked to this session`,
@@ -291,12 +308,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			});
 		}
 		if (!tokens) {
-			// Self-heal: federation link is dangling — remove from session state.
+			// Self-heal: federation link is dangling — remove from federation index.
 			try {
-				await opts.userSessionStore.removeFederation(sid, name);
+				await opts.sessionFederationIndex.removeFederation(sid, name);
 			} catch (error) {
 				logger.warn(
-					`POST /oauth/federation/${name}/token: removeFederation self-heal failed:`,
+					`POST /oauth/federation/${name}/token: sessionFederationIndex.removeFederation self-heal failed:`,
 					error,
 				);
 				// Best-effort: still return 404 regardless
@@ -466,10 +483,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						);
 					}
 					try {
-						await opts.userSessionStore.removeFederation(sid, name);
+						await opts.sessionFederationIndex.removeFederation(sid, name);
 					} catch (cleanupErr) {
 						logger.warn(
-							`POST /oauth/federation/${name}/token: removeFederation cleanup failed:`,
+							`POST /oauth/federation/${name}/token: sessionFederationIndex.removeFederation cleanup failed:`,
 							cleanupErr,
 						);
 					}

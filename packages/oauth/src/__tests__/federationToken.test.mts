@@ -23,8 +23,9 @@ import {
 	type FederationTokenStoreBase,
 	type Logger,
 	type RefreshTokenStoreBase,
+	type SessionFederationIndex,
 	type UserSession,
-	type UserSessionStoreBase,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { SignJWT } from "jose";
@@ -52,16 +53,13 @@ async function mintAccessToken(extra: Record<string, unknown> = {}): Promise<str
 		.sign(secretKey);
 }
 
-// Base session — google federation linked
+// Base session — identity fields only (federation data lives in SessionFederationIndex)
 const baseSession: UserSession = {
 	sid: "sid-1",
 	sub: "u-1",
 	authTime: new Date(),
 	createdAt: new Date(),
 	expiresAt: new Date(Date.now() + 3_600_000),
-	federations: ["google"],
-	activeRPs: [],
-	familyIds: ["fam-1"],
 	claims: { email: "alice@example.com" },
 };
 
@@ -82,18 +80,27 @@ const allowedClient = {
 	allowedAzpForFederationToken: true as const,
 };
 
-function makeSessionStore(override?: Partial<UserSessionStoreBase>): UserSessionStoreBase {
+function makeSessionStore(override?: Partial<UserSessionStore>): UserSessionStore {
 	return {
 		kind: "memory",
 		create: vi.fn(),
 		get: vi.fn().mockResolvedValue(baseSession),
-		registerRP: vi.fn(),
-		linkFamily: vi.fn(),
-		updateClaims: vi.fn(),
-		removeFederation: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn(),
 		...override,
 	};
+}
+
+function makeSessionFederationIndex(
+	override?: Partial<SessionFederationIndex>,
+): SessionFederationIndex {
+	return {
+		kind: "memory",
+		addFederation: vi.fn(async () => {}),
+		listFederations: vi.fn(async () => ["google"]),
+		removeFederation: vi.fn(async () => {}),
+		removeBySid: vi.fn(async () => {}),
+		...override,
+	} as SessionFederationIndex;
 }
 
 function makeRefreshStore(override?: Partial<RefreshTokenStoreBase>): RefreshTokenStoreBase {
@@ -127,7 +134,8 @@ function makeClientRepo(override?: Partial<ClientRepository>): ClientRepository 
 }
 
 interface BuildAppOpts {
-	sessionStore?: UserSessionStoreBase;
+	sessionStore?: UserSessionStore;
+	sessionFederationIndex?: SessionFederationIndex;
 	refreshStore?: RefreshTokenStoreBase;
 	fedTokenStore?: FederationTokenStoreBase;
 	clientRepo?: ClientRepository;
@@ -142,6 +150,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 	const router = createRouter(express, {
 		keyStore,
 		userSessionStore: opts.sessionStore ?? makeSessionStore(),
+		sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
 		refreshTokenStore: opts.refreshStore ?? makeRefreshStore(),
 		federationTokenStore: opts.fedTokenStore ?? makeFedTokenStore(),
 		clientRepository: opts.clientRepo ?? makeClientRepo(),
@@ -477,9 +486,9 @@ describe("POST /oauth/federation/:name/token", () => {
 	// 404 — federation not linked / tokens missing
 	// ---------------------------------------------------------------------------
 
-	describe("federation not in session.federations", () => {
+	describe("federation not in sessionFederationIndex", () => {
 		it("returns 404 federation_not_linked", async () => {
-			// baseSession only has 'google'; asking for 'github'
+			// sessionFederationIndex only has 'google'; asking for 'github'
 			const app = buildApp();
 			const token = await mintAccessToken();
 
@@ -491,19 +500,23 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("federationTokenStore.get returns null (dangling link)", () => {
-		it("returns 404 + calls removeFederation self-heal", async () => {
-			const sessionStore = makeSessionStore();
+		it("returns 404 + calls sessionFederationIndex.removeFederation self-heal", async () => {
+			const removeFederationSpy = vi.fn(async () => {});
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn(async () => ["google"]),
+				removeFederation: removeFederationSpy,
+			});
 			const fedTokenStore = makeFedTokenStore({
 				get: vi.fn().mockResolvedValue(null),
 			});
-			const app = buildApp({ sessionStore, fedTokenStore });
+			const app = buildApp({ sessionFederationIndex, fedTokenStore });
 			const token = await mintAccessToken();
 
 			const res = await postFedToken(app, "google", token);
 
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
-			expect(sessionStore.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+			expect(removeFederationSpy).toHaveBeenCalledWith("sid-1", "google");
 		});
 	});
 
@@ -567,7 +580,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				record: vi.fn().mockResolvedValue(undefined),
 			};
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
-			const sessionStore = makeSessionStore();
+			const removeFederationSpy = vi.fn(async () => {});
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn(async () => ["google"]),
+				removeFederation: removeFederationSpy,
+			});
 			const fedTokenStore = makeFedTokenStore({
 				get: vi.fn().mockResolvedValue(expiredTokens),
 			});
@@ -580,7 +597,7 @@ describe("POST /oauth/federation/:name/token", () => {
 					.mockRejectedValue(new Error("invalid_grant: token revoked")),
 			};
 			const app = buildApp({
-				sessionStore,
+				sessionFederationIndex,
 				fedTokenStore,
 				auditSink,
 				getFederationProviders: () =>
@@ -593,7 +610,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(410);
 			expect(res.body.error).toBe("re_authentication_required");
 			expect(fedTokenStore.delete).toHaveBeenCalledWith("sid-1", "google");
-			expect(sessionStore.removeFederation).toHaveBeenCalledWith("sid-1", "google");
+			expect(removeFederationSpy).toHaveBeenCalledWith("sid-1", "google");
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "federation.token.reauthentication_required",
@@ -991,6 +1008,25 @@ describe("POST /oauth/federation/:name/token", () => {
 			} finally {
 				consoleWarnSpy.mockRestore();
 			}
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// A4 §6.2 Step 1: sessionFederationIndex.listFederations failure → 503
+	// ---------------------------------------------------------------------------
+
+	describe("sessionFederationIndex.listFederations throws (fail-closed)", () => {
+		it("returns 503 temporarily_unavailable when federation index read fails", async () => {
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn().mockRejectedValue(new Error("redis down")),
+			});
+			const app = buildApp({ sessionFederationIndex });
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
 		});
 	});
 });
