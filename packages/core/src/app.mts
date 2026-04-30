@@ -13,227 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { RequestHandler, Router } from "express";
-import type { z } from "zod";
-import type { AuditSinkBase } from "./audit/types.mjs";
-import type { CoreConfig } from "./config/application.schema.mjs";
-import { composeConfigSchema } from "./config/application.schema.mjs";
-import type { FederationTokenStoreBase } from "./federation-tokens/types.mjs";
-import { GrantRegistry } from "./grants/registry.mjs";
-import type { KeyStore } from "./keys/KeyStore.mjs";
-import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "./mfa/types.mjs";
-import type { LegacyModule as Module, ModuleContext, PathResolver } from "./modules/types.mjs";
-import type { GrantPolicyHookBase } from "./policy/types.mjs";
-import type { RateLimiterBase } from "./ratelimit/types.mjs";
-import type { RefreshTokenStoreBase } from "./refresh/types.mjs";
-import * as healthcheck from "./routes/Healthcheck.mjs";
-import * as jwks from "./routes/Jwks.mjs";
-import type {
-	SessionFamilyIndex,
-	SessionFederationIndex,
-	SessionRPRegistry,
-	UserSessionStore,
-} from "./user-sessions/types.mjs";
 
-type ExpressLike = {
-	Router: () => Router;
-	json: () => RequestHandler;
-	urlencoded: (opts: { extended: boolean }) => RequestHandler;
-};
-
-export interface AppOptions {
-	express?: ExpressLike;
-	pathResolver?: PathResolver;
-	config: CoreConfig & Record<string, unknown>;
-	keyStore: KeyStore;
-	modules: Module[];
-	mfaProviderFactory?: MfaProviderFactory;
-	mfaCoordinator?: MfaCoordinator;
-	mfaTransactionStore?: MfaTransactionStore;
-	auditSink?: AuditSinkBase;
-	rateLimiter?: RateLimiterBase;
-	refreshTokenStore?: RefreshTokenStoreBase;
-	grantPolicy?: GrantPolicyHookBase;
-	userSessionStore?: UserSessionStore;
-	sessionRPRegistry?: SessionRPRegistry;
-	sessionFamilyIndex?: SessionFamilyIndex;
-	sessionFederationIndex?: SessionFederationIndex;
-	federationTokenStore?: FederationTokenStoreBase;
-}
-
-export interface AppResult {
-	init(): Promise<void>;
-	router: Router;
-	grantRegistry: GrantRegistry;
-}
-
-export function createApp(options: AppOptions): AppResult {
-	const { pathResolver = (s: string) => s, config, keyStore, modules } = options;
-
-	if (options.mfaCoordinator) {
-		if (!options.mfaProviderFactory) {
-			throw new Error("createApp: mfaProviderFactory is required when mfaCoordinator is set");
-		}
-		if (!options.mfaTransactionStore) {
-			throw new Error("createApp: mfaTransactionStore is required when mfaCoordinator is set");
-		}
-	}
-
-	// Composition-root invariant per A4 §3.4 / §8.1: when ANY of the 4
-	// user-session sibling stores is provided, ALL 4 must be provided.
-	// Partial wiring would leave grant/route handlers with non-null
-	// assertions that throw at runtime (e.g. authorization grant's
-	// deps.sessionFamilyIndex! / sessionRPRegistry! calls inside the
-	// userSessionStore-guarded block).
-	//
-	// The bundled `memorySessionStoresModule` / `redisSessionStoresModule`
-	// wires all 4 in a single decision; consumers using individual
-	// adapter constructors must supply all 4 in AppOptions together.
-	const sessionSlotsProvidedCount = [
-		options.userSessionStore,
-		options.sessionRPRegistry,
-		options.sessionFamilyIndex,
-		options.sessionFederationIndex,
-	].filter((s) => s != null).length;
-	if (sessionSlotsProvidedCount > 0 && sessionSlotsProvidedCount < 4) {
-		const provided: string[] = [];
-		const missing: string[] = [];
-		if (options.userSessionStore != null) provided.push("userSessionStore");
-		else missing.push("userSessionStore");
-		if (options.sessionRPRegistry != null) provided.push("sessionRPRegistry");
-		else missing.push("sessionRPRegistry");
-		if (options.sessionFamilyIndex != null) provided.push("sessionFamilyIndex");
-		else missing.push("sessionFamilyIndex");
-		if (options.sessionFederationIndex != null) provided.push("sessionFederationIndex");
-		else missing.push("sessionFederationIndex");
-		throw new Error(
-			`createApp: A4 composition-root invariant — when ANY user-session sibling store is provided, ALL 4 must be provided. ` +
-				`Provided: [${provided.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
-				`Use memorySessionStoresModule (or redisSessionStoresModule) for single-line wiring of all 4, ` +
-				`or supply all 4 individual adapters via AppOptions.`,
-		);
-	}
-
-	// Spec Section 10.1 — federations configured means stores are required.
-	// This runs BEFORE zod parsing, so `enabled` may still be a string from
-	// env-var overrides (HOCON substitutions emit `"true"`/`"1"`). We MUST
-	// accept exactly the strings that Plan #3's `coerceBooleanFromEnv`
-	// zod-preprocess coerces to true, so this pre-parse check neither
-	// (a) lets a schema-enabled federation slip through unchecked nor
-	// (b) rejects a config that zod would later reject anyway (false
-	// positive, mask the real schema error).
-	//
-	// Matches schema behavior: only `"true"` and `"1"` coerce to true.
-	// Arbitrary strings like "yes"/"on" are rejected by the schema, so
-	// treating them as truthy here would fire the stores-missing error
-	// before the real validation message.
-	const isEnabledTruthy = (v: unknown): boolean => {
-		if (v === true) return true;
-		if (typeof v !== "string") return false;
-		const normalized = v.trim().toLowerCase();
-		return normalized === "true" || normalized === "1";
-	};
-	const federationsCfg = (config as { federations?: Record<string, { enabled?: unknown }> })
-		.federations;
-	const federationsConfigured =
-		typeof federationsCfg === "object" &&
-		federationsCfg !== null &&
-		Object.values(federationsCfg).some((f) => f != null && isEnabledTruthy(f.enabled));
-
-	if (federationsConfigured && !options.federationTokenStore) {
-		throw new Error(
-			"createApp: federations are configured but federationTokenStore was not provided. " +
-				"Register a FederationTokenStore adapter in AppOptions.",
-		);
-	}
-	if (federationsConfigured && !options.userSessionStore) {
-		throw new Error(
-			"createApp: federations are configured but userSessionStore was not provided. " +
-				"Register a UserSessionStore adapter in AppOptions.",
-		);
-	}
-	if (federationsConfigured && !options.sessionRPRegistry) {
-		throw new Error(
-			"createApp: federations are configured but sessionRPRegistry was not provided. " +
-				"Register a SessionRPRegistry adapter in AppOptions (or use memorySessionStoresModule).",
-		);
-	}
-	if (federationsConfigured && !options.sessionFamilyIndex) {
-		throw new Error(
-			"createApp: federations are configured but sessionFamilyIndex was not provided. " +
-				"Register a SessionFamilyIndex adapter in AppOptions (or use memorySessionStoresModule).",
-		);
-	}
-	if (federationsConfigured && !options.sessionFederationIndex) {
-		throw new Error(
-			"createApp: federations are configured but sessionFederationIndex was not provided. " +
-				"Register a SessionFederationIndex adapter in AppOptions (or use memorySessionStoresModule).",
-		);
-	}
-
-	// CP-20: when grantPolicy is configured, config.oauth.jwt.issuer MUST be
-	// set so the issuer observed by the policy matches the issuer claim on
-	// minted tokens. Otherwise policy decisions are made against a different
-	// (or empty) issuer than what ends up in the token, which silently
-	// splits the two code paths.
-	if (options.grantPolicy) {
-		const oauth = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth;
-		const issuer = oauth?.jwt?.issuer;
-		if (typeof issuer !== "string" || issuer.length === 0) {
-			throw new Error(
-				"createApp: config.oauth.jwt.issuer must be set when grantPolicy is configured (policy evaluations and minted tokens must share a single trusted issuer)",
-			);
-		}
-	}
-
-	const express: ExpressLike =
-		options.express ??
-		(() => {
-			throw new Error(
-				"express must be provided in AppOptions or resolved via pathResolver before createApp is called",
-			);
-		})();
-
-	const router = express.Router();
-	const grantRegistry = new GrantRegistry();
-
-	// Wire core infrastructure routes (pure — no external deps)
-	router.use(healthcheck.createRouter(express)).use(jwks.createRouter(express, keyStore));
-
-	// OIDC discovery is mounted by the oauth module (when the OAuth endpoints
-	// it advertises actually exist). See packages/oauth/src/module.mts.
-
-	const context: ModuleContext = {
-		pathResolver,
-		config,
-		keyStore,
-		grantRegistry,
-		router,
-		mfaProviderFactory: options.mfaProviderFactory,
-		mfaCoordinator: options.mfaCoordinator,
-		mfaTransactionStore: options.mfaTransactionStore,
-		auditSink: options.auditSink,
-		rateLimiter: options.rateLimiter,
-		refreshTokenStore: options.refreshTokenStore,
-		grantPolicy: options.grantPolicy,
-		userSessionStore: options.userSessionStore,
-		sessionRPRegistry: options.sessionRPRegistry,
-		sessionFamilyIndex: options.sessionFamilyIndex,
-		sessionFederationIndex: options.sessionFederationIndex,
-		federationTokenStore: options.federationTokenStore,
-	};
-
-	async function init(): Promise<void> {
-		const moduleSchemas = modules
-			.map((m) => m.configSchema)
-			.filter((s): s is z.ZodObject<z.ZodRawShape> => s !== undefined);
-		const validatedConfig = composeConfigSchema(moduleSchemas).parse(config);
-		context.config = validatedConfig as CoreConfig & Record<string, unknown>;
-
-		for (const module of modules) {
-			await module.init(context);
-		}
-	}
-
-	return { init, router, grantRegistry };
-}
+/**
+ * Re-export of the v0.5.0 boot planner createApp. The legacy v0.4.x
+ * AppOptions / AppResult / createApp(options): AppResult shape was deleted
+ * in Phase 9 of the v0.5.0 redesign per A2-γ §3.1.
+ *
+ * Consumers MUST use the new shape:
+ *
+ *   const handle = await createApp({ modules, bootstrapComponents });
+ *   app.use(handle.router);
+ *   await handle.dispose();
+ *
+ * See A2-β §6.3 for AppHandle shape and A2-γ §4 for the standalone
+ * worked example.
+ */
+export {
+	type AppHandle,
+	type BootstrapMap,
+	type CreateAppOptions,
+	createApp,
+	type DefaultBootstrapMap,
+} from "./boot/index.mjs";

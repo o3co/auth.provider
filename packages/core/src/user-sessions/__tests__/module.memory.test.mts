@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { createBootApp, defineModule } from "../../index.mjs";
+import { createApp, defineModule } from "../../index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { memorySessionStoresModule } from "../modules/memory.mjs";
 
@@ -35,7 +35,7 @@ describe("memorySessionStoresModule", () => {
 		expect(typeof provides.sessionFederationIndex).toBe("function");
 	});
 
-	it("createBootApp wires all 4 components into ComponentMap", async () => {
+	it("createApp wires all 4 components into ComponentMap", async () => {
 		// Use a no-op route contributor to force the boot planner to materialise
 		// the module graph (requires the modules to be active). Components are
 		// read from handle.components after boot completes.
@@ -58,7 +58,7 @@ describe("memorySessionStoresModule", () => {
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [memorySessionStoresModule, activator],
 			bootstrapComponents: minBoot,
 		});

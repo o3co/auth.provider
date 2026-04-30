@@ -39,4 +39,3 @@ declare module "@o3co/auth-provider-core" {
 		readonly clientRepository: ClientRepository;
 	}
 }
-

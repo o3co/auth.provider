@@ -16,7 +16,7 @@
 
 /**
  * boot/__tests__/integration.test.mts — End-to-end integration tests for
- * the A2-β boot planner pipeline (createBootApp).
+ * the A2-β boot planner pipeline (createApp).
  *
  * Covers three end-to-end scenarios per spec §12 + §8.1:
  *   1. Happy boot — multi-module manifest with grants + routes contributions.
@@ -29,7 +29,7 @@
 
 import { Router } from "express";
 import { describe, expect, it } from "vitest";
-import { createBootApp } from "../../index.mjs";
+import { createApp } from "../../index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import type { BootstrapMap } from "../types.mjs";
@@ -158,7 +158,7 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 		// oauthAuthorizationModule does NOT require auditSink here — the audit
 		// concern is handled separately to keep the scenario realistic.
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [keyStoreModule, repositoriesModule, auditSinkEagerModule, oauthAuthorizationModule],
 			bootstrapComponents: minBoot,
 		});
@@ -209,7 +209,7 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [mod],
 			bootstrapComponents: minBoot,
 		});
@@ -304,7 +304,7 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 
 		let caught: unknown;
 		try {
-			await createBootApp({
+			await createApp({
 				modules: [
 					keyStoreModule,
 					repositoriesModule,
@@ -405,7 +405,7 @@ describe("integration — Scenario 3: cleanup runs in reverse-topological order 
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [moduleA, moduleB, moduleC],
 			bootstrapComponents: minBoot,
 		});

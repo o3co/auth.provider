@@ -15,7 +15,7 @@
  */
 import {
 	type BootstrapMap,
-	createBootApp,
+	createApp,
 	defaultChallengeCeremonyModule,
 	defineModule,
 } from "@o3co/auth-provider-core";
@@ -42,7 +42,7 @@ afterAll(async () => {
 	await container?.stop();
 });
 
-describe("A1 wiring — full Redis composition (createBootApp + redis modules)", () => {
+describe("A1 wiring — full Redis composition (createApp + redis modules)", () => {
 	it("composes redisClient + redis ChallengeStore + redis ReplaySeenSet + default ceremony into a working AppHandle", async () => {
 		const myRedisClientModule = defineModule({
 			name: "test-redis-client",
@@ -85,7 +85,7 @@ describe("A1 wiring — full Redis composition (createBootApp + redis modules)",
 			pathResolver: (s: string) => s,
 		} satisfies Record<string, unknown> as BootstrapMap;
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [
 				myRedisClientModule,
 				redisChallengeStoreModule,

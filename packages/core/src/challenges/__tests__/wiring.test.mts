@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import type { BootstrapMap } from "../../boot/types.mjs";
 import {
-	createBootApp,
+	createApp,
 	createMemoryChallengeStore,
 	createMemoryReplaySeenSet,
 	defaultChallengeCeremonyModule,
@@ -56,8 +56,8 @@ const activateCeremonyModule = defineModule({
 });
 
 describe("A1 wiring — happy path with all-memory composition", () => {
-	it("createBootApp({ memory store + memory set + default ceremony }) yields a working ceremony", async () => {
-		const handle = await createBootApp({
+	it("createApp({ memory store + memory set + default ceremony }) yields a working ceremony", async () => {
+		const handle = await createApp({
 			modules: [
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -94,7 +94,7 @@ describe("A1 wiring — override path", () => {
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [
 				memoryChallengeStoreModule,
 				memoryReplaySeenSetModule,
@@ -126,7 +126,7 @@ describe("A1 wiring — override path", () => {
 		});
 
 		await expect(
-			createBootApp({
+			createApp({
 				modules: [
 					memoryChallengeStoreModule,
 					memoryReplaySeenSetModule,
@@ -143,7 +143,7 @@ describe("A1 wiring — override path", () => {
 });
 
 describe("A1 wiring — direct adapter constructors (without modules)", () => {
-	it("createMemoryChallengeStore() + createMemoryReplaySeenSet() compose without going through createBootApp", () => {
+	it("createMemoryChallengeStore() + createMemoryReplaySeenSet() compose without going through createApp", () => {
 		const store = createMemoryChallengeStore();
 		const set = createMemoryReplaySeenSet();
 		expect(store.kind).toBe("memory");

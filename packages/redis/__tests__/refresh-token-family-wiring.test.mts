@@ -15,7 +15,7 @@
  */
 import {
 	type BootstrapMap,
-	createBootApp,
+	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenRotationModule,
 	defineModule,
@@ -86,7 +86,7 @@ afterAll(async () => {
 	await container?.stop();
 });
 
-describe("A3 wiring — full Redis composition (createBootApp + redis modules)", () => {
+describe("A3 wiring — full Redis composition (createApp + redis modules)", () => {
 	it("composes redisClient + redis store + default rotation + default revocation against real Redis", async () => {
 		const myRedisClientModule = defineModule({
 			name: "test-redis-client",
@@ -127,7 +127,7 @@ describe("A3 wiring — full Redis composition (createBootApp + redis modules)",
 			pathResolver: (s: string) => s,
 		} satisfies Record<string, unknown> as BootstrapMap;
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [
 				myRedisClientModule,
 				redisRefreshTokenFamilyStoreModule,

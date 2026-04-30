@@ -26,7 +26,7 @@
  * Per A5 §8.1, §8.2.
  */
 import { describe, expect, it } from "vitest";
-import { createBootApp, defineModule } from "../../index.mjs";
+import { createApp, defineModule } from "../../index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
@@ -79,7 +79,7 @@ describe("A5 pairing invariant — step 7.5", () => {
 		});
 
 		await expect(
-			createBootApp({
+			createApp({
 				modules: [federationOnlyModule, activatorModule],
 				bootstrapComponents: minBoot,
 			}),
@@ -111,7 +111,7 @@ describe("A5 pairing invariant — step 7.5", () => {
 		});
 
 		await expect(
-			createBootApp({
+			createApp({
 				modules: [policyOnlyModule, activatorModule],
 				bootstrapComponents: minBoot,
 			}),
@@ -154,7 +154,7 @@ describe("A5 pairing invariant — step 7.5", () => {
 			} as never,
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [pairedModule, activatorModule],
 			bootstrapComponents: minBoot,
 		});
@@ -179,7 +179,7 @@ describe("A5 pairing invariant — step 7.5", () => {
 		});
 
 		await expect(
-			createBootApp({
+			createApp({
 				modules: [badModule],
 				bootstrapComponents: minBoot,
 			}),

@@ -16,7 +16,7 @@
 import { describe, expect, it } from "vitest";
 import type { BootstrapMap } from "../../boot/types.mjs";
 import {
-	createBootApp,
+	createApp,
 	createMemoryRefreshTokenFamilyStore,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenRotationModule,
@@ -55,8 +55,8 @@ const activatorModule = defineModule({
 });
 
 describe("A3 wiring — happy path with all-memory composition", () => {
-	it("createBootApp({ memory store + default rotation + default revocation }) yields working wrappers", async () => {
-		const handle = await createBootApp({
+	it("createApp({ memory store + default rotation + default revocation }) yields working wrappers", async () => {
+		const handle = await createApp({
 			modules: [
 				memoryRefreshTokenFamilyStoreModule,
 				defaultRefreshTokenRotationModule,
@@ -105,7 +105,7 @@ describe("A3 wiring — override path", () => {
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [
 				memoryRefreshTokenFamilyStoreModule,
 				customRotationModule,
@@ -140,7 +140,7 @@ describe("A3 wiring — override path", () => {
 		});
 
 		await expect(
-			createBootApp({
+			createApp({
 				modules: [
 					memoryRefreshTokenFamilyStoreModule,
 					defaultRefreshTokenRotationModule,
@@ -157,7 +157,7 @@ describe("A3 wiring — override path", () => {
 });
 
 describe("A3 wiring — direct adapter constructor", () => {
-	it("createMemoryRefreshTokenFamilyStore() composes without going through createBootApp", () => {
+	it("createMemoryRefreshTokenFamilyStore() composes without going through createApp", () => {
 		const store = createMemoryRefreshTokenFamilyStore();
 		expect(store.kind).toBe("memory");
 	});

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { createBootApp, defineModule } from "../../index.mjs";
+import { createApp, defineModule } from "../../index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 
 const minBoot = {
@@ -91,7 +91,7 @@ describe("A5 override mechanism — federationRedirectPolicies", () => {
 			} as never,
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [builtinGoogleModule, customPolicyModule, activatorModule],
 			bootstrapComponents: minBoot,
 		});
