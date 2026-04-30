@@ -610,9 +610,6 @@ describe("createRefreshTokenGrant", () => {
 				authTime: new Date(),
 				createdAt: new Date(),
 				expiresAt: new Date(Date.now() + 3600_000),
-				federations: [],
-				activeRPs: [],
-				familyIds: [],
 				claims: {},
 			}));
 			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
