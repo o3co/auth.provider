@@ -22,16 +22,23 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect(typeof (mod as { supportsLogout?: unknown }).supportsLogout).toBe("function");
 	});
 
-	it("exports sessionModule as a runtime factory", async () => {
+	it("exports sessionModule as a const Module value (not a factory)", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { sessionModule?: unknown }).sessionModule).toBe("function");
+		const sessionModule = (mod as { sessionModule?: unknown }).sessionModule;
+		expect(sessionModule).toBeDefined();
+		// Per A2-γ §3.4: sessionModule is now a const Module — an object with a
+		// `name` field, not a factory function. Asserting object shape (rather
+		// than `typeof === "function"`) pins the v0.5.0 surface against the
+		// deleted v0.4.x factory shape.
+		expect(typeof sessionModule).toBe("object");
+		expect((sessionModule as { name: string }).name).toBe("session");
 	});
 
-	it("exports createFederationProviderFactory as a runtime factory", async () => {
+	it("exports extractFederationSection as a runtime helper", async () => {
 		const mod = await import("#/index.mjs");
-		expect(
-			typeof (mod as { createFederationProviderFactory?: unknown }).createFederationProviderFactory,
-		).toBe("function");
+		expect(typeof (mod as { extractFederationSection?: unknown }).extractFederationSection).toBe(
+			"function",
+		);
 	});
 
 	it("exports federation helper utilities for provider packages", async () => {
@@ -41,6 +48,15 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 			"function",
 		);
 		expect(typeof (mod as { codeChallenge?: unknown }).codeChallenge).toBe("function");
+	});
+
+	it("does NOT export the deleted v0.4.x federation factory surface", async () => {
+		const mod = await import("#/index.mjs");
+		// Per A2-γ §3.4 + Phase 9 issue #98 full removal:
+		// createFederationProviderFactory and FederationProviderFactory are deleted.
+		// Federation consumers now extend via per-federation defineModule
+		// (see federation-google / federation-github).
+		expect((mod as Record<string, unknown>).createFederationProviderFactory).toBeUndefined();
 	});
 
 	it("does NOT export concrete Google/GitHub provider factories", async () => {
@@ -55,10 +71,8 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect((mod as Record<string, unknown>).createPassport).toBeUndefined();
 	});
 
-	it("does not export the removed FederationProvider / VerifyUserContext names as runtime values", async () => {
+	it("does not export removed type-only names as runtime values", async () => {
 		const mod = await import("#/index.mjs");
-		// These are type-only exports and would not appear as runtime values anyway;
-		// this assertion documents the intended invariant.
 		expect((mod as Record<string, unknown>).VerifyUserContext).toBeUndefined();
 	});
 
