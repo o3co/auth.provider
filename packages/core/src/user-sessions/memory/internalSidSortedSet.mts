@@ -45,7 +45,11 @@ export function createMemorySidSortedSet(): MemorySidSortedSet {
 			const expiresAtMs = expiresAt.getTime();
 			if (expiresAtMs <= Date.now()) return;
 			const existing = store.get(sid);
-			if (existing) {
+			// Lazy GC: if the previous bucket has already expired, drop its state
+			// so a re-used sid does not leak federation/family IDs from a prior
+			// session into the new one. (Aligns with the `list()` GC path.)
+			const isStale = existing != null && existing.expiresAtMs <= Date.now();
+			if (existing && !isStale) {
 				if (!existing.seen.has(member)) {
 					existing.ordered.push(member);
 					existing.seen.add(member);

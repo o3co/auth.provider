@@ -620,6 +620,10 @@ export const createOAuthRouter = async (
 		hasIssuer;
 
 	// Federation-token endpoint forwards upstream; does NOT need our issuer.
+	// Symmetry with logoutSupported: gates on all 4 sibling stores even
+	// though federationToken only consumes 3 of them. Mirrors A4 §3.4 /
+	// §8.1 composition-root invariant (now structurally enforced in
+	// createApp — when ANY is wired, ALL are wired).
 	const federationTokenSupported =
 		!!userSessionStore &&
 		!!sessionRPRegistry &&

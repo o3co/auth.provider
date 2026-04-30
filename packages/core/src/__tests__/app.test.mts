@@ -174,6 +174,12 @@ describe("createApp", () => {
 	});
 
 	it("propagates sibling-store slots to ModuleContext", async () => {
+		// A4 §3.4 / §8.1 composition-root invariant: all 4 sibling stores must
+		// be provided together. Add a minimal userSessionStore stub so createApp
+		// accepts the partial wiring without throwing.
+		const stubUserSessionStore = {
+			kind: "memory",
+		} as import("#/user-sessions/types.mjs").UserSessionStore;
 		const stubRPRegistry = { kind: "memory" } as SessionRPRegistry;
 		const stubFamilyIndex = { kind: "memory" } as SessionFamilyIndex;
 		const stubFederationIndex = { kind: "memory" } as SessionFederationIndex;
@@ -191,6 +197,7 @@ describe("createApp", () => {
 			config: mockConfig,
 			keyStore: createSymmetricKeyStore("test-secret"),
 			modules: [capturingModule],
+			userSessionStore: stubUserSessionStore,
 			sessionRPRegistry: stubRPRegistry,
 			sessionFamilyIndex: stubFamilyIndex,
 			sessionFederationIndex: stubFederationIndex,
@@ -198,6 +205,7 @@ describe("createApp", () => {
 
 		await result.init();
 
+		expect(capturedCtx?.userSessionStore).toBe(stubUserSessionStore);
 		expect(capturedCtx?.sessionRPRegistry).toBe(stubRPRegistry);
 		expect(capturedCtx?.sessionFamilyIndex).toBe(stubFamilyIndex);
 		expect(capturedCtx?.sessionFederationIndex).toBe(stubFederationIndex);

@@ -41,7 +41,11 @@ export function createMemorySidHash<T>(idOf: (t: T) => string): MemorySidHash<T>
 			// entry. Mirror redis adapter's PEXPIREAT-after-expiry no-op.
 			if (expiresAtMs <= Date.now()) return;
 			const existing = store.get(sid);
-			const entries = existing?.entries ?? new Map<string, T>();
+			// Lazy GC: same rationale as createMemorySidSortedSet.add — drop a
+			// prior expired bucket's entries so a re-used sid doesn't leak
+			// RPs from a prior session.
+			const isStale = existing != null && existing.expiresAtMs <= Date.now();
+			const entries = isStale ? new Map<string, T>() : (existing?.entries ?? new Map<string, T>());
 			entries.set(idOf(entry), entry);
 			store.set(sid, { entries, expiresAtMs });
 		},

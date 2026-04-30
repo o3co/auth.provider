@@ -86,4 +86,18 @@ describe("createMemorySidHash", () => {
 		(out as Item[]).push({ id: "x", payload: "evil" });
 		expect(h.listValues("sid-1")).toEqual([{ id: "a", payload: "v1" }]);
 	});
+
+	it("lazy GC on setField: re-used sid after TTL expiry starts a fresh entries map", async () => {
+		const sidHash = createMemorySidHash<Item>(idOf);
+		const pastExpiry = new Date(Date.now() + 50);
+		sidHash.setField("sid-x", { id: "rp-1", payload: "old" }, pastExpiry);
+		expect(sidHash.listValues("sid-x")).toEqual([{ id: "rp-1", payload: "old" }]);
+
+		await new Promise((r) => setTimeout(r, 100)); // bucket now expired
+
+		// Re-use the same sid for a new session — must NOT carry over rp-1
+		const futureExpiry = new Date(Date.now() + 60_000);
+		sidHash.setField("sid-x", { id: "rp-2", payload: "new" }, futureExpiry);
+		expect(sidHash.listValues("sid-x")).toEqual([{ id: "rp-2", payload: "new" }]);
+	});
 });

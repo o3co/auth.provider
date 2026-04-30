@@ -79,6 +79,41 @@ export function createApp(options: AppOptions): AppResult {
 		}
 	}
 
+	// Composition-root invariant per A4 §3.4 / §8.1: when ANY of the 4
+	// user-session sibling stores is provided, ALL 4 must be provided.
+	// Partial wiring would leave grant/route handlers with non-null
+	// assertions that throw at runtime (e.g. authorization grant's
+	// deps.sessionFamilyIndex! / sessionRPRegistry! calls inside the
+	// userSessionStore-guarded block).
+	//
+	// The bundled `memorySessionStoresModule` / `redisSessionStoresModule`
+	// wires all 4 in a single decision; consumers using individual
+	// adapter constructors must supply all 4 in AppOptions together.
+	const sessionSlotsProvidedCount = [
+		options.userSessionStore,
+		options.sessionRPRegistry,
+		options.sessionFamilyIndex,
+		options.sessionFederationIndex,
+	].filter((s) => s != null).length;
+	if (sessionSlotsProvidedCount > 0 && sessionSlotsProvidedCount < 4) {
+		const provided: string[] = [];
+		const missing: string[] = [];
+		if (options.userSessionStore != null) provided.push("userSessionStore");
+		else missing.push("userSessionStore");
+		if (options.sessionRPRegistry != null) provided.push("sessionRPRegistry");
+		else missing.push("sessionRPRegistry");
+		if (options.sessionFamilyIndex != null) provided.push("sessionFamilyIndex");
+		else missing.push("sessionFamilyIndex");
+		if (options.sessionFederationIndex != null) provided.push("sessionFederationIndex");
+		else missing.push("sessionFederationIndex");
+		throw new Error(
+			`createApp: A4 composition-root invariant — when ANY user-session sibling store is provided, ALL 4 must be provided. ` +
+				`Provided: [${provided.join(", ")}]. Missing: [${missing.join(", ")}]. ` +
+				`Use memorySessionStoresModule (or redisSessionStoresModule) for single-line wiring of all 4, ` +
+				`or supply all 4 individual adapters via AppOptions.`,
+		);
+	}
+
 	// Spec Section 10.1 — federations configured means stores are required.
 	// This runs BEFORE zod parsing, so `enabled` may still be a string from
 	// env-var overrides (HOCON substitutions emit `"true"`/`"1"`). We MUST

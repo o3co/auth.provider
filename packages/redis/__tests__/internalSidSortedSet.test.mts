@@ -13,9 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
+
 import Redis from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
 import type { RedisClient } from "../src/types.mjs";
 
@@ -47,21 +48,22 @@ describe("createRedisSidSortedSet", () => {
 
 	it("add preserves insertion order across distinct members", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("order") });
+		// Insertion order is guaranteed by the module-level monotonic counter
+		// in createRedisSidSortedSet (per A4 §5.4 — see internal/redisSidSortedSet.mts);
+		// no inter-add sleep is needed.
 		await z.add("sid-1", "google", FUTURE());
-		// guarantee distinct millisecond scores so ordering is deterministic
-		await new Promise((r) => setTimeout(r, 5));
 		await z.add("sid-1", "github", FUTURE());
-		await new Promise((r) => setTimeout(r, 5));
 		await z.add("sid-1", "gitlab", FUTURE());
 		expect(await z.list("sid-1")).toEqual(["google", "github", "gitlab"]);
 	});
 
 	it("re-add of existing member does NOT promote position (ZADD NX)", async () => {
 		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("nx") });
+		// Insertion order is guaranteed by the module-level monotonic counter
+		// in createRedisSidSortedSet (per A4 §5.4 — see internal/redisSidSortedSet.mts);
+		// no inter-add sleep is needed.
 		await z.add("sid-1", "google", FUTURE());
-		await new Promise((r) => setTimeout(r, 5));
 		await z.add("sid-1", "github", FUTURE());
-		await new Promise((r) => setTimeout(r, 5));
 		await z.add("sid-1", "google", FUTURE()); // re-add: must NOT move to end
 		expect(await z.list("sid-1")).toEqual(["google", "github"]);
 	});

@@ -103,4 +103,19 @@ describe("createMemorySidSortedSet", () => {
 		z.add("sid-1", "google", FUTURE());
 		expect(z.list("sid-1")).toEqual(["github", "google"]);
 	});
+
+	it("lazy GC on add: re-used sid after TTL expiry starts a fresh ordered+seen", async () => {
+		const idx = createMemorySidSortedSet();
+		const pastExpiry = new Date(Date.now() + 50);
+		idx.add("sid-x", "alpha", pastExpiry);
+		idx.add("sid-x", "beta", pastExpiry);
+		expect(idx.list("sid-x")).toEqual(["alpha", "beta"]);
+
+		await new Promise((r) => setTimeout(r, 100)); // bucket now expired
+
+		// Re-use the same sid for a new session — must NOT carry over alpha/beta
+		const futureExpiry = new Date(Date.now() + 60_000);
+		idx.add("sid-x", "gamma", futureExpiry);
+		expect(idx.list("sid-x")).toEqual(["gamma"]);
+	});
 });
