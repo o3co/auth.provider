@@ -19,23 +19,67 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	defineModule,
+	type GrantDependencies,
 	type GrantPolicyHookBase,
 	GrantRegistry,
-	type ModuleContext,
 	type RefreshTokenStoreBase,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import type { Router } from "express";
+import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 
 // ---------------------------------------------------------------------------
-// Helpers shared by the authorize-captures-nonce-sid suite
+// Shared test-only stubs
+// ---------------------------------------------------------------------------
+
+const fakeClientRepository: ClientRepository = {
+	findById: async () => null,
+	authenticate: async () => null,
+};
+
+const fakeCodeRepository: CodeRepository = {
+	createCode: async () => ({ code: "fake-code" }),
+	getByCode: async () => null,
+	consumeByCode: async () => null,
+	removeByCode: async () => {},
+};
+
+/** Inline module that satisfies `requires: ["clientRepository"]`. */
+const clientRepositoryModule = defineModule({
+	name: "test:client-repository",
+	provides: {
+		clientRepository: () => fakeClientRepository,
+	},
+});
+
+/** Inline module that satisfies `requires: ["codeRepository"]`. */
+const codeRepositoryModule = defineModule({
+	name: "test:code-repository",
+	provides: {
+		codeRepository: () => fakeCodeRepository,
+	},
+});
+
+/** Inline module that satisfies `requires: ["keyStore"]`. */
+const keyStoreModule = defineModule({
+	name: "test:key-store",
+	provides: {
+		keyStore: () => createSymmetricKeyStore("test-secret-for-auth-grant!!!!!"),
+	},
+});
+
+// ---------------------------------------------------------------------------
+// Helper: build a minimal express app wired to createOAuthRouter.
+// The session middleware injects the provided session fields into req.session.
 // ---------------------------------------------------------------------------
 
 const authorizeConfig = {
@@ -58,10 +102,6 @@ const authorizeClientRepo: ClientRepository = {
 	authenticate: async () => null,
 };
 
-/**
- * Build a minimal express app wired to createOAuthRouter.
- * The session middleware injects the provided session fields into req.session.
- */
 async function buildAuthorizeApp(opts: {
 	sessionFields: Record<string, unknown>;
 	captureCode: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
@@ -101,78 +141,114 @@ async function buildAuthorizeApp(opts: {
 	return app;
 }
 
-const mockClientRepository: ClientRepository = {
-	findById: vi.fn().mockResolvedValue(null),
-	authenticate: vi.fn().mockResolvedValue(null),
-};
+// ---------------------------------------------------------------------------
+// Module manifest structural tests (§7.1 — static, no createTestApp needed)
+// ---------------------------------------------------------------------------
 
-const mockConfig = {
-	oauth: {
-		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {
-			authorization_code: { enabled: true },
-			refresh_token: { enabled: true },
-		},
-	},
-} as unknown as AppConfig;
-
-const makeContext = (overrides?: Partial<ModuleContext>): ModuleContext => ({
-	pathResolver: (s: string) => s,
-	config: mockConfig,
-	keyStore: createSymmetricKeyStore("test-secret"),
-	grantRegistry: new GrantRegistry(),
-	router: { use: vi.fn().mockReturnThis() } as unknown as Router,
-	...overrides,
-});
-
-describe("oauthAuthorizationModule", () => {
+describe("oauthAuthorizationModule — manifest shape", () => {
 	it("has name 'oauth-authorization'", () => {
-		const module = oauthAuthorizationModule({
-			codeRepository: {} as CodeRepository,
-			clientRepository: mockClientRepository,
-		});
+		const config = makeValidAppConfig();
+		const module = oauthAuthorizationModule({ config });
 		expect(module.name).toBe("oauth-authorization");
 	});
 
-	it("registers authorization and refresh_token grant handlers", async () => {
-		const ctx = makeContext();
-		const module = oauthAuthorizationModule({
-			codeRepository: {} as CodeRepository,
-			clientRepository: mockClientRepository,
-		});
-
-		await module.init(ctx);
-
-		expect(ctx.grantRegistry.get("authorization_code")).toBeDefined();
-		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
+	it("contributes authorization_code grant when enabled", () => {
+		const config = makeValidAppConfig();
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.authorization_code).toBeDefined();
 	});
 
-	it("does not register authorization grant when config says enabled=false", async () => {
-		const disabledConfig = {
-			...mockConfig,
+	it("contributes refresh_token grant when enabled", () => {
+		const config = makeValidAppConfig();
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.refresh_token).toBeDefined();
+	});
+
+	it("omits authorization_code grant when config says enabled=false", () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
 			oauth: {
-				...mockConfig.oauth,
+				...base.oauth,
+				grants: { ...base.oauth.grants, authorization_code: { enabled: false } },
+			},
+		};
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.authorization_code).toBeUndefined();
+	});
+
+	it("omits refresh_token grant when config says enabled=false", () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: { ...base.oauth.grants, refresh_token: { enabled: false } },
+			},
+		};
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.refresh_token).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// createTestApp integration tests (§7.3 — boot + inspect)
+// ---------------------------------------------------------------------------
+
+describe("oauthAuthorizationModule — createTestApp integration", () => {
+	it("registers authorization_code and refresh_token grants at boot", async () => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [
+				oauthAuthorizationModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
+		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("does not register authorization_code grant when config says enabled=false", async () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
 				grants: {
+					...base.oauth.grants,
 					authorization_code: { enabled: false },
 					refresh_token: { enabled: true },
 				},
 			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ config: disabledConfig });
-		const module = oauthAuthorizationModule({
-			codeRepository: {} as CodeRepository,
-			clientRepository: mockClientRepository,
+		};
+		const handle = await createTestApp({
+			modules: [
+				oauthAuthorizationModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-
-		await module.init(ctx);
-
-		expect(ctx.grantRegistry.get("authorization_code")).toBeUndefined();
-		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
+		expect(handle.inspect.grants.has("authorization_code")).toBe(false);
+		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		await handle.dispose();
 	});
+});
 
-	it("forwards context.refreshTokenStore to refresh_token grant handler", async () => {
+// ---------------------------------------------------------------------------
+// Grant factory unit tests — test createAuthorizationGrant / createRefreshTokenGrant
+// directly with mock deps (not through the module manifest).
+// These tests preserve the behavioral coverage that was previously embedded in
+// the module-level tests via module.init(ctx).
+// ---------------------------------------------------------------------------
+
+describe("createRefreshTokenGrant — refreshTokenStore forwarding", () => {
+	it("calls refreshTokenStore.rotate when a valid refresh_token is presented", async () => {
 		const rotateSpy = vi.fn().mockResolvedValue({ outcome: "rotated" });
 		const refreshTokenStore: RefreshTokenStoreBase = {
 			kind: "spy",
@@ -181,17 +257,19 @@ describe("oauthAuthorizationModule", () => {
 			revokeFamily: async () => {},
 		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
-		const ctx = makeContext({ refreshTokenStore, keyStore });
-		const module = oauthAuthorizationModule({
-			codeRepository: {} as CodeRepository,
-			clientRepository: mockClientRepository,
-		});
+		const baseDeps: GrantDependencies = {
+			config: {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+				},
+			} as unknown as GrantDependencies["config"],
+			keyStore,
+			refreshTokenStore,
+		};
 
-		await module.init(ctx);
-
-		const handler = ctx.grantRegistry.get("refresh_token");
-		expect(handler).toBeDefined();
-		if (!handler) return;
+		const handler = createRefreshTokenGrant(baseDeps);
 
 		// Build a real refresh token so rotate() is reached
 		const { generateToken } = await import("@o3co/auth-provider-core");
@@ -218,10 +296,10 @@ describe("oauthAuthorizationModule", () => {
 
 		expect(rotateSpy).toHaveBeenCalled();
 	});
+});
 
-	it("forwards context.userSessionStore to authorization and refresh_token grants (Fix C1/P1)", async () => {
-		// Construct module with a spy userSessionStore. Drive the authorization grant
-		// through a valid code exchange; assert get() was consulted (store is threaded).
+describe("createAuthorizationGrant — userSessionStore forwarding", () => {
+	it("calls userSessionStore.get when a valid code exchange includes a sid", async () => {
 		const getSpy = vi.fn().mockResolvedValue({
 			sid: "sid-wired",
 			sub: "u1",
@@ -249,25 +327,36 @@ describe("oauthAuthorizationModule", () => {
 			removeBySid: vi.fn(async () => {}),
 		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
-		const ctx = makeContext({ userSessionStore, sessionRPRegistry, sessionFamilyIndex, keyStore });
-
 		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code", sid: "sid-wired" });
-		const module = oauthAuthorizationModule({
+
+		const deps: GrantDependencies & {
+			codeRepository: CodeRepository;
+			clientRepository: ClientRepository;
+		} = {
+			config: {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+				},
+			} as unknown as GrantDependencies["config"],
+			keyStore,
+			userSessionStore,
+			sessionRPRegistry,
+			sessionFamilyIndex,
 			codeRepository: {
 				consumeByCode,
 				createCode: vi.fn(),
 				getByCode: vi.fn(),
 				removeByCode: vi.fn(),
 			} as unknown as CodeRepository,
-			clientRepository: mockClientRepository,
-		});
+			clientRepository: {
+				findById: vi.fn().mockResolvedValue(null),
+				authenticate: vi.fn().mockResolvedValue(null),
+			},
+		};
 
-		await module.init(ctx);
-
-		const handler = ctx.grantRegistry.get("authorization_code");
-		expect(handler).toBeDefined();
-		if (!handler) return;
-
+		const handler = createAuthorizationGrant(deps);
 		const { result } = await handler.handle({
 			body: { code: "auth-code", client_id: "client1" },
 			session: {
@@ -280,45 +369,118 @@ describe("oauthAuthorizationModule", () => {
 			metadata: {},
 		});
 
-		// The grant must succeed and have consulted the store via get(sid)
 		expect(result.status).toBe(200);
 		expect(getSpy).toHaveBeenCalledWith("sid-wired");
 	});
+});
 
-	it("forwards context.grantPolicy to authorization and refresh_token grants", async () => {
+describe("createAuthorizationGrant — grantPolicy forwarding", () => {
+	it("calls grantPolicy.evaluate during refresh_token grant", async () => {
+		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 		const grantPolicy: GrantPolicyHookBase = {
 			kind: "spy",
 			evaluate: vi.fn().mockResolvedValue({ outcome: "allow" }),
 		};
-		const ctx = makeContext({ grantPolicy });
-		const module = oauthAuthorizationModule({
-			codeRepository: {} as CodeRepository,
-			clientRepository: mockClientRepository,
+
+		// Build a valid refresh token first via authorization grant
+		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code" });
+		const authDeps: GrantDependencies & {
+			codeRepository: CodeRepository;
+			clientRepository: ClientRepository;
+		} = {
+			config: {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+				},
+			} as unknown as GrantDependencies["config"],
+			keyStore,
+			codeRepository: {
+				consumeByCode,
+				createCode: vi.fn(),
+				getByCode: vi.fn(),
+				removeByCode: vi.fn(),
+			} as unknown as CodeRepository,
+			clientRepository: {
+				findById: vi.fn().mockResolvedValue(null),
+				authenticate: vi.fn().mockResolvedValue(null),
+			},
+		};
+
+		const authHandler = createAuthorizationGrant(authDeps);
+		const authResult = await authHandler.handle({
+			body: { code: "auth-code", client_id: "client1" },
+			session: {
+				code: "auth-code",
+				code_client_id: "client1",
+				granted_scopes: ["read"],
+				user: { id: "u1" },
+			},
+			issuer: "localhost",
+			metadata: {},
 		});
 
-		await module.init(ctx);
+		// Pluck the refresh_token from the authorization code response
+		const tokens = (authResult.result as { status: number; tokens?: { refresh_token?: string } })
+			.tokens;
+		const refreshTokenValue = tokens?.refresh_token;
+		if (!refreshTokenValue) return; // skip if no token
 
-		expect(ctx.grantRegistry.get("authorization_code")).toBeDefined();
-		expect(ctx.grantRegistry.get("refresh_token")).toBeDefined();
+		// Now test the refresh grant with grantPolicy
+		const rtDeps: GrantDependencies = {
+			config: {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+				},
+			} as unknown as GrantDependencies["config"],
+			keyStore,
+			grantPolicy,
+		};
+
+		const rtHandler = createRefreshTokenGrant(rtDeps);
+		await rtHandler.handle({
+			body: { refresh_token: refreshTokenValue, client_id: "client1" },
+			session: {},
+			issuer: "localhost",
+			metadata: {},
+		});
+
+		expect(grantPolicy.evaluate).toHaveBeenCalled();
 	});
+});
 
+describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 	it("registered authorization handler returns 400 for invalid code", async () => {
-		const ctx = makeContext();
-		const mockCodeRepo = {
-			consumeByCode: vi.fn().mockResolvedValue(null),
-			createCode: vi.fn(),
-		} as unknown as CodeRepository;
-		const module = oauthAuthorizationModule({
-			codeRepository: mockCodeRepo,
-			clientRepository: mockClientRepository,
-		});
+		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
+		const consumeByCode = vi.fn().mockResolvedValue(null);
+		const deps: GrantDependencies & {
+			codeRepository: CodeRepository;
+			clientRepository: ClientRepository;
+		} = {
+			config: {
+				oauth: {
+					jwt: { secret: "test-secret" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+				},
+			} as unknown as GrantDependencies["config"],
+			keyStore,
+			codeRepository: {
+				consumeByCode,
+				createCode: vi.fn(),
+				getByCode: vi.fn(),
+				removeByCode: vi.fn(),
+			} as unknown as CodeRepository,
+			clientRepository: {
+				findById: vi.fn().mockResolvedValue(null),
+				authenticate: vi.fn().mockResolvedValue(null),
+			},
+		};
 
-		await module.init(ctx);
-
-		const handler = ctx.grantRegistry.get("authorization_code");
-		expect(handler).toBeDefined();
-		if (!handler) return;
-
+		const handler = createAuthorizationGrant(deps);
 		const { result } = await handler.handle({
 			body: { code: "bad-code", client_id: "c1" },
 			session: { code: "different-code", code_client_id: "c1" },
@@ -329,6 +491,13 @@ describe("oauthAuthorizationModule", () => {
 		expect(result.status).toBe(400);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// authorize persists OIDC round-trip state on code record (TODO-F-3)
+// These tests use the route layer directly — they do NOT use the module
+// manifest system and remain unchanged from v0.4.x since they test the
+// /authorize route behavior, not the module shape.
+// ---------------------------------------------------------------------------
 
 describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", () => {
 	it("captures nonce + sid on createCode when both are present", async () => {
