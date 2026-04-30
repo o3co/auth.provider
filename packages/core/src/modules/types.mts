@@ -25,7 +25,7 @@ import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "..
 import type { GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RateLimiterBase } from "../ratelimit/types.mjs";
 import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
-import type { UserSessionStoreBase } from "../user-sessions/types.mjs";
+import type { UserSessionStore } from "../user-sessions/types.mjs";
 
 /**
  * Resolves a module specifier to a URL/path that can be passed to dynamic import().
@@ -66,7 +66,7 @@ export interface ModuleContext {
 	rateLimiter?: RateLimiterBase;
 	refreshTokenStore?: RefreshTokenStoreBase;
 	grantPolicy?: GrantPolicyHookBase;
-	userSessionStore?: UserSessionStoreBase;
+	userSessionStore?: UserSessionStore;
 	federationTokenStore?: FederationTokenStoreBase;
 	/**
 	 * Federation providers Map, populated by the session module during its init phase.

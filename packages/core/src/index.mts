@@ -263,20 +263,39 @@ export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
-export { extractUserClaims } from "./user-sessions/claims.mjs";
-export {
-	createUserSessionStoreFactory,
-	registerBuiltinUserSessionStores,
-} from "./user-sessions/factory.mjs";
-// UserSessionStore — TODO-F-1
+// ---------------------------------------------------------------------------
+// A4 user-sessions (post v0.5.0 redesign): 4-way decomposition + Future-Use
+// MutableUserSessionStore. Per spec §5.1-§5.7, §7.1, §8.1.
+// ---------------------------------------------------------------------------
 export type {
 	CreateUserSessionInput,
+	MutableUserSessionStore,
 	RegisteredRP,
+	SessionFamilyIndex,
+	SessionFamilyIndexFactory,
+	SessionFederationIndex,
+	SessionFederationIndexFactory,
+	SessionRPRegistry,
+	SessionRPRegistryFactory,
 	UserSession,
 	UserSessionClaims,
-	UserSessionStoreBase,
+	UserSessionStore,
 	UserSessionStoreFactory,
 } from "./user-sessions/types.mjs";
+
+export {
+	createSessionFamilyIndexFactory,
+	createSessionFederationIndexFactory,
+	createSessionRPRegistryFactory,
+	createUserSessionStoreFactory,
+} from "./user-sessions/factory.mjs";
+
+export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
+export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
+export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
+export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
+
+export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
 
 // ---------------------------------------------------------------------------
 // A1 — Challenge Store + Replay Seen Set + Default Ceremony (Phase 5)
