@@ -48,9 +48,15 @@ export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSi
 	return {
 		async add(sid, member, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
-			if (expiresAtMs <= Date.now()) return;
+			// Capture insertion-time once and reuse as both the freshness guard
+			// reference and the ZADD score. Two `Date.now()` calls would diverge
+			// by sub-millisecond under GC pause — harmless functionally (score
+			// is purely an ordering key) but the single-capture form documents
+			// "score = insertion time at call entry" unambiguously.
+			const insertionTimeMs = Date.now();
+			if (expiresAtMs <= insertionTimeMs) return;
 			const pipeline = opts.client.multi();
-			pipeline.zAdd(k(sid), { score: Date.now(), value: member }, { NX: true });
+			pipeline.zAdd(k(sid), { score: insertionTimeMs, value: member }, { NX: true });
 			pipeline.pExpireAt(k(sid), expiresAtMs);
 			await pipeline.exec();
 		},
