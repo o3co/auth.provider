@@ -82,9 +82,13 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 		const config = context.config as AppConfig;
 
 		// Validate that required stores are present before proceeding.
-		if (!context.userSessionStore || !context.federationTokenStore) {
+		if (
+			!context.userSessionStore ||
+			!context.federationTokenStore ||
+			!context.sessionFederationIndex
+		) {
 			throw new Error(
-				"session module requires userSessionStore and federationTokenStore in ModuleContext",
+				"session module requires userSessionStore, federationTokenStore, and sessionFederationIndex in ModuleContext",
 			);
 		}
 
@@ -242,6 +246,7 @@ export const _sessionModuleImpl = (params: SessionModuleInternalOptions): Module
 				providerCallbackUrls,
 				userRepository: params.userRepository,
 				userSessionStore: context.userSessionStore,
+				sessionFederationIndex: context.sessionFederationIndex,
 				federationTokenStore: context.federationTokenStore,
 				sessionTtlMs: params.sessionTtlMs,
 			}),

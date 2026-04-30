@@ -117,6 +117,24 @@ export function createApp(options: AppOptions): AppResult {
 				"Register a UserSessionStore adapter in AppOptions.",
 		);
 	}
+	if (federationsConfigured && !options.sessionRPRegistry) {
+		throw new Error(
+			"createApp: federations are configured but sessionRPRegistry was not provided. " +
+				"Register a SessionRPRegistry adapter in AppOptions (or use memorySessionStoresModule).",
+		);
+	}
+	if (federationsConfigured && !options.sessionFamilyIndex) {
+		throw new Error(
+			"createApp: federations are configured but sessionFamilyIndex was not provided. " +
+				"Register a SessionFamilyIndex adapter in AppOptions (or use memorySessionStoresModule).",
+		);
+	}
+	if (federationsConfigured && !options.sessionFederationIndex) {
+		throw new Error(
+			"createApp: federations are configured but sessionFederationIndex was not provided. " +
+				"Register a SessionFederationIndex adapter in AppOptions (or use memorySessionStoresModule).",
+		);
+	}
 
 	// CP-20: when grantPolicy is configured, config.oauth.jwt.issuer MUST be
 	// set so the issuer observed by the policy matches the issuer claim on

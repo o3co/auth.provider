@@ -21,7 +21,7 @@ import {
 	type GrantPolicyHookBase,
 	type RefreshTokenRotateOutcome,
 	type RefreshTokenStoreBase,
-	type UserSessionStoreBase,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
@@ -593,15 +593,11 @@ describe("createRefreshTokenGrant", () => {
 
 		function createStubUserSessionStore(
 			get: (sid: string) => Promise<import("@o3co/auth-provider-core").UserSession | null>,
-		): UserSessionStoreBase {
+		): UserSessionStore {
 			return {
 				kind: "stub",
 				get,
 				async create() {},
-				async registerRP() {},
-				async linkFamily() {},
-				async updateClaims() {},
-				async removeFederation() {},
 				async delete() {},
 			};
 		}

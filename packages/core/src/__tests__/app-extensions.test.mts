@@ -22,6 +22,9 @@ import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "#/mfa/types.mjs";
 import type { GrantPolicyHookBase } from "#/policy/types.mjs";
 import { createInMemoryUserSessionStore } from "#/user-sessions/adapters/memory.mjs";
+import { createInMemorySessionFamilyIndex } from "#/user-sessions/memory/sessionFamilyIndex.mjs";
+import { createInMemorySessionFederationIndex } from "#/user-sessions/memory/sessionFederationIndex.mjs";
+import { createInMemorySessionRPRegistry } from "#/user-sessions/memory/sessionRPRegistry.mjs";
 
 const mockExpress = {
 	Router: () =>
@@ -270,7 +273,7 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 		).toThrow(/userSessionStore/);
 	});
 
-	it("accepts federation config when both stores are wired", () => {
+	it("throws when federations configured without sessionRPRegistry", () => {
 		expect(() =>
 			createApp({
 				express: mockExpress,
@@ -279,6 +282,54 @@ describe("createApp — TODO-F-1 federation store plumbing", () => {
 				modules: [],
 				userSessionStore: createInMemoryUserSessionStore(),
 				federationTokenStore: createInMemoryFederationTokenStore(),
+				// sessionRPRegistry deliberately omitted
+			}),
+		).toThrow(/sessionRPRegistry/);
+	});
+
+	it("throws when federations configured without sessionFamilyIndex", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				// sessionFamilyIndex deliberately omitted
+			}),
+		).toThrow(/sessionFamilyIndex/);
+	});
+
+	it("throws when federations configured without sessionFederationIndex", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+				// sessionFederationIndex deliberately omitted
+			}),
+		).toThrow(/sessionFederationIndex/);
+	});
+
+	it("accepts federation config when all sibling stores are wired", () => {
+		expect(() =>
+			createApp({
+				express: mockExpress,
+				config: configWithFederations,
+				keyStore: createSymmetricKeyStore("test-secret"),
+				modules: [],
+				userSessionStore: createInMemoryUserSessionStore(),
+				federationTokenStore: createInMemoryFederationTokenStore(),
+				sessionRPRegistry: createInMemorySessionRPRegistry(),
+				sessionFamilyIndex: createInMemorySessionFamilyIndex(),
+				sessionFederationIndex: createInMemorySessionFederationIndex(),
 			}),
 		).not.toThrow();
 	});

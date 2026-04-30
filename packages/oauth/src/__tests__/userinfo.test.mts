@@ -19,7 +19,7 @@ import {
 	createSymmetricKeyStore,
 	type RefreshTokenStoreBase,
 	type UserSession,
-	type UserSessionStoreBase,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { SignJWT } from "jose";
@@ -45,12 +45,12 @@ async function mintAT(extra: Record<string, unknown> = {}): Promise<string> {
 
 interface CallOptions {
 	token: string | null;
-	userSessionStore?: Partial<UserSessionStoreBase>;
+	userSessionStore?: Partial<UserSessionStore>;
 	refreshTokenStore?: Partial<RefreshTokenStoreBase>;
 }
 
 function buildApp(opts: {
-	userSessionStore?: Partial<UserSessionStoreBase>;
+	userSessionStore?: Partial<UserSessionStore>;
 	refreshTokenStore?: Partial<RefreshTokenStoreBase>;
 }) {
 	const app = express();
@@ -58,7 +58,7 @@ function buildApp(opts: {
 
 	const router = createRouter(express, {
 		keyStore,
-		userSessionStore: opts.userSessionStore as UserSessionStoreBase | undefined,
+		userSessionStore: opts.userSessionStore as UserSessionStore | undefined,
 		refreshTokenStore: opts.refreshTokenStore as RefreshTokenStoreBase | undefined,
 	});
 	// Mount at /oauth to match the convention in module.mts
@@ -85,9 +85,6 @@ const baseSession: UserSession = {
 	authTime: new Date(),
 	createdAt: new Date(),
 	expiresAt: new Date(Date.now() + 3_600_000),
-	federations: [],
-	activeRPs: [],
-	familyIds: ["fam-1"],
 	claims: {
 		email: "alice@example.com",
 		emailVerified: true,
@@ -106,10 +103,6 @@ describe("GET /oauth/userinfo", () => {
 				kind: "memory",
 				get: vi.fn().mockResolvedValue(baseSession),
 				create: vi.fn(),
-				registerRP: vi.fn(),
-				linkFamily: vi.fn(),
-				updateClaims: vi.fn(),
-				removeFederation: vi.fn(),
 				delete: vi.fn(),
 			},
 			refreshTokenStore: {
@@ -156,10 +149,6 @@ describe("GET /oauth/userinfo", () => {
 				kind: "memory",
 				get: vi.fn().mockResolvedValue(baseSession),
 				create: vi.fn(),
-				registerRP: vi.fn(),
-				linkFamily: vi.fn(),
-				updateClaims: vi.fn(),
-				removeFederation: vi.fn(),
 				delete: vi.fn(),
 			},
 		});
@@ -177,10 +166,6 @@ describe("GET /oauth/userinfo", () => {
 				kind: "memory",
 				get: vi.fn().mockResolvedValue(null),
 				create: vi.fn(),
-				registerRP: vi.fn(),
-				linkFamily: vi.fn(),
-				updateClaims: vi.fn(),
-				removeFederation: vi.fn(),
 				delete: vi.fn(),
 			},
 			refreshTokenStore: {
@@ -204,10 +189,6 @@ describe("GET /oauth/userinfo", () => {
 				kind: "memory",
 				get: vi.fn().mockResolvedValue(baseSession),
 				create: vi.fn(),
-				registerRP: vi.fn(),
-				linkFamily: vi.fn(),
-				updateClaims: vi.fn(),
-				removeFederation: vi.fn(),
 				delete: vi.fn(),
 			},
 			refreshTokenStore: {
@@ -267,10 +248,6 @@ describe("GET /oauth/userinfo", () => {
 				kind: "memory",
 				get: vi.fn().mockRejectedValue(new Error("redis unavailable")),
 				create: vi.fn(),
-				registerRP: vi.fn(),
-				linkFamily: vi.fn(),
-				updateClaims: vi.fn(),
-				removeFederation: vi.fn(),
 				delete: vi.fn(),
 			},
 			refreshTokenStore: {
@@ -309,10 +286,6 @@ describe("GET /oauth/userinfo", () => {
 				kind: "memory",
 				get: vi.fn().mockResolvedValue(baseSession),
 				create: vi.fn(),
-				registerRP: vi.fn(),
-				linkFamily: vi.fn(),
-				updateClaims: vi.fn(),
-				removeFederation: vi.fn(),
 				delete: vi.fn(),
 			},
 			refreshTokenStore: {
@@ -356,10 +329,6 @@ describe("GET /oauth/userinfo", () => {
 				kind: "memory",
 				get: vi.fn().mockResolvedValue(baseSession),
 				create: vi.fn(),
-				registerRP: vi.fn(),
-				linkFamily: vi.fn(),
-				updateClaims: vi.fn(),
-				removeFederation: vi.fn(),
 				delete: vi.fn(),
 			},
 			refreshTokenStore: {

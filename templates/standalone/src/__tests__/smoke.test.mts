@@ -18,15 +18,17 @@ import {
 	type AppConfig,
 	createApp,
 	createFederationTokenStoreFactory,
+	createInMemorySessionFamilyIndex,
+	createInMemorySessionFederationIndex,
+	createInMemorySessionRPRegistry,
+	createInMemoryUserSessionStore,
 	createKeyStoreFactory,
-	createUserSessionStoreFactory,
 	generateToken,
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
 	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
-	registerBuiltinUserSessionStores,
 } from "@o3co/auth-provider-core";
 import {
 	oauthAuthorizationModule,
@@ -99,9 +101,11 @@ describe("standalone smoke test", () => {
 			...(config.oauth.jwt.signingKey.local ?? {}),
 		});
 
-		const userSessionStoreFactory = createUserSessionStoreFactory();
-		registerBuiltinUserSessionStores(userSessionStoreFactory);
-		const userSessionStore = await userSessionStoreFactory.create({ type: "memory" });
+		// A4 — 4 sibling stores via direct construction (factory pattern removed in v0.5.0).
+		const userSessionStore = createInMemoryUserSessionStore();
+		const sessionRPRegistry = createInMemorySessionRPRegistry();
+		const sessionFamilyIndex = createInMemorySessionFamilyIndex();
+		const sessionFederationIndex = createInMemorySessionFederationIndex();
 
 		const federationTokenStoreFactory = createFederationTokenStoreFactory();
 		registerBuiltinFederationTokenStores(federationTokenStoreFactory);
@@ -112,6 +116,9 @@ describe("standalone smoke test", () => {
 			config,
 			keyStore,
 			userSessionStore,
+			sessionRPRegistry,
+			sessionFamilyIndex,
+			sessionFederationIndex,
 			federationTokenStore,
 			modules: [
 				oauthModule({ clientRepository, codeRepository, express }),

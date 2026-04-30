@@ -28,8 +28,11 @@ import {
 	type ModuleContext,
 	type RateLimiterBase,
 	type RefreshTokenStoreBase,
+	type SessionFamilyIndex,
+	type SessionFederationIndex,
+	type SessionRPRegistry,
 	type UserSession,
-	type UserSessionStoreBase,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Router } from "express";
 import express from "express";
@@ -167,28 +170,41 @@ describe("oauthModule", () => {
 			.setIssuedAt()
 			.sign(secretKey);
 
-		// Session has "google" linked
+		// Session has "google" linked (v0.5.0 UserSession: no federations/activeRPs/familyIds fields)
 		const session: UserSession = {
 			sid: "sid-1",
 			sub: "u-1",
 			authTime: new Date(),
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 3_600_000),
-			federations: ["google"],
-			activeRPs: [],
-			familyIds: ["fam-1"],
 			claims: {},
 		};
 
-		const sessionStore: UserSessionStoreBase = {
+		const sessionStore: UserSessionStore = {
 			kind: "memory",
 			create: vi.fn(),
 			get: vi.fn().mockResolvedValue(session),
-			registerRP: vi.fn(),
-			linkFamily: vi.fn(),
-			updateClaims: vi.fn(),
-			removeFederation: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn(),
+		};
+
+		const sessionRPRegistry: SessionRPRegistry = {
+			kind: "memory",
+			registerRP: vi.fn(async () => {}),
+			listRPs: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const sessionFamilyIndex: SessionFamilyIndex = {
+			kind: "memory",
+			addFamilyId: vi.fn(async () => {}),
+			listFamilyIds: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const sessionFederationIndex: SessionFederationIndex = {
+			kind: "memory",
+			addFederation: vi.fn(async () => {}),
+			listFederations: vi.fn(async () => ["google"]),
+			removeFederation: vi.fn(async () => {}),
+			removeBySid: vi.fn(async () => {}),
 		};
 
 		const refreshStore: RefreshTokenStoreBase = {
@@ -231,6 +247,9 @@ describe("oauthModule", () => {
 			router: rootRouter,
 			refreshTokenStore: refreshStore,
 			userSessionStore: sessionStore,
+			sessionRPRegistry,
+			sessionFamilyIndex,
+			sessionFederationIndex,
 			federationTokenStore: fedTokenStore,
 			// NOT setting federationProviders yet — simulates oauth init running first
 		});
@@ -286,28 +305,41 @@ describe("oauthModule", () => {
 			.setIssuedAt()
 			.sign(secretKey);
 
-		// Session has "google" linked
+		// Session has "google" linked (v0.5.0 UserSession: no federations/activeRPs/familyIds fields)
 		const session: UserSession = {
 			sid: "sid-1",
 			sub: "u-1",
 			authTime: new Date(),
 			createdAt: new Date(),
 			expiresAt: new Date(Date.now() + 3_600_000),
-			federations: ["google"],
-			activeRPs: [],
-			familyIds: ["fam-1"],
 			claims: {},
 		};
 
-		const sessionStore: UserSessionStoreBase = {
+		const sessionStore: UserSessionStore = {
 			kind: "memory",
 			create: vi.fn(),
 			get: vi.fn().mockResolvedValue(session),
-			registerRP: vi.fn(),
-			linkFamily: vi.fn(),
-			updateClaims: vi.fn(),
-			removeFederation: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn(),
+		};
+
+		const sessionRPRegistry2: SessionRPRegistry = {
+			kind: "memory",
+			registerRP: vi.fn(async () => {}),
+			listRPs: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const sessionFamilyIndex2: SessionFamilyIndex = {
+			kind: "memory",
+			addFamilyId: vi.fn(async () => {}),
+			listFamilyIds: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const sessionFederationIndex2: SessionFederationIndex = {
+			kind: "memory",
+			addFederation: vi.fn(async () => {}),
+			listFederations: vi.fn(async () => ["google"]),
+			removeFederation: vi.fn(async () => {}),
+			removeBySid: vi.fn(async () => {}),
 		};
 
 		const refreshStore: RefreshTokenStoreBase = {
@@ -356,6 +388,9 @@ describe("oauthModule", () => {
 			router: rootRouter,
 			refreshTokenStore: refreshStore,
 			userSessionStore: sessionStore,
+			sessionRPRegistry: sessionRPRegistry2,
+			sessionFamilyIndex: sessionFamilyIndex2,
+			sessionFederationIndex: sessionFederationIndex2,
 			federationTokenStore: fedTokenStore,
 			// NOT setting federationProviders yet — simulates oauth init running first
 		});
@@ -395,23 +430,38 @@ describe("oauthModule", () => {
 	it("federation-token endpoint is mounted even when oauth.jwt.issuer is absent (returns 401, not 404)", async () => {
 		const SECRET = "test-secret-at-least-32-chars!!";
 
-		const sessionStore: UserSessionStoreBase = {
+		const sessionStore3: UserSessionStore = {
 			kind: "memory",
 			create: vi.fn(),
 			get: vi.fn(),
-			registerRP: vi.fn(),
-			linkFamily: vi.fn(),
-			updateClaims: vi.fn(),
-			removeFederation: vi.fn(),
 			delete: vi.fn(),
 		};
-		const refreshStore: RefreshTokenStoreBase = {
+		const sessionRPRegistry3: SessionRPRegistry = {
+			kind: "memory",
+			registerRP: vi.fn(async () => {}),
+			listRPs: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const sessionFamilyIndex3: SessionFamilyIndex = {
+			kind: "memory",
+			addFamilyId: vi.fn(async () => {}),
+			listFamilyIds: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const sessionFederationIndex3: SessionFederationIndex = {
+			kind: "memory",
+			addFederation: vi.fn(async () => {}),
+			listFederations: vi.fn(async () => []),
+			removeFederation: vi.fn(async () => {}),
+			removeBySid: vi.fn(async () => {}),
+		};
+		const refreshStore3: RefreshTokenStoreBase = {
 			kind: "memory",
 			isFamilyRevoked: vi.fn(),
 			rotate: vi.fn(),
 			revokeFamily: vi.fn(),
 		};
-		const fedTokenStore: FederationTokenStoreBase = {
+		const fedTokenStore3: FederationTokenStoreBase = {
 			kind: "memory",
 			attach: vi.fn(),
 			get: vi.fn(),
@@ -433,9 +483,12 @@ describe("oauthModule", () => {
 			} as unknown as AppConfig,
 			keyStore: createSymmetricKeyStore(SECRET),
 			router: rootRouter,
-			refreshTokenStore: refreshStore,
-			userSessionStore: sessionStore,
-			federationTokenStore: fedTokenStore,
+			refreshTokenStore: refreshStore3,
+			userSessionStore: sessionStore3,
+			sessionRPRegistry: sessionRPRegistry3,
+			sessionFamilyIndex: sessionFamilyIndex3,
+			sessionFederationIndex: sessionFederationIndex3,
+			federationTokenStore: fedTokenStore3,
 		});
 
 		const oauth = oauthModule({

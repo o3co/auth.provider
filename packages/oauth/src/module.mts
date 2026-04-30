@@ -66,6 +66,9 @@ export const oauthModule = (params: {
 			grantPolicy: context.grantPolicy,
 			refreshTokenStore: context.refreshTokenStore,
 			userSessionStore: context.userSessionStore,
+			sessionRPRegistry: context.sessionRPRegistry,
+			sessionFamilyIndex: context.sessionFamilyIndex,
+			sessionFederationIndex: context.sessionFederationIndex,
 			federationTokenStore: context.federationTokenStore,
 			// Lazy closure: evaluated at request time, not at init time.
 			// Captures `context` by reference so federation providers written by
@@ -91,7 +94,12 @@ export const oauthModule = (params: {
 			// the logout router. When any required store is absent, the logout route
 			// is not registered and discovery must not advertise the 5 logout fields.
 			const logoutSupported =
-				!!context.userSessionStore && !!context.federationTokenStore && !!context.refreshTokenStore;
+				!!context.userSessionStore &&
+				!!context.sessionRPRegistry &&
+				!!context.sessionFamilyIndex &&
+				!!context.sessionFederationIndex &&
+				!!context.federationTokenStore &&
+				!!context.refreshTokenStore;
 			context.router.use(
 				oidcConfig.createRouter(express, {
 					issuer,
