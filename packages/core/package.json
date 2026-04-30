@@ -16,8 +16,8 @@
 			"types": "./dist/modules/manifest/index.d.mts"
 		},
 		"./testing": {
-			"import": "./dist/testing/index.mjs",
-			"types": "./dist/testing/index.d.mts"
+			"types": "./dist/testing/index.d.mts",
+			"import": "./dist/testing/index.mjs"
 		}
 	},
 	"files": [

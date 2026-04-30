@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+import type { z } from "zod";
+import type {
+	AppConfig,
+	CoreConfig,
+	fullSectionsSchema,
+} from "../../config/application.schema.mjs";
+
 /**
  * Minimal schema-valid config factories for tests that need to satisfy
  * `CoreConfigSchema` or `AppConfigSchema` parse without exercising the
@@ -21,10 +28,23 @@
  *
  * These factories return the smallest object shape that passes schema
  * validation; they intentionally diverge from `packages/core/config/
- * application.conf` for test ergonomics (e.g. raw secrets instead of
- * env-substituted placeholders, no signing-key alternatives). They are
- * NOT a hocon mirror — if you need fixture values that match production
- * defaults, parse `application.conf` directly via the test harness.
+ * application.conf` for test ergonomics. The deliberate divergences are:
+ *
+ * - `session.storage.type` is `"memory"` (hocon defaults to `"redis"`).
+ * - `federations` is `{}` (hocon ships a built-in `federations.google`
+ *   block with `enabled = false`).
+ * - `oauth.jwt.signingKey.local.secret` carries an inline test secret
+ *   (hocon uses `${?OAUTH_JWT_SECRET}` substitution).
+ * - `repositories.{client,user,code}` declare only the discriminator
+ *   `type` field; nested adapter-specific fields (`yaml.path`,
+ *   `memory.defaultExpiresIn`, …) are omitted because the schema marks
+ *   them optional or the adapter-specific factory is not exercised.
+ * - `endpoints.client` and `endpoints.authCallback` are omitted because
+ *   the schema marks them `.optional()`. Callers exercising those
+ *   endpoints' behaviour should add the missing fields per-test.
+ *
+ * If you need fixture values that match production defaults, parse
+ * `application.conf` directly via the test harness.
  *
  * Background: per ADR 2026-04-30 (schema-strict defaults from hocon),
  * defaults live exclusively in `application.conf`. Tests that previously
@@ -32,9 +52,17 @@
  * now supply explicit values; these factories provide the canonical
  * minimal shape so each call site does not re-invent it.
  *
+ * The factories use `satisfies` against `CoreConfig` / `AppConfig` so
+ * the returned object is type-checked against the schema *and* preserves
+ * the narrow inferred shape (literal enum values such as `algorithm:
+ * "HS256"` are not widened to `string`), so consumer tests can assign
+ * the result to typed variables without casts.
+ *
  * Each factory returns a fresh, mutable object so callers can apply
  * local overrides without bleeding into siblings.
  */
+
+type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
 
 export function makeValidCoreConfig() {
 	return {
@@ -55,7 +83,7 @@ export function makeValidCoreConfig() {
 			refreshToken: { expiresIn: 86400 },
 			grants: {},
 		},
-	};
+	} satisfies CoreConfig;
 }
 
 export function makeValidFullSections() {
@@ -64,7 +92,7 @@ export function makeValidFullSections() {
 			secret: "test-session-secret",
 			maxAge: 3600000,
 			secure: true,
-			sameSite: "lax" as const,
+			sameSite: "lax",
 			domain: null,
 			storage: { type: "memory" },
 		},
@@ -81,12 +109,12 @@ export function makeValidFullSections() {
 			login: {},
 		},
 		cors: { allowedOrigins: [] },
-	};
+	} satisfies FullSectionsConfig;
 }
 
 export function makeValidAppConfig() {
 	return {
 		...makeValidCoreConfig(),
 		...makeValidFullSections(),
-	};
+	} satisfies AppConfig;
 }

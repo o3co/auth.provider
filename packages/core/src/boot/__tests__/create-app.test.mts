@@ -55,8 +55,9 @@ declare module "@o3co/auth-provider-core" {
 // ---------------------------------------------------------------------------
 
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
-// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so this
-// fixture must mirror what hocon would have produced.
+// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
+// fixture supplies a minimal schema-valid baseline (intentionally
+// diverges from application.conf — see makeValidCoreConfig docstring).
 const minBoot = {
 	config: makeValidCoreConfig() as never,
 	pathResolver: (s: string) => s,
@@ -157,9 +158,11 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		expect(Object.isFrozen(handle)).toBe(true);
 		// components map is accessible and contains the bootstrap keys
 		expect(handle.components).toBeDefined();
-		// config is now the parsed (CoreConfigSchema-validated) result with
-		// Zod defaults applied — not the raw bootstrap reference. See
-		// validateAndComposeConfig substitution per Codex P2-A hardening.
+		// config is now the parsed (CoreConfigSchema-validated) result —
+		// not the raw bootstrap reference. See validateAndComposeConfig
+		// substitution per Codex P2-A hardening. The `port: 3000` value
+		// comes from the makeValidCoreConfig fixture; per ADR 2026-04-30
+		// the schema layer no longer carries a default for it.
 		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 		// The slot provided by the module is materialised (eager activation)
@@ -181,9 +184,11 @@ describe("createApp — 1. happy path: minimal manifest boots", () => {
 		expect(Object.isFrozen(handle)).toBe(true);
 		expect(Object.isFrozen(handle.components)).toBe(true);
 		// Bootstrap components are present in the frozen component map.
-		// config is now the parsed (CoreConfigSchema-validated) result with
-		// Zod defaults applied — not the raw bootstrap reference. See
-		// validateAndComposeConfig substitution per Codex P2-A hardening.
+		// config is now the parsed (CoreConfigSchema-validated) result —
+		// not the raw bootstrap reference. See validateAndComposeConfig
+		// substitution per Codex P2-A hardening. The `port: 3000` value
+		// comes from the makeValidCoreConfig fixture; per ADR 2026-04-30
+		// the schema layer no longer carries a default for it.
 		expect((handle.components.config as { http: { port: number } }).http.port).toBe(3000);
 		expect(handle.components.pathResolver).toBe(minBoot.pathResolver);
 	});

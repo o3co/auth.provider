@@ -35,8 +35,9 @@ declare module "@o3co/auth-provider-core" {
 import type { BootstrapMap } from "../types.mjs";
 
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
-// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so this
-// fixture must mirror what hocon would have produced.
+// hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
+// fixture supplies a minimal schema-valid baseline (intentionally
+// diverges from application.conf — see makeValidCoreConfig docstring).
 const minCoreConfig = makeValidCoreConfig();
 
 const minBootstrap = {

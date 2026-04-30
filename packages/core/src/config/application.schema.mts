@@ -23,8 +23,11 @@
  *
  * Consequence: schema parse rejects bare `{}` inputs. Tests that need a
  * valid config must either (a) load it through `parseFile` against the
- * built-in hocon, or (b) supply a fixture that mirrors what hocon would
- * have produced. See ADR 2026-04-30.
+ * built-in hocon, or (b) supply a minimal schema-valid baseline (e.g.
+ * the `makeValidCoreConfig` factory exposed via the
+ * `@o3co/auth-provider-core/testing` subpath, which intentionally
+ * diverges from `application.conf` for test ergonomics). See
+ * ADR 2026-04-30.
  */
 import { z } from "zod";
 
