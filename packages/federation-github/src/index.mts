@@ -15,8 +15,4 @@
  */
 
 export type { GithubProvider, GithubProviderConfig } from "./github.mjs";
-export {
-	createGithubProvider,
-	githubFederationModule,
-	registerGithubFederation,
-} from "./github.mjs";
+export { createGithubProvider, githubFederationModule } from "./github.mjs";
