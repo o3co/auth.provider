@@ -21,7 +21,7 @@ import { createInMemoryFederationTokenStore } from "#/federation-tokens/adapters
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import type { MfaCoordinator, MfaProviderFactory, MfaTransactionStore } from "#/mfa/types.mjs";
 import type { GrantPolicyHookBase } from "#/policy/types.mjs";
-import { createInMemoryUserSessionStore } from "#/user-sessions/adapters/memory.mjs";
+import { createInMemoryUserSessionStore } from "#/user-sessions/memory/userSessionStore.mjs";
 import { createInMemorySessionFamilyIndex } from "#/user-sessions/memory/sessionFamilyIndex.mjs";
 import { createInMemorySessionFederationIndex } from "#/user-sessions/memory/sessionFederationIndex.mjs";
 import { createInMemorySessionRPRegistry } from "#/user-sessions/memory/sessionRPRegistry.mjs";

@@ -47,7 +47,10 @@ declare module "@o3co/auth-provider-core" {
 		readonly codeRepository: { readonly stub: "codeRepository" };
 		readonly userRepository: { readonly stub: "userRepository" };
 		readonly auditSink: { readonly stub: "auditSink" };
-		readonly userSessionStore?: { readonly stub: "userSessionStore" };
+		// userSessionStore is canonically declared as UserSessionStore? in
+		// `user-sessions/types.mts` ComponentMap merge — do not redeclare here
+		// (would conflict with the canonical type). The Scenario 2 provider
+		// returns a UserSessionStore-compatible stub directly at the call site.
 		// NOTE: refreshTokenStore is intentionally NOT declared here — the
 		// X1 cross-spec constraint (legacy-slots-absent.test.mts) prohibits
 		// it from appearing in ComponentMap. Scenario 2 injects the key via a
@@ -261,7 +264,12 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 			name: "session",
 			requires: ["config"],
 			provides: {
-				userSessionStore: (_deps) => ({ stub: "userSessionStore" as const }),
+				userSessionStore: (_deps) => ({
+					kind: "memory" as const,
+					create: async () => {},
+					get: async () => null,
+					delete: async () => {},
+				}),
 			},
 		});
 
