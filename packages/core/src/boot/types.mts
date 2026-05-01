@@ -552,7 +552,7 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 22 literals, Per A2-β §6.1
+// BootErrorReason — exactly 23 literals, Per A2-β §6.1
 // ---------------------------------------------------------------------------
 
 /**
@@ -589,7 +589,7 @@ export type BootErrorReason =
 	| "federation-stores-incomplete";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — 22 total, Per A2-β §6.1
+// Per-reason *Details interfaces — 23 total, Per A2-β §6.1
 // ---------------------------------------------------------------------------
 
 /** Per A2-β §6.1. */

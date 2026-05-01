@@ -102,7 +102,7 @@ describe("BootErrorReason", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-reason Details — discriminator type checks (all 22)
+// Per-reason Details — discriminator type checks (all 23)
 // ---------------------------------------------------------------------------
 
 describe("per-reason *Details discriminators", () => {
