@@ -13,7 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { AppConfig, Module } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	defaultRefreshTokenFamilyRevocationModule,
+	defaultRefreshTokenRotationModule,
+	type Module,
+	memoryRefreshTokenFamilyStoreModule,
+} from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 import {
 	oauthAuthorizationModule,
@@ -65,5 +71,8 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
 		overrides.storesModule ?? storesModule,
+		memoryRefreshTokenFamilyStoreModule,
+		defaultRefreshTokenRotationModule,
+		defaultRefreshTokenFamilyRevocationModule,
 	];
 }
