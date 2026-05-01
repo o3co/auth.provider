@@ -397,7 +397,7 @@ v0.4.0 ではこのパッケージから passport を直接依存として削除
 3. **`FederationProfile.raw` を削除。** OIDC 標準クレームがファーストクラスフィールドになった（`sub`、`email`、`emailVerified`、`name`、`picture`、`accessToken`、`refreshToken`、`idToken`、`expiresAt`）。プロバイダー固有クレーム（Google の `hd`、Microsoft の `tid` など）はインデックスシグネチャ `[key: string]: unknown` で伝達される。
 4. **`FederationProfile.id` → `sub` へリネーム、`expiresIn: number` → `expiresAt: Date | null`（必須）に変更。** adapter は明示的に判断する必要がある — プロバイダーが有限の expiry を発行する場合は `Date`、発行しない場合（GitHub OAuth Apps の classic token 等）は `null` を返す。route 層は fallback expiry を勝手に発明しなくなった — `null` は「refresh せず、プロバイダーが invalidate するまで reuse」を意味する。`FederationTokenStore` 側の `FederationTokens.expiresAt` も同じ契約に従う。
 5. **`createPassport()` と `SetupPassportContext` をパブリック API から削除。** 状態（CSRF）と PKCE はルート層が内部で管理する。プロバイダーは純粋関数になった。
-6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。いずれかが `ModuleContext` に存在しない場合、`sessionModule` は `init()` 時に例外をスローする。
+6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。これらは `sessionModule.requires` に宣言され、該当 component を提供するモジュールが無い場合、boot planner が `BootError(reason: 'missing-required-component')` で拒否する。
 7. **`/login` エラーレスポンス** は RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。旧フォーマット `{ message: "..." }` をクライアントが解析している場合は更新が必要。
 8. **`SupportsRefresh.refreshToken`** の戻り型が `RefreshedTokens`（新型）: `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }` に変更。Google/GitHub のリフレッシュレスポンスは正当に `sub` を省略するため、ルート層が保存済み identity を維持する。
 
@@ -457,7 +457,7 @@ class CustomProvider implements FederationProvider, SupportsClaimMapping {
 
 ### モジュールの配線
 
-`sessionModule` は `userRepository`（`/login` 用）が必要。`ModuleContext` の `userSessionStore` + `federationTokenStore` は**必須**になった。
+`sessionModule` は `userRepository`（`/login` 用）が必要。`userSessionStore` + `federationTokenStore` は `sessionModule.requires` に含まれており、該当 component を提供するモジュールが無い場合、boot planner が `BootError` を投げる。
 
 ## 関連
 
