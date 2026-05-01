@@ -18,7 +18,7 @@ import type {
 	ClientRepository,
 	GrantContext,
 	PublicClient,
-	RefreshTokenStoreBase,
+	RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
@@ -44,16 +44,12 @@ const clientRepository: ClientRepository = {
 	authenticate: async (id) => (id === client.clientId ? client : null),
 };
 
-// In-memory refresh token store preserving family revocation state between
-// calls, so we can revoke then re-exchange and observe the cascade.
-function makeStatefulStore(): RefreshTokenStoreBase & { revokedFamilies: Set<string> } {
+// In-memory family revocation slot preserving state between calls, so we can
+// revoke then re-exchange and observe the cascade.
+function makeStatefulStore(): RefreshTokenFamilyRevocation & { revokedFamilies: Set<string> } {
 	const revoked = new Set<string>();
 	return {
-		kind: "stateful-fixture",
 		revokedFamilies: revoked,
-		async rotate() {
-			return { outcome: "rotated" };
-		},
 		async isFamilyRevoked(familyId) {
 			return revoked.has(familyId);
 		},
@@ -63,11 +59,11 @@ function makeStatefulStore(): RefreshTokenStoreBase & { revokedFamilies: Set<str
 	};
 }
 
-function buildHandler(store: RefreshTokenStoreBase) {
+function buildHandler(store: RefreshTokenFamilyRevocation) {
 	const registry = new ExchangeTokenValidatorRegistry();
-	// Validator has no refreshTokenStore so it returns a ValidatedToken with
+	// Validator has no refreshTokenFamilyRevocation so it returns a ValidatedToken with
 	// familyId set. The grant handler's re-surface block then consults
-	// deps.refreshTokenStore and emits the family_revoked errorDescription.
+	// deps.refreshTokenFamilyRevocation and emits the family_revoked errorDescription.
 	// This matches the unit-test pattern (validatorRefreshStore: null) and is
 	// required for the cascade test to observe "family_revoked" vs the opaque
 	// "subject_token validation failed" that would result if the validator
@@ -94,7 +90,7 @@ function buildHandler(store: RefreshTokenStoreBase) {
 			// biome-ignore lint/suspicious/noExplicitAny: test scaffold config
 		} as any,
 		keyStore,
-		refreshTokenStore: store,
+		refreshTokenFamilyRevocation: store,
 		tokenExchangeValidatorResolver: registry,
 		clientRepository,
 	});
@@ -244,17 +240,17 @@ describe("token_exchange — integration", () => {
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
 	// contribution-factory `deps`. Both the grant handler (`grant.mts:212-266`,
 	// family_revoked re-surface) and the built-in self-issued validator
-	// (`module.mts:68`, family revocation check) read `deps.refreshTokenStore`.
+	// (`module.mts:68`, family revocation check) read `deps.refreshTokenFamilyRevocation`.
 	// Without declaring it here, a composition root that wires the store
 	// will have it silently dropped: family-revocation observability turns
 	// off, and self-issued exchanges that carry a `family_id` are rejected
 	// as if the store were absent. RFC 8693 §7.2 state 1 requirement.
-	it("declares refreshTokenStore in optional so the family-revocation path receives it", async () => {
+	it("declares refreshTokenFamilyRevocation in optional so the family-revocation path receives it", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
-		expect(tokenExchangeModule.optional).toContain("refreshTokenStore");
+		expect(tokenExchangeModule.optional).toContain("refreshTokenFamilyRevocation");
 	});
 
-	// Symmetric to the refreshTokenStore guard above. The token-exchange grant
+	// Symmetric to the refreshTokenFamilyRevocation guard above. The token-exchange grant
 	// reads `deps.grantPolicy` at grant.mts:339,362 to enforce CP-18 fail-
 	// closed policy decisions on exchange requests. Other OAuth grants
 	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy

@@ -20,7 +20,10 @@ import type { KeyStore } from "../keys/KeyStore.mjs";
 import type { PathResolver } from "../modules/types.mjs";
 import type { GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
-import type { RefreshTokenRotation } from "../refresh-token-family/types.mjs";
+import type {
+	RefreshTokenFamilyRevocation,
+	RefreshTokenRotation,
+} from "../refresh-token-family/types.mjs";
 import type {
 	SessionFamilyIndex,
 	SessionFederationIndex,
@@ -82,6 +85,7 @@ export interface GrantDependencies {
 	/** @deprecated Use `refreshTokenRotation` (A3 §5.2). Removed in Task A8. */
 	refreshTokenStore?: RefreshTokenStoreBase;
 	refreshTokenRotation?: RefreshTokenRotation;
+	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	grantPolicy?: GrantPolicyHookBase;
 	userSessionStore?: UserSessionStore;
 	sessionRPRegistry?: SessionRPRegistry;

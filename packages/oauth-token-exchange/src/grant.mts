@@ -207,44 +207,47 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 
 			// Fail-closed: the self-issued validator silently skips the family check
-			// when refreshTokenStore is absent, but Token Exchange must not issue
-			// tokens whose revocation cannot be observed (spec §7.2 state 1).
+			// when refreshTokenFamilyRevocation is absent, but Token Exchange must
+			// not issue tokens whose revocation cannot be observed (spec §7.2 state 1).
 			if (
 				subjectValidated.familyId &&
-				!deps.refreshTokenStore &&
+				!deps.refreshTokenFamilyRevocation &&
 				subjectTokenType === ACCESS_TOKEN_TYPE
 			) {
 				return {
 					result: {
 						status: 400,
 						error: "invalid_grant",
-						errorDescription: "refresh token store not configured (revocation cannot be verified)",
+						errorDescription:
+							"refresh token family revocation not configured (revocation cannot be verified)",
 					},
 				};
 			}
 
 			// Revocation responsibility model (spec §7.2):
-			//   - The built-in self-issued validator accepts an OPTIONAL refreshTokenStore
-			//     as a convenience — but the RECOMMENDED wiring (used by integration
-			//     tests and README) leaves the validator storeless and lets this handler
-			//     own revocation.
+			//   - The built-in self-issued validator accepts an OPTIONAL
+			//     refreshTokenFamilyRevocation as a convenience — but the
+			//     RECOMMENDED wiring (used by integration tests and README) leaves
+			//     the validator storeless and lets this handler own revocation.
 			//   - Handler-owned revocation has two benefits: (a) it can surface the
 			//     specific `family_revoked` errorDescription that RFC 8693 consumers
 			//     expect, and (b) it applies fail-closed semantics (spec §7.2 state 1)
-			//     when the store is not wired at the grant level.
-			//   - If a consumer wires the store into BOTH the validator AND the grant,
+			//     when the slot is not wired at the grant level.
+			//   - If a consumer wires the slot into BOTH the validator AND the grant,
 			//     revocation is double-checked. Safe but wasteful — the validator's
 			//     early null short-circuits the handler's specific error reporting.
-			// Re-surface family_revoked for operators by consulting the store directly
+			// Re-surface family_revoked for operators by consulting the slot directly
 			// when a family_id was present. isFamilyRevoked is idempotent and cheap.
 			if (
 				subjectValidated.familyId &&
-				deps.refreshTokenStore &&
+				deps.refreshTokenFamilyRevocation &&
 				subjectTokenType === ACCESS_TOKEN_TYPE
 			) {
 				let revoked: boolean;
 				try {
-					revoked = await deps.refreshTokenStore.isFamilyRevoked(subjectValidated.familyId);
+					revoked = await deps.refreshTokenFamilyRevocation.isFamilyRevoked(
+						subjectValidated.familyId,
+					);
 				} catch {
 					return {
 						result: {

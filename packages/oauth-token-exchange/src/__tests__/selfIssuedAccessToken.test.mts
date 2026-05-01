@@ -16,13 +16,13 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, makeRefreshStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
 describe("createSelfIssuedAccessTokenValidator", () => {
 	const validator = (overrides = {}) =>
 		createSelfIssuedAccessTokenValidator({
 			keyStore,
-			refreshTokenFamilyRevocation: makeRefreshStore(),
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			issuer: ISSUER,
 			...overrides,
 		});
@@ -31,7 +31,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(() =>
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
-				refreshTokenFamilyRevocation: makeRefreshStore(),
+				refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			}),
 		).toThrow("issuer is required");
 	});
@@ -65,7 +65,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 
 	it("returns null when family is revoked", async () => {
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-revoked" });
-		const store = makeRefreshStore({
+		const store = makeFamilyRevocation({
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		});
 		const v = validator({ refreshTokenFamilyRevocation: store });
@@ -75,7 +75,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 
 	it("throws when isFamilyRevoked throws (runtime unavailable)", async () => {
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		const store = makeRefreshStore({
+		const store = makeFamilyRevocation({
 			isFamilyRevoked: vi.fn().mockRejectedValue(new Error("redis down")),
 		});
 		const v = validator({ refreshTokenFamilyRevocation: store });
@@ -84,7 +84,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 
 	it("accepts a token without family_id claim (legacy) when refreshTokenFamilyRevocation is present", async () => {
 		const token = await signSelfIssuedAccessToken({});
-		const store = makeRefreshStore();
+		const store = makeFamilyRevocation();
 		const v = validator({ refreshTokenFamilyRevocation: store });
 		const result = await v.validate(token, { role: "subject" });
 		expect(result).not.toBeNull();

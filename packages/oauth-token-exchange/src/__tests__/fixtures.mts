@@ -18,7 +18,7 @@ import { createSecretKey } from "node:crypto";
 import {
 	createSymmetricKeyStore,
 	type KeyStore,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
 import { SignJWT } from "jose";
 
@@ -46,14 +46,10 @@ export async function signSelfIssuedAccessToken(
 		.sign(secretKey);
 }
 
-export function makeRefreshStore(
-	overrides: Partial<RefreshTokenStoreBase> = {},
-): RefreshTokenStoreBase {
+export function makeFamilyRevocation(
+	overrides: Partial<RefreshTokenFamilyRevocation> = {},
+): RefreshTokenFamilyRevocation {
 	return {
-		kind: "fixture",
-		async rotate() {
-			return { outcome: "rotated" };
-		},
 		async isFamilyRevoked() {
 			return false;
 		},

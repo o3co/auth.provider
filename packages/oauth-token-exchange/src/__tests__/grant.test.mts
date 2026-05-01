@@ -28,7 +28,7 @@ import { describe, expect, it } from "vitest";
 import { createTokenExchangeGrant } from "#/grant.mjs";
 import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import { ISSUER, keyStore, makeRefreshStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
+import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
@@ -62,9 +62,9 @@ function buildGrant(
 		validatorRegistry?: ExchangeTokenValidatorRegistry;
 		clientRepository?: ClientRepository;
 		/** Pass `null` to explicitly omit the store from deps (fail-closed tests). */
-		refreshTokenStore?: ReturnType<typeof makeRefreshStore> | null;
-		/** Store wired into the validator (defaults to same as refreshTokenStore). */
-		validatorRefreshStore?: ReturnType<typeof makeRefreshStore> | null;
+		refreshTokenFamilyRevocation?: ReturnType<typeof makeFamilyRevocation> | null;
+		/** Store wired into the validator (defaults to same as refreshTokenFamilyRevocation). */
+		validatorRefreshStore?: ReturnType<typeof makeFamilyRevocation> | null;
 		config?: AppConfig;
 		grantPolicy?: GrantPolicyHookBase;
 	} = {},
@@ -72,9 +72,9 @@ function buildGrant(
 	const registry = overrides.validatorRegistry ?? new ExchangeTokenValidatorRegistry();
 	// null = explicitly absent; undefined = use default
 	const grantStore =
-		overrides.refreshTokenStore === null
+		overrides.refreshTokenFamilyRevocation === null
 			? undefined
-			: (overrides.refreshTokenStore ?? makeRefreshStore());
+			: (overrides.refreshTokenFamilyRevocation ?? makeFamilyRevocation());
 	// validatorRefreshStore defaults to same as grantStore unless explicitly overridden
 	const validatorStore =
 		"validatorRefreshStore" in overrides
@@ -93,7 +93,7 @@ function buildGrant(
 	return createTokenExchangeGrant({
 		config: overrides.config ?? mockConfig,
 		keyStore,
-		refreshTokenStore: grantStore,
+		refreshTokenFamilyRevocation: grantStore,
 		// ExchangeTokenValidatorRegistry exposes structurally-compatible
 		// `.get()` for the resolver; A2-γ §3.3 keeps the registry class as
 		// test scaffolding even though it is no longer publicly exported.
@@ -321,14 +321,14 @@ describe("createTokenExchangeGrant — token validation", () => {
 	});
 
 	it("returns invalid_grant/family_revoked when subject family is revoked", async () => {
-		const store = makeRefreshStore({
+		const store = makeFamilyRevocation({
 			isFamilyRevoked: async (id) => id === "fam-bad",
 		});
 		// validatorRefreshStore: null → validator has no store, so it returns a
 		// ValidatedToken with familyId set (doesn't self-check revocation).
-		// The grant's re-surface block then consults `refreshTokenStore` and
+		// The grant's re-surface block then consults `refreshTokenFamilyRevocation` and
 		// surfaces the `family_revoked` errorDescription.
-		const g = buildGrant({ refreshTokenStore: store, validatorRefreshStore: null });
+		const g = buildGrant({ refreshTokenFamilyRevocation: store, validatorRefreshStore: null });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-bad" });
 		const { result } = await g.handle(
 			ctx({
@@ -345,12 +345,12 @@ describe("createTokenExchangeGrant — token validation", () => {
 		});
 	});
 
-	it("returns invalid_grant when refreshTokenStore is not wired (fail-closed)", async () => {
-		// refreshTokenStore: null → deps.refreshTokenStore is undefined (absent).
+	it("returns invalid_grant when refreshTokenFamilyRevocation is not wired (fail-closed)", async () => {
+		// refreshTokenFamilyRevocation: null → deps.refreshTokenFamilyRevocation is undefined (absent).
 		// validatorRefreshStore: null → validator has no store, so it returns a
 		// ValidatedToken with familyId (doesn't self-check revocation).
 		// The grant's fail-closed check fires: familyId present + no store → 400.
-		const g = buildGrant({ refreshTokenStore: null, validatorRefreshStore: null });
+		const g = buildGrant({ refreshTokenFamilyRevocation: null, validatorRefreshStore: null });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(
 			ctx({
@@ -364,12 +364,12 @@ describe("createTokenExchangeGrant — token validation", () => {
 	});
 
 	it("returns temporarily_unavailable (503) when validator throws (runtime store failure)", async () => {
-		const store = makeRefreshStore({
+		const store = makeFamilyRevocation({
 			isFamilyRevoked: async () => {
 				throw new Error("redis down");
 			},
 		});
-		const g = buildGrant({ refreshTokenStore: store });
+		const g = buildGrant({ refreshTokenFamilyRevocation: store });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(
 			ctx({
