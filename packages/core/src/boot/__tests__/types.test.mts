@@ -32,6 +32,7 @@ import type {
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
 	FederationRedirectPolicyUnpairedDetails,
+	FederationStoresIncompleteDetails,
 	GrantPolicyWithoutIssuerDetails,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
@@ -65,13 +66,13 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 22 literals (Phase 9 added "grant-policy-without-
+// BootErrorReason — exactly 23 literals (Phase 9 added "grant-policy-without-
 // issuer" for the CP-20 invariant restoration; issue #101 added
-// "mfa-partial-wiring")
+// "mfa-partial-wiring" and "federation-stores-incomplete")
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 22 reason literals", () => {
+	it("contains exactly the 23 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "duplicate-module-name"
 			| "duplicate-provides"
@@ -95,6 +96,7 @@ describe("BootErrorReason", () => {
 			| "federation-redirect-policy-unpaired"
 			| "grant-policy-without-issuer"
 			| "mfa-partial-wiring"
+			| "federation-stores-incomplete"
 		>();
 	});
 });
@@ -220,6 +222,12 @@ describe("per-reason *Details discriminators", () => {
 
 	it("MfaPartialWiringDetails.reason", () => {
 		expectTypeOf<MfaPartialWiringDetails["reason"]>().toEqualTypeOf<"mfa-partial-wiring">();
+	});
+
+	it("FederationStoresIncompleteDetails.reason", () => {
+		expectTypeOf<
+			FederationStoresIncompleteDetails["reason"]
+		>().toEqualTypeOf<"federation-stores-incomplete">();
 	});
 });
 

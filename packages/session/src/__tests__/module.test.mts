@@ -93,6 +93,24 @@ const sessionFederationIndexModule = defineModule({
 });
 
 /**
+ * Stub modules for `sessionRPRegistry` and `sessionFamilyIndex`.
+ * These slots are oauth-package concerns (not provided by sessionModule or
+ * any session-package module), but the boot-time `federation-stores-incomplete`
+ * validator requires them whenever any federation is enabled in config.
+ * Tests that enable a federation must include these stubs so the guard passes
+ * and the session-level validations under test can fire.
+ */
+const sessionRPRegistryModule = defineModule({
+	name: "test:session-rp-registry",
+	provides: { sessionRPRegistry: () => ({ kind: "stub" }) } as never,
+});
+
+const sessionFamilyIndexModule = defineModule({
+	name: "test:session-family-index",
+	provides: { sessionFamilyIndex: () => ({ kind: "stub" }) } as never,
+});
+
+/**
  * Stub federation module — contributes `federations.stub` + the paired
  * `federationRedirectPolicies.stub`. Needed for any test that exercises the
  * boot path with at least one enabled federation in config (otherwise the
@@ -126,6 +144,12 @@ const baseTestModules = [
 	userSessionStoreModule,
 	federationTokenStoreModule,
 	sessionFederationIndexModule,
+	// Required by the boot-time `federation-stores-incomplete` validator whenever
+	// any federation is enabled in config. These are oauth-package concerns;
+	// the session-package tests use stubs so the guard passes and session-level
+	// validations under test can fire. Per issue #101 TODO-F-1.
+	sessionRPRegistryModule,
+	sessionFamilyIndexModule,
 ];
 
 // ---------------------------------------------------------------------------

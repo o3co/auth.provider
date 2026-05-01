@@ -19,7 +19,7 @@
  * share, plus the BootError class catalogue.
  *
  * A single file (not per-stage files) because the discriminated
- * BootError.details union has 22 variants and the intermediate stage types
+ * BootError.details union has 23 variants and the intermediate stage types
  * form a tight chain — splitting would force unavoidable circular imports
  * between later stage modules.
  *
@@ -558,9 +558,10 @@ export type BootStage =
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 22 reasons.
+ * exactly 23 reasons.
  *
- * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring).
+ * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
+ * federation-stores-incomplete).
  */
 export type BootErrorReason =
 	| "duplicate-module-name"
@@ -584,7 +585,8 @@ export type BootErrorReason =
 	| "route-order-target-missing"
 	| "federation-redirect-policy-unpaired"
 	| "grant-policy-without-issuer"
-	| "mfa-partial-wiring";
+	| "mfa-partial-wiring"
+	| "federation-stores-incomplete";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — 22 total, Per A2-β §6.1
@@ -870,12 +872,26 @@ export interface MfaPartialWiringDetails {
 }
 
 /**
+ * Per A2-β §6.1 amendment 2026-05 (issue #101 TODO-F-1).
+ * When config.federations.<name>.enabled is true, all 5 session/federation
+ * stores must be wired: userSessionStore, sessionRPRegistry,
+ * sessionFamilyIndex, sessionFederationIndex, and federationTokenStore.
+ */
+export interface FederationStoresIncompleteDetails {
+	readonly reason: "federation-stores-incomplete";
+	/** The federation name whose enabled flag triggered the check. */
+	readonly federationName: string;
+	/** The store keys that are absent from the planned component set. */
+	readonly missing: readonly string[];
+}
+
+/**
  * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
  * Per A2-β §6.1, extended by A5 §8.2 and the Phase 9 boot-validator
  * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
- * (mfa-partial-wiring).
+ * (mfa-partial-wiring, federation-stores-incomplete).
  */
 export type BootErrorDetails =
 	| DuplicateModuleNameDetails
@@ -899,7 +915,8 @@ export type BootErrorDetails =
 	| RouteOrderTargetMissingDetails
 	| FederationRedirectPolicyUnpairedDetails
 	| GrantPolicyWithoutIssuerDetails
-	| MfaPartialWiringDetails;
+	| MfaPartialWiringDetails
+	| FederationStoresIncompleteDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

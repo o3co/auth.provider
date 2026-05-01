@@ -29,6 +29,7 @@
  */
 
 import { z } from "zod";
+import type { AppConfig } from "../config/application.schema.mjs";
 import { composeConfigSchema } from "../config/application.schema.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
@@ -910,6 +911,45 @@ export function checkMfaPartialWiring(plannedKeys: ReadonlySet<string>): void {
 }
 
 // ---------------------------------------------------------------------------
+// Step 13.7 — Federation stores wiring guard
+// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
+// ---------------------------------------------------------------------------
+
+const FEDERATION_REQUIRED_STORES = [
+	"userSessionStore",
+	"sessionRPRegistry",
+	"sessionFamilyIndex",
+	"sessionFederationIndex",
+	"federationTokenStore",
+] as const;
+
+/**
+ * If any `config.federations.<name>.enabled === true`, all 5 session/
+ * federation stores MUST be present in the planned component set. A missing
+ * store causes the federation routes to 503 at runtime with an opaque error.
+ *
+ * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
+ */
+export function checkFederationStoresWiring(
+	config: AppConfig,
+	plannedKeys: ReadonlySet<string>,
+): void {
+	const federations = (config.federations ?? {}) as Record<string, { enabled?: boolean }>;
+	for (const [name, fed] of Object.entries(federations)) {
+		if (fed?.enabled !== true) continue;
+		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !plannedKeys.has(k));
+		if (missing.length > 0) {
+			throw new BootError({
+				stage: "validateManifests",
+				reason: "federation-stores-incomplete",
+				message: `federations.${name} is enabled but session/federation stores are missing: ${missing.join(", ")}`,
+				details: { reason: "federation-stores-incomplete", federationName: name, missing },
+			});
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Step 8 — Override target existence
 // Per A2-β §5.1 step 8.
 // ---------------------------------------------------------------------------
@@ -1385,6 +1425,14 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 			normalisedModules.flatMap((m) => m.providesKeys as string[]),
 		);
 		checkMfaPartialWiring(plannedKeys);
+
+		// Step 13.7: Federation stores wiring guard — if any federation is
+		// enabled in config, all 5 session/federation stores must be wired.
+		// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
+		checkFederationStoresWiring(
+			parsedConfig as AppConfig,
+			plannedKeys,
+		);
 	}
 
 	// Step 14: Route-order edge sanity
