@@ -197,6 +197,7 @@ export function createRedisFederationTokenStore(
  */
 export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStoreBase> = (
 	config,
+	_ctx,
 ) => {
 	const cfg = config as {
 		client?: unknown;
