@@ -21,14 +21,27 @@ import type {
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import { HttpUserRepository } from "./repositories/HttpUserRepository.mjs";
-import { RedisCodeRepository } from "./repositories/RedisCodeRepository.mjs";
 
+/**
+ * Registers the foundation's built-in adapter factories. As of v0.5.0
+ * (Phase 10 Q4), the only built-in adapter remaining in foundation is
+ * the HTTP UserRepository — the Redis CodeRepository was relocated to
+ * `@o3co/auth-provider-redis`.
+ *
+ * The `codeFactory` parameter is retained for backward compatibility with
+ * the v0.4.x signature; foundation no longer registers any code adapter.
+ *
+ * Consumers that need redis-backed code storage should wire it directly:
+ *
+ *   import { redisCodeRepositoryBuilder } from "@o3co/auth-provider-redis";
+ *   codeFactory.register("redis", redisCodeRepositoryBuilder);
+ */
 export const registerBuiltinAdapters = (factories: {
 	userFactory: AdapterFactory<UserRepository>;
-	codeFactory: AdapterFactory<CodeRepository>;
+	// Kept for v0.4.x signature compatibility; no registrations performed.
+	codeFactory?: AdapterFactory<CodeRepository>;
 	pathResolver?: PathResolver;
 }): void => {
-	const { pathResolver } = factories;
 	factories.userFactory.register("http", (config) => {
 		if (typeof config.authenticateUrl !== "string") {
 			throw new Error('HttpUserRepository requires "authenticateUrl" in config');
@@ -53,14 +66,6 @@ export const registerBuiltinAdapters = (factories: {
 			})(),
 		});
 	});
-
-	factories.codeFactory.register("redis", (config) => {
-		if (typeof config.endpointUri !== "string") {
-			throw new Error('RedisCodeRepository requires "endpointUri" in config');
-		}
-		return RedisCodeRepository.create(config, pathResolver);
-	});
 };
 
 export { HttpUserRepository } from "./repositories/HttpUserRepository.mjs";
-export { RedisCodeRepository } from "./repositories/RedisCodeRepository.mjs";

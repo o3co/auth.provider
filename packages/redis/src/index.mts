@@ -26,6 +26,12 @@ export {
 	redisChallengeStoreModule,
 } from "./challenges.mjs";
 // ---------------------------------------------------------------------------
+// CodeRepository (Phase 10 Q4).
+// Relocated from @o3co/auth-provider-foundation. Module pattern intentionally
+// omitted in v0.5.0 (see plan §1 / Q4).
+// ---------------------------------------------------------------------------
+export { RedisCodeRepository, redisCodeRepositoryBuilder } from "./code-repository.mjs";
+// ---------------------------------------------------------------------------
 // FederationTokenStore (Phase 10 Q1+Q5).
 // Adapter relocated from core; module pattern added for declarative wiring
 // parity with other v0.5.0 redis adapters.

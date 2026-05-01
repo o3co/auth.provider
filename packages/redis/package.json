@@ -37,12 +37,19 @@
 		"zod": "^4.3.6"
 	},
 	"peerDependencies": {
-		"@o3co/auth-provider-core": "^0.0.0"
+		"@o3co/auth-provider-core": "^0.0.0",
+		"redis": "^5.10.0"
+	},
+	"peerDependenciesMeta": {
+		"redis": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@vitest/coverage-v8": "^4.1.2",
 		"ioredis": "^5.4.1",
+		"redis": "^5.10.0",
 		"testcontainers": "^10.16.0",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.2"

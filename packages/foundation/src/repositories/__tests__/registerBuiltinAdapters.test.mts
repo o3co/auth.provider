@@ -68,22 +68,13 @@ describe("registerBuiltinAdapters", () => {
 		}
 	});
 
-	it("registers 'redis' type in codeFactory", async () => {
+	it("does NOT register 'redis' type in codeFactory (relocated to @o3co/auth-provider-redis in Phase 10)", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 
 		registerBuiltinAdapters({ userFactory, codeFactory });
 
-		try {
-			await codeFactory.create({ type: "unknown" });
-			throw new Error("should have thrown");
-		} catch (err) {
-			expect(err).toBeInstanceOf(AdapterFactoryError);
-			const e = err as AdapterFactoryError;
-			expect(e.reason).toBe("unknown");
-			expect(e.kind).toBe("CodeRepository");
-			expect(e.registered).toContain("redis");
-		}
+		expect(codeFactory.registeredTypes()).not.toContain("redis");
 	});
 
 	it("http builder creates a working HttpUserRepository", async () => {
@@ -137,11 +128,10 @@ describe("registerBuiltinAdapters", () => {
 		);
 	});
 
-	it("redis builder throws when endpointUri is missing", async () => {
+	it("codeFactory accepts optional parameter (v0.4.x signature compat)", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
-		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
-		registerBuiltinAdapters({ userFactory, codeFactory });
 
-		await expect(codeFactory.create({ type: "redis" })).rejects.toThrow(/endpointUri/);
+		// codeFactory is now optional — omitting it should not throw
+		expect(() => registerBuiltinAdapters({ userFactory })).not.toThrow();
 	});
 });
