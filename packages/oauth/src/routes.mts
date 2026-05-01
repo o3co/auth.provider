@@ -600,7 +600,17 @@ export const createOAuthRouter = async (
 		});
 
 	// OIDC Core §5.3 — UserInfo endpoint
-	router.use(userinfo.createRouter(express, { keyStore, userSessionStore, refreshTokenStore }));
+	router.use(
+		userinfo.createRouter(express, {
+			keyStore,
+			userSessionStore,
+			// Transitional: routes.mts still holds the legacy refreshTokenStore
+			// local. Task A6 will rename the local + dep field. Passing the
+			// legacy 3-method store into a 2-method-typed param is sound via
+			// structural subtyping (legacy is a superset of FamilyRevocation).
+			refreshTokenFamilyRevocation: refreshTokenStore,
+		}),
+	);
 
 	// Federation endpoints — mount conditionally based on available stores and config.
 	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
