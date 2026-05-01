@@ -223,6 +223,7 @@ export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
+export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 // Rate limiter
 export type {
 	RateLimitContext,

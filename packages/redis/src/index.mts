@@ -39,6 +39,15 @@ export {
 	redisFederationTokenStoreModule,
 } from "./federation-tokens.mjs";
 export { redisSessionStoresModule } from "./modules/redisSessionStores.mjs";
+// ---------------------------------------------------------------------------
+// RateLimiter (Phase 10 Q3).
+// Adapter relocated from core; module pattern added.
+// ---------------------------------------------------------------------------
+export {
+	createRedisRateLimiter,
+	redisRateLimiterBuilder,
+	redisRateLimiterModule,
+} from "./ratelimit.mjs";
 export {
 	createRedisRefreshTokenFamilyStore,
 	type RedisRefreshTokenFamilyStoreOptions,

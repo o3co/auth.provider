@@ -46,13 +46,15 @@ function keyPrefix(key: string): string {
 	return colon === -1 ? key : key.slice(0, colon);
 }
 
-interface RedisRateLimiterConfig extends MemoryRateLimiterConfig {
-	client?: {
-		incr(key: string): Promise<number>;
-		expire(key: string, seconds: number): Promise<number>;
-	};
-}
-
+/**
+ * Registers the built-in in-memory RateLimiter. The "redis" backend was
+ * relocated to `@o3co/auth-provider-redis` in Phase 10; consumers wire it via:
+ *
+ *   import { redisRateLimiterBuilder } from "@o3co/auth-provider-redis";
+ *   factory.register("redis", redisRateLimiterBuilder);
+ *
+ * Or use the declarative `redisRateLimiterModule` in their `modules` array.
+ */
 export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 	factory.register("memory", (rawConfig) => {
 		const config = rawConfig as unknown as MemoryRateLimiterConfig;
@@ -100,56 +102,6 @@ export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 					allowed: true,
 					remaining: spec.limit - bucket.count,
 					resetAt: new Date(bucket.resetAt),
-				};
-			},
-		};
-	});
-
-	factory.register("redis", async (rawConfig) => {
-		const config = rawConfig as unknown as RedisRateLimiterConfig;
-		const limits = normalizeLimits(config.limits);
-		const defaultLimit: RateLimitSpec = (() => {
-			const raw = config.defaultLimit;
-			if (
-				raw &&
-				typeof raw === "object" &&
-				typeof raw.limit === "number" &&
-				typeof raw.windowSeconds === "number"
-			) {
-				return raw;
-			}
-			return { limit: 60, windowSeconds: 60 };
-		})();
-		// The built-in redis limiter requires an injected client. RateLimiterBase
-		// has no dispose() hook, so if the limiter created its own client it
-		// could never be cleanly closed — sockets would leak across process
-		// restarts. Consumers pass `config.client` so lifecycle lives in their
-		// composition root alongside other redis users (session store, etc.).
-		const client = config.client;
-		if (!client) {
-			throw new Error(
-				'Rate limiter "redis" requires config.client; the built-in limiter does not create its own redis client because RateLimiterBase has no disposal hook.',
-			);
-		}
-
-		return {
-			kind: "redis",
-			async check(key) {
-				const spec = limits[keyPrefix(key)] ?? defaultLimit;
-				const count = await client.incr(key);
-				if (count === 1) {
-					await client.expire(key, spec.windowSeconds);
-				}
-				if (count > spec.limit) {
-					return {
-						allowed: false,
-						remaining: 0,
-						reason: `limit:${keyPrefix(key)}`,
-					};
-				}
-				return {
-					allowed: true,
-					remaining: spec.limit - count,
 				};
 			},
 		};
