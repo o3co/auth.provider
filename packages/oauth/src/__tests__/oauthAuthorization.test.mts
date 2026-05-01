@@ -23,7 +23,7 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHookBase,
 	GrantRegistry,
-	type RefreshTokenStoreBase,
+	type RefreshTokenRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
 	type UserSessionStore,
@@ -261,14 +261,12 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 // the module-level tests via module.init(ctx).
 // ---------------------------------------------------------------------------
 
-describe("createRefreshTokenGrant — refreshTokenStore forwarding", () => {
-	it("calls refreshTokenStore.rotate when a valid refresh_token is presented", async () => {
+describe("createRefreshTokenGrant — refreshTokenRotation forwarding", () => {
+	it("calls refreshTokenRotation.rotate when a valid refresh_token is presented", async () => {
 		const rotateSpy = vi.fn().mockResolvedValue({ outcome: "rotated" });
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "spy",
+		const refreshTokenRotation: RefreshTokenRotation = {
+			register: vi.fn(async () => {}),
 			rotate: rotateSpy,
-			isFamilyRevoked: async () => false,
-			revokeFamily: async () => {},
 		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 		const baseDeps: GrantDependencies = {
@@ -280,7 +278,7 @@ describe("createRefreshTokenGrant — refreshTokenStore forwarding", () => {
 				},
 			} as unknown as GrantDependencies["config"],
 			keyStore,
-			refreshTokenStore,
+			refreshTokenRotation,
 		};
 
 		const handler = createRefreshTokenGrant(baseDeps);
