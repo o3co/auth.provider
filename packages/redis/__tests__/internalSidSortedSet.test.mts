@@ -14,15 +14,18 @@
  * limitations under the License.
  */
 
+import type {
+	SessionSidSortedSetClient,
+	SessionSidSortedSetMultiClient,
+} from "@o3co/auth-provider-core";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
-import type { RedisClient } from "../src/types.mjs";
 
 let container: StartedTestContainer;
 let raw: Redis;
-let client: RedisClient;
+let client: SessionSidSortedSetClient;
 
 beforeAll(async () => {
 	container = await new GenericContainer("redis:7-alpine").withExposedPorts(6379).start();
@@ -120,44 +123,27 @@ describe("createRedisSidSortedSet", () => {
 	});
 });
 
-function makeWrapper(io: Redis): RedisClient {
+function makeWrapper(io: Redis): SessionSidSortedSetClient {
+	const buildMulti = (): SessionSidSortedSetMultiClient => {
+		const p = io.multi();
+		const m: SessionSidSortedSetMultiClient = {
+			pExpireAt: (k, ms) => {
+				p.pexpireat(k, ms);
+				return m;
+			},
+			zAdd: (k, e, opts) => {
+				if (opts?.NX) p.zadd(k, "NX", e.score, e.value);
+				else p.zadd(k, e.score, e.value);
+				return m;
+			},
+			exec: async () => p.exec(),
+		};
+		return m;
+	};
+
 	return {
-		set: (k, v, _mode, ttl, _cond) => io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>,
 		del: (k) => io.del(k),
-		pttl: (k) => io.pttl(k),
-		exists: (k) => io.exists(k),
-		get: (k) => io.get(k),
-		watch: (...keys) => io.watch(...keys) as Promise<"OK">,
-		unwatch: () => io.unwatch() as Promise<"OK">,
-		multi: () => {
-			const p = io.multi();
-			const m = {
-				set: (k: string, v: string, _mode: "PX", ttl: number) => {
-					p.set(k, v, "PX", ttl);
-					return m;
-				},
-				hSet: (k: string, f: string, v: string) => {
-					p.hset(k, f, v);
-					return m;
-				},
-				pExpireAt: (k: string, ms: number) => {
-					p.pexpireat(k, ms);
-					return m;
-				},
-				zAdd: (k: string, e: { score: number; value: string }, opts?: { NX: true }) => {
-					if (opts?.NX) p.zadd(k, "NX", e.score, e.value);
-					else p.zadd(k, e.score, e.value);
-					return m;
-				},
-				exec: async () => p.exec(),
-			};
-			return m as unknown as ReturnType<RedisClient["multi"]>;
-		},
-		duplicate: () => {
-			throw new Error("duplicate() not used in this test");
-		},
-		hSet: (k, f, v) => io.hset(k, f, v) as Promise<number>,
-		hVals: (k) => io.hvals(k),
+		multi: () => buildMulti(),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
 		zAdd: (k, e, opts) =>
 			opts?.NX

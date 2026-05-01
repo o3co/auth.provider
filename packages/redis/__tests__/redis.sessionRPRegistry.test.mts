@@ -17,8 +17,8 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionRPRegistry } from "../src/sessionRPRegistry.mjs";
-import { makeIoredisRedisClient } from "./helpers/wrapper.mjs";
 import { runSessionRPRegistryContract } from "./sessionRPRegistry.contract.mjs";
 
 let container: StartedTestContainer;
@@ -37,8 +37,11 @@ afterAll(async () => {
 let suiteCounter = 0;
 runSessionRPRegistryContract(async () => {
 	suiteCounter += 1;
-	const client = makeIoredisRedisClient(raw);
-	return createRedisSessionRPRegistry({ client, keyPrefix: `t15:${suiteCounter}:` });
+	const { sessionRPRegistryClient } = makeIoredisClients(raw);
+	return createRedisSessionRPRegistry({
+		client: sessionRPRegistryClient,
+		keyPrefix: `t15:${suiteCounter}:`,
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -47,8 +50,11 @@ runSessionRPRegistryContract(async () => {
 
 describe("SessionRPRegistry concurrency", () => {
 	it("100 parallel registerRP for the same clientId → 1 entry (HSET dedup)", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const reg = createRedisSessionRPRegistry({ client, keyPrefix: "t15:conc1:" });
+		const { sessionRPRegistryClient } = makeIoredisClients(raw);
+		const reg = createRedisSessionRPRegistry({
+			client: sessionRPRegistryClient,
+			keyPrefix: "t15:conc1:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
 			Array.from({ length: 100 }, (_, i) =>
@@ -75,8 +81,11 @@ describe("SessionRPRegistry concurrency", () => {
 	});
 
 	it("100 parallel registerRP for distinct clientIds → all 100 land", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const reg = createRedisSessionRPRegistry({ client, keyPrefix: "t15:conc2:" });
+		const { sessionRPRegistryClient } = makeIoredisClients(raw);
+		const reg = createRedisSessionRPRegistry({
+			client: sessionRPRegistryClient,
+			keyPrefix: "t15:conc2:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
 			Array.from({ length: 100 }, (_, i) =>

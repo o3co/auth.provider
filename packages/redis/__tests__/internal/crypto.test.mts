@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { decryptTokenField, encryptTokenField } from "../crypto.mjs";
+import { decryptTokenField, encryptTokenField } from "../../src/internal/crypto.mjs";
 
 const key = Buffer.alloc(32, 1); // 32-byte key for AES-256
 const plaintext = "ya29.federation-refresh-token-example";

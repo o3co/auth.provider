@@ -2,70 +2,173 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
-import type { ComponentMap } from "@o3co/auth-provider-core";
-import { describe, expectTypeOf, it, test } from "vitest";
-// Importing for side-effect: declares redisClient slot via declare module
-import "../src/component-map.mjs";
-import type { DisposableRedisClient, RedisMulti } from "../src/index.mjs";
-import type { RedisClient } from "../src/types.mjs";
+import type {
+	ChallengeStoreClient,
+	ComponentMap,
+	DisposableRefreshTokenFamilyClient,
+	FederationTokenStoreClient,
+	RateLimiterClient,
+	RefreshTokenFamilyClient,
+	RefreshTokenFamilyMultiClient,
+	ReplaySeenSetClient,
+	SessionRPRegistryClient,
+	SessionRPRegistryMultiClient,
+	SessionSidSortedSetClient,
+	SessionSidSortedSetMultiClient,
+	UserSessionStoreClient,
+} from "@o3co/auth-provider-core";
+import { describe, expectTypeOf, it } from "vitest";
+import type { makeIoredisClients } from "../src/ioredis.mjs";
 
-describe("RedisClient", () => {
-	it("exposes the four ops needed by Phase 5 adapters", () => {
-		expectTypeOf<RedisClient["set"]>().toEqualTypeOf<
-			(
-				key: string,
-				value: string,
-				mode: "PX",
-				ttlMs: number,
-				condition: "NX",
-			) => Promise<"OK" | null>
+type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;
+
+describe("makeIoredisClients return shape", () => {
+	it("exposes all 9 per-purpose client slots", () => {
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("challengeStoreClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("replaySeenSetClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("refreshTokenFamilyClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("userSessionStoreClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionRPRegistryClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFamilyIndexClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("sessionFederationIndexClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("federationTokenStoreClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("rateLimiterClient");
+	});
+
+	it("challengeStoreClient satisfies ChallengeStoreClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["challengeStoreClient"]
+		>().toMatchTypeOf<ChallengeStoreClient>();
+	});
+
+	it("replaySeenSetClient satisfies ReplaySeenSetClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["replaySeenSetClient"]
+		>().toMatchTypeOf<ReplaySeenSetClient>();
+	});
+
+	it("refreshTokenFamilyClient satisfies RefreshTokenFamilyClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["refreshTokenFamilyClient"]
+		>().toMatchTypeOf<RefreshTokenFamilyClient>();
+	});
+
+	it("userSessionStoreClient satisfies UserSessionStoreClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["userSessionStoreClient"]
+		>().toMatchTypeOf<UserSessionStoreClient>();
+	});
+
+	it("sessionRPRegistryClient satisfies SessionRPRegistryClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["sessionRPRegistryClient"]
+		>().toMatchTypeOf<SessionRPRegistryClient>();
+	});
+
+	it("sessionFamilyIndexClient satisfies SessionSidSortedSetClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["sessionFamilyIndexClient"]
+		>().toMatchTypeOf<SessionSidSortedSetClient>();
+	});
+
+	it("sessionFederationIndexClient satisfies SessionSidSortedSetClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["sessionFederationIndexClient"]
+		>().toMatchTypeOf<SessionSidSortedSetClient>();
+	});
+
+	it("federationTokenStoreClient satisfies FederationTokenStoreClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["federationTokenStoreClient"]
+		>().toMatchTypeOf<FederationTokenStoreClient>();
+	});
+
+	it("rateLimiterClient satisfies RateLimiterClient", () => {
+		expectTypeOf<IoredisClientsReturn["rateLimiterClient"]>().toMatchTypeOf<RateLimiterClient>();
+	});
+});
+
+describe("ComponentMap declaration-merge — per-purpose client slots", () => {
+	it("challengeStoreClient slot is optional and of ChallengeStoreClient type", () => {
+		expectTypeOf<ComponentMap["challengeStoreClient"]>().toEqualTypeOf<
+			ChallengeStoreClient | undefined
 		>();
-		expectTypeOf<RedisClient["del"]>().toEqualTypeOf<(key: string) => Promise<number>>();
-		expectTypeOf<RedisClient["pttl"]>().toEqualTypeOf<(key: string) => Promise<number>>();
-		expectTypeOf<RedisClient["exists"]>().toEqualTypeOf<(key: string) => Promise<number>>();
+	});
+
+	it("replaySeenSetClient slot is optional and of ReplaySeenSetClient type", () => {
+		expectTypeOf<ComponentMap["replaySeenSetClient"]>().toEqualTypeOf<
+			ReplaySeenSetClient | undefined
+		>();
+	});
+
+	it("refreshTokenFamilyClient slot is optional and of RefreshTokenFamilyClient type", () => {
+		expectTypeOf<ComponentMap["refreshTokenFamilyClient"]>().toEqualTypeOf<
+			RefreshTokenFamilyClient | undefined
+		>();
+	});
+
+	it("userSessionStoreClient slot is optional and of UserSessionStoreClient type", () => {
+		expectTypeOf<ComponentMap["userSessionStoreClient"]>().toEqualTypeOf<
+			UserSessionStoreClient | undefined
+		>();
+	});
+
+	it("sessionRPRegistryClient slot is optional and of SessionRPRegistryClient type", () => {
+		expectTypeOf<ComponentMap["sessionRPRegistryClient"]>().toEqualTypeOf<
+			SessionRPRegistryClient | undefined
+		>();
+	});
+
+	it("sessionFamilyIndexClient slot is optional and of SessionSidSortedSetClient type", () => {
+		expectTypeOf<ComponentMap["sessionFamilyIndexClient"]>().toEqualTypeOf<
+			SessionSidSortedSetClient | undefined
+		>();
+	});
+
+	it("sessionFederationIndexClient slot is optional and of SessionSidSortedSetClient type", () => {
+		expectTypeOf<ComponentMap["sessionFederationIndexClient"]>().toEqualTypeOf<
+			SessionSidSortedSetClient | undefined
+		>();
+	});
+
+	it("federationTokenStoreClient slot is optional and of FederationTokenStoreClient type", () => {
+		expectTypeOf<ComponentMap["federationTokenStoreClient"]>().toEqualTypeOf<
+			FederationTokenStoreClient | undefined
+		>();
+	});
+
+	it("rateLimiterClient slot is optional and of RateLimiterClient type", () => {
+		expectTypeOf<ComponentMap["rateLimiterClient"]>().toEqualTypeOf<
+			RateLimiterClient | undefined
+		>();
 	});
 });
 
-describe("ComponentMap declaration-merge", () => {
-	it("redisClient slot is optional and of RedisClient type", () => {
-		expectTypeOf<ComponentMap["redisClient"]>().toEqualTypeOf<RedisClient | undefined>();
+describe("Per-purpose multi-client interfaces", () => {
+	it("RefreshTokenFamilyMultiClient has chainable set + exec", () => {
+		expectTypeOf<RefreshTokenFamilyMultiClient>().toEqualTypeOf<{
+			set(key: string, value: string, mode: "PX", ttlMs: number): RefreshTokenFamilyMultiClient;
+			exec(): Promise<unknown[] | null>;
+		}>();
 	});
-});
 
-test("RedisClient additively exposes get / watch / unwatch / multi / duplicate for A3 CAS", () => {
-	type ClientShape = {
-		// A1 (existing)
-		set(
-			key: string,
-			value: string,
-			mode: "PX",
-			ttlMs: number,
-			condition: "NX",
-		): Promise<"OK" | null>;
-		del(key: string): Promise<number>;
-		pttl(key: string): Promise<number>;
-		exists(key: string): Promise<number>;
-		// A3 (new)
-		get(key: string): Promise<string | null>;
-		watch(...keys: string[]): Promise<"OK">;
-		unwatch(): Promise<"OK">;
-		multi(): RedisMulti;
-		duplicate(): DisposableRedisClient;
-	};
-	expectTypeOf<RedisClient>().toEqualTypeOf<ClientShape>();
-});
+	it("DisposableRefreshTokenFamilyClient extends RefreshTokenFamilyClient + AsyncDisposable", () => {
+		expectTypeOf<DisposableRefreshTokenFamilyClient>().toMatchTypeOf<RefreshTokenFamilyClient>();
+		expectTypeOf<DisposableRefreshTokenFamilyClient>().toMatchTypeOf<AsyncDisposable>();
+		expectTypeOf<DisposableRefreshTokenFamilyClient[typeof Symbol.asyncDispose]>().toEqualTypeOf<
+			() => Promise<void>
+		>();
+	});
 
-test("RedisMulti exposes chainable set + exec returning null on CAS conflict", () => {
-	expectTypeOf<RedisMulti>().toEqualTypeOf<{
-		set(key: string, value: string, mode: "PX", ttlMs: number): RedisMulti;
-		exec(): Promise<unknown[] | null>;
-	}>();
-});
+	it("SessionRPRegistryMultiClient has chainable hSet + pExpireAt + exec", () => {
+		expectTypeOf<SessionRPRegistryMultiClient["hSet"]>().toBeFunction();
+		expectTypeOf<SessionRPRegistryMultiClient["pExpireAt"]>().toBeFunction();
+		expectTypeOf<SessionRPRegistryMultiClient["exec"]>().toBeFunction();
+	});
 
-test("DisposableRedisClient extends RedisClient + AsyncDisposable", () => {
-	expectTypeOf<DisposableRedisClient>().toMatchTypeOf<RedisClient>();
-	expectTypeOf<DisposableRedisClient>().toMatchTypeOf<AsyncDisposable>();
-	expectTypeOf<DisposableRedisClient[typeof Symbol.asyncDispose]>().toEqualTypeOf<
-		() => Promise<void>
-	>();
+	it("SessionSidSortedSetMultiClient has chainable pExpireAt + zAdd + exec", () => {
+		expectTypeOf<SessionSidSortedSetMultiClient["pExpireAt"]>().toBeFunction();
+		expectTypeOf<SessionSidSortedSetMultiClient["zAdd"]>().toBeFunction();
+		expectTypeOf<SessionSidSortedSetMultiClient["exec"]>().toBeFunction();
+	});
 });

@@ -31,7 +31,10 @@ const configSchema = z.object({
 
 /**
  * Bundled module providing all 4 redis-backed user-session stores against
- * the `redisClient` ComponentMap slot. Per A4 §8.1 + §10.1.
+ * the per-purpose ComponentMap slots `userSessionStoreClient`,
+ * `sessionRPRegistryClient`, `sessionFamilyIndexClient`, and
+ * `sessionFederationIndexClient` (declared in `@o3co/auth-provider-core`'s
+ * `user-sessions/types.mts`). Per A4 §8.1 + §10.1.
  *
  * `keyPrefix` is the OUTER namespace; the bundled module appends fixed
  * subprefixes per store (`us:` / `rp:` / `fi:` / `fed:`). Consumers that
@@ -43,14 +46,20 @@ const configSchema = z.object({
  */
 export const redisSessionStoresModule = defineModule({
 	name: "redisSessionStores",
-	requires: ["redisClient", "config"] as const,
+	requires: [
+		"userSessionStoreClient",
+		"sessionRPRegistryClient",
+		"sessionFamilyIndexClient",
+		"sessionFederationIndexClient",
+		"config",
+	] as const,
 	configSchema,
 	provides: {
 		userSessionStore: (deps) => {
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisUserSessionStore({
-				client: deps.redisClient,
+				client: deps.userSessionStoreClient,
 				keyPrefix: `${cfg.keyPrefix}us:`,
 			});
 		},
@@ -58,7 +67,7 @@ export const redisSessionStoresModule = defineModule({
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisSessionRPRegistry({
-				client: deps.redisClient,
+				client: deps.sessionRPRegistryClient,
 				keyPrefix: `${cfg.keyPrefix}rp:`,
 			});
 		},
@@ -66,7 +75,7 @@ export const redisSessionStoresModule = defineModule({
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisSessionFamilyIndex({
-				client: deps.redisClient,
+				client: deps.sessionFamilyIndexClient,
 				keyPrefix: `${cfg.keyPrefix}fi:`,
 			});
 		},
@@ -74,7 +83,7 @@ export const redisSessionStoresModule = defineModule({
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisSessionFederationIndex({
-				client: deps.redisClient,
+				client: deps.sessionFederationIndexClient,
 				keyPrefix: `${cfg.keyPrefix}fed:`,
 			});
 		},

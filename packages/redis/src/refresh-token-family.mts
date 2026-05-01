@@ -17,18 +17,18 @@ import {
 	type AdapterBuilder,
 	defineModule,
 	type RefreshTokenFamily,
+	type RefreshTokenFamilyClient,
 	type RefreshTokenFamilyStore,
 	type RefreshTokenFamilyUpdateResult,
 	RefreshTokenStorageError,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import type { RedisClient } from "./types.mjs";
 
 /**
  * Options for createRedisRefreshTokenFamilyStore.
  */
 export interface RedisRefreshTokenFamilyStoreOptions {
-	readonly client: RedisClient;
+	readonly client: RefreshTokenFamilyClient;
 	readonly keyPrefix: string;
 	/**
 	 * Maximum CAS retry attempts before throwing
@@ -58,8 +58,8 @@ const deserialize = (raw: string): RefreshTokenFamily =>
  * `${keyPrefix}${familyId}` whose value is a JSON serialisation of the
  * RefreshTokenFamily aggregate, with a TTL set via the SET command's PX
  * argument. JSON serialisation (rather than a Redis hash) keeps the
- * RedisClient surface narrow (no HSET/HGETALL needed) and matches A1's
- * single-key SET-NX pattern.
+ * RefreshTokenFamilyClient surface narrow (no HSET/HGETALL needed) and
+ * matches A1's single-key SET-NX pattern.
  *
  * Atomicity:
  *   - registerFamily uses `SET key value PX ttlMs NX` — atomic insert-only,
@@ -211,8 +211,13 @@ export function createRedisRefreshTokenFamilyStore(
  */
 export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFamilyStore> = (
 	config,
+	_ctx,
 ) => {
-	const c = config as { client: RedisClient; keyPrefix?: string; casRetryLimit?: number };
+	const c = config as {
+		client: RefreshTokenFamilyClient;
+		keyPrefix?: string;
+		casRetryLimit?: number;
+	};
 	return createRedisRefreshTokenFamilyStore({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "rtfam:",
@@ -230,7 +235,7 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
  */
 export const redisRefreshTokenFamilyStoreModule = defineModule({
 	name: "redis-refresh-token-family-store",
-	requires: ["redisClient", "config"] as const,
+	requires: ["refreshTokenFamilyClient", "config"] as const,
 	configSchema: z.object({
 		redisRefreshTokenFamilyStore: z
 			.object({
@@ -247,7 +252,7 @@ export const redisRefreshTokenFamilyStoreModule = defineModule({
 				}
 			).redisRefreshTokenFamilyStore;
 			return createRedisRefreshTokenFamilyStore({
-				client: deps.redisClient,
+				client: deps.refreshTokenFamilyClient,
 				keyPrefix: cfg.keyPrefix,
 				casRetryLimit: cfg.casRetryLimit,
 			});

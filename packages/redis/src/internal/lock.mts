@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { AcquireLockOptions, LockResult, SupportsLock } from "../types.mjs";
+import type { AcquireLockOptions, LockResult, SupportsLock } from "@o3co/auth-provider-core";
 
 /**
  * Minimal redis client shape the lock needs. Consumers can pass any client

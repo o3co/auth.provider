@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import type { RedisClient } from "../types.mjs";
+import type { SessionSidSortedSetClient } from "@o3co/auth-provider-core";
 
 export interface RedisSidSortedSetOptions {
-	readonly client: RedisClient;
+	readonly client: SessionSidSortedSetClient;
 	readonly keyPrefix: string;
 }
 

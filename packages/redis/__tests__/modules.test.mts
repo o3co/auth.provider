@@ -10,9 +10,9 @@ describe("redisChallengeStoreModule", () => {
 		expect(redisChallengeStoreModule.name).toBe("redis-challenge-store");
 	});
 
-	it("requires both 'redisClient' and 'config'", () => {
+	it("requires both 'challengeStoreClient' and 'config'", () => {
 		const reqs = redisChallengeStoreModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(new Set(["redisClient", "config"]));
+		expect(new Set(reqs)).toEqual(new Set(["challengeStoreClient", "config"]));
 	});
 
 	it("declares a Zod configSchema with module-namespaced 'redisChallengeStore' top-level key only", () => {
@@ -31,9 +31,9 @@ describe("redisReplaySeenSetModule", () => {
 		expect(redisReplaySeenSetModule.name).toBe("redis-replay-seen-set");
 	});
 
-	it("requires both 'redisClient' and 'config'", () => {
+	it("requires both 'replaySeenSetClient' and 'config'", () => {
 		const reqs = redisReplaySeenSetModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(new Set(["redisClient", "config"]));
+		expect(new Set(reqs)).toEqual(new Set(["replaySeenSetClient", "config"]));
 	});
 
 	it("declares a Zod configSchema with module-namespaced 'redisReplaySeenSet' top-level key only", () => {

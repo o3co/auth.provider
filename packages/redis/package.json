@@ -8,6 +8,10 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
+		},
+		"./ioredis": {
+			"import": "./dist/ioredis.mjs",
+			"types": "./dist/ioredis.d.mts"
 		}
 	},
 	"files": [
@@ -37,12 +41,23 @@
 		"zod": "^4.3.6"
 	},
 	"peerDependencies": {
-		"@o3co/auth-provider-core": "^0.0.0"
+		"@o3co/auth-provider-core": "^0.0.0",
+		"ioredis": "^5.4.1",
+		"redis": "^5.10.0"
+	},
+	"peerDependenciesMeta": {
+		"ioredis": {
+			"optional": true
+		},
+		"redis": {
+			"optional": true
+		}
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@vitest/coverage-v8": "^4.1.2",
 		"ioredis": "^5.4.1",
+		"redis": "^5.10.0",
 		"testcontainers": "^10.16.0",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.2"

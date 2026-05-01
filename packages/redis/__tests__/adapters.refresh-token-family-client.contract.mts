@@ -13,14 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { RefreshTokenFamilyClient } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import type { RedisClient } from "../src/types.mjs";
 
 /**
- * Factory for the contract suite. Returns a freshly-built RedisClient that
- * targets a live Redis instance. The contract suite exercises the
- * `duplicate()` NORMATIVE MUSTs from the RedisClient JSDoc (T4 hardening
- * per Claude review I1):
+ * Factory for the contract suite. Returns a freshly-built RefreshTokenFamilyClient
+ * that targets a live Redis instance. The contract suite exercises the
+ * `duplicate()` NORMATIVE MUSTs (T4 hardening per Claude review I1):
  *
  *   1. Each duplicate is a distinct instance.
  *   2. Each duplicate is bound to a fresh underlying socket — observed
@@ -32,14 +31,14 @@ import type { RedisClient } from "../src/types.mjs";
  * NOT sufficient evidence of WATCH isolation; this suite requires a
  * live Redis to detect socket sharing.
  */
-export type RedisClientContractFactory = () => RedisClient;
+export type RefreshTokenFamilyClientFactory = () => RefreshTokenFamilyClient;
 
-export function runRedisClientDuplicateContract(
-	factory: RedisClientContractFactory,
+export function runRefreshTokenFamilyClientDuplicateContract(
+	factory: RefreshTokenFamilyClientFactory,
 	keyPrefix: string,
 ): void {
-	describe("RedisClient.duplicate() — NORMATIVE contract", () => {
-		it("MUST 1: each invocation returns a distinct DisposableRedisClient instance", async () => {
+	describe("RefreshTokenFamilyClient.duplicate() — NORMATIVE contract", () => {
+		it("MUST 1: each invocation returns a distinct DisposableRefreshTokenFamilyClient instance", async () => {
 			const client = factory();
 			await using dup1 = client.duplicate();
 			await using dup2 = client.duplicate();
@@ -49,12 +48,15 @@ export function runRedisClientDuplicateContract(
 		});
 
 		it("MUST 2: duplicates have independent WATCH state (proves fresh socket)", async () => {
-			// Setup: write two distinct keys via the base client.
+			// Strategy: watch two ABSENT keys (keyA, keyB). A watched absent key
+			// triggers EXEC failure when another connection creates it (NX set
+			// from absent → present is a mutation that invalidates the watch).
+			// RefreshTokenFamilyClient only exposes `set(…, "NX")` — we exploit that
+			// to perform the mutation without needing a `del()` method.
 			const client = factory();
-			const keyA = `${keyPrefix}watch-isolation-a`;
-			const keyB = `${keyPrefix}watch-isolation-b`;
-			await client.set(keyA, "initial-a", "PX", 60_000, "NX");
-			await client.set(keyB, "initial-b", "PX", 60_000, "NX");
+			const keyA = `${keyPrefix}watch-isolation-a-${Date.now()}`;
+			const keyB = `${keyPrefix}watch-isolation-b-${Date.now()}`;
+			// Ensure keys are absent before the test (fresh prefix eliminates risk).
 
 			await using dup1 = client.duplicate();
 			await using dup2 = client.duplicate();
@@ -66,29 +68,24 @@ export function runRedisClientDuplicateContract(
 			await dup1.watch(keyA);
 			await dup2.watch(keyB);
 
-			// Mutate keyA from yet another connection (use a third duplicate
-			// for cleanliness — could also use base client).
+			// Mutate keyA from a third duplicate — NX set succeeds because keyA is
+			// absent, and any change (absent→present) invalidates dup1's WATCH on keyA.
 			await using mutator = client.duplicate();
-			await mutator.del(keyA);
+			await mutator.set(keyA, "mutated-by-mutator", "PX", 60_000, "NX");
 
-			// dup1's EXEC must fail (its watched key was modified).
+			// dup1's EXEC must fail (its watched key was created by mutator).
 			const dup1Multi = dup1.multi();
 			dup1Multi.set(`${keyPrefix}watch-result-a`, "should-not-commit", "PX", 60_000);
 			const dup1Result = await dup1Multi.exec();
 			expect(dup1Result).toBeNull();
 
-			// dup2's EXEC must succeed (its watched key was untouched). If
-			// duplicate() returned a shared socket, dup2 would observe
-			// dup1's WATCH list and ALSO fail here — that would be the
-			// contract violation.
+			// dup2's EXEC must succeed (keyB was not touched). If duplicate()
+			// shared a socket, dup2 would observe dup1's WATCH list and ALSO
+			// fail — that would be the contract violation.
 			const dup2Multi = dup2.multi();
 			dup2Multi.set(`${keyPrefix}watch-result-b`, "must-commit", "PX", 60_000);
 			const dup2Result = await dup2Multi.exec();
 			expect(dup2Result).not.toBeNull();
-
-			// Cleanup
-			await client.del(`${keyPrefix}watch-result-b`);
-			await client.del(keyB);
 		});
 
 		it("MUST 3: [Symbol.asyncDispose] closes the connection (smoke check)", async () => {
@@ -100,8 +97,7 @@ export function runRedisClientDuplicateContract(
 			const dup = client.duplicate();
 			await dup[Symbol.asyncDispose]();
 			// No assertion beyond no-throw — the absence of a hang/throw is
-			// the signal. A wrapper that omits dispose would fail typecheck
-			// (DisposableRedisClient extends AsyncDisposable).
+			// the signal.
 			expect(true).toBe(true);
 		});
 

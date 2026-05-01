@@ -14,18 +14,64 @@
  * limitations under the License.
  */
 
-// Side-effect import: declaration-merge `redisClient` into core's ComponentMap.
-// Consumer's `import "@o3co/auth-provider-redis"` is enough to enable type
-// inference for the redisClient slot.
-import "./component-map.mjs";
-
+// ---------------------------------------------------------------------------
+// Per-purpose client interfaces — re-exported from core for consumer
+// convenience. Consumers importing from @o3co/auth-provider-redis get all
+// per-purpose interfaces without needing a separate import from core.
+// ---------------------------------------------------------------------------
+export type {
+	ChallengeStoreClient,
+	DisposableRefreshTokenFamilyClient,
+	FederationTokenStoreClient,
+	RateLimiterClient,
+	RefreshTokenFamilyClient,
+	RefreshTokenFamilyMultiClient,
+	ReplaySeenSetClient,
+	SessionRPRegistryClient,
+	SessionRPRegistryMultiClient,
+	SessionSidSortedSetClient,
+	SessionSidSortedSetMultiClient,
+	UserSessionStoreClient,
+} from "@o3co/auth-provider-core";
 export {
 	createRedisChallengeStore,
 	type RedisChallengeStoreOptions,
 	redisChallengeStoreBuilder,
 	redisChallengeStoreModule,
 } from "./challenges.mjs";
+// makeIoredisClients lives at the `/ioredis` subpath
+// (`@o3co/auth-provider-redis/ioredis`) so the main entry stays
+// vendor-agnostic. Importing this main entry does NOT pull `ioredis` types
+// into the consumer's TS dependency closure. Per Phase 10 addendum +
+// Copilot review #102.
+// ---------------------------------------------------------------------------
+// CodeRepository (Phase 10 Q4).
+// Relocated from @o3co/auth-provider-foundation. Module pattern intentionally
+// omitted in v0.5.0 (see plan §1 / Q4).
+// ---------------------------------------------------------------------------
+export { RedisCodeRepository, redisCodeRepositoryBuilder } from "./code-repository.mjs";
+// ---------------------------------------------------------------------------
+// FederationTokenStore (Phase 10 Q1+Q5).
+// Adapter relocated from core; module pattern added for declarative wiring
+// parity with other v0.5.0 redis adapters.
+// ---------------------------------------------------------------------------
+export {
+	createRedisFederationTokenStore,
+	type EncryptionConfig,
+	type RedisFederationTokenStoreOptions,
+	redisFederationTokenStoreBuilder,
+	redisFederationTokenStoreModule,
+} from "./federation-tokens.mjs";
 export { redisSessionStoresModule } from "./modules/redisSessionStores.mjs";
+// ---------------------------------------------------------------------------
+// RateLimiter (Phase 10 Q3).
+// Adapter relocated from core; module pattern added.
+// ---------------------------------------------------------------------------
+export {
+	createRedisRateLimiter,
+	redisRateLimiterBuilder,
+	redisRateLimiterModule,
+} from "./ratelimit.mjs";
 export {
 	createRedisRefreshTokenFamilyStore,
 	type RedisRefreshTokenFamilyStoreOptions,
@@ -50,7 +96,6 @@ export {
 	createRedisSessionRPRegistry,
 	type RedisSessionRPRegistryOptions,
 } from "./sessionRPRegistry.mjs";
-export type { DisposableRedisClient, RedisClient, RedisMulti } from "./types.mjs";
 // ---------------------------------------------------------------------------
 // A4 user-session adapters (Phase 8b).
 // Per A4 §8.1 + §11.2.

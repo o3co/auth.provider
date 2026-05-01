@@ -21,7 +21,7 @@ const KEY_PREFIX = "oauth:code:";
 // In-memory store simulating Redis
 const store = new Map<string, string>();
 
-import { RedisCodeRepository } from "../RedisCodeRepository.mjs";
+import { RedisCodeRepository } from "../src/code-repository.mjs";
 
 const createMockRedis = () => ({
 	connect: vi.fn().mockResolvedValue(undefined),

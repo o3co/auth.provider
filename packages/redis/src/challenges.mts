@@ -18,17 +18,17 @@ import {
 	type Challenge,
 	ChallengeStorageError,
 	type ChallengeStore,
+	type ChallengeStoreClient,
 	canonicalChallengeKey,
 	defineModule,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import type { RedisClient } from "./types.mjs";
 
 /**
  * Options for createRedisChallengeStore.
  */
 export interface RedisChallengeStoreOptions {
-	readonly client: RedisClient;
+	readonly client: ChallengeStoreClient;
 	readonly keyPrefix: string;
 }
 
@@ -88,8 +88,8 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
  * Then calls:
  *   factory.create({ type: "redis", client, keyPrefix: "chal:" });
  */
-export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (config) => {
-	const c = config as { client: RedisClient; keyPrefix?: string };
+export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (config, _ctx) => {
+	const c = config as { client: ChallengeStoreClient; keyPrefix?: string };
 	return createRedisChallengeStore({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "chal:",
@@ -105,7 +105,7 @@ export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (confi
  */
 export const redisChallengeStoreModule = defineModule({
 	name: "redis-challenge-store",
-	requires: ["redisClient", "config"] as const,
+	requires: ["challengeStoreClient", "config"] as const,
 	configSchema: z.object({
 		redisChallengeStore: z
 			.object({
@@ -118,7 +118,7 @@ export const redisChallengeStoreModule = defineModule({
 			const cfg = (deps.config as unknown as { redisChallengeStore: { keyPrefix: string } })
 				.redisChallengeStore;
 			return createRedisChallengeStore({
-				client: deps.redisClient,
+				client: deps.challengeStoreClient,
 				keyPrefix: cfg.keyPrefix,
 			});
 		},

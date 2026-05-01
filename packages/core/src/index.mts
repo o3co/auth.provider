@@ -84,10 +84,12 @@ export {
 	createFederationTokenStoreFactory,
 	registerBuiltinFederationTokenStores,
 } from "./federation-tokens/factory.mjs";
+export { memoryFederationTokenStoreModule } from "./federation-tokens/module.mjs";
 // FederationTokenStore — TODO-F-1
 export type {
 	AcquireLockOptions,
 	FederationTokenStoreBase,
+	FederationTokenStoreClient,
 	FederationTokenStoreFactory,
 	FederationTokens,
 	LockResult,
@@ -222,11 +224,13 @@ export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
+export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 // Rate limiter
 export type {
 	RateLimitContext,
 	RateLimitDecision,
 	RateLimiterBase,
+	RateLimiterClient,
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
@@ -281,10 +285,15 @@ export type {
 	SessionFederationIndex,
 	SessionFederationIndexFactory,
 	SessionRPRegistry,
+	SessionRPRegistryClient,
 	SessionRPRegistryFactory,
+	SessionRPRegistryMultiClient,
+	SessionSidSortedSetClient,
+	SessionSidSortedSetMultiClient,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
+	UserSessionStoreClient,
 	UserSessionStoreFactory,
 } from "./user-sessions/types.mjs";
 
@@ -322,6 +331,7 @@ export type {
 	ChallengeCeremony,
 	ChallengeCeremonyOutcome,
 	ChallengeStore,
+	ChallengeStoreClient,
 } from "./challenges/types.mjs";
 export { createMemoryReplaySeenSet } from "./replay-seen-set/adapters/memory.mjs";
 export {
@@ -330,7 +340,7 @@ export {
 	registerBuiltinReplaySeenSets,
 } from "./replay-seen-set/factory.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
-export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
+export type { ReplaySeenSet, ReplaySeenSetClient } from "./replay-seen-set/types.mjs";
 
 // ===========================================================================
 // A3 — RefreshTokenFamilyStore + RefreshTokenRotation + RefreshTokenFamilyRevocation
@@ -361,7 +371,10 @@ export {
 	type DefaultRefreshTokenRotationDeps,
 } from "./refresh-token-family/rotation.mjs";
 export type {
+	DisposableRefreshTokenFamilyClient,
 	RefreshTokenFamily,
+	RefreshTokenFamilyClient,
+	RefreshTokenFamilyMultiClient,
 	RefreshTokenFamilyRevocation,
 	RefreshTokenFamilyStore,
 	RefreshTokenFamilyUpdateResult,

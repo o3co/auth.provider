@@ -14,12 +14,11 @@
  * limitations under the License.
  */
 
-import type { SessionFamilyIndex } from "@o3co/auth-provider-core";
+import type { SessionFamilyIndex, SessionSidSortedSetClient } from "@o3co/auth-provider-core";
 import { createRedisSidSortedSet } from "./internal/redisSidSortedSet.mjs";
-import type { RedisClient } from "./types.mjs";
 
 export interface RedisSessionFamilyIndexOptions {
-	readonly client: RedisClient;
+	readonly client: SessionSidSortedSetClient;
 	readonly keyPrefix: string;
 }
 

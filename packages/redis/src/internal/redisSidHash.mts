@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 
-import type { RedisClient } from "../types.mjs";
+import type { SessionRPRegistryClient } from "@o3co/auth-provider-core";
 
 export interface RedisSidHashOptions {
-	readonly client: RedisClient;
+	readonly client: SessionRPRegistryClient;
 	readonly keyPrefix: string;
 }
 

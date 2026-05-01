@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createRedisLock, type RedisLockClient } from "../redis.mjs";
+import { createRedisLock, type RedisLockClient } from "../../src/internal/lock.mjs";
 
 function makeFakeRedis(): RedisLockClient & {
 	data: Map<string, string>;

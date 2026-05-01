@@ -15,7 +15,7 @@
  */
 
 import crypto from "node:crypto";
-import type { Code, CodeRepository, PathResolver } from "@o3co/auth-provider-core";
+import type { AdapterBuilder, Code, CodeRepository, PathResolver } from "@o3co/auth-provider-core";
 
 const KEY_PREFIX = "oauth:code:";
 
@@ -117,3 +117,26 @@ export class RedisCodeRepository implements CodeRepository {
 		}
 	}
 }
+
+/**
+ * AdapterFactory builder. Consumer wires:
+ *   factory.register("redis", redisCodeRepositoryBuilder);
+ *
+ * `config` shape: `{ endpointUri: string; password?: string; defaultExpiresIn?: number }`.
+ *
+ * The repository is constructed and connected lazily on first call to
+ * `factory.create(...)`. The redis client lifetime is owned by the repo
+ * instance — for clean disposal across restarts, consumers should track
+ * the resulting CodeRepository and orchestrate closure in their composition
+ * root (no `dispose()` hook on the CodeRepository interface as of v0.5.0).
+ *
+ * Module pattern wrapper for `codeRepository` slot is intentionally NOT
+ * provided in v0.5.0 — see Phase 10 plan §1 / Q4 (deferred to a separate
+ * "legacy-slot module-parity" PR).
+ */
+export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (config, _ctx) => {
+	if (typeof config.endpointUri !== "string") {
+		throw new Error('RedisCodeRepository requires "endpointUri" in config');
+	}
+	return RedisCodeRepository.create(config);
+};

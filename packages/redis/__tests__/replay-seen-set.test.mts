@@ -2,11 +2,11 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import type { ReplaySeenSetClient } from "@o3co/auth-provider-core";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { createRedisReplaySeenSet } from "../src/replay-seen-set.mjs";
-import type { RedisClient } from "../src/types.mjs";
 import { runReplaySeenSetContract } from "./adapters.replay-seen-set.contract.mjs";
 
 let container: StartedTestContainer;
@@ -30,7 +30,7 @@ runReplaySeenSetContract("redis", {
 	create: () => {
 		keyCounter += 1;
 		return createRedisReplaySeenSet({
-			client: client as unknown as RedisClient,
+			client: client as unknown as ReplaySeenSetClient,
 			keyPrefix: `replay:test-${keyCounter}:`,
 		});
 	},

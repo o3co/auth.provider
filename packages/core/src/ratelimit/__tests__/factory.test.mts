@@ -118,3 +118,11 @@ describe("memory rate limiter — concurrent burst", () => {
 		expect(denied).toBe(5);
 	});
 });
+
+describe("registerBuiltinRateLimiters — Phase 10 redis relocation", () => {
+	it("does NOT register the 'redis' backend (relocated to @o3co/auth-provider-redis in Phase 10)", () => {
+		const f = createRateLimiterFactory();
+		registerBuiltinRateLimiters(f);
+		expect(f.registeredTypes()).not.toContain("redis");
+	});
+});

@@ -64,3 +64,24 @@ declare module "@o3co/auth-provider-core" {
 		readonly rateLimiter?: RateLimiterBase;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Backing client interface (Phase 10 addendum §3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Backing client for RateLimiter adapters. Declares only `incr` and `expire`
+ * — the two methods `createRedisRateLimiter` consumes.
+ *
+ * Per Phase 10 addendum §3.
+ */
+export interface RateLimiterClient {
+	incr(key: string): Promise<number>;
+	expire(key: string, seconds: number): Promise<number>;
+}
+
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly rateLimiterClient?: RateLimiterClient;
+	}
+}

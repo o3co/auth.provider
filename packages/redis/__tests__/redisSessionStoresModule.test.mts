@@ -19,8 +19,8 @@ import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { makeIoredisClients } from "../src/ioredis.mjs";
 import { redisSessionStoresModule } from "../src/modules/redisSessionStores.mjs";
-import { makeIoredisRedisClient } from "./helpers/wrapper.mjs";
 
 let container: StartedTestContainer;
 let raw: Redis;
@@ -42,8 +42,16 @@ const minBoot = (extra: Record<string, unknown>) =>
 	}) as never;
 
 describe("redisSessionStoresModule manifest", () => {
-	it("declares requires: redisClient + config", () => {
-		expect(redisSessionStoresModule.requires).toEqual(["redisClient", "config"]);
+	it("declares requires: 4 per-purpose client slots + config", () => {
+		expect(new Set(redisSessionStoresModule.requires)).toEqual(
+			new Set([
+				"userSessionStoreClient",
+				"sessionRPRegistryClient",
+				"sessionFamilyIndexClient",
+				"sessionFederationIndexClient",
+				"config",
+			]),
+		);
 	});
 
 	it("provides 4 components", () => {
@@ -63,7 +71,7 @@ describe("redisSessionStoresModule manifest", () => {
 });
 
 describe("redisSessionStoresModule wiring", () => {
-	it("createApp wires all 4 components against redisClient slot", async () => {
+	it("createApp wires all 4 components against per-purpose client slots", async () => {
 		// Activator pattern (no `activate` field on ModuleSpec): use contributes.routes
 		// to force closure root inclusion, then read from handle.components after boot.
 		const activator = defineModule({
@@ -89,8 +97,9 @@ describe("redisSessionStoresModule wiring", () => {
 			modules: [redisSessionStoresModule, activator],
 			bootstrapComponents: {
 				config: minBoot({ redisSessionStores: { keyPrefix: "wire:" } }),
-				redisClient: makeIoredisRedisClient(raw),
 				pathResolver: (p: string) => p,
+				// Spread all 9 per-purpose wrappers; the module only consumes its 4.
+				...makeIoredisClients(raw),
 			} as never,
 		});
 
@@ -105,7 +114,7 @@ describe("redisSessionStoresModule wiring", () => {
 		}
 	});
 
-	it("createApp throws BootError {missing-required-component} when redisClient absent", async () => {
+	it("createApp throws BootError {missing-required-component} when per-purpose client slots absent", async () => {
 		await expect(
 			createApp({
 				modules: [redisSessionStoresModule],
