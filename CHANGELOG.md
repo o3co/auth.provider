@@ -6,6 +6,170 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Breaking Changes (Phase 1-9 — Module System Redesign)
+
+#### Module manifest pipeline (A2-α/β/γ)
+
+- `createApp(options): { init, router, grantRegistry }` (sync) — **REPLACED** by
+  `createApp(options): Promise<AppHandle>` (async). The two-phase
+  `createApp(...); await init()` boot model is gone. (per A2-β §9, A2-γ §3.1)
+- `AppOptions` interface — **DELETED**. Replaced by `CreateAppOptions<B extends BootstrapMap>`. (per A2-β §9)
+- `AppResult` interface — **DELETED**. Replaced by `AppHandle`. (per A2-β §9)
+- `Module` interface (with `name`, `configSchema?`, `init(ctx)`) — **REPLACED** by
+  the A2-α `Module` (erased form of `ModuleSpec<R, O>`). The `init` callback is
+  gone; `ModuleSpec` adds `requires` / `optional` / `provides` / `contributes` /
+  `overrides` / `lifecycle`. Use `defineModule({...})` to author modules.
+  (per A2-α §3, A2-γ §3.1)
+- `ModuleContext` interface — **DELETED**. The v0.4.x god-bag's responsibilities are
+  decomposed into the typed `ComponentMap` consumed via `requires`. (per A2-γ §3.1, A6+A7 §3.2)
+- `GrantRegistry` class — **REMOVED** from `@o3co/auth-provider-core` public exports.
+  The class survives as an internal boot-planner collector only. Consumers who
+  called `new GrantRegistry()` / `register(...)` directly migrate to
+  `defineModule({ contributes: { grants: { "my:grant": (deps) => ... } } })`.
+  (per A2-γ §3.1, A6+A7 §3.5)
+- `GrantModule` type (`{ grants: Record<string, GrantFactory> }`) — **DELETED**.
+  Use the unified `defineModule({ contributes: { grants } })` shape. (per A2-γ §3.1)
+- `addModule(GrantModule, deps)` — **DELETED**. Replaced by
+  `createApp({ modules: [defineModule(...), ...] })`. (per A6+A7 §3.4, A2-γ §3.1)
+- `FederationProviderHandle` interface — **DELETED**. `federationProviders` becomes a
+  synthetic `ComponentMap` slot (`ReadonlyMap<string, FederationProvider>`) projected
+  by the planner's `federations` collector. (per A2-γ §3.1)
+- `LegacyModule` and `ModuleContext` types — **DELETED** from
+  `@o3co/auth-provider-core`. v0.4.x modules (functions returning
+  `{ name, init(context) }`) must be rewritten as v0.5.0 manifests via
+  `defineModule({...})`. (per A2-γ §2.4, A2-γ §9.4)
+- **No deprecation shim**: `createAppLegacy`, `registerGoogleFederation` /
+  `registerGithubFederation` imperative wrappers, and `registerBuiltinAdapters`
+  shims are all **explicitly rejected**. v0.5.0 is a clean break.
+  (per A2-γ §9.4)
+- `oauthModule({ clientRepository, codeRepository, express? })` factory signature
+  changes to `oauthModule({ config })`. Deps flow through `requires`.
+  (per A2-γ §3.2.1)
+- `oauthAuthorizationModule({ codeRepository, clientRepository })` becomes
+  `oauthAuthorizationModule({ config })`. `module.init(ctx)` and
+  `ctx.grantRegistry.register(...)` calls are gone. (per A2-γ §3.2.2)
+- `oauthSessionModule({ clientRepository })` becomes `oauthSessionModule({ config })`.
+  `init` and `grantRegistry.register` are gone. (per A2-γ §3.2.3)
+- `ExchangeTokenValidatorRegistry` class — **REMOVED** from
+  `@o3co/auth-provider-oauth-token-exchange` public exports. The v0.4.x pattern
+  of `new ExchangeTokenValidatorRegistry(); registry.register(...);
+  addModule(tokenExchangeModule, { validatorRegistry })` is replaced by a consumer
+  module: `defineModule({ contributes: { tokenExchangeValidators:
+  { "urn:my:type": (deps) => myValidator } } })`. (per A2-γ §3.3)
+- `registerBuiltinAdapters({ userFactory, codeFactory, pathResolver? })` from
+  `@o3co/auth-provider-foundation` — **DELETED**. Add `httpUserRepositoryModule`
+  / `redisCodeRepositoryModule` from `@o3co/auth-provider-foundation` to the
+  manifest list instead. (per A2-γ §3.7)
+
+#### Registry policy (A6+A7)
+
+- `GrantRegistry.register(name, value)` — **semantics changed**: silent overwrite
+  in v0.4.x → **throws** `BootError` on duplicate in v0.5.0. Use
+  `overrides.grants` in a module manifest for intentional override.
+  (per A6+A7 §2.1)
+- `ExchangeTokenValidatorRegistry.register(name, value)` — **semantics changed**:
+  silent overwrite pre-freeze → **throws** on duplicate (regardless of freeze state).
+  (per A6+A7 §2.1)
+- `AdapterFactory.replace(name, builder)` — **added** additively; `register`
+  continues to throw on duplicate (no change). (per A6+A7 §2.2)
+- Duplicate-on-`register` for `GrantRegistry` / `ExchangeTokenValidatorRegistry`
+  now throws immediately; consumers depending on silent overwrite (e.g. test code
+  that re-registered) migrate to `overrides` (manifest-level explicit replacement).
+  (per A6+A7 §3.5)
+
+#### Challenge store + replay-seen-set (A1)
+
+- `ChallengeStore` and `ReplaySeenSet` are **net-additive** to v0.5.0 develop (PR
+  #96 was closed unmerged; `SingleUseTokenStore` was never shipped). Consumers
+  installing `@o3co/auth-provider-redis` for the redis adapters must add the
+  package as a direct dependency; core's redis adapter is memory-only.
+  (per A1 §4 "Breaking changes vs PR #96 spec")
+
+#### Refresh-token family (A3)
+
+- `RefreshTokenStoreBase` interface — **DELETED** from `@o3co/auth-provider-core`.
+  Consumers who implemented it migrate as follows: (per A3 §4 "Breaking changes vs v0.4.x")
+  - **Interface rename**: `RefreshTokenStoreBase` → `RefreshTokenFamilyStore`.
+    Method shape changes drastically; not a transparent rename.
+  - **Adapter responsibility narrows**: `rotate(...)`, `isFamilyRevoked(...)`, and
+    `revokeFamily(...)` move out of the storage adapter and into wrapper interfaces
+    (`RefreshTokenRotation`, `RefreshTokenFamilyRevocation`).
+  - **Outcome union renamed and shifted**: `RefreshTokenRotateOutcome` →
+    `RefreshTokenRotationOutcome`; the `unknown` variant is renamed `unknown_family`;
+    the `replayed` variant loses its `familyId` field (the wrapper caller already has
+    `familyId` in scope). (per A3 §4)
+  - **`rotate(previousJti=null, ...)` overload deleted**: initial issue moves to
+    `RefreshTokenRotation.register(jti, familyId, expiresAtMs)`. (per A3 §4)
+  - **`expiresAt` parameter type changed** from `Date` to epoch-ms `number` in
+    `RefreshTokenRotation.rotate(prev, new, familyId, expiresAtMs)` and
+    `RefreshTokenRotation.register(jti, familyId, expiresAtMs)` — defence against
+    `Date.setTime` mutation. (per A3 §5.1)
+- All in-tree callers (`authorization.mts`, `refreshToken.mts`, `cascadeLogout.mts`,
+  `userinfo.mts`, `federationToken.mts`) are rewired to the new wrapper interfaces
+  in v0.5.0. (per A3 §4, §9)
+
+#### User-session decomposition (A4)
+
+- `UserSessionStoreBase` interface — **DELETED**. Split into four sibling stores:
+  `UserSessionStore` (3 methods) + `SessionRPRegistry` + `SessionFamilyIndex` +
+  `SessionFederationIndex`. (per A4 §4 "Breaking changes vs v0.4.x", item 1)
+- Methods removed from `UserSessionStore`: `registerRP`, `linkFamily`,
+  `updateClaims`, `removeFederation`. Each migrated to a sibling store (or in
+  `updateClaims` case, deferred to v0.6+ `MutableUserSessionStore`). (per A4 §4, item 2)
+- `UserSession` value type narrowed: `activeRPs`, `familyIds`, `federations` fields
+  removed (now owned by sibling stores). (per A4 §4, item 3)
+- `UserSessionStoreFactory` (alias for `AdapterFactory<UserSessionStoreBase>`) →
+  four distinct factories: `UserSessionStoreFactory`, `SessionRPRegistryFactory`,
+  `SessionFamilyIndexFactory`, `SessionFederationIndexFactory`. (per A4 §4, item 4)
+- `CreateUserSessionInput.federations?: ReadonlyArray<string>` field removed.
+  Federations are added separately via `SessionFederationIndex.addFederation` after
+  session create. (per A4 §4, item 5)
+
+#### Federation redirect-policy split (A5)
+
+- `FederationProvider.validateRedirect` and
+  `FederationProvider.resolveCallbackRedirect` — **removed** from the interface.
+  Consumer-defined `FederationProvider` implementations MUST drop these two methods.
+  (per A5 §4 "Breaking changes vs v0.4.x", items 1–2)
+- New contribution kind `federationRedirectPolicies` is **required** for any
+  federation that wants its callback flow to work — the boot planner throws
+  `BootError` if a `federations[name]` contribution lacks a matching
+  `federationRedirectPolicies[name]`. (per A5 §4, item 3)
+- `registerGoogleFederation(factory)` — **DELETED** from
+  `@o3co/auth-provider-session`. Consumers replace with
+  `import { googleFederationModule } from "@o3co/auth-provider-federation-google"`
+  and add it to the manifest list. (per A2-γ §3.5)
+- `registerGithubFederation(factory)` — **DELETED** from
+  `@o3co/auth-provider-session`. Same migration to `githubFederationModule`.
+  (per A2-γ §3.5)
+- `FederationProviderFactory` type and `createFederationProviderFactory()` from
+  `@o3co/auth-provider-session` — **DELETED**. Custom federations now extend via
+  `defineModule({ contributes: { federations: { myName: (deps) => provider } } })`.
+  (per A2-γ §3.4, §3.5)
+
+#### Issue #101 — A3 caller migration + boot validators
+
+- `RefreshTokenStoreBase` — **removed** from `@o3co/auth-provider-core` (factory,
+  types, and `__tests__/` under `packages/core/src/refresh/`). Consumers migrate to
+  the A3 triple `RefreshTokenRotation` / `RefreshTokenFamilyRevocation` /
+  `RefreshTokenFamilyStore` introduced in Phase 6.
+- `RefreshTokenRotation.rotate(prev, new, familyId, expiresAtMs: number)` —
+  `expiresAt` parameter changed from `Date` to epoch-ms `number` (defence against
+  `Date.setTime` mutation per A3 §5.1).
+- `RefreshTokenRotation.register(jti, familyId, expiresAtMs)` is the dedicated
+  initial-issue method, replacing the v0.4.x `rotate(null, jti, ...)` trick.
+- `ComponentMap.refreshTokenStore?` slot removed.
+- `GrantContext.refreshTokenStore?` field removed.
+- `oauthAuthorizationModule.optional` slot renamed
+  `"refreshTokenStore"` → `"refreshTokenRotation"`.
+- `oauthModule.optional` slot renamed
+  `"refreshTokenStore"` → `"refreshTokenFamilyRevocation"`.
+- `tokenExchangeModule.optional` slot renamed
+  `"refreshTokenStore"` → `"refreshTokenFamilyRevocation"`.
+- New `BootError` reasons: `"mfa-partial-wiring"` and
+  `"federation-stores-incomplete"` — boot-time guards restored from v0.4.x
+  `app-extensions.test.mts` after Phase 9 deletion.
+
 ### Breaking Changes (Phase 10 — Redis Adapter Relocation)
 
 - **`createRedisFederationTokenStore` moved**: from
