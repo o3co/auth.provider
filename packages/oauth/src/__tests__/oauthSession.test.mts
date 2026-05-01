@@ -20,10 +20,7 @@ import {
 	defineModule,
 	type GrantHandler,
 } from "@o3co/auth-provider-core";
-import {
-	createTestApp,
-	makeValidAppConfig,
-} from "@o3co/auth-provider-core/testing";
+import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { oauthSessionModule } from "#/oauthSession.mjs";
 

@@ -247,16 +247,16 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 			name: "key-store",
 			requires: ["config"],
 			provides: {
-				keyStore: (_deps) => ({ stub: "keyStore" } as never),
+				keyStore: (_deps) => ({ stub: "keyStore" }) as never,
 			},
 		});
 
 		const repositoriesModule = defineModule({
 			name: "repositories",
 			provides: {
-				clientRepository: (_deps) => ({ stub: "clientRepository" } as never),
-				codeRepository: (_deps) => ({ stub: "codeRepository" } as never),
-				userRepository: (_deps) => ({ stub: "userRepository" } as never),
+				clientRepository: (_deps) => ({ stub: "clientRepository" }) as never,
+				codeRepository: (_deps) => ({ stub: "codeRepository" }) as never,
+				userRepository: (_deps) => ({ stub: "userRepository" }) as never,
 			},
 		});
 
