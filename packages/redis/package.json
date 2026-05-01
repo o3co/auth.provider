@@ -8,6 +8,10 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
+		},
+		"./ioredis": {
+			"import": "./dist/ioredis.mjs",
+			"types": "./dist/ioredis.d.mts"
 		}
 	},
 	"files": [

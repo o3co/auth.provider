@@ -39,12 +39,11 @@ export {
 	redisChallengeStoreBuilder,
 	redisChallengeStoreModule,
 } from "./challenges.mjs";
-// ---------------------------------------------------------------------------
-// makeIoredisClients — canonical wiring factory (Phase 10 addendum).
-// Wrap a single ioredis.Redis connection into the 9 per-purpose client
-// wrappers and spread into bootstrapComponents.
-// ---------------------------------------------------------------------------
-export { makeIoredisClients } from "./clients.mjs";
+// makeIoredisClients lives at the `/ioredis` subpath
+// (`@o3co/auth-provider-redis/ioredis`) so the main entry stays
+// vendor-agnostic. Importing this main entry does NOT pull `ioredis` types
+// into the consumer's TS dependency closure. Per Phase 10 addendum +
+// Copilot review #102.
 // ---------------------------------------------------------------------------
 // CodeRepository (Phase 10 Q4).
 // Relocated from @o3co/auth-provider-foundation. Module pattern intentionally

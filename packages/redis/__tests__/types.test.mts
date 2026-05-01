@@ -18,7 +18,7 @@ import type {
 	UserSessionStoreClient,
 } from "@o3co/auth-provider-core";
 import { describe, expectTypeOf, it } from "vitest";
-import type { makeIoredisClients } from "../src/index.mjs";
+import type { makeIoredisClients } from "../src/ioredis.mjs";
 
 type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;
 

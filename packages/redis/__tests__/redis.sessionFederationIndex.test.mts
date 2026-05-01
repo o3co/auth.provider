@@ -17,7 +17,7 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeIoredisClients } from "../src/index.mjs";
+import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionFederationIndex } from "../src/sessionFederationIndex.mjs";
 import { runSessionFederationIndexContract } from "./sessionFederationIndex.contract.mjs";
 
