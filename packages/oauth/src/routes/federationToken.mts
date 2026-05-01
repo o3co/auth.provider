@@ -21,7 +21,7 @@ import type {
 	FederationTokenStoreBase,
 	KeyStore,
 	Logger,
-	RefreshTokenStoreBase,
+	RefreshTokenFamilyRevocation,
 	SessionFederationIndex,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -71,7 +71,7 @@ function supportsRefresh(
 
 export interface FederationTokenRouterOptions {
 	keyStore: KeyStore;
-	refreshTokenStore: RefreshTokenStoreBase;
+	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	userSessionStore: UserSessionStore;
 	sessionFederationIndex: SessionFederationIndex;
 	federationTokenStore: FederationTokenStoreBase;
@@ -191,7 +191,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		// Step 5: Check family revocation. Fail-closed: any throw → 401.
 		let revoked: boolean;
 		try {
-			revoked = await opts.refreshTokenStore.isFamilyRevoked(familyId);
+			revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 		} catch (error) {
 			logger.warn(
 				`POST /oauth/federation/${name}/token: isFamilyRevoked failed (refresh store outage):`,

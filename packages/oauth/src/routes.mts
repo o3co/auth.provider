@@ -674,8 +674,9 @@ export const createOAuthRouter = async (
 		router.use(
 			federationTokenRoute.createRouter(express, {
 				keyStore,
+				// Transitional bridge — Task A6 will rename routes.mts's local var + dep field.
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
-				refreshTokenStore: refreshTokenStore!,
+				refreshTokenFamilyRevocation: refreshTokenStore!,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
 				userSessionStore: userSessionStore!,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above

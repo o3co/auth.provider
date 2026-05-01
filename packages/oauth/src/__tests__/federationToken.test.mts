@@ -22,7 +22,7 @@ import {
 	type FederationProviderHandle,
 	type FederationTokenStoreBase,
 	type Logger,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 	type SessionFederationIndex,
 	type UserSession,
 	type UserSessionStore,
@@ -103,11 +103,11 @@ function makeSessionFederationIndex(
 	} as SessionFederationIndex;
 }
 
-function makeRefreshStore(override?: Partial<RefreshTokenStoreBase>): RefreshTokenStoreBase {
+function makeFamilyRevocation(
+	override?: Partial<RefreshTokenFamilyRevocation>,
+): RefreshTokenFamilyRevocation {
 	return {
-		kind: "memory",
 		isFamilyRevoked: vi.fn().mockResolvedValue(false),
-		rotate: vi.fn(),
 		revokeFamily: vi.fn().mockResolvedValue(undefined),
 		...override,
 	};
@@ -136,7 +136,7 @@ function makeClientRepo(override?: Partial<ClientRepository>): ClientRepository 
 interface BuildAppOpts {
 	sessionStore?: UserSessionStore;
 	sessionFederationIndex?: SessionFederationIndex;
-	refreshStore?: RefreshTokenStoreBase;
+	refreshFamilyRevocation?: RefreshTokenFamilyRevocation;
 	fedTokenStore?: FederationTokenStoreBase;
 	clientRepo?: ClientRepository;
 	getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
@@ -151,7 +151,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 		keyStore,
 		userSessionStore: opts.sessionStore ?? makeSessionStore(),
 		sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
-		refreshTokenStore: opts.refreshStore ?? makeRefreshStore(),
+		refreshTokenFamilyRevocation: opts.refreshFamilyRevocation ?? makeFamilyRevocation(),
 		federationTokenStore: opts.fedTokenStore ?? makeFedTokenStore(),
 		clientRepository: opts.clientRepo ?? makeClientRepo(),
 		getFederationProviders: opts.getFederationProviders ?? (() => undefined),
@@ -368,10 +368,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
-			const refreshStore = makeRefreshStore({
+			const refreshFamilyRevocation = makeFamilyRevocation({
 				isFamilyRevoked: vi.fn().mockResolvedValue(true),
 			});
-			const app = buildApp({ refreshStore, auditSink });
+			const app = buildApp({ refreshFamilyRevocation, auditSink });
 			const token = await mintAccessToken();
 
 			const res = await postFedToken(app, "google", token);
@@ -390,10 +390,10 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("isFamilyRevoked throws (fail-closed)", () => {
 		it("returns 401 when revocation check throws", async () => {
-			const refreshStore = makeRefreshStore({
+			const refreshFamilyRevocation = makeFamilyRevocation({
 				isFamilyRevoked: vi.fn().mockRejectedValue(new Error("redis down")),
 			});
-			const app = buildApp({ refreshStore });
+			const app = buildApp({ refreshFamilyRevocation });
 			const token = await mintAccessToken();
 
 			const res = await postFedToken(app, "google", token);
