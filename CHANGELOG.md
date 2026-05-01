@@ -133,6 +133,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Breaking Changes
 
+- **`createSelfIssuedAccessTokenValidator({ issuer })` requires a non-empty
+  string `issuer`.** The `issuer` field on
+  `CreateSelfIssuedAccessTokenValidatorOptions`
+  (`@o3co/auth-provider-oauth-token-exchange`) is no longer optional.
+  Constructing the validator with `undefined` or `""` now throws
+  synchronously. Without an issuer, any `access_token`-typed JWT signed by
+  the same KeyStore could pass validation, opening a token-type confusion
+  vector (Copilot review on PR #100, Critical). Callers either pass
+  `issuer` directly or rely on `tokenExchangeModule`'s `configSchema`
+  which enforces `config.oauth.jwt.issuer: z.string().min(1)` at boot
+  (intersected over `CoreConfigSchema`'s optional issuer via
+  `composeConfigSchema`). External consumers who imported the validator
+  factory directly need to start passing `issuer` (or migrate to consume
+  `tokenExchangeModule` which wires it from config).
+- **`oauthModule.configSchema` requires a non-empty
+  `config.endpoints.login.url`.** The `/oauth/authorize` route reads
+  `config.endpoints.login.url` unconditionally to redirect unauthenticated
+  requests. The base `endpoints.login.url` is `z.string().optional()` in
+  `CoreConfigSchema` (production defaults are supplied via HOCON env-var
+  substitution `${?ENDPOINTS_LOGIN_URL}`); without
+  `oauthModule.configSchema` tightening this to `z.string().min(1)`, a
+  config that omits the env var booted cleanly and produced
+  `undefined?redirect_to=...` redirects at request time. Boot now fails
+  fast with `BootError(reason: "config-validation-failed")` when the
+  field is missing or empty. Set `ENDPOINTS_LOGIN_URL` in production
+  env, or pass `endpoints.login.url` explicitly in non-HOCON consumer
+  configs (multi-agent review round 2 — Claude + Codex converged).
 - **Config schema is strict; defaults live exclusively in HOCON.**
   `application.schema.mts` no longer carries `.default(X)` for fields
   that hocon already supplies. Operators see the same effective

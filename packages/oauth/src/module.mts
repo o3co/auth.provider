@@ -18,27 +18,42 @@ import {
 	type AppConfig,
 	defineModule,
 	type FederationProviderHandle,
-	fullSectionsSchema,
 	type GrantRegistry,
 	type Module,
 	type ProviderDeps,
 } from "@o3co/auth-provider-core";
 import express from "express";
+import { z } from "zod";
 import * as oidcConfig from "./routes/OpenidConfiguration.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 
 /**
- * Config-slice schema for `oauthModule`. The OAuth router reads
- * `config.endpoints.login.url` (`routes.mts:339`) — without this slice in
- * the composed schema, a config that omits `endpoints` passes
- * `validateManifests` but crashes at the first `/oauth/authorize` request.
- * Composed via `composeConfigSchema` at validate-manifests step 13 so
- * boot fails with `BootError(reason: "config-validation-failed")` instead.
+ * Config-slice schema for `oauthModule`. The OAuth `/authorize` route
+ * unconditionally reads `config.endpoints.login.url` to build the redirect
+ * for unauthenticated requests (`routes.mts:339`). The base
+ * `endpoints.login.url` is `z.string().optional()` in `CoreConfigSchema`
+ * (production defaults are supplied via HOCON env-var substitution
+ * `${?ENDPOINTS_LOGIN_URL}`), but a config that omits the env var passes
+ * the base schema, then produces the literal redirect
+ * `undefined?redirect_to=...` at request time.
  *
- * Copilot review on PR #100 flagged the missing schema as Important.
+ * Composed via `composeConfigSchema` at validate-manifests step 13:
+ * intersection with the base schema yields `endpoints.login.url:
+ * z.string().min(1)`, so boot fails with
+ * `BootError(reason: "config-validation-failed")` before any request hits
+ * the route.
+ *
+ * Multi-agent review round 2 (Claude + Codex converged): the previous
+ * `fullSectionsSchema.pick({ endpoints: true })` only required the
+ * `endpoints` and `endpoints.login` *objects* to exist; `url` was still
+ * effectively optional. Tightened to `z.string().min(1)` here.
  */
-const oauthConfigSchema = fullSectionsSchema.pick({
-	endpoints: true,
+const oauthConfigSchema = z.object({
+	endpoints: z.object({
+		login: z.object({
+			url: z.string().min(1),
+		}),
+	}),
 });
 
 /**

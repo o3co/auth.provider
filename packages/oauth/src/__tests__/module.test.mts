@@ -99,6 +99,35 @@ describe("oauthModule — manifest shape", () => {
 		expect(module.configSchema).toBeDefined();
 	});
 
+	it("configSchema rejects a config missing endpoints.login.url", () => {
+		const config = makeValidAppConfig();
+		const module = oauthModule({ config });
+		const schema = module.configSchema;
+		if (!schema) throw new Error("configSchema must be defined");
+		// The base schema marks endpoints.login.url optional, but oauthConfigSchema
+		// must tighten it to z.string().min(1) so boot fails before /authorize is hit.
+		const result = schema.safeParse({ endpoints: { login: {} } });
+		expect(result.success).toBe(false);
+	});
+
+	it("configSchema rejects an empty endpoints.login.url", () => {
+		const config = makeValidAppConfig();
+		const module = oauthModule({ config });
+		const schema = module.configSchema;
+		if (!schema) throw new Error("configSchema must be defined");
+		const result = schema.safeParse({ endpoints: { login: { url: "" } } });
+		expect(result.success).toBe(false);
+	});
+
+	it("configSchema accepts a non-empty endpoints.login.url", () => {
+		const config = makeValidAppConfig();
+		const module = oauthModule({ config });
+		const schema = module.configSchema;
+		if (!schema) throw new Error("configSchema must be defined");
+		const result = schema.safeParse({ endpoints: { login: { url: "/login" } } });
+		expect(result.success).toBe(true);
+	});
+
 	it("includes oauth-endpoints route contribution when issuer is absent", () => {
 		const base = makeValidAppConfig();
 		// No issuer set — only oauth-endpoints factory should appear
@@ -132,6 +161,34 @@ describe("oauthModule — manifest shape", () => {
 // ---------------------------------------------------------------------------
 // createTestApp integration tests (§7.3 — boot + inspect)
 // ---------------------------------------------------------------------------
+
+describe("oauthModule — createTestApp boot failure", () => {
+	it("fails boot with config-validation-failed when endpoints.login.url is missing", async () => {
+		const { BootError } = await import("@o3co/auth-provider-core");
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			endpoints: {
+				...base.endpoints,
+				login: {}, // tighten path: drop the url that valid-config now provides
+			},
+		};
+		await expect(
+			createTestApp({
+				modules: [
+					oauthModule({ config }),
+					clientRepositoryModule,
+					codeRepositoryModule,
+					keyStoreModule,
+				],
+				bootstrapComponents: { config, pathResolver: (s) => s },
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "config-validation-failed",
+		} satisfies Partial<InstanceType<typeof BootError>>);
+	});
+});
 
 describe("oauthModule — createTestApp route inspection", () => {
 	it("registers only oauth-endpoints route when issuer is absent", async () => {

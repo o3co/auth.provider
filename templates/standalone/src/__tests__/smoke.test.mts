@@ -68,7 +68,7 @@ const config: AppConfig = {
 		code: { type: "memory", defaultExpiresIn: 600 },
 	},
 	endpoints: {
-		login: { url: undefined },
+		login: { url: "/login" },
 		client: { url: undefined },
 		authCallback: { url: undefined },
 	},

@@ -144,6 +144,24 @@ const handle = await createApp({
 - DPoP-bound token minting (planned for 1.0 GA)
 - Built-in external JWT validator (consumer-implement; planned as a separate package post-0.5)
 
+## Breaking changes (v0.5.0)
+
+- **`createSelfIssuedAccessTokenValidator({ issuer })` requires `issuer`.**
+  The `issuer` field on `CreateSelfIssuedAccessTokenValidatorOptions` is
+  no longer optional and must be a non-empty string. Constructing the
+  validator without it throws synchronously. Without an issuer, any
+  `access_token`-typed JWT signed by the same KeyStore could pass
+  validation — a token-type confusion vector. Most consumers do not
+  invoke this factory directly and pick up `issuer` automatically from
+  `config.oauth.jwt.issuer` via `tokenExchangeModule`; only direct
+  callers of the factory function need to update their call sites.
+- **`tokenExchangeModule` declares `configSchema` requiring
+  `config.oauth.jwt.issuer: string().min(1)`.** Boot fails with
+  `BootError(reason: "config-validation-failed")` when the issuer is
+  missing or empty. The schema is intersected over the core schema's
+  optional issuer via `composeConfigSchema`, so the more-restrictive
+  module schema wins.
+
 ## RFC references
 
 - [RFC 8693](https://datatracker.ietf.org/doc/html/rfc8693) — OAuth 2.0 Token Exchange

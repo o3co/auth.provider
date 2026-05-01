@@ -106,7 +106,10 @@ export function makeValidFullSections() {
 			code: { type: "memory" },
 		},
 		endpoints: {
-			login: {},
+			// `oauthModule.configSchema` requires a non-empty `endpoints.login.url`
+			// because `routes.mts:339` builds the unauthenticated /authorize redirect
+			// from it. Keeping the fixture valid across all v0.5.0 module schemas.
+			login: { url: "/login" },
 		},
 		cors: { allowedOrigins: [] },
 	} satisfies FullSectionsConfig;

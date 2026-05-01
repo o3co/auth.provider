@@ -56,6 +56,13 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 		grants.refresh_token = (deps) => createRefreshTokenGrant(deps);
 	}
 
+	// Intentionally no `configSchema`: this module reads only slices already
+	// declared in `CoreConfigSchema` (`oauth.grants.{authorization_code,refresh_token}.enabled`,
+	// `oauth.accessToken.expiresIn`, `oauth.refreshToken.expiresIn`). Adding a
+	// symmetric configSchema would be theatre — `composeConfigSchema` already
+	// validates these fields via the core schema. Declare a configSchema here
+	// only if a future change adds a read of a `config.<full-section>` key
+	// that lives in `fullSectionsSchema` (e.g. `config.session`, `config.endpoints`).
 	return defineModule({
 		name: "oauth-authorization",
 		requires: ["config", "clientRepository", "codeRepository", "keyStore"],
