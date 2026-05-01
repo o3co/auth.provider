@@ -1,6 +1,6 @@
 import type {
 	FederationTokenStoreBase,
-	RefreshTokenStoreBase,
+	RefreshTokenFamilyRevocation,
 	SessionFamilyIndex,
 	SessionFederationIndex,
 	SessionRPRegistry,
@@ -13,14 +13,14 @@ import { cascadeLogout } from "../cascadeLogout.mjs";
 // Mock factories
 // ---------------------------------------------------------------------------
 
-function makeRefreshStore(override?: Partial<RefreshTokenStoreBase>): RefreshTokenStoreBase {
+function makeFamilyRevocation(
+	override?: Partial<RefreshTokenFamilyRevocation>,
+): RefreshTokenFamilyRevocation {
 	return {
-		kind: "memory",
 		isFamilyRevoked: vi.fn().mockResolvedValue(false),
-		rotate: vi.fn(),
 		revokeFamily: vi.fn().mockResolvedValue(undefined),
 		...override,
-	} as unknown as RefreshTokenStoreBase;
+	};
 }
 
 function makeFedStore(override?: Partial<FederationTokenStoreBase>): FederationTokenStoreBase {
@@ -87,7 +87,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		const sessionFamilyIndex = makeSessionFamilyIndex({
 			listFamilyIds: vi.fn(async () => ["fam-1", "fam-2"]),
 		});
-		const rts = makeRefreshStore();
+		const rts = makeFamilyRevocation();
 		const fts = makeFedStore();
 		const uss = makeUserSessionStore();
 		const sessionRPRegistry = makeSessionRPRegistry();
@@ -95,7 +95,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 
 		const result = await cascadeLogout({
 			sid: "sid-1",
-			refreshTokenStore: rts,
+			refreshTokenFamilyRevocation: rts,
 			federationTokenStore: fts,
 			userSessionStore: uss,
 			sessionRPRegistry,
@@ -124,13 +124,13 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		const sessionFamilyIndex = makeSessionFamilyIndex({
 			listFamilyIds: vi.fn(async () => []),
 		});
-		const rts = makeRefreshStore();
+		const rts = makeFamilyRevocation();
 		const fts = makeFedStore();
 		const uss = makeUserSessionStore();
 
 		await cascadeLogout({
 			sid: "s",
-			refreshTokenStore: rts,
+			refreshTokenFamilyRevocation: rts,
 			federationTokenStore: fts,
 			userSessionStore: uss,
 			sessionRPRegistry: makeSessionRPRegistry(),
@@ -150,7 +150,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 	it("Step 1 (sessionFamilyIndex.listFamilyIds) failure → step:1, errors:[err]", async () => {
 		const result = await cascadeLogout({
 			sid: "s1",
-			refreshTokenStore: makeRefreshStore(),
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			federationTokenStore: makeFedStore(),
 			userSessionStore: makeUserSessionStore(),
 			sessionRPRegistry: makeSessionRPRegistry(),
@@ -171,7 +171,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 	});
 
 	it("Step 1 failure → Steps 2/3/4 NOT executed", async () => {
-		const rts = makeRefreshStore();
+		const rts = makeFamilyRevocation();
 		const fts = makeFedStore();
 		const uss = makeUserSessionStore();
 		const sessionRPRegistry = makeSessionRPRegistry();
@@ -184,7 +184,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 
 		await cascadeLogout({
 			sid: "s",
-			refreshTokenStore: rts,
+			refreshTokenFamilyRevocation: rts,
 			federationTokenStore: fts,
 			userSessionStore: uss,
 			sessionRPRegistry,
@@ -205,12 +205,12 @@ describe("cascadeLogout (A4 §6.2)", () => {
 	// -------------------------------------------------------------------------
 
 	it("Step 2 revokeFamily failure → outcome: failed, step:2, errors with that error", async () => {
-		const rts = makeRefreshStore({
+		const rts = makeFamilyRevocation({
 			revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
 		});
 		const result = await cascadeLogout({
 			sid: "s",
-			refreshTokenStore: rts,
+			refreshTokenFamilyRevocation: rts,
 			federationTokenStore: makeFedStore(),
 			userSessionStore: makeUserSessionStore(),
 			sessionRPRegistry: makeSessionRPRegistry(),
@@ -235,7 +235,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		});
 		const sessionFederationIndex = makeSessionFederationIndex();
 		const uss = makeUserSessionStore();
-		const rts = makeRefreshStore({
+		const rts = makeFamilyRevocation({
 			revokeFamily: vi.fn(async (id: string) => {
 				if (id === "fam-2") throw new Error("revoke fail");
 			}),
@@ -243,7 +243,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 
 		const result = await cascadeLogout({
 			sid: "s1",
-			refreshTokenStore: rts,
+			refreshTokenFamilyRevocation: rts,
 			federationTokenStore: makeFedStore(),
 			userSessionStore: uss,
 			sessionRPRegistry,
@@ -263,12 +263,12 @@ describe("cascadeLogout (A4 §6.2)", () => {
 	});
 
 	it("Step 2 collect-and-tally: all revokeFamily failures collected before HALT", async () => {
-		const rts = makeRefreshStore({
+		const rts = makeFamilyRevocation({
 			revokeFamily: vi.fn().mockRejectedValue(new Error("fail")),
 		});
 		const result = await cascadeLogout({
 			sid: "s",
-			refreshTokenStore: rts,
+			refreshTokenFamilyRevocation: rts,
 			federationTokenStore: makeFedStore({
 				deleteBySession: vi.fn().mockRejectedValue(new Error("fed fail")),
 			}),
@@ -295,7 +295,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		const uss = makeUserSessionStore();
 		const result = await cascadeLogout({
 			sid: "s",
-			refreshTokenStore: makeRefreshStore(),
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			federationTokenStore: fts,
 			userSessionStore: uss,
 			sessionRPRegistry: makeSessionRPRegistry(),
@@ -315,7 +315,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 	});
 
 	it("routes step-2 warning to opts.logger when provided (not console.warn)", async () => {
-		const rts = makeRefreshStore({
+		const rts = makeFamilyRevocation({
 			revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
 		});
 		const loggerWarn = vi.fn();
@@ -323,7 +323,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		try {
 			await cascadeLogout({
 				sid: "s",
-				refreshTokenStore: rts,
+				refreshTokenFamilyRevocation: rts,
 				federationTokenStore: makeFedStore(),
 				userSessionStore: makeUserSessionStore(),
 				sessionRPRegistry: makeSessionRPRegistry(),
@@ -358,7 +358,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 
 		const result = await cascadeLogout({
 			sid: "s1",
-			refreshTokenStore: makeRefreshStore(),
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			federationTokenStore: makeFedStore(),
 			userSessionStore: uss,
 			sessionRPRegistry,
@@ -379,7 +379,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 
 		const result = await cascadeLogout({
 			sid: "s1",
-			refreshTokenStore: makeRefreshStore(),
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			federationTokenStore: makeFedStore(),
 			userSessionStore: uss,
 			sessionRPRegistry: makeSessionRPRegistry({ removeBySid: throwFn }),
@@ -407,7 +407,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 
 		const result = await cascadeLogout({
 			sid: "s1",
-			refreshTokenStore: makeRefreshStore(),
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			federationTokenStore: makeFedStore(),
 			userSessionStore: uss,
 			sessionRPRegistry: makeSessionRPRegistry(),

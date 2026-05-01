@@ -657,8 +657,12 @@ export const createOAuthRouter = async (
 				sessionFederationIndex: sessionFederationIndex!,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
 				federationTokenStore: federationTokenStore!,
+				// Transitional bridge — Task A6 will rename routes.mts's local
+				// var + dep field. Legacy 3-method store satisfies the new
+				// 2-method RefreshTokenFamilyRevocation position via structural
+				// subtyping.
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
-				refreshTokenStore: refreshTokenStore!,
+				refreshTokenFamilyRevocation: refreshTokenStore!,
 				clientRepository,
 				getFederationProviders,
 				auditSink,

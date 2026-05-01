@@ -21,7 +21,7 @@ import type {
 	FederationTokenStoreBase,
 	KeyStore,
 	Logger,
-	RefreshTokenStoreBase,
+	RefreshTokenFamilyRevocation,
 	SessionFamilyIndex,
 	SessionFederationIndex,
 	SessionRPRegistry,
@@ -77,7 +77,7 @@ export interface LogoutRouterOptions {
 	sessionFamilyIndex: SessionFamilyIndex;
 	sessionFederationIndex: SessionFederationIndex;
 	federationTokenStore: FederationTokenStoreBase;
-	refreshTokenStore: RefreshTokenStoreBase;
+	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	clientRepository: ClientRepository;
 	/**
 	 * Getter for the federation providers Map. Evaluated at request time (not at
@@ -187,7 +187,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			if (familyId !== null) {
 				let revoked: boolean;
 				try {
-					revoked = await opts.refreshTokenStore.isFamilyRevoked(familyId);
+					revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 				} catch (error) {
 					logger.warn(
 						`/oauth/federation/${name}/logout: isFamilyRevoked failed (refresh store outage):`,
@@ -509,7 +509,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			// Step 6: Cascade logout.
 			const cascade = await cascadeLogout({
 				sid,
-				refreshTokenStore: opts.refreshTokenStore,
+				refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
 				federationTokenStore: opts.federationTokenStore,
 				userSessionStore: opts.userSessionStore,
 				sessionRPRegistry: opts.sessionRPRegistry,
