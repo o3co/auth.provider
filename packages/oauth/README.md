@@ -95,17 +95,20 @@ import express from "express";
 import { createApp } from "@o3co/auth-provider-core";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 
-const app = createApp(express, {
-  config,
-  keyStore,
+const handle = await createApp({
   modules: [
-    oauthModule({
-      clientRepository,
-      codeRepository,
-    }),
+    // composition-root modules that provide clientRepository, codeRepository,
+    // keyStore, and grant handlers go here
+    oauthModule({ config }),
   ],
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
-await app.init();
+
+const server = express();
+server.use(handle.router);
+server.listen(config.http.port);
+
+await handle.dispose();
 ```
 
 ## TODO-F-4 changes
@@ -298,7 +301,7 @@ v0.4.0 removes passport from this package. The `/oauth/introspect` endpoint now 
 
 ### Breaking changes
 
-1. **`createOAuthRouter` signature**: the `passport` option is dropped. Pass `clientRepository: ClientRepository` directly. `oauthModule({ clientRepository, ... })` wires this automatically.
+1. **`createOAuthRouter` signature**: the `passport` option is dropped. Pass `clientRepository: ClientRepository` directly. `oauthModule({ config })` receives repositories through module `requires` from composition-root providers.
 2. **`/introspect` error response**: follows RFC 6749 §5.2 shape `{ error, error_description }`.
 3. **`req.oauthClient`** (typed as `PublicClient | undefined`) is attached to the express `Request` by `createClientAuthMiddleware`. Consumers composing this middleware onto their own routes can read it directly — types come via global Express namespace augmentation.
 

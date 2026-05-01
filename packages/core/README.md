@@ -414,6 +414,7 @@ import {
   createApp,
   createDefaultFactories,
   createKeyStoreFactory,
+  defineModule,
   registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
@@ -449,29 +450,34 @@ const clientRepository = await clientFactory.create(flatten(config.repositories.
 const userRepository = await userFactory.create(flatten(config.repositories.user));
 const codeRepository = await codeFactory.create(flatten(config.repositories.code));
 
-const app = createApp(express, {
-  config,
-  keyStore,
-  modules: [
-    // additional modules go here
-  ],
+const localComponentsModule = defineModule({
+  name: "local-components",
+  provides: {
+    keyStore: () => keyStore,
+    clientRepository: () => clientRepository,
+    userRepository: () => userRepository,
+    codeRepository: () => codeRepository,
+  },
 });
 
-await app.init();
+const handle = await createApp({
+  modules: [
+    localComponentsModule,
+    // additional modules go here
+  ],
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
+});
 
 const server = express();
-server.use(app.router);
+server.use(handle.router);
 server.listen(config.http.port);
 ```
 
 ### Implementing a custom grant type
 
 ```typescript
-import type {
-  GrantFactory,
-  GrantHandler,
-  GrantModule,
-} from "@o3co/auth-provider-core";
+import { defineModule } from "@o3co/auth-provider-core";
+import type { GrantFactory, GrantHandler } from "@o3co/auth-provider-core";
 
 const myGrantFactory: GrantFactory = (deps) => ({
   async handle(ctx) {
@@ -486,12 +492,16 @@ const myGrantFactory: GrantFactory = (deps) => ({
   },
 });
 
-const myGrantModule: GrantModule = {
-  grants: { my_grant: myGrantFactory },
-};
+const myGrantModule = defineModule({
+  name: "my-grant",
+  requires: ["keyStore"],
+  contributes: {
+    grants: { my_grant: myGrantFactory },
+  },
+});
 ```
 
-Pass `myGrantModule` to `GrantRegistry.addModule()` or include it as a module that calls `context.grantRegistry.addModule()` in `init()`.
+Add `myGrantModule` to the `modules` array passed to `createApp`. The boot planner registers the grant through the `contributes.grants` projection per A2-γ Amendment 3 (`grantHandlerResolver` synthetic key).
 
 ### Loading clients and users from YAML
 

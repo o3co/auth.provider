@@ -170,21 +170,41 @@ The `docker-compose.yml` starts the auth server together with a Redis container.
 
 ## Adding Custom Modules
 
-To add a custom module, import it in `src/app.mts` and include it in the `modules` array passed to `createApp`:
+To add a custom module, import it in `src/buildModules.mts` and include it in the `modules` array passed to `createApp`:
 
 ```typescript
+// src/buildModules.mts
 import { myCustomModule } from "./modules/my-custom-module.mjs";
 
-const { init, router, grantRegistry } = createApp(express, {
-  // ...
-  modules: [
-    oauthModule({ clientRepository, codeRepository, express }),
-    sessionModule({ userRepository, express }),
-    oauthSessionModule({ clientRepository }),
-    oauthAuthorizationModule({ codeRepository }),
+export function buildModules(config: AppConfig, overrides: BuildModulesOverrides = {}): Module[] {
+  const googleEnabled =
+    (config.federations?.google as { enabled?: boolean } | undefined)?.enabled === true;
+
+  return [
+    oauthModule({ config }),
+    oauthSessionModule({ config }),
+    oauthAuthorizationModule({ config }),
+    sessionModule,
+    ...(googleEnabled ? [googleFederationModule, googleFederationConfigModule] : []),
     myCustomModule, // add here
-  ],
+    overrides.keyStoreModule ?? keyStoreModule,
+    overrides.repositoriesModule ?? repositoriesModule,
+    overrides.storesModule ?? storesModule,
+  ];
+}
+
+// src/app.mts
+const handle = await createApp({
+  modules: buildModules(config),
+  bootstrapComponents: {
+    config,
+    pathResolver: import.meta.resolve,
+  },
 });
+
+app.use(handle.router);
+const server = app.listen(config.http.port);
+gracefulShutdown(server, () => handle.dispose());
 ```
 
 ## npm Scripts

@@ -407,6 +407,7 @@ import {
   createApp,
   createDefaultFactories,
   createKeyStoreFactory,
+  defineModule,
   registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
@@ -441,29 +442,34 @@ const clientRepository = await clientFactory.create(flatten(config.repositories.
 const userRepository = await userFactory.create(flatten(config.repositories.user));
 const codeRepository = await codeFactory.create(flatten(config.repositories.code));
 
-const app = createApp(express, {
-  config,
-  keyStore,
-  modules: [
-    // 追加モジュールをここに渡す
-  ],
+const localComponentsModule = defineModule({
+  name: "local-components",
+  provides: {
+    keyStore: () => keyStore,
+    clientRepository: () => clientRepository,
+    userRepository: () => userRepository,
+    codeRepository: () => codeRepository,
+  },
 });
 
-await app.init();
+const handle = await createApp({
+  modules: [
+    localComponentsModule,
+    // 追加モジュールをここに渡す
+  ],
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
+});
 
 const server = express();
-server.use(app.router);
+server.use(handle.router);
 server.listen(config.http.port);
 ```
 
 ### カスタムグラントタイプの実装
 
 ```typescript
-import type {
-  GrantFactory,
-  GrantHandler,
-  GrantModule,
-} from "@o3co/auth-provider-core";
+import { defineModule } from "@o3co/auth-provider-core";
+import type { GrantFactory, GrantHandler } from "@o3co/auth-provider-core";
 
 const myGrantFactory: GrantFactory = (deps) => ({
   async handle(ctx) {
@@ -478,12 +484,16 @@ const myGrantFactory: GrantFactory = (deps) => ({
   },
 });
 
-const myGrantModule: GrantModule = {
-  grants: { my_grant: myGrantFactory },
-};
+const myGrantModule = defineModule({
+  name: "my-grant",
+  requires: ["keyStore"],
+  contributes: {
+    grants: { my_grant: myGrantFactory },
+  },
+});
 ```
 
-`GrantRegistry.addModule()` に直接渡すか、`init()` 内で `context.grantRegistry.addModule()` を呼び出すモジュールとして組み込んでください。
+`myGrantModule` を `createApp` に渡す `modules` 配列へ追加してください。boot planner は A2-γ Amendment 3（`grantHandlerResolver` synthetic key）に従い、`contributes.grants` の projection を通じて grant を登録します。
 
 ### YAML からクライアントとユーザーを読み込む
 
