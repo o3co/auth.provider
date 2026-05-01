@@ -79,13 +79,17 @@ export const tokenExchangeModule: Module = defineModule({
 	configSchema: tokenExchangeConfigSchema,
 	requires: ["tokenExchangeValidatorResolver", "clientRepository", "keyStore", "config"],
 	optional: [
-		// Both the token-exchange grant (grant.mts:212-266 family_revoked
-		// re-surface) and the built-in self-issued validator (createSelfIssued-
-		// AccessTokenValidator below) read deps.refreshTokenStore for family
-		// revocation. Without declaring it here, the planner drops the store
-		// at the contribution boundary even when the composition root wires
-		// it. RFC 8693 §7.2 state 1 demands family revocation be observable.
+		// The token-exchange grant (grant.mts:212-266 family_revoked re-surface)
+		// reads deps.refreshTokenStore for family revocation. Without declaring
+		// it here, the planner drops the store at the contribution boundary even
+		// when the composition root wires it. RFC 8693 §7.2 state 1 demands
+		// family revocation be observable.
 		"refreshTokenStore",
+		// The built-in self-issued validator (createSelfIssuedAccessTokenValidator
+		// below) reads deps.refreshTokenFamilyRevocation for the read-only
+		// isFamilyRevoked check (A3 spec §5.3). Separate from refreshTokenStore
+		// which the grant handler owns for full revocation authority.
+		"refreshTokenFamilyRevocation",
 		// The token-exchange grant reads deps.grantPolicy at grant.mts:339,362
 		// to enforce the CP-18 fail-closed policy gate. Sibling grants (auth-
 		// code, refresh-token) declare grantPolicy in oauthAuthorizationModule;
@@ -104,7 +108,7 @@ export const tokenExchangeModule: Module = defineModule({
 				createSelfIssuedAccessTokenValidator({
 					keyStore: deps.keyStore,
 					issuer: deps.config.oauth.jwt.issuer,
-					refreshTokenStore: deps.refreshTokenStore,
+					refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
 				}),
 		},
 	},

@@ -85,7 +85,7 @@ function buildGrant(
 			ACCESS_TOKEN_TYPE,
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
-				refreshTokenStore: validatorStore,
+				refreshTokenFamilyRevocation: validatorStore,
 				issuer: ISSUER,
 			}),
 		);

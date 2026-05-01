@@ -22,7 +22,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 	const validator = (overrides = {}) =>
 		createSelfIssuedAccessTokenValidator({
 			keyStore,
-			refreshTokenStore: makeRefreshStore(),
+			refreshTokenFamilyRevocation: makeRefreshStore(),
 			issuer: ISSUER,
 			...overrides,
 		});
@@ -31,7 +31,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(() =>
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
-				refreshTokenStore: makeRefreshStore(),
+				refreshTokenFamilyRevocation: makeRefreshStore(),
 			}),
 		).toThrow("issuer is required");
 	});
@@ -68,7 +68,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		const store = makeRefreshStore({
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		});
-		const v = validator({ refreshTokenStore: store });
+		const v = validator({ refreshTokenFamilyRevocation: store });
 		expect(await v.validate(token, { role: "subject" })).toBeNull();
 		expect(store.isFamilyRevoked).toHaveBeenCalledWith("fam-revoked");
 	});
@@ -78,14 +78,14 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		const store = makeRefreshStore({
 			isFamilyRevoked: vi.fn().mockRejectedValue(new Error("redis down")),
 		});
-		const v = validator({ refreshTokenStore: store });
+		const v = validator({ refreshTokenFamilyRevocation: store });
 		await expect(v.validate(token, { role: "subject" })).rejects.toThrow("redis down");
 	});
 
-	it("accepts a token without family_id claim (legacy) when refreshTokenStore is present", async () => {
+	it("accepts a token without family_id claim (legacy) when refreshTokenFamilyRevocation is present", async () => {
 		const token = await signSelfIssuedAccessToken({});
 		const store = makeRefreshStore();
-		const v = validator({ refreshTokenStore: store });
+		const v = validator({ refreshTokenFamilyRevocation: store });
 		const result = await v.validate(token, { role: "subject" });
 		expect(result).not.toBeNull();
 		expect(result?.familyId).toBeUndefined();
