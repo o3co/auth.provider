@@ -921,14 +921,21 @@ const FEDERATION_REQUIRED_STORES = [
 	"sessionFamilyIndex",
 	"sessionFederationIndex",
 	"federationTokenStore",
+	"refreshTokenFamilyRevocation",
 ] as const;
 
 /**
- * If any `config.federations.<name>.enabled === true`, all 5 session/
- * federation stores MUST be present in the planned component set. A missing
- * store causes the federation routes to 503 at runtime with an opaque error.
+ * If any `config.federations.<name>.enabled === true`, all 6 session/
+ * federation/refresh-token-family slots MUST be present in the planned
+ * component set. A missing store causes federation routes either to 503 at
+ * runtime with an opaque error (session/federationToken stores) or to never
+ * mount at all (refreshTokenFamilyRevocation — see packages/oauth/src/routes.mts
+ * `logoutSupported` / `federationTokenSupported` gates), surfacing as
+ * unexpected 404s. Both failure modes are equally opaque from the operator's
+ * perspective; the validator surfaces them at boot time.
  *
- * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
+ * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05; refreshTokenFamilyRevocation
+ * gating added per #103 review (alignment with route-level gating in oauth/routes.mts).
  */
 export function checkFederationStoresWiring(
 	config: AppConfig,

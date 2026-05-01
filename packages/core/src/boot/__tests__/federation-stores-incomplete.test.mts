@@ -19,18 +19,23 @@
  * (issue #101 TODO-F-1).
  *
  * Rule: when config.federations.<name>.enabled === true for any federation,
- * all 5 session/federation stores MUST be wired in the planned component set:
+ * all 6 session/federation/refresh-family slots MUST be wired in the planned
+ * component set:
  *   - userSessionStore
  *   - sessionRPRegistry
  *   - sessionFamilyIndex
  *   - sessionFederationIndex
  *   - federationTokenStore
+ *   - refreshTokenFamilyRevocation
  *
- * Missing any store causes federation routes to 503 at runtime with an opaque
- * error. The validator fires in the validate-manifests stage so misconfiguration
- * surfaces at boot time.
+ * Missing any of the first 5 causes federation routes to 503 at runtime with
+ * an opaque error; missing refreshTokenFamilyRevocation causes the routes to
+ * never mount at all (see packages/oauth/src/routes.mts logoutSupported /
+ * federationTokenSupported gates). Both surface as opaque misconfigurations
+ * to the operator; the validator catches them at boot.
  *
- * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
+ * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05; refreshTokenFamilyRevocation
+ * gating added per #103 review.
  */
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
@@ -58,7 +63,7 @@ function makeBootWithNoFederations() {
 	} as never;
 }
 
-/** A module that provides all 5 required session/federation stores. */
+/** A module that provides all 6 required session/federation/refresh-family stores. */
 const allStoresModule = defineModule({
 	name: "test:all-federation-stores",
 	provides: {
@@ -67,6 +72,7 @@ const allStoresModule = defineModule({
 		sessionFamilyIndex: () => ({ kind: "stub" }),
 		sessionFederationIndex: () => ({ kind: "stub" }),
 		federationTokenStore: () => ({ kind: "stub" }),
+		refreshTokenFamilyRevocation: () => ({ kind: "stub" }),
 	} as never,
 });
 
@@ -94,6 +100,7 @@ describe("checkFederationStoresWiring", () => {
 					"sessionFamilyIndex",
 					"sessionFederationIndex",
 					"federationTokenStore",
+					"refreshTokenFamilyRevocation",
 				]),
 			},
 		});
@@ -108,7 +115,7 @@ describe("checkFederationStoresWiring", () => {
 		).resolves.toBeDefined();
 	});
 
-	it("does not throw when federation is enabled and all 5 stores are wired", async () => {
+	it("does not throw when federation is enabled and all 6 stores are wired", async () => {
 		await expect(
 			createApp({
 				modules: [allStoresModule],
@@ -122,7 +129,7 @@ describe("checkFederationStoresWiring", () => {
 	// to module `provides`. Without this, composition roots that wire stores
 	// via bootstrap/override are falsely rejected.
 
-	it("does not throw when all 5 stores are supplied via bootstrapComponents", async () => {
+	it("does not throw when all 6 stores are supplied via bootstrapComponents", async () => {
 		const bootstrapWithStores = {
 			...(makeBootWithFederationEnabled() as Record<string, unknown>),
 			userSessionStore: { kind: "stub" },
@@ -130,6 +137,7 @@ describe("checkFederationStoresWiring", () => {
 			sessionFamilyIndex: { kind: "stub" },
 			sessionFederationIndex: { kind: "stub" },
 			federationTokenStore: { kind: "stub" },
+			refreshTokenFamilyRevocation: { kind: "stub" },
 		} as never;
 		await expect(
 			createApp({
@@ -150,6 +158,7 @@ describe("checkFederationStoresWiring", () => {
 					sessionFamilyIndex: { kind: "stub" },
 					sessionFederationIndex: { kind: "stub" },
 					federationTokenStore: { kind: "stub" },
+					refreshTokenFamilyRevocation: { kind: "stub" },
 				} as never,
 			}),
 		).resolves.toBeDefined();
