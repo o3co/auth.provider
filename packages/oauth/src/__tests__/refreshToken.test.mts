@@ -19,8 +19,7 @@ import {
 	type GrantContext,
 	type GrantDependencies,
 	type GrantPolicyHookBase,
-	type RefreshTokenRotateOutcome,
-	type RefreshTokenStoreBase,
+	type RefreshTokenRotation,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { SignJWT } from "jose";
@@ -294,19 +293,15 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
-	describe("family_id and refreshTokenStore integration", () => {
-		function createStubRefreshTokenStore(
-			onRotate: (previousJti: string | null) => RefreshTokenRotateOutcome,
-		): RefreshTokenStoreBase {
+	describe("family_id and refreshTokenRotation integration", () => {
+		function createStubRotation(
+			outcome: "rotated" | "replayed" | "revoked" | "unknown_family",
+		): RefreshTokenRotation {
 			return {
-				kind: "stub",
-				async rotate(previousJti) {
-					return onRotate(previousJti);
+				async register() {},
+				async rotate() {
+					return { outcome };
 				},
-				async isFamilyRevoked() {
-					return false;
-				},
-				async revokeFamily() {},
 			};
 		}
 
@@ -341,12 +336,9 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
-		it("returns invalid_grant/replay_detected when the store reports 'replayed'", async () => {
-			const stub = createStubRefreshTokenStore((_prev) => ({
-				outcome: "replayed",
-				familyId: "test-family",
-			}));
-			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenStore: stub };
+		it("returns invalid_grant/replay_detected when the rotation reports 'replayed'", async () => {
+			const stub = createStubRotation("replayed");
+			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenRotation: stub };
 			// Token must include a jti so that previousJti !== null and rotate() is called
 			const token = await new SignJWT({ sub: "u1", scope: "read write" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
@@ -372,18 +364,14 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
-		it("returns 503 temporarily_unavailable when refreshTokenStore.rotate throws (CP-17)", async () => {
-			const throwingStore: RefreshTokenStoreBase = {
-				kind: "broken",
+		it("returns 503 temporarily_unavailable when refreshTokenRotation.rotate throws (CP-17)", async () => {
+			const throwingRotation: RefreshTokenRotation = {
+				async register() {},
 				async rotate() {
 					throw new Error("redis down");
 				},
-				async isFamilyRevoked() {
-					return false;
-				},
-				async revokeFamily() {},
 			};
-			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenStore: throwingStore };
+			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenRotation: throwingRotation };
 			const token = await new SignJWT({ sub: "u1", scope: "read write" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setExpirationTime("24h")
@@ -403,9 +391,9 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("returns invalid_grant/family_revoked when the store reports 'revoked'", async () => {
-			const stub = createStubRefreshTokenStore((_prev) => ({ outcome: "revoked" }));
-			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenStore: stub };
+		it("returns invalid_grant/family_revoked when the rotation reports 'revoked'", async () => {
+			const stub = createStubRotation("revoked");
+			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenRotation: stub };
 			// Token must include a jti so that previousJti !== null and rotate() is called
 			const token = await new SignJWT({ sub: "u1", scope: "read write" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })

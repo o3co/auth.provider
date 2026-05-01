@@ -280,7 +280,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				},
 			);
 
-			if (deps.refreshTokenStore && previousJti !== null) {
+			if (deps.refreshTokenRotation && previousJti !== null) {
 				const newRefreshPayload = decodeJwtPayload(newRefreshToken.token);
 				const newJti = newRefreshPayload.jti as string | undefined;
 				const newExp = newRefreshPayload.exp as number | undefined;
@@ -290,13 +290,13 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					// jti and register the new one, so replay detection cannot
 					// be guaranteed. Return 503 so the client retries rather
 					// than bubbling an unhandled 500 HTML from express.
-					let rotateResult: Awaited<ReturnType<typeof deps.refreshTokenStore.rotate>>;
+					let rotateResult: Awaited<ReturnType<typeof deps.refreshTokenRotation.rotate>>;
 					try {
-						rotateResult = await deps.refreshTokenStore.rotate(
+						rotateResult = await deps.refreshTokenRotation.rotate(
 							previousJti,
 							newJti,
 							newFamilyId,
-							new Date(newExp * 1000),
+							newExp * 1000,
 						);
 					} catch {
 						return {
