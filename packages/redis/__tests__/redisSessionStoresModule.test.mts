@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { createBootApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
@@ -63,7 +63,7 @@ describe("redisSessionStoresModule manifest", () => {
 });
 
 describe("redisSessionStoresModule wiring", () => {
-	it("createBootApp wires all 4 components against redisClient slot", async () => {
+	it("createApp wires all 4 components against redisClient slot", async () => {
 		// Activator pattern (no `activate` field on ModuleSpec): use contributes.routes
 		// to force closure root inclusion, then read from handle.components after boot.
 		const activator = defineModule({
@@ -85,7 +85,7 @@ describe("redisSessionStoresModule wiring", () => {
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [redisSessionStoresModule, activator],
 			bootstrapComponents: {
 				config: minBoot({ redisSessionStores: { keyPrefix: "wire:" } }),
@@ -105,9 +105,9 @@ describe("redisSessionStoresModule wiring", () => {
 		}
 	});
 
-	it("createBootApp throws BootError {missing-required-component} when redisClient absent", async () => {
+	it("createApp throws BootError {missing-required-component} when redisClient absent", async () => {
 		await expect(
-			createBootApp({
+			createApp({
 				modules: [redisSessionStoresModule],
 				bootstrapComponents: { config: minBoot({}) } as never,
 			}),

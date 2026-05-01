@@ -14,8 +14,7 @@
  * limitations under the License.
  */
 
-export type { FederationProviderFactory } from "./federations/factory.mjs";
-export { createFederationProviderFactory } from "./federations/factory.mjs";
+export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect, validateRedirect } from "./federations/helpers.mjs";
 export { codeChallenge } from "./federations/pkce.mjs";

@@ -115,7 +115,7 @@ class GrantRegistry {
 }
 ```
 
-`addModule` instantiates all `GrantFactory` entries in the module and registers them. Call `cleanup()` on shutdown to invoke each handler's optional `cleanup()` method.
+`addModule` instantiates all `GrantFactory` entries in the module and registers them. `cleanup()` is the legacy shutdown hook: it iterates registered grant handlers and invokes each handler's optional `cleanup()` method. New code should use `handle.dispose()` (returned by `createApp`) instead — `AppHandle.dispose()` runs per-component `lifecycle[K].cleanup` callbacks in reverse-topological order per A2-β §8.1. `GrantRegistry.cleanup()` is retained for backwards compatibility and will be removed in a future minor.
 
 ### Token Utilities
 
@@ -350,42 +350,50 @@ Key contract properties:
 
 ### Module System
 
-Modules extend the app with additional routes, middleware, or grant types. Each module receives a `ModuleContext` during initialization.
+Modules extend the app with additional routes, grant handlers, or DI-graph
+components. v0.5.0 modules are declarative manifests authored via
+`defineModule({...})` — they declare `requires` / `optional` (typed
+`ProviderDeps` keys) and contribute to `ContributesMap` slots like
+`grants`, `routes`, `federations`.
 
 ```typescript
 type PathResolver = (specifier: string) => string;
 
-interface ModuleContext {
-  pathResolver: PathResolver;
-  config: AppConfig;
-  keyStore: KeyStore;
-  grantRegistry: GrantRegistry;
-  router: Router; // Express Router
-}
-
-interface Module {
-  name: string;
-  init(context: ModuleContext): Promise<void>;
-}
+const myModule = defineModule({
+  name: "my-module",
+  requires: ["config", "clientRepository"] as const,
+  contributes: {
+    routes: [
+      (deps) => ({ id: "my-route", mountPath: "/my", handler: makeRouter(deps) }),
+    ],
+  },
+});
 ```
+
+> Note: the v0.4.x `LegacyModule` / `ModuleContext` shape (a function
+> returning `{ name, init(context) }`) was removed in Phase 9 of the
+> v0.5.0 redesign. The boot planner injects typed deps directly into the
+> contribution lambdas; modules no longer mutate a shared `ModuleContext`.
 
 ### App Factory
 
 ```typescript
-interface AppOptions {
-  pathResolver?: PathResolver;
-  config: AppConfig;
-  keyStore: KeyStore;
-  modules: Module[];
+interface CreateAppOptions {
+  modules: readonly Module[];
+  bootstrapComponents: { config: AppConfig; pathResolver: PathResolver };
+  contributionKinds?: ContributionKindMap;
+  overrideComponents?: Partial<ComponentMap>;
 }
 
-interface AppResult {
-  init(): Promise<void>;
+interface AppHandle {
   router: Router;
-  grantRegistry: GrantRegistry;
+  components: Partial<ComponentMap>;
+  routes: readonly OrderedRouteContribution[];
+  listen(port: number): Promise<HttpServer>;
+  dispose(): Promise<void>;
 }
 
-function createApp(express: ExpressLike, options: AppOptions): AppResult;
+function createApp(options: CreateAppOptions): Promise<AppHandle>;
 ```
 
 `createApp` wires together config, key store, grant registry, and modules into a single Express router. Call `init()` to run all module initializers. The router is ready to mount after `init()` resolves.
@@ -406,6 +414,7 @@ import {
   createApp,
   createDefaultFactories,
   createKeyStoreFactory,
+  defineModule,
   registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 
@@ -441,29 +450,34 @@ const clientRepository = await clientFactory.create(flatten(config.repositories.
 const userRepository = await userFactory.create(flatten(config.repositories.user));
 const codeRepository = await codeFactory.create(flatten(config.repositories.code));
 
-const app = createApp(express, {
-  config,
-  keyStore,
-  modules: [
-    // additional modules go here
-  ],
+const localComponentsModule = defineModule({
+  name: "local-components",
+  provides: {
+    keyStore: () => keyStore,
+    clientRepository: () => clientRepository,
+    userRepository: () => userRepository,
+    codeRepository: () => codeRepository,
+  },
 });
 
-await app.init();
+const handle = await createApp({
+  modules: [
+    localComponentsModule,
+    // additional modules go here
+  ],
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
+});
 
 const server = express();
-server.use(app.router);
+server.use(handle.router);
 server.listen(config.http.port);
 ```
 
 ### Implementing a custom grant type
 
 ```typescript
-import type {
-  GrantFactory,
-  GrantHandler,
-  GrantModule,
-} from "@o3co/auth-provider-core";
+import { defineModule } from "@o3co/auth-provider-core";
+import type { GrantFactory, GrantHandler } from "@o3co/auth-provider-core";
 
 const myGrantFactory: GrantFactory = (deps) => ({
   async handle(ctx) {
@@ -478,12 +492,16 @@ const myGrantFactory: GrantFactory = (deps) => ({
   },
 });
 
-const myGrantModule: GrantModule = {
-  grants: { my_grant: myGrantFactory },
-};
+const myGrantModule = defineModule({
+  name: "my-grant",
+  requires: ["keyStore"],
+  contributes: {
+    grants: { my_grant: myGrantFactory },
+  },
+});
 ```
 
-Pass `myGrantModule` to `GrantRegistry.addModule()` or include it as a module that calls `context.grantRegistry.addModule()` in `init()`.
+Add `myGrantModule` to the `modules` array passed to `createApp`. The boot planner registers the grant through the `contributes.grants` projection per A2-γ Amendment 3 (`grantHandlerResolver` synthetic key).
 
 ### Loading clients and users from YAML
 

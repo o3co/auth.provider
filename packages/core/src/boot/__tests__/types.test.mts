@@ -63,11 +63,12 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 20 literals
+// BootErrorReason — exactly 21 literals (Phase 9 added "grant-policy-without-
+// issuer" for the CP-20 invariant restoration)
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 20 reason literals", () => {
+	it("contains exactly the 21 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "duplicate-module-name"
 			| "duplicate-provides"
@@ -89,6 +90,7 @@ describe("BootErrorReason", () => {
 			| "route-order-cycle"
 			| "route-order-target-missing"
 			| "federation-redirect-policy-unpaired"
+			| "grant-policy-without-issuer"
 		>();
 	});
 });
@@ -319,8 +321,10 @@ describe("BootError", () => {
 // ---------------------------------------------------------------------------
 
 describe("AppHandle", () => {
-	it("has exactly the four expected keys", () => {
-		expectTypeOf<keyof AppHandle>().toEqualTypeOf<"router" | "listen" | "dispose" | "components">();
+	it("has exactly the five expected keys", () => {
+		expectTypeOf<keyof AppHandle>().toEqualTypeOf<
+			"router" | "listen" | "dispose" | "components" | "routes"
+		>();
 	});
 });
 

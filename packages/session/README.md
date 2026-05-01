@@ -2,10 +2,13 @@
 
 Session and federation routes module for [auth.provider](../../README.md).
 
-Handles username/password login, logout, and OAuth 2.0 federation for providers
-registered with `FederationProviderFactory`. Uses RFC 6749 authorization code
-flow internally. Concrete providers such as Google and GitHub live in separate
-provider packages.
+Handles username/password login, logout, and OAuth 2.0 federation. Concrete
+providers such as Google and GitHub live in separate provider packages and
+contribute their `FederationProvider` to this module via the manifest model
+(per-federation `defineModule(...)` — see
+[`@o3co/auth-provider-federation-google`](../federation-google/README.md) and
+[`@o3co/auth-provider-federation-github`](../federation-github/README.md)).
+Uses RFC 6749 authorization code flow internally.
 
 ## Install
 
@@ -31,16 +34,12 @@ express@^5.0.0
 ### `sessionModule`
 
 ```typescript
-function sessionModule(params: {
-  userRepository: UserRepository;
-  express?: ExpressLike;
-  federationProviderFactory?: FederationProviderFactory;
-}): Module;
+import { sessionModule } from "@o3co/auth-provider-session";
+// → sessionModule is a const Module (manifest), NOT a factory.
+// Add it to the manifest list passed to createApp / createTestApp.
 ```
 
-Top-level module. Mounts session and federation routes onto the Express app.
-
-Routes mounted:
+Const Module. Contributes two route bundles, both mounted at `/session`:
 
 | Method | Path                                              | Description                     |
 |--------|---------------------------------------------------|---------------------------------|
@@ -51,15 +50,30 @@ Routes mounted:
 
 The `:name` path parameter corresponds to the federation key in `config.federations` (e.g. `google`, `github`, `google-work`). Unknown names return `404`.
 
+`requires`: `userRepository`, `userSessionStore`, `federationTokenStore`,
+`sessionFederationIndex` (sibling stores), plus the synthetic keys
+`federationProviders` and `federationRedirectPolicyResolver` populated by the
+boot planner from per-federation modules. See
+[`@o3co/auth-provider-federation-google`](../federation-google/README.md) for an
+example federation module.
+
 ---
 
-### `createFederationProviderFactory`
+### `extractFederationSection`
 
 ```typescript
-function createFederationProviderFactory(): FederationProviderFactory;
+function extractFederationSection(
+  federations: Record<string, unknown>,
+  name: string,
+): { type: string; [key: string]: unknown } | undefined;
 ```
 
-Creates an empty `FederationProviderFactory` (an `AdapterFactory<FederationProvider>` with no provider types registered). Install provider packages and register them in the composition root, then pass the factory to `sessionModule`.
+Pure utility — normalizes a federation config slice into a flat credential
+object. Handles flat (`{ enabled, clientId, callbackURL }`), nested
+(`{ enabled, type, [type]: {...} }`), and shorthand (key serves as type)
+shapes; rejects mixed shapes; returns `undefined` for absent or
+`enabled !== true` entries. Used by per-federation modules to read their own
+config slice.
 
 ---
 
@@ -81,20 +95,22 @@ interface FederationProvider {
     readonly codeVerifier: string;
     readonly redirectUri: string;
   }): Promise<FederationProfile>;
-
-  validateRedirect(url: string): FederationResult<void>;
-  resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
 }
 ```
 
-Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. Optionally mix in `SupportsLogout` for IdPs that expose an end-session endpoint.
+Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. Optionally mix in `SupportsLogout`, `SupportsClaimMapping`, or `SupportsRefresh`.
 
 - `name` — unique provider identifier. Used as both the Map key in `federationProviders` and the route `:name` parameter.
 - `scope` — OAuth 2.0 scopes to request.
 - `buildAuthorizationUrl` — builds the RFC 6749 §4.1 + RFC 7636 authorization URL. Receives a pre-generated `codeVerifier` from the route layer; implementations should compute `code_challenge` via `codeChallenge(codeVerifier)`.
 - `exchangeCode` — exchanges an authorization code for a normalized `FederationProfile`. Must include `issuer` and `sub`; all other fields are optional.
-- `validateRedirect` — validates whether a redirect URL is permitted before initiating the federation flow.
-- `resolveCallbackRedirect` — resolves the post-callback redirect target from the session.
+
+> **Note (A5 split, v0.5.0):** redirect URL handling — `validateRedirect` /
+> `resolveCallbackRedirect` — was moved off `FederationProvider` and onto a
+> dedicated `FederationRedirectPolicy` capability. Per-federation modules
+> contribute the policy via `federationRedirectPolicies.<name>`; built-ins
+> use `createDefaultFederationRedirectPolicy(...)`. Custom providers do not
+> implement these methods on `FederationProvider`.
 
 ---
 
@@ -143,8 +159,6 @@ function createMyIdPProvider(): FederationProvider & SupportsLogout {
     scope: ["openid"],
     buildAuthorizationUrl({ redirectUri, state, codeVerifier }) { /* ... */ },
     async exchangeCode({ code, codeVerifier, redirectUri }) { /* ... */ },
-    validateRedirect(url) { /* ... */ },
-    resolveCallbackRedirect(session) { /* ... */ },
     async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
       const url = new URL("https://myidp.example/oidc/logout");
       if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
@@ -264,16 +278,6 @@ Providers implementing `SupportsRefresh` can keep federation tokens alive withou
 
 ---
 
-### `FederationProviderFactory` (type)
-
-```typescript
-type FederationProviderFactory = AdapterFactory<FederationProvider>;
-```
-
-An `AdapterFactory<FederationProvider>`. Register custom provider types via `factory.register(type, builder)`.
-
----
-
 ### `FederationResult<T>` (type)
 
 ```typescript
@@ -289,33 +293,39 @@ Discriminated union returned by `FederationProvider` methods. Check `ok` before 
 ### Basic usage
 
 ```typescript
-import express from "express";
 import { createApp } from "@o3co/auth-provider-core";
-import {
-  createFederationProviderFactory,
-  sessionModule,
-} from "@o3co/auth-provider-session";
-import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
+import { sessionModule } from "@o3co/auth-provider-session";
+import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 
-const federationProviderFactory = createFederationProviderFactory();
-registerGoogleFederation(federationProviderFactory);
-
-const app = createApp(express, {
-  config,
-  keyStore,
+const handle = await createApp({
   modules: [
-    sessionModule({
-      userRepository,
-      federationProviderFactory,
-    }),
+    sessionModule,                 // const — no factory call
+    googleFederationModule,        // contributes federations.google + federationRedirectPolicies.google
+    // ... composition-root modules that supply userRepository, the four-store split, etc.
   ],
+  bootstrapComponents: { config, pathResolver },
 });
-await app.init();
 ```
 
-The `sessionModule` reads `config.federations` and creates providers using the
-factory supplied by the composition root. If a federation type is enabled in
-config but no package registered that type, boot fails fast.
+The boot planner aggregates `federations.<name>` and
+`federationRedirectPolicies.<name>` contributions from per-federation modules
+into the synthetic `federationProviders` and `federationRedirectPolicyResolver`
+ComponentMap entries that `sessionModule`'s federation routes consume. The
+planner enforces the pairing invariant **between contribution kinds**: every
+contributed `federations.<name>` MUST have a paired
+`federationRedirectPolicies.<name>` and vice versa, otherwise boot fails with
+`BootError({ reason: "federation-redirect-policy-unpaired" })`.
+
+The planner does NOT cross-check `config.federations` against contributions —
+if a federation is enabled in config but no module contributes its provider
+pair, boot still succeeds and `/session/oauth/federation/:name` returns `404`
+at request time. Composition roots that want fail-fast on misconfiguration
+should add the matching per-federation module (or a config-bootstrap module
+that throws when its federation slice is enabled but no provider package is
+installed). `sessionModule` does enforce one config-derived invariant at boot:
+every enabled federation in `config.federations` must declare a `callbackURL`,
+otherwise boot fails (the same fail-fast invariant the v0.4.x module
+enforced at `init()` time).
 
 ### HOCON federation configuration
 
@@ -369,26 +379,47 @@ Mixed shape — top-level fields alongside a nested sub-section — is rejected 
 
 ### Custom federation provider
 
+Custom federations are added by writing a per-federation `defineModule(...)`
+that contributes both `federations.<name>` (the `FederationProvider`) and
+`federationRedirectPolicies.<name>` (the redirect policy). The const-Module
+pattern with a typed `ComponentMap` config slot is the recommended shape — see
+[`@o3co/auth-provider-federation-google`'s `google.mts`](../federation-google/src/google.mts)
+for the reference implementation. The minimal sketch:
+
 ```typescript
+import { defineModule } from "@o3co/auth-provider-core";
 import {
   codeChallenge,
-  createFederationProviderFactory,
+  createDefaultFederationRedirectPolicy,
   type FederationProvider,
-  type FederationProviderFactory,
 } from "@o3co/auth-provider-session";
 
-const factory = createFederationProviderFactory();
+declare module "@o3co/auth-provider-core" {
+  interface ComponentMap {
+    readonly microsoftFederationConfig?: { clientId: string; callbackURL: string };
+  }
+}
 
-// Register a custom provider type
-factory.register("microsoft", async (config) => {
-  // build and return a FederationProvider
+export const microsoftFederationModule = defineModule({
+  name: "federation:microsoft",
+  requires: ["microsoftFederationConfig"] as const,
+  contributes: {
+    federations: {
+      microsoft: (deps) => buildMicrosoftProvider(deps.microsoftFederationConfig),
+    },
+    federationRedirectPolicies: {
+      microsoft: (deps) => createDefaultFederationRedirectPolicy(deps.microsoftFederationConfig),
+    },
+  },
+});
+
+function buildMicrosoftProvider(cfg: { clientId: string; callbackURL: string }): FederationProvider {
   return {
-    name: config.name as string,
+    name: "microsoft",
     scope: ["openid", "profile", "email"],
     buildAuthorizationUrl({ redirectUri, state, codeVerifier }) {
       const url = new URL("https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", config.clientId as string);
+      url.searchParams.set("client_id", cfg.clientId);
       url.searchParams.set("redirect_uri", redirectUri);
       url.searchParams.set("state", state);
       url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
@@ -398,35 +429,17 @@ factory.register("microsoft", async (config) => {
     },
     async exchangeCode({ code, codeVerifier, redirectUri }) {
       // POST to token endpoint + optional userinfo; normalize to FederationProfile
-      return { issuer: "https://login.microsoftonline.com/common/v2.0", sub: userId, email, accessToken, expiresAt };
+      return { issuer: "https://login.microsoftonline.com/common/v2.0", sub: "...", expiresAt: null };
     },
-    validateRedirect: (url) => ({ ok: true, value: undefined }),
-    resolveCallbackRedirect: (session) => ({ ok: true, value: session.redirectTo ?? "/" }),
   };
-});
-
-// Build the provider map from config — mirrors the normalization in module.mts
-const federationProviders = new Map<string, FederationProvider>();
-for (const [name, section] of Object.entries(config.federations)) {
-  if (!section.enabled) continue;
-
-  const type = (typeof section.type === "string" ? section.type : undefined) ?? name;
-  const subSection = (section as Record<string, unknown>)[type];
-  const isNested =
-    typeof subSection === "object" && subSection !== null && !Array.isArray(subSection);
-
-  const rawBuilderConfig = isNested
-    ? (() => {
-        const { enabled: _e, type: _t, [type]: _sub, ...topLevel } = section as Record<string, unknown>;
-        return { type, ...topLevel, ...(subSection as Record<string, unknown>) };
-      })()
-    : { type, ...(section as Record<string, unknown>) };
-
-  const { enabled: _e2, type: _t2, ...flatConfig } = rawBuilderConfig as Record<string, unknown>;
-  const provider = await factory.create({ type, name, ...flatConfig });
-  federationProviders.set(name, provider);
 }
 ```
+
+The composition root supplies `microsoftFederationConfig` via a small
+config-bootstrap module that runs `extractFederationSection(config.federations,
+"microsoft")` and surfaces the credentials on the typed slot. The session
+module's federation routes consume the aggregated `federationProviders` map
+and route by `:name`.
 
 ## TODO-F-3 changes
 
@@ -443,7 +456,7 @@ v0.4.0 removes passport as a direct dependency from this package.
 3. **`FederationProfile.raw` removed.** OIDC-standard claims are first-class fields (`sub`, `email`, `emailVerified`, `name`, `picture`, `accessToken`, `refreshToken`, `idToken`, `expiresAt`). Provider-specific claims (Google `hd`, Microsoft `tid`) are carried by the index signature `[key: string]: unknown`.
 4. **`FederationProfile.id` renamed to `sub`, `expiresIn: number` replaced with `expiresAt: Date | null` (required).** Adapters MUST make an explicit decision: return a `Date` when the provider issues a finite expiry, `null` when it does not (e.g. GitHub OAuth Apps classic tokens). The route layer no longer invents a fallback expiry — `null` signals "do not refresh; reuse until the provider invalidates". `FederationTokens.expiresAt` on `FederationTokenStore` follows the same contract.
 5. **`createPassport()` and `SetupPassportContext` removed from the public API.** State (CSRF) and PKCE are managed by the route layer internally; providers are pure functions.
-6. **`UserSessionStore` and `FederationTokenStore` are now required** (previously optional with legacy fallback). The `sessionModule` throws at `init()` time if either is absent from `ModuleContext`.
+6. **`UserSessionStore` and `FederationTokenStore` are now required** (previously optional with legacy fallback). They are now declared in `sessionModule.requires`; the boot planner rejects with `BootError(reason: 'missing-required-component')` if no module provides them.
 7. **`/login` error responses** follow RFC 6749 §5.2 shape: `{ error, error_description }`. If your client parses the old `{ message: "..." }` format, update accordingly.
 8. **`SupportsRefresh.refreshToken`** returns `RefreshedTokens` (new type): `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }`. Google/GitHub refresh responses legitimately omit `sub`; the route layer preserves stored identity.
 
@@ -503,7 +516,11 @@ class CustomProvider implements FederationProvider, SupportsClaimMapping {
 
 ### Module wiring
 
-`sessionModule` requires `userRepository` (for `/login`). `userSessionStore` + `federationTokenStore` from `ModuleContext` are now **required**.
+In v0.5.0 `sessionModule` is a const Module (no factory call). Its
+`requires` declares the dependencies the boot planner must supply:
+`userRepository`, the four-store split (`userSessionStore`,
+`federationTokenStore`, `sessionFederationIndex`), and the synthetic keys
+`federationProviders` + `federationRedirectPolicyResolver`.
 
 ## See Also
 

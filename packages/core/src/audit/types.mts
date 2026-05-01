@@ -46,3 +46,18 @@ export interface AuditSinkBase {
 }
 
 export type AuditSinkFactory = AdapterFactory<AuditSinkBase>;
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge (A2-α §6.1 — optional slot)
+//
+// Declared here so oauthModule can list "auditSink" in its `optional` array
+// and the DI graph types deps.auditSink as AuditSinkBase | undefined.
+// The slot is optional: when absent, oauth routes emit no audit events (the
+// emitAuditEvent helper is a no-op when sink is undefined).
+// Phase 9 Task 4 augmentation.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly auditSink?: AuditSinkBase;
+	}
+}

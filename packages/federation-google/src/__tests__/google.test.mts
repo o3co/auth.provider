@@ -8,7 +8,6 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
-import { createFederationProviderFactory } from "@o3co/auth-provider-session";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -43,7 +42,7 @@ vi.mock("openid-client", () => ({
 	skipSubjectCheck: hoisted.skipSubjectCheckSym,
 }));
 
-import { createGoogleProvider, registerGoogleFederation } from "../google.mjs";
+import { createGoogleProvider } from "../google.mjs";
 
 describe("createGoogleProvider on openid-client", () => {
 	const baseConfig = {
@@ -61,25 +60,6 @@ describe("createGoogleProvider on openid-client", () => {
 		const p = createGoogleProvider(baseConfig);
 		expect(p.name).toBe("google");
 		expect([...p.scope]).toEqual(["openid", "profile", "email"]);
-	});
-
-	it("registerGoogleFederation registers the google factory type", async () => {
-		const factory = createFederationProviderFactory();
-		registerGoogleFederation(factory);
-
-		const p = await factory.create({ type: "google", ...baseConfig });
-
-		expect(factory.registeredTypes()).toEqual(["google"]);
-		expect(p.name).toBe("google");
-	});
-
-	it("registerGoogleFederation throws when required builder fields are missing", async () => {
-		const factory = createFederationProviderFactory();
-		registerGoogleFederation(factory);
-
-		await expect(factory.create({ type: "google", name: "google" })).rejects.toThrow(
-			/clientId|clientSecret|callbackURL/i,
-		);
 	});
 
 	it("buildAuthorizationUrl forwards redirect_uri/state/code_challenge/access_type to openid-client", () => {

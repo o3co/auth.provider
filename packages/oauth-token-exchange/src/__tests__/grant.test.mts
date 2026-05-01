@@ -94,7 +94,10 @@ function buildGrant(
 		config: overrides.config ?? mockConfig,
 		keyStore,
 		refreshTokenStore: grantStore,
-		validatorRegistry: registry,
+		// ExchangeTokenValidatorRegistry exposes structurally-compatible
+		// `.get()` for the resolver; A2-γ §3.3 keeps the registry class as
+		// test scaffolding even though it is no longer publicly exported.
+		tokenExchangeValidatorResolver: registry,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 	});

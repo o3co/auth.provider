@@ -95,17 +95,20 @@ import express from "express";
 import { createApp } from "@o3co/auth-provider-core";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 
-const app = createApp(express, {
-  config,
-  keyStore,
+const handle = await createApp({
   modules: [
-    oauthModule({
-      clientRepository,
-      codeRepository,
-    }),
+    // clientRepository、codeRepository、keyStore、grant handler を提供する
+    // composition root 側のモジュールをここに追加する
+    oauthModule({ config }),
   ],
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
-await app.init();
+
+const server = express();
+server.use(handle.router);
+server.listen(config.http.port);
+
+await handle.dispose();
 ```
 
 ## TODO-F-4 の変更点
@@ -298,7 +301,7 @@ v0.4.0 ではこのパッケージから passport を削除した。`/oauth/intr
 
 ### 破壊的変更
 
-1. **`createOAuthRouter` のシグネチャ変更**: `passport` オプションを削除。`clientRepository: ClientRepository` を直接渡す。`oauthModule({ clientRepository, ... })` を使用すれば自動で配線される。
+1. **`createOAuthRouter` のシグネチャ変更**: `passport` オプションを削除。`clientRepository: ClientRepository` を直接渡す。`oauthModule({ config })` は composition root 側の provider から module `requires` 経由で repository を受け取る。
 2. **`/introspect` エラーレスポンス**: RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。
 3. **`req.oauthClient`**（`PublicClient | undefined` 型）が `createClientAuthMiddleware` によって Express `Request` に付与される。このミドルウェアを独自ルートに組み込む場合は直接参照できる — 型はグローバルの Express 名前空間拡張で提供される。
 

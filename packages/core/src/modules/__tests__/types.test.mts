@@ -14,25 +14,11 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import type { LegacyModule as Module, ModuleContext, PathResolver } from "#/modules/types.mjs";
+import type { PathResolver } from "#/modules/types.mjs";
 
-describe("Module interface", () => {
-	it("PathResolver is a function from string to string", () => {
+describe("PathResolver", () => {
+	it("is a function from string to string", () => {
 		const resolver: PathResolver = (specifier: string) => `/resolved/${specifier}`;
 		expect(resolver("passport")).toBe("/resolved/passport");
-	});
-
-	it("Module has name and async init", async () => {
-		let initCalled = false;
-		const module: Module = {
-			name: "test-module",
-			async init(_context: ModuleContext): Promise<void> {
-				initCalled = true;
-			},
-		};
-
-		expect(module.name).toBe("test-module");
-		expect(initCalled).toBe(false);
-		// init requires a ModuleContext — tested in app.test.mts
 	});
 });

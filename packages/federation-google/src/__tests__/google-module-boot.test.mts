@@ -17,7 +17,7 @@
 /**
  * End-to-end boot integration test for `googleFederationModule` (Cl-M2).
  *
- * Boots the const-Module through `createBootApp` together with a small
+ * Boots the const-Module through `createApp` together with a small
  * bootstrap module that supplies `googleFederationConfig`, and asserts the
  * pairing invariant materialises both contributions in `handle.components`:
  *
@@ -33,7 +33,7 @@
  *
  * Per A5 §10.1 + Cl-M2.
  */
-import { createBootApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import type { FederationProvider, FederationRedirectPolicy } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
@@ -83,7 +83,7 @@ const activatorModule = defineModule({
 
 describe("googleFederationModule boot integration (Cl-M2)", () => {
 	it("boots end-to-end and materialises both federations.google and federationRedirectPolicies.google", async () => {
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [googleFederationModule, configBootstrapModule, activatorModule],
 			bootstrapComponents: minBoot,
 		});

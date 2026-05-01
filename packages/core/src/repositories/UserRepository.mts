@@ -20,3 +20,20 @@ export interface UserRepository {
 	authenticate(username: string, password: string): Promise<User | null>;
 	authenticateByToken(token: string): Promise<User | null>;
 }
+
+// ---------------------------------------------------------------------------
+// ComponentMap slot declaration (per A2-α §6.1)
+//
+// `userRepository` is a core component produced by a composition-root-local
+// module (e.g. `repositoriesModule` in A2-γ §3.8 standalone template). Modules
+// that authenticate users (sessionModule's /login, federation routes after
+// callback) declare `requires: ["userRepository"]` and receive the instance
+// through the typed DI graph.
+//
+// Per A2-γ §3.4: sessionModule requires userRepository in its manifest.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly userRepository: UserRepository;
+	}
+}

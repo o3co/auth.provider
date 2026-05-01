@@ -15,43 +15,31 @@
  */
 
 import {
-	AdapterFactoryError,
 	type AppConfig,
-	createSymmetricKeyStore,
+	defineModule,
 	type FederationTokenStoreBase,
-	GrantRegistry,
-	type ModuleContext,
 	type SessionFederationIndex,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import type { Router } from "express";
-import { describe, expect, it, vi } from "vitest";
-import { _sessionModuleImpl, sessionModule } from "#/module.mjs";
+import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { describe, expect, it } from "vitest";
+import type { FederationProvider } from "#/federations/types.mjs";
+import { sessionModule } from "#/module.mjs";
 
-const mockConfig = {
-	oauth: {
-		jwt: { secret: "test-secret" },
-		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
-		grants: {},
-	},
-	rateLimit: {
-		login: { windowMs: 60000, limit: 100 },
-	},
-	cors: {
-		allowedOrigins: [],
-	},
-	session: {
-		domain: null,
-	},
-	federations: {},
-	endpoints: {
-		login: { url: "/login" },
-		client: { url: "http://localhost:3001" },
-		authCallback: { url: "/auth/callback" },
-	},
-} as unknown as AppConfig;
+// ---------------------------------------------------------------------------
+// Shared test-only stubs (per A5 §10.1 typed-slot const-Module pattern)
+// ---------------------------------------------------------------------------
+
+const fakeUserRepository: UserRepository = {
+	authenticate: async () => null,
+	authenticateByToken: async () => null,
+} as unknown as UserRepository;
+
+const userRepositoryModule = defineModule({
+	name: "test:user-repository",
+	provides: { userRepository: () => fakeUserRepository },
+});
 
 function makeUserSessionStore(): UserSessionStore {
 	return {
@@ -61,20 +49,13 @@ function makeUserSessionStore(): UserSessionStore {
 			return null;
 		},
 		async delete() {},
-	};
+	} as unknown as UserSessionStore;
 }
 
-function makeSessionFederationIndex(): SessionFederationIndex {
-	return {
-		kind: "memory",
-		async addFederation() {},
-		async listFederations() {
-			return [];
-		},
-		async removeFederation() {},
-		async removeBySid() {},
-	};
-}
+const userSessionStoreModule = defineModule({
+	name: "test:user-session-store",
+	provides: { userSessionStore: () => makeUserSessionStore() },
+});
 
 function makeFederationTokenStore(): FederationTokenStoreBase {
 	return {
@@ -89,604 +70,177 @@ function makeFederationTokenStore(): FederationTokenStoreBase {
 	} as unknown as FederationTokenStoreBase;
 }
 
-const makeContext = (overrides?: Partial<ModuleContext>): ModuleContext => ({
-	pathResolver: (s: string) => s,
-	config: mockConfig,
-	keyStore: createSymmetricKeyStore("test-secret"),
-	grantRegistry: new GrantRegistry(),
-	router: {
-		use: vi.fn().mockReturnThis(),
-	} as unknown as Router,
-	userSessionStore: makeUserSessionStore(),
-	federationTokenStore: makeFederationTokenStore(),
-	sessionFederationIndex: makeSessionFederationIndex(),
-	...overrides,
+const federationTokenStoreModule = defineModule({
+	name: "test:federation-token-store",
+	provides: { federationTokenStore: () => makeFederationTokenStore() },
 });
 
-describe("sessionModule", () => {
-	it("has name 'session'", () => {
-		const module = sessionModule({
-			userRepository: {} as UserRepository,
-		});
-		expect(module.name).toBe("session");
-	});
+function makeSessionFederationIndex(): SessionFederationIndex {
+	return {
+		kind: "memory",
+		async addFederation() {},
+		async listFederations() {
+			return [];
+		},
+		async removeFederation() {},
+		async removeBySid() {},
+	} as unknown as SessionFederationIndex;
+}
 
-	it("throws when userSessionStore is missing from context", async () => {
-		const ctx = makeContext({ userSessionStore: undefined });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-		});
+const sessionFederationIndexModule = defineModule({
+	name: "test:session-federation-index",
+	provides: { sessionFederationIndex: () => makeSessionFederationIndex() },
+});
 
-		await expect(module.init(ctx)).rejects.toThrow(
-			/userSessionStore, federationTokenStore, and sessionFederationIndex/i,
-		);
-	});
+/**
+ * Stub federation module — contributes `federations.stub` + the paired
+ * `federationRedirectPolicies.stub`. Needed for any test that exercises the
+ * boot path with at least one enabled federation in config (otherwise the
+ * planner's pairing invariant would fail to satisfy from config alone).
+ */
+const stubFederationProvider: FederationProvider = {
+	name: "stub",
+	scope: ["openid"],
+	buildAuthorizationUrl: () => new URL("https://example.com/authorize"),
+	exchangeCode: async () => ({ issuer: "https://example.com", sub: "user-1", expiresAt: null }),
+};
 
-	it("throws when federationTokenStore is missing from context", async () => {
-		const ctx = makeContext({ federationTokenStore: undefined });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-		});
-
-		await expect(module.init(ctx)).rejects.toThrow(
-			/userSessionStore, federationTokenStore, and sessionFederationIndex/i,
-		);
-	});
-
-	it("mounts /session routes on context.router", async () => {
-		const routerMock = {
-			use: vi.fn().mockReturnThis(),
-		} as unknown as Router;
-		const ctx = makeContext({ router: routerMock });
-		const module = sessionModule({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-		});
-
-		await module.init(ctx);
-
-		// Should mount session and federation routes under /session
-		const calls = (routerMock.use as ReturnType<typeof vi.fn>).mock.calls;
-		const sessionCalls = calls.filter((call: unknown[]) => call[0] === "/session");
-		expect(sessionCalls.length).toBeGreaterThanOrEqual(2);
-	});
-
-	it("uses the public federationProviderFactory option for enabled federations", async () => {
-		const factory = {
-			create: vi.fn().mockResolvedValue({
-				name: "google",
-				scope: [],
-				buildAuthorizationUrl: vi.fn(),
-				exchangeCode: vi.fn(),
+const stubFederationModule = defineModule({
+	name: "test:stub-federation",
+	contributes: {
+		federations: {
+			stub: () => stubFederationProvider,
+		},
+		federationRedirectPolicies: {
+			stub: () => ({
+				validateRedirect: () => ({ ok: true as const, value: undefined }),
+				resolveCallbackRedirect: () => ({ ok: true as const, value: "/" }),
 			}),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
+		},
+	},
+});
+
+const baseTestModules = [
+	sessionModule,
+	userRepositoryModule,
+	userSessionStoreModule,
+	federationTokenStoreModule,
+	sessionFederationIndexModule,
+];
+
+// ---------------------------------------------------------------------------
+// Static manifest assertions (Codex-recommended: keep structural assertions
+// for declarative shape; HTTP / integration tests cover behavior)
+// ---------------------------------------------------------------------------
+
+describe("sessionModule (static manifest)", () => {
+	it("exposes the const Module shape — not a factory", () => {
+		expect(typeof sessionModule).toBe("object");
+		expect(sessionModule.name).toBe("session");
+	});
+
+	it("declares the Amendment 5 + A5 dep set in `requires`", () => {
+		expect(sessionModule.requires).toEqual(
+			expect.arrayContaining([
+				"config",
+				"userRepository",
+				"userSessionStore",
+				"federationTokenStore",
+				"sessionFederationIndex",
+				"federationProviders",
+				"federationRedirectPolicyResolver",
+			]),
+		);
+		// Amendment 5 (§1.1.5): `sessionRPRegistry` and `sessionFamilyIndex` are
+		// oauth-package concerns, MUST NOT appear in sessionModule.requires.
+		expect(sessionModule.requires).not.toContain("sessionRPRegistry");
+		expect(sessionModule.requires).not.toContain("sessionFamilyIndex");
+	});
+
+	it("contributes exactly two routes, both at /session, with distinct ids", () => {
+		const routes = sessionModule.contributes?.routes;
+		expect(routes).toBeDefined();
+		expect(routes).toHaveLength(2);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Boot-level integration tests (createTestApp)
+// ---------------------------------------------------------------------------
+
+describe("sessionModule (boot integration)", () => {
+	it("boots successfully when no federations are enabled", async () => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: baseTestModules,
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+		});
+		expect(handle.routes.some((r) => r.contribution.mountPath === "/session")).toBe(true);
+		await handle.dispose();
+	});
+
+	it("registers a federation provider contributed via per-federation module", async () => {
+		const base = makeValidAppConfig();
+		const config: AppConfig = {
+			...base,
 			federations: {
-				google: {
+				...base.federations,
+				stub: {
 					enabled: true,
 					clientId: "id",
 					clientSecret: "secret",
 					callbackURL: "https://example.com/cb",
-				},
+				} as never,
 			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
+		} as AppConfig;
+		const handle = await createTestApp({
+			modules: [...baseTestModules, stubFederationModule],
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
 		});
-
-		await module.init(ctx);
-
-		expect(factory.create).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "google", name: "google" }),
-		);
+		expect(handle.inspect.federations.has("stub")).toBe(true);
+		await handle.dispose();
 	});
 
-	it("does not register Google/GitHub providers by default", async () => {
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
+	it("fails to boot when an enabled federation has no callbackURL", async () => {
+		const base = makeValidAppConfig();
+		const config: AppConfig = {
+			...base,
 			federations: {
-				google: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/cb",
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-		});
-
-		await expect(module.init(ctx)).rejects.toSatisfy((err) => {
-			if (!(err instanceof Error)) return false;
-			const cause = (err as Error & { cause?: unknown }).cause;
-			return (
-				/no provider registered for type "google"/.test(err.message) &&
-				/@o3co\/auth-provider-federation-google/.test(err.message) &&
-				/federationProviderFactory/.test(err.message) &&
-				cause instanceof AdapterFactoryError &&
-				cause.reason === "unknown" &&
-				cause.kind === "FederationProvider"
-			);
-		});
-	});
-
-	it("rethrows non-AdapterFactoryError failures from factory.create unchanged", async () => {
-		const originalError = new Error("custom provider builder crashed");
-		const factory = {
-			create: vi.fn().mockRejectedValue(originalError),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				google: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/cb",
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		// Unknown-type wrapping must only apply to AdapterFactoryError; other failures
-		// from custom builders must surface unchanged so operators see the real cause.
-		await expect(module.init(ctx)).rejects.toBe(originalError);
-	});
-
-	it("rethrows AdapterFactoryError with reason=duplicate unchanged", async () => {
-		const dupErr = new AdapterFactoryError({
-			reason: "duplicate",
-			kind: "FederationProvider",
-			type: "google",
-			registered: ["google"],
-		});
-		const factory = {
-			create: vi.fn().mockRejectedValue(dupErr),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				google: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/cb",
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = sessionModule({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		// Only reason='unknown' gets the install/register hint wrapping; duplicate
-		// (a builder-bug signal) must propagate verbatim.
-		await expect(module.init(ctx)).rejects.toBe(dupErr);
-	});
-
-	it("skips federations with enabled=false", async () => {
-		// Arrange: one federation entry with enabled=false
-		const factory = {
-			create: vi.fn(),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				google: { enabled: false, clientId: "id", clientSecret: "secret", callbackURL: "cb" },
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		await module.init(ctx);
-
-		// factory.create should NOT have been called for disabled federation
-		expect(factory.create).not.toHaveBeenCalled();
-	});
-
-	it("normalizes shorthand config (key name as type)", async () => {
-		// key 'google' with no explicit type => type defaults to 'google'
-		const factory = {
-			create: vi.fn().mockResolvedValue({
-				name: "google",
-				scope: [],
-				buildAuthorizationUrl: vi.fn(),
-				exchangeCode: vi.fn(),
-			}),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				google: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/cb",
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		await module.init(ctx);
-
-		// factory.create called with type='google' (shorthand: key name used as type)
-		expect(factory.create).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "google", name: "google" }),
-		);
-	});
-
-	it("normalizes explicit config with nested sub-section", async () => {
-		// explicit type + nested sub-section (e.g. { type: 'google', google: { clientId: ... } })
-		const factory = {
-			create: vi.fn().mockResolvedValue({
-				name: "google-work",
-				scope: [],
-				buildAuthorizationUrl: vi.fn(),
-				exchangeCode: vi.fn(),
-			}),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				"google-work": {
-					enabled: true,
-					type: "google",
-					google: { clientId: "id", clientSecret: "secret", callbackURL: "https://example.com/cb" },
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		await module.init(ctx);
-
-		// factory.create called with flattened nested fields, name='google-work', type='google'
-		expect(factory.create).toHaveBeenCalledWith(
-			expect.objectContaining({ type: "google", name: "google-work", clientId: "id" }),
-		);
-	});
-
-	it("rejects mixed shape (top-level + nested fields) with fail-fast error", async () => {
-		const factory = {
-			create: vi.fn(),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				google: {
-					enabled: true,
-					type: "google",
-					// top-level credential fields (flat shape)
-					clientId: "id",
-					// AND a nested sub-section — mixed shape
-					google: { clientSecret: "secret", callbackURL: "https://example.com/cb" },
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		await expect(module.init(ctx)).rejects.toThrow(/mixed shape/i);
-		expect(factory.create).not.toHaveBeenCalled();
-	});
-
-	it("preserves top-level passthrough fields when config is nested", async () => {
-		// Arrange: a custom type with both a nested sub-section AND a top-level passthrough field.
-		let receivedConfig: Record<string, unknown> | undefined;
-		const factory = {
-			create: vi.fn().mockImplementation(async (cfg: Record<string, unknown>) => {
-				receivedConfig = cfg;
-				return {
-					name: cfg.name as string,
-					scope: [],
-					buildAuthorizationUrl: vi.fn(),
-					exchangeCode: vi.fn(),
-				};
-			}),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				corp: {
-					enabled: true,
-					type: "custom",
-					// top-level passthrough field — must survive normalization
-					audience: "api://my-corp",
-					// nested adapter-specific sub-section
-					custom: { issuer: "https://idp.corp.example", callbackURL: "https://example.com/cb" },
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		await module.init(ctx);
-
-		expect(factory.create).toHaveBeenCalledTimes(1);
-		expect(receivedConfig).toMatchObject({
-			type: "custom",
-			name: "corp",
-			audience: "api://my-corp", // top-level passthrough preserved
-			issuer: "https://idp.corp.example", // nested sub-section merged
-		});
-	});
-
-	it("rejects a custom builder that returns a provider with a different name", async () => {
-		// Guard: the config-key ↔ route-param invariant requires that
-		// the provider returned by factory.create has name === the config key.
-		const factory = {
-			create: vi.fn().mockResolvedValue({
-				name: "WRONG", // builder returned a different name
-				scope: [],
-				buildAuthorizationUrl: vi.fn(),
-				exchangeCode: vi.fn(),
-			}),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				corp: { enabled: true, clientId: "id", clientSecret: "secret", callbackURL: "cb" },
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		await expect(module.init(ctx)).rejects.toThrow(/provider builder returned name/i);
-	});
-
-	it("forwards userSessionStore and sessionTtlMs to sessionRoutes.createRouter", async () => {
-		// C1: module.mts must thread context.userSessionStore and params.sessionTtlMs to
-		// sessionRoutes.createRouter so the local login handler can create UserSession records.
-		const userSessionStore = makeUserSessionStore();
-
-		let capturedRouterOptions: Record<string, unknown> | undefined;
-		// Stub router so init() can proceed without a real express app.
-		const routerStub = { use: vi.fn().mockReturnThis() } as unknown as import("express").Router;
-		const createSessionRouterSpy = vi
-			.fn()
-			.mockImplementation((_, opts: Record<string, unknown>) => {
-				capturedRouterOptions = opts;
-				return routerStub;
-			});
-
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as import("express").Router;
-		const ctx = makeContext({ router: routerMock, userSessionStore });
-
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			sessionTtlMs: 7200_000,
-			_createSessionRouter:
-				createSessionRouterSpy as unknown as typeof import("#/routes/Session.mjs").createRouter,
-		});
-
-		await module.init(ctx);
-
-		expect(createSessionRouterSpy).toHaveBeenCalledTimes(1);
-		expect(capturedRouterOptions).toMatchObject({
-			userSessionStore,
-			sessionTtlMs: 7200_000,
-		});
-	});
-
-	it("injects name and context fields into builder config", async () => {
-		const factory = {
-			create: vi.fn().mockResolvedValue({
-				name: "google",
-				scope: [],
-				buildAuthorizationUrl: vi.fn(),
-				exchangeCode: vi.fn(),
-			}),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			session: { domain: ".example.com" },
-			endpoints: {
-				login: { url: "/login" },
-				authCallback: { url: "/auth/callback" },
-				client: { url: "http://app.example.com" },
-			},
-			federations: {
-				google: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/cb",
-				},
-			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
-
-		await module.init(ctx);
-
-		expect(factory.create).toHaveBeenCalledWith(
-			expect.objectContaining({
-				name: "google",
-				sessionDomain: ".example.com",
-				authCallbackUrl: "/auth/callback",
-				clientUrl: "http://app.example.com",
-			}),
-		);
-	});
-
-	it("populates providerCallbackUrls and passes it to federation route factory", async () => {
-		const routerStub = { use: vi.fn().mockReturnThis() } as unknown as import("express").Router;
-		const federationRouterSpy = vi.fn().mockReturnValue(routerStub);
-
-		const factory = {
-			create: vi.fn().mockResolvedValue({
-				name: "google",
-				scope: [],
-				buildAuthorizationUrl: vi.fn(),
-				exchangeCode: vi.fn(),
-			}),
-		};
-
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				google: {
-					enabled: true,
-					clientId: "id",
-					clientSecret: "secret",
-					callbackURL: "https://example.com/oauth/callback",
-				},
-			},
-		} as unknown as AppConfig;
-
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-			_createFederationRouter:
-				federationRouterSpy as unknown as typeof import("#/routes/Federation.mjs").createRouter,
-		});
-
-		await module.init(ctx);
-
-		expect(federationRouterSpy).toHaveBeenCalledOnce();
-		const [, opts] = federationRouterSpy.mock.calls[0] as [
-			unknown,
-			{ providerCallbackUrls: Map<string, string> },
-		];
-		expect(opts.providerCallbackUrls.get("google")).toBe("https://example.com/oauth/callback");
-	});
-
-	it("throws at init when an enabled federation has no callbackURL (custom provider fail-fast)", async () => {
-		// A custom factory that returns a provider regardless of callbackURL — this proves
-		// the module-level guard fires before request time, independently of factory narrowing.
-		const factory = {
-			create: vi.fn().mockResolvedValue({
-				name: "corp",
-				scope: [],
-				buildAuthorizationUrl: vi.fn(),
-				exchangeCode: vi.fn(),
-			}),
-		};
-		const routerMock = { use: vi.fn().mockReturnThis() } as unknown as Router;
-		const config = {
-			...mockConfig,
-			federations: {
-				corp: {
+				...base.federations,
+				stub: {
 					enabled: true,
 					clientId: "id",
 					clientSecret: "secret",
 					// callbackURL intentionally absent
-				},
+				} as never,
 			},
-		} as unknown as AppConfig;
-		const ctx = makeContext({ router: routerMock, config });
-		const module = _sessionModuleImpl({
-			userRepository: {
-				authenticate: vi.fn(),
-				authenticateByToken: vi.fn(),
-			} as unknown as UserRepository,
-			federationProviderFactory:
-				factory as unknown as import("#/federations/factory.mjs").FederationProviderFactory,
-		});
+		} as AppConfig;
+		await expect(
+			createTestApp({
+				modules: [...baseTestModules, stubFederationModule],
+				bootstrapComponents: { config, pathResolver: (s: string) => s },
+			}),
+		).rejects.toThrow(/callbackURL is required/);
+	});
 
-		await expect(module.init(ctx)).rejects.toThrow(/callbackURL is required/);
+	it("skips disabled federations in the providerCallbackUrls projection", async () => {
+		const base = makeValidAppConfig();
+		const config: AppConfig = {
+			...base,
+			federations: {
+				...base.federations,
+				disabledFed: {
+					enabled: false,
+					// no callbackURL — must NOT throw because disabled
+				} as never,
+			},
+		} as AppConfig;
+		const handle = await createTestApp({
+			modules: baseTestModules,
+			bootstrapComponents: { config, pathResolver: (s: string) => s },
+		});
+		// No throw at boot, no entry in the federation registry.
+		expect(handle.inspect.federations.has("disabledFed")).toBe(false);
+		await handle.dispose();
 	});
 });

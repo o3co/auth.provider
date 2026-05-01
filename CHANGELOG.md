@@ -14,26 +14,152 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   build a schema-valid config baseline without re-implementing it. The
   subpath is consumer-test-only — production runtime code MUST NOT
   import from it.
-- `@o3co/auth-provider-federation-google` package with `createGoogleProvider()` and `registerGoogleFederation(factory)`.
-- `@o3co/auth-provider-federation-github` package with `createGithubProvider()` and `registerGithubFederation(factory)`.
-- `sessionModule({ federationProviderFactory })` option for composition roots that explicitly register federation provider packages.
+- **Typed ComponentMap slots** for the standard core components.
+  Modules now declare `requires: ["..."]` against typed slots, and the
+  DI graph types `deps.<slot>` accordingly. The Phase 9 augmentation
+  added the following `declare module "@o3co/auth-provider-core"`
+  blocks (each colocated next to its base type):
+  - `keyStore: KeyStore` (required)
+  - `clientRepository: ClientRepository` (required)
+  - `userRepository: UserRepository` (required)
+  - `codeRepository: CodeRepository` (required)
+  - `auditSink?: AuditSinkBase` (optional)
+  - `rateLimiter?: RateLimiterBase` (optional)
+  - `federationTokenStore?: FederationTokenStoreBase` (optional)
+  - `grantPolicy?: GrantPolicyHookBase` (optional)
+  - `refreshTokenStore?: RefreshTokenStoreBase` (optional, transitional —
+    see issue #101 for the migration to the A3 family triple).
+  Consumer modules can list these in their `requires` / `optional`
+  arrays without redeclaring the slot type.
+- **Boot validator: CP-20 grantPolicy / jwt.issuer invariant** restored
+  at validate-manifests step 13.5. When `grantPolicy` is wired through
+  any of the three supported component sources — module `provides`,
+  `bootstrapComponents`, or `overrideComponents` — `config.oauth.jwt.issuer`
+  must be a non-empty string; otherwise `BootError` is thrown with reason
+  `grant-policy-without-issuer`. Mirrors the v0.4.x guard removed when
+  the legacy `createApp` body was deleted in commit fd22577e. Other
+  v0.4.x guards (MFA partial-wiring, TODO-F-1 federation+stores) are
+  tracked in #101 as follow-ups; the v0.4.x A4 four-store invariant is
+  intentionally retired in v0.5.0 because the four user-session slots
+  are now split across packages (`sessionModule` consumes 2, `oauthModule`
+  consumes 2) and step 4 (`checkRequiresClosure`) enforces per-module
+  wiring.
+- `templates/standalone/src/buildModules.mts` — composition-root helper
+  that gates federation modules on `config.federations.<name>.enabled`
+  and accepts `BuildModulesOverrides` for tests. Replaces the inline
+  module list in `app.mts`.
+- `@o3co/auth-provider-federation-google` package with `createGoogleProvider()` and the const `googleFederationModule` that contributes `federations.google` + `federationRedirectPolicies.google` via the typed `googleFederationConfig` ComponentMap slot (per A5 §10.1).
+- `@o3co/auth-provider-federation-github` package with `createGithubProvider()` and the const `githubFederationModule` (symmetric to Google).
+- `extractFederationSection(federations, name)` exported from `@o3co/auth-provider-session` — pure utility that normalizes flat / nested / shorthand federation config slices for use by per-federation config-bridge modules.
 - `validateRedirect` and `resolveCallbackRedirect` exports from `@o3co/auth-provider-session` for provider package implementations. (`codeChallenge` was already exported since v0.4.0.)
 - `@o3co/create-auth-provider` scoped scaffolder package. Replaces the unscoped `create-o3co-auth-provider` so the scaffolder lives under the `@o3co` npm org alongside the runtime packages. Consumers should switch to `npx @o3co/create-auth-provider my-auth-app`. The old `create-o3co-auth-provider` package on npm is deprecated.
 
 ### Changed
 
-- **Breaking**: Google and GitHub federation providers are no longer bundled in `@o3co/auth-provider-session`. Consumers must install provider packages, register them with `createFederationProviderFactory()`, and pass the factory to `sessionModule`.
+- **Breaking**: `sessionModule` is now a const Module value rather than a factory function. Callers `import { sessionModule } from "@o3co/auth-provider-session"` and add it directly to the manifest list passed to `createApp({ modules: [...] })` — no factory call. Per-federation modules (e.g. `googleFederationModule`, `githubFederationModule`) are added alongside.
+- **Breaking**: Google and GitHub federation providers are no longer bundled in `@o3co/auth-provider-session`. Consumers install the per-federation packages and add their const Modules (`googleFederationModule` / `githubFederationModule`) to the manifest, plus a small config-bridge module that supplies the typed `googleFederationConfig` / `githubFederationConfig` ComponentMap slot from `config.federations.<name>` via `extractFederationSection`.
 - `templates/standalone` registers `@o3co/auth-provider-federation-google` explicitly for the default Google federation config.
 - Scaffolder CLI renamed from `create-o3co-auth-provider` to `@o3co/create-auth-provider` (scoped). The `bin` entry is now `create-auth-provider`.
 
 ### Removed
 
+- **Breaking**: The Route 1 federation factory surface is fully removed (issue #98). `createFederationProviderFactory()`, the `FederationProviderFactory` type, `registerGoogleFederation()`, `registerGithubFederation()`, `narrowGoogleConfig()`, `narrowGithubConfig()`, and `sessionModule({ federationProviderFactory })` are all deleted. Custom federations now extend via per-federation `defineModule(...)` (see `@o3co/auth-provider-federation-google` for the reference pattern).
 - **Breaking**: `registerBuiltinFederations`, `createGoogleProvider`, and `createGithubProvider` are removed from `@o3co/auth-provider-session`.
 - `openid-client` is no longer a runtime dependency of `@o3co/auth-provider-session`; it belongs to the concrete provider packages.
 - **Breaking**: `@o3co/auth-provider-did` package. The DID authentication grant is no longer part of this project. The package is no longer maintained here.
+- **Breaking**: `LegacyModule` and `ModuleContext` types are removed from `@o3co/auth-provider-core`. v0.4.x modules (functions returning `{ name, init(context) }`) must be rewritten as v0.5.0 manifests authored via `defineModule({...})` per A2-α §3 and migrated to use typed `ProviderDeps` instead of `ModuleContext`. `PathResolver` and `FederationProviderHandle` remain — `PathResolver` is the type for `bootstrapComponents.pathResolver`; `FederationProviderHandle` is the structural narrowing of the `federationProviders` synthetic key for core-adjacent route consumers.
+
+### Fixed
+
+- `oauthAuthorizationModule` now declares `refreshTokenStore` and
+  `grantPolicy` in `optional`. Without them the boot planner dropped
+  the components at the contribution-factory boundary, so refresh-
+  token rotation persistence (`createRefreshTokenGrant`) and CP-18
+  fail-closed grantPolicy enforcement were silently dead in v0.5.0
+  consumers that wired either component.
+- `tokenExchangeModule` now declares `refreshTokenStore` and
+  `grantPolicy` in `optional`. Without `refreshTokenStore` the
+  family-revocation path in the token-exchange grant and the built-in
+  self-issued validator could not observe revocations even when a
+  composition root provided the store, breaking RFC 8693 §7.2 state-1
+  expectations. Without `grantPolicy` the token-exchange grant sat
+  outside CP-18 fail-closed enforcement while sibling OAuth grants
+  (auth-code, refresh-token) were gated — a structural inconsistency
+  in policy coverage.
+- `oauthModule`'s OIDC discovery contribution mounts the router at
+  `/` instead of `/.well-known/openid-configuration`. The discovery
+  router itself registers the spec-fixed absolute path, so the prior
+  combination produced the double-pathed handler
+  `/.well-known/openid-configuration/.well-known/openid-configuration`
+  and returned 404 on standard discovery requests.
+- `templates/standalone` now boots under the default
+  `federations.google.enabled = false` config. The composition root
+  gates `googleFederationModule` and `googleFederationConfigModule`
+  on the enabled flag via the new `buildModules` helper; previously
+  both were unconditionally included and the config-bridge module
+  threw at boot when the section was absent or disabled.
+- **Breaking (type-level)**: `refreshTokenStore` and `grantPolicy`
+  ComponentMap slots are now declared `readonly … ?:` instead of
+  `readonly …` to match their always-optional consumption contract.
+  Both have always been optional at runtime — the prior non-optional
+  declaration lied about the contract and would have surfaced a
+  typecheck failure for any module that declared them in `optional`.
+  External consumers who wrote `deps.refreshTokenStore.rotate(...)`
+  without a guard need to add `if (deps.refreshTokenStore)` (or a
+  non-null assertion) at the call site. v0.5.0 is breaking, so this
+  semver-fits, but the user-visible surface narrows.
+
+### Boot lifecycle
+
+- **Recommended graceful-shutdown shape moves from `grantRegistry.cleanup()`
+  to `handle.dispose()`.** The v0.4.x bridge
+  `gracefulShutdown(server, () => grantRegistry.cleanup())` becomes
+  `gracefulShutdown(server, () => handle.dispose())`, where `handle` is the
+  awaited result of `createApp(...)`. `AppHandle.dispose()` runs
+  per-component `lifecycle[K].cleanup` callbacks in reverse-topological
+  order per A2-β §8.1. `GrantRegistry.cleanup()` itself remains in this
+  release for backwards compatibility (it still iterates registered grants
+  and calls each handler's optional `cleanup()`); a follow-up minor will
+  remove it once all consumers and templates migrate to
+  `handle.dispose()`.
+
+- Per-contribution-kind disposal hooks (e.g. for grants holding owned
+  resources) are NOT structurally supported by the new boot planner in
+  v0.5.0. The `GrantHandler.cleanup` field on the type continues to be
+  invoked by the legacy `GrantRegistry.cleanup()` path described above,
+  but no v0.5.0 built-in grant declares it. A future minor (or A2-β
+  reopening) may add per-contribution-kind disposal at the collector
+  level — see A2-γ §5.3 for the structural-gap discussion.
 
 ### Breaking Changes
 
+- **`createSelfIssuedAccessTokenValidator({ issuer })` requires a non-empty
+  string `issuer`.** The `issuer` field on
+  `CreateSelfIssuedAccessTokenValidatorOptions`
+  (`@o3co/auth-provider-oauth-token-exchange`) is no longer optional.
+  Constructing the validator with `undefined` or `""` now throws
+  synchronously. Without an issuer, any `access_token`-typed JWT signed by
+  the same KeyStore could pass validation, opening a token-type confusion
+  vector (Copilot review on PR #100, Critical). Callers either pass
+  `issuer` directly or rely on `tokenExchangeModule`'s `configSchema`
+  which enforces `config.oauth.jwt.issuer: z.string().min(1)` at boot
+  (intersected over `CoreConfigSchema`'s optional issuer via
+  `composeConfigSchema`). External consumers who imported the validator
+  factory directly need to start passing `issuer` (or migrate to consume
+  `tokenExchangeModule` which wires it from config).
+- **`oauthModule.configSchema` requires a non-empty
+  `config.endpoints.login.url`.** The `/oauth/authorize` route reads
+  `config.endpoints.login.url` unconditionally to redirect unauthenticated
+  requests. The base `endpoints.login.url` is `z.string().optional()` in
+  `CoreConfigSchema` (production defaults are supplied via HOCON env-var
+  substitution `${?ENDPOINTS_LOGIN_URL}`); without
+  `oauthModule.configSchema` tightening this to `z.string().min(1)`, a
+  config that omits the env var booted cleanly and produced
+  `undefined?redirect_to=...` redirects at request time. Boot now fails
+  fast with `BootError(reason: "config-validation-failed")` when the
+  field is missing or empty. Set `ENDPOINTS_LOGIN_URL` in production
+  env, or pass `endpoints.login.url` explicitly in non-HOCON consumer
+  configs (multi-agent review round 2 — Claude + Codex converged).
 - **Config schema is strict; defaults live exclusively in HOCON.**
   `application.schema.mts` no longer carries `.default(X)` for fields
   that hocon already supplies. Operators see the same effective

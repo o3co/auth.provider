@@ -17,7 +17,7 @@
 /**
  * End-to-end boot integration test for `githubFederationModule` (Cl-M2).
  *
- * Boots the const-Module through `createBootApp` together with a small
+ * Boots the const-Module through `createApp` together with a small
  * bootstrap module that supplies `githubFederationConfig`, and asserts the
  * pairing invariant materialises both contributions in `handle.components`:
  *
@@ -33,7 +33,7 @@
  *
  * Per A5 §10.1 + Cl-M2.
  */
-import { createBootApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import type { FederationProvider, FederationRedirectPolicy } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
@@ -83,7 +83,7 @@ const activatorModule = defineModule({
 
 describe("githubFederationModule boot integration (Cl-M2)", () => {
 	it("boots end-to-end and materialises both federations.github and federationRedirectPolicies.github", async () => {
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [githubFederationModule, configBootstrapModule, activatorModule],
 			bootstrapComponents: minBoot,
 		});

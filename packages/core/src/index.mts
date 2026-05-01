@@ -22,8 +22,9 @@ export {
 	type BuilderContext,
 	createAdapterFactory,
 } from "./adapters/AdapterFactory.mjs";
-// App factory (legacy — v0.4.x createApp; stays until Phase 9 / A2-γ migration)
-export { type AppOptions, type AppResult, createApp } from "./app.mjs";
+// App factory — v0.5.0 boot planner. Re-exports from ./boot/index.mjs through
+// ./app.mjs for backwards-compatible import-path stability.
+export { createApp } from "./app.mjs";
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,
@@ -68,13 +69,8 @@ export type {
 	SyntheticKeyCollisionDetails,
 	UnknownContributionKindDetails,
 } from "./boot/index.mjs";
-// Boot planner — v0.5.0 createApp + AppHandle + BootError catalogue
-// `createBootApp` is a temporary alias; Phase 9 drops the alias and the legacy
-// createApp above, leaving a single `createApp` export from ./boot/index.mjs.
-export {
-	BootError,
-	createApp as createBootApp,
-} from "./boot/index.mjs";
+// Boot planner — BootError catalogue. `createApp` is exported above (via app.mjs).
+export { BootError } from "./boot/index.mjs";
 // Configuration
 export {
 	type AppConfig,
@@ -172,10 +168,10 @@ export type {
 	SupportsRevocation,
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
-// Module system — v0.5.0 manifest types + legacy types for migration.
-// LegacyModule is the deprecated v0.4.x shape (init callback); will be
-// removed in Phase 9 (A2-γ caller migration). New code uses Module
-// (= v0.5.0 manifest type from defineModule()).
+// Module system — v0.5.0 manifest types. The v0.4.x `LegacyModule` /
+// `ModuleContext` interfaces were deleted in Phase 9 (A2-γ caller migration);
+// authoring code uses `Module` and `defineModule()` from
+// `@o3co/auth-provider-core/modules/manifest`.
 export type {
 	AuditHook,
 	AuditHookFactory,
@@ -193,14 +189,12 @@ export type {
 	// @o3co/auth-provider-core/modules/manifest directly.
 	GrantHandlerResolver,
 	GrantPolicyHook,
-	LegacyModule,
 	// GrantPolicyHookFactory: excluded — name collides with legacy
 	// ./policy/types.mjs export at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
 	MfaFactor,
 	MfaFactorFactory,
 	Module,
-	ModuleContext,
 	ModuleSpec,
 	PathResolver,
 	Provider,

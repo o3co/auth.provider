@@ -170,21 +170,41 @@ make test
 
 ## カスタムモジュールの追加
 
-カスタムモジュールを追加するには、`src/app.mts` でインポートし、`createApp` に渡す `modules` 配列に追加します。
+カスタムモジュールを追加するには、`src/buildModules.mts` でインポートし、`createApp` に渡す `modules` 配列に追加します。
 
 ```typescript
+// src/buildModules.mts
 import { myCustomModule } from "./modules/my-custom-module.mjs";
 
-const { init, router, grantRegistry } = createApp(express, {
-  // ...
-  modules: [
-    oauthModule({ clientRepository, codeRepository, express }),
-    sessionModule({ userRepository, express }),
-    oauthSessionModule({ clientRepository }),
-    oauthAuthorizationModule({ codeRepository }),
+export function buildModules(config: AppConfig, overrides: BuildModulesOverrides = {}): Module[] {
+  const googleEnabled =
+    (config.federations?.google as { enabled?: boolean } | undefined)?.enabled === true;
+
+  return [
+    oauthModule({ config }),
+    oauthSessionModule({ config }),
+    oauthAuthorizationModule({ config }),
+    sessionModule,
+    ...(googleEnabled ? [googleFederationModule, googleFederationConfigModule] : []),
     myCustomModule, // ここに追加
-  ],
+    overrides.keyStoreModule ?? keyStoreModule,
+    overrides.repositoriesModule ?? repositoriesModule,
+    overrides.storesModule ?? storesModule,
+  ];
+}
+
+// src/app.mts
+const handle = await createApp({
+  modules: buildModules(config),
+  bootstrapComponents: {
+    config,
+    pathResolver: import.meta.resolve,
+  },
 });
+
+app.use(handle.router);
+const server = app.listen(config.http.port);
+gracefulShutdown(server, () => handle.dispose());
 ```
 
 ## npm スクリプト

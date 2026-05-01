@@ -2,7 +2,7 @@
 
 [auth.provider](../../README.md) 向けセッション・フェデレーションルートモジュール。
 
-ユーザー名/パスワードログイン、ログアウト、`FederationProviderFactory` に登録されたプロバイダー向けの OAuth 2.0 フェデレーションを担当する。内部的には RFC 6749 認可コードフローを使用する。Google / GitHub などの具体プロバイダーは別パッケージに分離されている。
+ユーザー名/パスワードログイン、ログアウト、OAuth 2.0 フェデレーションを担当する。Google / GitHub などの具体プロバイダーは別パッケージに分離されており、各プロバイダーパッケージが per-federation な `defineModule(...)` で `FederationProvider` を contribute するモデルになっている（[`@o3co/auth-provider-federation-google`](../federation-google/README.md) / [`@o3co/auth-provider-federation-github`](../federation-github/README.md) を参照）。内部的には RFC 6749 認可コードフローを使用する。
 
 ## インストール
 
@@ -28,16 +28,12 @@ express@^5.0.0
 ### `sessionModule`
 
 ```typescript
-function sessionModule(params: {
-  userRepository: UserRepository;
-  express?: ExpressLike;
-  federationProviderFactory?: FederationProviderFactory;
-}): Module;
+import { sessionModule } from "@o3co/auth-provider-session";
+// → sessionModule は const Module（manifest）であり、factory 関数ではない。
+// createApp / createTestApp の modules リストに直接渡す。
 ```
 
-トップレベルのモジュール。セッションおよびフェデレーションルートを Express アプリにマウントする。
-
-マウントされるルート:
+const Module。`/session` 配下に 2 つの route bundle を contribute する:
 
 | メソッド | パス | 説明 |
 | --- | --- | --- |
@@ -48,15 +44,20 @@ function sessionModule(params: {
 
 `:name` パスパラメーターは `config.federations` のキー（例: `google`、`github`、`google-work`）に対応する。未知の名前は `404` を返す。
 
+`requires`: `userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`（兄弟ストア）、加えて per-federation modules が contribute する内容を boot planner が集約する synthetic key `federationProviders` と `federationRedirectPolicyResolver`。フェデレーションモジュールの実装例は [`@o3co/auth-provider-federation-google`](../federation-google/README.md) を参照。
+
 ---
 
-### `createFederationProviderFactory`
+### `extractFederationSection`
 
 ```typescript
-function createFederationProviderFactory(): FederationProviderFactory;
+function extractFederationSection(
+  federations: Record<string, unknown>,
+  name: string,
+): { type: string; [key: string]: unknown } | undefined;
 ```
 
-プロバイダータイプが未登録の空の `FederationProviderFactory`（`AdapterFactory<FederationProvider>`）を返す。具体プロバイダーパッケージをインストールして composition root で登録し、その factory を `sessionModule` に渡す。
+純粋関数のユーティリティ。フェデレーション設定スライスを fla 形（`{ enabled, clientId, callbackURL }`）／nested 形（`{ enabled, type, [type]: {...} }`）／shorthand（key を type として扱う）の各形状から、フラットな credential オブジェクトに正規化する。mixed 形（top-level credential と nested sub-section の両方が存在）はエラー。エントリーが無い場合や `enabled !== true` の場合は `undefined` を返す。per-federation module が自分の config スライスを読むときに使う。
 
 ---
 
@@ -78,20 +79,17 @@ interface FederationProvider {
     readonly codeVerifier: string;
     readonly redirectUri: string;
   }): Promise<FederationProfile>;
-
-  validateRedirect(url: string): FederationResult<void>;
-  resolveCallbackRedirect(session: { redirectTo?: string }): FederationResult<string>;
 }
 ```
 
-カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。IdP が end-session endpoint を公開している場合は `SupportsLogout` を mix-in できる。
+カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。`SupportsLogout` / `SupportsClaimMapping` / `SupportsRefresh` を必要に応じて mix-in できる。
 
 - `name` — プロバイダーの一意な識別子。`federationProviders` の Map キーとルートの `:name` パラメーターに対応する。
 - `scope` — OAuth 2.0 スコープ。
 - `buildAuthorizationUrl` — RFC 6749 §4.1 + RFC 7636 の認可 URL を構築する。`codeVerifier` はルート層が生成して渡す。`code_challenge` の計算には `codeChallenge(codeVerifier)` を使うこと。
 - `exchangeCode` — 認可コードを `FederationProfile` に交換する。`issuer` と `sub` は必須。
-- `validateRedirect` — フェデレーションフロー開始前にリダイレクト URL を検証する。
-- `resolveCallbackRedirect` — コールバック後のリダイレクト先をセッションから解決する。
+
+> **Note (A5 split, v0.5.0):** リダイレクト URL のハンドリング（`validateRedirect` / `resolveCallbackRedirect`）は `FederationProvider` から外され、専用の `FederationRedirectPolicy` capability に分離された。per-federation module は `federationRedirectPolicies.<name>` で policy を contribute する。built-in は `createDefaultFederationRedirectPolicy(...)` を使う。カスタム provider は `FederationProvider` 上にこれらのメソッドを実装しない。
 
 ---
 
@@ -138,8 +136,6 @@ function createMyIdPProvider(): FederationProvider & SupportsLogout {
     scope: ["openid"],
     buildAuthorizationUrl({ redirectUri, state, codeVerifier }) { /* ... */ },
     async exchangeCode({ code, codeVerifier, redirectUri }) { /* ... */ },
-    validateRedirect(url) { /* ... */ },
-    resolveCallbackRedirect(session) { /* ... */ },
     async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
       const url = new URL("https://myidp.example/oidc/logout");
       if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
@@ -267,16 +263,6 @@ if (supportsRefresh(provider)) {
 
 ---
 
-### `FederationProviderFactory` (type)
-
-```typescript
-type FederationProviderFactory = AdapterFactory<FederationProvider>;
-```
-
-`AdapterFactory<FederationProvider>` の型エイリアス。`factory.register(type, builder)` でカスタムプロバイダータイプを登録できる。
-
----
-
 ### `FederationResult<T>` (type)
 
 ```typescript
@@ -292,31 +278,25 @@ type FederationResult<T> =
 ### 基本的な使い方
 
 ```typescript
-import express from "express";
 import { createApp } from "@o3co/auth-provider-core";
-import {
-  createFederationProviderFactory,
-  sessionModule,
-} from "@o3co/auth-provider-session";
-import { registerGoogleFederation } from "@o3co/auth-provider-federation-google";
+import { sessionModule } from "@o3co/auth-provider-session";
+import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 
-const federationProviderFactory = createFederationProviderFactory();
-registerGoogleFederation(federationProviderFactory);
-
-const app = createApp(express, {
-  config,
-  keyStore,
+const handle = await createApp({
   modules: [
-    sessionModule({
-      userRepository,
-      federationProviderFactory,
-    }),
+    sessionModule,                 // const — factory 呼び出しなし
+    googleFederationModule,        // federations.google + federationRedirectPolicies.google を contribute する
+    // ... composition root の userRepository や 4 ストア分割を供給するモジュール群
   ],
+  bootstrapComponents: { config, pathResolver },
 });
-await app.init();
 ```
 
-`sessionModule` は composition root から渡された factory を使って `config.federations` のプロバイダーを生成する。設定で有効なタイプが未登録の場合は起動時に fail-fast する。
+boot planner が per-federation modules の `federations.<name>` と `federationRedirectPolicies.<name>` の contribution を集約し、synthetic な `federationProviders` と `federationRedirectPolicyResolver` ComponentMap エントリーを構築する。`sessionModule` のフェデレーションルートはこれらを消費する。
+
+planner が enforce する pairing 不変条件は **contribution kind 同士** に対するもの: contribute された `federations.<name>` には対になる `federationRedirectPolicies.<name>` が必須（逆も同様）であり、欠ける場合は `BootError({ reason: "federation-redirect-policy-unpaired" })` で boot 失敗する。
+
+planner は `config.federations` と contribution の cross-check は行わない — config で有効化されている federation に対応する provider pair を contribute するモジュールが無い場合でも boot は成功し、`/session/oauth/federation/:name` がリクエスト時に `404` を返す。設定ミスを fail-fast にしたい composition root は、対応する per-federation module（あるいは federation slice が enabled だが provider package 未インストールの場合に throw する config-bootstrap module）を追加すること。なお `sessionModule` は config 由来の不変条件を boot 時に 1 つだけ enforce する: `config.federations` で enabled になっている federation はすべて `callbackURL` を宣言する必要があり、欠ける場合は boot 失敗する（v0.4.x が `init()` で enforce していた fail-fast 不変条件と同じ）。
 
 ### HOCON フェデレーション設定
 
@@ -370,64 +350,37 @@ federations {
 
 ### カスタムフェデレーションプロバイダー
 
+カスタムフェデレーションは per-federation な `defineModule(...)` を書いて、`federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>`（redirect policy）の両方を contribute する。型付き ComponentMap config slot を伴う const-Module パターンが推奨形 — 実装例として [`@o3co/auth-provider-federation-google` の `google.mts`](../federation-google/src/google.mts) を参照。最小スケッチ:
+
 ```typescript
+import { defineModule } from "@o3co/auth-provider-core";
 import {
   codeChallenge,
-  createFederationProviderFactory,
+  createDefaultFederationRedirectPolicy,
   type FederationProvider,
-  type FederationProviderFactory,
 } from "@o3co/auth-provider-session";
 
-const factory = createFederationProviderFactory();
-
-// カスタムプロバイダータイプを登録
-factory.register("microsoft", async (config) => {
-  // FederationProvider を構築して返す
-  return {
-    name: config.name as string,
-    scope: ["openid", "profile", "email"],
-    buildAuthorizationUrl({ redirectUri, state, codeVerifier }) {
-      const url = new URL("https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
-      url.searchParams.set("response_type", "code");
-      url.searchParams.set("client_id", config.clientId as string);
-      url.searchParams.set("redirect_uri", redirectUri);
-      url.searchParams.set("state", state);
-      url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
-      url.searchParams.set("code_challenge_method", "S256");
-      url.searchParams.set("scope", "openid profile email");
-      return url;
-    },
-    async exchangeCode({ code, codeVerifier, redirectUri }) {
-      // トークンエンドポイントへ POST + 必要に応じて userinfo を取得し、FederationProfile に正規化する
-      return { issuer: "https://login.microsoftonline.com/common/v2.0", sub: userId, email, accessToken, expiresAt };
-    },
-    validateRedirect: (url) => ({ ok: true, value: undefined }),
-    resolveCallbackRedirect: (session) => ({ ok: true, value: session.redirectTo ?? "/" }),
-  };
-});
-
-// config からプロバイダー Map を構築 — module.mts の正規化ロジックを反映
-const federationProviders = new Map<string, FederationProvider>();
-for (const [name, section] of Object.entries(config.federations)) {
-  if (!section.enabled) continue;
-
-  const type = (typeof section.type === "string" ? section.type : undefined) ?? name;
-  const subSection = (section as Record<string, unknown>)[type];
-  const isNested =
-    typeof subSection === "object" && subSection !== null && !Array.isArray(subSection);
-
-  const rawBuilderConfig = isNested
-    ? (() => {
-        const { enabled: _e, type: _t, [type]: _sub, ...topLevel } = section as Record<string, unknown>;
-        return { type, ...topLevel, ...(subSection as Record<string, unknown>) };
-      })()
-    : { type, ...(section as Record<string, unknown>) };
-
-  const { enabled: _e2, type: _t2, ...flatConfig } = rawBuilderConfig as Record<string, unknown>;
-  const provider = await factory.create({ type, name, ...flatConfig });
-  federationProviders.set(name, provider);
+declare module "@o3co/auth-provider-core" {
+  interface ComponentMap {
+    readonly microsoftFederationConfig?: { clientId: string; callbackURL: string };
+  }
 }
+
+export const microsoftFederationModule = defineModule({
+  name: "federation:microsoft",
+  requires: ["microsoftFederationConfig"] as const,
+  contributes: {
+    federations: {
+      microsoft: (deps) => buildMicrosoftProvider(deps.microsoftFederationConfig),
+    },
+    federationRedirectPolicies: {
+      microsoft: (deps) => createDefaultFederationRedirectPolicy(deps.microsoftFederationConfig),
+    },
+  },
+});
 ```
+
+composition root は、`extractFederationSection(config.federations, "microsoft")` を実行して credentials を抽出し、`microsoftFederationConfig` 型 slot に流し込む小さな config-bootstrap module を用意する。`sessionModule` のフェデレーションルートは集約された `federationProviders` map を消費し、`:name` でルーティングする。
 
 ## TODO-F-3 の変更点
 
@@ -444,7 +397,7 @@ v0.4.0 ではこのパッケージから passport を直接依存として削除
 3. **`FederationProfile.raw` を削除。** OIDC 標準クレームがファーストクラスフィールドになった（`sub`、`email`、`emailVerified`、`name`、`picture`、`accessToken`、`refreshToken`、`idToken`、`expiresAt`）。プロバイダー固有クレーム（Google の `hd`、Microsoft の `tid` など）はインデックスシグネチャ `[key: string]: unknown` で伝達される。
 4. **`FederationProfile.id` → `sub` へリネーム、`expiresIn: number` → `expiresAt: Date | null`（必須）に変更。** adapter は明示的に判断する必要がある — プロバイダーが有限の expiry を発行する場合は `Date`、発行しない場合（GitHub OAuth Apps の classic token 等）は `null` を返す。route 層は fallback expiry を勝手に発明しなくなった — `null` は「refresh せず、プロバイダーが invalidate するまで reuse」を意味する。`FederationTokenStore` 側の `FederationTokens.expiresAt` も同じ契約に従う。
 5. **`createPassport()` と `SetupPassportContext` をパブリック API から削除。** 状態（CSRF）と PKCE はルート層が内部で管理する。プロバイダーは純粋関数になった。
-6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。いずれかが `ModuleContext` に存在しない場合、`sessionModule` は `init()` 時に例外をスローする。
+6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。これらは `sessionModule.requires` に宣言され、該当 component を提供するモジュールが無い場合、boot planner が `BootError(reason: 'missing-required-component')` で拒否する。
 7. **`/login` エラーレスポンス** は RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。旧フォーマット `{ message: "..." }` をクライアントが解析している場合は更新が必要。
 8. **`SupportsRefresh.refreshToken`** の戻り型が `RefreshedTokens`（新型）: `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }` に変更。Google/GitHub のリフレッシュレスポンスは正当に `sub` を省略するため、ルート層が保存済み identity を維持する。
 
@@ -504,7 +457,7 @@ class CustomProvider implements FederationProvider, SupportsClaimMapping {
 
 ### モジュールの配線
 
-`sessionModule` は `userRepository`（`/login` 用）が必要。`ModuleContext` の `userSessionStore` + `federationTokenStore` は**必須**になった。
+`sessionModule` は `userRepository`（`/login` 用）が必要。`userSessionStore` + `federationTokenStore` は `sessionModule.requires` に含まれており、該当 component を提供するモジュールが無い場合、boot planner が `BootError` を投げる。
 
 ## 関連
 

@@ -32,3 +32,20 @@ export interface CodeRepository {
 	consumeByCode(code: string): Promise<Code | null>;
 	removeByCode(code: string): Promise<void>;
 }
+
+// ---------------------------------------------------------------------------
+// ComponentMap slot declaration (per A2-α §6.1)
+//
+// `codeRepository` is a core component produced by a composition-root-local
+// module (e.g. `repositoriesModule` in A2-γ §3.8 standalone template). Modules
+// that issue or exchange authorization codes declare `requires: ["codeRepository"]`
+// and receive the instance through the typed DI graph.
+//
+// Per A2-γ §3.2.2: oauthAuthorizationModule requires codeRepository in its
+// manifest to pass it into createAuthorizationGrant.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly codeRepository: CodeRepository;
+	}
+}

@@ -530,6 +530,7 @@ export function assembleApp(
 		},
 		dispose,
 		components: frozen.components,
+		routes: ordered,
 	};
 
 	// Theme D: freeze the whole AppHandle before returning (§6.3).

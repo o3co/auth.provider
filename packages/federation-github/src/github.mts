@@ -22,7 +22,6 @@ import {
 	type EndSessionResult,
 	type FederationProfile,
 	type FederationProvider,
-	type FederationProviderFactory,
 	type MappedClaims,
 	type SupportsClaimMapping,
 	type SupportsLogout,
@@ -60,32 +59,6 @@ export interface GithubProviderConfig {
 }
 
 export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
-
-function narrowGithubConfig(config: Record<string, unknown>): GithubProviderConfig {
-	const name = typeof config.name === "string" ? config.name : undefined;
-	const clientId = typeof config.clientId === "string" ? config.clientId : undefined;
-	const clientSecret = typeof config.clientSecret === "string" ? config.clientSecret : undefined;
-	const callbackURL = typeof config.callbackURL === "string" ? config.callbackURL : undefined;
-	if (!name || !clientId || !clientSecret || !callbackURL) {
-		throw new Error("GitHub federation requires name, clientId, clientSecret, and callbackURL");
-	}
-	return {
-		name,
-		clientId,
-		clientSecret,
-		callbackURL,
-		sessionDomain: typeof config.sessionDomain === "string" ? config.sessionDomain : undefined,
-		authCallbackUrl:
-			typeof config.authCallbackUrl === "string" ? config.authCallbackUrl : undefined,
-		clientUrl: typeof config.clientUrl === "string" ? config.clientUrl : undefined,
-		endSessionEndpoint:
-			typeof config.endSessionEndpoint === "string" ? config.endSessionEndpoint : undefined,
-	};
-}
-
-export function registerGithubFederation(factory: FederationProviderFactory): void {
-	factory.register("github", async (config) => createGithubProvider(narrowGithubConfig(config)));
-}
 
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {

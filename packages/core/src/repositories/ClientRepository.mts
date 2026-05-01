@@ -22,3 +22,20 @@ export interface ClientRepository {
 	findById(clientId: string): Promise<PublicClient | null>;
 	authenticate(clientId: string, secret: string): Promise<PublicClient | null>;
 }
+
+// ---------------------------------------------------------------------------
+// ComponentMap slot declaration (per A2-α §6.1)
+//
+// `clientRepository` is a core component produced by a composition-root-local
+// module (e.g. `repositoriesModule` in A2-γ §3.8 standalone template). Modules
+// that validate OAuth clients declare `requires: ["clientRepository"]` and
+// receive the instance through the typed DI graph.
+//
+// Per A2-γ §3.2.3 / §3.2.2 / §3.2.1: oauthSessionModule, oauthAuthorization-
+// Module, and oauthModule all require clientRepository in their manifests.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly clientRepository: ClientRepository;
+	}
+}

@@ -27,6 +27,15 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 			...overrides,
 		});
 
+	it("throws when issuer is missing from validator options", () => {
+		expect(() =>
+			createSelfIssuedAccessTokenValidator({
+				keyStore,
+				refreshTokenStore: makeRefreshStore(),
+			}),
+		).toThrow("issuer is required");
+	});
+
 	it("accepts a valid self-issued at+jwt and returns claims", async () => {
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const result = await validator().validate(token, { role: "subject" });

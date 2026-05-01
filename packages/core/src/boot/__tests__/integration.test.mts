@@ -16,7 +16,7 @@
 
 /**
  * boot/__tests__/integration.test.mts — End-to-end integration tests for
- * the A2-β boot planner pipeline (createBootApp).
+ * the A2-β boot planner pipeline (createApp).
  *
  * Covers three end-to-end scenarios per spec §12 + §8.1:
  *   1. Happy boot — multi-module manifest with grants + routes contributions.
@@ -29,7 +29,7 @@
 
 import { Router } from "express";
 import { describe, expect, it } from "vitest";
-import { createBootApp } from "../../index.mjs";
+import { createApp } from "../../index.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import type { BootstrapMap } from "../types.mjs";
@@ -42,21 +42,25 @@ import { BootError } from "../types.mjs";
 
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		// Scenario 1 + 2 — infrastructure slots
-		readonly keyStore: { readonly stub: "keyStore" };
-		readonly clientRepository: { readonly stub: "clientRepository" };
-		readonly codeRepository: { readonly stub: "codeRepository" };
-		readonly userRepository: { readonly stub: "userRepository" };
-		readonly auditSink: { readonly stub: "auditSink" };
+		// keyStore / clientRepository / codeRepository / userRepository / auditSink
+		// are canonically declared in their respective core files
+		// (keys/KeyStore.mts, repositories/{Client,Code,User}Repository.mts,
+		// audit/types.mts). This test's stub providers return values typed
+		// `as never` so they match the canonical ComponentMap types at the
+		// call site without redeclaring the slot here — declaration merging
+		// would conflict with the real `KeyStore` / `UserRepository` / etc.
+		// types and fail the typecheck stage. Scenario 1's behavior coverage
+		// (closure / planner shape / dispose order) does not depend on the
+		// stub objects' shape; it depends on identity + planner ordering.
+		//
 		// userSessionStore is canonically declared as UserSessionStore? in
-		// `user-sessions/types.mts` ComponentMap merge — do not redeclare here
-		// (would conflict with the canonical type). The Scenario 2 provider
-		// returns a UserSessionStore-compatible stub directly at the call site.
-		// NOTE: refreshTokenStore is intentionally NOT declared here — the
-		// X1 cross-spec constraint (legacy-slots-absent.test.mts) prohibits
-		// it from appearing in ComponentMap. Scenario 2 injects the key via a
-		// runtime cast on the requires array so the planner sees it at runtime
-		// without adding it to the type-level ComponentMap.
+		// `user-sessions/types.mts` ComponentMap merge — do not redeclare here.
+		// Scenario 2 returns a UserSessionStore-compatible stub at the call site.
+		//
+		// NOTE: refreshTokenStore is canonically declared in `refresh/types.mts`
+		// per Phase 9 Task 4's transitional bridge (oauth/routes.mts dep
+		// signatures). Phase 9 Task 11 (deferred) will retire this slot.
+		//
 		// Scenario 3 — cleanup-order slots (prefixed "int" to avoid clashing
 		// with materialize-components.test.mts which declares slotA/B/C as number)
 		readonly intSlotA: { readonly label: "A" };
@@ -84,11 +88,17 @@ const minBoot = {
 
 describe("integration — Scenario 1: happy boot of a multi-module manifest", () => {
 	it("produces an AppHandle with components, a real Express Router, and dispose", async () => {
-		const stubKeyStore = { stub: "keyStore" } as const;
-		const stubClientRepository = { stub: "clientRepository" } as const;
-		const stubCodeRepository = { stub: "codeRepository" } as const;
-		const stubUserRepository = { stub: "userRepository" } as const;
-		const stubAuditSink = { stub: "auditSink" } as const;
+		// Stub return values typed `as never`: these scenarios cover boot-planner
+		// shape (closure, ordering, error catalogue) — not the typed contracts
+		// of each ComponentMap slot. Phase 9 Task 6/10 narrowed several slot
+		// types (e.g. `userRepository: UserRepository`); satisfying each
+		// real interface from a stub object would expand each scenario by
+		// 50+ lines of vacuous method stubs without adding planner coverage.
+		const stubKeyStore = { stub: "keyStore" } as never;
+		const stubClientRepository = { stub: "clientRepository" } as never;
+		const stubCodeRepository = { stub: "codeRepository" } as never;
+		const stubUserRepository = { stub: "userRepository" } as never;
+		const stubAuditSink = { stub: "auditSink" } as never;
 
 		// Module: provides keyStore (requires config from bootstrap).
 		const keyStoreModule = defineModule({
@@ -158,7 +168,7 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 		// oauthAuthorizationModule does NOT require auditSink here — the audit
 		// concern is handled separately to keep the scenario realistic.
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [keyStoreModule, repositoriesModule, auditSinkEagerModule, oauthAuthorizationModule],
 			bootstrapComponents: minBoot,
 		});
@@ -209,7 +219,7 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [mod],
 			bootstrapComponents: minBoot,
 		});
@@ -230,20 +240,23 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 		// Replicate the §12 module list. Module names match the spec exactly so
 		// the path assertions below are stable.
 
+		// Stubs typed `as never` per Scenario 1 above: these tests verify
+		// planner shape (closure / ordering / BootError catalogue), not the
+		// typed contracts of each ComponentMap slot.
 		const keyStoreModule = defineModule({
 			name: "key-store",
 			requires: ["config"],
 			provides: {
-				keyStore: (_deps) => ({ stub: "keyStore" as const }),
+				keyStore: (_deps) => ({ stub: "keyStore" }) as never,
 			},
 		});
 
 		const repositoriesModule = defineModule({
 			name: "repositories",
 			provides: {
-				clientRepository: (_deps) => ({ stub: "clientRepository" as const }),
-				codeRepository: (_deps) => ({ stub: "codeRepository" as const }),
-				userRepository: (_deps) => ({ stub: "userRepository" as const }),
+				clientRepository: (_deps) => ({ stub: "clientRepository" }) as never,
+				codeRepository: (_deps) => ({ stub: "codeRepository" }) as never,
+				userRepository: (_deps) => ({ stub: "userRepository" }) as never,
 			},
 		});
 
@@ -304,7 +317,7 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 
 		let caught: unknown;
 		try {
-			await createBootApp({
+			await createApp({
 				modules: [
 					keyStoreModule,
 					repositoriesModule,
@@ -405,7 +418,7 @@ describe("integration — Scenario 3: cleanup runs in reverse-topological order 
 			},
 		});
 
-		const handle = await createBootApp({
+		const handle = await createApp({
 			modules: [moduleA, moduleB, moduleC],
 			bootstrapComponents: minBoot,
 		});

@@ -23,8 +23,10 @@
  * and collector contracts).
  *
  * The package root `index.mts` selectively re-exports the subset of these
- * symbols that forms the public API, using `createApp as createBootApp` for
- * the temporary Phase 4 coexistence alias (Phase 9 promotes to `createApp`).
+ * symbols that forms the public API. Phase 9 (A2-γ caller migration) deleted
+ * the legacy v0.4.x `createApp` body and the `createBootApp` coexistence
+ * alias; the package root's `createApp` now resolves to this orchestrator
+ * directly via `./app.mjs`.
  *
  * Per A2-β §6.4 / §9.
  */

@@ -21,10 +21,12 @@ export {
 	type TokenExchangeDependencies,
 } from "./grant.mjs";
 export { tokenExchangeModule } from "./module.mjs";
-export {
-	ExchangeTokenValidatorRegistry,
-	ExchangeTokenValidatorRegistryError,
-} from "./validator/registry.mjs";
+// Per A2-γ §3.3: ExchangeTokenValidatorRegistry / Error were the v0.4.x
+// mutable consumer-facing surface and are no longer exported. The
+// planner-internal collector retains the implementation; consumers read
+// the resolver projection via deps.tokenExchangeValidatorResolver
+// (TokenExchangeValidatorResolver) and contribute new validators via
+// contributes.tokenExchangeValidators on their own modules.
 export {
 	type CreateSelfIssuedAccessTokenValidatorOptions,
 	createSelfIssuedAccessTokenValidator,

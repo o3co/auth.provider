@@ -42,3 +42,20 @@ export interface RefreshTokenStoreBase {
 }
 
 export type RefreshTokenStoreFactory = AdapterFactory<RefreshTokenStoreBase>;
+
+// ---------------------------------------------------------------------------
+// ComponentMap slot declaration (per A2-α §6.1)
+//
+// `refreshTokenStore` is an optional v0.4.x-shape component still consumed
+// by `oauth/src/routes.mts` (introspect family-revocation lookup, userinfo
+// refresh-token handling, logout cascade). Phase 6 (A3) introduced the
+// `refreshTokenRotation`/`refreshTokenFamilyStore`/`refreshTokenFamilyRevocation`
+// triple as the v0.5.0 successor; migration of routes.mts to consume the
+// triple is a follow-on task. Until then, this slot remains live so
+// downstream callers can wire it through the v0.5.0 DI graph.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly refreshTokenStore?: RefreshTokenStoreBase;
+	}
+}

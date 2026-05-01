@@ -12,44 +12,30 @@ pnpm add @o3co/auth-provider-oauth-token-exchange
 ## Register the grant
 
 ```ts
-import { GrantRegistry } from "@o3co/auth-provider-core";
-import {
-  ExchangeTokenValidatorRegistry,
-  createSelfIssuedAccessTokenValidator,
-  tokenExchangeModule,
-} from "@o3co/auth-provider-oauth-token-exchange";
+import { createApp } from "@o3co/auth-provider-core";
+import { tokenExchangeModule } from "@o3co/auth-provider-oauth-token-exchange";
 
-// `keyStore`, `issuer`, `refreshTokenStore`, `clientRepository`, and any other
-// fields in `deps` come from your app wiring (see auth-provider-core docs).
-const grantRegistry = new GrantRegistry();
-
-const validatorRegistry = new ExchangeTokenValidatorRegistry();
-validatorRegistry.register(
-  "urn:ietf:params:oauth:token-type:access_token",
-  // Signature + typ + issuer check only. Revocation is handled by the
-  // grant handler via deps.refreshTokenStore so the specific
-  // `family_revoked` errorDescription can be surfaced (spec §5.3).
-  createSelfIssuedAccessTokenValidator({
-    keyStore,
-    issuer,
-  }),
-);
-
-grantRegistry.addModule(tokenExchangeModule, {
-  ...deps,
-  refreshTokenStore,  // REQUIRED — handler uses this for cascading revoke
-  validatorRegistry,
-  clientRepository,
+const handle = await createApp({
+  modules: [
+    tokenExchangeModule,
+    clientRepositoryModule,
+    keyStoreModule,
+    refreshTokenStoreModule,
+  ],
+  bootstrapComponents: {
+    config,
+    pathResolver,
+  },
 });
 ```
 
 The grant type URI is `urn:ietf:params:oauth:grant-type:token-exchange` (IETF registered).
 
-After `addModule` returns, the `validatorRegistry` is frozen — subsequent `register()` calls throw. This prevents a consumer reference from silently replacing the built-in validator at runtime.
+The built-in `access_token` validator is contributed by `tokenExchangeModule` itself. Consumers do not create or mutate a validator registry.
 
 ## Disabling the module
 
-There is no config-driven disable switch. To disable Token Exchange, **do not import `tokenExchangeModule`** (do not call `grantRegistry.addModule(tokenExchangeModule, ...)`).
+There is no config-driven disable switch. To disable Token Exchange, **do not import `tokenExchangeModule`**.
 
 Rationale: the RFC 8693 grant type URI (used for HTTP dispatch) differs from the HOCON-friendly config key, which makes a config-driven `enabled` flag structurally awkward to implement cleanly. Consumer-level opt-in via module import is both simpler and consistent with the rest of the v0.5.0 package-split philosophy (`@o3co/auth-provider-oauth-federation-*`).
 
@@ -69,12 +55,16 @@ When `allowedAudiences` is empty or omitted, the only accepted `audience` parame
 
 ## External JWT subject_token
 
-The package ships a built-in validator only for the `access_token` token type (tokens issued by this same auth.provider instance). To accept external JWTs as `subject_token`, implement `ExchangeTokenValidator` yourself and register it for `urn:ietf:params:oauth:token-type:jwt`:
+The package ships a built-in validator only for the `access_token` token type (tokens issued by this same auth.provider instance). To accept external JWTs as `subject_token`, implement `ExchangeTokenValidator` yourself and contribute it from a sibling module for `urn:ietf:params:oauth:token-type:jwt`:
 
 ```ts
+import { createApp, defineModule } from "@o3co/auth-provider-core";
 import type { ExchangeTokenValidator, ValidatedToken } from "@o3co/auth-provider-oauth-token-exchange";
+import { tokenExchangeModule } from "@o3co/auth-provider-oauth-token-exchange";
 
 class ExternalJwtValidator implements ExchangeTokenValidator {
+  constructor(private readonly options: { keyStore: unknown }) {}
+
   async validate(
     token: string,
     ctx: { role: "subject" | "actor" },
@@ -85,15 +75,31 @@ class ExternalJwtValidator implements ExchangeTokenValidator {
   }
 }
 
-validatorRegistry.register(
-  "urn:ietf:params:oauth:token-type:jwt",
-  new ExternalJwtValidator({ /* your config */ }),
-);
+const externalJwtTokenExchangeValidatorModule = defineModule({
+  name: "external-jwt-token-exchange-validator",
+  requires: ["keyStore"],
+  contributes: {
+    tokenExchangeValidators: {
+      "urn:ietf:params:oauth:token-type:jwt": (deps) =>
+        new ExternalJwtValidator({ keyStore: deps.keyStore }),
+    },
+  },
+});
+
+const handle = await createApp({
+  modules: [
+    tokenExchangeModule,
+    externalJwtTokenExchangeValidatorModule,
+    clientRepositoryModule,
+    keyStoreModule,
+  ],
+  bootstrapComponents: { config, pathResolver },
+});
 ```
 
 ## Security notes
 
-1. **refreshTokenStore must be wired into the grant dependencies (not into the validator)** so the handler can surface the specific `family_revoked` errorDescription (spec §5.3). Without `refreshTokenStore` in the grant deps, self-issued access_tokens carrying `family_id` cannot be revocation-checked; the handler returns `invalid_grant` (fail-closed). Leaving it absent from the validator is intentional — the handler owns revocation so the specific error can propagate. See the "Register the grant" example above.
+1. **refreshTokenStore must be wired via a module that provides `refreshTokenStore`** so the boot planner injects it into `tokenExchangeModule`'s typed deps and the handler can surface the specific `family_revoked` errorDescription (spec §5.3). Without `refreshTokenStore` in the module graph, self-issued access_tokens carrying `family_id` cannot be revocation-checked; the handler returns `invalid_grant` (fail-closed). `tokenExchangeModule` declares both `refreshTokenStore` and `grantPolicy` in `optional`. See the "Register the grant" example above.
 
 2. **Scope is always narrowed by the core handler.** `requested scope ⊆ subject_token.scope` is enforced unconditionally — a `GrantPolicyHook` cannot bypass this subset check for narrowing **through the request parameter**. However, see point 5 below about policy-level override.
 
@@ -121,16 +127,15 @@ validatorRegistry.register(
 
 9. **Missing subject claim rejection.** Self-issued access_tokens without a `sub` claim (or with an empty-string `sub`) are rejected with `invalid_grant`. This prevents a silently-anonymous token from reaching downstream services.
 
-10. **Validator registry is sealed at registration.** Once `grantRegistry.addModule(tokenExchangeModule, ...)` is called, the `validatorRegistry` passed in is frozen — subsequent `register()` calls throw. This prevents a consumer reference from replacing the built-in validator at runtime.
+10. **Validator contributions are immutable after boot.** The boot planner aggregates `tokenExchangeValidators` contributions, freezes the world during activation, and exposes only a read-only resolver to the grant handler. Post-boot mutation cannot replace the built-in validator at runtime.
 
 11. **Confidential clients only (v0.5.0).** The handler requires `client_secret` and authenticates via `clientRepository.authenticate()`. Requests without a secret are rejected with `invalid_client` (401). The core `Client` type carries `clientSecret: string` as a required field and `PublicClient = Omit<Client, "clientSecret">`, so `findById()` alone cannot tell a "no secret configured" client from "secret omitted by caller" — accepting the unauthenticated path would let an attacker exchange a stolen `subject_token` under any client's allowlist. Public-client support is deferred until a `Client.public` flag (or equivalent) lands in core.
 
 ## Registration pattern summary
 
-- Consumer creates `ExchangeTokenValidatorRegistry` and registers validators for each supported `subject_token_type`
-- Consumer calls `grantRegistry.addModule(tokenExchangeModule, { ..., validatorRegistry, clientRepository })`
-- Module factory receives deps, calls `validatorRegistry.freeze()`, returns the grant handler
-- Post-wire, the registry is immutable — consumers cannot mutate it even via their own reference
+- Import `tokenExchangeModule` and any sibling modules that contribute additional validators
+- Boot the app with `await createApp({ modules: [...], bootstrapComponents: { config, pathResolver } })`
+- Call `handle.dispose()` during shutdown
 
 ## Unsupported RFC 8693 features (v0.5.0 scope-out)
 
@@ -138,6 +143,24 @@ validatorRegistry.register(
 - Token type conversion (access ↔ id, access → refresh): returns `unsupported_token_type`
 - DPoP-bound token minting (planned for 1.0 GA)
 - Built-in external JWT validator (consumer-implement; planned as a separate package post-0.5)
+
+## Breaking changes (v0.5.0)
+
+- **`createSelfIssuedAccessTokenValidator({ issuer })` requires `issuer`.**
+  The `issuer` field on `CreateSelfIssuedAccessTokenValidatorOptions` is
+  no longer optional and must be a non-empty string. Constructing the
+  validator without it throws synchronously. Without an issuer, any
+  `access_token`-typed JWT signed by the same KeyStore could pass
+  validation — a token-type confusion vector. Most consumers do not
+  invoke this factory directly and pick up `issuer` automatically from
+  `config.oauth.jwt.issuer` via `tokenExchangeModule`; only direct
+  callers of the factory function need to update their call sites.
+- **`tokenExchangeModule` declares `configSchema` requiring
+  `config.oauth.jwt.issuer: string().min(1)`.** Boot fails with
+  `BootError(reason: "config-validation-failed")` when the issuer is
+  missing or empty. The schema is intersected over the core schema's
+  optional issuer via `composeConfigSchema`, so the more-restrictive
+  module schema wins.
 
 ## RFC references
 

@@ -49,3 +49,18 @@ export interface RateLimitSpec {
 	readonly limit: number;
 	readonly windowSeconds: number;
 }
+
+// ---------------------------------------------------------------------------
+// ComponentMap declaration-merge (A2-α §6.1 — optional slot)
+//
+// Declared here so oauthModule can list "rateLimiter" in its `optional` array
+// and the DI graph types deps.rateLimiter as RateLimiterBase | undefined.
+// The slot is optional: when absent, oauth routes degrade gracefully (no
+// rate-limiting applied, fail-open per createOAuthRouter semantics).
+// Phase 9 Task 4 augmentation.
+// ---------------------------------------------------------------------------
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly rateLimiter?: RateLimiterBase;
+	}
+}
