@@ -206,9 +206,11 @@ describe("createAuthorizationGrant", () => {
 
 			expect(result.status).toBe(200);
 			expect(registerSpy).toHaveBeenCalledTimes(1);
-			const [newJti, familyId, expiresAtMs] = (
-				registerSpy.mock.calls[0] as unknown
-			) as [string, string, number];
+			const [newJti, familyId, expiresAtMs] = registerSpy.mock.calls[0] as unknown as [
+				string,
+				string,
+				number,
+			];
 			expect(typeof newJti).toBe("string");
 			expect(newJti.length).toBeGreaterThan(0);
 			expect(familyId).toMatch(

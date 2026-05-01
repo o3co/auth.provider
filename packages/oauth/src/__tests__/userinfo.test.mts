@@ -59,7 +59,9 @@ function buildApp(opts: {
 	const router = createRouter(express, {
 		keyStore,
 		userSessionStore: opts.userSessionStore as UserSessionStore | undefined,
-		refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation as RefreshTokenFamilyRevocation | undefined,
+		refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation as
+			| RefreshTokenFamilyRevocation
+			| undefined,
 	});
 	// Mount at /oauth to match the convention in module.mts
 	app.use("/oauth", router);

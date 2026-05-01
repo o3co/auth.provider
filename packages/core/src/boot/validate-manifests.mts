@@ -1429,10 +1429,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		// Step 13.7: Federation stores wiring guard — if any federation is
 		// enabled in config, all 5 session/federation stores must be wired.
 		// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
-		checkFederationStoresWiring(
-			parsedConfig as AppConfig,
-			plannedKeys,
-		);
+		checkFederationStoresWiring(parsedConfig as AppConfig, plannedKeys);
 	}
 
 	// Step 14: Route-order edge sanity

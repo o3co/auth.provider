@@ -125,7 +125,9 @@ function makeSessionFederationIndex(
 	} as SessionFederationIndex;
 }
 
-function makeFamilyRevocation(override?: Partial<RefreshTokenFamilyRevocation>): RefreshTokenFamilyRevocation {
+function makeFamilyRevocation(
+	override?: Partial<RefreshTokenFamilyRevocation>,
+): RefreshTokenFamilyRevocation {
 	return {
 		isFamilyRevoked: vi.fn().mockResolvedValue(false),
 		revokeFamily: vi.fn().mockResolvedValue(undefined),

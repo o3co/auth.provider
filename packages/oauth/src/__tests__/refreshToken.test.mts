@@ -371,7 +371,10 @@ describe("createRefreshTokenGrant", () => {
 					throw new Error("redis down");
 				},
 			};
-			const depsWithStore: GrantDependencies = { ...mockDeps, refreshTokenRotation: throwingRotation };
+			const depsWithStore: GrantDependencies = {
+				...mockDeps,
+				refreshTokenRotation: throwingRotation,
+			};
 			const token = await new SignJWT({ sub: "u1", scope: "read write" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setExpirationTime("24h")
