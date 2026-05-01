@@ -23,8 +23,11 @@ import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { redisChallengeStoreModule, redisReplaySeenSetModule } from "../src/index.mjs";
-import type { RedisClient } from "../src/types.mjs";
+import {
+	makeIoredisClients,
+	redisChallengeStoreModule,
+	redisReplaySeenSetModule,
+} from "../src/index.mjs";
 
 let container: StartedTestContainer;
 let client: Redis;
@@ -43,14 +46,7 @@ afterAll(async () => {
 });
 
 describe("A1 wiring — full Redis composition (createApp + redis modules)", () => {
-	it("composes redisClient + redis ChallengeStore + redis ReplaySeenSet + default ceremony into a working AppHandle", async () => {
-		const myRedisClientModule = defineModule({
-			name: "test-redis-client",
-			provides: {
-				redisClient: () => client as unknown as RedisClient,
-			},
-		});
-
+	it("composes per-purpose clients + redis ChallengeStore + redis ReplaySeenSet + default ceremony into a working AppHandle", async () => {
 		// Activator: a real downstream consumer (e.g. webauthnModule) would naturally
 		// activate `challengeCeremony` and the underlying stores via its own route
 		// handler module that requires them. The boot planner only walks `requires`
@@ -83,11 +79,14 @@ describe("A1 wiring — full Redis composition (createApp + redis modules)", () 
 		const boot = {
 			config: config as never,
 			pathResolver: (s: string) => s,
+			// Per-purpose client slots — spread all 9 wrappers from makeIoredisClients.
+			// challengeStoreClient + replaySeenSetClient are the two slots consumed by
+			// redisChallengeStoreModule and redisReplaySeenSetModule respectively.
+			...makeIoredisClients(client),
 		} satisfies Record<string, unknown> as BootstrapMap;
 
 		const handle = await createApp({
 			modules: [
-				myRedisClientModule,
 				redisChallengeStoreModule,
 				redisReplaySeenSetModule,
 				defaultChallengeCeremonyModule,

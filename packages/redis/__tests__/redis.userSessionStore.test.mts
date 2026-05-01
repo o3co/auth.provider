@@ -17,8 +17,8 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
+import { makeIoredisClients } from "../src/index.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
-import { makeIoredisRedisClient } from "./helpers/wrapper.mjs"; // shared wrapper helper (Task 14.3)
 import { runUserSessionStoreContract } from "./userSessionStore.contract.mjs";
 
 let container: StartedTestContainer;
@@ -37,6 +37,9 @@ afterAll(async () => {
 let suiteCounter = 0;
 runUserSessionStoreContract(async () => {
 	suiteCounter += 1;
-	const client = makeIoredisRedisClient(raw);
-	return createRedisUserSessionStore({ client, keyPrefix: `t14:${suiteCounter}:` });
+	const { userSessionStoreClient } = makeIoredisClients(raw);
+	return createRedisUserSessionStore({
+		client: userSessionStoreClient,
+		keyPrefix: `t14:${suiteCounter}:`,
+	});
 });

@@ -24,54 +24,10 @@ import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { redisRefreshTokenFamilyStoreModule } from "../src/index.mjs";
-import type { DisposableRedisClient, RedisClient, RedisMulti } from "../src/types.mjs";
+import { makeIoredisClients, redisRefreshTokenFamilyStoreModule } from "../src/index.mjs";
 
 let container: StartedTestContainer;
 let client: Redis;
-
-/**
- * Adapt a raw ioredis Redis instance to the structural RedisClient + provide
- * `duplicate()` returning a DisposableRedisClient (Symbol.asyncDispose calls
- * the duplicated ioredis instance's quit()). The base client itself is NOT
- * disposable — only duplicates owned by `updateFamily` need lifetime
- * management.
- *
- * Inlined from refresh-token-family.test.mts (acceptable test-code
- * duplication; sharing via a shared test helper is a follow-up).
- */
-const adapt = (raw: Redis): RedisClient => ({
-	set: (key, value, mode, ttlMs, condition) => raw.set(key, value, mode, ttlMs, condition),
-	del: (key) => raw.del(key),
-	pttl: (key) => raw.pttl(key),
-	exists: (key) => raw.exists(key),
-	get: (key) => raw.get(key),
-	watch: (...keys) => raw.watch(...keys),
-	unwatch: () => raw.unwatch(),
-	multi: () => {
-		const m = raw.multi();
-		const facade: RedisMulti = {
-			set: (key, value, mode, ttlMs) => {
-				m.set(key, value, mode, ttlMs);
-				return facade;
-			},
-			exec: async () => {
-				const result = await m.exec();
-				return result;
-			},
-		};
-		return facade;
-	},
-	duplicate: (): DisposableRedisClient => {
-		const dup = raw.duplicate();
-		const wrapped = adapt(dup);
-		return Object.assign(wrapped, {
-			[Symbol.asyncDispose]: async () => {
-				await dup.quit();
-			},
-		});
-	},
-});
 
 beforeAll(async () => {
 	container = await new GenericContainer("redis:7-alpine").withExposedPorts(6379).start();
@@ -87,14 +43,7 @@ afterAll(async () => {
 });
 
 describe("A3 wiring — full Redis composition (createApp + redis modules)", () => {
-	it("composes redisClient + redis store + default rotation + default revocation against real Redis", async () => {
-		const myRedisClientModule = defineModule({
-			name: "test-redis-client",
-			provides: {
-				redisClient: () => adapt(client),
-			},
-		});
-
+	it("composes per-purpose clients + redis store + default rotation + default revocation against real Redis", async () => {
 		// Activator (same pattern as Phase 5 + Task 10): force materialisation of
 		// the wrapper slots via a closure root that requires them.
 		const activatorModule = defineModule({
@@ -125,11 +74,13 @@ describe("A3 wiring — full Redis composition (createApp + redis modules)", () 
 		const boot = {
 			config: config as never,
 			pathResolver: (s: string) => s,
+			// Per-purpose client slots — refreshTokenFamilyClient is consumed by
+			// redisRefreshTokenFamilyStoreModule (requires: ["refreshTokenFamilyClient", "config"]).
+			...makeIoredisClients(client),
 		} satisfies Record<string, unknown> as BootstrapMap;
 
 		const handle = await createApp({
 			modules: [
-				myRedisClientModule,
 				redisRefreshTokenFamilyStoreModule,
 				defaultRefreshTokenRotationModule,
 				defaultRefreshTokenFamilyRevocationModule,

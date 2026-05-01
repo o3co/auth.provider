@@ -17,8 +17,8 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { makeIoredisClients } from "../src/index.mjs";
 import { createRedisSessionFederationIndex } from "../src/sessionFederationIndex.mjs";
-import { makeIoredisRedisClient } from "./helpers/wrapper.mjs";
 import { runSessionFederationIndexContract } from "./sessionFederationIndex.contract.mjs";
 
 let container: StartedTestContainer;
@@ -37,8 +37,11 @@ afterAll(async () => {
 let suiteCounter = 0;
 runSessionFederationIndexContract(async () => {
 	suiteCounter += 1;
-	const client = makeIoredisRedisClient(raw);
-	return createRedisSessionFederationIndex({ client, keyPrefix: `t17:${suiteCounter}:` });
+	const { sessionFederationIndexClient } = makeIoredisClients(raw);
+	return createRedisSessionFederationIndex({
+		client: sessionFederationIndexClient,
+		keyPrefix: `t17:${suiteCounter}:`,
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -47,8 +50,11 @@ runSessionFederationIndexContract(async () => {
 
 describe("SessionFederationIndex concurrency", () => {
 	it("100 parallel distinct federations → all 100 land", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:conc1:" });
+		const { sessionFederationIndexClient } = makeIoredisClients(raw);
+		const idx = createRedisSessionFederationIndex({
+			client: sessionFederationIndexClient,
+			keyPrefix: "t17:conc1:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
 			Array.from({ length: 100 }, (_, i) => idx.addFederation("sid-conc", `fed-${i}`, expiresAt)),
@@ -63,8 +69,11 @@ describe("SessionFederationIndex concurrency", () => {
 	});
 
 	it("100 parallel same-federation → 1 entry (ZADD NX dedup)", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:conc2:" });
+		const { sessionFederationIndexClient } = makeIoredisClients(raw);
+		const idx = createRedisSessionFederationIndex({
+			client: sessionFederationIndexClient,
+			keyPrefix: "t17:conc2:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
 			Array.from({ length: 100 }, () => idx.addFederation("sid-dedup", "fed-dedup", expiresAt)),
@@ -75,8 +84,11 @@ describe("SessionFederationIndex concurrency", () => {
 	});
 
 	it("interleaved add/remove → either [fed-x] or [] (never partial)", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:conc3:" });
+		const { sessionFederationIndexClient } = makeIoredisClients(raw);
+		const idx = createRedisSessionFederationIndex({
+			client: sessionFederationIndexClient,
+			keyPrefix: "t17:conc3:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		// Run 50 add and 50 remove operations concurrently; result is valid if
 		// it's either fully present or fully absent — never a corrupted state.
@@ -92,8 +104,11 @@ describe("SessionFederationIndex concurrency", () => {
 		// The internal helper uses a module-level monotonic counter as score
 		// (see redisSidSortedSet.mts), so no inter-add sleep is needed to
 		// guarantee strict insertion order even within the same millisecond.
-		const client = makeIoredisRedisClient(raw);
-		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:order1:" });
+		const { sessionFederationIndexClient } = makeIoredisClients(raw);
+		const idx = createRedisSessionFederationIndex({
+			client: sessionFederationIndexClient,
+			keyPrefix: "t17:order1:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		const names = ["alpha", "beta", "gamma", "delta", "epsilon"];
 		for (const name of names) {
@@ -104,8 +119,11 @@ describe("SessionFederationIndex concurrency", () => {
 	});
 
 	it("re-add of existing member does NOT promote position", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const idx = createRedisSessionFederationIndex({ client, keyPrefix: "t17:order2:" });
+		const { sessionFederationIndexClient } = makeIoredisClients(raw);
+		const idx = createRedisSessionFederationIndex({
+			client: sessionFederationIndexClient,
+			keyPrefix: "t17:order2:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		await idx.addFederation("sid-promote", "first", expiresAt);
 		await idx.addFederation("sid-promote", "second", expiresAt);

@@ -11,8 +11,8 @@ describe("redisRateLimiterModule", () => {
 		expect(redisRateLimiterModule.name).toBe("redis-rate-limiter");
 	});
 
-	it("requires redisClient and config", () => {
-		expect(redisRateLimiterModule.requires).toEqual(["redisClient", "config"]);
+	it("requires rateLimiterClient and config", () => {
+		expect(redisRateLimiterModule.requires).toEqual(["rateLimiterClient", "config"]);
 	});
 
 	it("provides rateLimiter", () => {

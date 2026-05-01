@@ -5,15 +5,13 @@
 
 import {
 	type FederationTokenStoreBase,
+	type FederationTokenStoreClient,
 	type FederationTokens,
 	type SupportsLock,
 	supportsLock,
 } from "@o3co/auth-provider-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	createRedisFederationTokenStore,
-	type RedisLikeClient,
-} from "../src/federation-tokens.mjs";
+import { createRedisFederationTokenStore } from "../src/federation-tokens.mjs";
 
 function createFakeRedis() {
 	const data = new Map<string, string>();
@@ -22,13 +20,21 @@ function createFakeRedis() {
 		data,
 		ttls,
 		get: vi.fn(async (k: string) => data.get(k) ?? null),
-		set: vi.fn(async (k: string, v: string, opts?: { PX?: number; NX?: boolean }) => {
-			// NX: only set if key does not exist; return null when skipped.
-			if (opts?.NX && data.has(k)) return null;
-			data.set(k, v);
-			if (opts?.PX !== undefined) ttls.set(k, opts.PX);
-			return "OK";
-		}),
+		// Positional form: (key, value, mode: "PX", ttlMs, condition?: "NX")
+		set: vi.fn(
+			async (
+				k: string,
+				v: string,
+				_mode: "PX",
+				ttl: number,
+				condition?: "NX",
+			): Promise<"OK" | null> => {
+				if (condition === "NX" && data.has(k)) return null;
+				data.set(k, v);
+				ttls.set(k, ttl);
+				return "OK";
+			},
+		),
 		del: vi.fn(async (...keys: string[]) => {
 			let n = 0;
 			for (const k of keys) if (data.delete(k)) n += 1;
@@ -41,7 +47,7 @@ function createFakeRedis() {
 				for (const k of matched) yield k;
 			})();
 		}),
-	} satisfies RedisLikeClient & { data: Map<string, string>; ttls: Map<string, number> };
+	} satisfies FederationTokenStoreClient & { data: Map<string, string>; ttls: Map<string, number> };
 }
 
 const encryptionKey = Buffer.alloc(32, 7);

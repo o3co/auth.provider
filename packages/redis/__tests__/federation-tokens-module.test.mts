@@ -14,8 +14,11 @@ describe("redisFederationTokenStoreModule", () => {
 		expect(redisFederationTokenStoreModule.name).toBe("redis-federation-token-store");
 	});
 
-	it("requires redisClient and config", () => {
-		expect(redisFederationTokenStoreModule.requires).toEqual(["redisClient", "config"]);
+	it("requires federationTokenStoreClient and config", () => {
+		expect(redisFederationTokenStoreModule.requires).toEqual([
+			"federationTokenStoreClient",
+			"config",
+		]);
 	});
 
 	it("provides federationTokenStore", () => {

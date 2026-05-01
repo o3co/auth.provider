@@ -10,9 +10,9 @@ describe("redisRefreshTokenFamilyStoreModule", () => {
 		expect(redisRefreshTokenFamilyStoreModule.name).toBe("redis-refresh-token-family-store");
 	});
 
-	it("requires both 'redisClient' and 'config'", () => {
+	it("requires both 'refreshTokenFamilyClient' and 'config'", () => {
 		const reqs = redisRefreshTokenFamilyStoreModule.requires ?? [];
-		expect(new Set(reqs)).toEqual(new Set(["redisClient", "config"]));
+		expect(new Set(reqs)).toEqual(new Set(["refreshTokenFamilyClient", "config"]));
 	});
 
 	it("declares a Zod configSchema with module-namespaced 'redisRefreshTokenFamilyStore' top-level key only", () => {

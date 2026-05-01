@@ -17,8 +17,8 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { makeIoredisClients } from "../src/index.mjs";
 import { createRedisSessionFamilyIndex } from "../src/sessionFamilyIndex.mjs";
-import { makeIoredisRedisClient } from "./helpers/wrapper.mjs";
 import { runSessionFamilyIndexContract } from "./sessionFamilyIndex.contract.mjs";
 
 let container: StartedTestContainer;
@@ -37,8 +37,11 @@ afterAll(async () => {
 let suiteCounter = 0;
 runSessionFamilyIndexContract(async () => {
 	suiteCounter += 1;
-	const client = makeIoredisRedisClient(raw);
-	return createRedisSessionFamilyIndex({ client, keyPrefix: `t16:${suiteCounter}:` });
+	const { sessionFamilyIndexClient } = makeIoredisClients(raw);
+	return createRedisSessionFamilyIndex({
+		client: sessionFamilyIndexClient,
+		keyPrefix: `t16:${suiteCounter}:`,
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -47,8 +50,11 @@ runSessionFamilyIndexContract(async () => {
 
 describe("SessionFamilyIndex concurrency", () => {
 	it("100 parallel distinct familyIds → all 100 land", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const idx = createRedisSessionFamilyIndex({ client, keyPrefix: "t16:conc1:" });
+		const { sessionFamilyIndexClient } = makeIoredisClients(raw);
+		const idx = createRedisSessionFamilyIndex({
+			client: sessionFamilyIndexClient,
+			keyPrefix: "t16:conc1:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
 			Array.from({ length: 100 }, (_, i) => idx.addFamilyId("sid-conc", `fam-${i}`, expiresAt)),
@@ -63,8 +69,11 @@ describe("SessionFamilyIndex concurrency", () => {
 	});
 
 	it("100 parallel same familyId → 1 entry (ZADD NX dedup)", async () => {
-		const client = makeIoredisRedisClient(raw);
-		const idx = createRedisSessionFamilyIndex({ client, keyPrefix: "t16:conc2:" });
+		const { sessionFamilyIndexClient } = makeIoredisClients(raw);
+		const idx = createRedisSessionFamilyIndex({
+			client: sessionFamilyIndexClient,
+			keyPrefix: "t16:conc2:",
+		});
 		const expiresAt = new Date(Date.now() + 60_000);
 		await Promise.all(
 			Array.from({ length: 100 }, () => idx.addFamilyId("sid-dedup", "fam-dedup", expiresAt)),
