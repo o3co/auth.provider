@@ -7,6 +7,7 @@ import {
 	type AdapterBuilder,
 	defineModule,
 	type RateLimiterBase,
+	type RateLimiterClient,
 	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -15,10 +16,7 @@ interface RedisRateLimiterConfig {
 	type?: string;
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
-	client?: {
-		incr(key: string): Promise<number>;
-		expire(key: string, seconds: number): Promise<number>;
-	};
+	client?: RateLimiterClient;
 }
 
 function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
@@ -41,10 +39,7 @@ function keyPrefix(key: string): string {
 }
 
 interface CreateRedisRateLimiterOptions {
-	client: {
-		incr(key: string): Promise<number>;
-		expire(key: string, seconds: number): Promise<number>;
-	};
+	client: RateLimiterClient;
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
 }
@@ -95,7 +90,7 @@ export const redisRateLimiterBuilder: AdapterBuilder<RateLimiterBase> = (config,
 		);
 	}
 	return createRedisRateLimiter({
-		client: cfg.client,
+		client: cfg.client as RateLimiterClient,
 		limits: cfg.limits,
 		defaultLimit: cfg.defaultLimit,
 	});
@@ -113,7 +108,7 @@ const rateLimitSpecSchema = z.object({
  */
 export const redisRateLimiterModule = defineModule({
 	name: "redis-rate-limiter",
-	requires: ["redisClient", "config"] as const,
+	requires: ["rateLimiterClient", "config"] as const,
 	configSchema: z.object({
 		redisRateLimiter: z
 			.object({
@@ -132,14 +127,8 @@ export const redisRateLimiterModule = defineModule({
 					};
 				}
 			).redisRateLimiter;
-			// The redisClient ComponentMap shape is the structural client
-			// with all redis ops. RateLimiter only needs incr + expire,
-			// so we pass through and trust the structural compat.
 			return createRedisRateLimiter({
-				client: deps.redisClient as unknown as {
-					incr(key: string): Promise<number>;
-					expire(key: string, seconds: number): Promise<number>;
-				},
+				client: deps.rateLimiterClient,
 				limits: cfg.limits,
 				defaultLimit: cfg.defaultLimit,
 			});

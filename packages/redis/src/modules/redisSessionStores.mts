@@ -43,14 +43,20 @@ const configSchema = z.object({
  */
 export const redisSessionStoresModule = defineModule({
 	name: "redisSessionStores",
-	requires: ["redisClient", "config"] as const,
+	requires: [
+		"userSessionStoreClient",
+		"sessionRPRegistryClient",
+		"sessionFamilyIndexClient",
+		"sessionFederationIndexClient",
+		"config",
+	] as const,
 	configSchema,
 	provides: {
 		userSessionStore: (deps) => {
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisUserSessionStore({
-				client: deps.redisClient,
+				client: deps.userSessionStoreClient,
 				keyPrefix: `${cfg.keyPrefix}us:`,
 			});
 		},
@@ -58,7 +64,7 @@ export const redisSessionStoresModule = defineModule({
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisSessionRPRegistry({
-				client: deps.redisClient,
+				client: deps.sessionRPRegistryClient,
 				keyPrefix: `${cfg.keyPrefix}rp:`,
 			});
 		},
@@ -66,7 +72,7 @@ export const redisSessionStoresModule = defineModule({
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisSessionFamilyIndex({
-				client: deps.redisClient,
+				client: deps.sessionFamilyIndexClient,
 				keyPrefix: `${cfg.keyPrefix}fi:`,
 			});
 		},
@@ -74,7 +80,7 @@ export const redisSessionStoresModule = defineModule({
 			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
 				.redisSessionStores;
 			return createRedisSessionFederationIndex({
-				client: deps.redisClient,
+				client: deps.sessionFederationIndexClient,
 				keyPrefix: `${cfg.keyPrefix}fed:`,
 			});
 		},

@@ -7,6 +7,7 @@ import {
 	type AdapterBuilder,
 	defineModule,
 	type FederationTokenStoreBase,
+	type FederationTokenStoreClient,
 	type FederationTokens,
 	type SupportsLock,
 } from "@o3co/auth-provider-core";
@@ -14,23 +15,10 @@ import { z } from "zod";
 import { decryptTokenField, encryptTokenField } from "./internal/crypto.mjs";
 import { createRedisLock } from "./internal/lock.mjs";
 
-export interface RedisLikeClient {
-	get(key: string): Promise<string | null>;
-	set(key: string, value: string, opts?: { PX?: number; NX?: boolean }): Promise<string | null>;
-	del(...keys: string[]): Promise<number>;
-	/**
-	 * Non-blocking alternative to Redis KEYS — matches redis v5 client's
-	 * `scanIterator({ MATCH, COUNT })`. Cursor-based, yields matching keys in
-	 * batches without blocking the server. Required for `deleteBySession` to
-	 * be safe in production.
-	 */
-	scanIterator(opts: { MATCH: string; COUNT?: number }): AsyncIterable<string>;
-}
-
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
 export interface RedisFederationTokenStoreOptions {
-	client: RedisLikeClient;
+	client: FederationTokenStoreClient;
 	encryption: EncryptionConfig;
 	keyPrefix?: string;
 	/**
@@ -81,14 +69,23 @@ export function createRedisFederationTokenStore(
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
 
 	// Advisory lock: uses a separate key namespace (lock:) so lock keys never
-	// collide with token envelope keys. The lock client shim bridges the
-	// variadic del(...keys) of RedisLikeClient to the single-key del(key) that
-	// RedisLockClient requires.
+	// collide with token envelope keys. The lock client shim bridges from
+	// FederationTokenStoreClient's positional set form to the options-object
+	// form that RedisLockClient requires (internal to this package).
 	const lockKeyPrefix = `${prefix}lock:`;
 	const lock = createRedisLock({
 		client: {
 			get: (key) => opts.client.get(key),
-			set: (key, value, o) => opts.client.set(key, value, o),
+			set: (key, value, o) => {
+				// RedisLockClient uses options-object form; bridge to positional form.
+				if (o?.NX && o.PX !== undefined) {
+					return opts.client.set(key, value, "PX", o.PX, "NX") as Promise<string | null>;
+				}
+				if (o?.PX !== undefined) {
+					return opts.client.set(key, value, "PX", o.PX) as Promise<string | null>;
+				}
+				return Promise.resolve(null);
+			},
 			del: (key) => opts.client.del(key),
 		},
 		keyPrefix: lockKeyPrefix,
@@ -132,7 +129,7 @@ export function createRedisFederationTokenStore(
 		// token's expiresAt. The access token's expiry is preserved inside the
 		// envelope so F-6 consumers can decide to refresh; the record itself
 		// must outlive the access_token so the refresh_token remains available.
-		await opts.client.set(k(sid, name), JSON.stringify(env), { PX: storeTtlMs });
+		await opts.client.set(k(sid, name), JSON.stringify(env), "PX", storeTtlMs);
 	};
 
 	return {
@@ -214,7 +211,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 	if (missing.length > 0) {
 		throw new Error(
 			`federationTokenStore.redis: client is missing required method(s): ${missing.join(", ")}. ` +
-				`Pass a 'redis' v5 client (or a mock that implements get/set/del/scanIterator).`,
+				`Pass a wrapper that implements get/set/del/scanIterator (e.g. makeIoredisClients(io).federationTokenStoreClient).`,
 		);
 	}
 	const mode = cfg.encryption?.mode ?? "required";
@@ -241,7 +238,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		encryption = { mode: "allow-plaintext" };
 	}
 	return createRedisFederationTokenStore({
-		client: cfg.client as RedisLikeClient,
+		client: cfg.client as FederationTokenStoreClient,
 		encryption,
 		keyPrefix: cfg.keyPrefix,
 		ttl: cfg.ttl,
@@ -263,7 +260,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
  */
 export const redisFederationTokenStoreModule = defineModule({
 	name: "redis-federation-token-store",
-	requires: ["redisClient", "config"] as const,
+	requires: ["federationTokenStoreClient", "config"] as const,
 	configSchema: z.object({
 		redisFederationTokenStore: z
 			.object({
@@ -288,7 +285,7 @@ export const redisFederationTokenStoreModule = defineModule({
 			).redisFederationTokenStore;
 			return redisFederationTokenStoreBuilder(
 				{
-					client: deps.redisClient,
+					client: deps.federationTokenStoreClient,
 					encryption: { mode: cfg.encryptionMode, key: cfg.encryptionKey },
 					keyPrefix: cfg.keyPrefix,
 					ttl: cfg.ttl,

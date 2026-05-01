@@ -19,15 +19,15 @@ import {
 	canonicalChallengeKey,
 	defineModule,
 	type ReplaySeenSet,
+	type ReplaySeenSetClient,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import type { RedisClient } from "./types.mjs";
 
 /**
  * Options for createRedisReplaySeenSet.
  */
 export interface RedisReplaySeenSetOptions {
-	readonly client: RedisClient;
+	readonly client: ReplaySeenSetClient;
 	readonly keyPrefix: string;
 }
 
@@ -81,8 +81,8 @@ export function createRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): Repla
  * Then calls:
  *   factory.create({ type: "redis", client, keyPrefix: "replay:" });
  */
-export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = (config) => {
-	const c = config as { client: RedisClient; keyPrefix?: string };
+export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = (config, _ctx) => {
+	const c = config as { client: ReplaySeenSetClient; keyPrefix?: string };
 	return createRedisReplaySeenSet({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "replay:",
@@ -98,7 +98,7 @@ export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = (config)
  */
 export const redisReplaySeenSetModule = defineModule({
 	name: "redis-replay-seen-set",
-	requires: ["redisClient", "config"] as const,
+	requires: ["replaySeenSetClient", "config"] as const,
 	configSchema: z.object({
 		redisReplaySeenSet: z
 			.object({
@@ -111,7 +111,7 @@ export const redisReplaySeenSetModule = defineModule({
 			const cfg = (deps.config as unknown as { redisReplaySeenSet: { keyPrefix: string } })
 				.redisReplaySeenSet;
 			return createRedisReplaySeenSet({
-				client: deps.redisClient,
+				client: deps.replaySeenSetClient,
 				keyPrefix: cfg.keyPrefix,
 			});
 		},

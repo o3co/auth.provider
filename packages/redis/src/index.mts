@@ -40,7 +40,6 @@ export {
 	createRedisFederationTokenStore,
 	type EncryptionConfig,
 	type RedisFederationTokenStoreOptions,
-	type RedisLikeClient,
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
 } from "./federation-tokens.mjs";

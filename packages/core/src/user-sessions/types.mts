@@ -219,13 +219,22 @@ declare module "@o3co/auth-provider-core" {
 /**
  * Backing client for UserSessionStore adapters. Declares only `set`, `get`,
  * `del` — the exact methods `createRedisUserSessionStore` consumes.
- * Note: `set` here does NOT include the `"NX"` condition (sessions use
- * `SET PX` without `NX`; duplicate detection is done at the application layer).
+ * The `set` overloads cover both the plain-PX form (for future update paths)
+ * and the PX+NX form used by `create` (atomic insert-only, mirrors
+ * ChallengeStore.issue and RefreshTokenFamilyStore.registerFamily).
  *
- * Per Phase 10 addendum §3.
+ * Per Phase 10 addendum §3 (NX overload added based on actual adapter audit
+ * of `userSessionStore.mts`; plan table erroneously described "no NX").
  */
 export interface UserSessionStoreClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK" | null>;
+	set(
+		key: string,
+		value: string,
+		mode: "PX",
+		ttlMs: number,
+		condition: "NX",
+	): Promise<"OK" | null>;
 	get(key: string): Promise<string | null>;
 	del(key: string): Promise<number>;
 }

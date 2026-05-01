@@ -17,18 +17,18 @@ import {
 	type AdapterBuilder,
 	defineModule,
 	type RefreshTokenFamily,
+	type RefreshTokenFamilyClient,
 	type RefreshTokenFamilyStore,
 	type RefreshTokenFamilyUpdateResult,
 	RefreshTokenStorageError,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import type { RedisClient } from "./types.mjs";
 
 /**
  * Options for createRedisRefreshTokenFamilyStore.
  */
 export interface RedisRefreshTokenFamilyStoreOptions {
-	readonly client: RedisClient;
+	readonly client: RefreshTokenFamilyClient;
 	readonly keyPrefix: string;
 	/**
 	 * Maximum CAS retry attempts before throwing
@@ -211,8 +211,13 @@ export function createRedisRefreshTokenFamilyStore(
  */
 export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFamilyStore> = (
 	config,
+	_ctx,
 ) => {
-	const c = config as { client: RedisClient; keyPrefix?: string; casRetryLimit?: number };
+	const c = config as {
+		client: RefreshTokenFamilyClient;
+		keyPrefix?: string;
+		casRetryLimit?: number;
+	};
 	return createRedisRefreshTokenFamilyStore({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "rtfam:",
@@ -230,7 +235,7 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
  */
 export const redisRefreshTokenFamilyStoreModule = defineModule({
 	name: "redis-refresh-token-family-store",
-	requires: ["redisClient", "config"] as const,
+	requires: ["refreshTokenFamilyClient", "config"] as const,
 	configSchema: z.object({
 		redisRefreshTokenFamilyStore: z
 			.object({
@@ -247,7 +252,7 @@ export const redisRefreshTokenFamilyStoreModule = defineModule({
 				}
 			).redisRefreshTokenFamilyStore;
 			return createRedisRefreshTokenFamilyStore({
-				client: deps.redisClient,
+				client: deps.refreshTokenFamilyClient,
 				keyPrefix: cfg.keyPrefix,
 				casRetryLimit: cfg.casRetryLimit,
 			});
