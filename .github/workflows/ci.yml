@@ -226,13 +226,19 @@ jobs:
           # than the workspace:* resolution that local builds use). Catches
           # "template references symbols not in the published tarball"
           # before tag push.
+          #
+          # Use `pnpm pack` (not `npm pack`): npm pack does not rewrite
+          # `workspace:*` ranges, so the tarball's package.json would still
+          # carry workspace: protocol — which npm install in the scratch
+          # dir cannot resolve (EUNSUPPORTEDPROTOCOL). pnpm pack rewrites
+          # workspace:* to the resolved version (0.0.0 in this repo).
           mkdir -p /tmp/tarballs
           for pkg in packages/*/; do
             name=$(node -p "require('./${pkg}package.json').name")
             case "$name" in
               @o3co/auth-provider-*)
                 pushd "$pkg" >/dev/null
-                npm pack --pack-destination /tmp/tarballs
+                pnpm pack --pack-destination /tmp/tarballs
                 popd >/dev/null
                 ;;
               *)
@@ -248,30 +254,38 @@ jobs:
           SCRATCH=$(mktemp -d)
           cp -R templates/standalone "$SCRATCH/standalone"
           pushd "$SCRATCH/standalone" >/dev/null
-          # Rewrite workspace:* deps to file: tarball URLs so npm install
-          # consumes the packed artifacts rather than the workspace.
-          for tarball in /tmp/tarballs/*.tgz; do
-            pkgname=$(tar -xzOf "$tarball" package/package.json | node -e "
-              let s = '';
-              process.stdin.on('data', c => s += c);
-              process.stdin.on('end', () => console.log(JSON.parse(s).name));
-            ")
-            node -e "
-              const fs = require('fs');
-              const tar = process.argv[1];
-              const name = process.argv[2];
-              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-              for (const section of ['dependencies', 'peerDependencies', 'devDependencies']) {
-                if (pkg[section] && pkg[section][name]) {
-                  pkg[section][name] = 'file:' + tar;
-                }
+          # Rewrite workspace:* in direct deps to file: tarball URLs AND add
+          # an `overrides` block pinning every workspace package to its
+          # tarball. The overrides block is required so transitive workspace
+          # deps (e.g. oauth -> core) resolve from /tmp/tarballs rather than
+          # being fetched from the public npm registry, where these versions
+          # do not exist yet.
+          node -e "
+            const fs = require('fs');
+            const path = require('path');
+            const dir = process.argv[1];
+            const tarballs = fs.readdirSync(dir).filter(f => f.endsWith('.tgz'));
+            const { execSync } = require('child_process');
+            const map = new Map();
+            for (const f of tarballs) {
+              const full = path.join(dir, f);
+              const pkgJson = execSync('tar -xzOf ' + full + ' package/package.json').toString();
+              map.set(JSON.parse(pkgJson).name, 'file:' + full);
+            }
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            for (const section of ['dependencies', 'peerDependencies', 'devDependencies']) {
+              if (!pkg[section]) continue;
+              for (const [name, spec] of Object.entries(pkg[section])) {
+                if (map.has(name)) pkg[section][name] = map.get(name);
               }
-              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
-            " "$tarball" "$pkgname"
-          done
+            }
+            pkg.overrides = pkg.overrides || {};
+            for (const [name, spec] of map) pkg.overrides[name] = spec;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          " /tmp/tarballs
           # Use npm rather than pnpm here: pnpm in workspace context would
           # try to re-resolve; standalone npm install consumes the file:
-          # tarballs straight.
+          # tarballs straight (with overrides forcing transitives too).
           npm install --no-package-lock --omit=optional
           npm run build
           popd >/dev/null
