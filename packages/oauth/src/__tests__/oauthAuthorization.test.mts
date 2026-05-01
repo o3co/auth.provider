@@ -192,15 +192,15 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
 	// contribution-factory `deps`. Both grant factories read
-	// `deps.refreshTokenStore` (refresh-token rotation persistence) and
+	// `deps.refreshTokenRotation` (A3 §5.2 rotation persistence) and
 	// `deps.grantPolicy` (CP-18 fail-closed gate). If they are not declared
 	// here, a composition root that wires either component will see it
 	// silently dropped at the grant boundary — refresh-token rotation stops
 	// recording, and grantPolicy enforcement becomes dead code.
-	it("declares refreshTokenStore + grantPolicy in optional so deps reach the grants", () => {
+	it("declares refreshTokenRotation + grantPolicy in optional so deps reach the grants", () => {
 		const config = makeValidAppConfig();
 		const module = oauthAuthorizationModule({ config });
-		expect(module.optional).toContain("refreshTokenStore");
+		expect(module.optional).toContain("refreshTokenRotation");
 		expect(module.optional).toContain("grantPolicy");
 	});
 });
