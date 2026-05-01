@@ -93,12 +93,15 @@ const sessionFederationIndexModule = defineModule({
 });
 
 /**
- * Stub modules for `sessionRPRegistry` and `sessionFamilyIndex`.
- * These slots are oauth-package concerns (not provided by sessionModule or
- * any session-package module), but the boot-time `federation-stores-incomplete`
- * validator requires them whenever any federation is enabled in config.
- * Tests that enable a federation must include these stubs so the guard passes
- * and the session-level validations under test can fire.
+ * Stub modules for `sessionRPRegistry`, `sessionFamilyIndex`, and
+ * `refreshTokenFamilyRevocation`. These slots are oauth-package concerns (not
+ * provided by sessionModule or any session-package module), but the boot-time
+ * `federation-stores-incomplete` validator requires them whenever any
+ * federation is enabled in config (the validator stays aligned with route-level
+ * gating in packages/oauth/src/routes.mts logoutSupported /
+ * federationTokenSupported). Tests that enable a federation must include these
+ * stubs so the guard passes and the session-level validations under test can
+ * fire.
  */
 const sessionRPRegistryModule = defineModule({
 	name: "test:session-rp-registry",
@@ -108,6 +111,11 @@ const sessionRPRegistryModule = defineModule({
 const sessionFamilyIndexModule = defineModule({
 	name: "test:session-family-index",
 	provides: { sessionFamilyIndex: () => ({ kind: "stub" }) } as never,
+});
+
+const refreshTokenFamilyRevocationModule = defineModule({
+	name: "test:refresh-token-family-revocation",
+	provides: { refreshTokenFamilyRevocation: () => ({ kind: "stub" }) } as never,
 });
 
 /**
@@ -147,9 +155,11 @@ const baseTestModules = [
 	// Required by the boot-time `federation-stores-incomplete` validator whenever
 	// any federation is enabled in config. These are oauth-package concerns;
 	// the session-package tests use stubs so the guard passes and session-level
-	// validations under test can fire. Per issue #101 TODO-F-1.
+	// validations under test can fire. Per issue #101 TODO-F-1, plus #103 review
+	// (refreshTokenFamilyRevocation added so validator matches route-level gating).
 	sessionRPRegistryModule,
 	sessionFamilyIndexModule,
+	refreshTokenFamilyRevocationModule,
 ];
 
 // ---------------------------------------------------------------------------
