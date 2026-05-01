@@ -234,13 +234,6 @@ export type {
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
-export { createRefreshTokenStoreFactory } from "./refresh/factory.mjs";
-// Refresh token store
-export type {
-	RefreshTokenRotateOutcome,
-	RefreshTokenStoreBase,
-	RefreshTokenStoreFactory,
-} from "./refresh/types.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";

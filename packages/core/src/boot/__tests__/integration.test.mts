@@ -21,7 +21,7 @@
  * Covers three end-to-end scenarios per spec §12 + §8.1:
  *   1. Happy boot — multi-module manifest with grants + routes contributions.
  *   2. Spec §12 worked-example failure diagnostic — oauthAuthorizationModule
- *      missing refreshTokenStore; BootError shape matches §12 exactly.
+ *      missing intMissingSlot (test-only slot); BootError shape matches §12 exactly.
  *   3. Reverse-topological cleanup order on dispose (§8.1).
  *
  * Per A2-β §12 + §8.1 / Phase 4 Task 10.
@@ -57,9 +57,12 @@ declare module "@o3co/auth-provider-core" {
 		// `user-sessions/types.mts` ComponentMap merge — do not redeclare here.
 		// Scenario 2 returns a UserSessionStore-compatible stub at the call site.
 		//
-		// NOTE: refreshTokenStore is canonically declared in `refresh/types.mts`
-		// per Phase 9 Task 4's transitional bridge (oauth/routes.mts dep
-		// signatures). Phase 9 Task 11 (deferred) will retire this slot.
+		// Scenario 2 — a test-only slot declared here so the planner can be asked
+		// to require it; it is intentionally never provided by any module in that
+		// test, which triggers the missing-required-component BootError path.
+		// Using a locally declared (never-provided) slot avoids casting legacy
+		// slot names as `never` to bypass ComponentMap type-level checks.
+		readonly intMissingSlot: { readonly purpose: "scenario-2-trigger" };
 		//
 		// Scenario 3 — cleanup-order slots (prefixed "int" to avoid clashing
 		// with materialize-components.test.mts which declares slotA/B/C as number)
@@ -236,7 +239,7 @@ describe("integration — Scenario 1: happy boot of a multi-module manifest", ()
 // ---------------------------------------------------------------------------
 
 describe("integration — Scenario 2: spec §12 worked-example failure diagnostic", () => {
-	it("throws BootError with missing-required-component for refreshTokenStore", async () => {
+	it("throws BootError with missing-required-component for a slot that is never provided", async () => {
 		// Replicate the §12 module list. Module names match the spec exactly so
 		// the path assertions below are stable.
 
@@ -260,16 +263,14 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 			},
 		});
 
-		// oauthAuthorizationModule requires refreshTokenStore — intentionally
-		// not provided by any module in this test, which triggers the BootError.
-		//
-		// "refreshTokenStore" is cast as `never` to bypass the ComponentMap type-level
-		// check: the X1 cross-spec constraint prohibits the legacy slot name from
-		// being declared in ComponentMap. At runtime the planner only reads the
-		// string value, so the cast is safe for this diagnostic test.
+		// oauthAuthorizationModule requires "intMissingSlot" — a test-only slot
+		// declared in the declare module block above but intentionally never
+		// provided by any module in this test, which triggers the BootError.
+		// No `as never` cast needed: the slot is legitimately declared in
+		// ComponentMap for this test file.
 		const oauthAuthorizationModule = defineModule({
 			name: "oauth-authorization",
-			requires: ["keyStore", "clientRepository", "codeRepository", "refreshTokenStore" as never],
+			requires: ["keyStore", "clientRepository", "codeRepository", "intMissingSlot"],
 			contributes: {
 				grants: {
 					"urn:test:authorization_code": (_deps) => ({}),
@@ -308,7 +309,7 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 
 		// auditModule requires auditSink — also missing, but the planner surfaces
 		// only the FIRST violation in input-array order (oauth-authorization's
-		// refreshTokenStore comes first per module iteration, which iterates
+		// intMissingSlot comes first per module iteration, which iterates
 		// oauthAuthorizationModule before auditModule in the input array).
 		const auditModule = defineModule({
 			name: "audit",
@@ -342,14 +343,14 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 		expect(err.details.reason).toBe("missing-required-component");
 
 		if (err.details.reason === "missing-required-component") {
-			expect(err.details.missingKey).toBe("refreshTokenStore");
+			expect(err.details.missingKey).toBe("intMissingSlot");
 			// rootModule: the module that first hits the unsatisfied requires key;
 			// since oauthAuthorizationModule has no provider chain leading back to
 			// a requirer, it IS the root module.
 			expect(err.details.rootModule).toBe("oauth-authorization");
 			// path: single entry — the failing module with its missing key, no satisfiedBy.
 			expect(err.details.path).toEqual([
-				{ module: "oauth-authorization", requires: "refreshTokenStore" },
+				{ module: "oauth-authorization", requires: "intMissingSlot" },
 			]);
 		}
 	});

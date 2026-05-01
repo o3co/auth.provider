@@ -22,7 +22,7 @@ import {
 	type FederationProviderHandle,
 	type FederationTokenStoreBase,
 	type Logger,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
 	type SessionRPRegistry,
@@ -125,11 +125,11 @@ function makeSessionFederationIndex(
 	} as SessionFederationIndex;
 }
 
-function makeRefreshStore(override?: Partial<RefreshTokenStoreBase>): RefreshTokenStoreBase {
+function makeFamilyRevocation(
+	override?: Partial<RefreshTokenFamilyRevocation>,
+): RefreshTokenFamilyRevocation {
 	return {
-		kind: "memory",
 		isFamilyRevoked: vi.fn().mockResolvedValue(false),
-		rotate: vi.fn(),
 		revokeFamily: vi.fn().mockResolvedValue(undefined),
 		...override,
 	};
@@ -160,7 +160,7 @@ interface BuildAppOpts {
 	sessionRPRegistry?: SessionRPRegistry;
 	sessionFamilyIndex?: SessionFamilyIndex;
 	sessionFederationIndex?: SessionFederationIndex;
-	refreshStore?: RefreshTokenStoreBase;
+	refreshFamilyRevocation?: RefreshTokenFamilyRevocation;
 	fedTokenStore?: FederationTokenStoreBase;
 	clientRepo?: ClientRepository;
 	/** Getter for federation providers — evaluated at request time. */
@@ -180,7 +180,7 @@ function buildApp(opts: BuildAppOpts = {}) {
 		sessionRPRegistry: opts.sessionRPRegistry ?? makeSessionRPRegistry(),
 		sessionFamilyIndex: opts.sessionFamilyIndex ?? makeSessionFamilyIndex(),
 		sessionFederationIndex: opts.sessionFederationIndex ?? makeSessionFederationIndex(),
-		refreshTokenStore: opts.refreshStore ?? makeRefreshStore(),
+		refreshTokenFamilyRevocation: opts.refreshFamilyRevocation ?? makeFamilyRevocation(),
 		federationTokenStore: opts.fedTokenStore ?? makeFedTokenStore(),
 		clientRepository: opts.clientRepo ?? makeClientRepo(),
 		getFederationProviders: opts.getFederationProviders ?? (() => undefined),
@@ -213,9 +213,9 @@ describe("POST /oauth/logout", () => {
 	describe("happy path", () => {
 		it("valid id_token_hint + session → cascadeLogout called, returns JSON { logged_out: true }", async () => {
 			const sessionStore = makeSessionStore();
-			const refreshStore = makeRefreshStore();
+			const refreshFamilyRevocation = makeFamilyRevocation();
 			const fedTokenStore = makeFedTokenStore();
-			const app = buildApp({ sessionStore, refreshStore, fedTokenStore });
+			const app = buildApp({ sessionStore, refreshFamilyRevocation, fedTokenStore });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -223,7 +223,7 @@ describe("POST /oauth/logout", () => {
 			expect(res.status).toBe(200);
 			expect(res.body).toEqual({ logged_out: true });
 			// cascadeLogout step 1: revokeFamily called for each familyId
-			expect(refreshStore.revokeFamily).toHaveBeenCalledWith("fam-1");
+			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 			// cascadeLogout step 3: session deleted
 			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 			// cascadeLogout step 2: federation tokens cleared
@@ -234,15 +234,15 @@ describe("POST /oauth/logout", () => {
 	describe("session missing (defensive no-op)", () => {
 		it("userSessionStore.get → null → 200 JSON, cascadeLogout NOT called", async () => {
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(null) });
-			const refreshStore = makeRefreshStore();
-			const app = buildApp({ sessionStore, refreshStore });
+			const refreshFamilyRevocation = makeFamilyRevocation();
+			const app = buildApp({ sessionStore, refreshFamilyRevocation });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
 
 			expect(res.status).toBe(200);
 			expect(res.body).toEqual({ logged_out: true });
-			expect(refreshStore.revokeFamily).not.toHaveBeenCalled();
+			expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
 			expect(sessionStore.delete).not.toHaveBeenCalled();
 		});
 	});
@@ -278,10 +278,10 @@ describe("POST /oauth/logout", () => {
 
 	describe("cascadeLogout returns failed (step 1: revokeFamily throws)", () => {
 		it("returns 503 temporarily_unavailable", async () => {
-			const refreshStore = makeRefreshStore({
+			const refreshFamilyRevocation = makeFamilyRevocation({
 				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
 			});
-			const app = buildApp({ refreshStore });
+			const app = buildApp({ refreshFamilyRevocation });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -564,10 +564,10 @@ describe("POST /oauth/logout", () => {
 		});
 
 		it("503 cascade failure sets Cache-Control: no-store and Pragma: no-cache", async () => {
-			const refreshStore = makeRefreshStore({
+			const refreshFamilyRevocation = makeFamilyRevocation({
 				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
 			});
-			const app = buildApp({ refreshStore });
+			const app = buildApp({ refreshFamilyRevocation });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
@@ -809,10 +809,10 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 	describe("family revoked", () => {
 		it("returns 401 invalid_token when isFamilyRevoked returns true", async () => {
-			const refreshStore = makeRefreshStore({
+			const refreshFamilyRevocation = makeFamilyRevocation({
 				isFamilyRevoked: vi.fn().mockResolvedValue(true),
 			});
-			const app = buildFedLogoutApp({ refreshStore });
+			const app = buildFedLogoutApp({ refreshFamilyRevocation });
 			const token = await mintAccessToken();
 
 			const res = await postFedLogout(app, "google", token);
@@ -920,10 +920,10 @@ describe("POST /oauth/federation/:name/logout", () => {
 		});
 
 		it("family revoked returns WWW-Authenticate: Bearer error=invalid_token", async () => {
-			const refreshStore = makeRefreshStore({
+			const refreshFamilyRevocation = makeFamilyRevocation({
 				isFamilyRevoked: vi.fn().mockResolvedValue(true),
 			});
-			const app = buildFedLogoutApp({ refreshStore });
+			const app = buildFedLogoutApp({ refreshFamilyRevocation });
 			const token = await mintAccessToken();
 
 			const res = await postFedLogout(app, "google", token);
@@ -1116,10 +1116,10 @@ describe("audit events", () => {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
-			const refreshStore = makeRefreshStore({
+			const refreshFamilyRevocation = makeFamilyRevocation({
 				revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
 			});
-			const app = buildApp({ auditSink, refreshStore });
+			const app = buildApp({ auditSink, refreshFamilyRevocation });
 			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });

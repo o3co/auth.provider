@@ -17,7 +17,7 @@
 import {
 	filterClaimsByScope,
 	type KeyStore,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -32,7 +32,7 @@ type ExpressLike = {
 export interface UserinfoRouterOptions {
 	keyStore: KeyStore;
 	userSessionStore?: UserSessionStore;
-	refreshTokenStore?: RefreshTokenStoreBase;
+	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 }
 
 /**
@@ -93,10 +93,10 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		// tokens minted before F-3 lack this claim and bypass the cascade check
 		// (legacy backward-compat). New tokens always carry family_id per F-3.
 		const familyId = typeof payload.family_id === "string" ? payload.family_id : null;
-		if (familyId !== null && opts.refreshTokenStore) {
+		if (familyId !== null && opts.refreshTokenFamilyRevocation) {
 			let revoked: boolean;
 			try {
-				revoked = await opts.refreshTokenStore.isFamilyRevoked(familyId);
+				revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 			} catch {
 				// Fail-closed: cannot determine revocation state → treat as revoked
 				res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');

@@ -16,7 +16,7 @@
 import type {
 	FederationTokenStoreBase,
 	Logger,
-	RefreshTokenStoreBase,
+	RefreshTokenFamilyRevocation,
 	SessionFamilyIndex,
 	SessionFederationIndex,
 	SessionRPRegistry,
@@ -25,7 +25,7 @@ import type {
 
 export interface CascadeLogoutOptions {
 	readonly sid: string;
-	readonly refreshTokenStore: RefreshTokenStoreBase;
+	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	readonly federationTokenStore: FederationTokenStoreBase;
 	readonly userSessionStore: UserSessionStore;
 	readonly sessionRPRegistry: SessionRPRegistry;
@@ -106,11 +106,11 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 
 	for (const familyId of familyIds) {
 		try {
-			await opts.refreshTokenStore.revokeFamily(familyId);
+			await opts.refreshTokenFamilyRevocation.revokeFamily(familyId);
 		} catch (error) {
 			stepTwoFailures.push(error);
 			logger.warn(
-				`cascadeLogout: refreshTokenStore.revokeFamily(${familyId}) failed (continuing tally):`,
+				`cascadeLogout: refreshTokenFamilyRevocation.revokeFamily(${familyId}) failed (continuing tally):`,
 				error,
 			);
 		}

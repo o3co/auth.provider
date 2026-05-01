@@ -20,6 +20,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	type RefreshTokenRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
 } from "@o3co/auth-provider-core";
@@ -178,22 +179,15 @@ describe("createAuthorizationGrant", () => {
 			expect(sessionMutation?.clear).toContain("granted_scopes");
 		});
 
-		it("registers initial rt+jwt via refreshTokenStore.rotate(null, ...) (CP-2)", async () => {
-			const rotateSpy = vi.fn(
-				async (_prev: string | null, _next: string, _fam: string, _exp: Date) =>
-					({ outcome: "rotated" }) as const,
-			);
-			const refreshTokenStore = {
-				kind: "spy",
-				rotate: rotateSpy,
-				async isFamilyRevoked() {
-					return false;
-				},
-				async revokeFamily() {},
+		it("registers initial rt+jwt via refreshTokenRotation.register (CP-2)", async () => {
+			const registerSpy = vi.fn(async () => {});
+			const refreshTokenRotation: RefreshTokenRotation = {
+				register: registerSpy,
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			};
 			const deps = {
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
-				refreshTokenStore,
+				refreshTokenRotation,
 			};
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
@@ -211,36 +205,31 @@ describe("createAuthorizationGrant", () => {
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(200);
-			expect(rotateSpy).toHaveBeenCalledTimes(1);
-			const [previousJti, newJti, familyId, expiresAt] = rotateSpy.mock.calls[0] as [
-				string | null,
+			expect(registerSpy).toHaveBeenCalledTimes(1);
+			const [newJti, familyId, expiresAtMs] = registerSpy.mock.calls[0] as unknown as [
 				string,
 				string,
-				Date,
+				number,
 			];
-			expect(previousJti).toBeNull();
 			expect(typeof newJti).toBe("string");
 			expect(newJti.length).toBeGreaterThan(0);
 			expect(familyId).toMatch(
 				/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
 			);
-			expect(expiresAt).toBeInstanceOf(Date);
+			expect(typeof expiresAtMs).toBe("number");
+			expect(expiresAtMs).toBeGreaterThan(Date.now());
 		});
 
-		it("returns 503 temporarily_unavailable when initial rotate throws (CP-16)", async () => {
-			const throwingStore = {
-				kind: "broken",
-				async rotate() {
+		it("returns 503 temporarily_unavailable when refreshTokenRotation.register throws (CP-16)", async () => {
+			const throwingRotation: RefreshTokenRotation = {
+				register: async () => {
 					throw new Error("store down");
 				},
-				async isFamilyRevoked() {
-					return false;
-				},
-				async revokeFamily() {},
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			};
 			const deps = {
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
-				refreshTokenStore: throwingStore,
+				refreshTokenRotation: throwingRotation,
 			};
 			const handler = createAuthorizationGrant(deps);
 
@@ -261,7 +250,7 @@ describe("createAuthorizationGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("skips initial-register when no refreshTokenStore is configured (CP-2 graceful)", async () => {
+		it("skips initial-register when no refreshTokenRotation is configured (CP-2 graceful)", async () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({

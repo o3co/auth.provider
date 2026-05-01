@@ -23,7 +23,7 @@ import {
 	createSymmetricKeyStore,
 	defineModule,
 	GrantRegistry,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
 import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -68,7 +68,10 @@ async function makeAccessToken(overrides: Record<string, unknown> = {}): Promise
 		.sign(secretKey);
 }
 
-async function buildApp(refreshTokenStore?: RefreshTokenStoreBase, auditSink?: AuditSinkBase) {
+async function buildApp(
+	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation,
+	auditSink?: AuditSinkBase,
+) {
 	const app = express();
 	app.set("trust proxy", 1);
 	app.use(express.json());
@@ -80,7 +83,7 @@ async function buildApp(refreshTokenStore?: RefreshTokenStoreBase, auditSink?: A
 		clientRepository: mockClientRepository,
 		codeRepository: mockCodeRepository,
 		keyStore,
-		refreshTokenStore,
+		refreshTokenFamilyRevocation,
 		auditSink,
 	});
 
@@ -104,33 +107,29 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const familyId = "fam-abc";
 		const token = await makeAccessToken({ family_id: familyId });
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			isFamilyRevoked: vi.fn().mockResolvedValue(false),
 		};
 
-		const app = await buildApp(refreshTokenStore);
+		const app = await buildApp(refreshTokenFamilyRevocation);
 		const res = await introspect(app, token);
 
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(true);
-		expect(refreshTokenStore.isFamilyRevoked).toHaveBeenCalledWith(familyId);
+		expect(refreshTokenFamilyRevocation.isFamilyRevoked).toHaveBeenCalledWith(familyId);
 	});
 
 	it("returns active:false when family_id present and isFamilyRevoked returns true", async () => {
 		const familyId = "fam-revoked";
 		const token = await makeAccessToken({ family_id: familyId });
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		};
 
-		const app = await buildApp(refreshTokenStore);
+		const app = await buildApp(refreshTokenFamilyRevocation);
 		const res = await introspect(app, token);
 
 		expect(res.status).toBe(200);
@@ -141,14 +140,12 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const familyId = "fam-error";
 		const token = await makeAccessToken({ family_id: familyId });
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			isFamilyRevoked: vi.fn().mockRejectedValue(new Error("store unavailable")),
 		};
 
-		const app = await buildApp(refreshTokenStore);
+		const app = await buildApp(refreshTokenFamilyRevocation);
 		const res = await introspect(app, token);
 
 		expect(res.status).toBe(200);
@@ -159,9 +156,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const familyId = "fam-error-audit";
 		const token = await makeAccessToken({ family_id: familyId });
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			isFamilyRevoked: vi.fn().mockRejectedValue(new Error("backend down")),
 		};
@@ -173,7 +168,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 			},
 		};
 
-		const app = await buildApp(refreshTokenStore, auditSink);
+		const app = await buildApp(refreshTokenFamilyRevocation, auditSink);
 		const res = await introspect(app, token);
 
 		expect(res.status).toBe(200);
@@ -188,9 +183,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const familyId = "fam-revoked-audit";
 		const token = await makeAccessToken({ family_id: familyId });
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		};
@@ -202,7 +195,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 			},
 		};
 
-		const app = await buildApp(refreshTokenStore, auditSink);
+		const app = await buildApp(refreshTokenFamilyRevocation, auditSink);
 		const res = await introspect(app, token);
 
 		expect(res.status).toBe(200);
@@ -215,9 +208,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 	it("returns active:true and does NOT consult store for legacy token without family_id", async () => {
 		const token = await makeAccessToken(); // no family_id claim
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			// Throws if called — ensures no consultation for legacy tokens
 			isFamilyRevoked: vi.fn().mockImplementation(() => {
@@ -225,70 +216,58 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 			}),
 		};
 
-		const app = await buildApp(refreshTokenStore);
+		const app = await buildApp(refreshTokenFamilyRevocation);
 		const res = await introspect(app, token);
 
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(true);
-		expect(refreshTokenStore.isFamilyRevoked).not.toHaveBeenCalled();
+		expect(refreshTokenFamilyRevocation.isFamilyRevoked).not.toHaveBeenCalled();
 	});
 
 	it("rejects empty-string family_id and does NOT consult store", async () => {
 		// family_id: "" should be treated as missing (M1 guard)
 		const token = await makeAccessToken({ family_id: "" });
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			isFamilyRevoked: vi.fn().mockImplementation(() => {
 				throw new Error("isFamilyRevoked must not be called for empty family_id");
 			}),
 		};
 
-		const app = await buildApp(refreshTokenStore);
+		const app = await buildApp(refreshTokenFamilyRevocation);
 		const res = await introspect(app, token);
 
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(true);
-		expect(refreshTokenStore.isFamilyRevoked).not.toHaveBeenCalled();
+		expect(refreshTokenFamilyRevocation.isFamilyRevoked).not.toHaveBeenCalled();
 	});
 });
 
 // ---------------------------------------------------------------------------
-// oauthModule — refreshTokenStore composition (C1) via createTestApp
+// oauthModule — refreshTokenFamilyRevocation composition (C1) via createTestApp
 //
 // Migrated to createTestApp pattern: oauthModule is booted via the Phase 4
-// planner; refreshTokenStore flows through the DI graph. The family-revoke
-// cascade must still fire because createOAuthRouter receives the store from
-// typed deps (not legacy ModuleContext.refreshTokenStore).
-//
-// Note: RefreshTokenStoreBase is the v0.4.x legacy shape used by createOAuthRouter
-// for the introspect cascade. It is NOT a declared ComponentMap slot in v0.5.0
-// (replaced by refreshTokenFamilyStore / refreshTokenRotation / etc. per A3).
-// Wiring to the A3 slots is deferred; this test exercises the createOAuthRouter
-// call-site forwarding that oauthModule must perform via the deps object cast.
+// planner; refreshTokenFamilyRevocation flows through the DI graph. The
+// family-revoke cascade must still fire because createOAuthRouter receives the
+// store from typed deps (A3 §5.3 — RefreshTokenFamilyRevocation interface).
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — refreshTokenStore composition (C1) via createTestApp", () => {
-	it("threads refreshTokenStore through to /introspect so family revocation returns active:false", async () => {
+describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via createTestApp", () => {
+	it("threads refreshTokenFamilyRevocation through to /introspect so family revocation returns active:false", async () => {
 		const familyId = "fam-module-revoked";
 		const token = await makeAccessToken({ family_id: familyId });
 
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "test",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			revokeFamily: vi.fn(),
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		};
 
-		// refreshTokenStore is not a declared ComponentMap slot in v0.5.0 (A3 replaced it).
-		// We use an any cast to thread it through the DI graph as an ad-hoc component;
-		// oauthModule reads it from deps in the route factory and forwards to createOAuthRouter.
-		const refreshTokenStoreModule = defineModule({
-			name: "test:refresh-token-store",
-			// biome-ignore lint/suspicious/noExplicitAny: v0.4.x slot not in ComponentMap; deferred to A3 wiring task
-			provides: { refreshTokenStore: () => refreshTokenStore } as any,
+		// refreshTokenFamilyRevocation flows through the DI graph as the A3 §5.3 slot;
+		// oauthModule reads it from typed deps and forwards to createOAuthRouter.
+		const refreshTokenFamilyRevocationModule = defineModule({
+			name: "test:refresh-token-family-revocation",
+			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
 
 		const base = makeValidAppConfig();
@@ -319,7 +298,7 @@ describe("oauthModule — refreshTokenStore composition (C1) via createTestApp",
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreForC1,
-				refreshTokenStoreModule,
+				refreshTokenFamilyRevocationModule,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -337,7 +316,7 @@ describe("oauthModule — refreshTokenStore composition (C1) via createTestApp",
 		// If C1 is fixed, the store was consulted and the family is revoked → inactive.
 		expect(res.status).toBe(200);
 		expect(res.body.active).toBe(false);
-		expect(refreshTokenStore.isFamilyRevoked).toHaveBeenCalledWith(familyId);
+		expect(refreshTokenFamilyRevocation.isFamilyRevoked).toHaveBeenCalledWith(familyId);
 
 		await handle.dispose();
 	});

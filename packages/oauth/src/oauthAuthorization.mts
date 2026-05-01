@@ -71,7 +71,7 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			// read these to back refresh-token rotation persistence and CP-18 grant
 			// policy enforcement. Boot planner only injects keys listed here, so
 			// omitting them silently drops both features at the grant boundary.
-			"refreshTokenStore",
+			"refreshTokenRotation", // A3 §5.2 — replaces legacy refreshTokenStore (#101)
 			"grantPolicy",
 			"userSessionStore",
 			"sessionRPRegistry", // Amendment 4 (§1.1.4)

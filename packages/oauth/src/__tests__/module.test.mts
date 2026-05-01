@@ -25,7 +25,7 @@ import {
 	type FederationProviderHandle,
 	type FederationTokenStoreBase,
 	type RateLimiterBase,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
 	type SessionRPRegistry,
@@ -415,9 +415,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 			deleteBySession: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn().mockResolvedValue(undefined),
 		};
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "memory",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			isFamilyRevoked: vi.fn(async () => false),
 			revokeFamily: vi.fn(),
 		};
@@ -451,9 +449,9 @@ describe("oauthModule — federation logout via typed deps", () => {
 			name: "test:federation-token-store",
 			provides: { federationTokenStore: () => fedTokenStore },
 		});
-		const refreshTokenStoreModule = defineModule({
-			name: "test:refresh-token-store",
-			provides: { refreshTokenStore: () => refreshTokenStore },
+		const refreshTokenFamilyRevocationModule = defineModule({
+			name: "test:refresh-token-family-revocation",
+			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
 		// federationProviders is SYNTHETIC — built from the "federations" collector.
 		// Contribute the google provider via a federation module; the boot planner
@@ -502,7 +500,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 				sessionFamilyIndexModule,
 				sessionFederationIndexModule,
 				federationTokenStoreModule,
-				refreshTokenStoreModule,
+				refreshTokenFamilyRevocationModule,
 				federationModule,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
@@ -530,9 +528,9 @@ describe("oauthModule — federation logout via typed deps", () => {
 	});
 
 	it("federation-token endpoint is mounted even when issuer is absent (returns 401, not 404)", async () => {
-		// federationTokenSupported in routes.mts (lines 627-633) gates on the
-		// 4-store split + federationTokenStore + refreshTokenStore. Issuer
-		// absence must NOT break this gate — that is what the test asserts.
+		// federationTokenSupported in routes.mts gates on the 4-store split +
+		// federationTokenStore + refreshTokenFamilyRevocation. Issuer absence
+		// must NOT break this gate — that is what the test asserts.
 		const sessionStore: UserSessionStore = {
 			kind: "memory",
 			create: vi.fn(),
@@ -566,9 +564,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 			deleteBySession: vi.fn(),
 			delete: vi.fn(),
 		};
-		const refreshTokenStore: RefreshTokenStoreBase = {
-			kind: "memory",
-			rotate: vi.fn(),
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
 			isFamilyRevoked: vi.fn(async () => false),
 			revokeFamily: vi.fn(),
 		};
@@ -593,9 +589,9 @@ describe("oauthModule — federation logout via typed deps", () => {
 			name: "test:federation-token-store-noissuer",
 			provides: { federationTokenStore: () => fedTokenStore },
 		});
-		const refreshTokenStoreModule = defineModule({
-			name: "test:refresh-token-store-noissuer",
-			provides: { refreshTokenStore: () => refreshTokenStore },
+		const refreshTokenFamilyRevocationModule = defineModule({
+			name: "test:refresh-token-family-revocation-noissuer",
+			provides: { refreshTokenFamilyRevocation: () => refreshTokenFamilyRevocation },
 		});
 
 		const config = makeValidAppConfig();
@@ -612,7 +608,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 				sessionFamilyIndexModule,
 				sessionFederationIndexModule,
 				federationTokenStoreModule,
-				refreshTokenStoreModule,
+				refreshTokenFamilyRevocationModule,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});

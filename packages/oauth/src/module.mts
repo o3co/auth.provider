@@ -76,14 +76,13 @@ const oauthConfigSchema = z.object({
  * `deps.federationProviders` is the typed, stable read at factory invocation
  * time (Theme E structural fix).
  *
- * `grantPolicy` and `refreshTokenStore` are declared as ComponentMap slots
- * (colocated augmentations in `core/src/policy/types.mts` and
- * `core/src/refresh/types.mts`). Both are still consumed by `routes.mts` —
- * `grantPolicy.evaluate` gates `/oauth/token`, and `refreshTokenStore` is
- * read by introspect (family revocation), userinfo, and logout cascade.
- * Phase 6 A3 introduced `refreshTokenRotation`/`refreshTokenFamilyStore`/
- * `refreshTokenFamilyRevocation` as the v0.5.0 successor, but the routes.mts
- * migration to the new triple is deferred to a follow-on task.
+ * `grantPolicy` and `refreshTokenFamilyRevocation` are declared as
+ * ComponentMap slots (colocated augmentations in `core/src/policy/types.mts`
+ * and `core/src/refresh-token-family/types.mts`). Both are consumed by
+ * `routes.mts` — `grantPolicy.evaluate` gates `/oauth/token`, and
+ * `refreshTokenFamilyRevocation.isFamilyRevoked` is read by introspect,
+ * userinfo, logout cascade, and federation-token. The legacy
+ * `RefreshTokenStoreBase` slot was removed in issue #101 (A3 §5.3).
  *
  * Theme B (one responsibility per module), Theme C (no synthetic-key redeclaration),
  * Theme D (immutability — const defineModule, no ctx mutation),
@@ -111,7 +110,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 		| "rateLimiter"
 		| "auditSink"
 		| "grantPolicy"
-		| "refreshTokenStore"
+		| "refreshTokenFamilyRevocation"
 		| "userSessionStore"
 		| "sessionRPRegistry"
 		| "sessionFamilyIndex"
@@ -132,7 +131,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 			"rateLimiter", // Phase 9 Task 4 augmentation — oauth routes degrade gracefully without
 			"auditSink", // Phase 9 Task 4 augmentation — no events emitted when absent
 			"grantPolicy", // Phase 9 Task 4 augmentation — gates POST /oauth/token; allow-all when absent
-			"refreshTokenStore", // Phase 9 Task 4 augmentation — introspect/userinfo/logout cascade; A3 successor wiring deferred
+			"refreshTokenFamilyRevocation", // A3 §5.3 — introspect/userinfo/logout cascade family-revocation check
 			"userSessionStore", // Phase 8 A4 four-store split
 			"sessionRPRegistry", // Amendment 4 (§1.1.4)
 			"sessionFamilyIndex", // Amendment 4 (§1.1.4)
@@ -158,7 +157,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 						rateLimiter: deps.rateLimiter,
 						auditSink: deps.auditSink,
 						grantPolicy: deps.grantPolicy,
-						refreshTokenStore: deps.refreshTokenStore,
+						refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
 						userSessionStore: deps.userSessionStore,
 						sessionRPRegistry: deps.sessionRPRegistry,
 						sessionFamilyIndex: deps.sessionFamilyIndex,
@@ -192,7 +191,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 									| "rateLimiter"
 									| "auditSink"
 									| "grantPolicy"
-									| "refreshTokenStore"
+									| "refreshTokenFamilyRevocation"
 									| "userSessionStore"
 									| "sessionRPRegistry"
 									| "sessionFamilyIndex"
@@ -207,7 +206,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 									!!deps.sessionFamilyIndex &&
 									!!deps.sessionFederationIndex &&
 									!!deps.federationTokenStore &&
-									!!deps.refreshTokenStore;
+									!!deps.refreshTokenFamilyRevocation;
 								return {
 									id: "oidc-discovery",
 									// The OIDC discovery path `/.well-known/openid-configuration`

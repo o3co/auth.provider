@@ -28,7 +28,7 @@ import {
 	type KeyStore,
 	type PublicClient,
 	type RateLimiterBase,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
 	type SessionRPRegistry,
@@ -71,7 +71,7 @@ export const createOAuthRouter = async (
 		rateLimiter,
 		auditSink,
 		grantPolicy,
-		refreshTokenStore,
+		refreshTokenFamilyRevocation,
 		userSessionStore,
 		sessionRPRegistry,
 		sessionFamilyIndex,
@@ -87,7 +87,7 @@ export const createOAuthRouter = async (
 		rateLimiter?: RateLimiterBase;
 		auditSink?: AuditSinkBase;
 		grantPolicy?: GrantPolicyHookBase;
-		refreshTokenStore?: RefreshTokenStoreBase;
+		refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 		userSessionStore?: UserSessionStore;
 		sessionRPRegistry?: SessionRPRegistry;
 		sessionFamilyIndex?: SessionFamilyIndex;
@@ -275,10 +275,10 @@ export const createOAuthRouter = async (
 					const rawFamilyId = (payload as Record<string, unknown>).family_id;
 					const familyId =
 						typeof rawFamilyId === "string" && rawFamilyId.length > 0 ? rawFamilyId : null;
-					if (familyId !== null && refreshTokenStore) {
+					if (familyId !== null && refreshTokenFamilyRevocation) {
 						let revoked: boolean;
 						try {
-							revoked = await refreshTokenStore.isFamilyRevoked(familyId);
+							revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 						} catch (cause) {
 							// Fail-closed: RFC 7662 §2.2 defines `active: false` for revoked/invalid tokens.
 							// When we cannot determine family revocation state, prefer inactive over active
@@ -600,7 +600,13 @@ export const createOAuthRouter = async (
 		});
 
 	// OIDC Core §5.3 — UserInfo endpoint
-	router.use(userinfo.createRouter(express, { keyStore, userSessionStore, refreshTokenStore }));
+	router.use(
+		userinfo.createRouter(express, {
+			keyStore,
+			userSessionStore,
+			refreshTokenFamilyRevocation,
+		}),
+	);
 
 	// Federation endpoints — mount conditionally based on available stores and config.
 	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
@@ -616,7 +622,7 @@ export const createOAuthRouter = async (
 		!!sessionFamilyIndex &&
 		!!sessionFederationIndex &&
 		!!federationTokenStore &&
-		!!refreshTokenStore &&
+		!!refreshTokenFamilyRevocation &&
 		hasIssuer;
 
 	// Federation-token endpoint forwards upstream; does NOT need our issuer.
@@ -630,7 +636,7 @@ export const createOAuthRouter = async (
 		!!sessionFamilyIndex &&
 		!!sessionFederationIndex &&
 		!!federationTokenStore &&
-		!!refreshTokenStore;
+		!!refreshTokenFamilyRevocation;
 
 	if (logoutSupported) {
 		router.use(
@@ -648,7 +654,7 @@ export const createOAuthRouter = async (
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
 				federationTokenStore: federationTokenStore!,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
-				refreshTokenStore: refreshTokenStore!,
+				refreshTokenFamilyRevocation: refreshTokenFamilyRevocation!,
 				clientRepository,
 				getFederationProviders,
 				auditSink,
@@ -661,7 +667,7 @@ export const createOAuthRouter = async (
 			federationTokenRoute.createRouter(express, {
 				keyStore,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
-				refreshTokenStore: refreshTokenStore!,
+				refreshTokenFamilyRevocation: refreshTokenFamilyRevocation!,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
 				userSessionStore: userSessionStore!,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above

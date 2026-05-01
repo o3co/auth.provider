@@ -17,7 +17,7 @@
 import { createSecretKey } from "node:crypto";
 import {
 	createSymmetricKeyStore,
-	type RefreshTokenStoreBase,
+	type RefreshTokenFamilyRevocation,
 	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -46,12 +46,12 @@ async function mintAT(extra: Record<string, unknown> = {}): Promise<string> {
 interface CallOptions {
 	token: string | null;
 	userSessionStore?: Partial<UserSessionStore>;
-	refreshTokenStore?: Partial<RefreshTokenStoreBase>;
+	refreshTokenFamilyRevocation?: Partial<RefreshTokenFamilyRevocation>;
 }
 
 function buildApp(opts: {
 	userSessionStore?: Partial<UserSessionStore>;
-	refreshTokenStore?: Partial<RefreshTokenStoreBase>;
+	refreshTokenFamilyRevocation?: Partial<RefreshTokenFamilyRevocation>;
 }) {
 	const app = express();
 	app.use(express.json());
@@ -59,7 +59,9 @@ function buildApp(opts: {
 	const router = createRouter(express, {
 		keyStore,
 		userSessionStore: opts.userSessionStore as UserSessionStore | undefined,
-		refreshTokenStore: opts.refreshTokenStore as RefreshTokenStoreBase | undefined,
+		refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation as
+			| RefreshTokenFamilyRevocation
+			| undefined,
 	});
 	// Mount at /oauth to match the convention in module.mts
 	app.use("/oauth", router);
@@ -69,7 +71,7 @@ function buildApp(opts: {
 async function callUserinfo(opts: CallOptions) {
 	const app = buildApp({
 		userSessionStore: opts.userSessionStore,
-		refreshTokenStore: opts.refreshTokenStore,
+		refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
 	});
 	const req = request(app).get("/oauth/userinfo");
 	if (opts.token !== null) {
@@ -105,10 +107,8 @@ describe("GET /oauth/userinfo", () => {
 				create: vi.fn(),
 				delete: vi.fn(),
 			},
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 		});
@@ -126,7 +126,7 @@ describe("GET /oauth/userinfo", () => {
 		const res = await callUserinfo({
 			token: "not.a.valid.jwt",
 			userSessionStore: undefined,
-			refreshTokenStore: undefined,
+			refreshTokenFamilyRevocation: undefined,
 		});
 
 		expect(res.status).toBe(401);
@@ -139,10 +139,8 @@ describe("GET /oauth/userinfo", () => {
 
 		const res = await callUserinfo({
 			token,
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(true),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 			userSessionStore: {
@@ -168,10 +166,8 @@ describe("GET /oauth/userinfo", () => {
 				create: vi.fn(),
 				delete: vi.fn(),
 			},
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 		});
@@ -191,10 +187,8 @@ describe("GET /oauth/userinfo", () => {
 				create: vi.fn(),
 				delete: vi.fn(),
 			},
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 		});
@@ -213,7 +207,7 @@ describe("GET /oauth/userinfo", () => {
 		const res = await callUserinfo({
 			token: null,
 			userSessionStore: undefined,
-			refreshTokenStore: undefined,
+			refreshTokenFamilyRevocation: undefined,
 		});
 
 		expect(res.status).toBe(401);
@@ -227,10 +221,8 @@ describe("GET /oauth/userinfo", () => {
 		const res = await callUserinfo({
 			token,
 			userSessionStore: undefined,
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 		});
@@ -250,10 +242,8 @@ describe("GET /oauth/userinfo", () => {
 				create: vi.fn(),
 				delete: vi.fn(),
 			},
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 		});
@@ -288,10 +278,8 @@ describe("GET /oauth/userinfo", () => {
 				create: vi.fn(),
 				delete: vi.fn(),
 			},
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 		});
@@ -331,10 +319,8 @@ describe("GET /oauth/userinfo", () => {
 				create: vi.fn(),
 				delete: vi.fn(),
 			},
-			refreshTokenStore: {
-				kind: "memory",
+			refreshTokenFamilyRevocation: {
 				isFamilyRevoked: vi.fn().mockResolvedValue(false),
-				rotate: vi.fn(),
 				revokeFamily: vi.fn(),
 			},
 		});

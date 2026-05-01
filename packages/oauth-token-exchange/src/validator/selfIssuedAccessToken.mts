@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { KeyStore, RefreshTokenStoreBase } from "@o3co/auth-provider-core";
+import type { KeyStore, RefreshTokenFamilyRevocation } from "@o3co/auth-provider-core";
 import { decodeProtectedHeader, jwtVerify } from "jose";
 import type {
 	ExchangeTokenValidationContext,
@@ -26,7 +26,7 @@ export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 
 export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	keyStore: KeyStore;
-	refreshTokenStore?: RefreshTokenStoreBase;
+	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	issuer: string;
 }
 
@@ -38,9 +38,9 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  *     when signed by the same KeyStore — prevents token-type-confusion)
  *   - Standard claims (exp via jose)
  *   - Issuer match (always — `issuer` is a required option)
- *   - When refreshTokenStore is wired: family_id cascading revoke
+ *   - When refreshTokenFamilyRevocation is wired: family_id cascading revoke
  *
- * When refreshTokenStore is absent, the family revoke check is silently
+ * When refreshTokenFamilyRevocation is absent, the family revoke check is silently
  * skipped here; the grant handler is responsible for detecting this
  * misconfiguration and responding with invalid_grant (spec §7.2 state 1:
  * "not wired"). The validator alone is NOT fail-closed against store
@@ -59,7 +59,7 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
 ): ExchangeTokenValidator {
-	const { keyStore, refreshTokenStore, issuer } = options;
+	const { keyStore, refreshTokenFamilyRevocation, issuer } = options;
 	if (typeof issuer !== "string" || issuer.length === 0) {
 		throw new Error(
 			"createSelfIssuedAccessTokenValidator: issuer is required (a non-empty string). Without an issuer to compare against, an at+jwt signed by the same KeyStore but with a different `iss` claim could be accepted.",
@@ -103,9 +103,9 @@ export function createSelfIssuedAccessTokenValidator(
 
 			const familyId = typeof payload.family_id === "string" ? payload.family_id : undefined;
 
-			if (familyId && refreshTokenStore) {
+			if (familyId && refreshTokenFamilyRevocation) {
 				// Throws on runtime failure — grant handler converts to 503.
-				const revoked = await refreshTokenStore.isFamilyRevoked(familyId);
+				const revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 				if (revoked) return null;
 			}
 

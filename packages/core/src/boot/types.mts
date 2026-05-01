@@ -19,7 +19,7 @@
  * share, plus the BootError class catalogue.
  *
  * A single file (not per-stage files) because the discriminated
- * BootError.details union has 19 variants and the intermediate stage types
+ * BootError.details union has 23 variants and the intermediate stage types
  * form a tight chain — splitting would force unavoidable circular imports
  * between later stage modules.
  *
@@ -552,15 +552,16 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 19 literals, Per A2-β §6.1
+// BootErrorReason — exactly 23 literals, Per A2-β §6.1
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 19 reasons.
+ * exactly 23 reasons.
  *
- * Per A2-β §6.1.
+ * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
+ * federation-stores-incomplete).
  */
 export type BootErrorReason =
 	| "duplicate-module-name"
@@ -583,10 +584,12 @@ export type BootErrorReason =
 	| "route-order-cycle"
 	| "route-order-target-missing"
 	| "federation-redirect-policy-unpaired"
-	| "grant-policy-without-issuer";
+	| "grant-policy-without-issuer"
+	| "mfa-partial-wiring"
+	| "federation-stores-incomplete";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — 19 total, Per A2-β §6.1
+// Per-reason *Details interfaces — 23 total, Per A2-β §6.1
 // ---------------------------------------------------------------------------
 
 /** Per A2-β §6.1. */
@@ -862,12 +865,36 @@ export interface GrantPolicyWithoutIssuerDetails {
 	readonly providedBy: string;
 }
 
+/** Per A2-β §6.1 amendment 2026-05 (issue #101). */
+export interface MfaPartialWiringDetails {
+	readonly reason: "mfa-partial-wiring";
+	readonly missing: readonly ("mfaProviderFactory" | "mfaTransactionStore")[];
+}
+
+/**
+ * Per A2-β §6.1 amendment 2026-05 (issue #101 TODO-F-1); refreshTokenFamilyRevocation
+ * added per #103 review (alignment with route-level gating in
+ * packages/oauth/src/routes.mts).
+ *
+ * When config.federations.<name>.enabled is true, all 6 federation-related
+ * slots must be wired: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
+ * sessionFederationIndex, federationTokenStore, and refreshTokenFamilyRevocation.
+ */
+export interface FederationStoresIncompleteDetails {
+	readonly reason: "federation-stores-incomplete";
+	/** The federation name whose enabled flag triggered the check. */
+	readonly federationName: string;
+	/** The store keys that are absent from the planned component set. */
+	readonly missing: readonly string[];
+}
+
 /**
  * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
  * Per A2-β §6.1, extended by A5 §8.2 and the Phase 9 boot-validator
- * restoration (A4 four-store + CP-20 issuer guard).
+ * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
+ * (mfa-partial-wiring, federation-stores-incomplete).
  */
 export type BootErrorDetails =
 	| DuplicateModuleNameDetails
@@ -890,7 +917,9 @@ export type BootErrorDetails =
 	| RouteOrderCycleDetails
 	| RouteOrderTargetMissingDetails
 	| FederationRedirectPolicyUnpairedDetails
-	| GrantPolicyWithoutIssuerDetails;
+	| GrantPolicyWithoutIssuerDetails
+	| MfaPartialWiringDetails
+	| FederationStoresIncompleteDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

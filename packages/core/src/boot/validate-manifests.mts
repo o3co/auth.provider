@@ -29,6 +29,7 @@
  */
 
 import { z } from "zod";
+import type { AppConfig } from "../config/application.schema.mjs";
 import { composeConfigSchema } from "../config/application.schema.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
@@ -882,6 +883,80 @@ function checkGrantPolicyIssuerInvariant(
 }
 
 // ---------------------------------------------------------------------------
+// Step 13.6 — MFA partial-wiring guard
+// Per issue #101, A2-β §6.1 amendment 2026-05.
+// ---------------------------------------------------------------------------
+
+/**
+ * If `mfaCoordinator` is provided by any module, both `mfaProviderFactory`
+ * and `mfaTransactionStore` MUST also be provided. Otherwise the first MFA
+ * flow crashes at runtime with a confusing `Cannot read properties of
+ * undefined`.
+ *
+ * Per issue #101, A2-β amendment 2026-05.
+ */
+export function checkMfaPartialWiring(plannedKeys: ReadonlySet<string>): void {
+	if (!plannedKeys.has("mfaCoordinator")) return;
+	const missing: ("mfaProviderFactory" | "mfaTransactionStore")[] = [];
+	if (!plannedKeys.has("mfaProviderFactory")) missing.push("mfaProviderFactory");
+	if (!plannedKeys.has("mfaTransactionStore")) missing.push("mfaTransactionStore");
+	if (missing.length > 0) {
+		throw new BootError({
+			stage: "validateManifests",
+			reason: "mfa-partial-wiring",
+			message: `mfaCoordinator is provided but ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} missing`,
+			details: { reason: "mfa-partial-wiring", missing },
+		});
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Step 13.7 — Federation stores wiring guard
+// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
+// ---------------------------------------------------------------------------
+
+const FEDERATION_REQUIRED_STORES = [
+	"userSessionStore",
+	"sessionRPRegistry",
+	"sessionFamilyIndex",
+	"sessionFederationIndex",
+	"federationTokenStore",
+	"refreshTokenFamilyRevocation",
+] as const;
+
+/**
+ * If any `config.federations.<name>.enabled === true`, all 6 session/
+ * federation/refresh-token-family slots MUST be present in the planned
+ * component set. A missing store causes federation routes either to 503 at
+ * runtime with an opaque error (session/federationToken stores) or to never
+ * mount at all (refreshTokenFamilyRevocation — see packages/oauth/src/routes.mts
+ * `logoutSupported` / `federationTokenSupported` gates), surfacing as
+ * unexpected 404s. Both failure modes are equally opaque from the operator's
+ * perspective; the validator surfaces them at boot time.
+ *
+ * Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05; refreshTokenFamilyRevocation
+ * gating added per #103 review (alignment with route-level gating in oauth/routes.mts).
+ */
+export function checkFederationStoresWiring(
+	config: AppConfig,
+	plannedKeys: ReadonlySet<string>,
+): void {
+	const federations = (config.federations ?? {}) as Record<string, { enabled?: boolean }>;
+	for (const [name, fed] of Object.entries(federations)) {
+		if (fed?.enabled !== true) continue;
+		const missing = FEDERATION_REQUIRED_STORES.filter((k) => !plannedKeys.has(k));
+		if (missing.length > 0) {
+			throw new BootError({
+				stage: "validateManifests",
+				reason: "federation-stores-incomplete",
+				message: `federations.${name} is enabled but required federation stores are missing: ${missing.join(", ")}`,
+				details: { reason: "federation-stores-incomplete", federationName: name, missing },
+			});
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Step 8 — Override target existence
 // Per A2-β §5.1 step 8.
 // ---------------------------------------------------------------------------
@@ -1348,6 +1423,30 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		bootstrapComponents,
 		overrideComponents,
 	);
+
+	// Step 13.6: MFA partial-wiring guard — if mfaCoordinator is provided,
+	// both mfaProviderFactory and mfaTransactionStore MUST also be provided.
+	// Per issue #101, A2-β §6.1 amendment 2026-05.
+	//
+	// `plannedKeys` MUST cover all three supported component sources (module
+	// provides, bootstrapComponents, overrideComponents) — same shape as the
+	// CP-20 invariant at step 13.5. Otherwise a composition root that wires
+	// MFA / federation stores via bootstrap or override is falsely rejected
+	// (see multi-agent-review I1+P2 convergence, 2026-05-01).
+	{
+		const plannedKeys = new Set<string>([
+			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
+			...Object.keys(bootstrapComponents),
+			...Object.keys(overrideComponents ?? {}),
+		]);
+		checkMfaPartialWiring(plannedKeys);
+
+		// Step 13.7: Federation stores wiring guard — if any federation is
+		// enabled in config, all required federation stores must be wired
+		// (see FEDERATION_REQUIRED_STORES for the authoritative list).
+		// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
+		checkFederationStoresWiring(parsedConfig as AppConfig, plannedKeys);
+	}
 
 	// Step 14: Route-order edge sanity
 	checkRouteOrderEdges(modules);
