@@ -54,6 +54,55 @@ jobs:
             exit 1
           fi
           echo "No vendor import leaks found in public .d.mts."
+      - name: No redis client imports in core
+        run: |
+          set -euo pipefail
+          # Per A1 §11: redis client libs (ioredis, redis) are an optional peer
+          # of @o3co/auth-provider-redis ONLY. They MUST NOT appear in
+          # @o3co/auth-provider-core source — core stays backend-agnostic.
+          PATTERN='(from[[:space:]]+["'"'"'](ioredis|redis)["'"'"']|require\([[:space:]]*["'"'"'](ioredis|redis)["'"'"']|import\([[:space:]]*["'"'"'](ioredis|redis)["'"'"'])'
+          LEAKED=$(find packages/core/src \( -name '*.mts' -o -name '*.ts' \) -exec grep -l -E "$PATTERN" {} \; 2>/dev/null || true)
+          if [ -n "$LEAKED" ]; then
+            echo "::error::Redis client import leaked into packages/core/:"
+            echo "$LEAKED" | while read -r f; do
+              echo "---"
+              echo "file: $f"
+              grep -n -E "$PATTERN" "$f" || true
+            done
+            exit 1
+          fi
+          echo "OK: no redis client imports in packages/core/"
+      - name: No legacy v0.4.x slot type references
+        run: |
+          set -euo pipefail
+          # Phase 11 fence: removed v0.4.x slot types must not reappear in
+          # source. CHANGELOG.md, spec markdown, and audit markdown are
+          # excluded by the *.mts/*.ts include filter. Comment lines
+          # (`// ...`, `* ...`, `/* ...`) are also filtered — historical
+          # references in JSDoc and the X1/X2 invariant tests are legitimate
+          # and document why the slots are absent.
+          PATTERN='UserSessionStoreBase|RefreshTokenStoreBase|SingleUseTokenStore'
+          HITS=$(grep -rnE "$PATTERN" packages/ templates/ create-app/ --include='*.mts' --include='*.ts' 2>/dev/null | grep -v '/dist/' | grep -vE ':[[:space:]]*(//|\*|/\*)' || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Legacy v0.4.x slot types referenced in code (must be removed in v0.5.0):"
+            echo "$HITS"
+            exit 1
+          fi
+          echo "OK: no legacy v0.4.x slot types in source code"
+      - name: ComponentMap namespace policy
+        run: |
+          set -euo pipefail
+          # Per A1 §5.5: unnamespaced ComponentMap slot names are reserved for
+          # o3co-published packages. Third-party augmentations MUST use a
+          # namespace prefix (e.g. acme.cacheClient). This repo only contains
+          # o3co packages — so any dotted slot name is a policy violation.
+          OFFENDERS=$(grep -rnE 'readonly[[:space:]]+[a-zA-Z_$][a-zA-Z0-9_$]*\.[a-zA-Z_$][a-zA-Z0-9_$.]*[[:space:]]*\??:' packages/ --include='*.mts' --include='*.ts' 2>/dev/null | grep -v '/dist/' || true)
+          if [ -n "$OFFENDERS" ]; then
+            echo "::error::Namespaced ComponentMap slot found in o3co package (reserve unnamespaced names for o3co; third-party augmentations live outside this repo):"
+            echo "$OFFENDERS"
+            exit 1
+          fi
+          echo "OK: all in-repo ComponentMap slot names are unnamespaced"
       - name: No cross-project references
         run: |
           set -euo pipefail
