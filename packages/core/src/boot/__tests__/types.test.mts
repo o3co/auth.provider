@@ -32,9 +32,11 @@ import type {
 	DuplicateOverrideDetails,
 	DuplicateProvidesDetails,
 	FederationRedirectPolicyUnpairedDetails,
+	GrantPolicyWithoutIssuerDetails,
 	InvalidRouteAdvertisementPathDetails,
 	LifecycleWithoutProvidesDetails,
 	ListShapedOverrideDetails,
+	MfaPartialWiringDetails,
 	MissingRequiredComponentDetails,
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
@@ -63,12 +65,13 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 21 literals (Phase 9 added "grant-policy-without-
-// issuer" for the CP-20 invariant restoration)
+// BootErrorReason — exactly 22 literals (Phase 9 added "grant-policy-without-
+// issuer" for the CP-20 invariant restoration; issue #101 added
+// "mfa-partial-wiring")
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 21 reason literals", () => {
+	it("contains exactly the 22 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "duplicate-module-name"
 			| "duplicate-provides"
@@ -91,12 +94,13 @@ describe("BootErrorReason", () => {
 			| "route-order-target-missing"
 			| "federation-redirect-policy-unpaired"
 			| "grant-policy-without-issuer"
+			| "mfa-partial-wiring"
 		>();
 	});
 });
 
 // ---------------------------------------------------------------------------
-// Per-reason Details — discriminator type checks (all 20)
+// Per-reason Details — discriminator type checks (all 22)
 // ---------------------------------------------------------------------------
 
 describe("per-reason *Details discriminators", () => {
@@ -206,6 +210,16 @@ describe("per-reason *Details discriminators", () => {
 		expectTypeOf<
 			FederationRedirectPolicyUnpairedDetails["reason"]
 		>().toEqualTypeOf<"federation-redirect-policy-unpaired">();
+	});
+
+	it("GrantPolicyWithoutIssuerDetails.reason", () => {
+		expectTypeOf<
+			GrantPolicyWithoutIssuerDetails["reason"]
+		>().toEqualTypeOf<"grant-policy-without-issuer">();
+	});
+
+	it("MfaPartialWiringDetails.reason", () => {
+		expectTypeOf<MfaPartialWiringDetails["reason"]>().toEqualTypeOf<"mfa-partial-wiring">();
 	});
 });
 

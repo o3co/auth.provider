@@ -882,6 +882,34 @@ function checkGrantPolicyIssuerInvariant(
 }
 
 // ---------------------------------------------------------------------------
+// Step 13.6 — MFA partial-wiring guard
+// Per issue #101, A2-β §6.1 amendment 2026-05.
+// ---------------------------------------------------------------------------
+
+/**
+ * If `mfaCoordinator` is provided by any module, both `mfaProviderFactory`
+ * and `mfaTransactionStore` MUST also be provided. Otherwise the first MFA
+ * flow crashes at runtime with a confusing `Cannot read properties of
+ * undefined`.
+ *
+ * Per issue #101, A2-β amendment 2026-05.
+ */
+export function checkMfaPartialWiring(plannedKeys: ReadonlySet<string>): void {
+	if (!plannedKeys.has("mfaCoordinator")) return;
+	const missing: ("mfaProviderFactory" | "mfaTransactionStore")[] = [];
+	if (!plannedKeys.has("mfaProviderFactory")) missing.push("mfaProviderFactory");
+	if (!plannedKeys.has("mfaTransactionStore")) missing.push("mfaTransactionStore");
+	if (missing.length > 0) {
+		throw new BootError({
+			stage: "validateManifests",
+			reason: "mfa-partial-wiring",
+			message: `mfaCoordinator is provided but ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} missing`,
+			details: { reason: "mfa-partial-wiring", missing },
+		});
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Step 8 — Override target existence
 // Per A2-β §5.1 step 8.
 // ---------------------------------------------------------------------------
@@ -1348,6 +1376,16 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		bootstrapComponents,
 		overrideComponents,
 	);
+
+	// Step 13.6: MFA partial-wiring guard — if mfaCoordinator is provided,
+	// both mfaProviderFactory and mfaTransactionStore MUST also be provided.
+	// Per issue #101, A2-β §6.1 amendment 2026-05.
+	{
+		const plannedKeys = new Set<string>(
+			normalisedModules.flatMap((m) => m.providesKeys as string[]),
+		);
+		checkMfaPartialWiring(plannedKeys);
+	}
 
 	// Step 14: Route-order edge sanity
 	checkRouteOrderEdges(modules);
