@@ -149,13 +149,7 @@ export function supportsLock(
 export interface FederationTokenStoreClient {
 	get(key: string): Promise<string | null>;
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK" | null>;
-	set(
-		key: string,
-		value: string,
-		mode: "PX",
-		ttlMs: number,
-		condition: "NX",
-	): Promise<"OK" | null>;
+	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	del(...keys: string[]): Promise<number>;
 	scanIterator(opts: { MATCH: string; COUNT?: number }): AsyncIterable<string>;
 }

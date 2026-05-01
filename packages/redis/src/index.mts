@@ -14,17 +14,37 @@
  * limitations under the License.
  */
 
-// Side-effect import: declaration-merge `redisClient` into core's ComponentMap.
-// Consumer's `import "@o3co/auth-provider-redis"` is enough to enable type
-// inference for the redisClient slot.
-import "./component-map.mjs";
-
+// ---------------------------------------------------------------------------
+// Per-purpose client interfaces — re-exported from core for consumer
+// convenience. Consumers importing from @o3co/auth-provider-redis get all
+// per-purpose interfaces without needing a separate import from core.
+// ---------------------------------------------------------------------------
+export type {
+	ChallengeStoreClient,
+	DisposableRefreshTokenFamilyClient,
+	FederationTokenStoreClient,
+	RateLimiterClient,
+	RefreshTokenFamilyClient,
+	RefreshTokenFamilyMultiClient,
+	ReplaySeenSetClient,
+	SessionRPRegistryClient,
+	SessionRPRegistryMultiClient,
+	SessionSidSortedSetClient,
+	SessionSidSortedSetMultiClient,
+	UserSessionStoreClient,
+} from "@o3co/auth-provider-core";
 export {
 	createRedisChallengeStore,
 	type RedisChallengeStoreOptions,
 	redisChallengeStoreBuilder,
 	redisChallengeStoreModule,
 } from "./challenges.mjs";
+// ---------------------------------------------------------------------------
+// makeIoredisClients — canonical wiring factory (Phase 10 addendum).
+// Wrap a single ioredis.Redis connection into the 9 per-purpose client
+// wrappers and spread into bootstrapComponents.
+// ---------------------------------------------------------------------------
+export { makeIoredisClients } from "./clients.mjs";
 // ---------------------------------------------------------------------------
 // CodeRepository (Phase 10 Q4).
 // Relocated from @o3co/auth-provider-foundation. Module pattern intentionally
@@ -77,7 +97,6 @@ export {
 	createRedisSessionRPRegistry,
 	type RedisSessionRPRegistryOptions,
 } from "./sessionRPRegistry.mjs";
-export type { DisposableRedisClient, RedisClient, RedisMulti } from "./types.mjs";
 // ---------------------------------------------------------------------------
 // A4 user-session adapters (Phase 8b).
 // Per A4 §8.1 + §11.2.

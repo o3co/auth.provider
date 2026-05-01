@@ -228,13 +228,7 @@ declare module "@o3co/auth-provider-core" {
  */
 export interface UserSessionStoreClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK" | null>;
-	set(
-		key: string,
-		value: string,
-		mode: "PX",
-		ttlMs: number,
-		condition: "NX",
-	): Promise<"OK" | null>;
+	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	get(key: string): Promise<string | null>;
 	del(key: string): Promise<number>;
 }
