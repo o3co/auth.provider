@@ -25,6 +25,19 @@ export {
 	redisChallengeStoreBuilder,
 	redisChallengeStoreModule,
 } from "./challenges.mjs";
+// ---------------------------------------------------------------------------
+// FederationTokenStore (Phase 10 Q1+Q5).
+// Adapter relocated from core; module pattern added for declarative wiring
+// parity with other v0.5.0 redis adapters.
+// ---------------------------------------------------------------------------
+export {
+	createRedisFederationTokenStore,
+	type EncryptionConfig,
+	type RedisFederationTokenStoreOptions,
+	type RedisLikeClient,
+	redisFederationTokenStoreBuilder,
+	redisFederationTokenStoreModule,
+} from "./federation-tokens.mjs";
 export { redisSessionStoresModule } from "./modules/redisSessionStores.mjs";
 export {
 	createRedisRefreshTokenFamilyStore,

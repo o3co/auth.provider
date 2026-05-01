@@ -11,6 +11,17 @@ export function createFederationTokenStoreFactory(): FederationTokenStoreFactory
 	return createAdapterFactory<FederationTokenStoreBase>("FederationTokenStore");
 }
 
+/**
+ * Registers the built-in in-memory FederationTokenStore. The "redis" backend
+ * was relocated to `@o3co/auth-provider-redis` in Phase 10; consumers wire
+ * it via:
+ *
+ *   import { redisFederationTokenStoreBuilder } from "@o3co/auth-provider-redis";
+ *   factory.register("redis", redisFederationTokenStoreBuilder);
+ *
+ * Or use the declarative `redisFederationTokenStoreModule` in their `modules`
+ * array.
+ */
 export function registerBuiltinFederationTokenStores(factory: FederationTokenStoreFactory): void {
 	factory.register("memory", () => {
 		// eslint-disable-next-line no-console
@@ -18,64 +29,6 @@ export function registerBuiltinFederationTokenStores(factory: FederationTokenSto
 			"federationTokenStore: in-memory adapter is for dev/test only — do not use in production (tokens are lost on restart, no cross-instance replication).",
 		);
 		return createInMemoryFederationTokenStore();
-	});
-	factory.register("redis", async (config) => {
-		const cfg = config as {
-			client?: unknown;
-			encryption?: { mode?: "required" | "allow-plaintext"; key?: Buffer | string };
-			keyPrefix?: string;
-			ttl?: number;
-		};
-		if (!cfg.client) {
-			throw new Error("federationTokenStore.redis: 'client' option is required");
-		}
-		// Validate the client shape up-front so misconfiguration fails fast with
-		// a clear error, not later at deleteBySession runtime. The adapter uses
-		// get / set / del / scanIterator.
-		const clientObj = cfg.client as Record<string, unknown>;
-		const requiredMethods = ["get", "set", "del", "scanIterator"] as const;
-		const missing = requiredMethods.filter((m) => typeof clientObj[m] !== "function");
-		if (missing.length > 0) {
-			throw new Error(
-				`federationTokenStore.redis: client is missing required method(s): ${missing.join(", ")}. ` +
-					`Pass a 'redis' v5 client (or a mock that implements get/set/del/scanIterator).`,
-			);
-		}
-		// Default encryption.mode to "required" — the secure default, matching
-		// spec Section 5 (production MUST encrypt). Operators who want the
-		// plaintext dev mode must pass `encryption: { mode: "allow-plaintext" }`
-		// explicitly; implicit omission no longer means "reject config", it
-		// means "use the safe default".
-		const mode = cfg.encryption?.mode ?? "required";
-		let encryption: import("./adapters/redis.mjs").EncryptionConfig;
-		if (mode === "required") {
-			const rawKey = cfg.encryption?.key;
-			const keyBuf =
-				typeof rawKey === "string"
-					? Buffer.from(rawKey, "base64")
-					: rawKey instanceof Buffer
-						? rawKey
-						: Buffer.alloc(0);
-			if (keyBuf.length !== 32) {
-				throw new Error(
-					"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
-				);
-			}
-			encryption = { mode: "required", key: keyBuf };
-		} else {
-			// eslint-disable-next-line no-console
-			console.warn(
-				"federationTokenStore.redis: running with encryption.mode = allow-plaintext. Do not use in production.",
-			);
-			encryption = { mode: "allow-plaintext" };
-		}
-		const { createRedisFederationTokenStore } = await import("./adapters/redis.mjs");
-		return createRedisFederationTokenStore({
-			client: cfg.client as Parameters<typeof createRedisFederationTokenStore>[0]["client"],
-			encryption,
-			keyPrefix: cfg.keyPrefix,
-			ttl: cfg.ttl,
-		});
 	});
 }
 

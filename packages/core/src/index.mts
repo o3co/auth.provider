@@ -84,6 +84,7 @@ export {
 	createFederationTokenStoreFactory,
 	registerBuiltinFederationTokenStores,
 } from "./federation-tokens/factory.mjs";
+export { memoryFederationTokenStoreModule } from "./federation-tokens/module.mjs";
 // FederationTokenStore — TODO-F-1
 export type {
 	AcquireLockOptions,

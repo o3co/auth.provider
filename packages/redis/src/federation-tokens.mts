@@ -3,9 +3,16 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
-import { decryptTokenField, encryptTokenField } from "../crypto.mjs";
-import { createRedisLock } from "../lock/redis.mjs";
-import type { FederationTokenStoreBase, FederationTokens, SupportsLock } from "../types.mjs";
+import {
+	type AdapterBuilder,
+	defineModule,
+	type FederationTokenStoreBase,
+	type FederationTokens,
+	type SupportsLock,
+} from "@o3co/auth-provider-core";
+import { z } from "zod";
+import { decryptTokenField, encryptTokenField } from "./internal/crypto.mjs";
+import { createRedisLock } from "./internal/lock.mjs";
 
 export interface RedisLikeClient {
 	get(key: string): Promise<string | null>;
@@ -173,3 +180,120 @@ export function createRedisFederationTokenStore(
 		},
 	};
 }
+
+/**
+ * AdapterFactory builder. Consumer wires:
+ *   factory.register("redis", redisFederationTokenStoreBuilder);
+ *
+ * `config` shape:
+ *   { client: RedisLikeClient,
+ *     encryption: EncryptionConfig | { mode?: "required" | "allow-plaintext", key?: Buffer | string },
+ *     keyPrefix?: string,
+ *     ttl?: number }
+ *
+ * Encryption defaults: mode = "required", key MUST be 32-byte (raw Buffer or
+ * base64 string). `mode = "allow-plaintext"` emits a startup warning and is
+ * intended for dev/test only (per spec §5).
+ */
+export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStoreBase> = (
+	config,
+) => {
+	const cfg = config as {
+		client?: unknown;
+		encryption?: { mode?: "required" | "allow-plaintext"; key?: Buffer | string };
+		keyPrefix?: string;
+		ttl?: number;
+	};
+	if (!cfg.client) {
+		throw new Error("federationTokenStore.redis: 'client' option is required");
+	}
+	const clientObj = cfg.client as Record<string, unknown>;
+	const requiredMethods = ["get", "set", "del", "scanIterator"] as const;
+	const missing = requiredMethods.filter((m) => typeof clientObj[m] !== "function");
+	if (missing.length > 0) {
+		throw new Error(
+			`federationTokenStore.redis: client is missing required method(s): ${missing.join(", ")}. ` +
+				`Pass a 'redis' v5 client (or a mock that implements get/set/del/scanIterator).`,
+		);
+	}
+	const mode = cfg.encryption?.mode ?? "required";
+	let encryption: EncryptionConfig;
+	if (mode === "required") {
+		const rawKey = cfg.encryption?.key;
+		const keyBuf =
+			typeof rawKey === "string"
+				? Buffer.from(rawKey, "base64")
+				: rawKey instanceof Buffer
+					? rawKey
+					: Buffer.alloc(0);
+		if (keyBuf.length !== 32) {
+			throw new Error(
+				"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
+			);
+		}
+		encryption = { mode: "required", key: keyBuf };
+	} else {
+		// eslint-disable-next-line no-console
+		console.warn(
+			"federationTokenStore.redis: running with encryption.mode = allow-plaintext. Do not use in production.",
+		);
+		encryption = { mode: "allow-plaintext" };
+	}
+	return createRedisFederationTokenStore({
+		client: cfg.client as RedisLikeClient,
+		encryption,
+		keyPrefix: cfg.keyPrefix,
+		ttl: cfg.ttl,
+	});
+};
+
+/**
+ * `defineModule` manifest for the redis FederationTokenStore. Static
+ * composition path; for runtime-config-driven backend selection use the
+ * builder above with the AdapterFactory pattern.
+ *
+ * configSchema: top-level key `redisFederationTokenStore` (module-namespaced
+ * per master roadmap §3.5).
+ *
+ * `requires`: needs `redisClient` (declared by `@o3co/auth-provider-redis`'s
+ * component-map.mts) and `config`. Encryption key is read from
+ * `redisFederationTokenStore.encryptionKey` (base64 string) — operators set
+ * it via env var `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
+ */
+export const redisFederationTokenStoreModule = defineModule({
+	name: "redis-federation-token-store",
+	requires: ["redisClient", "config"] as const,
+	configSchema: z.object({
+		redisFederationTokenStore: z
+			.object({
+				keyPrefix: z.string().default("ft:"),
+				ttl: z.number().positive().default(86400),
+				encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
+				encryptionKey: z.string().optional(),
+			})
+			.default({ keyPrefix: "ft:", ttl: 86400, encryptionMode: "required" }),
+	}),
+	provides: {
+		federationTokenStore: (deps) => {
+			const cfg = (
+				deps.config as unknown as {
+					redisFederationTokenStore: {
+						keyPrefix: string;
+						ttl: number;
+						encryptionMode: "required" | "allow-plaintext";
+						encryptionKey?: string;
+					};
+				}
+			).redisFederationTokenStore;
+			return redisFederationTokenStoreBuilder(
+				{
+					client: deps.redisClient,
+					encryption: { mode: cfg.encryptionMode, key: cfg.encryptionKey },
+					keyPrefix: cfg.keyPrefix,
+					ttl: cfg.ttl,
+				},
+				{},
+			);
+		},
+	},
+});

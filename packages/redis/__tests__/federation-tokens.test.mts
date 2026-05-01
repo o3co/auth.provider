@@ -3,10 +3,17 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import {
+	type FederationTokenStoreBase,
+	type FederationTokens,
+	type SupportsLock,
+	supportsLock,
+} from "@o3co/auth-provider-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createRedisFederationTokenStore, type RedisLikeClient } from "../adapters/redis.mjs";
-import type { FederationTokenStoreBase, FederationTokens, SupportsLock } from "../types.mjs";
-import { supportsLock } from "../types.mjs";
+import {
+	createRedisFederationTokenStore,
+	type RedisLikeClient,
+} from "../src/federation-tokens.mjs";
 
 function createFakeRedis() {
 	const data = new Map<string, string>();
