@@ -192,3 +192,87 @@ jobs:
           flags: session
           disable_search: true
           fail_ci_if_error: false
+
+  publish-readiness:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('**/package.json') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install
+      - run: pnpm run build
+
+      - name: Pack all @o3co/auth-provider-* packages
+        run: |
+          set -euo pipefail
+          # Per project_v050_publish_readiness_gap memory: simulate the
+          # post-publish state by tarballing every workspace package and
+          # exercising the standalone template against the tarballs (rather
+          # than the workspace:* resolution that local builds use). Catches
+          # "template references symbols not in the published tarball"
+          # before tag push.
+          mkdir -p /tmp/tarballs
+          for pkg in packages/*/; do
+            name=$(node -p "require('./${pkg}package.json').name")
+            case "$name" in
+              @o3co/auth-provider-*)
+                pushd "$pkg" >/dev/null
+                npm pack --pack-destination /tmp/tarballs
+                popd >/dev/null
+                ;;
+              *)
+                echo "skipping $name (not @o3co/auth-provider-*)"
+                ;;
+            esac
+          done
+          ls -la /tmp/tarballs
+
+      - name: Build templates/standalone against packed tarballs
+        run: |
+          set -euo pipefail
+          SCRATCH=$(mktemp -d)
+          cp -R templates/standalone "$SCRATCH/standalone"
+          pushd "$SCRATCH/standalone" >/dev/null
+          # Rewrite workspace:* deps to file: tarball URLs so npm install
+          # consumes the packed artifacts rather than the workspace.
+          for tarball in /tmp/tarballs/*.tgz; do
+            pkgname=$(tar -xzOf "$tarball" package/package.json | node -e "
+              let s = '';
+              process.stdin.on('data', c => s += c);
+              process.stdin.on('end', () => console.log(JSON.parse(s).name));
+            ")
+            node -e "
+              const fs = require('fs');
+              const tar = process.argv[1];
+              const name = process.argv[2];
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+              for (const section of ['dependencies', 'peerDependencies', 'devDependencies']) {
+                if (pkg[section] && pkg[section][name]) {
+                  pkg[section][name] = 'file:' + tar;
+                }
+              }
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+            " "$tarball" "$pkgname"
+          done
+          # Use npm rather than pnpm here: pnpm in workspace context would
+          # try to re-resolve; standalone npm install consumes the file:
+          # tarballs straight.
+          npm install --no-package-lock --omit=optional
+          npm run build
+          popd >/dev/null
+          echo "OK: templates/standalone builds against packed tarballs"
