@@ -128,4 +128,55 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 		expect(handle).toBeDefined();
 		await handle.dispose();
 	});
+
+	// CP-20 must also fire when grantPolicy is wired via bootstrapComponents
+	// or overrideComponents — those are the other two supported paths into
+	// the typed DI graph (per A2-α §6.1 + A2-β §5.1 step 8). A module-only
+	// scan would let an empty-issuer misconfig slip through whenever the
+	// host pre-seeds grantPolicy directly. Multi-reviewer convergence in
+	// Round 2: Claude (Important) + Codex (P2).
+	it("rejects bootstrapComponents.grantPolicy when issuer is missing", async () => {
+		await expect(
+			createApp({
+				modules: [],
+				bootstrapComponents: {
+					config: configWithIssuer(undefined),
+					pathResolver: (p: string) => p,
+					grantPolicy: noopGrantPolicy,
+				} as never,
+			}),
+		).rejects.toSatisfy(
+			(err: unknown) => err instanceof BootError && err.reason === "grant-policy-without-issuer",
+		);
+	});
+
+	it("rejects overrideComponents.grantPolicy when issuer is empty", async () => {
+		await expect(
+			createApp({
+				modules: [],
+				bootstrapComponents: {
+					config: configWithIssuer(""),
+					pathResolver: (p: string) => p,
+				} as never,
+				overrideComponents: {
+					grantPolicy: noopGrantPolicy,
+				} as never,
+			}),
+		).rejects.toSatisfy(
+			(err: unknown) => err instanceof BootError && err.reason === "grant-policy-without-issuer",
+		);
+	});
+
+	it("accepts bootstrapComponents.grantPolicy when issuer is set", async () => {
+		const handle = await createApp({
+			modules: [],
+			bootstrapComponents: {
+				config: configWithIssuer("https://auth.example"),
+				pathResolver: (p: string) => p,
+				grantPolicy: noopGrantPolicy,
+			} as never,
+		});
+		expect(handle).toBeDefined();
+		await handle.dispose();
+	});
 });

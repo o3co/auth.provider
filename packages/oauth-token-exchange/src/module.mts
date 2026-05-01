@@ -62,6 +62,12 @@ export const tokenExchangeModule: Module = defineModule({
 		// at the contribution boundary even when the composition root wires
 		// it. RFC 8693 §7.2 state 1 demands family revocation be observable.
 		"refreshTokenStore",
+		// The token-exchange grant reads deps.grantPolicy at grant.mts:339,362
+		// to enforce the CP-18 fail-closed policy gate. Sibling grants (auth-
+		// code, refresh-token) declare grantPolicy in oauthAuthorizationModule;
+		// without declaring it here, token-exchange would silently sit outside
+		// CP-18 enforcement while sibling grants are gated.
+		"grantPolicy",
 	],
 	contributes: {
 		grants: {

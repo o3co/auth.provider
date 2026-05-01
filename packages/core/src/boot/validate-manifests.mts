@@ -831,33 +831,52 @@ function checkFederationRedirectPolicyPairing(modules: readonly NormalisedModule
 // ---------------------------------------------------------------------------
 // Step 13.5 — CP-20 grantPolicy / jwt.issuer consistency invariant
 //
-// Restores the v0.4.x guard. When any module provides `grantPolicy`, the
-// configured issuer must be a non-empty string — the policy hook signs its
-// decisions against that issuer, and an empty value silently disables
-// CP-18 fail-closed enforcement at the JWT layer. Runs after step 13
+// Restores the v0.4.x guard. When `grantPolicy` is wired through ANY of the
+// three supported component sources — module `provides`, `bootstrapComponents`,
+// or `overrideComponents` — the configured issuer must be a non-empty string.
+// The policy hook signs decisions against that issuer; an empty value silently
+// disables CP-18 fail-closed enforcement at the JWT layer. Runs after step 13
 // (validateAndComposeConfig) so the parsed config is available.
 // ---------------------------------------------------------------------------
 
 function checkGrantPolicyIssuerInvariant(
 	modules: readonly NormalisedModule[],
 	parsedConfig: unknown,
+	bootstrapComponents: BootstrapMap,
+	overrideComponents: Partial<ComponentMap> | undefined,
 ): void {
-	const grantPolicyProvider = modules.find((m) =>
+	// Resolve the wiring source in priority: module provides → override →
+	// bootstrap. The detail's `providedBy` field reports the first source
+	// found; step 2 (checkProvidesClosure) guarantees module-side uniqueness,
+	// and the bootstrap/override sentinels are deliberately distinct strings
+	// so downstream tooling can tell them apart.
+	const moduleProvider = modules.find((m) =>
 		(m.providesKeys as readonly string[]).includes("grantPolicy"),
 	);
-	if (!grantPolicyProvider) return;
+	const overrideHasGrantPolicy =
+		overrideComponents !== undefined &&
+		(overrideComponents as Record<string, unknown>).grantPolicy !== undefined;
+	const bootstrapHasGrantPolicy =
+		(bootstrapComponents as Record<string, unknown>).grantPolicy !== undefined;
+
+	let providedBy: string | undefined;
+	if (moduleProvider) providedBy = moduleProvider.name;
+	else if (overrideHasGrantPolicy) providedBy = "<overrideComponents>";
+	else if (bootstrapHasGrantPolicy) providedBy = "<bootstrapComponents>";
+
+	if (providedBy === undefined) return;
 
 	const issuer = (parsedConfig as { oauth?: { jwt?: { issuer?: unknown } } } | undefined)?.oauth
 		?.jwt?.issuer;
 	if (typeof issuer === "string" && issuer.length > 0) return;
 
 	throw new BootError({
-		message: `CP-20 invariant: config.oauth.jwt.issuer must be a non-empty string when grantPolicy is wired (provided by "${grantPolicyProvider.name}"). Empty issuer turns CP-18 fail-closed enforcement into silent allow-all at the JWT layer.`,
+		message: `CP-20 invariant: config.oauth.jwt.issuer must be a non-empty string when grantPolicy is wired (provided by "${providedBy}"). Empty issuer turns CP-18 fail-closed enforcement into silent allow-all at the JWT layer.`,
 		reason: "grant-policy-without-issuer",
 		stage: "validateManifests",
 		details: {
 			reason: "grant-policy-without-issuer",
-			providedBy: grantPolicyProvider.name,
+			providedBy,
 		},
 	});
 }
@@ -1320,8 +1339,15 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	};
 
 	// Step 13.5: CP-20 grantPolicy/issuer invariant — runs after step 13 so
-	// the parsed config is available (restored v0.4.x guard).
-	checkGrantPolicyIssuerInvariant(normalisedModules, parsedConfig);
+	// the parsed config is available (restored v0.4.x guard). Inspects all
+	// three supported component sources: module provides, bootstrapComponents,
+	// and overrideComponents.
+	checkGrantPolicyIssuerInvariant(
+		normalisedModules,
+		parsedConfig,
+		bootstrapComponents,
+		overrideComponents,
+	);
 
 	// Step 14: Route-order edge sanity
 	checkRouteOrderEdges(modules);

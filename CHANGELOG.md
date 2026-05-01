@@ -32,16 +32,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Consumer modules can list these in their `requires` / `optional`
   arrays without redeclaring the slot type.
 - **Boot validator: CP-20 grantPolicy / jwt.issuer invariant** restored
-  at validate-manifests step 13.5. When any module provides `grantPolicy`,
-  `config.oauth.jwt.issuer` must be a non-empty string; otherwise
-  `BootError` is thrown with reason `grant-policy-without-issuer`.
-  Mirrors the v0.4.x guard removed when the legacy `createApp` body was
-  deleted in commit fd22577e. Other v0.4.x guards (MFA partial-wiring,
-  TODO-F-1 federation+stores) are tracked in #101 as follow-ups; the
-  v0.4.x A4 four-store invariant is intentionally retired in v0.5.0
-  because the four user-session slots are now split across packages
-  (`sessionModule` consumes 2, `oauthModule` consumes 2) and step 4
-  (`checkRequiresClosure`) enforces per-module wiring.
+  at validate-manifests step 13.5. When `grantPolicy` is wired through
+  any of the three supported component sources — module `provides`,
+  `bootstrapComponents`, or `overrideComponents` — `config.oauth.jwt.issuer`
+  must be a non-empty string; otherwise `BootError` is thrown with reason
+  `grant-policy-without-issuer`. Mirrors the v0.4.x guard removed when
+  the legacy `createApp` body was deleted in commit fd22577e. Other
+  v0.4.x guards (MFA partial-wiring, TODO-F-1 federation+stores) are
+  tracked in #101 as follow-ups; the v0.4.x A4 four-store invariant is
+  intentionally retired in v0.5.0 because the four user-session slots
+  are now split across packages (`sessionModule` consumes 2, `oauthModule`
+  consumes 2) and step 4 (`checkRequiresClosure`) enforces per-module
+  wiring.
 - `templates/standalone/src/buildModules.mts` — composition-root helper
   that gates federation modules on `config.federations.<name>.enabled`
   and accepts `BuildModulesOverrides` for tests. Replaces the inline
@@ -75,11 +77,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   token rotation persistence (`createRefreshTokenGrant`) and CP-18
   fail-closed grantPolicy enforcement were silently dead in v0.5.0
   consumers that wired either component.
-- `tokenExchangeModule` now declares `refreshTokenStore` in `optional`.
-  Without it the family-revocation path in the token-exchange grant
-  and the built-in self-issued validator could not observe revocations
-  even when a composition root provided the store, breaking RFC 8693
-  §7.2 state-1 expectations.
+- `tokenExchangeModule` now declares `refreshTokenStore` and
+  `grantPolicy` in `optional`. Without `refreshTokenStore` the
+  family-revocation path in the token-exchange grant and the built-in
+  self-issued validator could not observe revocations even when a
+  composition root provided the store, breaking RFC 8693 §7.2 state-1
+  expectations. Without `grantPolicy` the token-exchange grant sat
+  outside CP-18 fail-closed enforcement while sibling OAuth grants
+  (auth-code, refresh-token) were gated — a structural inconsistency
+  in policy coverage.
 - `oauthModule`'s OIDC discovery contribution mounts the router at
   `/` instead of `/.well-known/openid-configuration`. The discovery
   router itself registers the spec-fixed absolute path, so the prior
@@ -92,12 +98,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   on the enabled flag via the new `buildModules` helper; previously
   both were unconditionally included and the config-bridge module
   threw at boot when the section was absent or disabled.
-- `refreshTokenStore` and `grantPolicy` ComponentMap slots are
-  declared with `?:` to match their documented optional contract.
-  Both have always been optional at consumption; the prior
-  `readonly refreshTokenStore: RefreshTokenStoreBase` declaration
-  lied about the contract and would have surfaced a typecheck
-  failure for any module declaring them in `optional`.
+- **Breaking (type-level)**: `refreshTokenStore` and `grantPolicy`
+  ComponentMap slots are now declared `readonly … ?:` instead of
+  `readonly …` to match their always-optional consumption contract.
+  Both have always been optional at runtime — the prior non-optional
+  declaration lied about the contract and would have surfaced a
+  typecheck failure for any module that declared them in `optional`.
+  External consumers who wrote `deps.refreshTokenStore.rotate(...)`
+  without a guard need to add `if (deps.refreshTokenStore)` (or a
+  non-null assertion) at the call site. v0.5.0 is breaking, so this
+  semver-fits, but the user-visible surface narrows.
 
 ### Boot lifecycle
 

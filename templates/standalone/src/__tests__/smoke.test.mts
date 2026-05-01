@@ -163,15 +163,23 @@ describe("standalone smoke test", () => {
 	// bridge `googleFederationConfigModule`, so the bridge's
 	// `extractFederationSection` returned undefined and threw at boot. The
 	// fix moved the manifest assembly into `buildModules`, which conditionally
-	// includes the federation pair. This test exercises buildModules with the
-	// scaffold-default config, so any regression that re-introduces the
-	// unconditional inclusion fails here.
+	// includes the federation pair. The first sub-assertion asserts directly
+	// on the manifest list — a regression that bypasses the gate fails the
+	// `not.toContain` even if `googleFederationConfigModule` is later made
+	// tolerant of `undefined` (which would otherwise mask the gating bug).
+	// The second sub-assertion verifies the resulting handle still boots
+	// (Codex Round 1 P1 reproducibility).
 	it("boots when google federation is disabled (default scaffold config)", async () => {
+		const modules = buildModules(config, {
+			keyStoreModule: testKeyStoreModule,
+			repositoriesModule: testRepositoriesModule,
+		});
+		const moduleNames = modules.map((m) => m.name);
+		expect(moduleNames).not.toContain("federation:google");
+		expect(moduleNames).not.toContain("standalone:google-federation-config");
+
 		const handle = await createApp({
-			modules: buildModules(config, {
-				keyStoreModule: testKeyStoreModule,
-				repositoriesModule: testRepositoriesModule,
-			}),
+			modules,
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		handleRef = handle;

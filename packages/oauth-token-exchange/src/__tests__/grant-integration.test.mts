@@ -222,4 +222,16 @@ describe("token_exchange — integration", () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("refreshTokenStore");
 	});
+
+	// Symmetric to the refreshTokenStore guard above. The token-exchange grant
+	// reads `deps.grantPolicy` at grant.mts:339,362 to enforce CP-18 fail-
+	// closed policy decisions on exchange requests. Other OAuth grants
+	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy
+	// in oauthAuthorizationModule.optional; without declaring it here as well,
+	// token-exchange would silently sit outside the policy gate while sibling
+	// grants are enforced — a structural inconsistency in CP-18 coverage.
+	it("declares grantPolicy in optional so CP-18 enforcement reaches token-exchange", async () => {
+		const { tokenExchangeModule } = await import("#/module.mjs");
+		expect(tokenExchangeModule.optional).toContain("grantPolicy");
+	});
 });
