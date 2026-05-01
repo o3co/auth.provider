@@ -1420,10 +1420,18 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// Step 13.6: MFA partial-wiring guard — if mfaCoordinator is provided,
 	// both mfaProviderFactory and mfaTransactionStore MUST also be provided.
 	// Per issue #101, A2-β §6.1 amendment 2026-05.
+	//
+	// `plannedKeys` MUST cover all three supported component sources (module
+	// provides, bootstrapComponents, overrideComponents) — same shape as the
+	// CP-20 invariant at step 13.5. Otherwise a composition root that wires
+	// MFA / federation stores via bootstrap or override is falsely rejected
+	// (see multi-agent-review I1+P2 convergence, 2026-05-01).
 	{
-		const plannedKeys = new Set<string>(
-			normalisedModules.flatMap((m) => m.providesKeys as string[]),
-		);
+		const plannedKeys = new Set<string>([
+			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
+			...Object.keys(bootstrapComponents),
+			...Object.keys(overrideComponents ?? {}),
+		]);
 		checkMfaPartialWiring(plannedKeys);
 
 		// Step 13.7: Federation stores wiring guard — if any federation is

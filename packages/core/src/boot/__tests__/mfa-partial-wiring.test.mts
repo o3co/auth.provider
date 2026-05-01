@@ -85,4 +85,59 @@ describe("checkMfaPartialWiring", () => {
 			}),
 		).resolves.toBeDefined();
 	});
+
+	// Multi-channel coverage (multi-agent-review I1+P2 fix): the validator
+	// must consult `bootstrapComponents` and `overrideComponents` in addition
+	// to module `provides`. Without this, composition roots that wire MFA
+	// dependencies via bootstrap/override are falsely rejected.
+
+	it("does not throw when MFA slots are supplied via bootstrapComponents", async () => {
+		const bootstrapWithMfa = {
+			...(minBoot as Record<string, unknown>),
+			mfaCoordinator: { kind: "stub" },
+			mfaProviderFactory: { kind: "stub" },
+			mfaTransactionStore: { kind: "stub" },
+		} as never;
+		await expect(
+			createApp({
+				modules: [],
+				bootstrapComponents: bootstrapWithMfa,
+			}),
+		).resolves.toBeDefined();
+	});
+
+	it("does not throw when mfaCoordinator from a module is paired with companions from bootstrapComponents", async () => {
+		const coordinatorOnly = defineModule({
+			name: "test:mfa-coordinator-only",
+			provides: { mfaCoordinator: () => ({ kind: "stub" }) } as never,
+		});
+		const bootstrapWithCompanions = {
+			...(minBoot as Record<string, unknown>),
+			mfaProviderFactory: { kind: "stub" },
+			mfaTransactionStore: { kind: "stub" },
+		} as never;
+		await expect(
+			createApp({
+				modules: [coordinatorOnly],
+				bootstrapComponents: bootstrapWithCompanions,
+			}),
+		).resolves.toBeDefined();
+	});
+
+	it("does not throw when MFA slots come via overrideComponents", async () => {
+		const coordinatorOnly = defineModule({
+			name: "test:mfa-coordinator-only-override",
+			provides: { mfaCoordinator: () => ({ kind: "stub" }) } as never,
+		});
+		await expect(
+			createApp({
+				modules: [coordinatorOnly],
+				bootstrapComponents: minBoot,
+				overrideComponents: {
+					mfaProviderFactory: { kind: "stub" },
+					mfaTransactionStore: { kind: "stub" },
+				} as never,
+			}),
+		).resolves.toBeDefined();
+	});
 });

@@ -116,4 +116,42 @@ describe("checkFederationStoresWiring", () => {
 			}),
 		).resolves.toBeDefined();
 	});
+
+	// Multi-channel coverage (multi-agent-review I1+P2 fix): the validator
+	// must consult `bootstrapComponents` and `overrideComponents` in addition
+	// to module `provides`. Without this, composition roots that wire stores
+	// via bootstrap/override are falsely rejected.
+
+	it("does not throw when all 5 stores are supplied via bootstrapComponents", async () => {
+		const bootstrapWithStores = {
+			...(makeBootWithFederationEnabled() as Record<string, unknown>),
+			userSessionStore: { kind: "stub" },
+			sessionRPRegistry: { kind: "stub" },
+			sessionFamilyIndex: { kind: "stub" },
+			sessionFederationIndex: { kind: "stub" },
+			federationTokenStore: { kind: "stub" },
+		} as never;
+		await expect(
+			createApp({
+				modules: [],
+				bootstrapComponents: bootstrapWithStores,
+			}),
+		).resolves.toBeDefined();
+	});
+
+	it("does not throw when stores come via overrideComponents", async () => {
+		await expect(
+			createApp({
+				modules: [],
+				bootstrapComponents: makeBootWithFederationEnabled(),
+				overrideComponents: {
+					userSessionStore: { kind: "stub" },
+					sessionRPRegistry: { kind: "stub" },
+					sessionFamilyIndex: { kind: "stub" },
+					sessionFederationIndex: { kind: "stub" },
+					federationTokenStore: { kind: "stub" },
+				} as never,
+			}),
+		).resolves.toBeDefined();
+	});
 });
