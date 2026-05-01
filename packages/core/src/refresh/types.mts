@@ -56,6 +56,6 @@ export type RefreshTokenStoreFactory = AdapterFactory<RefreshTokenStoreBase>;
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		readonly refreshTokenStore: RefreshTokenStoreBase;
+		readonly refreshTokenStore?: RefreshTokenStoreBase;
 	}
 }

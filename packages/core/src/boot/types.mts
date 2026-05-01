@@ -582,7 +582,8 @@ export type BootErrorReason =
 	| "contribute-factory-failed"
 	| "route-order-cycle"
 	| "route-order-target-missing"
-	| "federation-redirect-policy-unpaired";
+	| "federation-redirect-policy-unpaired"
+	| "grant-policy-without-issuer";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — 19 total, Per A2-β §6.1
@@ -845,10 +846,28 @@ export interface FederationRedirectPolicyUnpairedDetails {
 }
 
 /**
- * Discriminated union of all 20 per-reason Details interfaces.
+ * CP-20 invariant restoring the v0.4.x guard: when any module provides
+ * `grantPolicy`, `config.oauth.jwt.issuer` must be a non-empty string.
+ * The grant policy hook signs decisions against the configured issuer; an
+ * empty issuer turns CP-18 fail-closed enforcement into silent allow-all.
+ *
+ * Phase 9 dropped the v0.4.x A4 four-store invariant: in v0.5.0 the four
+ * user-session slots are split across packages (sessionModule consumes 2,
+ * oauthModule consumes 2). Step 4 (checkRequiresClosure) already enforces
+ * the per-module wiring contract, so a separate "all-or-none" check would
+ * mis-fire on legitimate test fixtures that exercise only one subsystem.
+ */
+export interface GrantPolicyWithoutIssuerDetails {
+	readonly reason: "grant-policy-without-issuer";
+	readonly providedBy: string;
+}
+
+/**
+ * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
- * Per A2-β §6.1, extended by A5 §8.2.
+ * Per A2-β §6.1, extended by A5 §8.2 and the Phase 9 boot-validator
+ * restoration (A4 four-store + CP-20 issuer guard).
  */
 export type BootErrorDetails =
 	| DuplicateModuleNameDetails
@@ -870,7 +889,8 @@ export type BootErrorDetails =
 	| ContributeFactoryFailedDetails
 	| RouteOrderCycleDetails
 	| RouteOrderTargetMissingDetails
-	| FederationRedirectPolicyUnpairedDetails;
+	| FederationRedirectPolicyUnpairedDetails
+	| GrantPolicyWithoutIssuerDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

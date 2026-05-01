@@ -209,4 +209,17 @@ describe("token_exchange — integration", () => {
 
 		await handle.dispose();
 	});
+
+	// Boot planner only injects keys listed in `requires` ∪ `optional` into
+	// contribution-factory `deps`. Both the grant handler (`grant.mts:212-266`,
+	// family_revoked re-surface) and the built-in self-issued validator
+	// (`module.mts:68`, family revocation check) read `deps.refreshTokenStore`.
+	// Without declaring it here, a composition root that wires the store
+	// will have it silently dropped: family-revocation observability turns
+	// off, and self-issued exchanges that carry a `family_id` are rejected
+	// as if the store were absent. RFC 8693 §7.2 state 1 requirement.
+	it("declares refreshTokenStore in optional so the family-revocation path receives it", async () => {
+		const { tokenExchangeModule } = await import("#/module.mjs");
+		expect(tokenExchangeModule.optional).toContain("refreshTokenStore");
+	});
 });

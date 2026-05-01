@@ -63,6 +63,6 @@ export type GrantPolicyHookFactory = AdapterFactory<GrantPolicyHookBase>;
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		readonly grantPolicy: GrantPolicyHookBase;
+		readonly grantPolicy?: GrantPolicyHookBase;
 	}
 }

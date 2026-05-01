@@ -25,16 +25,10 @@ import {
 	InMemoryUserRepository,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
-import {
-	oauthAuthorizationModule,
-	oauthModule,
-	oauthSessionModule,
-} from "@o3co/auth-provider-oauth";
-import { sessionModule } from "@o3co/auth-provider-session";
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
-import { storesModule } from "../modules.mjs";
+import { buildModules } from "../buildModules.mjs";
 
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false },
@@ -115,15 +109,10 @@ describe("standalone smoke test", () => {
 
 	async function buildApp() {
 		const handle = await createApp({
-			modules: [
-				oauthModule({ config }),
-				oauthSessionModule({ config }),
-				oauthAuthorizationModule({ config }),
-				sessionModule,
-				testKeyStoreModule,
-				testRepositoriesModule,
-				storesModule,
-			],
+			modules: buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+			}),
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 
@@ -166,6 +155,27 @@ describe("standalone smoke test", () => {
 			.send({ grant_type: "unsupported" });
 		expect(res.status).toBe(400);
 		expect(res.headers["cache-control"]).not.toBe("no-store");
+	});
+
+	// Regression guard: a freshly scaffolded standalone app must boot under
+	// the default `federations.google.enabled = false`. The earlier shape of
+	// app.mts unconditionally listed `googleFederationModule` and the config
+	// bridge `googleFederationConfigModule`, so the bridge's
+	// `extractFederationSection` returned undefined and threw at boot. The
+	// fix moved the manifest assembly into `buildModules`, which conditionally
+	// includes the federation pair. This test exercises buildModules with the
+	// scaffold-default config, so any regression that re-introduces the
+	// unconditional inclusion fails here.
+	it("boots when google federation is disabled (default scaffold config)", async () => {
+		const handle = await createApp({
+			modules: buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+			}),
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		handleRef = handle;
+		expect(handle).toBeDefined();
 	});
 
 	it("POST /oauth/introspect returns iat in active token response", async () => {

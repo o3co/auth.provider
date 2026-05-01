@@ -14,6 +14,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   build a schema-valid config baseline without re-implementing it. The
   subpath is consumer-test-only — production runtime code MUST NOT
   import from it.
+- **Typed ComponentMap slots** for the standard core components.
+  Modules now declare `requires: ["..."]` against typed slots, and the
+  DI graph types `deps.<slot>` accordingly. The Phase 9 augmentation
+  added the following `declare module "@o3co/auth-provider-core"`
+  blocks (each colocated next to its base type):
+  - `keyStore: KeyStore` (required)
+  - `clientRepository: ClientRepository` (required)
+  - `userRepository: UserRepository` (required)
+  - `codeRepository: CodeRepository` (required)
+  - `auditSink?: AuditSinkBase` (optional)
+  - `rateLimiter?: RateLimiterBase` (optional)
+  - `federationTokenStore?: FederationTokenStoreBase` (optional)
+  - `grantPolicy?: GrantPolicyHookBase` (optional)
+  - `refreshTokenStore?: RefreshTokenStoreBase` (optional, transitional —
+    see issue #101 for the migration to the A3 family triple).
+  Consumer modules can list these in their `requires` / `optional`
+  arrays without redeclaring the slot type.
+- **Boot validator: CP-20 grantPolicy / jwt.issuer invariant** restored
+  at validate-manifests step 13.5. When any module provides `grantPolicy`,
+  `config.oauth.jwt.issuer` must be a non-empty string; otherwise
+  `BootError` is thrown with reason `grant-policy-without-issuer`.
+  Mirrors the v0.4.x guard removed when the legacy `createApp` body was
+  deleted in commit fd22577e. Other v0.4.x guards (MFA partial-wiring,
+  TODO-F-1 federation+stores) are tracked in #101 as follow-ups; the
+  v0.4.x A4 four-store invariant is intentionally retired in v0.5.0
+  because the four user-session slots are now split across packages
+  (`sessionModule` consumes 2, `oauthModule` consumes 2) and step 4
+  (`checkRequiresClosure`) enforces per-module wiring.
+- `templates/standalone/src/buildModules.mts` — composition-root helper
+  that gates federation modules on `config.federations.<name>.enabled`
+  and accepts `BuildModulesOverrides` for tests. Replaces the inline
+  module list in `app.mts`.
 - `@o3co/auth-provider-federation-google` package with `createGoogleProvider()` and the const `googleFederationModule` that contributes `federations.google` + `federationRedirectPolicies.google` via the typed `googleFederationConfig` ComponentMap slot (per A5 §10.1).
 - `@o3co/auth-provider-federation-github` package with `createGithubProvider()` and the const `githubFederationModule` (symmetric to Google).
 - `extractFederationSection(federations, name)` exported from `@o3co/auth-provider-session` — pure utility that normalizes flat / nested / shorthand federation config slices for use by per-federation config-bridge modules.
@@ -34,6 +66,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `openid-client` is no longer a runtime dependency of `@o3co/auth-provider-session`; it belongs to the concrete provider packages.
 - **Breaking**: `@o3co/auth-provider-did` package. The DID authentication grant is no longer part of this project. The package is no longer maintained here.
 - **Breaking**: `LegacyModule` and `ModuleContext` types are removed from `@o3co/auth-provider-core`. v0.4.x modules (functions returning `{ name, init(context) }`) must be rewritten as v0.5.0 manifests authored via `defineModule({...})` per A2-α §3 and migrated to use typed `ProviderDeps` instead of `ModuleContext`. `PathResolver` and `FederationProviderHandle` remain — `PathResolver` is the type for `bootstrapComponents.pathResolver`; `FederationProviderHandle` is the structural narrowing of the `federationProviders` synthetic key for core-adjacent route consumers.
+
+### Fixed
+
+- `oauthAuthorizationModule` now declares `refreshTokenStore` and
+  `grantPolicy` in `optional`. Without them the boot planner dropped
+  the components at the contribution-factory boundary, so refresh-
+  token rotation persistence (`createRefreshTokenGrant`) and CP-18
+  fail-closed grantPolicy enforcement were silently dead in v0.5.0
+  consumers that wired either component.
+- `tokenExchangeModule` now declares `refreshTokenStore` in `optional`.
+  Without it the family-revocation path in the token-exchange grant
+  and the built-in self-issued validator could not observe revocations
+  even when a composition root provided the store, breaking RFC 8693
+  §7.2 state-1 expectations.
+- `oauthModule`'s OIDC discovery contribution mounts the router at
+  `/` instead of `/.well-known/openid-configuration`. The discovery
+  router itself registers the spec-fixed absolute path, so the prior
+  combination produced the double-pathed handler
+  `/.well-known/openid-configuration/.well-known/openid-configuration`
+  and returned 404 on standard discovery requests.
+- `templates/standalone` now boots under the default
+  `federations.google.enabled = false` config. The composition root
+  gates `googleFederationModule` and `googleFederationConfigModule`
+  on the enabled flag via the new `buildModules` helper; previously
+  both were unconditionally included and the config-bridge module
+  threw at boot when the section was absent or disabled.
+- `refreshTokenStore` and `grantPolicy` ComponentMap slots are
+  declared with `?:` to match their documented optional contract.
+  Both have always been optional at consumption; the prior
+  `readonly refreshTokenStore: RefreshTokenStoreBase` declaration
+  lied about the contract and would have surfaced a typecheck
+  failure for any module declaring them in `optional`.
 
 ### Boot lifecycle
 

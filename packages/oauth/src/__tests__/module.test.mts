@@ -189,7 +189,13 @@ describe("oauthModule — createTestApp route inspection", () => {
 		await handle.dispose();
 	});
 
-	it("oidc-discovery is mounted at /.well-known/openid-configuration", async () => {
+	it("oidc-discovery serves the spec-fixed /.well-known/openid-configuration path", async () => {
+		// Behavioral, not just shape: the legacy `mountPath: "/.well-known/openid-
+		// configuration"` paired with the router's internal
+		// `router.get("/.well-known/openid-configuration", ...)` produced a
+		// double-pathed handler at `/.well-known/openid-configuration/.well-
+		// known/openid-configuration` — the standard endpoint returned 404. This
+		// test mounts the contribution and probes the actual path.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -207,10 +213,11 @@ describe("oauthModule — createTestApp route inspection", () => {
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
-		const discoveryRoute = handle.inspect.routes.find(
-			(r) => r.contribution.id === "oidc-discovery",
-		);
-		expect(discoveryRoute?.contribution.mountPath).toBe("/.well-known/openid-configuration");
+		const app = express();
+		app.use(handle.router);
+		const res = await request(app).get("/.well-known/openid-configuration");
+		expect(res.status).toBe(200);
+		expect(res.body.issuer).toBe("https://auth.example.com");
 		await handle.dispose();
 	});
 });

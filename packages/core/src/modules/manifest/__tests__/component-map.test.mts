@@ -15,7 +15,7 @@ test("ComponentMap accumulates declaration-merged slots from each phase", () => 
 	expectTypeOf<Bootstrap>().toEqualTypeOf<"config" | "pathResolver">();
 });
 
-// TODO(#issue): Re-enable when Phase 9 Task 11 (delete legacy core/src/refresh/)
+// TODO(#101): Re-enable when Phase 9 Task 11 (delete legacy core/src/refresh/)
 // lands. Phase 9 Task 4 (oauth module migration, A2-γ §3.2.1) re-added the
 // legacy `refreshTokenStore` ComponentMap slot as a transitional bridge so
 // oauth/routes.mts can keep its v0.4.x dep signatures while the migration to

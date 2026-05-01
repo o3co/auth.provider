@@ -16,16 +16,9 @@
 import { fileURLToPath } from "node:url";
 import { gracefulShutdown } from "@o3co/auth.utils";
 import { type AppConfig, AppConfigSchema, createApp } from "@o3co/auth-provider-core";
-import { googleFederationModule } from "@o3co/auth-provider-federation-google";
-import {
-	oauthAuthorizationModule,
-	oauthModule,
-	oauthSessionModule,
-} from "@o3co/auth-provider-oauth";
 import {
 	createSessionStoreFactory,
 	registerBuiltinSessionStores,
-	sessionModule,
 } from "@o3co/auth-provider-session";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
@@ -34,13 +27,8 @@ import session from "express-session";
 import helmet from "helmet";
 
 import logger from "#/logger.mjs";
+import { buildModules } from "./buildModules.mjs";
 import { resolveConfigPaths } from "./configPath.mjs";
-import {
-	googleFederationConfigModule,
-	keyStoreModule,
-	repositoriesModule,
-	storesModule,
-} from "./modules.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
 // ENV = CONFIG_ENV || NODE_ENV || "development"; missing {ENV}.conf is fatal.
@@ -100,18 +88,11 @@ await (async (): Promise<void> => {
 	// Step 4: Boot the auth pipeline. bootstrapComponents carries only host-
 	// environment values (config + pathResolver per A2-γ §4 worked example);
 	// every other component flows through composition-root-local modules.
+	// `buildModules` is the single source of truth for the module list — it
+	// gates federation modules on `config.federations.<name>.enabled`, which
+	// the standalone scaffold defaults to false.
 	const handle = await createApp({
-		modules: [
-			oauthModule({ config }),
-			oauthSessionModule({ config }),
-			oauthAuthorizationModule({ config }),
-			sessionModule,
-			googleFederationModule,
-			googleFederationConfigModule,
-			keyStoreModule,
-			repositoriesModule,
-			storesModule,
-		],
+		modules: buildModules(config),
 		bootstrapComponents: {
 			config,
 			pathResolver: import.meta.resolve,

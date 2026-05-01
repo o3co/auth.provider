@@ -35,14 +35,6 @@ import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
  * → `oauthAuthorizationModule({ config })`.
  * Both repositories now flow through `requires` from the DI graph.
  *
- * Note on optional deps: `refreshTokenStore` (legacy v0.4.x slot, retired by
- * A3) and `grantPolicy` are NOT valid ComponentMap keys in v0.5.0, so they
- * cannot appear in the `optional` array. The grant factories handle their
- * absence gracefully (undefined → feature disabled). Wiring these through the
- * v0.5.0 DI graph is deferred to a follow-on task that updates GrantDependencies
- * to use `refreshTokenRotation` (A3) and the grantPolicyHooks contribution
- * pattern respectively.
- *
  * Theme B (one responsibility per module), Theme D (immutability — no init
  * mutation of ctx), Theme E (structural conditional via factory body).
  */
@@ -68,6 +60,12 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 		name: "oauth-authorization",
 		requires: ["config", "clientRepository", "codeRepository", "keyStore"],
 		optional: [
+			// Both grant factories (createAuthorizationGrant / createRefreshTokenGrant)
+			// read these to back refresh-token rotation persistence and CP-18 grant
+			// policy enforcement. Boot planner only injects keys listed here, so
+			// omitting them silently drops both features at the grant boundary.
+			"refreshTokenStore",
+			"grantPolicy",
 			"userSessionStore",
 			"sessionRPRegistry", // Amendment 4 (§1.1.4)
 			"sessionFamilyIndex", // Amendment 4 (§1.1.4)

@@ -179,7 +179,15 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 									!!deps.refreshTokenStore;
 								return {
 									id: "oidc-discovery",
-									mountPath: "/.well-known/openid-configuration",
+									// The OIDC discovery path `/.well-known/openid-configuration`
+									// is fixed by the spec, so `oidcConfig.createRouter` registers
+									// the absolute path inside the router itself (kept that way
+									// to preserve the public createRouter contract — direct
+									// callers do `app.use(createRouter(...))`). Mount at "/" to
+									// avoid composing the path twice; otherwise express produces
+									// `/.well-known/openid-configuration/.well-known/openid-
+									// configuration` and the standard endpoint returns 404.
+									mountPath: "/",
 									handler: oidcConfig.createRouter(express, {
 										issuer: issuer as string,
 										signingAlgs: [deps.keyStore.algorithm],
