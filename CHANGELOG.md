@@ -46,6 +46,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   optional peer. Consumers that previously installed `redis` because
   of foundation now install it because of `@o3co/auth-provider-redis`
   instead. Net dependency cost is identical.
+- **`RedisClient` super-type + `redisClient` ComponentMap slot REMOVED**.
+  Replaced by 9 per-purpose backing-client interfaces
+  (`ChallengeStoreClient`, `ReplaySeenSetClient`,
+  `RefreshTokenFamilyClient`, `UserSessionStoreClient`,
+  `SessionRPRegistryClient`, `SessionSidSortedSetClient` — reused for
+  both `sessionFamilyIndexClient` and `sessionFederationIndexClient`
+  slots — `FederationTokenStoreClient`, `RateLimiterClient`) and 9
+  corresponding `xxxClient` ComponentMap slots, all declared in
+  `@o3co/auth-provider-core` next to the adapter's responsibility.
+  Each slot's type declares only the methods that adapter actually
+  consumes (e.g. `RateLimiterClient` is `{ incr; expire }`, not the
+  full redis surface). Consumers wiring redis: replace
+  `bootstrapComponents: { redisClient: w }` with
+  `bootstrapComponents: { ...makeIoredisClients(io) }` (new factory
+  in `@o3co/auth-provider-redis`). Future memcached/postgres adapters
+  can satisfy the same per-purpose interfaces with their own wrappers
+  without touching the slot model. Rationale: the prior super-type
+  could not honestly describe `federationTokenStore` (needs
+  `scanIterator`) or `rateLimiter` (needs `incr` / `expire`) without
+  polluting other adapters' contracts.
+- **`RedisLikeClient` interface REMOVED** (was exported transiently by
+  `@o3co/auth-provider-redis` between Phase 10 Task 2 commit and the
+  per-purpose addendum; never published). Replaced by
+  `FederationTokenStoreClient` from `@o3co/auth-provider-core`.
+- **`makeIoredisRedisClient` test helper REMOVED**. Tests use
+  `makeIoredisClients` from the production `@o3co/auth-provider-redis`
+  surface.
 
 ### Added (Phase 10)
 
@@ -62,6 +89,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`redisFederationTokenStoreBuilder`** / **`redisRateLimiterBuilder`** /
   **`redisCodeRepositoryBuilder`** in `@o3co/auth-provider-redis` —
   `AdapterBuilder` exports for AdapterFactory-style wiring.
+- **9 per-purpose backing-client interfaces** in
+  `@o3co/auth-provider-core` (one per redis adapter family). Each
+  interface declares the minimal method set its adapter consumes;
+  backend wrappers (today: redis; future: memcached, postgres)
+  implement these interfaces independently:
+  `ChallengeStoreClient`, `ReplaySeenSetClient`,
+  `RefreshTokenFamilyClient` (+ `RefreshTokenFamilyMultiClient` +
+  `DisposableRefreshTokenFamilyClient`), `UserSessionStoreClient`,
+  `SessionRPRegistryClient` (+ `SessionRPRegistryMultiClient`),
+  `SessionSidSortedSetClient` (+ `SessionSidSortedSetMultiClient`,
+  shared by `sessionFamilyIndexClient` and
+  `sessionFederationIndexClient` slots), `FederationTokenStoreClient`,
+  `RateLimiterClient`. All slot identities live in
+  `@o3co/auth-provider-core`'s `ComponentMap` via declaration-merge.
+- **`makeIoredisClients(io)`** factory in `@o3co/auth-provider-redis` —
+  returns the 9 typed wrappers from a single ioredis connection,
+  spreadable into `bootstrapComponents`.
+- **`RefreshTokenFamilyClient.duplicate` contract test** at
+  `packages/redis/__tests__/adapters.refresh-token-family-client.contract.mts` —
+  validates the WATCH-isolation MUSTs (independent socket per
+  duplicate, `[Symbol.asyncDispose]` closes the connection) against
+  any wrapper implementation. Replaces the deleted
+  `adapters.redis-client.contract.mts` super-type contract.
 
 ### Added
 
