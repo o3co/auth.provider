@@ -949,7 +949,7 @@ export function checkFederationStoresWiring(
 			throw new BootError({
 				stage: "validateManifests",
 				reason: "federation-stores-incomplete",
-				message: `federations.${name} is enabled but session/federation stores are missing: ${missing.join(", ")}`,
+				message: `federations.${name} is enabled but required federation stores are missing: ${missing.join(", ")}`,
 				details: { reason: "federation-stores-incomplete", federationName: name, missing },
 			});
 		}
@@ -1442,7 +1442,8 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		checkMfaPartialWiring(plannedKeys);
 
 		// Step 13.7: Federation stores wiring guard — if any federation is
-		// enabled in config, all 5 session/federation stores must be wired.
+		// enabled in config, all required federation stores must be wired
+		// (see FEDERATION_REQUIRED_STORES for the authoritative list).
 		// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
 		checkFederationStoresWiring(parsedConfig as AppConfig, plannedKeys);
 	}

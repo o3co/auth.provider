@@ -872,10 +872,13 @@ export interface MfaPartialWiringDetails {
 }
 
 /**
- * Per A2-β §6.1 amendment 2026-05 (issue #101 TODO-F-1).
- * When config.federations.<name>.enabled is true, all 5 session/federation
- * stores must be wired: userSessionStore, sessionRPRegistry,
- * sessionFamilyIndex, sessionFederationIndex, and federationTokenStore.
+ * Per A2-β §6.1 amendment 2026-05 (issue #101 TODO-F-1); refreshTokenFamilyRevocation
+ * added per #103 review (alignment with route-level gating in
+ * packages/oauth/src/routes.mts).
+ *
+ * When config.federations.<name>.enabled is true, all 6 federation-related
+ * slots must be wired: userSessionStore, sessionRPRegistry, sessionFamilyIndex,
+ * sessionFederationIndex, federationTokenStore, and refreshTokenFamilyRevocation.
  */
 export interface FederationStoresIncompleteDetails {
 	readonly reason: "federation-stores-incomplete";
