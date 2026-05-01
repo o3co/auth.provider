@@ -30,6 +30,10 @@ import {
 } from "@o3co/auth-provider-core";
 import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
+import {
+	redisCodeRepositoryBuilder,
+	redisFederationTokenStoreBuilder,
+} from "@o3co/auth-provider-redis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
 
 /**
@@ -105,6 +109,7 @@ export const repositoriesModule: Module = defineModule({
 		codeRepository: async ({ config, pathResolver }) => {
 			const { userFactory, codeFactory } = createDefaultFactories();
 			registerBuiltinAdapters({ userFactory, codeFactory, pathResolver });
+			codeFactory.register("redis", redisCodeRepositoryBuilder);
 			return codeFactory.create(
 				flattenAdapterConfig(
 					(config as AppConfig).repositories.code as { type: string } & Record<string, unknown>,
@@ -131,6 +136,7 @@ export const storesModule: Module = defineModule({
 		federationTokenStore: async ({ config }) => {
 			const factory = createFederationTokenStoreFactory();
 			registerBuiltinFederationTokenStores(factory);
+			factory.register("redis", redisFederationTokenStoreBuilder);
 			const slice = (
 				config as AppConfig & {
 					federationTokenStore?: { type: string } & Record<string, unknown>;
