@@ -104,7 +104,8 @@ const rateLimitSpecSchema = z.object({
 /**
  * `defineModule` manifest for the redis RateLimiter. Reads `redisRateLimiter`
  * config slice (limits + defaultLimit). The redis client itself comes from
- * the `redisClient` ComponentMap slot.
+ * the `rateLimiterClient` ComponentMap slot (per-purpose interface declared
+ * in `@o3co/auth-provider-core`'s `ratelimit/types.mts`).
  */
 export const redisRateLimiterModule = defineModule({
 	name: "redis-rate-limiter",

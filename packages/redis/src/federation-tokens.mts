@@ -183,7 +183,7 @@ export function createRedisFederationTokenStore(
  *   factory.register("redis", redisFederationTokenStoreBuilder);
  *
  * `config` shape:
- *   { client: RedisLikeClient,
+ *   { client: FederationTokenStoreClient,
  *     encryption: EncryptionConfig | { mode?: "required" | "allow-plaintext", key?: Buffer | string },
  *     keyPrefix?: string,
  *     ttl?: number }
@@ -253,8 +253,9 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
  * configSchema: top-level key `redisFederationTokenStore` (module-namespaced
  * per master roadmap §3.5).
  *
- * `requires`: needs `redisClient` (declared by `@o3co/auth-provider-redis`'s
- * component-map.mts) and `config`. Encryption key is read from
+ * `requires`: needs `federationTokenStoreClient` (per-purpose slot declared
+ * in `@o3co/auth-provider-core`'s `federation-tokens/types.mts`) and
+ * `config`. Encryption key is read from
  * `redisFederationTokenStore.encryptionKey` (base64 string) — operators set
  * it via env var `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY`.
  */

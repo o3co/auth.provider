@@ -31,7 +31,10 @@ const configSchema = z.object({
 
 /**
  * Bundled module providing all 4 redis-backed user-session stores against
- * the `redisClient` ComponentMap slot. Per A4 §8.1 + §10.1.
+ * the per-purpose ComponentMap slots `userSessionStoreClient`,
+ * `sessionRPRegistryClient`, `sessionFamilyIndexClient`, and
+ * `sessionFederationIndexClient` (declared in `@o3co/auth-provider-core`'s
+ * `user-sessions/types.mts`). Per A4 §8.1 + §10.1.
  *
  * `keyPrefix` is the OUTER namespace; the bundled module appends fixed
  * subprefixes per store (`us:` / `rp:` / `fi:` / `fed:`). Consumers that

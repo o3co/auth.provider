@@ -58,8 +58,8 @@ const deserialize = (raw: string): RefreshTokenFamily =>
  * `${keyPrefix}${familyId}` whose value is a JSON serialisation of the
  * RefreshTokenFamily aggregate, with a TTL set via the SET command's PX
  * argument. JSON serialisation (rather than a Redis hash) keeps the
- * RedisClient surface narrow (no HSET/HGETALL needed) and matches A1's
- * single-key SET-NX pattern.
+ * RefreshTokenFamilyClient surface narrow (no HSET/HGETALL needed) and
+ * matches A1's single-key SET-NX pattern.
  *
  * Atomicity:
  *   - registerFamily uses `SET key value PX ttlMs NX` — atomic insert-only,
