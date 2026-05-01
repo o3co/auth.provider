@@ -211,3 +211,86 @@ declare module "@o3co/auth-provider-core" {
 		readonly mutableUserSessionStore?: MutableUserSessionStore;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Backing client interfaces (Phase 10 addendum §3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Backing client for UserSessionStore adapters. Declares only `set`, `get`,
+ * `del` — the exact methods `createRedisUserSessionStore` consumes.
+ * Note: `set` here does NOT include the `"NX"` condition (sessions use
+ * `SET PX` without `NX`; duplicate detection is done at the application layer).
+ *
+ * Per Phase 10 addendum §3.
+ */
+export interface UserSessionStoreClient {
+	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK" | null>;
+	get(key: string): Promise<string | null>;
+	del(key: string): Promise<number>;
+}
+
+/**
+ * Chainable transaction pipeline returned by `SessionRPRegistryClient.multi()`.
+ *
+ * Per Phase 10 addendum §3.
+ */
+export interface SessionRPRegistryMultiClient {
+	hSet(key: string, field: string, value: string): SessionRPRegistryMultiClient;
+	pExpireAt(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
+	exec(): Promise<unknown[] | null>;
+}
+
+/**
+ * Backing client for SessionRPRegistry adapters. Declares the hash ops +
+ * multi pipeline that `createRedisSidHash` consumes.
+ *
+ * Per Phase 10 addendum §3.
+ */
+export interface SessionRPRegistryClient {
+	del(key: string): Promise<number>;
+	hSet(key: string, field: string, value: string): Promise<number>;
+	hVals(key: string): Promise<string[]>;
+	multi(): SessionRPRegistryMultiClient;
+	pExpireAt(key: string, msTimestamp: number): Promise<number>;
+}
+
+/**
+ * Chainable transaction pipeline returned by `SessionSidSortedSetClient.multi()`.
+ *
+ * Per Phase 10 addendum §3.
+ */
+export interface SessionSidSortedSetMultiClient {
+	pExpireAt(key: string, msTimestamp: number): SessionSidSortedSetMultiClient;
+	zAdd(
+		key: string,
+		entry: { score: number; value: string },
+		opts?: { NX: true },
+	): SessionSidSortedSetMultiClient;
+	exec(): Promise<unknown[] | null>;
+}
+
+/**
+ * Backing client for SessionFamilyIndex and SessionFederationIndex adapters.
+ * Both adapters share this interface (same sorted-set operations, different
+ * slot identities in ComponentMap).
+ *
+ * Per Phase 10 addendum §3.
+ */
+export interface SessionSidSortedSetClient {
+	del(key: string): Promise<number>;
+	multi(): SessionSidSortedSetMultiClient;
+	pExpireAt(key: string, msTimestamp: number): Promise<number>;
+	zAdd(key: string, entry: { score: number; value: string }, opts?: { NX: true }): Promise<number>;
+	zRange(key: string, start: number, stop: number): Promise<string[]>;
+	zRem(key: string, member: string): Promise<number>;
+}
+
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		readonly userSessionStoreClient?: UserSessionStoreClient;
+		readonly sessionRPRegistryClient?: SessionRPRegistryClient;
+		readonly sessionFamilyIndexClient?: SessionSidSortedSetClient;
+		readonly sessionFederationIndexClient?: SessionSidSortedSetClient;
+	}
+}
