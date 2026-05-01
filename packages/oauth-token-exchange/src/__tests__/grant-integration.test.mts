@@ -210,6 +210,37 @@ describe("token_exchange — integration", () => {
 		await handle.dispose();
 	});
 
+	it("declares a configSchema for boot-time config validation", async () => {
+		const { tokenExchangeModule } = await import("#/module.mjs");
+		expect(tokenExchangeModule.configSchema).toBeDefined();
+	});
+
+	it("fails boot with config-validation-failed when oauth.jwt.issuer is missing", async () => {
+		const { BootError, defineModule } = await import("@o3co/auth-provider-core");
+		const { createTestApp, makeValidAppConfig } = await import("@o3co/auth-provider-core/testing");
+		const { tokenExchangeModule } = await import("#/module.mjs");
+
+		const clientRepositoryModule = defineModule({
+			name: "test:client-repository",
+			provides: { clientRepository: () => clientRepository },
+		});
+		const keyStoreModule = defineModule({
+			name: "test:key-store",
+			provides: { keyStore: () => keyStore },
+		});
+
+		const config = makeValidAppConfig();
+		await expect(
+			createTestApp({
+				modules: [tokenExchangeModule, clientRepositoryModule, keyStoreModule],
+				bootstrapComponents: { config, pathResolver: (s) => s },
+			}),
+		).rejects.toMatchObject({
+			name: "BootError",
+			reason: "config-validation-failed",
+		} satisfies Partial<InstanceType<typeof BootError>>);
+	});
+
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
 	// contribution-factory `deps`. Both the grant handler (`grant.mts:212-266`,
 	// family_revoked re-surface) and the built-in self-issued validator

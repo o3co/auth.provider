@@ -35,7 +35,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
-const secretKeyPromise = createSecretKey(Buffer.from(SECRET));
+const secretKey = createSecretKey(Buffer.from(SECRET));
 
 const mockConfig = {
 	oauth: {
@@ -65,7 +65,7 @@ async function makeAccessToken(overrides: Record<string, unknown> = {}): Promise
 	return new SignJWT({ sub: "u1", scope: "read", ...overrides })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
 		.setExpirationTime("1h")
-		.sign(secretKeyPromise);
+		.sign(secretKey);
 }
 
 async function buildApp(refreshTokenStore?: RefreshTokenStoreBase, auditSink?: AuditSinkBase) {

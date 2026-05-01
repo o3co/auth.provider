@@ -27,7 +27,7 @@ export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	keyStore: KeyStore;
 	refreshTokenStore?: RefreshTokenStoreBase;
-	issuer?: string;
+	issuer: string;
 }
 
 /**
@@ -37,7 +37,7 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  *   - `typ: "at+jwt"` header (rejects id_tokens and logout_tokens even
  *     when signed by the same KeyStore — prevents token-type-confusion)
  *   - Standard claims (exp via jose)
- *   - Issuer match
+ *   - Issuer match (always — `issuer` is a required option)
  *   - When refreshTokenStore is wired: family_id cascading revoke
  *
  * When refreshTokenStore is absent, the family revoke check is silently
@@ -45,6 +45,12 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * misconfiguration and responding with invalid_grant (spec §7.2 state 1:
  * "not wired"). The validator alone is NOT fail-closed against store
  * misconfiguration.
+ *
+ * `issuer` is required; the constructor throws synchronously when it is
+ * missing or an empty string. Without an issuer to compare against, an
+ * at+jwt signed by the same KeyStore but with a different (or absent) `iss`
+ * claim could be accepted — exactly the token-type-confusion gap Copilot
+ * flagged on PR #100.
  *
  * Throws on infrastructure failures (store unavailable during runtime).
  * Returns null on validation failures (bad signature, wrong typ, missing/empty sub,
@@ -54,6 +60,11 @@ export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
 ): ExchangeTokenValidator {
 	const { keyStore, refreshTokenStore, issuer } = options;
+	if (typeof issuer !== "string" || issuer.length === 0) {
+		throw new Error(
+			"createSelfIssuedAccessTokenValidator: issuer is required (a non-empty string). Without an issuer to compare against, an at+jwt signed by the same KeyStore but with a different `iss` claim could be accepted.",
+		);
+	}
 
 	return {
 		async validate(
@@ -82,7 +93,7 @@ export function createSelfIssuedAccessTokenValidator(
 				return null;
 			}
 
-			if (issuer && payload.iss !== issuer) {
+			if (payload.iss !== issuer) {
 				return null;
 			}
 

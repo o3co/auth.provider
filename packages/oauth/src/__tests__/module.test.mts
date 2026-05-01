@@ -93,6 +93,12 @@ describe("oauthModule — manifest shape", () => {
 		expect(module.name).toBe("oauth");
 	});
 
+	it("declares a configSchema for boot-time config validation", () => {
+		const config = makeValidAppConfig();
+		const module = oauthModule({ config });
+		expect(module.configSchema).toBeDefined();
+	});
+
 	it("includes oauth-endpoints route contribution when issuer is absent", () => {
 		const base = makeValidAppConfig();
 		// No issuer set — only oauth-endpoints factory should appear

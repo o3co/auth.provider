@@ -15,11 +15,34 @@
  */
 
 import { defineModule, type GrantHandler, type Module } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "./grant.mjs";
 import {
 	ACCESS_TOKEN_TYPE,
 	createSelfIssuedAccessTokenValidator,
 } from "./validator/selfIssuedAccessToken.mjs";
+
+/**
+ * Token Exchange config-slice schema. Refines `oauth.jwt.issuer` from
+ * CoreConfigSchema's permissive `z.string().optional()` to a required
+ * non-empty string — the built-in self-issued validator and the grant's
+ * issuer-equality check both depend on a known issuer, and an empty
+ * string would silently disable the issuer-mismatch defense (Copilot
+ * review on PR #100, Critical).
+ *
+ * Composed via `composeConfigSchema` at validate-manifests step 13: the
+ * intersection with CoreConfigSchema produces `oauth.jwt.issuer:
+ * z.string().min(1)`, so any boot whose configured `issuer` is missing
+ * or empty fails with `BootError(reason: "config-validation-failed")`
+ * before the validator factory is invoked.
+ */
+const tokenExchangeConfigSchema = z.object({
+	oauth: z.object({
+		jwt: z.object({
+			issuer: z.string().min(1),
+		}),
+	}),
+});
 
 /**
  * Declarative manifest for OAuth 2.0 Token Exchange (RFC 8693).
@@ -53,6 +76,7 @@ type AnyDeps = any;
 
 export const tokenExchangeModule: Module = defineModule({
 	name: "oauth-token-exchange",
+	configSchema: tokenExchangeConfigSchema,
 	requires: ["tokenExchangeValidatorResolver", "clientRepository", "keyStore", "config"],
 	optional: [
 		// Both the token-exchange grant (grant.mts:212-266 family_revoked

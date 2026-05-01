@@ -18,6 +18,7 @@ import {
 	type AppConfig,
 	defineModule,
 	type FederationProviderHandle,
+	fullSectionsSchema,
 	type GrantRegistry,
 	type Module,
 	type ProviderDeps,
@@ -25,6 +26,20 @@ import {
 import express from "express";
 import * as oidcConfig from "./routes/OpenidConfiguration.mjs";
 import { createOAuthRouter } from "./routes.mjs";
+
+/**
+ * Config-slice schema for `oauthModule`. The OAuth router reads
+ * `config.endpoints.login.url` (`routes.mts:339`) — without this slice in
+ * the composed schema, a config that omits `endpoints` passes
+ * `validateManifests` but crashes at the first `/oauth/authorize` request.
+ * Composed via `composeConfigSchema` at validate-manifests step 13 so
+ * boot fails with `BootError(reason: "config-validation-failed")` instead.
+ *
+ * Copilot review on PR #100 flagged the missing schema as Important.
+ */
+const oauthConfigSchema = fullSectionsSchema.pick({
+	endpoints: true,
+});
 
 /**
  * Declarative manifest for the OAuth 2.0 endpoint suite.
@@ -90,6 +105,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 		| "federationProviders"
 	>({
 		name: "oauth",
+		configSchema: oauthConfigSchema,
 		requires: [
 			"config", // createOAuthRouter reads config.oauth.jwt.issuer, accessToken / refreshToken expiry
 			"clientRepository",
