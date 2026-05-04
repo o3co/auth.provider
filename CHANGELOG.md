@@ -188,6 +188,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `createDefaultFactories` → `createRepositoryFactories` (specifically
     repository factories, not generic "default factories")
 
+  The companion parameter types lose the `Default` prefix in lockstep
+  (consumers writing typed glue code update type imports too):
+
+  - `DefaultChallengeCeremonyDeps` → `ChallengeCeremonyDeps`
+  - `DefaultRefreshTokenFamilyRotationDeps` → `RefreshTokenFamilyRotationDeps`
+  - `DefaultRefreshTokenFamilyRevocationDeps` → `RefreshTokenFamilyRevocationDeps`
+  - `DefaultFederationRedirectPolicyConfig` → `FederationRedirectPolicyConfig`
+
   Module names retain the `default*Module` form where default-ness is the
   intended distinction.
 
