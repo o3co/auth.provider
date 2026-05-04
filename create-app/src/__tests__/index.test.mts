@@ -73,11 +73,31 @@ describe("scaffold", () => {
 		expect(pkg.name).toBe("@piratis-blossoms/auth.provider");
 	});
 
-	it("ships versions for optional federation provider packages", () => {
-		const versions = JSON.parse(readFileSync(join("templates", "versions.json"), "utf-8"));
+	it("ships versions for every workspace auth-provider package, in sync with each package.json", () => {
+		const versions: Record<string, string> = JSON.parse(
+			readFileSync(join("templates", "versions.json"), "utf-8"),
+		);
 
-		expect(versions["@o3co/auth-provider-federation-google"]).toBe("0.0.0");
-		expect(versions["@o3co/auth-provider-federation-github"]).toBe("0.0.0");
+		const expectedPackages: Record<string, string> = {
+			"@o3co/auth-provider-core": "../packages/core/package.json",
+			"@o3co/auth-provider-federation-github": "../packages/federation-github/package.json",
+			"@o3co/auth-provider-federation-google": "../packages/federation-google/package.json",
+			"@o3co/auth-provider-foundation": "../packages/foundation/package.json",
+			"@o3co/auth-provider-oauth": "../packages/oauth/package.json",
+			"@o3co/auth-provider-oauth-token-exchange": "../packages/oauth-token-exchange/package.json",
+			"@o3co/auth-provider-redis": "../packages/redis/package.json",
+			"@o3co/auth-provider-session": "../packages/session/package.json",
+		};
+
+		for (const [name, pkgPath] of Object.entries(expectedPackages)) {
+			const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+			expect(versions[name], `versions.json missing entry for ${name}`).toBeDefined();
+			expect(versions[name], `versions.json[${name}] out of sync with ${pkgPath}`).toBe(
+				pkg.version,
+			);
+		}
+
+		expect(Object.keys(versions).sort()).toEqual(Object.keys(expectedPackages).sort());
 	});
 });
 
