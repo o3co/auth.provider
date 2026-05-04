@@ -4,6 +4,9 @@
  */
 import type { ComponentMap } from "@o3co/auth-provider-core";
 import { describe, expectTypeOf, it } from "vitest";
+// Import via the package's public entrypoint (not the internal `clients.mjs`)
+// so this type-shape test exercises the consumer-facing surface — any drift
+// between `index.mts` re-exports and `clients.mts` definitions fails here.
 import type {
 	ChallengeStoreClient,
 	DisposableRefreshTokenFamilyClient,
@@ -17,7 +20,7 @@ import type {
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
-} from "../src/clients.mjs";
+} from "../src/index.mjs";
 import type { makeIoredisClients } from "../src/ioredis.mjs";
 
 type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;

@@ -104,10 +104,14 @@ export function makeIoredisClients(io: Redis): {
 	const refreshTokenFamilyClient = buildRefreshClient(io);
 
 	const userSessionStoreClient: UserSessionStoreClient = {
-		set: (k, v, _mode, ttl, cond?) =>
+		// Cast required because TypeScript cannot unify a single arrow function
+		// against an overloaded property signature (the two `set` overloads
+		// have distinct return types). The runtime branch on `cond` upholds
+		// each overload's contract.
+		set: ((k: string, v: string, _mode: "PX", ttl: number, cond?: "NX") =>
 			cond === "NX"
-				? (io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>)
-				: (io.set(k, v, "PX", ttl) as Promise<"OK" | null>),
+				? io.set(k, v, "PX", ttl, "NX")
+				: io.set(k, v, "PX", ttl)) as UserSessionStoreClient["set"],
 		get: (k) => io.get(k),
 		del: (k) => io.del(k),
 	};
@@ -165,10 +169,11 @@ export function makeIoredisClients(io: Redis): {
 
 	const federationTokenStoreClient: FederationTokenStoreClient = {
 		get: (k) => io.get(k),
-		set: (k, v, _mode, ttl, cond?) =>
+		// Cast required for overloaded `set`; see UserSessionStoreClient above.
+		set: ((k: string, v: string, _mode: "PX", ttl: number, cond?: "NX") =>
 			cond === "NX"
-				? (io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>)
-				: (io.set(k, v, "PX", ttl) as Promise<"OK" | null>),
+				? io.set(k, v, "PX", ttl, "NX")
+				: io.set(k, v, "PX", ttl)) as FederationTokenStoreClient["set"],
 		del: (...keys) => io.del(...keys),
 		scanIterator: ({ MATCH, COUNT }) =>
 			(async function* () {

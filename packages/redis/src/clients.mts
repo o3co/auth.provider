@@ -97,12 +97,16 @@ export interface DisposableRefreshTokenFamilyClient
 /**
  * Backing client for UserSessionStore adapters. Declares only `set`, `get`,
  * `del` — the exact methods `createRedisUserSessionStore` consumes.
- * The `set` overloads cover both the plain-PX form (for future update paths)
- * and the PX+NX form used by `create` (atomic insert-only, mirrors
- * ChallengeStore.issue and RefreshTokenFamilyStore.registerFamily).
+ *
+ * `set` has two overloads:
+ *  - plain PX form (no condition): always succeeds with `"OK"` per Redis
+ *    `SET key value PX ms` protocol; never returns null.
+ *  - PX+NX form: atomic insert-only, used by `create`; mirrors
+ *    ChallengeStore.issue and RefreshTokenFamilyStore.registerFamily.
+ *    Returns `"OK"` on insert, `null` when the key already existed.
  */
 export interface UserSessionStoreClient {
-	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK" | null>;
+	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	get(key: string): Promise<string | null>;
 	del(key: string): Promise<number>;
@@ -164,12 +168,17 @@ export interface SessionSidSortedSetClient {
 
 /**
  * Backing client for FederationTokenStore adapters. Declares `get`, `set`
- * (positional PX form, no NX condition), variadic `del`, and `scanIterator`
- * for the cursor-based key scan used by `deleteBySession`.
+ * (two overloads: PX form, and PX+NX form for atomic insert-only),
+ * variadic `del`, and `scanIterator` for the cursor-based key scan used
+ * by `deleteBySession`.
+ *
+ * The plain-PX `set` overload always succeeds with `"OK"` per Redis
+ * `SET key value PX ms` protocol; the PX+NX overload returns `"OK"` on
+ * insert or `null` when the key already existed.
  */
 export interface FederationTokenStoreClient {
 	get(key: string): Promise<string | null>;
-	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK" | null>;
+	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	del(...keys: string[]): Promise<number>;
 	scanIterator(opts: { MATCH: string; COUNT?: number }): AsyncIterable<string>;
