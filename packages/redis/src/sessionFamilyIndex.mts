@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import type { SessionFamilyIndex, SessionSidSortedSetClient } from "@o3co/auth-provider-core";
+import type { SessionFamilyIndex } from "@o3co/auth-provider-core";
+import type { SessionSidSortedSetClient } from "./clients.mjs";
 import { createRedisSidSortedSet } from "./internal/redisSidSortedSet.mjs";
 
 export interface RedisSessionFamilyIndexOptions {

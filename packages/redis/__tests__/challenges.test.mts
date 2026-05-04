@@ -2,11 +2,12 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
-import type { ChallengeStoreClient } from "@o3co/auth-provider-core";
+
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { createRedisChallengeStore } from "../src/challenges.mjs";
+import type { ChallengeStoreClient } from "../src/clients.mjs";
 import { runChallengeStoreContract } from "./adapters.challenge-store.contract.mjs";
 
 let container: StartedTestContainer;

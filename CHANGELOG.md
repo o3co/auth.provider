@@ -216,6 +216,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ships an actual implementation.
   - Also removed: `mutableUserSessionStore` ComponentMap slot.
 
+### Breaking Changes (pre-tag interface review — Group B)
+
+- **Backing-client interfaces relocated** from `@o3co/auth-provider-core` to
+  `@o3co/auth-provider-redis`. The shape (`hSet`, `zAdd`, `pttl`,
+  `multi`/`watch`/`exec`, `pExpireAt`, etc.) is intrinsically Redis-flavoured;
+  hosting it in core forced storage-agnostic consumers to mimic Redis
+  semantics. Eleven types moved; consumers update type imports from
+  `@o3co/auth-provider-core` to `@o3co/auth-provider-redis`:
+  - `ChallengeStoreClient`
+  - `ReplaySeenSetClient`
+  - `RefreshTokenFamilyClient`
+  - `RefreshTokenFamilyMultiClient`
+  - `DisposableRefreshTokenFamilyClient`
+  - `UserSessionStoreClient`
+  - `SessionRPRegistryClient`
+  - `SessionRPRegistryMultiClient`
+  - `SessionSidSortedSetClient`
+  - `SessionSidSortedSetMultiClient`
+  - `FederationTokenStoreClient`
+  - `RateLimiterClient`
+
+  The matching ComponentMap slot augmentations (`challengeStoreClient`,
+  `replaySeenSetClient`, `refreshTokenFamilyClient`, `userSessionStoreClient`,
+  `sessionRPRegistryClient`, `sessionFamilyIndexClient`,
+  `sessionFederationIndexClient`, `federationTokenStoreClient`,
+  `rateLimiterClient`) move with the interfaces. The slot keys themselves are
+  unchanged; the type augmentations now ship from
+  `@o3co/auth-provider-redis`. Consumers wiring redis backends already import
+  from `@o3co/auth-provider-redis` (or its `/ioredis` subpath), so the slot
+  types remain visible.
+
+  Custom non-Redis backends (DynamoDB, Postgres, etcd, ...) define their own
+  client contracts; do NOT implement these Redis-shaped interfaces.
+
 ### Breaking Changes (Phase 10 — Redis Adapter Relocation)
 
 - **`createRedisFederationTokenStore` moved**: from

@@ -7,10 +7,10 @@ import {
 	type AdapterBuilder,
 	defineModule,
 	type RateLimiterBase,
-	type RateLimiterClient,
 	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
+import type { RateLimiterClient } from "./clients.mjs";
 
 interface RedisRateLimiterConfig {
 	type?: string;

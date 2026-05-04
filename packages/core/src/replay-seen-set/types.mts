@@ -69,20 +69,5 @@ declare module "@o3co/auth-provider-core" {
 // Backing client interface (Phase 10 addendum §3)
 // ---------------------------------------------------------------------------
 
-/**
- * Backing client for ReplaySeenSet adapters. Adapter implementations
- * (e.g. `@o3co/auth-provider-redis`'s `createRedisReplaySeenSet`) consume
- * exactly these methods.
- *
- * Per Phase 10 addendum §3.
- */
-export interface ReplaySeenSetClient {
-	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
-	exists(key: string): Promise<number>;
-}
-
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly replaySeenSetClient?: ReplaySeenSetClient;
-	}
-}
+// ReplaySeenSetClient backing-client interface relocated to
+// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3).

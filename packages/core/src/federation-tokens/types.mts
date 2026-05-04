@@ -139,23 +139,5 @@ export function supportsLock(
 // Backing client interface (Phase 10 addendum §3)
 // ---------------------------------------------------------------------------
 
-/**
- * Backing client for FederationTokenStore adapters. Declares `get`, `set`
- * (positional PX form, no NX condition), variadic `del`, and `scanIterator`
- * for the cursor-based key scan used by `deleteBySession`.
- *
- * Per Phase 10 addendum §3.
- */
-export interface FederationTokenStoreClient {
-	get(key: string): Promise<string | null>;
-	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK" | null>;
-	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
-	del(...keys: string[]): Promise<number>;
-	scanIterator(opts: { MATCH: string; COUNT?: number }): AsyncIterable<string>;
-}
-
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly federationTokenStoreClient?: FederationTokenStoreClient;
-	}
-}
+// FederationTokenStoreClient backing-client interface relocated to
+// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3).

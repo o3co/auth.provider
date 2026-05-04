@@ -19,9 +19,9 @@ import {
 	canonicalChallengeKey,
 	defineModule,
 	type ReplaySeenSet,
-	type ReplaySeenSetClient,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
+import type { ReplaySeenSetClient } from "./clients.mjs";
 
 /**
  * Options for createRedisReplaySeenSet.

@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { RefreshTokenFamilyClient } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
+import type { RefreshTokenFamilyClient } from "../src/clients.mjs";
 
 /**
  * Factory for the contract suite. Returns a freshly-built RefreshTokenFamilyClient

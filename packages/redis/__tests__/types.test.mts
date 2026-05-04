@@ -2,9 +2,10 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import type { ComponentMap } from "@o3co/auth-provider-core";
+import { describe, expectTypeOf, it } from "vitest";
 import type {
 	ChallengeStoreClient,
-	ComponentMap,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,
@@ -16,8 +17,7 @@ import type {
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
-} from "@o3co/auth-provider-core";
-import { describe, expectTypeOf, it } from "vitest";
+} from "../src/clients.mjs";
 import type { makeIoredisClients } from "../src/ioredis.mjs";
 
 type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;

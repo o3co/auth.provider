@@ -14,13 +14,10 @@
  * limitations under the License.
  */
 
-import type {
-	SessionSidSortedSetClient,
-	SessionSidSortedSetMultiClient,
-} from "@o3co/auth-provider-core";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
 
 let container: StartedTestContainer;

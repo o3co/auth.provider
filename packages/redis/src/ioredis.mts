@@ -2,6 +2,7 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import type { Redis } from "ioredis";
 import type {
 	ChallengeStoreClient,
 	DisposableRefreshTokenFamilyClient,
@@ -15,8 +16,7 @@ import type {
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
-} from "@o3co/auth-provider-core";
-import type { Redis } from "ioredis";
+} from "./clients.mjs";
 
 /**
  * Wrap a single ioredis connection into the 9 typed client wrappers

@@ -85,11 +85,11 @@ export {
 	registerBuiltinFederationTokenStores,
 } from "./federation-tokens/factory.mjs";
 export { memoryFederationTokenStoreModule } from "./federation-tokens/module.mjs";
-// FederationTokenStore — TODO-F-1
+// FederationTokenStore — TODO-F-1. Backing client interface
+// (FederationTokenStoreClient) lives in @o3co/auth-provider-redis (S3).
 export type {
 	AcquireLockOptions,
 	FederationTokenStoreBase,
-	FederationTokenStoreClient,
 	FederationTokenStoreFactory,
 	FederationTokens,
 	LockResult,
@@ -225,12 +225,12 @@ export {
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
-// Rate limiter
+// Rate limiter. Backing client interface (RateLimiterClient) lives in
+// @o3co/auth-provider-redis (S3).
 export type {
 	RateLimitContext,
 	RateLimitDecision,
 	RateLimiterBase,
-	RateLimiterClient,
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
@@ -269,6 +269,9 @@ export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
 // A4 user-sessions (post v0.5.0 redesign): 4-way decomposition.
 // Per spec §5.1-§5.7, §7.1, §8.1.
 // ---------------------------------------------------------------------------
+// Backing client interfaces (UserSessionStoreClient, SessionRPRegistryClient
+// (+Multi), SessionSidSortedSetClient (+Multi)) live in
+// @o3co/auth-provider-redis (S3).
 export type {
 	CreateUserSessionInput,
 	RegisteredRP,
@@ -277,15 +280,10 @@ export type {
 	SessionFederationIndex,
 	SessionFederationIndexFactory,
 	SessionRPRegistry,
-	SessionRPRegistryClient,
 	SessionRPRegistryFactory,
-	SessionRPRegistryMultiClient,
-	SessionSidSortedSetClient,
-	SessionSidSortedSetMultiClient,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
-	UserSessionStoreClient,
 	UserSessionStoreFactory,
 } from "./user-sessions/types.mjs";
 
@@ -323,7 +321,6 @@ export type {
 	ChallengeCeremony,
 	ChallengeCeremonyOutcome,
 	ChallengeStore,
-	ChallengeStoreClient,
 } from "./challenges/types.mjs";
 export { createMemoryReplaySeenSet } from "./replay-seen-set/adapters/memory.mjs";
 export {
@@ -332,7 +329,7 @@ export {
 	registerBuiltinReplaySeenSets,
 } from "./replay-seen-set/factory.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
-export type { ReplaySeenSet, ReplaySeenSetClient } from "./replay-seen-set/types.mjs";
+export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 
 // ===========================================================================
 // A3 — RefreshTokenFamilyStore + RefreshTokenFamilyRotation + RefreshTokenFamilyRevocation
@@ -363,10 +360,7 @@ export {
 	type RefreshTokenFamilyRotationDeps,
 } from "./refresh-token-family/rotation.mjs";
 export type {
-	DisposableRefreshTokenFamilyClient,
 	RefreshTokenFamily,
-	RefreshTokenFamilyClient,
-	RefreshTokenFamilyMultiClient,
 	RefreshTokenFamilyRevocation,
 	RefreshTokenFamilyRotation,
 	RefreshTokenFamilyRotationOutcome,

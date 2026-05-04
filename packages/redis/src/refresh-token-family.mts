@@ -17,12 +17,12 @@ import {
 	type AdapterBuilder,
 	defineModule,
 	type RefreshTokenFamily,
-	type RefreshTokenFamilyClient,
 	type RefreshTokenFamilyStore,
 	type RefreshTokenFamilyUpdateResult,
 	RefreshTokenStorageError,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
+import type { RefreshTokenFamilyClient } from "./clients.mjs";
 
 /**
  * Options for createRedisRefreshTokenFamilyStore.

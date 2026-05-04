@@ -2,10 +2,11 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
-import type { ReplaySeenSetClient } from "@o3co/auth-provider-core";
+
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
+import type { ReplaySeenSetClient } from "../src/clients.mjs";
 import { createRedisReplaySeenSet } from "../src/replay-seen-set.mjs";
 import { runReplaySeenSetContract } from "./adapters.replay-seen-set.contract.mjs";
 

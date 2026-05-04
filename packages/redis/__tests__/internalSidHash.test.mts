@@ -14,13 +14,10 @@
  * limitations under the License.
  */
 
-import type {
-	SessionRPRegistryClient,
-	SessionRPRegistryMultiClient,
-} from "@o3co/auth-provider-core";
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "../src/clients.mjs";
 import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
 
 let container: StartedTestContainer;

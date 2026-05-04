@@ -19,8 +19,8 @@ import type {
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
-	UserSessionStoreClient,
 } from "@o3co/auth-provider-core";
+import type { UserSessionStoreClient } from "./clients.mjs";
 
 export interface RedisUserSessionStoreOptions {
 	readonly client: UserSessionStoreClient;

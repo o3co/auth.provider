@@ -14,10 +14,18 @@
  * limitations under the License.
  */
 
+export {
+	createRedisChallengeStore,
+	type RedisChallengeStoreOptions,
+	redisChallengeStoreBuilder,
+	redisChallengeStoreModule,
+} from "./challenges.mjs";
 // ---------------------------------------------------------------------------
-// Per-purpose client interfaces — re-exported from core for consumer
-// convenience. Consumers importing from @o3co/auth-provider-redis get all
-// per-purpose interfaces without needing a separate import from core.
+// Per-purpose backing-client interfaces. These describe the methods Redis
+// adapters consume, expressed in Redis protocol terms (`hSet`, `zAdd`, `pttl`,
+// `multi`/`watch`/`exec`, etc.). Consumers writing custom Redis-backed clients
+// (alternative to ioredis) implement these contracts. Non-Redis backends
+// define their own contracts; do not implement these.
 // ---------------------------------------------------------------------------
 export type {
 	ChallengeStoreClient,
@@ -32,13 +40,7 @@ export type {
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
-} from "@o3co/auth-provider-core";
-export {
-	createRedisChallengeStore,
-	type RedisChallengeStoreOptions,
-	redisChallengeStoreBuilder,
-	redisChallengeStoreModule,
-} from "./challenges.mjs";
+} from "./clients.mjs";
 // makeIoredisClients lives at the `/ioredis` subpath
 // (`@o3co/auth-provider-redis/ioredis`) so the main entry stays
 // vendor-agnostic. Importing this main entry does NOT pull `ioredis` types
