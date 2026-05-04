@@ -14,11 +14,8 @@
  * limitations under the License.
  */
 
-import type {
-	RegisteredRP,
-	SessionRPRegistry,
-	SessionRPRegistryClient,
-} from "@o3co/auth-provider-core";
+import type { RegisteredRP, SessionRPRegistry } from "@o3co/auth-provider-core";
+import type { SessionRPRegistryClient } from "./clients.mjs";
 import { createRedisSidHash } from "./internal/redisSidHash.mjs";
 
 export interface RedisSessionRPRegistryOptions {

@@ -18,11 +18,11 @@ import {
 	type Challenge,
 	ChallengeStorageError,
 	type ChallengeStore,
-	type ChallengeStoreClient,
 	canonicalChallengeKey,
 	defineModule,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
+import type { ChallengeStoreClient } from "./clients.mjs";
 
 /**
  * Options for createRedisChallengeStore.

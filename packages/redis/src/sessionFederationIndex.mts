@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import type { SessionFederationIndex, SessionSidSortedSetClient } from "@o3co/auth-provider-core";
+import type { SessionFederationIndex } from "@o3co/auth-provider-core";
+import type { SessionSidSortedSetClient } from "./clients.mjs";
 import { createRedisSidSortedSet } from "./internal/redisSidSortedSet.mjs";
 
 export interface RedisSessionFederationIndexOptions {

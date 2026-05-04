@@ -2,15 +2,14 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import Redis from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { afterAll, beforeAll } from "vitest";
 import type {
 	DisposableRefreshTokenFamilyClient,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
-} from "@o3co/auth-provider-core";
-import Redis from "ioredis";
-
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
-import { afterAll, beforeAll } from "vitest";
+} from "../src/clients.mjs";
 import { createRedisRefreshTokenFamilyStore } from "../src/refresh-token-family.mjs";
 import { runRefreshTokenFamilyStoreContract } from "./adapters.refresh-token-family.contract.mjs";
 import { runRefreshTokenFamilyClientDuplicateContract } from "./adapters.refresh-token-family-client.contract.mjs";

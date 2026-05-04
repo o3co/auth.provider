@@ -5,12 +5,12 @@
 
 import {
 	type FederationTokenStoreBase,
-	type FederationTokenStoreClient,
 	type FederationTokens,
 	type SupportsLock,
 	supportsLock,
 } from "@o3co/auth-provider-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { FederationTokenStoreClient } from "../src/clients.mjs";
 import { createRedisFederationTokenStore } from "../src/federation-tokens.mjs";
 
 function createFakeRedis() {

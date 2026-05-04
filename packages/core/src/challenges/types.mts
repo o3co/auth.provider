@@ -137,23 +137,6 @@ declare module "@o3co/auth-provider-core" {
 // Backing client interface (Phase 10 addendum §3)
 // ---------------------------------------------------------------------------
 
-/**
- * Backing client for ChallengeStore adapters. Adapter implementations
- * (e.g. `@o3co/auth-provider-redis`'s `createRedisChallengeStore`) consume
- * exactly these methods. The slot represents the role "the backing client
- * of the challenge store"; consumers wire whichever backend wrapper
- * (redis, memcached, etc.) satisfies this interface.
- *
- * Per Phase 10 addendum §3.
- */
-export interface ChallengeStoreClient {
-	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
-	pttl(key: string): Promise<number>;
-	del(key: string): Promise<number>;
-}
-
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly challengeStoreClient?: ChallengeStoreClient;
-	}
-}
+// ChallengeStoreClient backing-client interface relocated to
+// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3) — the
+// shape is intrinsically Redis-flavoured and lives with its consumers.

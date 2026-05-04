@@ -277,52 +277,6 @@ declare module "@o3co/auth-provider-core" {
 }
 
 // ---------------------------------------------------------------------------
-// Backing client interfaces (Phase 10 addendum §3)
-// ---------------------------------------------------------------------------
-
-/**
- * Chainable transaction pipeline returned by `RefreshTokenFamilyClient.multi()`.
- *
- * Per Phase 10 addendum §3.
- */
-export interface RefreshTokenFamilyMultiClient {
-	set(key: string, value: string, mode: "PX", ttlMs: number): RefreshTokenFamilyMultiClient;
-	exec(): Promise<unknown[] | null>;
-}
-
-/**
- * Backing client for RefreshTokenFamilyStore adapters. The `duplicate()` method
- * returns a `DisposableRefreshTokenFamilyClient` bound to a new underlying
- * connection, required for WATCH/MULTI/EXEC CAS isolation per A3 §7.2.
- *
- * Per Phase 10 addendum §3.
- */
-export interface RefreshTokenFamilyClient {
-	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
-	get(key: string): Promise<string | null>;
-	pttl(key: string): Promise<number>;
-	watch(...keys: string[]): Promise<"OK">;
-	unwatch(): Promise<"OK">;
-	multi(): RefreshTokenFamilyMultiClient;
-	duplicate(): DisposableRefreshTokenFamilyClient;
-}
-
-/**
- * A `RefreshTokenFamilyClient` that owns a single network connection and is
- * responsible for closing it. Returned by `RefreshTokenFamilyClient.duplicate()`
- * so consumer code can use `await using conn = client.duplicate()` for scoped,
- * exception-safe connection lifetime.
- *
- * Per Phase 10 addendum §3.
- */
-export interface DisposableRefreshTokenFamilyClient
-	extends RefreshTokenFamilyClient,
-		AsyncDisposable {
-	[Symbol.asyncDispose](): Promise<void>;
-}
-
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		readonly refreshTokenFamilyClient?: RefreshTokenFamilyClient;
-	}
-}
+// RefreshTokenFamilyClient / RefreshTokenFamilyMultiClient /
+// DisposableRefreshTokenFamilyClient backing-client interfaces relocated to
+// @o3co/auth-provider-redis (v0.5.0 pre-tag interface review S3).

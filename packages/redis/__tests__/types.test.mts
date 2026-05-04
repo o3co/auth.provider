@@ -2,9 +2,13 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import type { ComponentMap } from "@o3co/auth-provider-core";
+import { describe, expectTypeOf, it } from "vitest";
+// Import via the package's public entrypoint (not the internal `clients.mjs`)
+// so this type-shape test exercises the consumer-facing surface — any drift
+// between `index.mts` re-exports and `clients.mts` definitions fails here.
 import type {
 	ChallengeStoreClient,
-	ComponentMap,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,
@@ -16,8 +20,7 @@ import type {
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
-} from "@o3co/auth-provider-core";
-import { describe, expectTypeOf, it } from "vitest";
+} from "../src/index.mjs";
 import type { makeIoredisClients } from "../src/ioredis.mjs";
 
 type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;

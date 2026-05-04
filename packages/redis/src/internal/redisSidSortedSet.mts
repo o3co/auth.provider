@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { SessionSidSortedSetClient } from "@o3co/auth-provider-core";
+import type { SessionSidSortedSetClient } from "../clients.mjs";
 
 export interface RedisSidSortedSetOptions {
 	readonly client: SessionSidSortedSetClient;

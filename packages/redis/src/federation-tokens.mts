@@ -7,11 +7,11 @@ import {
 	type AdapterBuilder,
 	defineModule,
 	type FederationTokenStoreBase,
-	type FederationTokenStoreClient,
 	type FederationTokens,
 	type SupportsLock,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
+import type { FederationTokenStoreClient } from "./clients.mjs";
 import { decryptTokenField, encryptTokenField } from "./internal/crypto.mjs";
 import { createRedisLock } from "./internal/lock.mjs";
 
