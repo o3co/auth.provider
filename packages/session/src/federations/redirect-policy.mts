@@ -64,7 +64,7 @@ export type FederationRedirectPolicyFactory<Deps = ProviderDeps<never, never>> =
 ) => FederationRedirectPolicy;
 
 /**
- * Config slice consumed by the default redirect policy.
+ * Config slice consumed by the redirect policy.
  *
  * This is the v0.4.x helper-facing shape (see `helpers.mts`):
  *   - `sessionDomain`: cookie domain; redirect targets must match or be
@@ -73,12 +73,12 @@ export type FederationRedirectPolicyFactory<Deps = ProviderDeps<never, never>> =
  *     consumer-supplied `redirect_to` query parameter.
  *   - `clientUrl`: fallback redirect when session has no `redirectTo`.
  *
- * A `Pick<RedirectConfig, ...>` projection limits the default policy to the
+ * A `Pick<RedirectConfig, ...>` projection limits the policy to the
  * fields it actually consumes. A5 does NOT invent new field names.
  *
  * Per A5 §9.
  */
-export type DefaultFederationRedirectPolicyConfig = Pick<
+export type FederationRedirectPolicyConfig = Pick<
 	RedirectConfig,
 	"sessionDomain" | "authCallbackUrl" | "clientUrl"
 >;
@@ -95,7 +95,7 @@ export type DefaultFederationRedirectPolicyConfig = Pick<
  * Per A5 §9.
  */
 export function createFederationRedirectPolicy(
-	config: DefaultFederationRedirectPolicyConfig,
+	config: FederationRedirectPolicyConfig,
 ): FederationRedirectPolicy {
 	// Defensive snapshot: detach from caller's reference so post-construction
 	// mutation of the supplied config (e.g. `config.sessionDomain = "evil.com"`

@@ -300,8 +300,8 @@ export { createMemoryChallengeStore } from "./challenges/adapters/memory.mjs";
 export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";
 // Default composition
 export {
+	type ChallengeCeremonyDeps,
 	createChallengeCeremony,
-	type DefaultChallengeCeremonyDeps,
 } from "./challenges/ceremony.mjs";
 export type { ChallengeStorageErrorReason } from "./challenges/errors.mjs";
 // Errors
@@ -356,11 +356,11 @@ export {
 
 export {
 	createRefreshTokenFamilyRevocation,
-	type DefaultRefreshTokenFamilyRevocationDeps,
+	type RefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {
 	createRefreshTokenFamilyRotation,
-	type DefaultRefreshTokenFamilyRotationDeps,
+	type RefreshTokenFamilyRotationDeps,
 } from "./refresh-token-family/rotation.mjs";
 export type {
 	DisposableRefreshTokenFamilyClient,

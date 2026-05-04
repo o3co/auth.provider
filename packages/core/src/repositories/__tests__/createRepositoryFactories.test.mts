@@ -24,7 +24,7 @@ describe("createRepositoryFactories", () => {
 	let tmpDir: string;
 
 	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-default-factories-"));
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-repository-factories-"));
 	});
 
 	afterEach(() => {
