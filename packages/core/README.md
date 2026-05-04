@@ -346,7 +346,7 @@ Key contract properties:
 - `create()` throws `AdapterFactoryError` when `type` is not registered; the error carries the `kind`, `type`, and `registered` list.
 - `BuilderContext` is shared by reference across builder invocations for a given factory. Treat it as read-only from builders.
 
-`createDefaultFactories` returns three factories pre-registered with the built-in `yaml`/`static` (client, user) and `memory` (code) types. Use `registerBuiltinAdapters` from `@o3co/auth-provider-foundation` to add `http` and `redis` adapters, or register your own types to support other backends.
+`createDefaultFactories` returns three factories pre-registered with the built-in `yaml`/`static` (client, user) and `memory` (code) types. Use `registerBuiltinAdapters` from `@o3co/auth-provider-foundation` to add the `http` user-authentication adapter, or register your own types to support other backends. For Redis-backed code/store adapters, see `@o3co/auth-provider-redis`.
 
 ### Module System
 

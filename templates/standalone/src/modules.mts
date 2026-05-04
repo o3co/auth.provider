@@ -84,11 +84,11 @@ export const keyStoreModule: Module = defineModule({
  */
 export const repositoriesModule: Module = defineModule({
 	name: "standalone:repositories",
-	requires: ["config", "pathResolver"] as const,
+	requires: ["config"] as const,
 	provides: {
-		clientRepository: async ({ config, pathResolver }) => {
-			const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
-			registerBuiltinAdapters({ userFactory, codeFactory, pathResolver });
+		clientRepository: async ({ config }) => {
+			const { clientFactory, userFactory } = createDefaultFactories();
+			registerBuiltinAdapters({ userFactory });
 			const slice = flattenAdapterConfig(
 				(config as AppConfig).repositories.client as { type: string } & Record<string, unknown>,
 			);
@@ -97,18 +97,18 @@ export const repositoriesModule: Module = defineModule({
 			}
 			return clientFactory.create(slice);
 		},
-		userRepository: async ({ config, pathResolver }) => {
-			const { userFactory, codeFactory } = createDefaultFactories();
-			registerBuiltinAdapters({ userFactory, codeFactory, pathResolver });
+		userRepository: async ({ config }) => {
+			const { userFactory } = createDefaultFactories();
+			registerBuiltinAdapters({ userFactory });
 			return userFactory.create(
 				flattenAdapterConfig(
 					(config as AppConfig).repositories.user as { type: string } & Record<string, unknown>,
 				),
 			);
 		},
-		codeRepository: async ({ config, pathResolver }) => {
+		codeRepository: async ({ config }) => {
 			const { userFactory, codeFactory } = createDefaultFactories();
-			registerBuiltinAdapters({ userFactory, codeFactory, pathResolver });
+			registerBuiltinAdapters({ userFactory });
 			codeFactory.register("redis", redisCodeRepositoryBuilder);
 			return codeFactory.create(
 				flattenAdapterConfig(

@@ -20,7 +20,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
-	type RefreshTokenRotation,
+	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
 } from "@o3co/auth-provider-core";
@@ -179,15 +179,15 @@ describe("createAuthorizationGrant", () => {
 			expect(sessionMutation?.clear).toContain("granted_scopes");
 		});
 
-		it("registers initial rt+jwt via refreshTokenRotation.register (CP-2)", async () => {
+		it("registers initial rt+jwt via refreshTokenFamilyRotation.register (CP-2)", async () => {
 			const registerSpy = vi.fn(async () => {});
-			const refreshTokenRotation: RefreshTokenRotation = {
+			const refreshTokenFamilyRotation: RefreshTokenFamilyRotation = {
 				register: registerSpy,
 				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			};
 			const deps = {
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
-				refreshTokenRotation,
+				refreshTokenFamilyRotation,
 			};
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
@@ -220,8 +220,8 @@ describe("createAuthorizationGrant", () => {
 			expect(expiresAtMs).toBeGreaterThan(Date.now());
 		});
 
-		it("returns 503 temporarily_unavailable when refreshTokenRotation.register throws (CP-16)", async () => {
-			const throwingRotation: RefreshTokenRotation = {
+		it("returns 503 temporarily_unavailable when refreshTokenFamilyRotation.register throws (CP-16)", async () => {
+			const throwingRotation: RefreshTokenFamilyRotation = {
 				register: async () => {
 					throw new Error("store down");
 				},
@@ -229,7 +229,7 @@ describe("createAuthorizationGrant", () => {
 			};
 			const deps = {
 				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
-				refreshTokenRotation: throwingRotation,
+				refreshTokenFamilyRotation: throwingRotation,
 			};
 			const handler = createAuthorizationGrant(deps);
 
@@ -250,7 +250,7 @@ describe("createAuthorizationGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("skips initial-register when no refreshTokenRotation is configured (CP-2 graceful)", async () => {
+		it("skips initial-register when no refreshTokenFamilyRotation is configured (CP-2 graceful)", async () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({

@@ -16,7 +16,6 @@
 
 import {
 	AdapterFactoryError,
-	type CodeRepository,
 	createAdapterFactory,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
@@ -52,9 +51,8 @@ afterAll(() => server.close());
 describe("registerBuiltinAdapters", () => {
 	it("registers 'http' type in userFactory", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
-		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
 
-		registerBuiltinAdapters({ userFactory, codeFactory });
+		registerBuiltinAdapters({ userFactory });
 
 		try {
 			await userFactory.create({ type: "unknown" });
@@ -68,19 +66,9 @@ describe("registerBuiltinAdapters", () => {
 		}
 	});
 
-	it("does NOT register 'redis' type in codeFactory (relocated to @o3co/auth-provider-redis in Phase 10)", async () => {
-		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
-		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
-
-		registerBuiltinAdapters({ userFactory, codeFactory });
-
-		expect(codeFactory.registeredTypes()).not.toContain("redis");
-	});
-
 	it("http builder creates a working HttpUserRepository", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
-		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
-		registerBuiltinAdapters({ userFactory, codeFactory });
+		registerBuiltinAdapters({ userFactory });
 
 		const repo = await userFactory.create({
 			type: "http",
@@ -102,8 +90,7 @@ describe("registerBuiltinAdapters", () => {
 
 	it("http builder coerces string timeout to number (env-override path)", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
-		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
-		registerBuiltinAdapters({ userFactory, codeFactory });
+		registerBuiltinAdapters({ userFactory });
 
 		const repo = await userFactory.create({
 			type: "http",
@@ -120,18 +107,10 @@ describe("registerBuiltinAdapters", () => {
 
 	it("http builder throws when authenticateUrl is missing", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
-		const codeFactory = createAdapterFactory<CodeRepository>("CodeRepository");
-		registerBuiltinAdapters({ userFactory, codeFactory });
+		registerBuiltinAdapters({ userFactory });
 
 		await expect(userFactory.create({ type: "http", timeout: 5000 })).rejects.toThrow(
 			/authenticateUrl/,
 		);
-	});
-
-	it("codeFactory accepts optional parameter (v0.4.x signature compat)", async () => {
-		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
-
-		// codeFactory is now optional — omitting it should not throw
-		expect(() => registerBuiltinAdapters({ userFactory })).not.toThrow();
 	});
 });

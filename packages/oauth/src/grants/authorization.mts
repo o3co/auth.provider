@@ -305,9 +305,9 @@ export const createAuthorizationGrant = (
 
 			// Register the initial refresh token family so replay detection is
 			// active from the first use. Per A3 §5.2: use the dedicated
-			// RefreshTokenRotation.register(newJti, familyId, expiresAtMs) rather
+			// RefreshTokenFamilyRotation.register(newJti, familyId, expiresAtMs) rather
 			// than the v0.4.x rotate(null, ...) trick — expiresAtMs is epoch-ms.
-			if (deps.refreshTokenRotation) {
+			if (deps.refreshTokenFamilyRotation) {
 				const payload = decodeJwtPayload(refreshToken.token);
 				const jti = payload.jti as string | undefined;
 				const exp = payload.exp as number | undefined;
@@ -319,7 +319,7 @@ export const createAuthorizationGrant = (
 					// a controlled 503 JSON so clients see a retryable error instead
 					// of an unhandled HTML 500 from express.
 					try {
-						await deps.refreshTokenRotation.register(jti, familyId, exp * 1000);
+						await deps.refreshTokenFamilyRotation.register(jti, familyId, exp * 1000);
 					} catch {
 						return {
 							result: {

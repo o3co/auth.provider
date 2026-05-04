@@ -16,7 +16,7 @@
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import { createMemoryRefreshTokenFamilyStore } from "./adapters/memory.mjs";
 import { createDefaultRefreshTokenFamilyRevocation } from "./revocation.mjs";
-import { createDefaultRefreshTokenRotation } from "./rotation.mjs";
+import { createDefaultRefreshTokenFamilyRotation } from "./rotation.mjs";
 
 /**
  * Memory-backed RefreshTokenFamilyStore module. Test + dev only — no
@@ -32,21 +32,21 @@ export const memoryRefreshTokenFamilyStoreModule = defineModule({
 });
 
 /**
- * Default RefreshTokenRotation wrapper module. Composes the storage
+ * Default RefreshTokenFamilyRotation wrapper module. Composes the storage
  * primitive into the 4-outcome rotation ceremony. Replaceable via DI:
  * consumers wanting custom rotation policy (audit-emitting, grace-period,
- * etc.) provide a module with `provides: { refreshTokenRotation: ... }`
+ * etc.) provide a module with `provides: { refreshTokenFamilyRotation: ... }`
  * INSTEAD of this one — boot planner enforces uniqueness via
  * BootError({ reason: "duplicate-provides" }).
  *
  * Per A3 §8.1.
  */
-export const defaultRefreshTokenRotationModule = defineModule({
+export const defaultRefreshTokenFamilyRotationModule = defineModule({
 	name: "core-default-refresh-token-rotation",
 	requires: ["refreshTokenFamilyStore"] as const,
 	provides: {
-		refreshTokenRotation: (deps) =>
-			createDefaultRefreshTokenRotation({
+		refreshTokenFamilyRotation: (deps) =>
+			createDefaultRefreshTokenFamilyRotation({
 				refreshTokenFamilyStore: deps.refreshTokenFamilyStore,
 			}),
 	},

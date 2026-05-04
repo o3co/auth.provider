@@ -346,7 +346,7 @@ function createDefaultFactories(): {
 - `create()` は未登録 `type` で `AdapterFactoryError` を throw する。error は `kind` / `type` / `registered` を構造化フィールドとして保持する。
 - `BuilderContext` は factory 単位で共有される（call ごとのコピーではない）。builder 側では read-only として扱うこと。
 
-`createDefaultFactories` は組み込みの `yaml` / `static`（client、user）と `memory`（code）タイプが登録済みの 3 つのファクトリーを返します。`http` / `redis` は `@o3co/auth-provider-foundation` の `registerBuiltinAdapters` で追加できます。独自の backend は `register` で追加してください。
+`createDefaultFactories` は組み込みの `yaml` / `static`（client、user）と `memory`（code）タイプが登録済みの 3 つのファクトリーを返します。`@o3co/auth-provider-foundation` の `registerBuiltinAdapters` で `http` ユーザー認証アダプターを追加できます。独自の backend は `register` で追加してください。Redis バックエンドの code / store アダプターは `@o3co/auth-provider-redis` を参照してください。
 
 ### モジュールシステム
 

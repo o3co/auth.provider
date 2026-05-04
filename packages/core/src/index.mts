@@ -336,7 +336,7 @@ export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
 export type { ReplaySeenSet, ReplaySeenSetClient } from "./replay-seen-set/types.mjs";
 
 // ===========================================================================
-// A3 — RefreshTokenFamilyStore + RefreshTokenRotation + RefreshTokenFamilyRevocation
+// A3 — RefreshTokenFamilyStore + RefreshTokenFamilyRotation + RefreshTokenFamilyRevocation
 // ===========================================================================
 
 export { createMemoryRefreshTokenFamilyStore } from "./refresh-token-family/adapters/memory.mjs";
@@ -351,7 +351,7 @@ export {
 } from "./refresh-token-family/factory.mjs";
 export {
 	defaultRefreshTokenFamilyRevocationModule,
-	defaultRefreshTokenRotationModule,
+	defaultRefreshTokenFamilyRotationModule,
 	memoryRefreshTokenFamilyStoreModule,
 } from "./refresh-token-family/module.mjs";
 
@@ -360,8 +360,8 @@ export {
 	type DefaultRefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {
-	createDefaultRefreshTokenRotation,
-	type DefaultRefreshTokenRotationDeps,
+	createDefaultRefreshTokenFamilyRotation,
+	type DefaultRefreshTokenFamilyRotationDeps,
 } from "./refresh-token-family/rotation.mjs";
 export type {
 	DisposableRefreshTokenFamilyClient,
@@ -369,8 +369,8 @@ export type {
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	RefreshTokenFamilyRevocation,
+	RefreshTokenFamilyRotation,
+	RefreshTokenFamilyRotationOutcome,
 	RefreshTokenFamilyStore,
 	RefreshTokenFamilyUpdateResult,
-	RefreshTokenRotation,
-	RefreshTokenRotationOutcome,
 } from "./refresh-token-family/types.mjs";

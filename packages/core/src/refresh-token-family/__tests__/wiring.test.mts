@@ -19,7 +19,7 @@ import {
 	createApp,
 	createMemoryRefreshTokenFamilyStore,
 	defaultRefreshTokenFamilyRevocationModule,
-	defaultRefreshTokenRotationModule,
+	defaultRefreshTokenFamilyRotationModule,
 	defineModule,
 	memoryRefreshTokenFamilyStoreModule,
 } from "../../index.mjs";
@@ -42,7 +42,7 @@ const minBoot = {
 // via their own route handler modules.
 const activatorModule = defineModule({
 	name: "test-activate-refresh-token-wrappers",
-	requires: ["refreshTokenRotation", "refreshTokenFamilyRevocation"] as const,
+	requires: ["refreshTokenFamilyRotation", "refreshTokenFamilyRevocation"] as const,
 	contributes: {
 		routes: [
 			{
@@ -59,15 +59,15 @@ describe("A3 wiring — happy path with all-memory composition", () => {
 		const handle = await createApp({
 			modules: [
 				memoryRefreshTokenFamilyStoreModule,
-				defaultRefreshTokenRotationModule,
+				defaultRefreshTokenFamilyRotationModule,
 				defaultRefreshTokenFamilyRevocationModule,
 				activatorModule,
 			],
 			bootstrapComponents: minBoot,
 		});
 
-		const rotation = (handle.components as { refreshTokenRotation?: unknown })
-			.refreshTokenRotation as unknown as {
+		const rotation = (handle.components as { refreshTokenFamilyRotation?: unknown })
+			.refreshTokenFamilyRotation as unknown as {
 			register(j: string, f: string, e: number): Promise<void>;
 			rotate(p: string, n: string, f: string, e: number): Promise<{ outcome: string }>;
 		};
@@ -91,12 +91,12 @@ describe("A3 wiring — happy path with all-memory composition", () => {
 });
 
 describe("A3 wiring — override path", () => {
-	it("custom refreshTokenRotation module REPLACES the default (no duplicate-provides error)", async () => {
+	it("custom refreshTokenFamilyRotation module REPLACES the default (no duplicate-provides error)", async () => {
 		const customRotationModule = defineModule({
 			name: "test-custom-rotation",
 			requires: ["refreshTokenFamilyStore"] as const,
 			provides: {
-				refreshTokenRotation: () => ({
+				refreshTokenFamilyRotation: () => ({
 					async register() {},
 					async rotate() {
 						return { outcome: "unknown_family" as const };
@@ -115,8 +115,8 @@ describe("A3 wiring — override path", () => {
 			bootstrapComponents: minBoot,
 		});
 
-		const rotation = (handle.components as { refreshTokenRotation?: unknown })
-			.refreshTokenRotation as unknown as {
+		const rotation = (handle.components as { refreshTokenFamilyRotation?: unknown })
+			.refreshTokenFamilyRotation as unknown as {
 			rotate(p: string, n: string, f: string, e: number): Promise<{ outcome: string }>;
 		};
 		const out = await rotation.rotate("a", "b", "c", Date.now() + 60_000);
@@ -125,12 +125,12 @@ describe("A3 wiring — override path", () => {
 		await handle.dispose();
 	});
 
-	it("adding BOTH default and custom refreshTokenRotation modules throws duplicate-provides", async () => {
+	it("adding BOTH default and custom refreshTokenFamilyRotation modules throws duplicate-provides", async () => {
 		const customRotationModule = defineModule({
 			name: "test-conflict-rotation",
 			requires: ["refreshTokenFamilyStore"] as const,
 			provides: {
-				refreshTokenRotation: () => ({
+				refreshTokenFamilyRotation: () => ({
 					async register() {},
 					async rotate() {
 						return { outcome: "unknown_family" as const };
@@ -143,7 +143,7 @@ describe("A3 wiring — override path", () => {
 			createApp({
 				modules: [
 					memoryRefreshTokenFamilyStoreModule,
-					defaultRefreshTokenRotationModule,
+					defaultRefreshTokenFamilyRotationModule,
 					customRotationModule,
 					defaultRefreshTokenFamilyRevocationModule,
 				],

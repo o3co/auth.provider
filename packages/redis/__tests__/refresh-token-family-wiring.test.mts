@@ -17,7 +17,7 @@ import {
 	type BootstrapMap,
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
-	defaultRefreshTokenRotationModule,
+	defaultRefreshTokenFamilyRotationModule,
 	defineModule,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
@@ -51,7 +51,7 @@ describe("A3 wiring — full Redis composition (createApp + redis modules)", () 
 			name: "test-activator",
 			requires: [
 				"refreshTokenFamilyStore",
-				"refreshTokenRotation",
+				"refreshTokenFamilyRotation",
 				"refreshTokenFamilyRevocation",
 			] as const,
 			contributes: {
@@ -83,7 +83,7 @@ describe("A3 wiring — full Redis composition (createApp + redis modules)", () 
 		const handle = await createApp({
 			modules: [
 				redisRefreshTokenFamilyStoreModule,
-				defaultRefreshTokenRotationModule,
+				defaultRefreshTokenFamilyRotationModule,
 				defaultRefreshTokenFamilyRevocationModule,
 				activatorModule,
 			],
@@ -91,8 +91,8 @@ describe("A3 wiring — full Redis composition (createApp + redis modules)", () 
 		});
 
 		try {
-			const rotation = (handle.components as { refreshTokenRotation?: unknown })
-				.refreshTokenRotation as unknown as {
+			const rotation = (handle.components as { refreshTokenFamilyRotation?: unknown })
+				.refreshTokenFamilyRotation as unknown as {
 				register(j: string, f: string, e: number): Promise<void>;
 				rotate(p: string, n: string, f: string, e: number): Promise<{ outcome: string }>;
 			};

@@ -7,7 +7,7 @@ This package ships nine adapters covering every redis-backed component that
 
 - `ChallengeStore` (challenges)
 - `ReplaySeenSet` (replay-seen-set)
-- `RefreshTokenFamilyStore` / `RefreshTokenRotation` /
+- `RefreshTokenFamilyStore` / `RefreshTokenFamilyRotation` /
   `RefreshTokenFamilyRevocation` (refresh-token-family)
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
   `SessionFederationIndex` (user sessions, A4 four-store split)
