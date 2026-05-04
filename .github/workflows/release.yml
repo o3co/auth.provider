@@ -46,27 +46,13 @@ jobs:
           draft: true
           generate_release_notes: true
 
-      - name: Check if already published
-        id: npm_check
-        shell: bash
-        run: |
-          PACKAGE_VERSION="${GITHUB_REF#refs/tags/v}"
-          set +e
-          OUTPUT="$(npm view "@o3co/auth-provider-core@${PACKAGE_VERSION}" version 2>&1)"
-          STATUS=$?
-          set -e
-          if [ "$STATUS" -eq 0 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif printf '%s\n' "$OUTPUT" | grep -qE 'E404|404 Not Found'; then
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "npm view failed unexpectedly:" >&2
-            printf '%s\n' "$OUTPUT" >&2
-            exit "$STATUS"
-          fi
-
+      # pnpm publish skips per-package when the version is already on the registry,
+      # so the workflow is idempotent on retag and we don't need an upfront
+      # whole-job short-circuit. The previous core-only check caused partial
+      # publishes (e.g. trusted-publisher misconfig on one package) to be
+      # impossible to recover from via tag retag — once core was on the registry,
+      # rerun would skip the entire publish step and never retry the missing packages.
       - name: Publish packages
-        if: steps.npm_check.outputs.skip != 'true'
         run: pnpm -r publish --access public --no-git-checks --provenance
 
       - name: Publish GitHub Release
