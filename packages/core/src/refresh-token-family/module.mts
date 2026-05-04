@@ -15,8 +15,8 @@
  */
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import { createMemoryRefreshTokenFamilyStore } from "./adapters/memory.mjs";
-import { createDefaultRefreshTokenFamilyRevocation } from "./revocation.mjs";
-import { createDefaultRefreshTokenFamilyRotation } from "./rotation.mjs";
+import { createRefreshTokenFamilyRevocation } from "./revocation.mjs";
+import { createRefreshTokenFamilyRotation } from "./rotation.mjs";
 
 /**
  * Memory-backed RefreshTokenFamilyStore module. Test + dev only — no
@@ -46,7 +46,7 @@ export const defaultRefreshTokenFamilyRotationModule = defineModule({
 	requires: ["refreshTokenFamilyStore"] as const,
 	provides: {
 		refreshTokenFamilyRotation: (deps) =>
-			createDefaultRefreshTokenFamilyRotation({
+			createRefreshTokenFamilyRotation({
 				refreshTokenFamilyStore: deps.refreshTokenFamilyStore,
 			}),
 	},
@@ -63,7 +63,7 @@ export const defaultRefreshTokenFamilyRevocationModule = defineModule({
 	requires: ["refreshTokenFamilyStore"] as const,
 	provides: {
 		refreshTokenFamilyRevocation: (deps) =>
-			createDefaultRefreshTokenFamilyRevocation({
+			createRefreshTokenFamilyRevocation({
 				refreshTokenFamilyStore: deps.refreshTokenFamilyStore,
 			}),
 	},

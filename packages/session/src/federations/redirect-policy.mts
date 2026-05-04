@@ -94,7 +94,7 @@ export type DefaultFederationRedirectPolicyConfig = Pick<
  *
  * Per A5 §9.
  */
-export function createDefaultFederationRedirectPolicy(
+export function createFederationRedirectPolicy(
 	config: DefaultFederationRedirectPolicyConfig,
 ): FederationRedirectPolicy {
 	// Defensive snapshot: detach from caller's reference so post-construction

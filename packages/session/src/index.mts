@@ -24,7 +24,7 @@ export type {
 	FederationRedirectPolicy,
 	FederationRedirectPolicyFactory,
 } from "./federations/redirect-policy.mjs";
-export { createDefaultFederationRedirectPolicy } from "./federations/redirect-policy.mjs";
+export { createFederationRedirectPolicy } from "./federations/redirect-policy.mjs";
 export type {
 	EndSessionRequest,
 	EndSessionResult,

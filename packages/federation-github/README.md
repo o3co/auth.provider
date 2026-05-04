@@ -24,7 +24,6 @@ const githubConfigBridgeModule = defineModule({
       const slice = extractFederationSection(deps.config.federations, "github");
       if (!slice) throw new Error("federations.github must be enabled");
       return {
-        name: "github",
         clientId: slice.clientId as string,
         clientSecret: slice.clientSecret as string,
         callbackURL: slice.callbackURL as string,
@@ -44,15 +43,14 @@ const handle = await createApp({
 });
 ```
 
-For advanced or multi-tenant setups, call `createGithubProvider(config)`
-directly and wrap with a custom `defineModule(...)` factory per
-A2-α §7.1.
+v0.5.0 is single-tenant: `provider.name` is fixed at `"github"`. Multi-tenant
+setups (multiple GitHub apps in one provider) are deferred post-publish.
 
 ## Public API
 
 - `githubFederationModule` — const Module contributing `federations.github` +
   `federationRedirectPolicies.github`
 - `createGithubProvider(config: GithubProviderConfig): GithubProvider` —
-  pure constructor (advanced / multi-tenant use)
+  pure constructor
 - `GithubProviderConfig`, `GithubProvider` — types
 - `githubFederationConfig` — declared ComponentMap slot for the config bridge

@@ -43,9 +43,7 @@ export interface DefaultChallengeCeremonyDeps {
  *
  * Per A1 §6 + §6.1.
  */
-export function createDefaultChallengeCeremony(
-	deps: DefaultChallengeCeremonyDeps,
-): ChallengeCeremony {
+export function createChallengeCeremony(deps: DefaultChallengeCeremonyDeps): ChallengeCeremony {
 	return {
 		async consume(scope, value): Promise<ChallengeCeremonyOutcome> {
 			// Step 1: find — lookup the challenge.

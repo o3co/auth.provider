@@ -29,7 +29,7 @@ import type { UserRepository } from "./UserRepository.mjs";
  *   - `@o3co/auth-provider-foundation` `registerBuiltinAdapters` — http user repo
  *   - `@o3co/auth-provider-redis` builders (e.g. `redisCodeRepositoryBuilder`)
  */
-export const createDefaultFactories = (): {
+export const createRepositoryFactories = (): {
 	clientFactory: AdapterFactory<ClientRepository>;
 	userFactory: AdapterFactory<UserRepository>;
 	codeFactory: AdapterFactory<CodeRepository>;

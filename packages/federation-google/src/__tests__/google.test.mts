@@ -46,7 +46,6 @@ import { createGoogleProvider } from "../google.mjs";
 
 describe("createGoogleProvider on openid-client", () => {
 	const baseConfig = {
-		name: "google",
 		clientId: "client-id",
 		clientSecret: "client-secret",
 		callbackURL: "https://app.example.com/session/oauth/federation/google/callback",

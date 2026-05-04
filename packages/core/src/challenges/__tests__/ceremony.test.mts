@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createMemoryReplaySeenSet } from "../../replay-seen-set/adapters/memory.mjs";
 import type { ReplaySeenSet } from "../../replay-seen-set/types.mjs";
 import { createMemoryChallengeStore } from "../adapters/memory.mjs";
-import { createDefaultChallengeCeremony } from "../ceremony.mjs";
+import { createChallengeCeremony } from "../ceremony.mjs";
 import { ChallengeStorageError } from "../errors.mjs";
 
 const future = (): number => Date.now() + 60_000;
@@ -17,11 +17,11 @@ function makeCeremonyWithMemoryBackends() {
 	return {
 		store,
 		set,
-		ceremony: createDefaultChallengeCeremony({ challengeStore: store, replaySeenSet: set }),
+		ceremony: createChallengeCeremony({ challengeStore: store, replaySeenSet: set }),
 	};
 }
 
-describe("createDefaultChallengeCeremony — 3-outcome path (memory backends)", () => {
+describe("createChallengeCeremony — 3-outcome path (memory backends)", () => {
 	it("never-issued → outcome 'unknown'", async () => {
 		const { ceremony } = makeCeremonyWithMemoryBackends();
 		const result = await ceremony.consume("scope-A", "never-existed");
@@ -77,7 +77,7 @@ describe("createDefaultChallengeCeremony — 3-outcome path (memory backends)", 
 			}),
 			contains: vi.fn(async () => false),
 		};
-		const ceremony = createDefaultChallengeCeremony({ challengeStore: store, replaySeenSet: set });
+		const ceremony = createChallengeCeremony({ challengeStore: store, replaySeenSet: set });
 		await store.issue("scope-A", "race-ttl", future());
 		const result = await ceremony.consume("scope-A", "race-ttl");
 		expect(result).toEqual({ outcome: "consumed" });
@@ -94,7 +94,7 @@ describe("createDefaultChallengeCeremony — 3-outcome path (memory backends)", 
 			}),
 			contains: vi.fn(async () => false),
 		};
-		const ceremony = createDefaultChallengeCeremony({ challengeStore: store, replaySeenSet: set });
+		const ceremony = createChallengeCeremony({ challengeStore: store, replaySeenSet: set });
 		await store.issue("scope-A", "system-err", future());
 		await expect(ceremony.consume("scope-A", "system-err")).rejects.toBe(innerError);
 	});

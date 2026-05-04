@@ -46,7 +46,6 @@ import { createGithubProvider } from "../github.mjs";
 
 describe("createGithubProvider on openid-client", () => {
 	const baseConfig = {
-		name: "github",
 		clientId: "client-id",
 		clientSecret: "client-secret",
 		callbackURL: "https://app.example.com/session/oauth/federation/github/callback",

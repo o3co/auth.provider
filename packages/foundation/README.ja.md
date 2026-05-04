@@ -57,10 +57,10 @@ class HttpUserRepository implements UserRepository {
 ## 使い方
 
 ```typescript
-import { createDefaultFactories } from "@o3co/auth-provider-core";
+import { createRepositoryFactories } from "@o3co/auth-provider-core";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 
-const { userFactory } = createDefaultFactories();
+const { userFactory } = createRepositoryFactories();
 
 registerBuiltinAdapters({ userFactory });
 

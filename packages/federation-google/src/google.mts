@@ -17,7 +17,7 @@
 import { defineModule } from "@o3co/auth-provider-core";
 import {
 	codeChallenge,
-	createDefaultFederationRedirectPolicy,
+	createFederationRedirectPolicy,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -43,8 +43,6 @@ const GOOGLE_ISSUER = "https://accounts.google.com";
 const SCOPES = ["openid", "profile", "email"] as const;
 
 export interface GoogleProviderConfig {
-	/** Strategy identifier — use a unique name per tenant for multi-tenant setups. */
-	name: string;
 	clientId: string;
 	clientSecret: string;
 	callbackURL: string;
@@ -66,9 +64,7 @@ export type GoogleProvider = FederationProvider &
 
 export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
-		throw new Error(
-			`Google federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
-		);
+		throw new Error(`Google federation "google" requires clientId, clientSecret, and callbackURL`);
 	}
 
 	// ServerMetadata constructed locally — no discovery call. Google's endpoints are stable.
@@ -83,7 +79,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
 
 	return {
-		name: config.name,
+		name: "google",
 		scope: SCOPES,
 
 		buildAuthorizationUrl(params: {
@@ -170,7 +166,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 					url = new URL(config.endSessionEndpoint);
 				} catch {
 					throw new Error(
-						`Google federation "${config.name}" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
+						`Google federation "google" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
 					);
 				}
 				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
@@ -185,7 +181,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				url = new URL(base);
 			} catch {
 				throw new Error(
-					`Google federation "${config.name}" received an invalid postLogoutRedirectUri: ${base}`,
+					`Google federation "google" received an invalid postLogoutRedirectUri: ${base}`,
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);
@@ -213,9 +209,8 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
  * — consumer redirect URL policy).
  *
  * Config supplied via the `googleFederationConfig` ComponentMap slot
- * (per A5 §10.1 const-Module pattern). Single-tenant baseline: one Google
- * federation under name "google". Multi-tenant consumers wrap with a factory
- * per A2-α §7.1.
+ * (per A5 §10.1 const-Module pattern). v0.5.0 is single-tenant: the federation
+ * is registered under name "google". Multi-tenant support deferred post-publish.
  *
  * Per A5 §10.1.
  */
@@ -224,19 +219,13 @@ export const googleFederationModule = defineModule({
 	requires: ["googleFederationConfig"] as const,
 	contributes: {
 		federations: {
-			// const-module path is single-tenant: `provider.name` is forced to the
-			// contribution key "google" regardless of `config.name`. The route
-			// layer keys session state, callback URL lookup, and redirect-policy
-			// resolution by `provider.name`; a divergent `config.name` would
-			// cause silent runtime mismatch (provider.name="MyGoogle" registered
-			// at federations.google → resolver lookup with key "MyGoogle" fails).
-			// Multi-tenant consumers wrap with `(config) => Module` per
-			// A5 §10.1 + A2-α §7.1 — that path supplies the contribution key
-			// and `config.name` together.
-			google: (deps) => ({ ...createGoogleProvider(deps.googleFederationConfig), name: "google" }),
+			// v0.5.0 is single-tenant: provider.name is fixed at "google".
+			// Multi-tenant support deferred to post-publish; consumers needing
+			// multiple Google apps will get an additive Config shape.
+			google: (deps) => createGoogleProvider(deps.googleFederationConfig),
 		},
 		federationRedirectPolicies: {
-			google: (deps) => createDefaultFederationRedirectPolicy(deps.googleFederationConfig),
+			google: (deps) => createFederationRedirectPolicy(deps.googleFederationConfig),
 		},
 	},
 });

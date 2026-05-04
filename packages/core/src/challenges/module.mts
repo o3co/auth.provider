@@ -15,7 +15,7 @@
  */
 import { defineModule } from "../modules/manifest/index.mjs";
 import { createMemoryChallengeStore } from "./adapters/memory.mjs";
-import { createDefaultChallengeCeremony } from "./ceremony.mjs";
+import { createChallengeCeremony } from "./ceremony.mjs";
 
 /**
  * Built-in module that provides the in-process memory ChallengeStore.
@@ -42,7 +42,7 @@ export const defaultChallengeCeremonyModule = defineModule({
 	requires: ["challengeStore", "replaySeenSet"] as const,
 	provides: {
 		challengeCeremony: (deps) =>
-			createDefaultChallengeCeremony({
+			createChallengeCeremony({
 				challengeStore: deps.challengeStore,
 				replaySeenSet: deps.replaySeenSet,
 			}),

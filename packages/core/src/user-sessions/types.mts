@@ -49,7 +49,7 @@ export interface RegisteredRP {
 
 /**
  * Authenticated user session aggregate. Post-create immutable at v0.5.0
- * (claims update deferred to v0.6+ MutableUserSessionStore). Per A4 §5.1.
+ * (claims update deferred post-publish). Per A4 §5.1.
  */
 export interface UserSession {
 	readonly sid: string;
@@ -79,7 +79,7 @@ export interface CreateUserSessionInput {
 
 /**
  * Sid-keyed store for the authenticated user session. Post-create immutable
- * at v0.5.0; for claims update see `MutableUserSessionStore`. Per A4 §5.1.
+ * at v0.5.0 (claims update deferred post-publish). Per A4 §5.1.
  *
  * Cascade semantics: `delete(sid)` is the global session-invalidation
  * primitive. Sibling reverse-index stores hold orphan entries naturally
@@ -159,31 +159,6 @@ export interface SessionFederationIndex {
 	removeBySid(sid: string): Promise<void>;
 }
 
-/**
- * **PRE-DECLARED ONLY at v0.5.0** — no v0.5.0 implementation, no v0.5.0
- * caller. Type is shipped as a structural constraint for future (v0.6+)
- * implementers. Per A4 §5.5.
- *
- * Updater contract:
- *  - synchronous (returns a value, not a Promise)
- *  - receives `Readonly<UserSession>`; MUST NOT mutate in place
- *  - returns a new `UserSessionClaims` to commit, or `null` to abort
- *  - identity/lifetime fields (sid/sub/authTime/createdAt/expiresAt) are
- *    structurally unchanged by the implementation; updater returns CLAIMS only
- *  - MAY be invoked multiple times due to CAS retry; MUST be replay-safe
- *
- * Driver: TODO-F federation-token-lifecycle (v0.6+ federation re-link claim
- * propagation). When that lands the implementation MUST add memory + redis
- * adapters and the consuming feature MUST declare
- * `requires: ["mutableUserSessionStore"] as const`.
- */
-export interface MutableUserSessionStore extends UserSessionStore {
-	update(
-		sid: string,
-		updater: (current: Readonly<UserSession>) => Readonly<UserSessionClaims> | null,
-	): Promise<UserSession | null>;
-}
-
 // ---------------------------------------------------------------------------
 // AdapterFactory aliases (Theme C: composition-root, throw-on-duplicate)
 // ---------------------------------------------------------------------------
@@ -194,7 +169,7 @@ export type SessionFamilyIndexFactory = AdapterFactory<SessionFamilyIndex>;
 export type SessionFederationIndexFactory = AdapterFactory<SessionFederationIndex>;
 
 // ---------------------------------------------------------------------------
-// ComponentMap declaration-merge (5 slots, all optional)
+// ComponentMap declaration-merge (4 slots, all optional)
 // ---------------------------------------------------------------------------
 
 declare module "@o3co/auth-provider-core" {
@@ -203,12 +178,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly sessionRPRegistry?: SessionRPRegistry;
 		readonly sessionFamilyIndex?: SessionFamilyIndex;
 		readonly sessionFederationIndex?: SessionFederationIndex;
-		/**
-		 * Optional capability slot for adapters that implement
-		 * `MutableUserSessionStore`. Reserved for v0.6+ federation re-link
-		 * claim propagation; no v0.5.0 implementation.
-		 */
-		readonly mutableUserSessionStore?: MutableUserSessionStore;
 	}
 }
 

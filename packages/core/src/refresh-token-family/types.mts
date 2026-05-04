@@ -125,7 +125,7 @@ export interface RefreshTokenFamilyStore {
 	 *   - Updater MAY use a closure-captured variable to communicate the
 	 *     abort reason to the caller; the closure is reset at the top of
 	 *     each updater invocation. This is the wrapper pattern used by
-	 *     `createDefaultRefreshTokenFamilyRotation` to translate "aborted"
+	 *     `createRefreshTokenFamilyRotation` to translate "aborted"
 	 *     results into "replayed" or "revoked" outcomes.
 	 *   - Updater MUST NOT return a RefreshTokenFamily whose `expiresAtMs` is
 	 *     `<= now()`. Both adapters fail-closed by throwing
@@ -175,7 +175,7 @@ export type RefreshTokenFamilyRotationOutcome =
 /**
  * Rotation ceremony wrapper. Composes `RefreshTokenFamilyStore.updateFamily`
  * into the 4-outcome union. The default impl
- * (`createDefaultRefreshTokenFamilyRotation`) is shipped as
+ * (`createRefreshTokenFamilyRotation`) is shipped as
  * `defaultRefreshTokenFamilyRotationModule`; consumers needing custom policy
  * (audit-emitting rotation, grace-period rotation, etc.) replace the
  * module with their own.
@@ -225,7 +225,7 @@ export interface RefreshTokenFamilyRotation {
  * authentication flow), different callers, different expected outcomes.
  *
  * Idempotent revoke + read-only check. The default impl
- * (`createDefaultRefreshTokenFamilyRevocation`) ships as
+ * (`createRefreshTokenFamilyRevocation`) ships as
  * `defaultRefreshTokenFamilyRevocationModule`.
  *
  * Per A3 §5.3.

@@ -37,7 +37,7 @@ export interface DefaultRefreshTokenFamilyRevocationDeps {
  *
  * Per A3 §6.2.
  */
-export function createDefaultRefreshTokenFamilyRevocation(
+export function createRefreshTokenFamilyRevocation(
 	deps: DefaultRefreshTokenFamilyRevocationDeps,
 ): RefreshTokenFamilyRevocation {
 	return {

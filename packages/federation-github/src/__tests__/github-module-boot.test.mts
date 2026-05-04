@@ -45,7 +45,6 @@ const minBoot = {
 } as never;
 
 const stubGithubConfig: GithubProviderConfig = {
-	name: "github",
 	clientId: "test-client-id",
 	clientSecret: "test-client-secret",
 	callbackURL: "https://example.com/auth/github/callback",

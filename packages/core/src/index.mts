@@ -251,7 +251,7 @@ export {
 } from "./repositories/InMemoryUserRepository.mjs";
 export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 // Default repository factories
-export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
+export { createRepositoryFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
 export {
@@ -266,12 +266,11 @@ export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionR
 export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
 export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
 // ---------------------------------------------------------------------------
-// A4 user-sessions (post v0.5.0 redesign): 4-way decomposition + Future-Use
-// MutableUserSessionStore. Per spec §5.1-§5.7, §7.1, §8.1.
+// A4 user-sessions (post v0.5.0 redesign): 4-way decomposition.
+// Per spec §5.1-§5.7, §7.1, §8.1.
 // ---------------------------------------------------------------------------
 export type {
 	CreateUserSessionInput,
-	MutableUserSessionStore,
 	RegisteredRP,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
@@ -301,7 +300,7 @@ export { createMemoryChallengeStore } from "./challenges/adapters/memory.mjs";
 export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";
 // Default composition
 export {
-	createDefaultChallengeCeremony,
+	createChallengeCeremony,
 	type DefaultChallengeCeremonyDeps,
 } from "./challenges/ceremony.mjs";
 export type { ChallengeStorageErrorReason } from "./challenges/errors.mjs";
@@ -356,11 +355,11 @@ export {
 } from "./refresh-token-family/module.mjs";
 
 export {
-	createDefaultRefreshTokenFamilyRevocation,
+	createRefreshTokenFamilyRevocation,
 	type DefaultRefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {
-	createDefaultRefreshTokenFamilyRotation,
+	createRefreshTokenFamilyRotation,
 	type DefaultRefreshTokenFamilyRotationDeps,
 } from "./refresh-token-family/rotation.mjs";
 export type {

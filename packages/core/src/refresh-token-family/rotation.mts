@@ -45,7 +45,7 @@ export interface DefaultRefreshTokenFamilyRotationDeps {
  *
  * Per A3 §6.1.
  */
-export function createDefaultRefreshTokenFamilyRotation(
+export function createRefreshTokenFamilyRotation(
 	deps: DefaultRefreshTokenFamilyRotationDeps,
 ): RefreshTokenFamilyRotation {
 	return {
