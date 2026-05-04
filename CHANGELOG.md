@@ -57,9 +57,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   module: `defineModule({ contributes: { tokenExchangeValidators:
   { "urn:my:type": (deps) => myValidator } } })`. (per A2-γ §3.3)
 - `registerBuiltinAdapters({ userFactory, codeFactory, pathResolver? })` from
-  `@o3co/auth-provider-foundation` — **DELETED**. Add `httpUserRepositoryModule`
-  / `redisCodeRepositoryModule` from `@o3co/auth-provider-foundation` to the
-  manifest list instead. (per A2-γ §3.7)
+  `@o3co/auth-provider-foundation` — **signature narrowed** to
+  `registerBuiltinAdapters({ userFactory })`. The `codeFactory` and
+  `pathResolver` parameters are removed; foundation only registers the `"http"`
+  user-authentication adapter. The Redis `CodeRepository` was relocated to
+  `@o3co/auth-provider-redis` (Phase 10). Consumers needing Redis code storage
+  call `codeFactory.register("redis", redisCodeRepositoryBuilder)` directly
+  after importing from `@o3co/auth-provider-redis`. (per Phase 10 + interface
+  review pre-tag M3/M4)
 
 #### Registry policy (A6+A7)
 
@@ -93,16 +98,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     Method shape changes drastically; not a transparent rename.
   - **Adapter responsibility narrows**: `rotate(...)`, `isFamilyRevoked(...)`, and
     `revokeFamily(...)` move out of the storage adapter and into wrapper interfaces
-    (`RefreshTokenRotation`, `RefreshTokenFamilyRevocation`).
+    (`RefreshTokenFamilyRotation`, `RefreshTokenFamilyRevocation`).
   - **Outcome union renamed and shifted**: `RefreshTokenRotateOutcome` →
-    `RefreshTokenRotationOutcome`; the `unknown` variant is renamed `unknown_family`;
+    `RefreshTokenFamilyRotationOutcome`; the `unknown` variant is renamed `unknown_family`;
     the `replayed` variant loses its `familyId` field (the wrapper caller already has
     `familyId` in scope). (per A3 §4)
   - **`rotate(previousJti=null, ...)` overload deleted**: initial issue moves to
-    `RefreshTokenRotation.register(jti, familyId, expiresAtMs)`. (per A3 §4)
+    `RefreshTokenFamilyRotation.register(jti, familyId, expiresAtMs)`. (per A3 §4)
   - **`expiresAt` parameter type changed** from `Date` to epoch-ms `number` in
-    `RefreshTokenRotation.rotate(prev, new, familyId, expiresAtMs)` and
-    `RefreshTokenRotation.register(jti, familyId, expiresAtMs)` — defence against
+    `RefreshTokenFamilyRotation.rotate(prev, new, familyId, expiresAtMs)` and
+    `RefreshTokenFamilyRotation.register(jti, familyId, expiresAtMs)` — defence against
     `Date.setTime` mutation. (per A3 §5.1)
 - All in-tree callers (`authorization.mts`, `refreshToken.mts`, `cascadeLogout.mts`,
   `userinfo.mts`, `federationToken.mts`) are rewired to the new wrapper interfaces
@@ -151,17 +156,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - `RefreshTokenStoreBase` — **removed** from `@o3co/auth-provider-core` (factory,
   types, and `__tests__/` under `packages/core/src/refresh/`). Consumers migrate to
-  the A3 triple `RefreshTokenRotation` / `RefreshTokenFamilyRevocation` /
+  the A3 triple `RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation` /
   `RefreshTokenFamilyStore` introduced in Phase 6.
-- `RefreshTokenRotation.rotate(prev, new, familyId, expiresAtMs: number)` —
+- `RefreshTokenFamilyRotation.rotate(prev, new, familyId, expiresAtMs: number)` —
   `expiresAt` parameter changed from `Date` to epoch-ms `number` (defence against
   `Date.setTime` mutation per A3 §5.1).
-- `RefreshTokenRotation.register(jti, familyId, expiresAtMs)` is the dedicated
+- `RefreshTokenFamilyRotation.register(jti, familyId, expiresAtMs)` is the dedicated
   initial-issue method, replacing the v0.4.x `rotate(null, jti, ...)` trick.
 - `ComponentMap.refreshTokenStore?` slot removed.
 - `GrantContext.refreshTokenStore?` field removed.
 - `oauthAuthorizationModule.optional` slot renamed
-  `"refreshTokenStore"` → `"refreshTokenRotation"`.
+  `"refreshTokenStore"` → `"refreshTokenFamilyRotation"`.
 - `oauthModule.optional` slot renamed
   `"refreshTokenStore"` → `"refreshTokenFamilyRevocation"`.
 - `tokenExchangeModule.optional` slot renamed

@@ -59,7 +59,7 @@ export type RefreshTokenFamilyUpdateResult =
  *
  * Theme A: this interface exposes only single-key atomic primitives. The
  * 4-outcome rotation ceremony (`rotated | replayed | revoked |
- * unknown_family`) is composed in the wrapper layer (`RefreshTokenRotation`),
+ * unknown_family`) is composed in the wrapper layer (`RefreshTokenFamilyRotation`),
  * NOT classified by the adapter.
  *
  * Per A3 §5.1.
@@ -125,7 +125,7 @@ export interface RefreshTokenFamilyStore {
 	 *   - Updater MAY use a closure-captured variable to communicate the
 	 *     abort reason to the caller; the closure is reset at the top of
 	 *     each updater invocation. This is the wrapper pattern used by
-	 *     `createDefaultRefreshTokenRotation` to translate "aborted"
+	 *     `createDefaultRefreshTokenFamilyRotation` to translate "aborted"
 	 *     results into "replayed" or "revoked" outcomes.
 	 *   - Updater MUST NOT return a RefreshTokenFamily whose `expiresAtMs` is
 	 *     `<= now()`. Both adapters fail-closed by throwing
@@ -166,7 +166,7 @@ export interface RefreshTokenFamilyStore {
  *
  * Per A3 §5.2.
  */
-export type RefreshTokenRotationOutcome =
+export type RefreshTokenFamilyRotationOutcome =
 	| { readonly outcome: "rotated" }
 	| { readonly outcome: "replayed" }
 	| { readonly outcome: "revoked" }
@@ -175,14 +175,14 @@ export type RefreshTokenRotationOutcome =
 /**
  * Rotation ceremony wrapper. Composes `RefreshTokenFamilyStore.updateFamily`
  * into the 4-outcome union. The default impl
- * (`createDefaultRefreshTokenRotation`) is shipped as
- * `defaultRefreshTokenRotationModule`; consumers needing custom policy
+ * (`createDefaultRefreshTokenFamilyRotation`) is shipped as
+ * `defaultRefreshTokenFamilyRotationModule`; consumers needing custom policy
  * (audit-emitting rotation, grace-period rotation, etc.) replace the
  * module with their own.
  *
  * Per A3 §5.2.
  */
-export interface RefreshTokenRotation {
+export interface RefreshTokenFamilyRotation {
 	/**
 	 * Register a new refresh-token family at initial issue time (e.g., from
 	 * the authorization_code grant handler).
@@ -215,7 +215,7 @@ export interface RefreshTokenRotation {
 		newJti: string,
 		familyId: string,
 		expiresAtMs: number,
-	): Promise<RefreshTokenRotationOutcome>;
+	): Promise<RefreshTokenFamilyRotationOutcome>;
 }
 
 /**
@@ -264,14 +264,14 @@ export interface RefreshTokenFamilyRevocation {
 // resolves them from module `provides` at boot time per A2-beta §5.3.
 //
 // Slot-name reservation policy (A1 §5.5): unnamespaced names
-// (refreshTokenFamilyStore, refreshTokenRotation, refreshTokenFamilyRevocation)
+// (refreshTokenFamilyStore, refreshTokenFamilyRotation, refreshTokenFamilyRevocation)
 // are reserved for o3co packages. Consumers augmenting ComponentMap for
 // their own use MUST namespace their key (e.g. acme.refreshTokenStore).
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly refreshTokenFamilyStore?: RefreshTokenFamilyStore;
-		readonly refreshTokenRotation?: RefreshTokenRotation;
+		readonly refreshTokenFamilyRotation?: RefreshTokenFamilyRotation;
 		readonly refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	}
 }

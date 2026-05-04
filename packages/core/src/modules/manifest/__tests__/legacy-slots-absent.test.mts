@@ -10,7 +10,7 @@ import { expectTypeOf, test } from "vitest";
 //
 // Phases 5 (A1), 6 (A3), 8 (A4) declaration-merge their replacement slots:
 //   - challengeStore, replaySeenSet, challengeCeremony (A1)
-//   - refreshTokenFamilyStore, refreshTokenRotation,
+//   - refreshTokenFamilyStore, refreshTokenFamilyRotation,
 //     refreshTokenFamilyRevocation (A3)
 //   - userSessionStore (A4 — narrowed type, NOT UserSessionStoreBase),
 //     sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex,
@@ -44,7 +44,7 @@ test("legacy v0.4.x slots are NOT in v0.5.0 ComponentMap (package-boundary check
 	expectTypeOf<_A1>().toEqualTypeOf<true>();
 
 	// refreshTokenStore: A3 retires the slot NAME entirely (replaced by
-	// refreshTokenFamilyStore + refreshTokenRotation +
+	// refreshTokenFamilyStore + refreshTokenFamilyRotation +
 	// refreshTokenFamilyRevocation). Issue #101 (Task A8) deletes the
 	// transitional bridge that was added during Phase 9; this assertion
 	// is now active.

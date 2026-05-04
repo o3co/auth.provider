@@ -31,7 +31,7 @@ test("ComponentMap does NOT contain v0.4.x legacy slots (X1/X2 amendment)", () =
 	//   when a regression reintroduces the legacy SHAPE.
 	//
 	// - `refreshTokenStore`: A3 retires this slot NAME entirely (replaced by
-	//   `refreshTokenFamilyStore` + `refreshTokenRotation` +
+	//   `refreshTokenFamilyStore` + `refreshTokenFamilyRotation` +
 	//   `refreshTokenFamilyRevocation`). Issue #101 (Task A8) deletes the
 	//   transitional bridge; the presence-based check below is now active.
 

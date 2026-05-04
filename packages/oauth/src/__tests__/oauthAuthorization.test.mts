@@ -23,7 +23,7 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHookBase,
 	GrantRegistry,
-	type RefreshTokenRotation,
+	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
 	type UserSessionStore,
@@ -192,15 +192,15 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
 	// contribution-factory `deps`. Both grant factories read
-	// `deps.refreshTokenRotation` (A3 §5.2 rotation persistence) and
+	// `deps.refreshTokenFamilyRotation` (A3 §5.2 rotation persistence) and
 	// `deps.grantPolicy` (CP-18 fail-closed gate). If they are not declared
 	// here, a composition root that wires either component will see it
 	// silently dropped at the grant boundary — refresh-token rotation stops
 	// recording, and grantPolicy enforcement becomes dead code.
-	it("declares refreshTokenRotation + grantPolicy in optional so deps reach the grants", () => {
+	it("declares refreshTokenFamilyRotation + grantPolicy in optional so deps reach the grants", () => {
 		const config = makeValidAppConfig();
 		const module = oauthAuthorizationModule({ config });
-		expect(module.optional).toContain("refreshTokenRotation");
+		expect(module.optional).toContain("refreshTokenFamilyRotation");
 		expect(module.optional).toContain("grantPolicy");
 	});
 });
@@ -261,10 +261,10 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 // the module-level tests via module.init(ctx).
 // ---------------------------------------------------------------------------
 
-describe("createRefreshTokenGrant — refreshTokenRotation forwarding", () => {
-	it("calls refreshTokenRotation.rotate when a valid refresh_token is presented", async () => {
+describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", () => {
+	it("calls refreshTokenFamilyRotation.rotate when a valid refresh_token is presented", async () => {
 		const rotateSpy = vi.fn().mockResolvedValue({ outcome: "rotated" });
-		const refreshTokenRotation: RefreshTokenRotation = {
+		const refreshTokenFamilyRotation: RefreshTokenFamilyRotation = {
 			register: vi.fn(async () => {}),
 			rotate: rotateSpy,
 		};
@@ -278,7 +278,7 @@ describe("createRefreshTokenGrant — refreshTokenRotation forwarding", () => {
 				},
 			} as unknown as GrantDependencies["config"],
 			keyStore,
-			refreshTokenRotation,
+			refreshTokenFamilyRotation,
 		};
 
 		const handler = createRefreshTokenGrant(baseDeps);

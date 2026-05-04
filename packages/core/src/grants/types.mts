@@ -21,7 +21,7 @@ import type { PathResolver } from "../modules/types.mjs";
 import type { GrantPolicyHookBase } from "../policy/types.mjs";
 import type {
 	RefreshTokenFamilyRevocation,
-	RefreshTokenRotation,
+	RefreshTokenFamilyRotation,
 } from "../refresh-token-family/types.mjs";
 import type {
 	SessionFamilyIndex,
@@ -81,7 +81,7 @@ export interface GrantDependencies {
 	config: CoreConfig & Record<string, unknown>;
 	keyStore: KeyStore;
 	pathResolver?: PathResolver;
-	refreshTokenRotation?: RefreshTokenRotation;
+	refreshTokenFamilyRotation?: RefreshTokenFamilyRotation;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	grantPolicy?: GrantPolicyHookBase;
 	userSessionStore?: UserSessionStore;

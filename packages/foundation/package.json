@@ -1,6 +1,6 @@
 {
 	"name": "@o3co/auth-provider-foundation",
-	"description": "Production adapters for auth.provider",
+	"description": "Production HTTP user-authentication adapter for auth.provider",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"type": "module",

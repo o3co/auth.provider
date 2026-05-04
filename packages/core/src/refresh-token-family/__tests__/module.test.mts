@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	defaultRefreshTokenFamilyRevocationModule,
-	defaultRefreshTokenRotationModule,
+	defaultRefreshTokenFamilyRotationModule,
 	memoryRefreshTokenFamilyStoreModule,
 } from "../module.mjs";
 
@@ -26,18 +26,20 @@ describe("memoryRefreshTokenFamilyStoreModule", () => {
 	});
 });
 
-describe("defaultRefreshTokenRotationModule", () => {
-	it("has the canonical module name 'core-default-refresh-token-rotation'", () => {
-		expect(defaultRefreshTokenRotationModule.name).toBe("core-default-refresh-token-rotation");
+describe("defaultRefreshTokenFamilyRotationModule", () => {
+	it("has the canonical module name 'core-default-refresh-token-family-rotation'", () => {
+		expect(defaultRefreshTokenFamilyRotationModule.name).toBe(
+			"core-default-refresh-token-family-rotation",
+		);
 	});
 
-	it("requires refreshTokenFamilyStore and provides refreshTokenRotation", () => {
-		expect(new Set(defaultRefreshTokenRotationModule.requires ?? [])).toEqual(
+	it("requires refreshTokenFamilyStore and provides refreshTokenFamilyRotation", () => {
+		expect(new Set(defaultRefreshTokenFamilyRotationModule.requires ?? [])).toEqual(
 			new Set(["refreshTokenFamilyStore"]),
 		);
-		expect(typeof defaultRefreshTokenRotationModule.provides?.refreshTokenRotation).toBe(
-			"function",
-		);
+		expect(
+			typeof defaultRefreshTokenFamilyRotationModule.provides?.refreshTokenFamilyRotation,
+		).toBe("function");
 	});
 });
 

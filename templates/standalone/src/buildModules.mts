@@ -16,7 +16,7 @@
 import {
 	type AppConfig,
 	defaultRefreshTokenFamilyRevocationModule,
-	defaultRefreshTokenRotationModule,
+	defaultRefreshTokenFamilyRotationModule,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-core";
@@ -72,7 +72,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		overrides.repositoriesModule ?? repositoriesModule,
 		overrides.storesModule ?? storesModule,
 		memoryRefreshTokenFamilyStoreModule,
-		defaultRefreshTokenRotationModule,
+		defaultRefreshTokenFamilyRotationModule,
 		defaultRefreshTokenFamilyRevocationModule,
 	];
 }

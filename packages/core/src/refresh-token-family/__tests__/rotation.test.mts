@@ -5,14 +5,14 @@
 import { describe, expect, it } from "vitest";
 import { createMemoryRefreshTokenFamilyStore } from "../adapters/memory.mjs";
 import { RefreshTokenStorageError } from "../errors.mjs";
-import { createDefaultRefreshTokenRotation } from "../rotation.mjs";
+import { createDefaultRefreshTokenFamilyRotation } from "../rotation.mjs";
 
 const FUTURE = (): number => Date.now() + 60_000;
 
-describe("createDefaultRefreshTokenRotation", () => {
+describe("createDefaultRefreshTokenFamilyRotation", () => {
 	it("register then findFamily shows the new family", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		const fam = await store.findFamily("fam-1");
 		expect(fam).not.toBeNull();
@@ -22,7 +22,7 @@ describe("createDefaultRefreshTokenRotation", () => {
 
 	it("register throws duplicate-family on second call", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		await expect(rotation.register("jti-2", "fam-1", FUTURE())).rejects.toMatchObject({
 			name: "RefreshTokenStorageError",
@@ -32,7 +32,7 @@ describe("createDefaultRefreshTokenRotation", () => {
 
 	it("register throws expired-at-issue when expiresAt is past", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		await expect(rotation.register("jti-1", "fam-1", Date.now() - 1)).rejects.toBeInstanceOf(
 			RefreshTokenStorageError,
 		);
@@ -40,7 +40,7 @@ describe("createDefaultRefreshTokenRotation", () => {
 
 	it("rotate returns 'rotated' when previousJti matches and family is healthy", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		const out = await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE());
 		expect(out.outcome).toBe("rotated");
@@ -50,7 +50,7 @@ describe("createDefaultRefreshTokenRotation", () => {
 
 	it("rotate returns 'replayed' when previousJti does NOT match the active jti", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		// Try to rotate using a stale previousJti.
 		const out = await rotation.rotate("jti-stale", "jti-2", "fam-1", FUTURE());
@@ -61,7 +61,7 @@ describe("createDefaultRefreshTokenRotation", () => {
 
 	it("rotate returns 'revoked' when family is revoked (regardless of previousJti match)", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		await store.updateFamily("fam-1", (cur) => ({ ...cur, revoked: true }));
 		const out = await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE());
@@ -70,14 +70,14 @@ describe("createDefaultRefreshTokenRotation", () => {
 
 	it("rotate returns 'unknown_family' when family does not exist", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		const out = await rotation.rotate("jti-x", "jti-y", "ghost-fam", FUTURE());
 		expect(out.outcome).toBe("unknown_family");
 	});
 
 	it("outcome objects are frozen at runtime", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createDefaultRefreshTokenRotation({ refreshTokenFamilyStore: store });
+		const rotation = createDefaultRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		const rotated = await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE());
 		expect(Object.isFrozen(rotated)).toBe(true);

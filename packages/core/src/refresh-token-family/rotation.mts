@@ -15,24 +15,24 @@
  */
 import type {
 	RefreshTokenFamily,
+	RefreshTokenFamilyRotation,
+	RefreshTokenFamilyRotationOutcome,
 	RefreshTokenFamilyStore,
-	RefreshTokenRotation,
-	RefreshTokenRotationOutcome,
 } from "./types.mjs";
 
 /**
- * Inputs for the default RefreshTokenRotation composition.
+ * Inputs for the default RefreshTokenFamilyRotation composition.
  * Per A3 §6.1.
  */
-export interface DefaultRefreshTokenRotationDeps {
+export interface DefaultRefreshTokenFamilyRotationDeps {
 	readonly refreshTokenFamilyStore: RefreshTokenFamilyStore;
 }
 
 /**
- * Default RefreshTokenRotation composition: builds a fresh
+ * Default RefreshTokenFamilyRotation composition: builds a fresh
  * RefreshTokenFamily aggregate on `register`, and translates
  * RefreshTokenFamilyStore.updateFamily outcomes into the 4-variant
- * RefreshTokenRotationOutcome on `rotate`.
+ * RefreshTokenFamilyRotationOutcome on `rotate`.
  *
  * The closure-captured `abortReason` is reset at the top of every updater
  * invocation so CAS retries observe the freshest classification (the LAST
@@ -45,9 +45,9 @@ export interface DefaultRefreshTokenRotationDeps {
  *
  * Per A3 §6.1.
  */
-export function createDefaultRefreshTokenRotation(
-	deps: DefaultRefreshTokenRotationDeps,
-): RefreshTokenRotation {
+export function createDefaultRefreshTokenFamilyRotation(
+	deps: DefaultRefreshTokenFamilyRotationDeps,
+): RefreshTokenFamilyRotation {
 	return {
 		async register(newJti, familyId, expiresAtMs) {
 			const family: RefreshTokenFamily = Object.freeze({
@@ -85,7 +85,7 @@ export function createDefaultRefreshTokenRotation(
 				case "aborted":
 					return Object.freeze({
 						outcome: abortReason ?? "replayed",
-					} as const) as RefreshTokenRotationOutcome;
+					} as const) as RefreshTokenFamilyRotationOutcome;
 				case "committed":
 					return Object.freeze({ outcome: "rotated" } as const);
 			}

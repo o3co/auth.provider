@@ -18,10 +18,10 @@ import type { ComponentMap } from "../../modules/manifest/component-map.mjs";
 import type {
 	RefreshTokenFamily,
 	RefreshTokenFamilyRevocation,
+	RefreshTokenFamilyRotation,
+	RefreshTokenFamilyRotationOutcome,
 	RefreshTokenFamilyStore,
 	RefreshTokenFamilyUpdateResult,
-	RefreshTokenRotation,
-	RefreshTokenRotationOutcome,
 } from "../types.mjs";
 
 test("RefreshTokenFamily fields are readonly with correct types", () => {
@@ -69,8 +69,8 @@ test("RefreshTokenFamilyUpdateResult committed variant carries family", () => {
 	}
 });
 
-test("RefreshTokenRotationOutcome is a 4-variant discriminated union", () => {
-	expectTypeOf<RefreshTokenRotationOutcome>().toEqualTypeOf<
+test("RefreshTokenFamilyRotationOutcome is a 4-variant discriminated union", () => {
+	expectTypeOf<RefreshTokenFamilyRotationOutcome>().toEqualTypeOf<
 		| { readonly outcome: "rotated" }
 		| { readonly outcome: "replayed" }
 		| { readonly outcome: "revoked" }
@@ -78,7 +78,7 @@ test("RefreshTokenRotationOutcome is a 4-variant discriminated union", () => {
 	>();
 });
 
-test("RefreshTokenRotation exposes register and rotate methods", () => {
+test("RefreshTokenFamilyRotation exposes register and rotate methods", () => {
 	type RotationShape = {
 		register(newJti: string, familyId: string, expiresAtMs: number): Promise<void>;
 		rotate(
@@ -86,9 +86,9 @@ test("RefreshTokenRotation exposes register and rotate methods", () => {
 			newJti: string,
 			familyId: string,
 			expiresAtMs: number,
-		): Promise<RefreshTokenRotationOutcome>;
+		): Promise<RefreshTokenFamilyRotationOutcome>;
 	};
-	expectTypeOf<RefreshTokenRotation>().toEqualTypeOf<RotationShape>();
+	expectTypeOf<RefreshTokenFamilyRotation>().toEqualTypeOf<RotationShape>();
 });
 
 test("RefreshTokenFamilyRevocation exposes revokeFamily + isFamilyRevoked", () => {
@@ -103,8 +103,8 @@ test("ComponentMap exposes the 3 A3 slots as readonly optional", () => {
 	expectTypeOf<ComponentMap["refreshTokenFamilyStore"]>().toEqualTypeOf<
 		RefreshTokenFamilyStore | undefined
 	>();
-	expectTypeOf<ComponentMap["refreshTokenRotation"]>().toEqualTypeOf<
-		RefreshTokenRotation | undefined
+	expectTypeOf<ComponentMap["refreshTokenFamilyRotation"]>().toEqualTypeOf<
+		RefreshTokenFamilyRotation | undefined
 	>();
 	expectTypeOf<ComponentMap["refreshTokenFamilyRevocation"]>().toEqualTypeOf<
 		RefreshTokenFamilyRevocation | undefined
