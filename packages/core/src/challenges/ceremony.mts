@@ -18,16 +18,16 @@ import { ChallengeStorageError } from "./errors.mjs";
 import type { ChallengeCeremony, ChallengeCeremonyOutcome, ChallengeStore } from "./types.mjs";
 
 /**
- * Inputs for the default 3-outcome challenge ceremony composition.
+ * Inputs for the 3-outcome challenge ceremony composition.
  * Per A1 §6 (lines 341-398).
  */
-export interface DefaultChallengeCeremonyDeps {
+export interface ChallengeCeremonyDeps {
 	readonly challengeStore: ChallengeStore;
 	readonly replaySeenSet: ReplaySeenSet;
 }
 
 /**
- * Default ChallengeCeremony composition: combines ChallengeStore (issue/find/
+ * ChallengeCeremony composition: combines ChallengeStore (issue/find/
  * consume) and ReplaySeenSet (markSeen/contains) into the 3-outcome wrapper
  * (consumed | replayed | unknown).
  *
@@ -43,9 +43,7 @@ export interface DefaultChallengeCeremonyDeps {
  *
  * Per A1 §6 + §6.1.
  */
-export function createDefaultChallengeCeremony(
-	deps: DefaultChallengeCeremonyDeps,
-): ChallengeCeremony {
+export function createChallengeCeremony(deps: ChallengeCeremonyDeps): ChallengeCeremony {
 	return {
 		async consume(scope, value): Promise<ChallengeCeremonyOutcome> {
 			// Step 1: find — lookup the challenge.

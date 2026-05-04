@@ -35,16 +35,15 @@ describe("googleFederationModule const Module", () => {
 		);
 	});
 
-	it("forces provider.name to 'google' regardless of config.name (Codex P2 fix)", () => {
-		// const-module path is single-tenant — provider.name MUST equal the
-		// contribution key, even if config.name diverges. The route layer keys
-		// session state / callback URL / redirect-policy lookup by provider.name;
-		// a divergent config.name would silently break runtime resolution.
+	it("produces provider.name == 'google' (single-tenant invariant)", () => {
+		// v0.5.0 single-tenant: provider.name is fixed at "google", matching
+		// the contribution key. The route layer keys session state / callback
+		// URL / redirect-policy lookup by provider.name; no consumer-supplied
+		// name can divert it. Multi-tenant support is deferred post-publish.
 		const factory = googleFederationModule.contributes?.federations?.google;
 		if (typeof factory !== "function") throw new Error("factory missing");
 		const provider = factory({
 			googleFederationConfig: {
-				name: "MyTenantGoogle", // intentionally divergent
 				clientId: "abc",
 				clientSecret: "xyz",
 				callbackURL: "https://example.com/cb",

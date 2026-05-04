@@ -251,7 +251,7 @@ export {
 } from "./repositories/InMemoryUserRepository.mjs";
 export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 // Default repository factories
-export { createDefaultFactories } from "./repositories/RepositoryFactory.mjs";
+export { createRepositoryFactories } from "./repositories/RepositoryFactory.mjs";
 export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
 export {
@@ -266,12 +266,11 @@ export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionR
 export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
 export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
 // ---------------------------------------------------------------------------
-// A4 user-sessions (post v0.5.0 redesign): 4-way decomposition + Future-Use
-// MutableUserSessionStore. Per spec §5.1-§5.7, §7.1, §8.1.
+// A4 user-sessions (post v0.5.0 redesign): 4-way decomposition.
+// Per spec §5.1-§5.7, §7.1, §8.1.
 // ---------------------------------------------------------------------------
 export type {
 	CreateUserSessionInput,
-	MutableUserSessionStore,
 	RegisteredRP,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
@@ -301,8 +300,8 @@ export { createMemoryChallengeStore } from "./challenges/adapters/memory.mjs";
 export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";
 // Default composition
 export {
-	createDefaultChallengeCeremony,
-	type DefaultChallengeCeremonyDeps,
+	type ChallengeCeremonyDeps,
+	createChallengeCeremony,
 } from "./challenges/ceremony.mjs";
 export type { ChallengeStorageErrorReason } from "./challenges/errors.mjs";
 // Errors
@@ -356,12 +355,12 @@ export {
 } from "./refresh-token-family/module.mjs";
 
 export {
-	createDefaultRefreshTokenFamilyRevocation,
-	type DefaultRefreshTokenFamilyRevocationDeps,
+	createRefreshTokenFamilyRevocation,
+	type RefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {
-	createDefaultRefreshTokenFamilyRotation,
-	type DefaultRefreshTokenFamilyRotationDeps,
+	createRefreshTokenFamilyRotation,
+	type RefreshTokenFamilyRotationDeps,
 } from "./refresh-token-family/rotation.mjs";
 export type {
 	DisposableRefreshTokenFamilyClient,

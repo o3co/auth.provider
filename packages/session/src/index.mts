@@ -20,11 +20,11 @@ export { resolveCallbackRedirect, validateRedirect } from "./federations/helpers
 export { codeChallenge } from "./federations/pkce.mjs";
 // A5 redirect-policy split (per A5 §5.2/§5.3/§9)
 export type {
-	DefaultFederationRedirectPolicyConfig,
 	FederationRedirectPolicy,
+	FederationRedirectPolicyConfig,
 	FederationRedirectPolicyFactory,
 } from "./federations/redirect-policy.mjs";
-export { createDefaultFederationRedirectPolicy } from "./federations/redirect-policy.mjs";
+export { createFederationRedirectPolicy } from "./federations/redirect-policy.mjs";
 export type {
 	EndSessionRequest,
 	EndSessionResult,

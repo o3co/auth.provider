@@ -62,8 +62,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
  * applied via SET PX. The v0.4.x lost-update window is **structurally
  * absent**: this adapter exposes only `create` (atomic SET NX),
  * `get`, `delete`. No GET → mutate → SET path exists at the v0.5.0
- * `UserSessionStore` interface level; claims update lives in the
- * Future-Use `MutableUserSessionStore` (no v0.5.0 implementation).
+ * `UserSessionStore` interface level; claims update is deferred post-publish.
  *
  * Atomicity:
  *  - `create` uses SET NX PX — atomic insert-only, same primitive as A1

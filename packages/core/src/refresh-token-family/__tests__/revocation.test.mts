@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createMemoryRefreshTokenFamilyStore } from "../adapters/memory.mjs";
-import { createDefaultRefreshTokenFamilyRevocation } from "../revocation.mjs";
+import { createRefreshTokenFamilyRevocation } from "../revocation.mjs";
 import type {
 	RefreshTokenFamily,
 	RefreshTokenFamilyStore,
@@ -15,7 +15,7 @@ const FUTURE = (): number => Date.now() + 60_000;
 
 const seed = async () => {
 	const store = createMemoryRefreshTokenFamilyStore();
-	const revocation = createDefaultRefreshTokenFamilyRevocation({
+	const revocation = createRefreshTokenFamilyRevocation({
 		refreshTokenFamilyStore: store,
 	});
 	await store.registerFamily({
@@ -27,7 +27,7 @@ const seed = async () => {
 	return { store, revocation };
 };
 
-describe("createDefaultRefreshTokenFamilyRevocation", () => {
+describe("createRefreshTokenFamilyRevocation", () => {
 	it("revokeFamily flips revoked to true", async () => {
 		const { store, revocation } = await seed();
 		await revocation.revokeFamily("fam-1");
@@ -89,7 +89,7 @@ describe("createDefaultRefreshTokenFamilyRevocation", () => {
 				return { outcome: "committed", family: Object.freeze({ ...next }) };
 			},
 		};
-		const revocation = createDefaultRefreshTokenFamilyRevocation({
+		const revocation = createRefreshTokenFamilyRevocation({
 			refreshTokenFamilyStore: stubStore,
 		});
 		await revocation.revokeFamily("fam-1");

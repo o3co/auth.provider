@@ -119,8 +119,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `UserSessionStore` (3 methods) + `SessionRPRegistry` + `SessionFamilyIndex` +
   `SessionFederationIndex`. (per A4 §4 "Breaking changes vs v0.4.x", item 1)
 - Methods removed from `UserSessionStore`: `registerRP`, `linkFamily`,
-  `updateClaims`, `removeFederation`. Each migrated to a sibling store (or in
-  `updateClaims` case, deferred to v0.6+ `MutableUserSessionStore`). (per A4 §4, item 2)
+  `updateClaims`, `removeFederation`. Each migrated to a sibling store
+  (`updateClaims` deferred post-publish; no v0.5.0 surface). (per A4 §4, item 2)
 - `UserSession` value type narrowed: `activeRPs`, `familyIds`, `federations` fields
   removed (now owned by sibling stores). (per A4 §4, item 3)
 - `UserSessionStoreFactory` (alias for `AdapterFactory<UserSessionStoreBase>`) →
@@ -174,6 +174,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - New `BootError` reasons: `"mfa-partial-wiring"` and
   `"federation-stores-incomplete"` — boot-time guards restored from v0.4.x
   `app-extensions.test.mts` after Phase 9 deletion.
+
+### Breaking Changes (pre-tag interface review — Group A)
+
+- **`createDefault*` factory prefix dropped** for all 5 factories. Use the
+  unprefixed name; "Default" implied "1 of N" but only one implementation
+  ships per name. Reference libraries (node-oidc-provider, NextAuth, Lucia)
+  do not use this prefix:
+  - `createDefaultChallengeCeremony` → `createChallengeCeremony`
+  - `createDefaultRefreshTokenFamilyRotation` → `createRefreshTokenFamilyRotation`
+  - `createDefaultRefreshTokenFamilyRevocation` → `createRefreshTokenFamilyRevocation`
+  - `createDefaultFederationRedirectPolicy` → `createFederationRedirectPolicy`
+  - `createDefaultFactories` → `createRepositoryFactories` (specifically
+    repository factories, not generic "default factories")
+
+  The companion parameter types lose the `Default` prefix in lockstep
+  (consumers writing typed glue code update type imports too):
+
+  - `DefaultChallengeCeremonyDeps` → `ChallengeCeremonyDeps`
+  - `DefaultRefreshTokenFamilyRotationDeps` → `RefreshTokenFamilyRotationDeps`
+  - `DefaultRefreshTokenFamilyRevocationDeps` → `RefreshTokenFamilyRevocationDeps`
+  - `DefaultFederationRedirectPolicyConfig` → `FederationRedirectPolicyConfig`
+
+  Module names retain the `default*Module` form where default-ness is the
+  intended distinction.
+
+- **`name` field removed from `GithubProviderConfig` / `GoogleProviderConfig`**.
+  v0.5.0 is single-tenant: `provider.name` is fixed at `"github"` / `"google"`,
+  matching the federation contribution key. The `name` config field was
+  misleading because the const-module forced the contribution key regardless
+  of consumer input. Multi-tenant support (multiple GitHub/Google apps in one
+  provider) is deferred post-publish — when added, the Config shape will gain
+  `name` back additively (backward-compatible).
+
+- **`MutableUserSessionStore` interface removed** from
+  `@o3co/auth-provider-core` public exports. The interface was pre-declared
+  for v0.6+ federation re-link claim propagation but had no v0.5.0
+  implementation, no v0.5.0 caller, and no test exercising the actual
+  contract. Shipping a CAS callback shape without an implementation freezes
+  the hardest part prematurely. The interface will be re-added when v0.6+
+  ships an actual implementation.
+  - Also removed: `mutableUserSessionStore` ComponentMap slot.
 
 ### Breaking Changes (Phase 10 — Redis Adapter Relocation)
 

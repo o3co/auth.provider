@@ -16,15 +16,15 @@
 import type { RefreshTokenFamilyRevocation, RefreshTokenFamilyStore } from "./types.mjs";
 
 /**
- * Inputs for the default RefreshTokenFamilyRevocation composition.
+ * Inputs for the RefreshTokenFamilyRevocation composition.
  * Per A3 §6.2.
  */
-export interface DefaultRefreshTokenFamilyRevocationDeps {
+export interface RefreshTokenFamilyRevocationDeps {
 	readonly refreshTokenFamilyStore: RefreshTokenFamilyStore;
 }
 
 /**
- * Default RefreshTokenFamilyRevocation composition.
+ * RefreshTokenFamilyRevocation composition.
  *
  * `revokeFamily` is idempotent: returning null from the updater on
  * already-revoked state classifies as "aborted" at the storage layer,
@@ -37,8 +37,8 @@ export interface DefaultRefreshTokenFamilyRevocationDeps {
  *
  * Per A3 §6.2.
  */
-export function createDefaultRefreshTokenFamilyRevocation(
-	deps: DefaultRefreshTokenFamilyRevocationDeps,
+export function createRefreshTokenFamilyRevocation(
+	deps: RefreshTokenFamilyRevocationDeps,
 ): RefreshTokenFamilyRevocation {
 	return {
 		async revokeFamily(familyId) {

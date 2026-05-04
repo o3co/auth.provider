@@ -332,7 +332,7 @@ class AdapterFactoryError extends Error {
   readonly registered: readonly string[];
 }
 
-function createDefaultFactories(): {
+function createRepositoryFactories(): {
   clientFactory: AdapterFactory<ClientRepository>;
   userFactory: AdapterFactory<UserRepository>;
   codeFactory: AdapterFactory<CodeRepository>;
@@ -346,7 +346,7 @@ function createDefaultFactories(): {
 - `create()` は未登録 `type` で `AdapterFactoryError` を throw する。error は `kind` / `type` / `registered` を構造化フィールドとして保持する。
 - `BuilderContext` は factory 単位で共有される（call ごとのコピーではない）。builder 側では read-only として扱うこと。
 
-`createDefaultFactories` は組み込みの `yaml` / `static`（client、user）と `memory`（code）タイプが登録済みの 3 つのファクトリーを返します。`@o3co/auth-provider-foundation` の `registerBuiltinAdapters` で `http` ユーザー認証アダプターを追加できます。独自の backend は `register` で追加してください。Redis バックエンドの code / store アダプターは `@o3co/auth-provider-redis` を参照してください。
+`createRepositoryFactories` は組み込みの `yaml` / `static`（client、user）と `memory`（code）タイプが登録済みの 3 つのファクトリーを返します。`@o3co/auth-provider-foundation` の `registerBuiltinAdapters` で `http` ユーザー認証アダプターを追加できます。独自の backend は `register` で追加してください。Redis バックエンドの code / store アダプターは `@o3co/auth-provider-redis` を参照してください。
 
 ### モジュールシステム
 
@@ -405,7 +405,7 @@ import express from "express";
 import {
   AppConfigSchema,
   createApp,
-  createDefaultFactories,
+  createRepositoryFactories,
   createKeyStoreFactory,
   defineModule,
   registerBuiltinKeyStores,
@@ -436,7 +436,7 @@ const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
 const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
 
-const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+const { clientFactory, userFactory, codeFactory } = createRepositoryFactories();
 
 const clientRepository = await clientFactory.create(flatten(config.repositories.client));
 const userRepository = await userFactory.create(flatten(config.repositories.user));

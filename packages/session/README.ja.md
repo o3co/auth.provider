@@ -89,7 +89,7 @@ interface FederationProvider {
 - `buildAuthorizationUrl` — RFC 6749 §4.1 + RFC 7636 の認可 URL を構築する。`codeVerifier` はルート層が生成して渡す。`code_challenge` の計算には `codeChallenge(codeVerifier)` を使うこと。
 - `exchangeCode` — 認可コードを `FederationProfile` に交換する。`issuer` と `sub` は必須。
 
-> **Note (A5 split, v0.5.0):** リダイレクト URL のハンドリング（`validateRedirect` / `resolveCallbackRedirect`）は `FederationProvider` から外され、専用の `FederationRedirectPolicy` capability に分離された。per-federation module は `federationRedirectPolicies.<name>` で policy を contribute する。built-in は `createDefaultFederationRedirectPolicy(...)` を使う。カスタム provider は `FederationProvider` 上にこれらのメソッドを実装しない。
+> **Note (A5 split, v0.5.0):** リダイレクト URL のハンドリング（`validateRedirect` / `resolveCallbackRedirect`）は `FederationProvider` から外され、専用の `FederationRedirectPolicy` capability に分離された。per-federation module は `federationRedirectPolicies.<name>` で policy を contribute する。built-in は `createFederationRedirectPolicy(...)` を使う。カスタム provider は `FederationProvider` 上にこれらのメソッドを実装しない。
 
 ---
 
@@ -356,7 +356,7 @@ federations {
 import { defineModule } from "@o3co/auth-provider-core";
 import {
   codeChallenge,
-  createDefaultFederationRedirectPolicy,
+  createFederationRedirectPolicy,
   type FederationProvider,
 } from "@o3co/auth-provider-session";
 
@@ -374,7 +374,7 @@ export const microsoftFederationModule = defineModule({
       microsoft: (deps) => buildMicrosoftProvider(deps.microsoftFederationConfig),
     },
     federationRedirectPolicies: {
-      microsoft: (deps) => createDefaultFederationRedirectPolicy(deps.microsoftFederationConfig),
+      microsoft: (deps) => createFederationRedirectPolicy(deps.microsoftFederationConfig),
     },
   },
 });

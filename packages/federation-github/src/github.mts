@@ -17,7 +17,7 @@
 import { defineModule } from "@o3co/auth-provider-core";
 import {
 	codeChallenge,
-	createDefaultFederationRedirectPolicy,
+	createFederationRedirectPolicy,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -42,8 +42,6 @@ const SCOPES = ["read:user", "user:email"] as const;
 const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
 
 export interface GithubProviderConfig {
-	/** Strategy identifier — use a unique name per tenant for multi-tenant setups. */
-	name: string;
 	clientId: string;
 	clientSecret: string;
 	callbackURL: string;
@@ -62,9 +60,7 @@ export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaim
 
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
-		throw new Error(
-			`GitHub federation "${config.name}" requires clientId, clientSecret, and callbackURL`,
-		);
+		throw new Error(`GitHub federation "github" requires clientId, clientSecret, and callbackURL`);
 	}
 
 	// GitHub does not expose an OIDC discovery document, so we construct ServerMetadata manually.
@@ -79,7 +75,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
 
 	return {
-		name: config.name,
+		name: "github",
 		scope: SCOPES,
 
 		buildAuthorizationUrl(params: {
@@ -129,7 +125,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 							? ghId
 							: "";
 			if (!sub) {
-				throw new Error(`GitHub federation "${config.name}" received userinfo without id/sub`);
+				throw new Error(`GitHub federation "github" received userinfo without id/sub`);
 			}
 
 			// Fetch primary+verified email from /user/emails.
@@ -196,7 +192,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 					url = new URL(config.endSessionEndpoint);
 				} catch {
 					throw new Error(
-						`GitHub federation "${config.name}" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
+						`GitHub federation "github" has an invalid endSessionEndpoint: ${config.endSessionEndpoint}`,
 					);
 				}
 				if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
@@ -211,7 +207,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				url = new URL(base);
 			} catch {
 				throw new Error(
-					`GitHub federation "${config.name}" received an invalid postLogoutRedirectUri: ${base}`,
+					`GitHub federation "github" received an invalid postLogoutRedirectUri: ${base}`,
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);
@@ -246,17 +242,13 @@ export const githubFederationModule = defineModule({
 	requires: ["githubFederationConfig"] as const,
 	contributes: {
 		federations: {
-			// const-module path is single-tenant: see google.mts for the full
-			// rationale. provider.name forced to the contribution key "github"
-			// regardless of config.name. Multi-tenant consumers use a factory
-			// wrap per A5 §10.1 + A2-α §7.1.
-			github: (deps) => ({
-				...createGithubProvider(deps.githubFederationConfig),
-				name: "github",
-			}),
+			// v0.5.0 is single-tenant: provider.name is fixed at "github".
+			// Multi-tenant support deferred to post-publish; consumers needing
+			// multiple GitHub apps will get an additive Config shape.
+			github: (deps) => createGithubProvider(deps.githubFederationConfig),
 		},
 		federationRedirectPolicies: {
-			github: (deps) => createDefaultFederationRedirectPolicy(deps.githubFederationConfig),
+			github: (deps) => createFederationRedirectPolicy(deps.githubFederationConfig),
 		},
 	},
 });

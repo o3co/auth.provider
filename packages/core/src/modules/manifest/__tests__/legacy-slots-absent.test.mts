@@ -14,7 +14,7 @@ import { expectTypeOf, test } from "vitest";
 //     refreshTokenFamilyRevocation (A3)
 //   - userSessionStore (A4 — narrowed type, NOT UserSessionStoreBase),
 //     sessionRPRegistry, sessionFamilyIndex, sessionFederationIndex,
-//     mutableUserSessionStore (Future Use), redisClient (A1)
+//     redisClient (A1)
 //
 // This test mirrors the namespace-level test in component-map.test.mts
 // but imports from the package boundary `@o3co/auth-provider-core`.

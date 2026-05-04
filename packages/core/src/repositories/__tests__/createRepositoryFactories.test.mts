@@ -18,13 +18,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
-import { createDefaultFactories } from "#/repositories/RepositoryFactory.mjs";
+import { createRepositoryFactories } from "#/repositories/RepositoryFactory.mjs";
 
-describe("createDefaultFactories", () => {
+describe("createRepositoryFactories", () => {
 	let tmpDir: string;
 
 	beforeEach(() => {
-		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-default-factories-"));
+		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-repository-factories-"));
 	});
 
 	afterEach(() => {
@@ -50,7 +50,7 @@ describe("createDefaultFactories", () => {
 `,
 			);
 
-			const { clientFactory } = createDefaultFactories();
+			const { clientFactory } = createRepositoryFactories();
 			const repo = await clientFactory.create({ type: "yaml", path: yamlPath });
 			const client = await repo.findById("my-client");
 
@@ -61,7 +61,7 @@ describe("createDefaultFactories", () => {
 		});
 
 		it("throws AdapterFactoryError for unregistered type", async () => {
-			const { clientFactory } = createDefaultFactories();
+			const { clientFactory } = createRepositoryFactories();
 
 			await expect(clientFactory.create({ type: "redis" })).rejects.toBeInstanceOf(
 				AdapterFactoryError,
@@ -87,7 +87,7 @@ describe("createDefaultFactories", () => {
 `,
 			);
 
-			const { userFactory } = createDefaultFactories();
+			const { userFactory } = createRepositoryFactories();
 			const repo = await userFactory.create({ type: "yaml", path: yamlPath });
 			const user = await repo.authenticate("alice", "plainpass");
 
@@ -96,7 +96,7 @@ describe("createDefaultFactories", () => {
 		});
 
 		it("throws AdapterFactoryError for unregistered type", async () => {
-			const { userFactory } = createDefaultFactories();
+			const { userFactory } = createRepositoryFactories();
 
 			await expect(userFactory.create({ type: "http" })).rejects.toBeInstanceOf(
 				AdapterFactoryError,
@@ -115,7 +115,7 @@ describe("createDefaultFactories", () => {
 
 	describe("codeFactory", () => {
 		it("creates a code repository from memory config and supports createCode/getByCode", async () => {
-			const { codeFactory } = createDefaultFactories();
+			const { codeFactory } = createRepositoryFactories();
 			const repo = await codeFactory.create({ type: "memory" });
 			const code = await repo.createCode({});
 
@@ -126,35 +126,35 @@ describe("createDefaultFactories", () => {
 		});
 
 		it("rejects non-numeric defaultExpiresIn", async () => {
-			const { codeFactory } = createDefaultFactories();
+			const { codeFactory } = createRepositoryFactories();
 			await expect(
 				codeFactory.create({ type: "memory", defaultExpiresIn: "not-a-number" }),
 			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
 		});
 
 		it("rejects Infinity defaultExpiresIn", async () => {
-			const { codeFactory } = createDefaultFactories();
+			const { codeFactory } = createRepositoryFactories();
 			await expect(
 				codeFactory.create({ type: "memory", defaultExpiresIn: Infinity }),
 			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
 		});
 
 		it("rejects negative defaultExpiresIn", async () => {
-			const { codeFactory } = createDefaultFactories();
+			const { codeFactory } = createRepositoryFactories();
 			await expect(codeFactory.create({ type: "memory", defaultExpiresIn: -1 })).rejects.toThrow(
 				'"defaultExpiresIn" must be a finite positive number',
 			);
 		});
 
 		it("rejects zero defaultExpiresIn", async () => {
-			const { codeFactory } = createDefaultFactories();
+			const { codeFactory } = createRepositoryFactories();
 			await expect(codeFactory.create({ type: "memory", defaultExpiresIn: 0 })).rejects.toThrow(
 				'"defaultExpiresIn" must be a finite positive number',
 			);
 		});
 
 		it("throws AdapterFactoryError for unregistered type", async () => {
-			const { codeFactory } = createDefaultFactories();
+			const { codeFactory } = createRepositoryFactories();
 
 			await expect(codeFactory.create({ type: "redis" })).rejects.toBeInstanceOf(
 				AdapterFactoryError,
@@ -172,9 +172,9 @@ describe("createDefaultFactories", () => {
 	});
 });
 
-describe("createDefaultFactories — AdapterFactory shape", () => {
+describe("createRepositoryFactories — AdapterFactory shape", () => {
 	it("returns factories that expose register/create/registeredTypes", () => {
-		const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+		const { clientFactory, userFactory, codeFactory } = createRepositoryFactories();
 
 		for (const factory of [clientFactory, userFactory, codeFactory]) {
 			expect(typeof factory.register).toBe("function");
@@ -184,7 +184,7 @@ describe("createDefaultFactories — AdapterFactory shape", () => {
 	});
 
 	it("pre-registers yaml + static for client/user, memory for code", () => {
-		const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+		const { clientFactory, userFactory, codeFactory } = createRepositoryFactories();
 
 		expect(clientFactory.registeredTypes().sort()).toEqual(["static", "yaml"]);
 		expect(userFactory.registeredTypes().sort()).toEqual(["static", "yaml"]);

@@ -19,7 +19,6 @@ import { expectTypeOf, test } from "vitest";
 import type { AdapterFactory } from "../../adapters/AdapterFactory.mjs";
 import type {
 	CreateUserSessionInput,
-	MutableUserSessionStore,
 	RegisteredRP,
 	SessionFamilyIndex,
 	SessionFamilyIndexFactory,
@@ -106,21 +105,7 @@ test("SessionFederationIndex has 4 methods including per-element remove", () => 
 	>();
 });
 
-test("MutableUserSessionStore extends UserSessionStore with synchronous claims-only updater", () => {
-	type Updater = MutableUserSessionStore["update"];
-	expectTypeOf<Updater>().toEqualTypeOf<
-		(
-			sid: string,
-			updater: (current: Readonly<UserSession>) => Readonly<UserSessionClaims> | null,
-		) => Promise<UserSession | null>
-	>();
-});
-
-test("MutableUserSessionStore is assignable to UserSessionStore (extends relationship)", () => {
-	expectTypeOf<MutableUserSessionStore>().toMatchTypeOf<UserSessionStore>();
-});
-
-test("ComponentMap declaration-merge: 4 store slots + 1 mutable slot, all optional", () => {
+test("ComponentMap declaration-merge: 4 store slots, all optional", () => {
 	expectTypeOf<ComponentMap["userSessionStore"]>().toEqualTypeOf<UserSessionStore | undefined>();
 	expectTypeOf<ComponentMap["sessionRPRegistry"]>().toEqualTypeOf<SessionRPRegistry | undefined>();
 	expectTypeOf<ComponentMap["sessionFamilyIndex"]>().toEqualTypeOf<
@@ -128,9 +113,6 @@ test("ComponentMap declaration-merge: 4 store slots + 1 mutable slot, all option
 	>();
 	expectTypeOf<ComponentMap["sessionFederationIndex"]>().toEqualTypeOf<
 		SessionFederationIndex | undefined
-	>();
-	expectTypeOf<ComponentMap["mutableUserSessionStore"]>().toEqualTypeOf<
-		MutableUserSessionStore | undefined
 	>();
 });
 

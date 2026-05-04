@@ -45,7 +45,6 @@ const minBoot = {
 } as never;
 
 const stubGoogleConfig: GoogleProviderConfig = {
-	name: "google",
 	clientId: "test-client-id",
 	clientSecret: "test-client-secret",
 	callbackURL: "https://example.com/auth/google/callback",

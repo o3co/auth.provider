@@ -109,7 +109,7 @@ Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. O
 > `resolveCallbackRedirect` — was moved off `FederationProvider` and onto a
 > dedicated `FederationRedirectPolicy` capability. Per-federation modules
 > contribute the policy via `federationRedirectPolicies.<name>`; built-ins
-> use `createDefaultFederationRedirectPolicy(...)`. Custom providers do not
+> use `createFederationRedirectPolicy(...)`. Custom providers do not
 > implement these methods on `FederationProvider`.
 
 ---
@@ -390,7 +390,7 @@ for the reference implementation. The minimal sketch:
 import { defineModule } from "@o3co/auth-provider-core";
 import {
   codeChallenge,
-  createDefaultFederationRedirectPolicy,
+  createFederationRedirectPolicy,
   type FederationProvider,
 } from "@o3co/auth-provider-session";
 
@@ -408,7 +408,7 @@ export const microsoftFederationModule = defineModule({
       microsoft: (deps) => buildMicrosoftProvider(deps.microsoftFederationConfig),
     },
     federationRedirectPolicies: {
-      microsoft: (deps) => createDefaultFederationRedirectPolicy(deps.microsoftFederationConfig),
+      microsoft: (deps) => createFederationRedirectPolicy(deps.microsoftFederationConfig),
     },
   },
 });

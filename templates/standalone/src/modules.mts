@@ -16,13 +16,13 @@
 import path from "node:path";
 import {
 	type AppConfig,
-	createDefaultFactories,
 	createFederationTokenStoreFactory,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
 	createInMemorySessionRPRegistry,
 	createInMemoryUserSessionStore,
 	createKeyStoreFactory,
+	createRepositoryFactories,
 	defineModule,
 	type Module,
 	registerBuiltinFederationTokenStores,
@@ -87,7 +87,7 @@ export const repositoriesModule: Module = defineModule({
 	requires: ["config"] as const,
 	provides: {
 		clientRepository: async ({ config }) => {
-			const { clientFactory, userFactory } = createDefaultFactories();
+			const { clientFactory, userFactory } = createRepositoryFactories();
 			registerBuiltinAdapters({ userFactory });
 			const slice = flattenAdapterConfig(
 				(config as AppConfig).repositories.client as { type: string } & Record<string, unknown>,
@@ -98,7 +98,7 @@ export const repositoriesModule: Module = defineModule({
 			return clientFactory.create(slice);
 		},
 		userRepository: async ({ config }) => {
-			const { userFactory } = createDefaultFactories();
+			const { userFactory } = createRepositoryFactories();
 			registerBuiltinAdapters({ userFactory });
 			return userFactory.create(
 				flattenAdapterConfig(
@@ -107,7 +107,7 @@ export const repositoriesModule: Module = defineModule({
 			);
 		},
 		codeRepository: async ({ config }) => {
-			const { userFactory, codeFactory } = createDefaultFactories();
+			const { userFactory, codeFactory } = createRepositoryFactories();
 			registerBuiltinAdapters({ userFactory });
 			codeFactory.register("redis", redisCodeRepositoryBuilder);
 			return codeFactory.create(
@@ -178,7 +178,7 @@ export const googleFederationConfigModule: Module = defineModule({
 					"federations.google requires clientId, clientSecret, callbackURL when enabled",
 				);
 			}
-			return { name: "google", clientId, clientSecret, callbackURL };
+			return { clientId, clientSecret, callbackURL };
 		},
 	},
 });

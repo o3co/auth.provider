@@ -21,15 +21,15 @@ import type {
 } from "./types.mjs";
 
 /**
- * Inputs for the default RefreshTokenFamilyRotation composition.
+ * Inputs for the RefreshTokenFamilyRotation composition.
  * Per A3 §6.1.
  */
-export interface DefaultRefreshTokenFamilyRotationDeps {
+export interface RefreshTokenFamilyRotationDeps {
 	readonly refreshTokenFamilyStore: RefreshTokenFamilyStore;
 }
 
 /**
- * Default RefreshTokenFamilyRotation composition: builds a fresh
+ * RefreshTokenFamilyRotation composition: builds a fresh
  * RefreshTokenFamily aggregate on `register`, and translates
  * RefreshTokenFamilyStore.updateFamily outcomes into the 4-variant
  * RefreshTokenFamilyRotationOutcome on `rotate`.
@@ -45,8 +45,8 @@ export interface DefaultRefreshTokenFamilyRotationDeps {
  *
  * Per A3 §6.1.
  */
-export function createDefaultRefreshTokenFamilyRotation(
-	deps: DefaultRefreshTokenFamilyRotationDeps,
+export function createRefreshTokenFamilyRotation(
+	deps: RefreshTokenFamilyRotationDeps,
 ): RefreshTokenFamilyRotation {
 	return {
 		async register(newJti, familyId, expiresAtMs) {

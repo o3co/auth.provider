@@ -332,7 +332,7 @@ class AdapterFactoryError extends Error {
   readonly registered: readonly string[];
 }
 
-function createDefaultFactories(): {
+function createRepositoryFactories(): {
   clientFactory: AdapterFactory<ClientRepository>;
   userFactory: AdapterFactory<UserRepository>;
   codeFactory: AdapterFactory<CodeRepository>;
@@ -346,7 +346,7 @@ Key contract properties:
 - `create()` throws `AdapterFactoryError` when `type` is not registered; the error carries the `kind`, `type`, and `registered` list.
 - `BuilderContext` is shared by reference across builder invocations for a given factory. Treat it as read-only from builders.
 
-`createDefaultFactories` returns three factories pre-registered with the built-in `yaml`/`static` (client, user) and `memory` (code) types. Use `registerBuiltinAdapters` from `@o3co/auth-provider-foundation` to add the `http` user-authentication adapter, or register your own types to support other backends. For Redis-backed code/store adapters, see `@o3co/auth-provider-redis`.
+`createRepositoryFactories` returns three factories pre-registered with the built-in `yaml`/`static` (client, user) and `memory` (code) types. Use `registerBuiltinAdapters` from `@o3co/auth-provider-foundation` to add the `http` user-authentication adapter, or register your own types to support other backends. For Redis-backed code/store adapters, see `@o3co/auth-provider-redis`.
 
 ### Module System
 
@@ -412,7 +412,7 @@ import express from "express";
 import {
   AppConfigSchema,
   createApp,
-  createDefaultFactories,
+  createRepositoryFactories,
   createKeyStoreFactory,
   defineModule,
   registerBuiltinKeyStores,
@@ -444,7 +444,7 @@ const keyStoreFactory = createKeyStoreFactory();
 registerBuiltinKeyStores(keyStoreFactory);
 const keyStore = await keyStoreFactory.create(flatten(config.oauth.jwt.signingKey));
 
-const { clientFactory, userFactory, codeFactory } = createDefaultFactories();
+const { clientFactory, userFactory, codeFactory } = createRepositoryFactories();
 
 const clientRepository = await clientFactory.create(flatten(config.repositories.client));
 const userRepository = await userFactory.create(flatten(config.repositories.user));

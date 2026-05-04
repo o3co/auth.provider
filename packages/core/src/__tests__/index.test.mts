@@ -5,8 +5,8 @@ import {
 	createAdapterFactory,
 	createApp,
 	createAsymmetricKeyStore,
-	createDefaultFactories,
 	createKeyStoreFactory,
+	createRepositoryFactories,
 	createSymmetricKeyStore,
 	formatObject,
 	GrantRegistry,
@@ -50,8 +50,8 @@ describe("public API", () => {
 		expect(typeof AdapterFactoryError).toBe("function");
 	});
 
-	it("exports createDefaultFactories function", () => {
-		expect(typeof createDefaultFactories).toBe("function");
+	it("exports createRepositoryFactories function", () => {
+		expect(typeof createRepositoryFactories).toBe("function");
 	});
 
 	it("exports createSymmetricKeyStore function", () => {
