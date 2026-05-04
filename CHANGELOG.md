@@ -222,7 +222,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `@o3co/auth-provider-redis`. The shape (`hSet`, `zAdd`, `pttl`,
   `multi`/`watch`/`exec`, `pExpireAt`, etc.) is intrinsically Redis-flavoured;
   hosting it in core forced storage-agnostic consumers to mimic Redis
-  semantics. Eleven types moved; consumers update type imports from
+  semantics. Twelve types moved; consumers update type imports from
   `@o3co/auth-provider-core` to `@o3co/auth-provider-redis`:
   - `ChallengeStoreClient`
   - `ReplaySeenSetClient`
