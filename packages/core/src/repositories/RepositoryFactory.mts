@@ -25,8 +25,9 @@ import type { UserRepository } from "./UserRepository.mjs";
 
 /**
  * Construct the three default repository factories with built-in yaml/static/memory
- * adapters pre-registered. Consumers register additional adapters (e.g. http, redis)
- * via `registerBuiltinAdapters` from `@o3co/auth-provider-foundation`.
+ * adapters pre-registered. Consumers register additional adapters via:
+ *   - `@o3co/auth-provider-foundation` `registerBuiltinAdapters` — http user repo
+ *   - `@o3co/auth-provider-redis` builders (e.g. `redisCodeRepositoryBuilder`)
  */
 export const createDefaultFactories = (): {
 	clientFactory: AdapterFactory<ClientRepository>;
