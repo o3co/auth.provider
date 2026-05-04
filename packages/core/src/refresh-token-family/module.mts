@@ -42,7 +42,7 @@ export const memoryRefreshTokenFamilyStoreModule = defineModule({
  * Per A3 §8.1.
  */
 export const defaultRefreshTokenFamilyRotationModule = defineModule({
-	name: "core-default-refresh-token-rotation",
+	name: "core-default-refresh-token-family-rotation",
 	requires: ["refreshTokenFamilyStore"] as const,
 	provides: {
 		refreshTokenFamilyRotation: (deps) =>

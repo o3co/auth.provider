@@ -27,9 +27,9 @@ describe("memoryRefreshTokenFamilyStoreModule", () => {
 });
 
 describe("defaultRefreshTokenFamilyRotationModule", () => {
-	it("has the canonical module name 'core-default-refresh-token-rotation'", () => {
+	it("has the canonical module name 'core-default-refresh-token-family-rotation'", () => {
 		expect(defaultRefreshTokenFamilyRotationModule.name).toBe(
-			"core-default-refresh-token-rotation",
+			"core-default-refresh-token-family-rotation",
 		);
 	});
 
