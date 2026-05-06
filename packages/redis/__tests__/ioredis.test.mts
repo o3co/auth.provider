@@ -92,10 +92,7 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 		const noscriptError = new Error("NOSCRIPT No matching script. Please use EVAL.");
 		const io = makeFakeIoredis({
 			// First EVALSHA throws NOSCRIPT; the second (post-fallback) returns 1.
-			evalsha: vi
-				.fn()
-				.mockRejectedValueOnce(noscriptError)
-				.mockResolvedValueOnce(1),
+			evalsha: vi.fn().mockRejectedValueOnce(noscriptError).mockResolvedValueOnce(1),
 			eval: vi.fn().mockResolvedValue(1),
 		});
 		const { federationTokenStoreClient } = makeIoredisClients(io);
