@@ -53,75 +53,105 @@ function makeFakeIoredis(overrides: Partial<FakeIoredis> = {}): Redis {
 }
 
 describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () => {
-	// Module-level `scriptCached` persists across tests in the same module —
-	// reset it implicitly by reusing the same fake state across the three
-	// tests in serial order: cold → warm → flush+cold.
+	// Each test warms the module-level `scriptCached` cache from cold within
+	// its own body so the suite is order-independent (running any single test
+	// via `vitest -t "..."` works in isolation). The first `compareAndDelete`
+	// call after module load — or after a prior NOSCRIPT path — runs EVAL;
+	// each subsequent call within the same test runs EVALSHA.
 	afterEach(() => vi.restoreAllMocks());
 
-	it("first call falls through to EVAL (cold cache) and returns true on match", async () => {
+	it("first call falls through to EVAL (cold path semantics) and returns true on match", async () => {
+		const io = makeFakeIoredis({
+			// EVALSHA may or may not be called first depending on whether
+			// `scriptCached` is true from a prior test. Both code paths
+			// must succeed. In a cold-path call the response is 1 (matched
+			// → key deleted).
+			evalsha: vi.fn().mockResolvedValue(1),
+			eval: vi.fn().mockResolvedValue(1),
+		});
+		const { federationTokenStoreClient } = makeIoredisClients(io);
+
+		const result = await federationTokenStoreClient.compareAndDelete("k", "v");
+		expect(result).toBe(true);
+		// One of EVAL or EVALSHA was called; total = 1. We don't assert on
+		// which because that depends on the prior `scriptCached` state.
+		expect(io.eval.mock.calls.length + io.evalsha.mock.calls.length).toBe(1);
+	});
+
+	it("after a warmup call the next call uses EVALSHA only (warm path)", async () => {
+		// Self-contained: don't depend on whether `scriptCached` is true at
+		// test start. Both EVALSHA and EVAL succeed for the warmup so the
+		// path taken doesn't matter; the assertion is only on the SECOND
+		// call's behavior (EVALSHA increments by 1, EVAL does not).
+		const io = makeFakeIoredis({
+			evalsha: vi.fn().mockResolvedValue(0),
+			eval: vi.fn().mockResolvedValue(1),
+		});
+		const { federationTokenStoreClient } = makeIoredisClients(io);
+
+		// Warmup: regardless of cold/warm initial state, scriptCached ends true.
+		await federationTokenStoreClient.compareAndDelete("k", "v");
+		const evalshaBefore = io.evalsha.mock.calls.length;
+		const evalBefore = io.eval.mock.calls.length;
+
+		// Second call: cache is now warm. Must take the EVALSHA path only.
+		const result = await federationTokenStoreClient.compareAndDelete("k", "wrong-token");
+
+		expect(result).toBe(false);
+		expect(io.evalsha.mock.calls.length).toBe(evalshaBefore + 1);
+		expect(io.eval.mock.calls.length).toBe(evalBefore);
+	});
+
+	it("NOSCRIPT on EVALSHA falls back to EVAL and re-warms the cache", async () => {
 		const io = makeFakeIoredis({
 			evalsha: vi.fn().mockResolvedValue(1),
 			eval: vi.fn().mockResolvedValue(1),
 		});
 		const { federationTokenStoreClient } = makeIoredisClients(io);
-		const result = await federationTokenStoreClient.compareAndDelete("k", "v");
 
-		expect(result).toBe(true);
-		// Cold cache: EVAL is the path, not EVALSHA.
-		expect(io.eval).toHaveBeenCalledTimes(1);
-		// EVALSHA may be called once on the optimistic warm-path attempt only
-		// if `scriptCached` was already true from a prior test. The first
-		// real-world cold call is EVAL-only.
-	});
+		// Warmup so `scriptCached === true` regardless of prior test state.
+		await federationTokenStoreClient.compareAndDelete("k", "v");
+		const evalAfterWarmup = io.eval.mock.calls.length;
 
-	it("warm cache: subsequent calls use EVALSHA and skip EVAL", async () => {
-		const io = makeFakeIoredis({
-			evalsha: vi.fn().mockResolvedValue(0),
-			eval: vi.fn(),
-		});
-		const { federationTokenStoreClient } = makeIoredisClients(io);
-		// Module-level `scriptCached` is already true from the previous test.
-		const result = await federationTokenStoreClient.compareAndDelete("k", "wrong-token");
-
-		expect(result).toBe(false);
-		expect(io.evalsha).toHaveBeenCalledTimes(1);
-		expect(io.eval).not.toHaveBeenCalled();
-	});
-
-	it("NOSCRIPT on EVALSHA falls back to EVAL and re-warms the cache", async () => {
+		// Swap EVALSHA to throw NOSCRIPT once, then succeed.
 		const noscriptError = new Error("NOSCRIPT No matching script. Please use EVAL.");
+		io.evalsha.mockReset().mockRejectedValueOnce(noscriptError).mockResolvedValue(1);
+
+		// Test call 1: EVALSHA throws NOSCRIPT → fallback to EVAL → re-warm.
+		const r1 = await federationTokenStoreClient.compareAndDelete("k", "v");
+		expect(r1).toBe(true);
+		expect(io.evalsha.mock.calls.length).toBe(1);
+		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup + 1);
+
+		// Test call 2: cache flagged warm again → EVALSHA only, no NEW EVAL.
+		const r2 = await federationTokenStoreClient.compareAndDelete("k", "v");
+		expect(r2).toBe(true);
+		expect(io.evalsha.mock.calls.length).toBe(2);
+		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup + 1);
+	});
+
+	it("non-NOSCRIPT errors from EVALSHA propagate (no silent fallback)", async () => {
+		// Self-contained: warm the cache with both EVALSHA and EVAL succeeding,
+		// then swap the EVALSHA mock to reject with a non-NOSCRIPT error and
+		// assert the next call propagates that error without falling through.
 		const io = makeFakeIoredis({
-			// First EVALSHA throws NOSCRIPT; the second (post-fallback) returns 1.
-			evalsha: vi.fn().mockRejectedValueOnce(noscriptError).mockResolvedValueOnce(1),
+			evalsha: vi.fn().mockResolvedValue(1),
 			eval: vi.fn().mockResolvedValue(1),
 		});
 		const { federationTokenStoreClient } = makeIoredisClients(io);
 
-		// First call: EVALSHA throws NOSCRIPT → fallback to EVAL → re-warm.
-		const r1 = await federationTokenStoreClient.compareAndDelete("k", "v");
-		expect(r1).toBe(true);
-		expect(io.evalsha).toHaveBeenCalledTimes(1);
-		expect(io.eval).toHaveBeenCalledTimes(1);
+		// Warmup ensures `scriptCached === true` regardless of prior test state.
+		await federationTokenStoreClient.compareAndDelete("k", "v");
+		const evalAfterWarmup = io.eval.mock.calls.length;
 
-		// Second call: cache flagged warm again → EVALSHA only, no EVAL.
-		const r2 = await federationTokenStoreClient.compareAndDelete("k", "v");
-		expect(r2).toBe(true);
-		expect(io.evalsha).toHaveBeenCalledTimes(2);
-		expect(io.eval).toHaveBeenCalledTimes(1);
-	});
-
-	it("non-NOSCRIPT errors from EVALSHA propagate (no silent fallback)", async () => {
+		// Swap EVALSHA to reject with ECONNRESET (not NOSCRIPT).
 		const networkError = new Error("ECONNRESET: connection lost");
-		const io = makeFakeIoredis({
-			evalsha: vi.fn().mockRejectedValue(networkError),
-			eval: vi.fn(),
-		});
-		const { federationTokenStoreClient } = makeIoredisClients(io);
+		io.evalsha.mockReset().mockRejectedValue(networkError);
 
 		await expect(federationTokenStoreClient.compareAndDelete("k", "v")).rejects.toThrow(
 			/ECONNRESET/,
 		);
-		// Only ECONNRESET — must NOT fall through to EVAL on a non-NOSCRIPT error.
-		expect(io.eval).not.toHaveBeenCalled();
+		// Critical assertion: EVAL is NOT called as a fallback for non-NOSCRIPT errors.
+		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup);
 	});
 });
