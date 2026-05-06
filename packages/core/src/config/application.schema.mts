@@ -219,6 +219,21 @@ export const fullSectionsSchema = z.object({
 	cors: z.object({
 		allowedOrigins: z.array(z.string()),
 	}),
+	// D-2 v2: connection-config for the standalone refresh-token-family
+	// client. Defaults live in HOCON (`application.conf`) per ADR — no
+	// `.default()` here. Module-internal config (`keyPrefix`, `casRetryLimit`)
+	// stays under the separate `redisRefreshTokenFamilyStore.*` top-level key
+	// (consumed by `redisRefreshTokenFamilyStoreModule.configSchema`).
+	refreshTokenFamilyStore: z
+		.object({
+			redis: z
+				.object({
+					url: z.string(),
+					password: z.string().optional(),
+				})
+				.optional(),
+		})
+		.optional(),
 });
 
 /**

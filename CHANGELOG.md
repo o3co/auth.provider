@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed (Phase F — D-2 v2 standalone ioredis unification, v0.5.1)
+
+- **Multi-replica refresh-token persistence** (`templates/standalone`): the
+  standalone composition root now wires
+  `redisRefreshTokenFamilyStoreModule` (backed by a long-lived ioredis
+  connection from the new `refreshTokenFamilyClientModule`) by default,
+  replacing the in-memory `memoryRefreshTokenFamilyStoreModule`. This
+  closes OR-1 — pre-fix, multi-replica deployments returned `invalid_grant`
+  on every cross-replica refresh because each replica held RT families in
+  its own process memory.
+  **Migration**: set `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` to a shared
+  Redis 7.2+ instance. Falls back to `redis://localhost:6379` if unset
+  (which is correct for single-instance deployments and CI). The HOCON
+  config gains a `refreshTokenFamilyStore.redis.{url, password}` block in
+  both `packages/core/config/application.conf` and
+  `templates/standalone/config/application.conf`. Module-internal config
+  (`keyPrefix`, `casRetryLimit`) stays under the existing
+  `redisRefreshTokenFamilyStore.*` top-level key.
+
+- **`BuildModulesOverrides.refreshTokenFamilyModules`**
+  (`templates/standalone`): new optional override that replaces BOTH the
+  RT family client module AND the store module as a unit. Default is
+  `[refreshTokenFamilyClientModule, redisRefreshTokenFamilyStoreModule]`.
+  Smoke tests / unit tests pass `[memoryRefreshTokenFamilyStoreModule]`
+  here to avoid opening an ioredis connection.
+
+- **New runtime dependency** (`templates/standalone`): `ioredis ^5.4.1`
+  added as a direct dependency for the RT family store client (the
+  `makeIoredisClients` factory from
+  `@o3co/auth-provider-redis/ioredis` returns the typed
+  `RefreshTokenFamilyClient` shape including the `duplicate()` method
+  required for WATCH/MULTI/EXEC CAS isolation). Existing Redis client
+  dependencies (`redis ^5.10.0`, `connect-redis ^9.0.0`) are unchanged.
+
+- **`AppConfigSchema`** (`@o3co/auth-provider-core`):
+  `refreshTokenFamilyStore.redis.{url, password}` added to
+  `fullSectionsSchema` as an optional section (defaults live in HOCON,
+  not in the Zod schema, per ADR). Existing configs that omit this
+  section continue to validate without change.
+
 ### Breaking Changes (Phase F — D-1 Code/CodeData identity binding, v0.5.1)
 
 - **`CodeData.client_id` and `CodeData.redirect_uri` are now required fields**
