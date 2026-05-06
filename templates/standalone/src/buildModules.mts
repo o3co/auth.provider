@@ -33,11 +33,12 @@ import {
 } from "@o3co/auth-provider-redis";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import {
+	federationTokenStoreModule,
 	googleFederationConfigModule,
+	inMemorySessionStoresModule,
 	keyStoreModule,
 	repositoriesModule,
 	standaloneRedisClientsModule,
-	storesModule,
 } from "./modules.mjs";
 
 /**
@@ -84,27 +85,42 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// OAuth-endpoint rate limiter and the user-session-store family. The RT
 	// family store always uses Redis in the production manifest (D-2 v2 /
 	// OR-1) unless `overrides.refreshTokenFamilyModules` swaps it out. When
-	// EITHER consumer adapter is `"redis"` (or the RT family is using the
-	// default Redis path), the shared `standaloneRedisClientsModule` is
-	// added once and provides every per-purpose ComponentMap slot from a
-	// single ioredis socket per replica. Memory-only deployments skip it.
+	// EITHER consumer adapter is `"redis"` (or the RT family override
+	// includes a Redis-backed store module), the shared
+	// `standaloneRedisClientsModule` is added once and provides every
+	// per-purpose ComponentMap slot from a single ioredis socket per
+	// replica. Memory-only deployments skip it.
 	const rateLimiterAdapter = config.rateLimiter?.adapter ?? "memory";
 	const userSessionStoresAdapter = config.userSessionStores?.adapter ?? "memory";
-	const usingRtFamilyRedis = overrides.refreshTokenFamilyModules === undefined;
-	const usingRedisAnywhere =
-		usingRtFamilyRedis || rateLimiterAdapter === "redis" || userSessionStoresAdapter === "redis";
-
-	const sessionStoresModules: Module[] =
-		userSessionStoresAdapter === "redis"
-			? [redisSessionStoresModule]
-			: [overrides.storesModule ?? storesModule];
-
-	const rateLimiterModules: Module[] =
-		rateLimiterAdapter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
-
 	const refreshTokenFamilyModules: readonly Module[] = overrides.refreshTokenFamilyModules ?? [
 		redisRefreshTokenFamilyStoreModule,
 	];
+	// Detect whether the RT-family override (if any) keeps the Redis-backed
+	// store. Default (no override) uses Redis. An override that includes the
+	// Redis store module without also wiring `standaloneRedisClientsModule`
+	// would otherwise boot-fail on the missing `refreshTokenFamilyClient`
+	// component (Copilot review on PR #121).
+	const refreshTokenFamilyUsesRedis = refreshTokenFamilyModules.some(
+		(m) => m.name === "redis-refresh-token-family-store",
+	);
+	const usingRedisAnywhere =
+		refreshTokenFamilyUsesRedis ||
+		rateLimiterAdapter === "redis" ||
+		userSessionStoresAdapter === "redis";
+
+	// Federation-token store is always wired; only the 4 user-session
+	// stores switch on the adapter. Pre-Wave-5d the redis branch dropped
+	// the federation-token-store provider entirely (Copilot review on
+	// PR #121); splitting `storesModule` fixes that boot failure.
+	const sessionStoresModules: Module[] =
+		userSessionStoresAdapter === "redis"
+			? [redisSessionStoresModule]
+			: overrides.storesModule
+				? [overrides.storesModule]
+				: [inMemorySessionStoresModule];
+
+	const rateLimiterModules: Module[] =
+		rateLimiterAdapter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
 
 	return [
 		// D-5: sessionStoreModule wires the express-session middleware into the
@@ -124,6 +140,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// actually needs Redis. Memory-only deployments skip this so they
 		// don't open an unused socket.
 		...(usingRedisAnywhere ? [standaloneRedisClientsModule] : []),
+		// Federation-token store — always wired; independent of the
+		// `userSessionStores.adapter` switch. Was bundled into `storesModule`
+		// pre-Wave-5d; split so the redis session-stores branch doesn't
+		// drop the provider.
+		federationTokenStoreModule,
 		// User-session-store family: redis (multi-replica) or memory (dev).
 		...sessionStoresModules,
 		// OAuth-endpoint rate limiter: redis (shared counters) or memory.

@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and derives all per-purpose clients (refresh-token-family, 4 user-session
   stores, OAuth-endpoint rate limiter) via `makeIoredisClients(io)`. The
   F4 PR1 `refreshTokenFamilyClientModule` is replaced by a unified
-  `standaloneRedisClientsModule` that providers all 6 client slots from the
+  `standaloneRedisClientsModule` that provides all 6 client slots from the
   shared connection. Connection-pool pressure on the upstream Redis drops
   proportionally; lifecycle drains 1 socket instead of 3+. Memory-only
   deployments skip the shared module entirely so they don't open an unused

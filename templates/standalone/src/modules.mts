@@ -141,19 +141,40 @@ export const repositoriesModule: Module = defineModule({
 });
 
 /**
- * Stores module — provides the four-store user-session split + federation
- * token store. The standalone template uses in-memory stores by default; a
- * redis-backed deployment swaps this module for `@o3co/auth-provider-redis`'s
- * equivalent (per A4 §10 / Phase 5).
+ * In-memory user-session stores module — provides the four-store
+ * user-session split (userSessionStore, sessionRPRegistry,
+ * sessionFamilyIndex, sessionFederationIndex). This module is wired by
+ * `buildModules` only when `userSessionStores.adapter = "memory"`. The
+ * Redis branch swaps in `redisSessionStoresModule` from
+ * `@o3co/auth-provider-redis`.
+ *
+ * Pre-Wave-5d this module also provided `federationTokenStore` (now
+ * extracted into a separate always-wired module so the redis session
+ * branch doesn't drop the federation-token-store provider — Copilot
+ * review on PR #121).
  */
-export const storesModule: Module = defineModule({
-	name: "standalone:stores",
-	requires: ["config"] as const,
+export const inMemorySessionStoresModule: Module = defineModule({
+	name: "standalone:in-memory-session-stores",
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
 		sessionFamilyIndex: () => createInMemorySessionFamilyIndex(),
 		sessionFederationIndex: () => createInMemorySessionFederationIndex(),
+	},
+});
+
+/**
+ * Federation token store module — always wired (independent of the
+ * `userSessionStores.adapter` switch). Pre-Wave-5d this slot was bundled
+ * into the larger `storesModule`; that meant the redis session-stores
+ * branch dropped the federation-token-store provider entirely and boot
+ * failed on the missing component (Copilot review on PR #121). Splitting
+ * the slot out lets both adapters reuse it unchanged.
+ */
+export const federationTokenStoreModule: Module = defineModule({
+	name: "standalone:federation-token-store",
+	requires: ["config"] as const,
+	provides: {
 		federationTokenStore: async ({ config }) => {
 			const factory = createFederationTokenStoreFactory();
 			registerBuiltinFederationTokenStores(factory);
@@ -165,6 +186,21 @@ export const storesModule: Module = defineModule({
 			).federationTokenStore;
 			return factory.create(slice ? flattenAdapterConfig(slice) : { type: "memory" });
 		},
+	},
+});
+
+/**
+ * @deprecated since Wave 5d (F4 PR2): split into `inMemorySessionStoresModule`
+ * + `federationTokenStoreModule`. Re-exported for backward compatibility
+ * with consumers that imported `storesModule` from this file. New code
+ * should use the two split modules directly.
+ */
+export const storesModule: Module = defineModule({
+	name: "standalone:stores",
+	requires: ["config"] as const,
+	provides: {
+		...inMemorySessionStoresModule.provides,
+		...federationTokenStoreModule.provides,
 	},
 });
 
@@ -236,15 +272,22 @@ export const standaloneRedisClientsModule: Module = defineModule({
 // same `Redis` instance (and its `makeIoredisClients()` derivation) within
 // a single createApp() invocation. The boot planner calls each `provides`
 // in dependency order; without this, every consumed slot would create its
-// own Redis socket, defeating the unification purpose. The cache key is
-// the (config, lifecycleRegistrar) pair — different boot invocations get
-// independent connections.
-const clientsCache = new WeakMap<object, ReturnType<typeof makeIoredisClients>>();
+// own Redis socket, defeating the unification purpose.
+//
+// Cache key: the `lifecycleRegistrar` IDENTITY (which is per-boot — each
+// `createApp()` invocation seeds a fresh registrar via the boot planner).
+// Keying solely on `config` would incorrectly share connections across
+// boots when the same config object is reused with a new registrar (and
+// only the FIRST boot's registrar would receive disposal — Copilot review
+// on PR #121). When `lifecycleRegistrar` is undefined (test scenarios
+// that don't seed it), each call creates a fresh client; tests are
+// isolated and don't need cross-slot sharing.
+const clientsCache = new WeakMap<LifecycleRegistrar, ReturnType<typeof makeIoredisClients>>();
 function getOrCreateClients(
 	config: AppConfig,
 	lifecycleRegistrar: LifecycleRegistrar | undefined,
 ): ReturnType<typeof makeIoredisClients> {
-	const cached = clientsCache.get(config as object);
+	const cached = lifecycleRegistrar ? clientsCache.get(lifecycleRegistrar) : undefined;
 	if (cached) return cached;
 
 	const cfg = config.refreshTokenFamilyStore?.redis;
@@ -277,7 +320,7 @@ function getOrCreateClients(
 	});
 
 	const clients = makeIoredisClients(io);
-	clientsCache.set(config as object, clients);
+	if (lifecycleRegistrar) clientsCache.set(lifecycleRegistrar, clients);
 	return clients;
 }
 
