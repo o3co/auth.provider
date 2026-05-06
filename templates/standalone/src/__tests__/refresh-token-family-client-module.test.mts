@@ -119,7 +119,7 @@ describe("D-2 / refreshTokenFamilyClientModule", () => {
 		expect(quitSpies[0]).toHaveBeenCalledTimes(1);
 	});
 
-	it("does not crash when lifecycleRegistrar is absent (graceful no-op)", async () => {
+	it("does not crash when lifecycleRegistrar is absent (graceful no-op, no quit registered)", async () => {
 		const { refreshTokenFamilyClientModule } = await importModule();
 		const provides = (
 			refreshTokenFamilyClientModule as unknown as {
@@ -127,8 +127,31 @@ describe("D-2 / refreshTokenFamilyClientModule", () => {
 			}
 		).provides;
 
-		// No lifecycleRegistrar key in deps — must not throw.
+		// No lifecycleRegistrar key in deps — must not throw and must NOT
+		// register a cleanup (verified by the absence of any quit invocation
+		// after the factory resolves; the registrar branch is the only place
+		// `quit()` would be wired up in the no-real-shutdown unit-test path).
 		await expect(provides.refreshTokenFamilyClient({ config: baseConfig })).resolves.toBeDefined();
+		expect(quitSpies[0]).not.toHaveBeenCalled();
+	});
+
+	it("fails fast when refreshTokenFamilyStore.redis.url is missing (no silent localhost fallback)", async () => {
+		const { refreshTokenFamilyClientModule } = await importModule();
+		const provides = (
+			refreshTokenFamilyClientModule as unknown as {
+				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
+			}
+		).provides;
+
+		// Operator deliberately removed the section — must throw instead of
+		// silently falling back to redis://localhost:6379 (which would re-
+		// introduce the OR-1 multi-replica failure mode in production).
+		await expect(provides.refreshTokenFamilyClient({ config: {} })).rejects.toThrow(
+			/refreshTokenFamilyStore\.redis\.url/,
+		);
+		// And no ioredis instance was constructed because we threw before
+		// `new Redis(...)`.
+		expect(redisCtorCalls).toHaveLength(0);
 	});
 
 	it("attaches an error event handler to the ioredis client (prevents unhandled-error crash)", async () => {
