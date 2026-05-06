@@ -30,13 +30,22 @@ import type {
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
 
+/**
+ * Session data exposed to grant handlers.
+ *
+ * D-1 (v0.5.1): identity binding for the authorization code grant moved out
+ * of this session bag and into the code record (`Code.client_id` /
+ * `Code.redirect_uri`). The previously exposed `code_client_id`,
+ * `code_redirect_uri`, and `granted_scopes` fields have been removed because
+ * `/authorize` no longer writes them and `/token` no longer reads them.
+ *
+ * `code` is retained because the authorization grant still clears it from
+ * sessions issued before v0.5.1 ships (see `sessionMutation.clear`).
+ */
 export interface SessionData {
 	user?: Record<string, unknown>;
 	client?: Record<string, unknown>;
 	code?: string;
-	code_client_id?: string;
-	code_redirect_uri?: string;
-	granted_scopes?: string[];
 	isAuthenticated?: boolean;
 }
 

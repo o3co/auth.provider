@@ -181,6 +181,15 @@ export class RedisCodeRepository implements CodeRepository {
 				);
 				return null;
 			}
+			// Defensive type guards on optional array fields. The `as
+			// StoredCodePayload` cast trusts JSON shape; without these, a
+			// corrupted record with `grantedScope: "not-an-array"` would
+			// propagate a non-array up to downstream gates (scope filter / aud
+			// narrowing) that assume `readonly string[]`. Drop on shape mismatch
+			// rather than throw — the strict `/token` gates downstream will
+			// then reject naturally on the missing claim.
+			const grantedScope = Array.isArray(p.grantedScope) ? p.grantedScope : undefined;
+			const grantedAudience = Array.isArray(p.grantedAudience) ? p.grantedAudience : undefined;
 			return {
 				code,
 				client_id: p.client_id,
@@ -190,8 +199,8 @@ export class RedisCodeRepository implements CodeRepository {
 				nonce: p.nonce,
 				sid: p.sid,
 				expiresIn: p.expiresIn,
-				grantedScope: p.grantedScope,
-				grantedAudience: p.grantedAudience,
+				grantedScope,
+				grantedAudience,
 			};
 		} catch (err) {
 			const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);

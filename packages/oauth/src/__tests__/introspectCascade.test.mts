@@ -55,7 +55,12 @@ const mockClientRepository: ClientRepository = {
 };
 
 const mockCodeRepository: CodeRepository = {
-	createCode: async () => ({ code: "test-code" }),
+	// D-1: Code requires client_id + redirect_uri.
+	createCode: async () => ({
+		code: "test-code",
+		client_id: "client1",
+		redirect_uri: "https://rp.example/cb",
+	}),
 	getByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},

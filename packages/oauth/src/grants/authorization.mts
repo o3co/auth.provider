@@ -94,19 +94,24 @@ export const createAuthorizationGrant = (
 				};
 			}
 
+			// D-1: hoist client_id presence check ahead of consumeByCode so a
+			// missing client_id rejects symmetrically for confidential and public
+			// clients without burning the (otherwise valid) code via the atomic
+			// getDel inside consumeByCode.
+			if (!client_id) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "invalid client_id",
+					},
+				};
+			}
+
 			// A-3: Client secret verification (RFC 6749 §3.2.1)
 			// Only verify when client_secret is provided (confidential clients send it;
 			// public clients omit it). If provided, authenticate against the repository.
 			if (client_secret !== null && client_secret !== undefined) {
-				if (!client_id) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "invalid client_id",
-						},
-					};
-				}
 				const authenticated = await clientRepository.authenticate(client_id, client_secret);
 				if (!authenticated) {
 					return {
@@ -135,7 +140,7 @@ export const createAuthorizationGrant = (
 			// codeData.client_id. Custom impls predating v0.5.1 may emit a
 			// codeData without client_id — treat that as invalid_grant rather
 			// than crashing on undefined comparison.
-			if (!client_id || client_id !== codeData.client_id) {
+			if (client_id !== codeData.client_id) {
 				return {
 					result: {
 						status: 400,
@@ -467,9 +472,12 @@ export const createAuthorizationGrant = (
 					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }),
 				},
 				sessionMutation: {
-					// D-1: /authorize no longer writes session.code* in v0.5.1; the
-					// `code` key remains in the clear list to scrub residual values
-					// from sessions issued before v0.5.1 ships.
+					// D-1: /authorize no longer writes session.code* in v0.5.1.
+					// `code` is the only key still cleared here because the
+					// authorization grant doesn't read the other v0.4.x keys
+					// (`code_client_id`, `code_redirect_uri`, `granted_scopes`)
+					// at all anymore — they age out with the session TTL on
+					// rolling-deploy nodes that still have stale values.
 					clear: ["code"],
 				},
 			};

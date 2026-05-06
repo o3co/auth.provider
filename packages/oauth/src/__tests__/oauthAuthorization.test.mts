@@ -47,7 +47,12 @@ const fakeClientRepository: ClientRepository = {
 };
 
 const fakeCodeRepository: CodeRepository = {
-	createCode: async () => ({ code: "fake-code" }),
+	// D-1: Code requires client_id + redirect_uri.
+	createCode: async () => ({
+		code: "fake-code",
+		client_id: "client1",
+		redirect_uri: "https://rp.example/cb",
+	}),
 	getByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
@@ -129,7 +134,9 @@ async function buildAuthorizeApp(opts: {
 	const codeRepo: CodeRepository = {
 		createCode: async (params) => {
 			opts.captureCode(params);
-			return { code: "auth-code" };
+			// D-1: echo back the required identity fields from params so the
+			// returned `Code` satisfies the new shape (client_id + redirect_uri).
+			return { code: "auth-code", client_id: params.client_id, redirect_uri: params.redirect_uri };
 		},
 		getByCode: async () => null,
 		consumeByCode: async () => null,

@@ -48,7 +48,12 @@ const mockClientRepository: ClientRepository = {
 };
 
 const mockCodeRepository: CodeRepository = {
-	createCode: async () => ({ code: "test-code" }),
+	// D-1: Code requires client_id + redirect_uri.
+	createCode: async () => ({
+		code: "test-code",
+		client_id: "client1",
+		redirect_uri: "https://rp.example/cb",
+	}),
 	getByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
@@ -254,7 +259,12 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				authenticate: async () => null,
 			};
 			const codeRepo: CodeRepository = {
-				createCode: async () => ({ code: "auth-code-1" }),
+				// D-1: Code requires client_id + redirect_uri.
+				createCode: async () => ({
+					code: "auth-code-1",
+					client_id: "client1",
+					redirect_uri: "https://rp.example/cb",
+				}),
 				getByCode: async () => null,
 				consumeByCode: async () => null,
 				removeByCode: async () => {},
@@ -311,8 +321,11 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			const codeRepo: CodeRepository = {
 				createCode: async (params) => {
 					opts.captureCode?.(params);
+					// D-1: echo identity fields from params so the returned Code
+					// satisfies the new required shape.
 					return {
 						code: "code-1",
+						client_id: params.client_id,
 						redirect_uri: params.redirect_uri,
 						grantedScope: params.grantedScope,
 						grantedAudience: params.grantedAudience,
