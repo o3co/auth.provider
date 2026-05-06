@@ -1013,6 +1013,29 @@ describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound f
 		expect(result.errorDescription).toMatch(/client_id does not match/);
 	});
 
+	it("rejects malformed body.client_id (string[]) instead of silently falling back to authenticated client", async () => {
+		// Codex P2: a repeated `client_id` form param produces `string[]`. The
+		// fallback path must NOT treat this as "absent" — otherwise an attacker
+		// could append a bogus client_id alongside a valid Basic header and
+		// bypass the cross-client equality check.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx(
+				{
+					client_id: ["client-a", "spoof"], // malformed — repeated param
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				},
+				{ authenticatedClient: authedConfidential },
+			),
+		);
+		expect(result.status).toBe(400);
+		if (!("error" in result)) expect.fail("Expected error in result");
+		expect(result.error).toBe("invalid_request");
+		expect(result.errorDescription).toMatch(/client_id must be a single string value/);
+	});
+
 	it("rejects public clients (`tokenEndpointAuthMethod: 'none'`) regardless of route", async () => {
 		// `clientAuthMw` admits public clients on `/oauth/token` (PKCE is
 		// the authenticity gate at `/oauth/authorize`), but Token Exchange

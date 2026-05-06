@@ -63,7 +63,26 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// the authenticated identity is the canonical source. We resolve the
 			// effective client id from the body first (matching standalone-wiring
 			// callers) and fall back to `ctx.authenticatedClient.clientId`.
-			const bodyClientId = typeof body.client_id === "string" ? body.client_id : null;
+			//
+			// Treat "present but not a single string" (e.g. `string[]` produced
+			// by a repeated query parameter) as malformed instead of silently
+			// falling back — otherwise an attacker could include a bogus
+			// `client_id` array to bypass the cross-client equality check below.
+			const bodyClientIdRaw = body.client_id;
+			let bodyClientId: string | null;
+			if (bodyClientIdRaw === undefined || bodyClientIdRaw === null) {
+				bodyClientId = null;
+			} else if (typeof bodyClientIdRaw === "string") {
+				bodyClientId = bodyClientIdRaw;
+			} else {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "client_id must be a single string value",
+					},
+				};
+			}
 			const clientId = bodyClientId ?? ctx.authenticatedClient?.clientId ?? null;
 			const clientSecretRaw = body.client_secret;
 			let clientSecret: string | null;
