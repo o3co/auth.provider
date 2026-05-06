@@ -23,6 +23,7 @@ import {
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
+	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import express from "express";
@@ -112,6 +113,12 @@ describe("standalone smoke test", () => {
 			modules: buildModules(config, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
+				// D-2 v2: smoke tests stay in-memory for the RT family store.
+				// Production composition root pairs `refreshTokenFamilyClientModule`
+				// with `redisRefreshTokenFamilyStoreModule`; this override replaces
+				// the pair entirely with a single memory-backed store module so no
+				// real ioredis connection is opened during CI unit tests.
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 			}),
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -173,6 +180,7 @@ describe("standalone smoke test", () => {
 		const modules = buildModules(config, {
 			keyStoreModule: testKeyStoreModule,
 			repositoriesModule: testRepositoriesModule,
+			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 		});
 		const moduleNames = modules.map((m) => m.name);
 		expect(moduleNames).not.toContain("federation:google");
@@ -184,6 +192,37 @@ describe("standalone smoke test", () => {
 		});
 		handleRef = handle;
 		expect(handle).toBeDefined();
+	});
+
+	// D-2 v2 / OR-1 closure: the standalone composition root must default to the
+	// Redis-backed RT family store + ioredis client module pair, NOT the
+	// in-memory store. Multi-replica deployments lose RT family persistence
+	// when each replica holds families in-process; this test guards the
+	// production default. The override path is exercised by the smoke tests
+	// above (which substitute the memory store for CI).
+	describe("D-2: refresh token family modules wiring", () => {
+		it("buildModules includes the redis pair (client + store) by default", () => {
+			const modules = buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("standalone:refresh-token-family-client");
+			expect(names).toContain("redis-refresh-token-family-store");
+			expect(names).not.toContain("core-refresh-token-family-store-memory");
+		});
+
+		it("buildModules respects the refreshTokenFamilyModules override (memory-only)", () => {
+			const modules = buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("core-refresh-token-family-store-memory");
+			expect(names).not.toContain("standalone:refresh-token-family-client");
+			expect(names).not.toContain("redis-refresh-token-family-store");
+		});
 	});
 
 	it("POST /oauth/introspect returns iat in active token response", async () => {

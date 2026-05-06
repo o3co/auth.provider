@@ -34,7 +34,18 @@ import {
 	redisCodeRepositoryBuilder,
 	redisFederationTokenStoreBuilder,
 } from "@o3co/auth-provider-redis";
+import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
+// Named import is required here, not default. Under `module: "nodenext"`
+// with esModuleInterop, the default import resolves to the entire ioredis
+// CJS module-exports namespace object (because ioredis 5.x ships
+// `export = Redis`), so `new Redis(...)` raises TS2351 "not constructable".
+// The 11 default-import sites elsewhere in the repo all live under
+// `packages/redis/__tests__/` which `packages/redis/tsconfig.json`
+// explicitly excludes from strict tsc build (vitest's vue-tsc is more
+// permissive about CJS interop). Standalone production source is built
+// with strict nodenext, so the named import is the right shape here.
+import { Redis } from "ioredis";
 
 /**
  * Helper: turn a v0.4.x { type, [type]: {...} } adapter-config slice into the
@@ -152,6 +163,83 @@ export const storesModule: Module = defineModule({
 				}
 			).federationTokenStore;
 			return factory.create(slice ? flattenAdapterConfig(slice) : { type: "memory" });
+		},
+	},
+});
+
+/**
+ * RefreshTokenFamilyClient module — provides the long-lived ioredis-backed
+ * client consumed by `redisRefreshTokenFamilyStoreModule` (D-2 v2).
+ *
+ * Replaces the in-memory `memoryRefreshTokenFamilyStoreModule` previously
+ * wired in `buildModules`. The in-memory variant lost RT-family records on
+ * every replica restart and across replicas (OR-1) — multi-replica
+ * deployments returned `invalid_grant` on every other refresh request.
+ *
+ * Lifecycle: registers `io.quit()` with the boot-planner-pre-seeded
+ * `lifecycleRegistrar` (D-5 ComponentMap slot) so `handle.dispose()` quits
+ * the connection cleanly. The registrar is `optional` because the module
+ * remains usable in unit tests that bootstrap without seeding the registrar.
+ *
+ * Config: reads `refreshTokenFamilyStore.redis.{url, password}` from the
+ * already-validated `deps.config`. The `application.schema.mts` extension
+ * (D-2 v2 §1) ensures Zod does NOT strip these keys at validate time. No
+ * `zod` import in standalone code (BLOCKER 2 closure) — config is read
+ * directly off the typed `AppConfig` shape.
+ *
+ * Fails fast (throws) when `refreshTokenFamilyStore.redis.url` is absent.
+ * The HOCON default in `application.conf` covers single-instance / dev
+ * scenarios; an operator who deliberately removes the section in production
+ * sees an explicit error instead of a silent localhost fallback (the multi-
+ * replica failure mode OR-1 was supposed to close in the first place).
+ *
+ * @see {@link makeIoredisClients} — wraps the connection into the typed
+ * `RefreshTokenFamilyClient` shape including the `duplicate()` method
+ * required for WATCH/MULTI/EXEC CAS isolation.
+ */
+export const refreshTokenFamilyClientModule: Module = defineModule({
+	name: "standalone:refresh-token-family-client",
+	requires: ["config"] as const,
+	optional: ["lifecycleRegistrar"] as const,
+	provides: {
+		refreshTokenFamilyClient: async ({ config, lifecycleRegistrar }) => {
+			const cfg = (config as AppConfig).refreshTokenFamilyStore?.redis;
+			if (typeof cfg?.url !== "string" || cfg.url.length === 0) {
+				throw new Error(
+					"refreshTokenFamilyClientModule: `refreshTokenFamilyStore.redis.url` is required. " +
+						"Set REFRESH_TOKEN_FAMILY_STORE_REDIS_URL or restore the `refreshTokenFamilyStore.redis` " +
+						"block in application.conf. Multi-replica deployments require a shared Redis 7.2+ instance.",
+				);
+			}
+			const password = typeof cfg.password === "string" ? cfg.password : undefined;
+
+			// `lazyConnect: false` is the ioredis 5.x default; the explicit
+			// option documents the boot-time-connect contract so a future
+			// ioredis version flip does not silently change the failure mode.
+			const io = new Redis(cfg.url, {
+				password,
+				lazyConnect: false,
+			});
+
+			// Attach error handler so unhandled "error" events from ioredis
+			// 5.x do not crash the Node.js process. Initial connection
+			// failures surface here; the first `/oauth/token refresh_token`
+			// request will then fail because the store throws. TODO(D-4):
+			// swap `console.error` for the Logger interface once a v0.5.2
+			// polish PR lands.
+			io.on("error", (err: unknown) => {
+				console.error("[standalone:refresh-token-family-client] ioredis error", err);
+			});
+
+			// D-5: register cleanup with the boot-planner-pre-seeded
+			// lifecycleRegistrar. Optional chaining keeps the module usable in
+			// unit tests that bootstrap without seeding the registrar.
+			lifecycleRegistrar?.register(async () => {
+				await io.quit();
+			});
+
+			const { refreshTokenFamilyClient } = makeIoredisClients(io);
+			return refreshTokenFamilyClient;
 		},
 	},
 });

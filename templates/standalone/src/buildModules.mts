@@ -18,7 +18,6 @@ import {
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
 	type Module,
-	memoryRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 import {
@@ -26,10 +25,12 @@ import {
 	oauthModule,
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
+import { redisRefreshTokenFamilyStoreModule } from "@o3co/auth-provider-redis";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import {
 	googleFederationConfigModule,
 	keyStoreModule,
+	refreshTokenFamilyClientModule,
 	repositoriesModule,
 	storesModule,
 } from "./modules.mjs";
@@ -43,6 +44,17 @@ export interface BuildModulesOverrides {
 	readonly keyStoreModule?: Module;
 	readonly repositoriesModule?: Module;
 	readonly storesModule?: Module;
+	/**
+	 * D-2 v2: override BOTH the RT family client module AND the RT family
+	 * store module as a unit. Default:
+	 * `[refreshTokenFamilyClientModule, redisRefreshTokenFamilyStoreModule]`.
+	 *
+	 * Smoke tests / unit tests that don't want to open an ioredis connection
+	 * pass `[memoryRefreshTokenFamilyStoreModule]` here (no client module
+	 * needed for the memory store). The override REPLACES the entire pair —
+	 * passing a single-element array drops the client module too.
+	 */
+	readonly refreshTokenFamilyModules?: readonly Module[];
 }
 
 /**
@@ -77,7 +89,17 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
 		overrides.storesModule ?? storesModule,
-		memoryRefreshTokenFamilyStoreModule,
+		// D-2 v2 / OR-1: default to the Redis-backed RT family store + the
+		// ioredis client module that supplies it. Multi-replica deployments
+		// require a shared Redis instance — without this swap each replica
+		// holds families in-process and clients receive `invalid_grant` on
+		// every cross-replica refresh. The override path replaces the pair
+		// entirely (typically with `[memoryRefreshTokenFamilyStoreModule]`
+		// for unit tests that don't want a real ioredis connection).
+		...(overrides.refreshTokenFamilyModules ?? [
+			refreshTokenFamilyClientModule,
+			redisRefreshTokenFamilyStoreModule,
+		]),
 		defaultRefreshTokenFamilyRotationModule,
 		defaultRefreshTokenFamilyRevocationModule,
 	];

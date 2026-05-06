@@ -219,6 +219,37 @@ export const fullSectionsSchema = z.object({
 	cors: z.object({
 		allowedOrigins: z.array(z.string()),
 	}),
+	// D-2 v2: connection-config for the standalone refresh-token-family
+	// client. Defaults live in HOCON (`application.conf`) per ADR — no
+	// `.default()` here. Module-internal config (`keyPrefix`, `casRetryLimit`)
+	// is declared on a SEPARATE top-level key below so AppConfigSchema does
+	// not strip it before the boot-time module schema sees it.
+	refreshTokenFamilyStore: z
+		.object({
+			redis: z
+				.object({
+					url: z.string(),
+					password: z.string().optional(),
+				})
+				.optional(),
+		})
+		.optional(),
+	// D-2 v2: module-internal config for `redisRefreshTokenFamilyStoreModule`.
+	// MUST be declared here (in `fullSectionsSchema`) so `AppConfigSchema.parse(...)`
+	// in `app.mts` preserves operator overrides
+	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`) before
+	// the module's `configSchema` runs at boot time. Without this declaration
+	// Zod strips the unknown top-level key and the env-var overrides silently
+	// no-op. The actual defaults still live in `application.conf`; this entry
+	// is presence-only (both fields optional). The duplicate-source-of-truth
+	// concern is intentional: the module's `configSchema` enforces shape +
+	// defaults, this schema only ensures the keys survive validation.
+	redisRefreshTokenFamilyStore: z
+		.object({
+			keyPrefix: z.string().optional(),
+			casRetryLimit: z.coerce.number().optional(),
+		})
+		.optional(),
 });
 
 /**
