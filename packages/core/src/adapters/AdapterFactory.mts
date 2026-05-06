@@ -15,18 +15,93 @@
  */
 
 /**
- * Builder context passed to every adapter builder.
+ * Passed to AdapterFactory builders via {@link BuilderContext.lifecycle}.
+ * Builders that create disposable sub-resources (Redis clients, interval
+ * timers, etc.) SHOULD register a cleanup callback here.
  *
- * Intentionally minimal in v1 — all fields are optional and future additions are
- * guaranteed to be additive-only (non-breaking). Builders may ignore fields they
- * do not need. Planned future fields:
- *   - logger?: Logger         (startup-time logging, added when logger injection lands)
+ * Cleanups are invoked in LIFO order (reverse of registration) during
+ * `AppHandle.dispose()`, with `await` between each (sequential, not parallel).
+ * Errors in individual cleanups are logged and do NOT abort the drain. All
+ * cleanup errors accumulate into the AggregateError that `AppHandle.dispose()`
+ * may throw.
+ */
+export interface LifecycleRegistrar {
+	/**
+	 * Register a cleanup callback. Called in LIFO order during
+	 * `AppHandle.dispose()`. The callback MUST return a Promise.
+	 */
+	register(cleanup: () => Promise<void>): void;
+}
+
+/**
+ * Builder context passed to every adapter builder. All fields are optional
+ * and additions remain additive-only (non-breaking). Builders may ignore
+ * fields they do not need.
+ *
+ * Planned future fields:
+ *   - logger?: Logger         (startup-time logging — see D-4 Logger interface)
  *   - abortSignal?: AbortSignal (timeout-aware init, e.g. database connections)
  *   - tracer?: Tracer         (OpenTelemetry context propagation)
  *   - metrics?: MetricsRecorder (metrics backend injection)
  */
-// biome-ignore lint/suspicious/noEmptyInterface: intentionally empty in v1; interface (not type alias) preserves declaration-merging for additive evolution
-export interface BuilderContext {}
+export interface BuilderContext {
+	/**
+	 * Lifecycle registrar provided by the boot planner. Builders that produce
+	 * a resource requiring cleanup (database client, interval timer, etc.)
+	 * SHOULD call:
+	 *
+	 *     ctx.lifecycle?.register(async () => { await resource.close(); })
+	 *
+	 * Optional: factories constructed outside the boot planner (e.g. unit
+	 * tests) receive `{}` as `ctx`, so `ctx.lifecycle` is `undefined`. Always
+	 * use optional chaining.
+	 */
+	lifecycle?: LifecycleRegistrar;
+}
+
+/**
+ * Internal-LifecycleRegistrar with a `_drain` method for the boot planner.
+ * The `_` prefix signals private use — only `AppHandle.dispose()` calls
+ * `_drain`.
+ */
+export interface InternalLifecycleRegistrar extends LifecycleRegistrar {
+	/**
+	 * Drain all registered cleanups in LIFO order. Returns the array of
+	 * errors encountered (empty if all cleanups succeeded). Each error is
+	 * logged via the supplied logger as it occurs; the drain never throws.
+	 *
+	 * @internal
+	 */
+	_drain(logger: { error(obj: unknown): void }): Promise<readonly unknown[]>;
+}
+
+/**
+ * Create a concrete LifecycleRegistrar backed by an ordered array.
+ *
+ * @internal — used by the boot planner; not part of the consumer-facing API.
+ */
+export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
+	const cleanups: Array<() => Promise<void>> = [];
+	return {
+		register(cleanup: () => Promise<void>): void {
+			cleanups.push(cleanup);
+		},
+		async _drain(logger: { error(obj: unknown): void }): Promise<readonly unknown[]> {
+			const errors: unknown[] = [];
+			for (let i = cleanups.length - 1; i >= 0; i--) {
+				const cleanup = cleanups[i];
+				if (cleanup === undefined) continue;
+				try {
+					await cleanup();
+				} catch (err) {
+					logger.error({ msg: "lifecycle cleanup failed", cleanupIndex: i, error: err });
+					errors.push(err);
+				}
+			}
+			return errors;
+		},
+	};
+}
 
 /**
  * Factory builder function: given raw config plus a {@link BuilderContext}, produce

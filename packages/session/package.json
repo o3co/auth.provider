@@ -43,13 +43,15 @@
 		"redis": "^5.12.1"
 	},
 	"peerDependencies": {
-		"express": "^5.0.0"
+		"express": "^5.0.0",
+		"express-session": "^1.17.0"
 	},
 	"devDependencies": {
 		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
 		"@types/supertest": "^7.2.0",
 		"express": "^5.2.1",
+		"express-session": "^1.18.0",
 		"supertest": "^7.2.2",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.2",

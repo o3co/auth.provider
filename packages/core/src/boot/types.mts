@@ -30,6 +30,7 @@
 import type { Server as HttpServer } from "node:http";
 import type { Router } from "express";
 import type { z } from "zod";
+import type { LifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { AppConfig } from "../config/application.schema.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
@@ -61,6 +62,19 @@ declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly config: AppConfig;
 		readonly pathResolver: PathResolver;
+		/**
+		 * Boot-planner-owned lifecycle registrar (D-5). Pre-seeded as a bootstrap
+		 * component before any module factory runs. Modules that create disposable
+		 * sub-resources (Redis clients, interval timers) declare
+		 * `optional: ["lifecycleRegistrar"]` and forward the value into
+		 * `createAdapterFactory(kind, { lifecycle: deps.lifecycleRegistrar })`
+		 * so each builder receives the registrar via `BuilderContext.lifecycle`.
+		 *
+		 * This slot is NOT consumer-overridable — `bootstrap-component-collision`
+		 * fires if a consumer passes it via `bootstrapComponents` /
+		 * `overrideComponents`.
+		 */
+		readonly lifecycleRegistrar: LifecycleRegistrar;
 	}
 }
 

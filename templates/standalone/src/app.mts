@@ -16,14 +16,9 @@
 import { fileURLToPath } from "node:url";
 import { gracefulShutdown } from "@o3co/auth.utils";
 import { type AppConfig, AppConfigSchema, createApp } from "@o3co/auth-provider-core";
-import {
-	createSessionStoreFactory,
-	registerBuiltinSessionStores,
-} from "@o3co/auth-provider-session";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
-import session from "express-session";
 import helmet from "helmet";
 
 import logger from "#/logger.mjs";
@@ -56,36 +51,13 @@ await (async (): Promise<void> => {
 		}),
 	);
 
-	// Step 3: Build the Express session store and mount express-session.
-	// (express-session is host-environment middleware, not part of the auth
-	// boot pipeline — wired before createApp so it sits ahead of the router.)
-	const sessionStoreFactory = createSessionStoreFactory();
-	registerBuiltinSessionStores(sessionStoreFactory);
-	const sessionStorageSlice = config.session.storage as {
-		type: string;
-	} & Record<string, unknown>;
-	const sessionStore = await sessionStoreFactory.create({
-		type: sessionStorageSlice.type,
-		...((sessionStorageSlice[sessionStorageSlice.type] ?? {}) as Record<string, unknown>),
-	});
-	app.use(
-		session({
-			secret: config.session.secret,
-			resave: false,
-			saveUninitialized: false,
-			store: sessionStore,
-			cookie: {
-				path: "/",
-				httpOnly: true,
-				secure: config.session.secure,
-				maxAge: config.session.maxAge,
-				sameSite: config.session.sameSite,
-				domain: config.session.domain || undefined,
-			},
-		}),
-	);
-
-	// Step 4: Boot the auth pipeline. bootstrapComponents carries only host-
+	// Step 3: Boot the auth pipeline.
+	// D-5: express-session middleware is now wired by `sessionStoreModule`
+	// inside the boot planner (mounted via `before: ["session-routes",
+	// "federation-routes", "oauth-endpoints"]` so it initialises `req.session`
+	// for every downstream route). The connect-redis client's lifetime is
+	// owned by the planner via `BuilderContext.lifecycle` and drained on
+	// `handle.dispose()`. bootstrapComponents carries only host-
 	// environment values (config + pathResolver per A2-γ §4 worked example);
 	// every other component flows through composition-root-local modules.
 	// `buildModules` is the single source of truth for the module list — it
@@ -99,20 +71,20 @@ await (async (): Promise<void> => {
 		},
 	});
 
-	// Step 5: Wire host-level routes (healthcheck) before the auth router so
+	// Step 4: Wire host-level routes (healthcheck) before the auth router so
 	// they remain reachable even when the auth pipeline is degraded.
 	app.get("/_healthcheck", (_req, res) => {
 		res.status(200).json({ status: "ok" });
 	});
 
-	// Step 6: Mount the composed auth router and start the HTTP server.
+	// Step 5: Mount the composed auth router and start the HTTP server.
 	app.use(handle.router);
 	const server = app.listen(config.http.port, (): void => {
 		logger.info(`Server is running on http://localhost:${config.http.port}`);
 	});
 
-	// Step 7: Graceful shutdown — handle.dispose() runs reverse-topological
-	// per-component cleanup (per A2-β §8.1). Replaces the v0.4.x
-	// grantRegistry.cleanup() bridge.
+	// Step 6: Graceful shutdown — handle.dispose() runs reverse-topological
+	// per-component cleanup (per A2-β §8.1) plus D-5 LifecycleRegistrar drain
+	// (Redis clients, interval timers).
 	gracefulShutdown(server, () => handle.dispose());
 })();
