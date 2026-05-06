@@ -248,6 +248,45 @@ jobs:
           done
           ls -la /tmp/tarballs
 
+      - name: Pack create-app
+        run: |
+          set -euo pipefail
+          # @o3co/create-auth-provider is published alongside @o3co/auth-provider-*
+          # via `pnpm -r publish` in release.yml. Pack it into the same tarball
+          # destination so the assertion step below covers it too.
+          # The tarball filename (`o3co-create-auth-provider-*.tgz`) is distinct
+          # from the packages tarballs (`o3co-auth-provider-*-*.tgz`).
+          pushd create-app >/dev/null
+          pnpm pack --pack-destination /tmp/tarballs
+          popd >/dev/null
+          echo "create-app tarball:"
+          ls -la /tmp/tarballs/o3co-create-auth-provider-*.tgz
+
+      - name: Assert no __tests__ in published tarballs
+        run: |
+          set -euo pipefail
+          # Per CC-4 (SC-1 + SC-2 + SC-M2): compiled test artifacts must not ship
+          # in any published tarball. The scope is `dist/__tests__/` — legitimate
+          # scaffold content at `package/templates/standalone/src/__tests__/`
+          # (create-app tarball only) is consumer-facing template source and
+          # MUST stay shipped.
+          FAILED=0
+          for tgz in /tmp/tarballs/*.tgz; do
+            HITS=$(tar -tzf "$tgz" | grep -E '/dist/.*__tests__' || true)
+            if [ -n "$HITS" ]; then
+              echo "::error::$tgz contains __tests__ artifacts in dist/:"
+              echo "$HITS"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
+          echo "OK: no __tests__ artifacts in any published tarball's dist/"
+
+      - name: Check versions.json sync
+        run: node create-app/scripts/check-versions-json.mjs
+
       - name: Build templates/standalone against packed tarballs
         run: |
           set -euo pipefail
