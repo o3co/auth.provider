@@ -682,6 +682,13 @@ describe("D-1 / CR-2: /authorize binds identity to code record, not Express sess
 // allow anyone with the code to redeem it. The route must enforce these even
 // when operator config sets `pkce.required = false`.
 describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory", () => {
+	// Canonical RFC 7636 example pair — a 43-char base64url-encoded SHA-256
+	// digest of `dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`. Using a
+	// spec-valid challenge here means a future PKCE syntax check (e.g.,
+	// "must be 43-128 chars from [A-Z][a-z][0-9]-._~") would not break
+	// these tests — only the gate logic they target.
+	const VALID_S256_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
 	const publicClientRepo: ClientRepository = {
 		findById: async () => ({
 			clientId: "public-app",
@@ -757,7 +764,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 			client_id: "public-app",
 			redirect_uri: "https://spa.example.test/cb",
 			state: "state-plain",
-			code_challenge: "abc123",
+			code_challenge: VALID_S256_CHALLENGE,
 			code_challenge_method: "plain",
 		});
 		expect(res.status).toBe(302);
@@ -779,7 +786,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 			client_id: "public-app",
 			redirect_uri: "https://spa.example.test/cb",
 			state: "state-omit",
-			code_challenge: "abc123",
+			code_challenge: VALID_S256_CHALLENGE,
 			// no code_challenge_method → routes.mts treats absence as "plain"
 		});
 		expect(res.status).toBe(302);
@@ -803,7 +810,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 			redirect_uri: "https://spa.example.test/cb",
 			state: "state-ok",
 			scope: "openid profile",
-			code_challenge: "abc123",
+			code_challenge: VALID_S256_CHALLENGE,
 			code_challenge_method: "S256",
 		});
 		expect(res.status).toBe(302);
