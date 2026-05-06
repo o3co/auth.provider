@@ -53,11 +53,12 @@ await (async (): Promise<void> => {
 
 	// Step 3: Boot the auth pipeline.
 	// D-5: express-session middleware is now wired by `sessionStoreModule`
-	// inside the boot planner (mounted via `before: ["session-routes",
-	// "federation-routes", "oauth-endpoints"]` so it initialises `req.session`
-	// for every downstream route). The connect-redis client's lifetime is
-	// owned by the planner via `BuilderContext.lifecycle` and drained on
-	// `handle.dispose()`. bootstrapComponents carries only host-
+	// inside the boot planner. Mount order is enforced by declarationIndex
+	// tie-breaking — sessionStoreModule MUST come first in `buildModules(...)`
+	// so the middleware initialises `req.session` for every downstream route.
+	// The connect-redis client's lifetime is owned by the planner via
+	// `BuilderContext.lifecycle` and drained on `handle.dispose()`.
+	// bootstrapComponents carries only host-
 	// environment values (config + pathResolver per A2-γ §4 worked example);
 	// every other component flows through composition-root-local modules.
 	// `buildModules` is the single source of truth for the module list — it

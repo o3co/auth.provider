@@ -21,6 +21,7 @@ export {
 	AdapterFactoryError,
 	type BuilderContext,
 	createAdapterFactory,
+	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
 // App factory — v0.5.0 boot planner. Re-exports from ./boot/index.mjs through
 // ./app.mjs for backwards-compatible import-path stability.

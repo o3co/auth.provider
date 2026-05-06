@@ -153,7 +153,22 @@ export class RedisCodeRepository implements CodeRepository {
 	async [Symbol.asyncDispose](): Promise<void> {
 		if (this.disposed) return;
 		this.disposed = true;
-		await (this.redis as RedisClientWithQuit).quit();
+		// Runtime guard: the public `RedisClient` interface does NOT declare
+		// `quit()` (kept minimal per `feedback_no_vendor_in_interface`), but
+		// the concrete node-redis client returned by `createClient()` always
+		// provides it. Custom `RedisClient` implementations passed via the
+		// public constructor MUST also implement `quit()` for D-5 lifecycle
+		// integration to work — fail loudly with a clear message instead of
+		// throwing an opaque `client.quit is not a function` TypeError.
+		const client = this.redis as Partial<RedisClientWithQuit>;
+		if (typeof client.quit !== "function") {
+			throw new Error(
+				"RedisCodeRepository.dispose(): underlying redis client does not implement quit(). " +
+					"Custom RedisClient implementations passed to the constructor must provide a `quit(): Promise<void>` " +
+					"method for D-5 lifecycle integration.",
+			);
+		}
+		await client.quit();
 	}
 
 	/**

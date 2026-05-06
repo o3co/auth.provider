@@ -64,10 +64,10 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 
 	return [
 		// D-5: sessionStoreModule wires the express-session middleware into the
-		// boot-planner-managed lifecycle. Mount order is enforced by the
-		// module's `before` clause (session-routes / federation-routes /
-		// oauth-endpoints) — not by this list position. Listed first for
-		// readability.
+		// boot-planner-managed lifecycle. **Mount order is enforced by this
+		// list position (declarationIndex tie-breaking)** — the module
+		// intentionally has no `before`/`after` clause, so it MUST be listed
+		// ahead of every session-consuming module here. Do not reorder.
 		sessionStoreModule,
 		oauthModule({ config }),
 		oauthSessionModule({ config }),
