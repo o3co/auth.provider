@@ -240,7 +240,7 @@ IdP end-session 呼び出しが失敗した場合、ローカル状態はすで�
 6. それ以外はリフレッシュを行う:
    - 並行リフレッシュのファンアウトを防ぐために advisory lock を取得する（`FederationTokenStore` が `SupportsLock` を実装している場合）。
    - ロック取得後に再読み込みを行う — 待機中に別のウェイターがリフレッシュした可能性がある。
-   - `provider.refreshFederationToken(refreshToken)` を呼び出し、結果を永続化する。
+   - `provider.refreshToken(refreshToken)` を呼び出し、結果を永続化する。
    - ロックを解放する。
 
 ### レスポンス
@@ -292,7 +292,7 @@ clients:
 - `federation.token.success` — トークン発行時（詳細に `refreshed: boolean` が含まれ、キャッシュヒットかリフレッシュパスかを区別できる）
 - `federation.token.forbidden` — 403 発生時（クライアントが opt-in していない）
 - `federation.token.family_revoked` — family 失効による 401 発生時
-- `federation.token.refresh_failed` — `provider.refreshFederationToken` が throw したとき（`invalid_grant` 以外）
+- `federation.token.refresh_failed` — `provider.refreshToken` が throw したとき（`invalid_grant` 以外）
 - `federation.token.reauthentication_required` — IdP から `invalid_grant` を受け取ったとき
 
 ## v0.3.x → v0.4.0 マイグレーション

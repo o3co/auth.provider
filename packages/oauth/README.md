@@ -240,7 +240,7 @@ Each `Client` supports five optional fields for logout behavior:
 6. Otherwise, refresh it:
    - Acquire an advisory lock (when `FederationTokenStore` implements `SupportsLock`) to prevent concurrent refresh fan-out.
    - Re-read after the lock — another waiter may have refreshed during the wait.
-   - Call `provider.refreshFederationToken(refreshToken)`; persist the result.
+   - Call `provider.refreshToken(refreshToken)`; persist the result.
    - Release the lock.
 
 ### Response
@@ -292,7 +292,7 @@ The following audit events fire on this endpoint:
 - `federation.token.success` — on token issuance (details include `refreshed: boolean` to distinguish cache hits from refresh path)
 - `federation.token.forbidden` — on 403 (client not opted in)
 - `federation.token.family_revoked` — on 401 via revoked family
-- `federation.token.refresh_failed` — on provider.refreshFederationToken throwing (non-invalid_grant)
+- `federation.token.refresh_failed` — on provider.refreshToken throwing (non-invalid_grant)
 - `federation.token.reauthentication_required` — on `invalid_grant` from IdP
 
 ## Migrating from v0.3.x to v0.4.0
