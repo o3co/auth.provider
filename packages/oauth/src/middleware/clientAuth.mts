@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { ClientRepository, PublicClient } from "@o3co/auth-provider-core";
+import {
+	type ClientRepository,
+	consoleLogger,
+	type Logger,
+	type PublicClient,
+} from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
 
 // Module augmentation: expose `req.oauthClient` for consumers who compose this
@@ -65,9 +70,14 @@ function formUrlDecode(s: string): string {
  * operational detail to callers.
  *
  * @param clientRepository - used to look up the client by credential pair.
+ * @param logger - structured logger for repository-failure traces. Defaults to
+ *                 `consoleLogger` so existing callers compile unchanged.
  * @returns an express RequestHandler.
  */
-export function createClientAuthMiddleware(clientRepository: ClientRepository): RequestHandler {
+export function createClientAuthMiddleware(
+	clientRepository: ClientRepository,
+	logger: Logger = consoleLogger,
+): RequestHandler {
 	return async (req, res, next) => {
 		let clientId: string | undefined;
 		let clientSecret: string | undefined;
@@ -128,7 +138,7 @@ export function createClientAuthMiddleware(clientRepository: ClientRepository): 
 		} catch (err) {
 			// Fail-closed: repository unavailability must not grant access.
 			// Log server-side for operators; do NOT leak store details to callers.
-			console.warn({ err }, "client credential lookup failed");
+			logger.warn({ err }, "client credential lookup failed");
 			res.set("WWW-Authenticate", WWW_AUTH);
 			res.status(401).json({ error: "invalid_client" });
 			return;

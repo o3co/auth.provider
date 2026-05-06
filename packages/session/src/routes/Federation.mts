@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import type {
-	AppConfig,
-	FederationTokenStoreBase,
-	SessionFederationIndex,
-	UserRepository,
-	UserSessionStore,
+import {
+	type AppConfig,
+	consoleLogger,
+	type FederationTokenStoreBase,
+	type Logger,
+	type SessionFederationIndex,
+	type UserRepository,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { extractUserClaims } from "#/internal/extractUserClaims.mjs";
@@ -62,6 +64,7 @@ export const createRouter = (
 		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
+		logger = consoleLogger,
 	}: {
 		config: AppConfig;
 		federationProviders: ReadonlyMap<string, FederationProvider>;
@@ -72,6 +75,7 @@ export const createRouter = (
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStoreBase;
 		sessionTtlMs?: number;
+		logger?: Logger;
 	},
 ): Router => {
 	if (!userSessionStore) throw new Error("federation routes require userSessionStore");
@@ -159,6 +163,11 @@ export const createRouter = (
 				return res.status(404).json({ message: "NotFound" });
 			}
 
+			// Per-handler logger child carrying the provider binding. After
+			// `randomUUID()` produces `sid` below, we rebind to include `sid`
+			// so subsequent calls do not need to repeat either field.
+			let log = logger.child({ provider: provider.name });
+
 			const fed = req.session.federation;
 
 			// Check session.federation present and name matches
@@ -189,10 +198,7 @@ export const createRouter = (
 				req.session.save((err) => resolve(err ?? null));
 			});
 			if (reusePrevSaveErr) {
-				console.warn(
-					{ err: reusePrevSaveErr, provider: provider.name },
-					"reuse-prevention session save failed",
-				);
+				log.warn({ err: reusePrevSaveErr }, "reuse-prevention session save failed");
 				return res.status(500).json({
 					error: "server_error",
 					error_description: "Session store unavailable",
@@ -227,7 +233,7 @@ export const createRouter = (
 					redirectUri: callbackUrl,
 				});
 			} catch (err) {
-				console.warn({ err, provider: provider.name }, "federation token exchange failed");
+				log.warn({ err }, "federation token exchange failed");
 				return res.status(502).json({
 					error: "exchange_failed",
 					error_description: "Token exchange with upstream IdP failed",
@@ -245,7 +251,7 @@ export const createRouter = (
 			try {
 				user = await userRepository.authenticateByToken(`${provider.name}:${profile.sub}`);
 			} catch (err) {
-				console.warn({ err, provider: provider.name }, "user repository lookup failed");
+				log.warn({ err }, "user repository lookup failed");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "User directory temporarily unavailable",
@@ -265,6 +271,8 @@ export const createRouter = (
 			};
 
 			const sid = randomUUID();
+			// Rebind: from this point onward, every log call carries `provider` AND `sid`.
+			log = log.child({ sid });
 			const authTime = new Date();
 			const expiresAt = new Date(Date.now() + sessionTtlMs);
 
@@ -277,7 +285,7 @@ export const createRouter = (
 					claims,
 				});
 			} catch (err) {
-				console.warn({ err, provider: provider.name }, "userSession create failed");
+				log.warn({ err }, "userSession create failed");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "Session store unavailable",
@@ -300,10 +308,7 @@ export const createRouter = (
 				} catch {
 					// best-effort — ignore (the original error is the one returned)
 				}
-				console.warn(
-					{ err, provider: provider.name },
-					"sessionFederationIndex.addFederation failed",
-				);
+				log.warn({ err }, "sessionFederationIndex.addFederation failed");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "Session store unavailable",
@@ -340,8 +345,8 @@ export const createRouter = (
 				} catch {
 					// best-effort — ignore
 				}
-				console.error(
-					{ err: regenerateErr, sid, provider: provider.name },
+				log.error(
+					{ err: regenerateErr },
 					"session regeneration failed after userSessionStore.create",
 				);
 				return res.status(500).json({
@@ -422,7 +427,7 @@ export const createRouter = (
 				await new Promise<void>((resolve) => {
 					req.session.destroy(() => resolve());
 				});
-				console.error({ err, sid, provider: provider.name }, "session post-create failed");
+				log.error({ err }, "session post-create failed");
 				return res.status(500).json({
 					error: "session_create_failed",
 					error_description: "Internal error: session could not be persisted",

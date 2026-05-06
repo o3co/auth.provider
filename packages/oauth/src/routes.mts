@@ -19,6 +19,7 @@ import {
 	type AuditSinkBase,
 	type ClientRepository,
 	type CodeRepository,
+	consoleLogger,
 	emitAuditEvent,
 	type FederationProviderHandle,
 	type FederationTokenStoreBase,
@@ -26,6 +27,7 @@ import {
 	type GrantPolicyHookBase,
 	type GrantRegistry,
 	type KeyStore,
+	type Logger,
 	type PublicClient,
 	type RateLimiterBase,
 	type RefreshTokenFamilyRevocation,
@@ -78,6 +80,7 @@ export const createOAuthRouter = async (
 		sessionFederationIndex,
 		federationTokenStore,
 		getFederationProviders = () => undefined,
+		logger = consoleLogger,
 	}: {
 		registry: GrantRegistry;
 		config: AppConfig;
@@ -99,12 +102,13 @@ export const createOAuthRouter = async (
 		 * from `module.mts`. Defaults to `() => undefined` when not provided.
 		 */
 		getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
+		logger?: Logger;
 	},
 ): Promise<{ router: Router; registry: GrantRegistry }> => {
 	const router = express.Router();
 
 	// Construct once at router-creation time so the closure is not re-allocated per request.
-	const clientAuthMw = createClientAuthMiddleware(clientRepository);
+	const clientAuthMw = createClientAuthMiddleware(clientRepository, logger);
 
 	async function checkRateLimit(req: Request, res: Response, tag: string): Promise<boolean> {
 		if (!rateLimiter) return true;
@@ -658,6 +662,7 @@ export const createOAuthRouter = async (
 				clientRepository,
 				getFederationProviders,
 				auditSink,
+				logger,
 			}),
 		);
 	}
@@ -677,6 +682,7 @@ export const createOAuthRouter = async (
 				clientRepository,
 				getFederationProviders,
 				auditSink,
+				logger,
 			}),
 		);
 	}

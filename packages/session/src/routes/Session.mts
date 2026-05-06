@@ -15,7 +15,14 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { AppConfig, User, UserRepository, UserSessionStore } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	consoleLogger,
+	type Logger,
+	type User,
+	type UserRepository,
+	type UserSessionStore,
+} from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
 import { extractUserClaims } from "#/internal/extractUserClaims.mjs";
@@ -43,12 +50,14 @@ export const createRouter = (
 		config,
 		userSessionStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
+		logger = consoleLogger,
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
 		userSessionStore?: UserSessionStore;
 		/** Session TTL in milliseconds. Default: 24h. */
 		sessionTtlMs?: number;
+		logger?: Logger;
 	},
 ): Router => {
 	const router = express.Router();
@@ -139,7 +148,7 @@ export const createRouter = (
 				try {
 					user = await userRepository.authenticate(username, password);
 				} catch (err) {
-					console.warn({ err }, "local login authenticate failed");
+					logger.warn({ err }, "local login authenticate failed");
 					return res.status(503).json({
 						error: "temporarily_unavailable",
 						error_description: "User directory temporarily unavailable",

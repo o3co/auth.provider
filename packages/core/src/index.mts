@@ -148,6 +148,7 @@ export {
 	createAsymmetricKeyStore,
 	createSymmetricKeyStore,
 } from "./keys/KeyStore.mjs";
+export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";
 // Logging
 export type { Logger } from "./logging/Logger.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";

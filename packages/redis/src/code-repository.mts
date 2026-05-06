@@ -15,7 +15,14 @@
  */
 
 import crypto from "node:crypto";
-import type { AdapterBuilder, Code, CodeRepository, PathResolver } from "@o3co/auth-provider-core";
+import {
+	type AdapterBuilder,
+	type Code,
+	type CodeRepository,
+	consoleLogger,
+	type Logger,
+	type PathResolver,
+} from "@o3co/auth-provider-core";
 
 const KEY_PREFIX = "oauth:code:";
 
@@ -32,15 +39,18 @@ interface RedisClient {
 export class RedisCodeRepository implements CodeRepository {
 	private redis: RedisClient;
 	private defaultExpiresIn: number;
+	private logger: Logger;
 
-	constructor(redis: RedisClient, defaultExpiresIn = 600) {
+	constructor(redis: RedisClient, defaultExpiresIn = 600, logger: Logger = consoleLogger) {
 		this.redis = redis;
 		this.defaultExpiresIn = defaultExpiresIn;
+		this.logger = logger;
 	}
 
 	static async create(
 		config: Record<string, unknown>,
 		pathResolver?: PathResolver,
+		logger: Logger = consoleLogger,
 	): Promise<RedisCodeRepository> {
 		if (typeof config.endpointUri !== "string") {
 			throw new Error('RedisCodeRepository requires "endpointUri" in config');
@@ -63,7 +73,7 @@ export class RedisCodeRepository implements CodeRepository {
 		});
 		const defaultExpiresIn =
 			typeof config.defaultExpiresIn === "number" ? config.defaultExpiresIn : undefined;
-		const repo = new RedisCodeRepository(redis as unknown as RedisClient, defaultExpiresIn);
+		const repo = new RedisCodeRepository(redis as unknown as RedisClient, defaultExpiresIn, logger);
 		await repo.initialize();
 		return repo;
 	}
@@ -112,7 +122,7 @@ export class RedisCodeRepository implements CodeRepository {
 			return { ...JSON.parse(value), code } as Code;
 		} catch (err) {
 			const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
-			console.error(`RedisCodeRepository: corrupted data for code (hash=${codeHash})`, err);
+			this.logger.error({ err, codeHash }, "RedisCodeRepository: corrupted data for code");
 			return null;
 		}
 	}

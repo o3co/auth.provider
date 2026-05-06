@@ -32,6 +32,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/federationToken.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -991,8 +992,8 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("logger routing", () => {
 		it("routes failures to opts.logger, not console", async () => {
-			const warnSpy = vi.fn<(message: string, ...args: unknown[]) => void>();
-			const logger: Logger = { warn: warnSpy };
+			const logger = createMockLogger();
+			const warnSpy = logger.warn;
 			const sessionStore = makeSessionStore({
 				get: vi.fn().mockRejectedValue(new Error("redis down")),
 			});

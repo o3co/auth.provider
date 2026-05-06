@@ -1,4 +1,5 @@
 import { assert, describe, expect, it, vi } from "vitest";
+import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
 import { renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
 
 describe("renderFrontchannelLogoutHtml", () => {
@@ -170,7 +171,7 @@ describe("renderFrontchannelLogoutHtml", () => {
 	});
 
 	it("skips RPs with invalid frontchannelLogoutUri instead of throwing", () => {
-		const logger = { warn: vi.fn() };
+		const logger = createMockLogger();
 		const html = renderFrontchannelLogoutHtml({
 			rps: [
 				{ clientId: "good", frontchannelLogoutUri: "https://good.example/fc" },
