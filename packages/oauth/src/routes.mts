@@ -546,6 +546,48 @@ export const createOAuthRouter = async (
 					);
 				}
 
+				// IH-16 (v0.5.1): bound the OIDC `nonce` query parameter BEFORE the
+				// scope/policy block runs. Pre-fix the value was stored on the code
+				// record + echoed verbatim into the id_token, letting a malicious
+				// RP exhaust per-request memory or amplify the token payload with a
+				// multi-megabyte string. The 256-char ceiling is operator-tunable
+				// via `oauth.nonce.maxLength` (default in core HOCON, env-var
+				// `OAUTH_NONCE_MAX_LENGTH`). Errors use `redirectError` because
+				// `redirect_uri` is already validated against the client allowlist
+				// at this point — RFC 6749 §4.1.2.1 requires error redirects from
+				// here on.
+				//
+				// Placement (Claude review fixup): the gate runs BEFORE
+				// `grantPolicy.evaluate()` so an oversized nonce cannot trigger
+				// external policy I/O (Redis lookup / HTTP call) before the cheap
+				// length+character-set check rejects the request. Moving the gate
+				// any earlier than this is unsafe — it must follow `redirect_uri`
+				// validation so errors can use `redirectError`.
+				const nonceMaxLength = config.oauth.nonce?.maxLength ?? 256;
+				if (typeof req.query.nonce === "string") {
+					const nonceValue = req.query.nonce;
+					if (nonceValue.length > nonceMaxLength) {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							`nonce exceeds maximum length of ${nonceMaxLength}`,
+							toStr(state),
+						);
+					}
+					// Printable ASCII only (0x20-0x7E). Non-printable input could
+					// confuse downstream JWT libraries that don't escape control
+					// chars in JSON payloads. OIDC Core §3.1.2.1 leaves the
+					// alphabet unconstrained; this is a defensive narrowing.
+					if (!/^[\x20-\x7E]*$/.test(nonceValue)) {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							"nonce contains non-printable characters",
+							toStr(state),
+						);
+					}
+				}
+
 				const requestedScopes = toStr(scope)?.split(" ").filter(Boolean) ?? [];
 				const allowedFilteredScopes =
 					requestedScopes.length > 0
@@ -642,41 +684,6 @@ export const createOAuthRouter = async (
 				} else {
 					// No challenge: method is irrelevant (no PKCE)
 					resolvedMethod = undefined;
-				}
-
-				// IH-16 (v0.5.1): bound the OIDC `nonce` query parameter. Pre-fix
-				// the value was stored on the code record + echoed verbatim into
-				// the id_token, letting a malicious RP exhaust per-request memory
-				// or amplify the token payload with a multi-megabyte string. The
-				// 256-char ceiling is operator-tunable via `oauth.nonce.maxLength`
-				// (default in core HOCON, env-var `OAUTH_NONCE_MAX_LENGTH`).
-				// Errors use `redirectError` because `redirect_uri` is already
-				// validated against the client allowlist at this point — RFC 6749
-				// §4.1.2.1 requires error redirects from here on.
-				const oauthConfig = config.oauth as { nonce?: { maxLength?: number } } | undefined;
-				const nonceMaxLength = oauthConfig?.nonce?.maxLength ?? 256;
-				if (typeof req.query.nonce === "string") {
-					const nonceValue = req.query.nonce;
-					if (nonceValue.length > nonceMaxLength) {
-						return redirectError(
-							redirect_uri,
-							"invalid_request",
-							`nonce exceeds maximum length of ${nonceMaxLength}`,
-							toStr(state),
-						);
-					}
-					// Printable ASCII only (0x20-0x7E). Non-printable input could
-					// confuse downstream JWT libraries that don't escape control
-					// chars in JSON payloads. OIDC Core §3.1.2.1 leaves the
-					// alphabet unconstrained; this is a defensive narrowing.
-					if (!/^[\x20-\x7E]*$/.test(nonceValue)) {
-						return redirectError(
-							redirect_uri,
-							"invalid_request",
-							"nonce contains non-printable characters",
-							toStr(state),
-						);
-					}
 				}
 
 				// CP-14: persist `undefined` when no scopes/audiences survived —

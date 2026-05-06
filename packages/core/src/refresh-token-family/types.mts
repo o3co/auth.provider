@@ -159,6 +159,20 @@ export interface RefreshTokenFamilyStore {
  *   so the family TTL is set ONCE at creation and never extended). The
  *   field is optional so existing test stubs that return `{ outcome:
  *   "rotated" }` without it continue to compile.
+ *
+ *   **Drift caveat**: `cappedExpiresAtMs` is read from
+ *   `RefreshTokenFamilyUpdateResult.family.expiresAtMs` after a successful
+ *   commit. The Redis adapter reconstructs that value as
+ *   `Date.now() + newTtlMs` after the EXEC round-trip, so the returned
+ *   epoch-ms drifts forward by single-digit milliseconds vs the value
+ *   the updater computed. This drift is benign for cap-detection
+ *   (`cappedExpiresAtMs < requestedExpiresAtMs` still indicates the cap
+ *   fired), but the value is NOT a millisecond-precise mirror of the
+ *   stored Redis TTL — Phase F consumers planning to align an issued
+ *   JWT `exp` claim should subtract a safety margin or use `findFamily`
+ *   for a fresher read. See `packages/redis/src/refresh-token-family.mts`
+ *   `updateFamily` comment for the underlying mechanism.
+ *
  * - `replayed`: family exists, not revoked, but previousJti did NOT match
  *   the active jti (e.g., previous jti was already rotated out). Caller
  *   MUST reject and treat as a replay-attack audit signal.

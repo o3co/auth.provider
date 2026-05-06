@@ -52,7 +52,27 @@ export function resolvePkceSupportedMethods(
 	const raw = pkceConfig?.supportedMethods;
 	if (!Array.isArray(raw)) return DEFAULT_PKCE_METHODS;
 	const filtered = raw.filter((m): m is string => typeof m === "string");
-	if (filtered.length === 0) return DEFAULT_PKCE_METHODS;
+	if (filtered.length === 0) {
+		// All-non-string fallback (e.g. operator wrote `[123, null]`).
+		// Pre-Claude-review-fixup the helper fell back to defaults silently
+		// here, so a completely garbage allowlist disabled the operator's
+		// intended PKCE policy with zero log signal. Warn now so the
+		// misconfiguration is visible. We deliberately do NOT warn on the
+		// `raw.length === 0` case (operator literal `[]` may be an
+		// intentional "use defaults" signal); only an explicit non-empty
+		// non-string array trips this branch.
+		// Object-first per F5 D-4 Logger convention.
+		if (raw.length > 0) {
+			logger?.warn(
+				{
+					raw,
+					removed: raw.length,
+				},
+				"pkce_supportedMethods_all_non_string_fallback_to_default",
+			);
+		}
+		return DEFAULT_PKCE_METHODS;
+	}
 	if (filtered.length !== raw.length) {
 		// Object-first call shape per F5 D-4 Logger convention: structured
 		// fields first so PII-redaction tooling can inspect keys directly.

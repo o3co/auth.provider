@@ -58,14 +58,39 @@ describe("resolvePkceSupportedMethods (TS-4)", () => {
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("falls back to default when supportedMethods is the empty array literal", () => {
-		const result = resolvePkceSupportedMethods({ supportedMethods: [] });
+	it("falls back to default when supportedMethods is the empty array literal — silently (operator may have intended `[]` as 'use defaults')", () => {
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
+		const result = resolvePkceSupportedMethods({ supportedMethods: [] }, logger);
 		expect(result).toEqual(["S256", "plain"]);
+		// Literal `[]` is treated as "no opinion → use defaults"; warning here
+		// would flood logs for operators who intentionally cleared the field.
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("falls back to default when all elements are non-string (filtered to empty)", () => {
-		const result = resolvePkceSupportedMethods({ supportedMethods: [123, null] });
+	it("falls back to default AND warns when all elements are non-string (filtered to empty)", () => {
+		// Without the warn, an operator typo like `supportedMethods = [123, null]`
+		// would silently disable their PKCE method allowlist and the helper
+		// would substitute defaults. The warn surfaces this misconfiguration.
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
+		const result = resolvePkceSupportedMethods({ supportedMethods: [123, null] }, logger);
 		expect(result).toEqual(["S256", "plain"]);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
 	});
 
 	it("falls back to default when supportedMethods is absent", () => {

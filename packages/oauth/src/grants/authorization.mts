@@ -189,6 +189,26 @@ export const createAuthorizationGrant = (
 				};
 			}
 
+			// SF-3 fixup: a code record carrying `code_challenge` without
+			// `code_challenge_method` would silently bypass PKCE validation
+			// because the outer `if (codeData.code_challenge_method)` gate
+			// below is falsy. The /authorize route never persists this shape
+			// (challenge is stored only when method is resolved — see
+			// `routes.mts:632-661`), so in practice this guard fires only on
+			// a corrupt store record or a custom CodeRepository implementation
+			// that wrote the partial state. Reject as `invalid_request`; a
+			// vacuous-pass would be a silent verifier bypass.
+			if (codeData.code_challenge && !codeData.code_challenge_method) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription:
+							"code_challenge present but code_challenge_method missing on code record",
+					},
+				};
+			}
+
 			// Validate code_verifier using code data from repository
 			if (codeData.code_challenge_method) {
 				// SF-3 (v0.5.1): a code record with `code_challenge_method` set

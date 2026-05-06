@@ -111,6 +111,13 @@ async function buildAuthorizeApp(opts: {
 	sessionFields: Record<string, unknown>;
 	captureCode: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
 	captureSession?: (session: Record<string, unknown>) => void;
+	/**
+	 * Optional config override merged into the default `authorizeConfig`.
+	 * Used by IH-16 tests that need to set a non-default
+	 * `oauth.nonce.maxLength` so the configurable code path is exercised
+	 * (the no-override path uses the `?? 256` fallback only).
+	 */
+	configOverride?: Partial<AppConfig>;
 }) {
 	const app = express();
 	app.use(express.json());
@@ -143,9 +150,22 @@ async function buildAuthorizeApp(opts: {
 		removeByCode: async () => {},
 	};
 
+	const mergedConfig = (
+		opts.configOverride
+			? {
+					...authorizeConfig,
+					...opts.configOverride,
+					oauth: {
+						...(authorizeConfig as unknown as { oauth: Record<string, unknown> }).oauth,
+						...((opts.configOverride as { oauth?: Record<string, unknown> }).oauth ?? {}),
+					},
+				}
+			: authorizeConfig
+	) as AppConfig;
+
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
-		config: authorizeConfig,
+		config: mergedConfig,
 		clientRepository: authorizeClientRepo,
 		codeRepository: codeRepo,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -691,6 +711,44 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 		expect(location.origin + location.pathname).toBe("https://example.test/cb");
 		expect(location.searchParams.get("error")).toBe("invalid_request");
 		expect(location.searchParams.get("error_description")).toMatch(/non-printable|character/i);
+		expect(captureCode).not.toHaveBeenCalled();
+	});
+
+	it("honours an operator-configured `oauth.nonce.maxLength` (not just the default 256)", async () => {
+		// Without this test, the configurable code path was completely
+		// untested — the other IH-16 tests exercise only the `?? 256`
+		// fallback. Drop the limit to 10 and verify both an 11-char nonce
+		// rejects and a 10-char nonce passes; this proves
+		// `config.oauth.nonce.maxLength` actually flows through to the gate.
+		const captureCode = vi.fn();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode,
+			configOverride: {
+				oauth: {
+					jwt: { issuer: "https://auth.example" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					nonce: { maxLength: 10 },
+				},
+			} as unknown as Partial<AppConfig>,
+		});
+
+		// Over the operator limit — must redirect-error with the configured value.
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				nonce: "a".repeat(11),
+			});
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		// The error description must echo the OPERATOR's value (not 256) —
+		// proves the override took effect.
+		expect(location.searchParams.get("error_description")).toMatch(/maximum length of 10\b/);
 		expect(captureCode).not.toHaveBeenCalled();
 	});
 });

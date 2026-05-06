@@ -78,6 +78,17 @@ export function createRefreshTokenFamilyRotation(
 				// the original creation value (or honours a smaller caller-
 				// supplied value, e.g. a session-bound RT). Per OAuth 2.1
 				// BCP §4.14.1.
+				//
+				// Naming note: `cappedExpiresAtMs` here is the PRE-commit
+				// computed value used by the updater. The "rotated" outcome
+				// below exposes a same-named field that reads the POST-commit
+				// `result.family.expiresAtMs` — for the Redis adapter this
+				// drifts forward by a few ms vs the closure value (see
+				// `RefreshTokenFamilyRotationOutcome` JSDoc + the Redis
+				// `updateFamily` post-EXEC reconstruction comment). They are
+				// the same value modulo single-digit-ms drift; consumers
+				// must read the field on the outcome, not assume the
+				// updater's pre-commit value.
 				const cappedExpiresAtMs = Math.min(expiresAtMs, current.expiresAtMs);
 				return Object.freeze({
 					...current,
