@@ -821,5 +821,13 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		expect(location.searchParams.get("error")).toBeNull();
 		expect(captured?.client_id).toBe("public-app");
 		expect(captured?.redirect_uri).toBe("https://spa.example.test/cb");
+		// The /authorize gate is only the first half of the public-client
+		// protection. The verifier check at /token requires the challenge to
+		// have been persisted on the Code record — if a future refactor drops
+		// either field from `createCode`, the public-client gate would still
+		// pass requests through but `/token` would have no verifier to check
+		// against. Asserting persistence here closes that regression window.
+		expect(captured?.code_challenge).toBe(VALID_S256_CHALLENGE);
+		expect(captured?.code_challenge_method).toBe("S256");
 	});
 });
