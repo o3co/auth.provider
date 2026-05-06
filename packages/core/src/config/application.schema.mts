@@ -126,12 +126,18 @@ export const CoreConfigSchema = z.object({
 		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
 		// repository. Multi-replica deployments MUST set this to `"redis"`;
 		// the in-memory variant loses codes on restart and across replicas.
-		// Default `"memory"` lives in HOCON per ADR; presence-only here
-		// (`.optional()`) so token-only deployments that omit `oauth.code`
-		// entirely still validate against this base schema.
+		//
+		// `adapter` is `.optional()` (not required-when-code-is-present)
+		// because the core HOCON binds it to `${?OAUTH_CODE_ADAPTER}` with
+		// no literal default — when the env var is unset, HOCON still
+		// produces an empty `oauth.code = {}` block. Requiring `adapter`
+		// here would reject that valid "no override" state. The
+		// `buildModules` legacy `repositories.code.type = "redis"` fallback
+		// only fires when `adapter` is undefined, so leaving it optional
+		// is what keeps the deprecation window real.
 		code: z
 			.object({
-				adapter: z.enum(["memory", "redis"]),
+				adapter: z.enum(["memory", "redis"]).optional(),
 			})
 			.optional(),
 	}),
