@@ -20,30 +20,14 @@ import {
 	type Code,
 	type CodeRepository,
 	consoleLogger,
+	defineModule,
 	type Logger,
-	type PathResolver,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
+import type { CodeRepositoryClient } from "./clients.mjs";
 
-const KEY_PREFIX = "oauth:code:";
-
-// Minimal interface for the redis client methods we use.
-// Avoids importing the full "redis" types at the module level.
-interface RedisClient {
-	connect(): Promise<void>;
-	get(key: string): Promise<string | null>;
-	set(key: string, value: string, options?: { EX?: number }): Promise<unknown>;
-	getDel(key: string): Promise<string | null>;
-	del(key: string): Promise<number>;
-}
-
-// Quit shape lives on the concrete node-redis client returned by `createClient`
-// but is intentionally NOT part of the public `RedisClient` interface (which
-// stays minimal per `feedback_no_vendor_in_interface`). The cast in
-// `[Symbol.asyncDispose]` reaches the runtime quit() method via the private
-// `redis` field — no interface widening needed.
-interface RedisClientWithQuit extends RedisClient {
-	quit(): Promise<void>;
-}
+const DEFAULT_KEY_PREFIX = "oauth:code:";
+const DEFAULT_EXPIRES_IN_SECONDS = 600;
 
 /**
  * Shape persisted as JSON in Redis for each authorization code (D-1).
@@ -67,56 +51,31 @@ interface StoredCodePayload {
 	grantedAudience?: string[];
 }
 
+/**
+ * Options accepted by the public `RedisCodeRepository` constructor.
+ *
+ * Per OR-9 (Wave 5d): the connection lifecycle is owned by the consumer
+ * (composition root); the repository only consumes the typed
+ * `CodeRepositoryClient` wrapper. No internal client construction, no
+ * `quit()` call, no `[Symbol.asyncDispose]`.
+ */
+export interface RedisCodeRepositoryOptions {
+	readonly keyPrefix?: string;
+	readonly defaultExpiresIn?: number;
+	readonly logger?: Logger;
+}
+
 export class RedisCodeRepository implements CodeRepository {
-	private redis: RedisClient;
-	private defaultExpiresIn: number;
-	private logger: Logger;
-	// D-5: idempotence flag — `[Symbol.asyncDispose]` fallback in the boot
-	// planner AND the LifecycleRegistrar drain both target the same instance,
-	// so `dispose()` may be called twice. The second call must be a no-op
-	// instead of issuing a second `quit()` against a closed client (which
-	// throws `ClientClosedError` on node-redis v5).
-	private disposed = false;
+	private readonly client: CodeRepositoryClient;
+	private readonly keyPrefix: string;
+	private readonly defaultExpiresIn: number;
+	private readonly logger: Logger;
 
-	constructor(redis: RedisClient, defaultExpiresIn = 600, logger: Logger = consoleLogger) {
-		this.redis = redis;
-		this.defaultExpiresIn = defaultExpiresIn;
-		this.logger = logger;
-	}
-
-	static async create(
-		config: Record<string, unknown>,
-		pathResolver?: PathResolver,
-		logger: Logger = consoleLogger,
-	): Promise<RedisCodeRepository> {
-		if (typeof config.endpointUri !== "string") {
-			throw new Error('RedisCodeRepository requires "endpointUri" in config');
-		}
-
-		const { createClient } = pathResolver
-			? ((await import(pathResolver("redis"))) as typeof import("redis"))
-			: await import("redis");
-
-		const redis = createClient({
-			url: config.endpointUri,
-			password: typeof config.password === "string" ? config.password : undefined,
-			socket: {
-				reconnectStrategy: (retries: number) => {
-					const jitter = Math.floor(Math.random() * 200);
-					const delay = Math.min(2 ** retries * 50, 2000);
-					return delay + jitter;
-				},
-			},
-		});
-		const defaultExpiresIn =
-			typeof config.defaultExpiresIn === "number" ? config.defaultExpiresIn : undefined;
-		const repo = new RedisCodeRepository(redis as unknown as RedisClient, defaultExpiresIn, logger);
-		await repo.initialize();
-		return repo;
-	}
-
-	async initialize(): Promise<void> {
-		await this.redis.connect();
+	constructor(client: CodeRepositoryClient, opts: RedisCodeRepositoryOptions = {}) {
+		this.client = client;
+		this.keyPrefix = opts.keyPrefix ?? DEFAULT_KEY_PREFIX;
+		this.defaultExpiresIn = opts.defaultExpiresIn ?? DEFAULT_EXPIRES_IN_SECONDS;
+		this.logger = opts.logger ?? consoleLogger;
 	}
 
 	async createCode({
@@ -142,22 +101,23 @@ export class RedisCodeRepository implements CodeRepository {
 			grantedScope: grantedScope ? [...grantedScope] : undefined,
 			grantedAudience: grantedAudience ? [...grantedAudience] : undefined,
 		};
-		await this.redis.set(KEY_PREFIX + code, JSON.stringify(payload), { EX: expiresIn });
+		// PX expiry is in milliseconds; HOCON expiresIn is in seconds.
+		await this.client.set(this.keyPrefix + code, JSON.stringify(payload), "PX", expiresIn * 1000);
 		return { code, ...payload };
 	}
 
 	async getByCode(code: string): Promise<Code | null> {
-		const value = await this.redis.get(KEY_PREFIX + code);
+		const value = await this.client.get(this.keyPrefix + code);
 		return this.parseCodeValue(code, value);
 	}
 
 	async consumeByCode(code: string): Promise<Code | null> {
-		const value = await this.redis.getDel(KEY_PREFIX + code);
+		const value = await this.client.getDel(this.keyPrefix + code);
 		return this.parseCodeValue(code, value);
 	}
 
 	async removeByCode(code: string): Promise<void> {
-		await this.redis.del(KEY_PREFIX + code);
+		await this.client.del(this.keyPrefix + code);
 	}
 
 	private parseCodeValue(code: string, value: string | null): Code | null {
@@ -208,69 +168,76 @@ export class RedisCodeRepository implements CodeRepository {
 			return null;
 		}
 	}
-
-	/**
-	 * Disconnect the underlying Redis client (D-5 / OR-2). The
-	 * `redisCodeRepositoryBuilder` registers this with `BuilderContext.lifecycle`
-	 * so `AppHandle.dispose()` drains the connection automatically. The cast
-	 * reaches the runtime `quit()` method on the concrete node-redis client
-	 * without widening the minimal `RedisClient` interface (per
-	 * `feedback_no_vendor_in_interface`).
-	 */
-	async [Symbol.asyncDispose](): Promise<void> {
-		if (this.disposed) return;
-		this.disposed = true;
-		// Runtime guard: the public `RedisClient` interface does NOT declare
-		// `quit()` (kept minimal per `feedback_no_vendor_in_interface`), but
-		// the concrete node-redis client returned by `createClient()` always
-		// provides it. Custom `RedisClient` implementations passed via the
-		// public constructor MUST also implement `quit()` for D-5 lifecycle
-		// integration to work — fail loudly with a clear message instead of
-		// throwing an opaque `client.quit is not a function` TypeError.
-		const client = this.redis as Partial<RedisClientWithQuit>;
-		if (typeof client.quit !== "function") {
-			throw new Error(
-				"RedisCodeRepository.dispose(): underlying redis client does not implement quit(). " +
-					"Custom RedisClient implementations passed to the constructor must provide a `quit(): Promise<void>` " +
-					"method for D-5 lifecycle integration.",
-			);
-		}
-		await client.quit();
-	}
-
-	/**
-	 * Alias for `[Symbol.asyncDispose]` for call sites that cannot use
-	 * `await using`. Returns the same Promise.
-	 */
-	dispose(): Promise<void> {
-		return this[Symbol.asyncDispose]();
-	}
 }
 
 /**
- * AdapterFactory builder. Consumer wires:
- *   factory.register("redis", redisCodeRepositoryBuilder);
+ * @deprecated since v0.5.1 (OR-9). Use `redisCodeRepositoryModule` (DI module
+ * pattern) instead. The builder now expects `{ client, keyPrefix?,
+ * defaultExpiresIn? }` (the same shape the module passes internally) — the
+ * pre-v0.5.1 `{ endpointUri }` shape is no longer supported. Removed in v0.6.
  *
- * `config` shape: `{ endpointUri: string; password?: string; defaultExpiresIn?: number }`.
- *
- * The repository is constructed and connected lazily on first call to
- * `factory.create(...)`. The redis client lifetime is owned by the repo
- * instance: D-5 wired the builder to `ctx.lifecycle?.register(...)` so
- * `AppHandle.dispose()` drains `repo.dispose()` (which calls `quit()` on the
- * underlying client) automatically. Call sites that cannot use `await using`
- * may invoke `repo.dispose()` directly.
- *
- * Module pattern wrapper for `codeRepository` slot is intentionally NOT
- * provided in v0.5.0 — see Phase 10 plan §1 / Q4 (deferred to a separate
- * "legacy-slot module-parity" PR).
+ * Migration: stop calling `factory.register("redis", redisCodeRepositoryBuilder)`;
+ * instead include `redisCodeRepositoryModule` in the manifest and provide the
+ * `codeRepositoryClient` slot from `makeIoredisClients()`.
  */
-export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = async (config, ctx) => {
-	if (typeof config.endpointUri !== "string") {
-		throw new Error('RedisCodeRepository requires "endpointUri" in config');
+export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (config, _ctx) => {
+	const c = config as {
+		client?: CodeRepositoryClient;
+		keyPrefix?: string;
+		defaultExpiresIn?: number;
+	};
+	if (!c.client) {
+		throw new Error(
+			"redisCodeRepositoryBuilder: 'client' option is required (legacy { endpointUri } " +
+				"shape removed in v0.5.1). Use redisCodeRepositoryModule with a codeRepositoryClient " +
+				"slot from makeIoredisClients() instead.",
+		);
 	}
-	const repo = await RedisCodeRepository.create(config);
-	ctx.lifecycle?.register(async () => {
-		await repo.dispose();
+	consoleLogger.warn(
+		"redisCodeRepositoryBuilder is deprecated; use redisCodeRepositoryModule (will be removed in v0.6).",
+	);
+	return new RedisCodeRepository(c.client, {
+		keyPrefix: c.keyPrefix,
+		defaultExpiresIn: c.defaultExpiresIn,
 	});
-	return repo;
 };
+
+/**
+ * `defineModule` manifest for the Redis CodeRepository (OR-9 / Wave 5d).
+ *
+ * Static composition path. The legacy `redisCodeRepositoryBuilder` still
+ * exists for one release cycle but is deprecated — operators wiring redis
+ * codes should switch to this module + provide `codeRepositoryClient` from
+ * `makeIoredisClients()`.
+ *
+ * configSchema: top-level key `redisCodeRepository` (module-namespaced per
+ * master roadmap §3.5). No `.default()` per ADR — defaults live in
+ * `application.conf`. The constructor falls back to its built-in defaults
+ * (`oauth:code:` / 600s) when both HOCON and operator overrides omit a
+ * field; mirrors the `?? DEFAULT_*` pattern in the constructor body.
+ */
+export const redisCodeRepositoryModule = defineModule({
+	name: "redis-code-repository",
+	requires: ["codeRepositoryClient", "config"] as const,
+	configSchema: z.object({
+		redisCodeRepository: z
+			.object({
+				keyPrefix: z.string().optional(),
+				defaultExpiresIn: z.coerce.number().optional(),
+			})
+			.optional(),
+	}),
+	provides: {
+		codeRepository: (deps) => {
+			const cfg = (
+				deps.config as {
+					redisCodeRepository?: { keyPrefix?: string; defaultExpiresIn?: number };
+				}
+			).redisCodeRepository;
+			return new RedisCodeRepository(deps.codeRepositoryClient, {
+				keyPrefix: cfg?.keyPrefix,
+				defaultExpiresIn: cfg?.defaultExpiresIn,
+			});
+		},
+	},
+});

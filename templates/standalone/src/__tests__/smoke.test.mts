@@ -21,14 +21,13 @@ import {
 	defineModule,
 	generateToken,
 	InMemoryClientRepository,
-	InMemoryCodeRepository,
 	InMemoryUserRepository,
 	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 
 const config: AppConfig = {
@@ -48,6 +47,11 @@ const config: AppConfig = {
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
 		grants: {},
+		// OR-9: explicit memory adapter for the smoke test. The legacy
+		// `repositories.code.type` fallback would also pick memory here,
+		// but the explicit setting documents the intent and avoids
+		// console.warn deprecation noise in the test output.
+		code: { adapter: "memory" as const },
 	},
 	session: {
 		secret: "test-session-secret",
@@ -59,6 +63,7 @@ const config: AppConfig = {
 	},
 	rateLimit: {
 		login: { windowMs: 60000, limit: 10 },
+		failMode: "open",
 	},
 	federations: {
 		google: { enabled: false },
@@ -78,13 +83,18 @@ const config: AppConfig = {
  * Test-only repository module — bypasses the file-system-backed repositories
  * that `repositoriesModule` provides in production. Smoke tests use in-memory
  * empty repositories to verify the boot pipeline shape, not the data layer.
+ *
+ * Post-OR-9 (Wave 5d): `codeRepository` is no longer provided here — it is
+ * wired by `inMemoryCodeRepositoryModule` (or `redisCodeRepositoryModule`)
+ * via the `oauth.code.adapter` switch in `buildModules`. The smoke test
+ * config sets `oauth.code.adapter = "memory"`, so `inMemoryCodeRepositoryModule`
+ * is added automatically and provides the slot.
  */
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
 	provides: {
 		clientRepository: () => new InMemoryClientRepository(new Map()),
 		userRepository: () => new InMemoryUserRepository(new Map()),
-		codeRepository: () => new InMemoryCodeRepository(),
 	},
 });
 
@@ -266,6 +276,84 @@ describe("standalone smoke test", () => {
 			expect(names).toContain("redisSessionStores");
 			expect(names).not.toContain("standalone:stores");
 			expect(names).toContain("standalone:redis-clients");
+		});
+	});
+
+	// OR-9 (Wave 5d): adapter switch for the OAuth code repository. Closes
+	// the deferred Phase 10 module-pattern wrapper for `codeRepository`. The
+	// memory branch wires `inMemoryCodeRepositoryModule`; the redis branch
+	// wires `redisCodeRepositoryModule` against the shared ioredis socket
+	// (same `standaloneRedisClientsModule` as the RT family / rate limiter).
+	describe("OR-9: code-repository adapter wiring", () => {
+		it("buildModules wires inMemoryCodeRepositoryModule by default (oauth.code.adapter = 'memory')", () => {
+			const modules = buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("standalone:in-memory-code-repository");
+			expect(names).not.toContain("redis-code-repository");
+		});
+
+		it("buildModules switches to redisCodeRepositoryModule when oauth.code.adapter = 'redis'", () => {
+			const redisCodeConfig = {
+				...config,
+				oauth: { ...config.oauth, code: { adapter: "redis" as const } },
+			};
+			const modules = buildModules(redisCodeConfig, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("redis-code-repository");
+			expect(names).not.toContain("standalone:in-memory-code-repository");
+			// adapter = "redis" pulls in the shared ioredis socket so the
+			// `codeRepositoryClient` slot is satisfied.
+			expect(names).toContain("standalone:redis-clients");
+		});
+
+		it("buildModules honors legacy repositories.code.type='redis' with deprecation warn when oauth.code.adapter is absent", () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			try {
+				const legacyConfig = {
+					...config,
+					oauth: { ...config.oauth, code: undefined },
+					repositories: {
+						...config.repositories,
+						code: { type: "redis" as const, defaultExpiresIn: 600 },
+					},
+				};
+				const modules = buildModules(legacyConfig, {
+					keyStoreModule: testKeyStoreModule,
+					repositoriesModule: testRepositoriesModule,
+					refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+				});
+				const names = modules.map((m) => m.name);
+				expect(names).toContain("redis-code-repository");
+				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("repositories.code.type"));
+			} finally {
+				warnSpy.mockRestore();
+			}
+		});
+
+		it("buildModules has only ONE codeRepository provider in the manifest (no slot collision)", () => {
+			// Regression guard: `repositoriesModule` must NOT provide
+			// `codeRepository` post-OR-9 — the slot is owned by
+			// `inMemoryCodeRepositoryModule` or `redisCodeRepositoryModule`
+			// exclusively, selected via `oauth.code.adapter`.
+			const modules = buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				// Use the production repositoriesModule (not the test override)
+				// so we exercise its post-OR-9 provides-shape.
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const codeRepoProviders = modules.filter((m) =>
+				Object.keys(m.provides ?? {}).includes("codeRepository"),
+			);
+			expect(codeRepoProviders).toHaveLength(1);
+			expect(codeRepoProviders[0]?.name).toBe("standalone:in-memory-code-repository");
 		});
 	});
 

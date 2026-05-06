@@ -123,6 +123,17 @@ export const CoreConfigSchema = z.object({
 			expiresIn: z.coerce.number(),
 		}),
 		grants: z.object({}).passthrough(),
+		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
+		// repository. Multi-replica deployments MUST set this to `"redis"`;
+		// the in-memory variant loses codes on restart and across replicas.
+		// Default `"memory"` lives in HOCON per ADR; presence-only here
+		// (`.optional()`) so token-only deployments that omit `oauth.code`
+		// entirely still validate against this base schema.
+		code: z
+			.object({
+				adapter: z.enum(["memory", "redis"]),
+			})
+			.optional(),
 	}),
 });
 
@@ -206,6 +217,13 @@ export const fullSectionsSchema = z.object({
 	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
+		// OR-5: fail-mode policy for the OAuth-endpoint rate limiter when
+		// the limiter backend itself errors. `"open"` (default in HOCON)
+		// preserves existing fail-open behavior + adds `logger.error`
+		// emission so operators see the outage even when the audit sink
+		// is also down. `"closed"` returns HTTP 503 + logs — recommended
+		// for security-sensitive deployments. No `.default()` per ADR.
+		failMode: z.enum(["open", "closed"]),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),
 	repositories: z.object({
@@ -291,6 +309,19 @@ export const fullSectionsSchema = z.object({
 		.object({
 			keyPrefix: z.string().optional(),
 			casRetryLimit: z.coerce.number().optional(),
+		})
+		.optional(),
+	// OR-9 (Wave 5d): module-internal config for `redisCodeRepositoryModule`.
+	// MUST be declared here (in `fullSectionsSchema`) so `AppConfigSchema.parse(...)`
+	// in `app.mts` preserves operator overrides
+	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`) before
+	// the module's `configSchema` runs at boot time. Same gotcha as D-2 v2's
+	// `redisRefreshTokenFamilyStore` block above. Defaults stay in
+	// `application.conf`; this entry is presence-only (both fields optional).
+	redisCodeRepository: z
+		.object({
+			keyPrefix: z.string().optional(),
+			defaultExpiresIn: z.coerce.number().optional(),
 		})
 		.optional(),
 });

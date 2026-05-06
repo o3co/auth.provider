@@ -47,11 +47,18 @@ export type {
 // into the consumer's TS dependency closure. Per Phase 10 addendum +
 // Copilot review #102.
 // ---------------------------------------------------------------------------
-// CodeRepository (Phase 10 Q4).
-// Relocated from @o3co/auth-provider-foundation. Module pattern intentionally
-// omitted in v0.5.0 (see plan §1 / Q4).
+// CodeRepository (Phase 10 Q4 / OR-9 Wave 5d).
+// Relocated from @o3co/auth-provider-foundation. v0.5.1 OR-9 added the module
+// pattern + migrated to ioredis-typed `CodeRepositoryClient`; the legacy
+// builder is retained one release cycle as deprecated and now requires the
+// new `{ client, keyPrefix?, defaultExpiresIn? }` shape.
 // ---------------------------------------------------------------------------
-export { RedisCodeRepository, redisCodeRepositoryBuilder } from "./code-repository.mjs";
+export {
+	RedisCodeRepository,
+	type RedisCodeRepositoryOptions,
+	redisCodeRepositoryBuilder,
+	redisCodeRepositoryModule,
+} from "./code-repository.mjs";
 // ---------------------------------------------------------------------------
 // FederationTokenStore (Phase 10 Q1+Q5).
 // Adapter relocated from core; module pattern added for declarative wiring

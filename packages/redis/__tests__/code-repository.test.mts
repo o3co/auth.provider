@@ -21,13 +21,17 @@ const KEY_PREFIX = "oauth:code:";
 // In-memory store simulating Redis
 const store = new Map<string, string>();
 
+import type { CodeRepositoryClient } from "../src/clients.mjs";
 import { RedisCodeRepository } from "../src/code-repository.mjs";
 
-const createMockRedis = () => ({
-	connect: vi.fn().mockResolvedValue(undefined),
+// OR-9: the public `RedisCodeRepository` constructor accepts a typed
+// `CodeRepositoryClient` wrapper, not a node-redis client. The mock satisfies
+// only that interface — `set/get/getDel/del` — and ignores the `mode`/`ttlMs`
+// arguments which the in-memory store doesn't honor.
+const createMockClient = (): CodeRepositoryClient => ({
 	set: vi.fn().mockImplementation((key: string, value: string) => {
 		store.set(key, value);
-		return Promise.resolve("OK");
+		return Promise.resolve("OK" as const);
 	}),
 	get: vi.fn().mockImplementation((key: string) => {
 		return Promise.resolve(store.get(key) ?? null);
@@ -45,6 +49,7 @@ const createMockRedis = () => ({
 
 describe("RedisCodeRepository", () => {
 	let repo: RedisCodeRepository;
+	let client: CodeRepositoryClient;
 
 	// Minimal valid params for v0.5.1+ (D-1: client_id and redirect_uri required).
 	const minimalParams = {
@@ -52,11 +57,10 @@ describe("RedisCodeRepository", () => {
 		redirect_uri: "https://rp.example/cb",
 	};
 
-	beforeEach(async () => {
+	beforeEach(() => {
 		store.clear();
-		const redis = createMockRedis();
-		repo = new RedisCodeRepository(redis);
-		await repo.initialize();
+		client = createMockClient();
+		repo = new RedisCodeRepository(client);
 	});
 
 	describe("createCode", () => {
@@ -198,6 +202,68 @@ describe("RedisCodeRepository", () => {
 
 		it("does not throw for unknown code", async () => {
 			await expect(repo.removeByCode("nonexistent")).resolves.toBeUndefined();
+		});
+	});
+
+	// OR-9 (Wave 5d): external client + ioredis migration. The constructor
+	// accepts a `CodeRepositoryClient` typed wrapper instead of constructing
+	// its own node-redis client. PX expiry is in milliseconds; keyPrefix and
+	// defaultExpiresIn flow through the options object.
+	describe("OR-9 external client", () => {
+		it("calls client.set with PX mode and ttlMs = expiresIn * 1000", async () => {
+			await repo.createCode({ ...minimalParams, expiresIn: 300 });
+			expect(client.set).toHaveBeenCalledWith(
+				expect.stringMatching(/^oauth:code:/),
+				expect.any(String),
+				"PX",
+				300_000,
+			);
+		});
+
+		it("uses the default expiry (600s = 600000ms) when expiresIn is omitted", async () => {
+			await repo.createCode(minimalParams);
+			expect(client.set).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.any(String),
+				"PX",
+				600_000,
+			);
+		});
+
+		it("honors a custom keyPrefix option", async () => {
+			const customClient = createMockClient();
+			const customRepo = new RedisCodeRepository(customClient, { keyPrefix: "tenant-a:code:" });
+			const result = await customRepo.createCode(minimalParams);
+			expect(customClient.set).toHaveBeenCalledWith(
+				`tenant-a:code:${result.code}`,
+				expect.any(String),
+				"PX",
+				expect.any(Number),
+			);
+		});
+
+		it("honors a custom defaultExpiresIn option", async () => {
+			const customClient = createMockClient();
+			const customRepo = new RedisCodeRepository(customClient, { defaultExpiresIn: 120 });
+			const result = await customRepo.createCode(minimalParams);
+			expect(result.expiresIn).toBe(120);
+			expect(customClient.set).toHaveBeenCalledWith(
+				expect.any(String),
+				expect.any(String),
+				"PX",
+				120_000,
+			);
+		});
+
+		it("has no dispose / [Symbol.asyncDispose] method (consumer manages client lifecycle, D-5 v2)", () => {
+			// Regression guard: the consumer (composition root) owns the
+			// ioredis socket via `standaloneRedisClientsModule` and registers
+			// its own `lifecycleRegistrar.register(io.quit)`. The repository
+			// is purely a typed wrapper; introducing a dispose() here would
+			// double-quit the shared socket.
+			const r = repo as unknown as Record<string, unknown>;
+			expect(r.dispose).toBeUndefined();
+			expect(r[Symbol.asyncDispose as unknown as string]).toBeUndefined();
 		});
 	});
 

@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import type { Redis } from "ioredis";
 import type {
 	ChallengeStoreClient,
+	CodeRepositoryClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,
@@ -92,6 +93,7 @@ export function makeIoredisClients(io: Redis): {
 	sessionFederationIndexClient: SessionSidSortedSetClient;
 	federationTokenStoreClient: FederationTokenStoreClient;
 	rateLimiterClient: RateLimiterClient;
+	codeRepositoryClient: CodeRepositoryClient;
 } {
 	const challengeStoreClient: ChallengeStoreClient = {
 		set: (k, v, _mode, ttl, _cond) => io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>,
@@ -280,6 +282,17 @@ export function makeIoredisClients(io: Redis): {
 		expire: (k, s) => io.expire(k, s),
 	};
 
+	// OR-9: code-repository client. Codes are short-TTL (60-600s) high-volume
+	// records; the four-method surface (`set`/`get`/`getDel`/`del`) maps
+	// directly to ioredis primitives. Shares the same socket as the other
+	// per-purpose clients.
+	const codeRepositoryClient: CodeRepositoryClient = {
+		set: (k, v, _mode, ttlMs) => io.set(k, v, "PX", ttlMs) as Promise<"OK">,
+		get: (k) => io.get(k),
+		getDel: (k) => io.getdel(k),
+		del: (k) => io.del(k),
+	};
+
 	return {
 		challengeStoreClient,
 		replaySeenSetClient,
@@ -290,5 +303,6 @@ export function makeIoredisClients(io: Redis): {
 		sessionFederationIndexClient: sortedSetClient,
 		federationTokenStoreClient,
 		rateLimiterClient,
+		codeRepositoryClient,
 	};
 }

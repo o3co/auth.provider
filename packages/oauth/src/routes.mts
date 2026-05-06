@@ -127,9 +127,22 @@ export const createOAuthRouter = async (
 				userAgent: req.get("user-agent"),
 			});
 		} catch (cause) {
-			// Fail-open: if the limiter backend is unavailable we prefer to serve
-			// the auth flow over 5xx-ing every request. Operators see the outage
-			// via the audit event below and via their limiter's own telemetry.
+			// OR-5: the previous implementation was silent fail-open with a
+			// fire-and-forget audit event. The audit sink is typically Redis-
+			// backed too, so during a Redis outage the audit emission also
+			// silently drops — operators saw nothing while rate limiting was
+			// down for hours. The `failMode` policy below makes the behavior
+			// configurable, and the `logger.error` call ensures operators see
+			// the outage regardless of audit-sink status.
+			const failMode = config.rateLimit.failMode;
+			const errorMessage = cause instanceof Error ? cause.message : String(cause);
+			logger.error(
+				{ error: errorMessage, mode: failMode, tag, ip },
+				failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
+			);
+			// Belt-and-suspenders: keep the audit event for ops dashboards
+			// that consume it. The logger call above is the operator-visible
+			// path; the audit event is the structured pipeline path.
 			emitAuditEvent(auditSink, {
 				timestamp: new Date(),
 				type: "rate_limit.unavailable",
@@ -137,9 +150,16 @@ export const createOAuthRouter = async (
 				userAgent: req.get("user-agent"),
 				details: {
 					tag,
-					error: cause instanceof Error ? cause.message : String(cause),
+					error: errorMessage,
 				},
 			});
+			if (failMode === "closed") {
+				res.status(503).json({
+					error: "service_unavailable",
+					error_description: "Rate limiter temporarily unavailable",
+				});
+				return false;
+			}
 			return true;
 		}
 		if (!decision.allowed) {

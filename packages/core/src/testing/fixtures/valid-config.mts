@@ -98,6 +98,7 @@ export function makeValidFullSections() {
 		},
 		rateLimit: {
 			login: { windowMs: 900000, limit: 20 },
+			failMode: "open",
 		},
 		federations: {},
 		repositories: {

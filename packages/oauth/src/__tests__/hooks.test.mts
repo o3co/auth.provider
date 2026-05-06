@@ -24,18 +24,26 @@ import {
 	createSymmetricKeyStore,
 	type GrantPolicyHookBase,
 	GrantRegistry,
+	type Logger,
 	type RateLimiterBase,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 
+// OR-5: `checkRateLimit` reads `config.rateLimit.failMode` in the catch
+// path. The mock config carries `failMode: "open"` to exercise the
+// default behavior; closed-mode tests below override `rateLimit` per-test.
 const mockConfig = {
 	oauth: {
 		jwt: { issuer: "https://auth.example" },
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
+	},
+	rateLimit: {
+		login: { windowMs: 60_000, limit: 100 },
+		failMode: "open",
 	},
 	endpoints: {
 		login: { url: "/login" },
@@ -83,7 +91,12 @@ function createSpyAuditSink(): { sink: AuditSinkBase; events: AuditEvent[] } {
 	};
 }
 
-async function buildApp(overrides: { rateLimiter?: RateLimiterBase; auditSink?: AuditSinkBase }) {
+async function buildApp(overrides: {
+	rateLimiter?: RateLimiterBase;
+	auditSink?: AuditSinkBase;
+	logger?: Logger;
+	config?: AppConfig;
+}) {
 	const app = express();
 	// Ensure req.ip is consistently populated so the RateLimiter hook sees it
 	app.set("trust proxy", 1);
@@ -92,7 +105,7 @@ async function buildApp(overrides: { rateLimiter?: RateLimiterBase; auditSink?: 
 
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
-		config: mockConfig,
+		config: overrides.config ?? mockConfig,
 		clientRepository: mockClientRepository,
 		codeRepository: mockCodeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -178,6 +191,126 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			const ev = events.find((e) => e.type === "rate_limit.unavailable");
 			expect(ev).toBeDefined();
 			expect((ev?.details as { error?: string } | undefined)?.error).toContain("redis down");
+		});
+
+		// OR-5: fail-mode policy + logger emission. Pre-OR-5 the limiter
+		// outage was silent (audit sink was the only path, and a Redis-backed
+		// audit sink also drops during the same outage). The new logger
+		// emission ensures operators see the outage regardless of audit sink
+		// status; `failMode = "closed"` adds 503 enforcement on top.
+		describe("OR-5: failMode policy + logger emission", () => {
+			const makeMockLogger = (): Logger & { error: ReturnType<typeof vi.fn> } => ({
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+			});
+
+			const brokenRateLimiter: RateLimiterBase = {
+				kind: "broken",
+				async check() {
+					throw new Error("redis down");
+				},
+			};
+
+			it("failMode='open' + limiter throws → request allowed + logger.error('rate_limiter_failed_open')", async () => {
+				const logger = makeMockLogger();
+				const app = await buildApp({
+					rateLimiter: brokenRateLimiter,
+					logger,
+					// mockConfig already has failMode: "open"
+				});
+
+				const res = await request(app)
+					.post("/oauth/token")
+					.send({ grant_type: "unsupported_type_xyz" });
+
+				// fail-open: 400 unsupported_grant_type from the route, NOT 503
+				expect(res.status).toBe(400);
+				expect(logger.error).toHaveBeenCalledWith(
+					expect.objectContaining({
+						error: expect.stringContaining("redis down"),
+						mode: "open",
+						tag: "token",
+					}),
+					"rate_limiter_failed_open",
+				);
+			});
+
+			it("failMode='closed' + limiter throws → 503 service_unavailable + logger.error('rate_limiter_failed_closed')", async () => {
+				const logger = makeMockLogger();
+				const closedConfig = {
+					...(mockConfig as unknown as Record<string, unknown>),
+					rateLimit: {
+						login: { windowMs: 60_000, limit: 100 },
+						failMode: "closed",
+					},
+				} as unknown as AppConfig;
+				const app = await buildApp({
+					rateLimiter: brokenRateLimiter,
+					logger,
+					config: closedConfig,
+				});
+
+				const res = await request(app)
+					.post("/oauth/token")
+					.send({ grant_type: "unsupported_type_xyz" });
+
+				expect(res.status).toBe(503);
+				expect(res.body.error).toBe("service_unavailable");
+				expect(logger.error).toHaveBeenCalledWith(
+					expect.objectContaining({
+						error: expect.stringContaining("redis down"),
+						mode: "closed",
+						tag: "token",
+					}),
+					"rate_limiter_failed_closed",
+				);
+			});
+
+			it("failMode='open' + limiter succeeds and allows → no logger.error call (success path is silent)", async () => {
+				const logger = makeMockLogger();
+				const app = await buildApp({
+					rateLimiter: createStubRateLimiter(() => ({ allowed: true })),
+					logger,
+				});
+
+				const res = await request(app)
+					.post("/oauth/token")
+					.send({ grant_type: "unsupported_type_xyz" });
+
+				expect(res.status).toBe(400); // unsupported_grant_type, not 503
+				expect(logger.error).not.toHaveBeenCalledWith(
+					expect.anything(),
+					expect.stringMatching(/^rate_limiter_failed_/),
+				);
+			});
+
+			it("failMode='closed' + limiter succeeds and allows → no logger.error call (failMode only affects error path)", async () => {
+				const logger = makeMockLogger();
+				const closedConfig = {
+					...(mockConfig as unknown as Record<string, unknown>),
+					rateLimit: {
+						login: { windowMs: 60_000, limit: 100 },
+						failMode: "closed",
+					},
+				} as unknown as AppConfig;
+				const app = await buildApp({
+					rateLimiter: createStubRateLimiter(() => ({ allowed: true })),
+					logger,
+					config: closedConfig,
+				});
+
+				const res = await request(app)
+					.post("/oauth/token")
+					.send({ grant_type: "unsupported_type_xyz" });
+
+				expect(res.status).toBe(400); // unsupported_grant_type, not 503
+				expect(logger.error).not.toHaveBeenCalledWith(
+					expect.anything(),
+					expect.stringMatching(/^rate_limiter_failed_/),
+				);
+			});
 		});
 
 		it("does not block requests when rateLimiter allows", async () => {

@@ -31,10 +31,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
-import {
-	redisCodeRepositoryBuilder,
-	redisFederationTokenStoreBuilder,
-} from "@o3co/auth-provider-redis";
+import { redisFederationTokenStoreBuilder } from "@o3co/auth-provider-redis";
 import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
 // Named import is required here, not default. Under `module: "nodenext"`
@@ -91,16 +88,21 @@ export const keyStoreModule: Module = defineModule({
 });
 
 /**
- * Repositories module — provides client / user / code repositories from
+ * Repositories module — provides client / user repositories from
  * `config.repositories.*` slices using the built-in adapter factories.
+ *
+ * Pre-OR-9 this module also provided `codeRepository` — split out into
+ * `inMemoryCodeRepositoryModule` (memory branch) / `redisCodeRepositoryModule`
+ * (redis branch, from `@o3co/auth-provider-redis`) so the
+ * `oauth.code.adapter` switch can wire mutually-exclusive providers without
+ * a slot collision. Same pattern as the Wave-5d userSessionStores split.
  */
 export const repositoriesModule: Module = defineModule({
 	name: "standalone:repositories",
 	requires: ["config"] as const,
 	// D-5 / OR-2 / IH-11: forward `lifecycleRegistrar` into the repository
-	// factories so the redis/memory CodeRepository builders can register their
-	// disposal callbacks (RedisCodeRepository.quit() and the InMemory GC
-	// interval, respectively). Without this, builders' `ctx.lifecycle?.register`
+	// factories so client/user adapters can register disposal callbacks
+	// (e.g. file-watch closers). Without this, builders' `ctx.lifecycle?.register`
 	// is a no-op and the leaks remain.
 	optional: ["lifecycleRegistrar"] as const,
 	provides: {
@@ -126,16 +128,39 @@ export const repositoriesModule: Module = defineModule({
 				),
 			);
 		},
+	},
+});
+
+/**
+ * In-memory CodeRepository module — wired by `buildModules` only when
+ * `oauth.code.adapter = "memory"`. The redis branch swaps in
+ * `redisCodeRepositoryModule` from `@o3co/auth-provider-redis` (mutually
+ * exclusive — both modules provide the same `codeRepository` slot).
+ *
+ * Per OR-9 (Wave 5d) split: pre-OR-9 the codeRepository slot was provided
+ * inside `repositoriesModule` via the AdapterFactory pattern; that path
+ * coupled the slot to `repositories.code.type` which is now superseded by
+ * `oauth.code.adapter`.
+ */
+export const inMemoryCodeRepositoryModule: Module = defineModule({
+	name: "standalone:in-memory-code-repository",
+	requires: ["config"] as const,
+	optional: ["lifecycleRegistrar"] as const,
+	provides: {
 		codeRepository: async ({ config, lifecycleRegistrar }) => {
 			const ctx = { lifecycle: lifecycleRegistrar };
 			const { userFactory, codeFactory } = createRepositoryFactories(ctx);
 			registerBuiltinAdapters({ userFactory });
-			codeFactory.register("redis", redisCodeRepositoryBuilder);
-			return codeFactory.create(
-				flattenAdapterConfig(
-					(config as AppConfig).repositories.code as { type: string } & Record<string, unknown>,
-				),
+			// codeFactory.register("memory", ...) is wired by registerBuiltinAdapters
+			// indirectly; the memory builder is the default registered shape. The
+			// flattened slice MAY still have `type = "redis"` when only the legacy
+			// `repositories.code.type` is set — buildModules' adapter resolution
+			// already chose memory by the time we get here, so override the type
+			// explicitly to keep this module robust against legacy HOCON shapes.
+			const slice = flattenAdapterConfig(
+				(config as AppConfig).repositories.code as { type: string } & Record<string, unknown>,
 			);
+			return codeFactory.create({ ...slice, type: "memory" });
 		},
 	},
 });
@@ -264,6 +289,15 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		},
 		rateLimiterClient: async ({ config, lifecycleRegistrar }) => {
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).rateLimiterClient;
+		},
+		// OR-9: code-repository client wired off the same shared ioredis
+		// socket. `redisCodeRepositoryModule` consumes this slot when
+		// `oauth.code.adapter = "redis"`. Codes are short-TTL (60-600s)
+		// high-volume — sharing the connection avoids opening a separate
+		// socket while the per-purpose typed wrapper keeps the Redis
+		// command surface consumed by RedisCodeRepository explicit.
+		codeRepositoryClient: async ({ config, lifecycleRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).codeRepositoryClient;
 		},
 	},
 });

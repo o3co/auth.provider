@@ -259,6 +259,26 @@ export interface RateLimiterClient {
 	expire(key: string, seconds: number): Promise<number>;
 }
 
+// --- CodeRepositoryClient --------------------------------------------------
+
+/**
+ * Backing client for CodeRepository adapters. Declares only the four Redis
+ * commands `RedisCodeRepository` consumes: `set` with PX expiry (always
+ * succeeds with `"OK"`), unconditional `get`, atomic `getDel` (Redis 6.2+),
+ * and unconditional `del`.
+ *
+ * Per OR-9 (Wave 5d). The repository is rewritten in v0.5.1 to consume an
+ * externally-provided typed wrapper instead of constructing its own
+ * node-redis client; aligns with the per-purpose client convention
+ * established by D-2 v2 and consumed via `bootstrapComponents`.
+ */
+export interface CodeRepositoryClient {
+	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
+	get(key: string): Promise<string | null>;
+	getDel(key: string): Promise<string | null>;
+	del(key: string): Promise<number>;
+}
+
 // ---------------------------------------------------------------------------
 // ComponentMap augmentations: backing-client slots consumed by redis adapters.
 //
@@ -278,5 +298,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly sessionFederationIndexClient?: SessionSidSortedSetClient;
 		readonly federationTokenStoreClient?: FederationTokenStoreClient;
 		readonly rateLimiterClient?: RateLimiterClient;
+		readonly codeRepositoryClient?: CodeRepositoryClient;
 	}
 }
