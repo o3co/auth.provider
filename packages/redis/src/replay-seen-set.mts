@@ -82,7 +82,13 @@ export function createRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): Repla
  *   factory.create({ type: "redis", client, keyPrefix: "replay:" });
  */
 export const redisReplaySeenSetBuilder: AdapterBuilder<ReplaySeenSet> = (config, _ctx) => {
-	const c = config as { client: ReplaySeenSetClient; keyPrefix?: string };
+	const c = config as { client?: ReplaySeenSetClient; keyPrefix?: string };
+	// TS-M2 (Wave 5g): structural guard. Mirrors the
+	// `redisFederationTokenStoreBuilder` pattern — boot-time failure on
+	// missing client instead of cryptic runtime crash.
+	if (!c.client) {
+		throw new Error("redisReplaySeenSetBuilder: 'client' option is required");
+	}
 	return createRedisReplaySeenSet({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "replay:",

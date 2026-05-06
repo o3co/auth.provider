@@ -105,4 +105,61 @@ describe("HttpUserRepository", () => {
 			expect(user).toBeNull();
 		});
 	});
+
+	// TS-2 (Wave 5g): pre-fix, `(await res.json()) as User` was a compile-time
+	// cast only. A 200 response with an unexpected body shape silently
+	// produced a `User` whose required fields were `undefined`, leaking
+	// `sub: undefined` into the authentication flow. The new `isUser`
+	// runtime guard rejects such shapes by throwing — an "upstream broken"
+	// failure is distinct from "user not found" (401).
+	describe("TS-2: upstream response shape validation", () => {
+		it("throws when upstream 200 returns an object missing required fields", async () => {
+			server.use(
+				http.post(`${BASE_URL}/user/authenticate`, () => {
+					return HttpResponse.json({ status: "ok" }, { status: 200 });
+				}),
+			);
+			await expect(repo.authenticate("alice@example.com", "pass")).rejects.toThrow(
+				/invalid User shape/,
+			);
+		});
+
+		it("throws when upstream 200 returns non-string id", async () => {
+			server.use(
+				http.post(`${BASE_URL}/user/authenticate`, () => {
+					return HttpResponse.json({ id: 123, username: "alice" }, { status: 200 });
+				}),
+			);
+			await expect(repo.authenticate("alice@example.com", "pass")).rejects.toThrow(
+				/invalid User shape/,
+			);
+		});
+
+		it("throws when upstream 200 returns null body", async () => {
+			server.use(
+				http.post(`${BASE_URL}/user/authenticate`, () => {
+					return HttpResponse.json(null, { status: 200 });
+				}),
+			);
+			await expect(repo.authenticate("alice@example.com", "pass")).rejects.toThrow(
+				/invalid User shape/,
+			);
+		});
+
+		it("accepts valid User shape with extra fields (index-signature passthrough)", async () => {
+			server.use(
+				http.post(`${BASE_URL}/user/authenticate`, () => {
+					return HttpResponse.json(
+						{ id: "u1", username: "alice", email: "a@x", role: "admin" },
+						{ status: 200 },
+					);
+				}),
+			);
+			const user = await repo.authenticate("alice@example.com", "pass");
+			expect(user?.id).toBe("u1");
+			expect(user?.username).toBe("alice");
+			// Extra fields preserved via the `User` index signature.
+			expect((user as Record<string, unknown>).email).toBe("a@x");
+		});
+	});
 });

@@ -89,7 +89,13 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
  *   factory.create({ type: "redis", client, keyPrefix: "chal:" });
  */
 export const redisChallengeStoreBuilder: AdapterBuilder<ChallengeStore> = (config, _ctx) => {
-	const c = config as { client: ChallengeStoreClient; keyPrefix?: string };
+	const c = config as { client?: ChallengeStoreClient; keyPrefix?: string };
+	// TS-M2 (Wave 5g): structural guard. Mirrors the
+	// `redisFederationTokenStoreBuilder` pattern — fail at boot rather than
+	// at first Redis op with a cryptic `Cannot read properties of undefined`.
+	if (!c.client) {
+		throw new Error("redisChallengeStoreBuilder: 'client' option is required");
+	}
 	return createRedisChallengeStore({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "chal:",

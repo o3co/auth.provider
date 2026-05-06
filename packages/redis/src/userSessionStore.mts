@@ -16,6 +16,7 @@
 
 import type {
 	CreateUserSessionInput,
+	Logger,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -25,6 +26,15 @@ import type { UserSessionStoreClient } from "./clients.mjs";
 export interface RedisUserSessionStoreOptions {
 	readonly client: UserSessionStoreClient;
 	readonly keyPrefix: string;
+	/**
+	 * Optional structured logger consumed by `get()` when a stored
+	 * envelope fails JSON.parse or shape validation (TS-3). Optional
+	 * chaining is used so callers that don't inject a logger get the
+	 * same fail-closed `null` return without an emitted warn. Phase F
+	 * will add a `consoleLogger` fallback once the D-4 ComponentMap
+	 * `logger` slot lands and module wiring threads it through.
+	 */
+	readonly logger?: Logger;
 }
 
 interface Envelope {
@@ -35,6 +45,40 @@ interface Envelope {
 	expiresAtMs: number;
 	claims: Record<string, unknown>;
 }
+
+/**
+ * Hand-rolled type predicate for `Envelope`. Lighter than Zod for the
+ * storage layer and matches the Wave 5g `ts-safety-batch` convention.
+ *
+ * `Number.isFinite` rejects `NaN`, `Infinity`, `-Infinity`, and non-number
+ * types in one check — the original `expiresAtMs <= Date.now()` comparison
+ * silently returned `false` for `undefined`/`NaN`, bypassing the expiry
+ * filter and propagating `Invalid Date` into the returned `UserSession`.
+ *
+ * `claims` must be a plain object — `[]` and `null` both fail the
+ * `typeof === "object"` plus index-signature contract. Callers that need
+ * to support `claims: null` should change the predicate explicitly; the
+ * fail-closed default is the safer posture for a security-critical path.
+ *
+ * Per TS-3 (Wave 5j).
+ */
+const isValidEnvelope = (v: unknown): v is Envelope => {
+	if (typeof v !== "object" || v === null) return false;
+	const e = v as Partial<Envelope>;
+	return (
+		typeof e.sid === "string" &&
+		typeof e.sub === "string" &&
+		typeof e.authTimeMs === "number" &&
+		Number.isFinite(e.authTimeMs) &&
+		typeof e.createdAtMs === "number" &&
+		Number.isFinite(e.createdAtMs) &&
+		typeof e.expiresAtMs === "number" &&
+		Number.isFinite(e.expiresAtMs) &&
+		typeof e.claims === "object" &&
+		e.claims !== null &&
+		!Array.isArray(e.claims)
+	);
+};
 
 const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelope => ({
 	sid: input.sid,
@@ -96,9 +140,35 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 		async get(sid) {
 			const raw = await opts.client.get(k(sid));
 			if (raw === null) return null;
-			const env = JSON.parse(raw) as Envelope;
-			if (env.expiresAtMs <= Date.now()) return null;
-			return fromEnvelope(env);
+
+			// TS-3 (Wave 5j): the previous `JSON.parse(raw) as Envelope` was a
+			// compile-time cast only. A corrupt envelope with `expiresAtMs:
+			// undefined` made `expiresAtMs <= Date.now()` evaluate to `false`
+			// (NaN comparison), bypassing the expiry filter and returning a
+			// session with `Invalid Date` fields. Treat any parse / shape
+			// failure as fail-closed (return null) and emit a structured
+			// warn for operator observability.
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(raw);
+			} catch {
+				opts.logger?.warn(`user_session_corrupt_envelope: JSON.parse failed for sid=${sid}`, {
+					sid,
+					reason: "json_parse",
+				});
+				return null;
+			}
+
+			if (!isValidEnvelope(parsed)) {
+				opts.logger?.warn(`user_session_corrupt_envelope: shape invalid for sid=${sid}`, {
+					sid,
+					reason: "shape_invalid",
+				});
+				return null;
+			}
+
+			if (parsed.expiresAtMs <= Date.now()) return null;
+			return fromEnvelope(parsed);
 		},
 		async delete(sid) {
 			await opts.client.del(k(sid));
