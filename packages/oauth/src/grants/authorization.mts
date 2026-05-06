@@ -94,16 +94,26 @@ export const createAuthorizationGrant = (
 				};
 			}
 
-			// D-1: hoist client_id presence check ahead of consumeByCode so a
-			// missing client_id rejects symmetrically for confidential and public
-			// clients without burning the (otherwise valid) code via the atomic
-			// getDel inside consumeByCode.
+			// D-1: hoist client_id and redirect_uri presence checks ahead of
+			// consumeByCode so requests missing either reject without burning
+			// the (otherwise valid) code via the atomic getDel. The full
+			// equality checks against codeData.* still happen below — these
+			// hoisted checks only short-circuit the malformed-request path.
 			if (!client_id) {
 				return {
 					result: {
 						status: 400,
 						error: "invalid_grant",
 						errorDescription: "invalid client_id",
+					},
+				};
+			}
+			if (!redirect_uri) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "redirect_uri mismatch",
 					},
 				};
 			}
@@ -154,8 +164,10 @@ export const createAuthorizationGrant = (
 			// D-1: codeData.redirect_uri is now always populated (required field).
 			// The previous `?? session.code_redirect_uri` fallback hid the IH-4
 			// vacuous-pass bug where Redis silently dropped redirect_uri and the
-			// check was skipped entirely. Now strictly enforced.
-			if (!redirect_uri || redirect_uri !== codeData.redirect_uri) {
+			// check was skipped entirely. Now strictly enforced. The presence
+			// check on `redirect_uri` is hoisted above consumeByCode; this site
+			// only verifies the equality binding.
+			if (redirect_uri !== codeData.redirect_uri) {
 				return {
 					result: {
 						status: 400,

@@ -165,27 +165,23 @@ describe("InMemoryCodeRepository", () => {
 	// interface, so the @ts-expect-error directives below are unused → typecheck
 	// fails. Post-fix: both fields are required, so omitting either produces a
 	// TS error that the directive consumes → typecheck passes.
+	//
+	// Type-only assertions: the directives are attached to typed-variable
+	// declarations rather than runtime call sites, so vitest's typecheck pass
+	// validates the contract without storing invalid records in the repository.
 	describe("D-1 / TS-1: createCode requires client_id and redirect_uri at compile time", () => {
-		it("compile-time guard: omitting client_id is a type error", async () => {
-			const repo = new InMemoryCodeRepository();
+		it("compile-time guard: omitting client_id is a type error", () => {
 			// @ts-expect-error client_id is required on CodeData (D-1)
-			const params: Parameters<CodeRepository["createCode"]>[0] = {
+			const _params: Parameters<CodeRepository["createCode"]>[0] = {
 				redirect_uri: "https://rp.example/cb",
 			};
-			const code = await repo.createCode(params);
-			expect(code.code).toBeDefined();
-			repo.dispose();
 		});
 
-		it("compile-time guard: omitting redirect_uri is a type error", async () => {
-			const repo = new InMemoryCodeRepository();
+		it("compile-time guard: omitting redirect_uri is a type error", () => {
 			// @ts-expect-error redirect_uri is required on CodeData (D-1)
-			const params: Parameters<CodeRepository["createCode"]>[0] = {
+			const _params: Parameters<CodeRepository["createCode"]>[0] = {
 				client_id: "client-1",
 			};
-			const code = await repo.createCode(params);
-			expect(code.code).toBeDefined();
-			repo.dispose();
 		});
 
 		it("populated client_id and redirect_uri round-trip via getByCode", async () => {
