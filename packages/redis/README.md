@@ -5,9 +5,12 @@ Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core
 ## Requirements
 
 - **Node.js** `>=18.19.0`
-- **Redis server** `>=7.2 LTS` — the session adapters use `PEXPIREAT … GT` for
-  safe concurrent TTL writes (D-10). Redis 6.x is not supported. Tested
-  against:
+- **Redis server** `>=7.2 LTS` — the session adapters issue a
+  `PEXPIREAT … NX` + `PEXPIREAT … GT` pair for safe concurrent TTL writes
+  (D-10). NX sets the TTL on first write because a bare `… GT` silently
+  no-ops on a key with no existing TTL; GT then prevents truncation under
+  stale-`expiresAt` concurrent writes. Both flags require Redis 7.0+; we
+  pin to 7.2 LTS. Redis 6.x is not supported. Tested against:
   - AWS ElastiCache for Redis 7.2
   - Upstash Redis (7.2 compatible)
   - Redis Cloud 7.2

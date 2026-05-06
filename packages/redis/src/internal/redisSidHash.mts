@@ -29,7 +29,8 @@ export interface RedisSidHash {
 
 /**
  * Private redis helper used by `SessionRPRegistry`. Single-key HSET +
- * PEXPIREAT … GT pipeline keyed by `${keyPrefix}${sid}`. Per A4 §7.2.1.
+ * (`PEXPIREAT … NX` + `PEXPIREAT … GT`) pipeline keyed by
+ * `${keyPrefix}${sid}`. Per A4 §7.2.1.
  *
  * **HASH-keyed-by-element-id rationale**: SADD-of-JSON cannot dedup by
  * `clientId` when other RP fields change (different bytewise JSON for the
@@ -37,8 +38,10 @@ export interface RedisSidHash {
  * field name = `clientId`, semantically correct for RP upsert.
  *
  * **TTL contract**: callers MUST pass `session.expiresAt`. The `pExpireGT`
- * (PEXPIREAT … GT) modifier guards against stale-`expiresAt` writes
- * shortening the key's TTL on concurrent same-sid writes; D-10 / CR-3.
+ * method emits a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair: NX sets the TTL
+ * on first write (a bare GT silently no-ops on a key with no existing TTL —
+ * Redis treats no-TTL as infinite TTL for the GT flag), GT prevents TTL
+ * truncation on stale-`expiresAt` concurrent writes (D-10 / CR-3).
  * Requires Redis 7.0+; v0.5.1 pins the floor to Redis 7.2 LTS.
  * `UserSession.expiresAt` is post-create immutable per A4 §5.1, so the
  * legal value is fixed at session-create time.
