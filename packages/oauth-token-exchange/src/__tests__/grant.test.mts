@@ -969,6 +969,31 @@ describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound f
 		expect(result.status).toBe(200);
 	});
 
+	it("accepts a Basic-auth request that omits body.client_id entirely (uses ctx.authenticatedClient.clientId)", async () => {
+		// Standard `Authorization: Basic <creds>` callers don't repeat
+		// `client_id` in the body. The grant must derive identity from
+		// `ctx.authenticatedClient` rather than rejecting the request.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx(
+				{
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				},
+				{ authenticatedClient: authedConfidential },
+			),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		// `azp` is bound to the authenticated client id.
+		const at = decodeJwt((result.tokens as { access_token: string }).access_token) as Record<
+			string,
+			unknown
+		>;
+		expect(at.azp).toBe("client-a");
+	});
+
 	it("rejects when body.client_id differs from ctx.authenticatedClient.clientId (cross-client spoof)", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });

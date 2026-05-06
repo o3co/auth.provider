@@ -58,7 +58,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const subjectToken = typeof body.subject_token === "string" ? body.subject_token : null;
 			const subjectTokenType =
 				typeof body.subject_token_type === "string" ? body.subject_token_type : null;
-			const clientId = typeof body.client_id === "string" ? body.client_id : null;
+			// D-6 Codex post-review: when this grant runs through `/oauth/token`,
+			// Basic-authenticated callers don't repeat `client_id` in the body —
+			// the authenticated identity is the canonical source. We resolve the
+			// effective client id from the body first (matching standalone-wiring
+			// callers) and fall back to `ctx.authenticatedClient.clientId`.
+			const bodyClientId = typeof body.client_id === "string" ? body.client_id : null;
+			const clientId = bodyClientId ?? ctx.authenticatedClient?.clientId ?? null;
 			const clientSecretRaw = body.client_secret;
 			let clientSecret: string | null;
 			if (clientSecretRaw === undefined || clientSecretRaw === null) {
@@ -127,8 +133,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 				// Body-supplied client_id MUST match the authenticated identity —
 				// otherwise an attacker could authenticate as A and request a
-				// token exchange under B's allowlist.
-				if (clientId !== ctx.authenticatedClient.clientId) {
+				// token exchange under B's allowlist. Standard Basic-authenticated
+				// callers omit body `client_id` entirely; only verify equality
+				// when the body explicitly supplied one (`bodyClientId !== null`).
+				if (bodyClientId !== null && bodyClientId !== ctx.authenticatedClient.clientId) {
 					return {
 						result: {
 							status: 400,
