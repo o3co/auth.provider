@@ -313,10 +313,11 @@ describe("createRefreshTokenGrant — refreshTokenFamilyRotation forwarding", ()
 		);
 
 		await handler.handle({
-			body: { refresh_token: rt.token, client_id: "client-1" },
+			body: { refresh_token: rt.token },
 			session: {},
 			issuer: "test-issuer",
 			metadata: {},
+			authenticatedClient: { clientId: "client-1", tokenEndpointAuthMethod: "client_secret_basic" },
 		});
 
 		expect(rotateSpy).toHaveBeenCalled();
@@ -401,6 +402,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			},
 			issuer: "localhost",
 			metadata: {},
+			authenticatedClient: { clientId: "client1", tokenEndpointAuthMethod: "client_secret_basic" },
 		});
 
 		expect(result.status).toBe(200);
@@ -453,6 +455,7 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 			},
 			issuer: "localhost",
 			metadata: {},
+			authenticatedClient: { clientId: "client1", tokenEndpointAuthMethod: "client_secret_basic" },
 		});
 
 		// Pluck the refresh_token from the authorization code response
@@ -480,6 +483,7 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 			session: {},
 			issuer: "localhost",
 			metadata: {},
+			authenticatedClient: { clientId: "client1", tokenEndpointAuthMethod: "client_secret_basic" },
 		});
 
 		expect(grantPolicy.evaluate).toHaveBeenCalled();
@@ -520,6 +524,7 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 			session: { code: "different-code", code_client_id: "c1" },
 			issuer: "localhost",
 			metadata: {},
+			authenticatedClient: { clientId: "client1", tokenEndpointAuthMethod: "client_secret_basic" },
 		});
 
 		expect(result.status).toBe(400);

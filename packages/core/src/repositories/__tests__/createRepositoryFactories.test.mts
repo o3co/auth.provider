@@ -42,6 +42,7 @@ describe("createRepositoryFactories", () => {
 			const yamlPath = writeYaml(
 				"clients.yaml",
 				`my-client:
+  tokenEndpointAuthMethod: "client_secret_basic"
   clientSecret: "secret123"
   allowedRedirectUris:
     - "http://localhost:3000/callback"

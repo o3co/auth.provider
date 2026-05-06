@@ -36,6 +36,15 @@ const validCode = {
 	redirect_uri: RP_URI,
 };
 
+// D-6 (v0.5.1): the authorization grant requires `ctx.authenticatedClient` to
+// be present and match `codeData.client_id`. Tests default to "client1" — the
+// same client_id baked into validCode — so existing scope/PKCE/policy tests
+// pass through the binding gate unchanged.
+const DEFAULT_AUTH_CLIENT = {
+	clientId: "client1",
+	tokenEndpointAuthMethod: "client_secret_basic" as const,
+};
+
 const mockConfig = {
 	oauth: {
 		jwt: { secret: "test-secret" },
@@ -101,6 +110,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -117,6 +127,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -132,6 +143,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -147,6 +159,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -169,6 +182,7 @@ describe("createAuthorizationGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result, sessionMutation } = await handler.handle(ctx);
@@ -213,6 +227,7 @@ describe("createAuthorizationGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -256,6 +271,7 @@ describe("createAuthorizationGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(503);
@@ -278,6 +294,7 @@ describe("createAuthorizationGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 			expect(result.status).toBe(200);
 		});
@@ -297,6 +314,7 @@ describe("createAuthorizationGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -329,6 +347,7 @@ describe("createAuthorizationGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -363,6 +382,7 @@ describe("createAuthorizationGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 			expect(result.status).toBe(200);
 			if (!("tokens" in result)) throw new Error("expected tokens");
@@ -386,6 +406,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -409,6 +430,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -434,6 +456,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -462,6 +485,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -487,6 +511,7 @@ describe("createAuthorizationGrant", () => {
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -541,6 +566,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -583,6 +609,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -612,6 +639,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -637,6 +665,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -663,6 +692,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -688,6 +718,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -697,96 +728,69 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
-		describe("A-3: client secret verification", () => {
-			it("returns invalid_client when client_secret is wrong for a confidential client", async () => {
-				const clientRepo: ClientRepository = {
-					findById: vi.fn().mockResolvedValue({
-						clientId: "client1",
-						allowedRedirectUris: [],
-						allowedScopes: [],
-					}),
-					authenticate: vi.fn().mockResolvedValue(null), // secret mismatch
-				};
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }), clientRepo);
+		// D-6 (v0.5.1): the in-grant `client_secret` check that lived here pre-
+		// v0.5.1 is removed. RFC 6749 §2.3 client authentication is now the
+		// responsibility of `clientAuthMw` at the route level — the grant
+		// handler trusts `ctx.authenticatedClient` and only verifies the
+		// canonical binding `codeData.client_id === authenticatedClient.clientId`.
+		// The integration-level coverage for credential validity lives in
+		// `clientAuth.test.mts` (Group B + Codex M1/M4) and the route-level
+		// `routes.test.mts` (Group C). The grant-level invariant tested here is
+		// just the binding gate.
+		describe("D-6 binding gate: codeData.client_id vs ctx.authenticatedClient.clientId", () => {
+			it("returns 401 invalid_client when ctx.authenticatedClient is null", async () => {
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
 				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: {
-						code: "abc",
-						client_id: "client1",
-						redirect_uri: RP_URI,
-						client_secret: "wrong-secret",
-					},
-					session: { code: "abc", code_client_id: "client1" },
+				const { result } = await handler.handle({
+					body: { code: "abc", redirect_uri: RP_URI },
+					session: {},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
-				};
-
-				const { result } = await handler.handle(ctx);
+					authenticatedClient: null,
+				});
 
 				expect(result.status).toBe(401);
-				expect("error" in result && result.error).toBe("invalid_client");
+				if (!("error" in result)) expect.fail("Expected error in result");
+				expect(result.error).toBe("invalid_client");
 			});
 
-			it("returns 200 when client_secret is correct", async () => {
-				const clientRepo: ClientRepository = {
-					findById: vi.fn().mockResolvedValue({
-						clientId: "client1",
-						allowedRedirectUris: [],
-						allowedScopes: [],
-					}),
-					authenticate: vi.fn().mockResolvedValue({
-						clientId: "client1",
-						allowedRedirectUris: [],
-						allowedScopes: [],
-					}),
-				};
-				const deps = makeDeps(
-					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
-					clientRepo,
-				);
+			it("returns 400 invalid_grant when authenticatedClient.clientId differs from codeData.client_id", async () => {
+				// codeData binds the code to "client1" (validCode); the authenticated
+				// client at /token is a different client. The binding gate must
+				// reject — accepting it would let any authenticated client redeem
+				// any code, which is the spoof vector PB-2 closes.
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
 				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: {
-						code: "abc",
-						client_id: "client1",
-						redirect_uri: RP_URI,
-						client_secret: "correct-secret",
+				const { result } = await handler.handle({
+					body: { code: "abc", redirect_uri: RP_URI },
+					session: {},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: {
+						clientId: "different-client",
+						tokenEndpointAuthMethod: "client_secret_basic",
 					},
-					session: { code: "abc", code_client_id: "client1" },
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-				};
+				});
 
-				const { result } = await handler.handle(ctx);
-
-				expect(result.status).toBe(200);
+				expect(result.status).toBe(400);
+				if (!("error" in result)) expect.fail("Expected error in result");
+				expect(result.error).toBe("invalid_grant");
+				expect(result.errorDescription).toBe("code was not issued to this client");
 			});
 
-			it("skips client secret check when client has no secret (public client - findById returns client but authenticate returns null with no secret provided)", async () => {
-				// Public client: no client_secret in request, findById succeeds
-				const clientRepo: ClientRepository = {
-					findById: vi.fn().mockResolvedValue({
-						clientId: "client1",
-						allowedRedirectUris: [],
-						allowedScopes: [],
-					}),
-					authenticate: vi.fn().mockResolvedValue(null),
-				};
+			it("returns 200 when authenticatedClient matches codeData.client_id (canonical happy path)", async () => {
 				const deps = makeDeps(
-					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
-					clientRepo,
+					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid", ...validCode }),
 				);
 				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI }, // no client_secret
-					session: { code: "abc", code_client_id: "client1" },
+				const { result } = await handler.handle({
+					body: { code: "abc", redirect_uri: RP_URI },
+					session: { user: { id: "u1" } },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
-				};
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
 
-				const { result } = await handler.handle(ctx);
-
-				// Public client: no client_secret sent → skip verification
 				expect(result.status).toBe(200);
 			});
 		});
@@ -839,6 +843,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -871,6 +876,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -904,6 +910,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -999,6 +1006,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "c1", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1047,6 +1055,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "c-noiss", code_client_id: "client1" },
 					// issuer intentionally omitted
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1083,6 +1092,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "c2", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1108,6 +1118,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "c3", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1142,6 +1153,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -1170,6 +1182,7 @@ describe("createAuthorizationGrant", () => {
 					session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -1206,6 +1219,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				};
 
 				const { result } = await handler.handle(ctx);
@@ -1231,6 +1245,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1275,6 +1290,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(400);
@@ -1300,6 +1316,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1350,6 +1367,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1394,6 +1412,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(200);
@@ -1431,6 +1450,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(400);
@@ -1464,6 +1484,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(503);
@@ -1512,6 +1533,7 @@ describe("createAuthorizationGrant", () => {
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
 				});
 
 				expect(result.status).toBe(503);

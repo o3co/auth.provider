@@ -14,27 +14,51 @@
  * limitations under the License.
  */
 
+/**
+ * RFC 6749 §2.3 / RFC 7591 §2 client authentication method at the token endpoint.
+ *
+ * - `"client_secret_basic"`: HTTP Basic `Authorization` header (§2.3.1)
+ * - `"client_secret_post"`: form-encoded body parameters (§2.3.1)
+ * - `"none"`: public client (no secret; PKCE/S256 mandatory per RFC 9700 §2.1.1)
+ */
+export type TokenEndpointAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
+
 export interface Client {
-	clientId: string;
-	clientSecret: string;
-	allowedRedirectUris: string[];
-	allowedScopes: string[];
+	readonly clientId: string;
+	/**
+	 * Token-endpoint authentication method. REQUIRED — the schema rejects
+	 * client entries that omit it; deployments upgrading from v0.5.0 must add
+	 * the field explicitly per the v0.5.1 migration guide.
+	 *
+	 * Public clients (`"none"`) MUST present PKCE/S256 at `/authorize`;
+	 * confidential clients (`"client_secret_basic"` / `"client_secret_post"`)
+	 * MUST present a `clientSecret` and use the matching transport at `/token`.
+	 */
+	readonly tokenEndpointAuthMethod: TokenEndpointAuthMethod;
+	/**
+	 * Required when `tokenEndpointAuthMethod` is `"client_secret_basic"` or
+	 * `"client_secret_post"`. MUST be absent (`undefined`) when the method is
+	 * `"none"`. The `ClientEntrySchema` superRefine enforces both directions.
+	 */
+	readonly clientSecret?: string;
+	readonly allowedRedirectUris: string[];
+	readonly allowedScopes: string[];
 	/**
 	 * Audience URIs that this client may request in Token Exchange (RFC 8693)
 	 * `audience` parameter. Empty or undefined means only the client's own
 	 * clientId is allowed as audience. Not used outside Token Exchange.
 	 */
-	allowedAudiences?: string[];
+	readonly allowedAudiences?: string[];
 	// NEW (TODO-F-5): Logout metadata.
-	postLogoutRedirectUris?: string[];
-	backchannelLogoutUri?: string;
+	readonly postLogoutRedirectUris?: string[];
+	readonly backchannelLogoutUri?: string;
 	// default: true (includes sid in logout_token) — intentional deviation from OIDC Back-Channel
 	// Logout 1.0 §2.2 spec default of false, to default to the safer behavior. See ClientEntrySchema.
-	backchannelLogoutSessionRequired?: boolean;
-	frontchannelLogoutUri?: string;
+	readonly backchannelLogoutSessionRequired?: boolean;
+	readonly frontchannelLogoutUri?: string;
 	// default: true (includes sid in frontchannel logout iframe URL) — intentional deviation from OIDC
 	// Front-Channel Logout 1.0 spec default of false, to default to the safer behavior. See ClientEntrySchema.
-	frontchannelLogoutSessionRequired?: boolean;
+	readonly frontchannelLogoutSessionRequired?: boolean;
 	// NEW (TODO-F-6): Federation-token access opt-in.
 	/**
 	 * When true, this client MAY call POST /oauth/federation/:name/token to
@@ -46,7 +70,7 @@ export interface Client {
 	 * radius. Opt-in prevents accidentally granting this power to a generic
 	 * OAuth client registration that only needs auth.
 	 */
-	allowedAzpForFederationToken?: boolean;
+	readonly allowedAzpForFederationToken?: boolean;
 }
 
 export interface User {

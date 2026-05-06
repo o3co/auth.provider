@@ -56,7 +56,13 @@ const httpUrlSchema = z
  */
 export const ClientEntrySchema = z
 	.object({
-		clientSecret: z.string().min(1),
+		// D-6 (v0.5.1): RFC 6749 §2.3 / RFC 7591 §2 client authentication method.
+		// Required — `clientSecret` is now optional and gated by the superRefine
+		// below so confidential clients still surface a startup error when the
+		// secret is missing, and public clients (`"none"`) cannot smuggle a
+		// secret in.
+		tokenEndpointAuthMethod: z.enum(["client_secret_basic", "client_secret_post", "none"]),
+		clientSecret: z.string().min(1).optional(),
 		allowedRedirectUris: z.array(z.string()).default([]),
 		allowedScopes: z.array(z.string()).default([]),
 		allowedAudiences: z.array(z.string()).default([]),
@@ -78,7 +84,32 @@ export const ClientEntrySchema = z
 		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
 		allowedAzpForFederationToken: z.boolean().optional().default(false),
 	})
-	.strict();
+	.strict()
+	.superRefine((data, ctx) => {
+		// D-6 (v0.5.1): the discriminator must select the right credential shape.
+		// Confidential clients (basic / post) must carry a secret; public clients
+		// (`"none"`) MUST NOT — accepting a secret on a `"none"` client would leave
+		// the credential in config where an operator could later assume the client
+		// had been promoted to confidential without changing the auth method.
+		const needsSecret =
+			data.tokenEndpointAuthMethod === "client_secret_basic" ||
+			data.tokenEndpointAuthMethod === "client_secret_post";
+		if (needsSecret && data.clientSecret === undefined) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message:
+					'clientSecret is required when tokenEndpointAuthMethod is "client_secret_basic" or "client_secret_post"',
+				path: ["clientSecret"],
+			});
+		}
+		if (!needsSecret && data.clientSecret !== undefined) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: 'clientSecret must not be set when tokenEndpointAuthMethod is "none"',
+				path: ["clientSecret"],
+			});
+		}
+	});
 
 export type ClientEntry = z.infer<typeof ClientEntrySchema>;
 
@@ -98,6 +129,7 @@ export class InMemoryClientRepository implements ClientRepository {
 		if (!entry) return null;
 		return {
 			clientId,
+			tokenEndpointAuthMethod: entry.tokenEndpointAuthMethod,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
 			allowedAudiences: entry.allowedAudiences,
@@ -120,6 +152,16 @@ export class InMemoryClientRepository implements ClientRepository {
 		const entry = this.clients.get(clientId);
 		if (!entry) return null;
 
+		// D-6 (v0.5.1): public clients have no `clientSecret` to authenticate
+		// against. `clientAuthMw` already routes them through `findById` instead
+		// of `authenticate` — but this guard makes the contract structural rather
+		// than relying on every caller to dispatch correctly. Returning null
+		// (rather than throwing) keeps the failure indistinguishable from
+		// "wrong secret" so the timing surface stays uniform.
+		if (entry.tokenEndpointAuthMethod === "none" || entry.clientSecret === undefined) {
+			return null;
+		}
+
 		const stored = entry.clientSecret;
 		const isBcrypt = /^\$2[aby]\$/.test(stored);
 
@@ -136,6 +178,7 @@ export class InMemoryClientRepository implements ClientRepository {
 
 		return {
 			clientId,
+			tokenEndpointAuthMethod: entry.tokenEndpointAuthMethod,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
 			allowedAudiences: entry.allowedAudiences,

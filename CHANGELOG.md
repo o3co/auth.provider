@@ -6,6 +6,89 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### BREAKING (Phase F — F6 PR1 D-6 PB-2 client authentication redesign, v0.5.1)
+
+- **`Client` interface gains `tokenEndpointAuthMethod`** (`@o3co/auth-provider-core`)
+  — REQUIRED discriminator with values
+  `"client_secret_basic" | "client_secret_post" | "none"` (RFC 6749 §2.3 / RFC 7591 §2).
+  Existing client configurations MUST add the field; `ClientEntrySchema` rejects
+  entries that omit it. `clientSecret` is now `string | undefined` (optional)
+  and a Zod `.superRefine` enforces "required iff method is `basic` / `post`,
+  forbidden iff method is `"none"`". All `Client` fields are now `readonly`.
+
+- **`/oauth/token` requires client authentication for every grant**: the
+  built-in route now wires `clientAuthMw` ahead of the grant dispatcher.
+  Calls without valid Basic credentials (or `client_id` body for public
+  clients) receive `401 invalid_client`. Public clients (`tokenEndpointAuthMethod
+  = "none"`) MUST send `client_id` in the form body and rely on PKCE/S256
+  for authenticity.
+
+- **PKCE/S256 is mandatory for public clients at `/authorize`** (RFC 9700
+  §2.1.1): public-client requests without `code_challenge` or with
+  `code_challenge_method != "S256"` are rejected via redirect-error
+  `invalid_request`. The operator-level `pkce.required` config is no longer
+  consulted for `"none"` clients.
+
+- **`GrantContext.authenticatedClient: AuthenticatedClient | null`** is
+  populated by `clientAuthMw` and consumed by the authorization-code and
+  refresh-token grants. Custom grant handlers MUST update their
+  `GrantContext` fixtures and rely on `ctx.authenticatedClient.clientId`
+  rather than `body.client_id` for any identity decision.
+
+- **Refresh-token grant binds RT to issuing client via `azp`**: the new
+  binding gate compares `(claims.azp ?? aud) === ctx.authenticatedClient.clientId`.
+  New tokens emit `azp` explicitly; legacy tokens (lacking `azp`) fall back
+  to `aud` once. Body `client_id` is no longer destructured.
+
+- **Authorization-code grant removes the in-grant `client_secret` check**
+  (RFC 6749 §2.3 belongs at the route, not the handler) and replaces every
+  raw-body `client_id` use that fed an identity sink (token `aud`/`azp`,
+  ID-token `aud`/`azp`, grant-policy `clientId`, session RP registration,
+  logout-metadata lookup) with `ctx.authenticatedClient.clientId`.
+  `body.client_secret` is no longer destructured.
+
+- **`clientAuthMw` enforces per-method transport (Codex M1)**: a client
+  configured for `"client_secret_basic"` cannot succeed via body credentials
+  (and vice versa) — wrong-transport attempts return `invalid_client`
+  regardless of credential validity. Basic-header + body-credential
+  conflict (Codex M4) is rejected with `invalid_client` before any
+  repository lookup.
+
+- **Token Exchange grant**: when dispatched via the standard `/token`
+  route, `clientAuthMw` runs ahead of the grant; the grant retains its
+  internal `client_secret_post` check as a no-op double-auth so consumers
+  who wire it onto custom routes keep the same authenticity guarantee.
+
+- **`InMemoryClientRepository.authenticate()` returns `null` for public
+  clients** (`tokenEndpointAuthMethod = "none"`) without throwing —
+  callers should dispatch to `findById` for public clients.
+
+#### Migration
+
+`config/clients.yaml`:
+
+```yaml
+# Confidential client (most common case)
+my-app:
+  tokenEndpointAuthMethod: "client_secret_basic"  # ADD THIS
+  clientSecret: "..."
+  # ... existing fields unchanged
+
+# Public client (SPA / mobile)
+my-spa:
+  tokenEndpointAuthMethod: "none"                 # ADD THIS
+  # clientSecret MUST be absent for "none"
+  allowedRedirectUris:
+    - "https://app.example/callback"
+  allowedScopes: ["openid", "profile"]
+```
+
+Confidential client requests to `/oauth/token` MUST send credentials via
+either HTTP Basic header or the body `client_id` + `client_secret` pair
+(matching the configured `tokenEndpointAuthMethod`). Public client requests
+MUST send `client_id` in the body and (at `/authorize`) include
+`code_challenge` + `code_challenge_method = "S256"`.
+
 ### Changed (Phase F — F4 PR2 standalone wiring batch + IH-10/17/18, v0.5.1)
 
 - **Single shared ioredis socket per replica** (`templates/standalone`):

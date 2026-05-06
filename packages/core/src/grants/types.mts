@@ -23,12 +23,30 @@ import type {
 	RefreshTokenFamilyRevocation,
 	RefreshTokenFamilyRotation,
 } from "../refresh-token-family/types.mjs";
+import type { TokenEndpointAuthMethod } from "../repositories/types.mjs";
 import type {
 	SessionFamilyIndex,
 	SessionFederationIndex,
 	SessionRPRegistry,
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
+
+/**
+ * The client identity established by RFC 6749 §2.3 token-endpoint
+ * authentication middleware (`clientAuthMw`) before a grant handler is
+ * invoked.
+ *
+ * Every grant handler that gates on client identity (refresh, authorization
+ * code, token-exchange) MUST consult this slot rather than the raw request
+ * body — body parameters are attacker-controlled and may differ from the
+ * authenticated identity. `null` indicates the request did not pass through
+ * `clientAuthMw` (e.g., a custom route, or a unit test invoking the handler
+ * directly with a hand-built `GrantContext`).
+ */
+export interface AuthenticatedClient {
+	readonly clientId: string;
+	readonly tokenEndpointAuthMethod: TokenEndpointAuthMethod;
+}
 
 /**
  * Session data exposed to grant handlers.
@@ -56,6 +74,18 @@ export interface GrantContext {
 	metadata: Record<string, unknown>;
 	ip?: string;
 	userAgent?: string;
+	/**
+	 * The authenticated client established by `clientAuthMw` before grant
+	 * dispatch on `/token`. Grant handlers that bind tokens to client identity
+	 * (authorization code, refresh, token-exchange) MUST use this field rather
+	 * than `body.client_id` — the body is attacker-controlled and bypasses
+	 * RFC 6749 §2.3 authentication.
+	 *
+	 * `null` when the grant is invoked outside the standard `/token` route
+	 * (custom wiring, direct unit-test invocation). Handlers that rely on a
+	 * client identity SHOULD reject `null` with `invalid_client` 401.
+	 */
+	readonly authenticatedClient: AuthenticatedClient | null;
 }
 
 export interface GrantSuccess {

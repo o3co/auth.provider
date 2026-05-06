@@ -23,6 +23,7 @@ import type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
 	GrantPolicyRequest,
+	PublicClient,
 } from "@o3co/auth-provider-core";
 import { formatObject, generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
 import { buildActClaim } from "./act.mjs";
@@ -57,7 +58,32 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const subjectToken = typeof body.subject_token === "string" ? body.subject_token : null;
 			const subjectTokenType =
 				typeof body.subject_token_type === "string" ? body.subject_token_type : null;
-			const clientId = typeof body.client_id === "string" ? body.client_id : null;
+			// D-6 Codex post-review: when this grant runs through `/oauth/token`,
+			// Basic-authenticated callers don't repeat `client_id` in the body —
+			// the authenticated identity is the canonical source. We resolve the
+			// effective client id from the body first (matching standalone-wiring
+			// callers) and fall back to `ctx.authenticatedClient.clientId`.
+			//
+			// Treat "present but not a single string" (e.g. `string[]` produced
+			// by a repeated query parameter) as malformed instead of silently
+			// falling back — otherwise an attacker could include a bogus
+			// `client_id` array to bypass the cross-client equality check below.
+			const bodyClientIdRaw = body.client_id;
+			let bodyClientId: string | null;
+			if (bodyClientIdRaw === undefined || bodyClientIdRaw === null) {
+				bodyClientId = null;
+			} else if (typeof bodyClientIdRaw === "string") {
+				bodyClientId = bodyClientIdRaw;
+			} else {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "client_id must be a single string value",
+					},
+				};
+			}
+			const clientId = bodyClientId ?? ctx.authenticatedClient?.clientId ?? null;
 			const clientSecretRaw = body.client_secret;
 			let clientSecret: string | null;
 			if (clientSecretRaw === undefined || clientSecretRaw === null) {
@@ -101,19 +127,81 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
-			// Client authentication: confidential clients only. Reject when
-			// client_secret is omitted (see clientSecretRaw handling above for the
-			// rationale).
-			if (clientSecret === null) {
-				return {
-					result: {
-						status: 401,
-						error: "invalid_client",
-						errorDescription: "client_secret is required",
-					},
-				};
+			// Client authentication. Token Exchange supports confidential clients
+			// only — public (`"none"`) clients are refused regardless of route.
+			//
+			// D-6 (v0.5.1): when this grant is dispatched from the standard
+			// `/token` route, `clientAuthMw` has already authenticated the client
+			// (via Basic header OR body credentials) and populated
+			// `ctx.authenticatedClient`. We trust that identity over the body —
+			// without this branch, Basic-authenticated callers would fail here
+			// because `body.client_secret` is empty when credentials travel in
+			// the `Authorization` header. For consumers wiring this grant onto a
+			// custom route that bypasses `clientAuthMw`, the `else` branch keeps
+			// the original body-credential gate as the sole authenticity check.
+			let client: PublicClient | null;
+			if (ctx.authenticatedClient) {
+				if (ctx.authenticatedClient.tokenEndpointAuthMethod === "none") {
+					return {
+						result: {
+							status: 401,
+							error: "invalid_client",
+							errorDescription: "Token Exchange does not support public clients",
+						},
+					};
+				}
+				// Body-supplied client_id MUST match the authenticated identity —
+				// otherwise an attacker could authenticate as A and request a
+				// token exchange under B's allowlist. Standard Basic-authenticated
+				// callers omit body `client_id` entirely; only verify equality
+				// when the body explicitly supplied one (`bodyClientId !== null`).
+				if (bodyClientId !== null && bodyClientId !== ctx.authenticatedClient.clientId) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "client_id does not match authenticated client",
+						},
+					};
+				}
+				try {
+					client = await clientRepository.findById(ctx.authenticatedClient.clientId);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "client repository unavailable",
+						},
+					};
+				}
+			} else {
+				// Standalone wiring: no `clientAuthMw` ahead of us, so verify
+				// the body-supplied secret directly. Repository failures are
+				// surfaced as a controlled 503 to match the authenticated-client
+				// branch — without this guard, a transient repository outage
+				// would propagate as an unhandled 500.
+				if (clientSecret === null) {
+					return {
+						result: {
+							status: 401,
+							error: "invalid_client",
+							errorDescription: "client_secret is required",
+						},
+					};
+				}
+				try {
+					client = await clientRepository.authenticate(clientId, clientSecret);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "client repository unavailable",
+						},
+					};
+				}
 			}
-			const client = await clientRepository.authenticate(clientId, clientSecret);
 			if (!client) {
 				return {
 					result: {

@@ -1,14 +1,30 @@
 # Example client definitions loaded via loadYamlMap into InMemoryClientRepository.
 # Copy this file to clients.yaml and customize for your deployment.
 #
-# Secret format:
+# `tokenEndpointAuthMethod` is REQUIRED (RFC 6749 §2.3 / RFC 7591 §2):
+#   - "client_secret_basic": HTTP Basic Authorization header — recommended for confidential clients
+#   - "client_secret_post":  form-encoded body parameters
+#   - "none":                public client — no clientSecret; PKCE/S256 mandatory at /authorize
+#
+# Secret format (only for confidential clients — basic / post):
 #   - Plain text: "my-secret"
 #   - Bcrypt hash: "$2b$10$..." (generate with: node -e "require('bcrypt').hash('secret',10).then(console.log)")
 
 my-app:
+  tokenEndpointAuthMethod: "client_secret_basic"
   clientSecret: "$2b$10$REPLACE_WITH_BCRYPT_HASH"
   allowedRedirectUris:
     - "http://localhost:3000/callback"
   allowedScopes:
     - "read"
     - "write"
+
+# Public client example (e.g., a single-page app or mobile app):
+# my-spa:
+#   tokenEndpointAuthMethod: "none"
+#   # clientSecret MUST be absent for "none" clients.
+#   allowedRedirectUris:
+#     - "https://app.example/callback"
+#   allowedScopes:
+#     - "openid"
+#     - "profile"

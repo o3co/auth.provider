@@ -50,9 +50,34 @@ const mockConfig = {
 	},
 } as unknown as AppConfig;
 
+// D-6 (v0.5.1): every hit on /oauth/token now traverses `clientAuthMw` before
+// the registered grant handler runs. The mock client repository returns a
+// fixed "client1" / "secret1" pair so route-level integration tests can
+// authenticate by sending `Authorization: ${TEST_BASIC_AUTH}` and exercise the
+// rate-limit / audit / grant-policy paths under the new flow.
+const TEST_CLIENT_ID = "client1";
+const TEST_CLIENT_SECRET = "secret1";
+const TEST_BASIC_AUTH = `Basic ${Buffer.from(`${TEST_CLIENT_ID}:${TEST_CLIENT_SECRET}`).toString("base64")}`;
+
 const mockClientRepository: ClientRepository = {
-	findById: async () => null,
-	authenticate: async () => null,
+	findById: async (clientId) =>
+		clientId === TEST_CLIENT_ID
+			? {
+					clientId: TEST_CLIENT_ID,
+					tokenEndpointAuthMethod: "client_secret_basic",
+					allowedRedirectUris: ["https://rp.example/cb"],
+					allowedScopes: [],
+				}
+			: null,
+	authenticate: async (clientId, secret) =>
+		clientId === TEST_CLIENT_ID && secret === TEST_CLIENT_SECRET
+			? {
+					clientId: TEST_CLIENT_ID,
+					tokenEndpointAuthMethod: "client_secret_basic",
+					allowedRedirectUris: ["https://rp.example/cb"],
+					allowedScopes: [],
+				}
+			: null,
 };
 
 const mockCodeRepository: CodeRepository = {
@@ -127,7 +152,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				})),
 			});
 
-			const res = await request(app).post("/oauth/token").send({ grant_type: "password" });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.send({ grant_type: "password" });
 
 			expect(res.status).toBe(429);
 			expect(res.body.error).toBe("rate_limited");
@@ -146,7 +174,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				})),
 			});
 
-			const res = await request(app).post("/oauth/token").send({ grant_type: "refresh_token" });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.send({ grant_type: "refresh_token" });
 
 			expect(res.status).toBe(429);
 			expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
@@ -181,6 +212,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			const res = await request(app)
 				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
 				.send({ grant_type: "unsupported_type_xyz" });
 
 			// 400 unsupported_grant_type — request was allowed through (fail-open)
@@ -223,6 +255,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 				const res = await request(app)
 					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
 					.send({ grant_type: "unsupported_type_xyz" });
 
 				// fail-open: 400 unsupported_grant_type from the route, NOT 503
@@ -254,6 +287,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 				const res = await request(app)
 					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
 					.send({ grant_type: "unsupported_type_xyz" });
 
 				expect(res.status).toBe(503);
@@ -277,6 +311,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 				const res = await request(app)
 					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
 					.send({ grant_type: "unsupported_type_xyz" });
 
 				expect(res.status).toBe(400); // unsupported_grant_type, not 503
@@ -303,6 +338,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 				const res = await request(app)
 					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
 					.send({ grant_type: "unsupported_type_xyz" });
 
 				expect(res.status).toBe(400); // unsupported_grant_type, not 503
@@ -320,6 +356,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			const res = await request(app)
 				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
 				.send({ grant_type: "unsupported_type_xyz" });
 
 			// Not 429 — rate limiter allowed; 400 from unsupported_grant_type
@@ -339,7 +376,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				},
 			};
 			const app = await buildApp({ rateLimiter });
-			await request(app).post("/oauth/token").send({ grant_type: "unsupported_xyz" });
+			await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.send({ grant_type: "unsupported_xyz" });
 			expect(observedKey).toBeDefined();
 			// Extract ip portion from key "token:ip:<ip>"
 			const keyIp = observedKey?.split(":").slice(2).join(":");
@@ -352,7 +392,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			const { sink, events } = createSpyAuditSink();
 			const app = await buildApp({ auditSink: sink });
 
-			await request(app).post("/oauth/token").send({ grant_type: "unsupported_xyz" });
+			await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.send({ grant_type: "unsupported_xyz" });
 
 			expect(events.length).toBeGreaterThanOrEqual(1);
 			const ev = events.find((e) => e.type === "token.issued.failure");
@@ -362,7 +405,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		it("does not throw when auditSink is undefined (no-op)", async () => {
 			const app = await buildApp({});
 
-			const res = await request(app).post("/oauth/token").send({ grant_type: "unsupported_xyz" });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.send({ grant_type: "unsupported_xyz" });
 
 			expect(res.status).toBe(400);
 		});
@@ -719,6 +765,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				},
 				issuer: "https://auth.example",
 				metadata: {},
+				authenticatedClient: {
+					clientId: "client-1",
+					tokenEndpointAuthMethod: "client_secret_basic",
+				},
 			});
 
 			if (!("tokens" in result)) throw new Error("expected tokens");
