@@ -2,6 +2,7 @@
  * Copyright 2026 1o1 Co. Ltd.
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
+import { createHash } from "node:crypto";
 import type { Redis } from "ioredis";
 import type {
 	ChallengeStoreClient,
@@ -17,6 +18,41 @@ import type {
 	SessionSidSortedSetMultiClient,
 	UserSessionStoreClient,
 } from "./clients.mjs";
+
+/**
+ * Lua compare-and-delete script — atomic alternative to GET+DEL.
+ * Returns 1 when the key was deleted (caller's token matched), 0 otherwise.
+ * `KEYS[1]` = the lock key; `ARGV[1]` = the caller's acquire token.
+ */
+const LUA_COMPARE_AND_DELETE = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+`.trim();
+
+/**
+ * Precomputed SHA-1 digest of `LUA_COMPARE_AND_DELETE`. Redis indexes its
+ * server-side script cache by SHA-1 of the bytewise script source, so this
+ * digest is deterministic and matches what `SCRIPT LOAD` would return. We
+ * compute it once at module load and skip the extra round-trip that a
+ * `SCRIPT LOAD` would cost on every cold-cache `EVAL` fallback.
+ */
+const LUA_COMPARE_AND_DELETE_SHA = createHash("sha1").update(LUA_COMPARE_AND_DELETE).digest("hex");
+
+/**
+ * Module-level flag tracking whether the script is currently expected to be
+ * resident in the Redis server's script cache. `true` means the next call
+ * may use `EVALSHA`; `false` (e.g. after a `NOSCRIPT` error from
+ * `SCRIPT FLUSH` or cluster failover) means the next call must use `EVAL`,
+ * which implicitly re-loads the script and lets us flip back to `true`.
+ *
+ * Module scope (not per-`makeIoredisClients` call) because the script is
+ * constant: multiple ioredis clients in the same process share the same
+ * cache state on the same Redis server.
+ */
+let scriptCached = false;
 
 /**
  * Wrap a single ioredis connection into the 9 typed client wrappers
@@ -215,6 +251,28 @@ export function makeIoredisClients(io: Redis): {
 					for (const key of batch as string[]) yield key;
 				}
 			})(),
+		// D-9: atomic compare-and-delete via Lua. EVALSHA on the hot path with a
+		// precomputed module-level SHA-1; on `NOSCRIPT` (cold cache after
+		// SCRIPT FLUSH or cluster failover) falls back to EVAL, which Redis
+		// implicitly loads into its server-side cache so the next EVALSHA hits.
+		async compareAndDelete(key, expectedValue) {
+			if (scriptCached) {
+				try {
+					const r = (await io.evalsha(LUA_COMPARE_AND_DELETE_SHA, 1, key, expectedValue)) as number;
+					return r === 1;
+				} catch (err) {
+					if (!(err instanceof Error) || !err.message.includes("NOSCRIPT")) throw err;
+					scriptCached = false;
+					// Fall through to EVAL.
+				}
+			}
+			const r = (await io.eval(LUA_COMPARE_AND_DELETE, 1, key, expectedValue)) as number;
+			// EVAL implicitly loads the script into Redis's server-side cache;
+			// future EVALSHA hits with the precomputed SHA. No extra SCRIPT LOAD
+			// round-trip required.
+			scriptCached = true;
+			return r === 1;
+		},
 	};
 
 	const rateLimiterClient: RateLimiterClient = {

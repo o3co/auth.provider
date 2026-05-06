@@ -86,6 +86,15 @@ describe("makeIoredisClients return shape", () => {
 		>().toMatchTypeOf<FederationTokenStoreClient>();
 	});
 
+	// D-9: FederationTokenStoreClient declares atomic compare-and-delete used
+	// by the federation-tokens advisory lock release path. Custom client
+	// implementations must add this method.
+	it("FederationTokenStoreClient declares compareAndDelete: (key, expected) => Promise<boolean>", () => {
+		expectTypeOf<FederationTokenStoreClient["compareAndDelete"]>().toEqualTypeOf<
+			(key: string, expectedValue: string) => Promise<boolean>
+		>();
+	});
+
 	it("rateLimiterClient satisfies RateLimiterClient", () => {
 		expectTypeOf<IoredisClientsReturn["rateLimiterClient"]>().toMatchTypeOf<RateLimiterClient>();
 	});

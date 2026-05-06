@@ -19,7 +19,7 @@ import type { AcquireLockOptions, LockResult, SupportsLock } from "@o3co/auth-pr
 
 /**
  * Minimal redis client shape the lock needs. Consumers can pass any client
- * that implements these three methods — node-redis, ioredis, fake clients in
+ * that implements these methods — node-redis, ioredis, fake clients in
  * tests, etc.
  *
  * ## Value-fidelity contract
@@ -28,11 +28,6 @@ import type { AcquireLockOptions, LockResult, SupportsLock } from "@o3co/auth-pr
  * assumes of the client; consumers wiring a non-standard client MUST preserve
  * them:
  *
- * - `get(key)` MUST return the exact string previously written by `set(key, value)`.
- *   No normalization, wrapping, or transformation. Clients that base64-encode
- *   values on write must base64-decode on read (most commercial redis clients
- *   do this transparently; homemade shims must mirror the behavior).
- *
  * - `set(key, value, { NX: true, PX: ttlMs })` MUST return a truthy value (the
  *   stored string or `"OK"`) when the key was created, and MUST return `null`
  *   when creation was skipped because the key already exists. The lock treats
@@ -40,14 +35,18 @@ import type { AcquireLockOptions, LockResult, SupportsLock } from "@o3co/auth-pr
  *
  * - `PX` is in **milliseconds** (matching the redis native option).
  *
+ * - `compareAndDelete(key, expectedValue)` MUST atomically delete the key only
+ *   when its stored value equals `expectedValue`. Implementations MUST NOT
+ *   degrade to a non-atomic GET+DEL pair under any condition — the race
+ *   window the spec closes (CR-1, OR-13, SF-4) reopens if so.
+ *
  * Breaking these invariants causes silent incorrectness: the release path
  * will fail its value-match check and never DEL, waiting for the TTL to
  * reclaim the key. Under load this manifests as lock starvation.
  */
 export interface RedisLockClient {
-	get(key: string): Promise<string | null>;
 	set(key: string, value: string, opts?: { PX?: number; NX?: boolean }): Promise<string | null>;
-	del(key: string): Promise<number>;
+	compareAndDelete(key: string, expectedValue: string): Promise<boolean>;
 }
 
 export interface RedisLockOptions {
@@ -61,20 +60,24 @@ const DEFAULT_WAIT_MS = 4_000;
 const POLL_INTERVAL_MS = 50;
 
 /**
- * Redis-backed advisory lock. Uses SET NX PX for acquire and compare-and-delete
- * for release — the release path fetches the current value and only issues DEL
- * when the value still matches the caller's acquire token, so a TTL-expired
- * caller cannot evict a subsequent holder.
+ * Redis-backed advisory lock. Uses SET NX PX for acquire and an atomic
+ * compare-and-delete for release — the release path runs a Lua script (or
+ * adapter-equivalent atomic operation) that compares the stored value to the
+ * caller's acquire token and only deletes the key when they match in a single
+ * server-side step.
  *
- * The compare-and-delete is GET + DEL — not atomic. A small race window exists
- * between the two commands, during which another process could acquire the
- * lock after our GET; our DEL would then evict them one poll-cycle early. The
- * window is ms-sized and the consequence is bounded — consumers that need
- * strict atomicity should upgrade to a Lua EVAL-based release.
+ * **Atomicity (D-9 / OR-13 / SF-4)**: there is no race window between checking
+ * and deleting the key. Pre-D-9 the release was GET+DEL — a TTL-expired holder
+ * could evict a freshly-acquired lock owned by a different process between
+ * the two round-trips. The atomic `compareAndDelete` closes that race.
  *
- * Plan line 837: "Upgrading to a Lua script would remove the race but adds
- * dependency on EVAL being available (which it is on all mainstream redis
- * versions). Defer unless pattern is reused heavily."
+ * Adapter responsibility: built-in `makeIoredisClients()` implements
+ * `compareAndDelete` via Lua `EVAL` (with `EVALSHA` caching). Custom
+ * `FederationTokenStoreClient` implementations MUST provide an atomic
+ * implementation; degrading to GET+DEL reopens the race. Cluster-mode
+ * deployments with Lua scripting disabled need an alternative atomic primitive.
+ *
+ * See `FederationTokenStoreClient.compareAndDelete` JSDoc for the contract.
  */
 export function createRedisLock(opts: RedisLockOptions): Pick<SupportsLock, "acquireLock"> {
 	const prefix = opts.keyPrefix ?? "ftlock:";
@@ -94,14 +97,12 @@ export function createRedisLock(opts: RedisLockOptions): Pick<SupportsLock, "acq
 					return {
 						acquired: true,
 						release: async () => {
-							// Compare-and-delete: only remove the entry when the stored
-							// value still matches our acquire token. Prevents evicting a
+							// Atomic compare-and-delete: deletes the key only when the
+							// stored value equals our acquire token. Prevents evicting a
 							// subsequently acquired lock after our TTL expired under a
-							// slow operation.
-							const current = await opts.client.get(key);
-							if (current === token) {
-								await opts.client.del(key);
-							}
+							// slow operation. Return value is intentionally not checked —
+							// `false` (caller no longer holds the lock) is a no-op outcome.
+							await opts.client.compareAndDelete(key, token);
 						},
 					};
 				}

@@ -45,7 +45,13 @@ describe("redisFederationTokenStoreBuilder", () => {
 	});
 
 	it("rejects encryption.required without 32-byte key", () => {
-		const fakeClient = { get: () => null, set: () => null, del: () => 0, scanIterator: () => [] };
+		const fakeClient = {
+			get: () => null,
+			set: () => null,
+			del: () => 0,
+			scanIterator: () => [],
+			compareAndDelete: async () => false,
+		};
 		expect(() =>
 			redisFederationTokenStoreBuilder({
 				client: fakeClient,
@@ -55,7 +61,13 @@ describe("redisFederationTokenStoreBuilder", () => {
 	});
 
 	it("accepts encryption.allow-plaintext", () => {
-		const fakeClient = { get: () => null, set: () => null, del: () => 0, scanIterator: () => [] };
+		const fakeClient = {
+			get: () => null,
+			set: () => null,
+			del: () => 0,
+			scanIterator: () => [],
+			compareAndDelete: async () => false,
+		};
 		// No throw expected
 		const store = redisFederationTokenStoreBuilder({
 			client: fakeClient,

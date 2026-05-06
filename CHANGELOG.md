@@ -39,7 +39,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   silently no-ops on a key with no existing TTL — see method JSDoc). Custom
   backing-client implementations (non-ioredis) must add `pExpireGT` to compile.
 
+### Breaking Changes (Phase F — D-9 federation-tokens lock CAS, v0.5.1)
+
+- **`FederationTokenStoreClient.compareAndDelete` added** (`@o3co/auth-provider-redis`):
+  the `FederationTokenStoreClient` interface gains a required
+  `compareAndDelete(key, expectedValue): Promise<boolean>` method for atomic
+  advisory-lock release (closes CR-1 / OR-13 / SF-4). The pre-D-9 release
+  path was non-atomic GET+DEL, which had a race window during which a
+  TTL-expired holder could evict a freshly-acquired lock owned by a different
+  process. Lock semantics are now atomic via a server-side Lua compare-and-
+  delete script.
+  Custom implementations of `FederationTokenStoreClient` MUST add this method
+  with atomic semantics. Implementation guide: run a Lua `EVAL` script
+  `if redis.call("GET", KEYS[1]) == ARGV[1] then return redis.call("DEL", KEYS[1]) else return 0 end`
+  with `keys=[key]`, `arguments=[expectedValue]`, returning `result === 1`.
+  Redis Cluster-mode deployments with Lua scripting disabled require an
+  alternative atomic strategy.
+  The bundled `makeIoredisClients()` adapter implements this automatically
+  via Lua `EVAL` with `EVALSHA` caching and `NOSCRIPT` fallback.
+
+- **`RedisLockClient` interface narrowed** (`@o3co/auth-provider-redis`,
+  internal): the lock's minimal client interface drops `get` and `del` in
+  favor of the new `compareAndDelete`. The interface is not exported from
+  the package index and only used internally by the federation-tokens lock
+  bridge — no external impact.
+
 ### Bug Fixes (Phase F — v0.5.1)
+
+- **federation-tokens lock release race**: federation-token refresh paths
+  could spuriously evict a freshly-acquired lock held by a different process
+  when the previous holder's TTL expired mid-call. The release path is now
+  an atomic Lua compare-and-delete (D-9, closes CR-1 / OR-13 / SF-4). Custom
+  `FederationTokenStoreClient` implementations must implement
+  `compareAndDelete` with atomic semantics (see breaking-change entry above).
+
+- **federation-tokens production guard for `allow-plaintext`**: the redis
+  federation-token store builder (`redisFederationTokenStoreBuilder`) now
+  refuses to construct a store with `encryption.mode = "allow-plaintext"`
+  when `NODE_ENV` is `"production"` or `"staging"`, throwing a startup error
+  unless the operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`
+  to opt in (with a CRITICAL `console.error` warning). Pre-fix the builder
+  emitted a soft `console.warn` and continued, allowing federation tokens
+  (long-lived IdP refresh tokens) to ship unencrypted to production by
+  misconfiguration. Dev/test environments retain warn-only behavior. (OR-12,
+  closes CC-3 residual.)
 
 - **federation-refresh:** Fix Google (and other built-in) federation token refresh
   broken in v0.5.0. The route-side duck-type capability check in

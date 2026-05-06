@@ -211,8 +211,9 @@ export interface SessionSidSortedSetClient {
 /**
  * Backing client for FederationTokenStore adapters. Declares `get`, `set`
  * (two overloads: PX form, and PX+NX form for atomic insert-only),
- * variadic `del`, and `scanIterator` for the cursor-based key scan used
- * by `deleteBySession`.
+ * variadic `del`, `scanIterator` for the cursor-based key scan used by
+ * `deleteBySession`, and `compareAndDelete` for atomic advisory-lock
+ * release.
  *
  * The plain-PX `set` overload always succeeds with `"OK"` per Redis
  * `SET key value PX ms` protocol; the PX+NX overload returns `"OK"` on
@@ -224,6 +225,27 @@ export interface FederationTokenStoreClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	del(...keys: string[]): Promise<number>;
 	scanIterator(opts: { MATCH: string; COUNT?: number }): AsyncIterable<string>;
+	/**
+	 * Atomically compare the value stored at `key` to `expectedValue` and
+	 * delete the key only on match.
+	 *
+	 * This is the only safe lock-release primitive: a plain `del(key)` after a
+	 * separate `get(key)` has a race window between the two commands during
+	 * which a TTL-expired holder can evict a freshly-acquired lock owned by
+	 * another caller. Implementations MUST use a server-side atomic mechanism
+	 * — Lua `EVAL` on Redis standalone / Sentinel, or a transaction-equivalent
+	 * primitive on Cluster-mode deployments where `EVAL` is disabled.
+	 *
+	 * Built-in `makeIoredisClients()` implements this via a Lua compare-and-
+	 * delete script with `EVALSHA` caching and `EVAL` fallback on `NOSCRIPT`.
+	 *
+	 * @param key - The Redis key to check and conditionally delete.
+	 * @param expectedValue - The value the caller expects to find at `key`.
+	 * @returns `true` if the key was deleted (caller was the lock holder);
+	 *          `false` if the stored value did not match (caller is no longer
+	 *          the holder — a different process acquired the lock).
+	 */
+	compareAndDelete(key: string, expectedValue: string): Promise<boolean>;
 }
 
 // --- RateLimiterClient -----------------------------------------------------
