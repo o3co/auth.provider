@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { createLifecycleRegistrar } from "../../adapters/AdapterFactory.mjs";
 import { assembleApp } from "../assemble-app.mjs";
 import type { CleanupRecord, CollectedRouteContribution, FrozenWorld } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -591,6 +592,52 @@ describe("assembleApp — 14. MUST-FIX 3: no asyncDispose on external (override/
 // ---------------------------------------------------------------------------
 
 describe("assembleApp — 17. listen() wraps router in Express app", () => {
+	// ---------------------------------------------------------------------------
+	// 14. D-5 LifecycleRegistrar drain (Step 3 in buildDispose)
+	// ---------------------------------------------------------------------------
+
+	describe("assembleApp — 14. dispose drains LifecycleRegistrar (D-5)", () => {
+		it("registered cleanups run in LIFO order during AppHandle.dispose", async () => {
+			const order: string[] = [];
+			const reg = createLifecycleRegistrar();
+			reg.register(async () => {
+				order.push("first");
+			});
+			reg.register(async () => {
+				order.push("second");
+			});
+
+			const mockRouter = makeMockRouter();
+			const handle = assembleApp(makeFrozenWorld([]), {
+				express: { Router: () => mockRouter as never },
+				lifecycleReg: reg,
+			});
+
+			await handle.dispose();
+			// LIFO: second-registered runs first.
+			expect(order).toEqual(["second", "first"]);
+		});
+
+		it("LifecycleRegistrar drain errors accumulate into the dispose AggregateError", async () => {
+			const reg = createLifecycleRegistrar();
+			reg.register(async () => {
+				throw new Error("registrar-cleanup-boom");
+			});
+
+			const mockRouter = makeMockRouter();
+			const handle = assembleApp(makeFrozenWorld([]), {
+				express: { Router: () => mockRouter as never },
+				lifecycleReg: reg,
+			});
+
+			await expect(handle.dispose()).rejects.toThrow(/lifecycle-registrar/);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// 15. listen() — 404 fallthrough
+	// ---------------------------------------------------------------------------
+
 	it("returns 404 (not crash with 'next is not a function') for unmatched paths", async () => {
 		// Regression: passing a bare Express Router to http.createServer means
 		// fall-through requests cause "TypeError: next is not a function"
