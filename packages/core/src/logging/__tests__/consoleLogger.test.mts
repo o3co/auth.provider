@@ -3,8 +3,8 @@
  * Licensed under the Apache License, Version 2.0 (the "License").
  */
 
-import { consoleLogger, createConsoleLogger } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { consoleLogger, createConsoleLogger } from "../consoleLogger.mjs";
 
 describe("consoleLogger level routing", () => {
 	afterEach(() => vi.restoreAllMocks());
@@ -61,6 +61,12 @@ describe("consoleLogger level routing", () => {
 		consoleLogger.warn({ a: 1 });
 		expect(spy).toHaveBeenCalledWith({ a: 1 });
 		expect(spy).not.toHaveBeenCalledWith({ a: 1 }, undefined);
+	});
+
+	it("string-first call with msg + extra args forwards all positional args (pino interpolation)", () => {
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		consoleLogger.warn("base %s", "interp1", "interp2");
+		expect(spy).toHaveBeenCalledWith({}, "base %s", "interp1", "interp2");
 	});
 });
 

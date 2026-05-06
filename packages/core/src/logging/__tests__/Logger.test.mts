@@ -3,8 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License").
  */
 
-import { consoleLogger, type Logger } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
+import { consoleLogger } from "../consoleLogger.mjs";
+import type { Logger } from "../Logger.mjs";
 
 describe("Logger interface contract", () => {
 	it("consoleLogger satisfies the Logger interface with all 6 levels + child", () => {
