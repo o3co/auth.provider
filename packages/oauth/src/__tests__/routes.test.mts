@@ -16,12 +16,16 @@
 
 import {
 	type AppConfig,
+	type AuditEvent,
+	type AuditSinkBase,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type GrantHandler,
 	GrantRegistry,
 } from "@o3co/auth-provider-core";
-import type { Router } from "express";
+import express, { type Router } from "express";
+import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 
@@ -30,6 +34,48 @@ const mockConfig = {
 		login: { url: "/login" },
 	},
 } as unknown as AppConfig;
+
+const fullConfig = {
+	oauth: { jwt: { issuer: "https://issuer.example" } },
+	rateLimit: { failMode: "open" as const },
+	endpoints: { login: { url: "/login" } },
+} as unknown as AppConfig;
+
+const TEST_CLIENT_ID = "client1";
+const TEST_CLIENT_SECRET = "secret1";
+const TEST_BASIC_AUTH = `Basic ${Buffer.from(`${TEST_CLIENT_ID}:${TEST_CLIENT_SECRET}`).toString("base64")}`;
+
+const integrationClientRepo: ClientRepository = {
+	findById: async (clientId) =>
+		clientId === TEST_CLIENT_ID
+			? {
+					clientId: TEST_CLIENT_ID,
+					tokenEndpointAuthMethod: "client_secret_basic",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+				}
+			: null,
+	authenticate: async (clientId, secret) =>
+		clientId === TEST_CLIENT_ID && secret === TEST_CLIENT_SECRET
+			? {
+					clientId: TEST_CLIENT_ID,
+					tokenEndpointAuthMethod: "client_secret_basic",
+					allowedRedirectUris: [],
+					allowedScopes: [],
+				}
+			: null,
+};
+
+const integrationCodeRepo: CodeRepository = {
+	createCode: async () => ({
+		code: "code-x",
+		client_id: TEST_CLIENT_ID,
+		redirect_uri: "https://rp.example/cb",
+	}),
+	getByCode: async () => null,
+	consumeByCode: async () => null,
+	removeByCode: async () => {},
+};
 
 const mockExpress = {
 	Router: () =>
@@ -91,5 +137,131 @@ describe("createOAuthRouter", () => {
 
 		// The second arg (index 1) is the rate-limit middleware — it must be a function
 		expect(typeof introspectCall[1]).toBe("function");
+	});
+
+	// D-6 (v0.5.1) integration coverage: exercise the full /oauth/token pipeline
+	// end-to-end via supertest + a real express app. The mocked-router tests
+	// above only verify wiring; these tests cover the success-path token
+	// response, audit emit, and the 401 → `WWW-Authenticate: Bearer` branch.
+	describe("D-6 /oauth/token integration", () => {
+		async function buildApp(opts: {
+			grantHandler: GrantHandler;
+			grantType: string;
+			auditSink?: AuditSinkBase;
+		}) {
+			const app = express();
+			app.set("trust proxy", 1);
+			app.use(express.json());
+			app.use(express.urlencoded({ extended: false }));
+			const registry = new GrantRegistry();
+			registry.register(opts.grantType, opts.grantHandler);
+			const { router } = await createOAuthRouter(express, {
+				registry,
+				config: fullConfig,
+				clientRepository: integrationClientRepo,
+				codeRepository: integrationCodeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				auditSink: opts.auditSink,
+			});
+			app.use("/oauth", router);
+			return app;
+		}
+
+		it("success path: returns 200 + tokens + Cache-Control no-store + audit", async () => {
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSinkBase = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async (_ctx) => ({
+					result: {
+						status: 200,
+						tokens: { access_token: "at.x.y", token_type: "Bearer", expires_in: 300 },
+					},
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "stub" });
+
+			expect(res.status).toBe(200);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.headers.pragma).toBe("no-cache");
+			expect(res.body.access_token).toBe("at.x.y");
+			// `clientId` in the audit event uses the authenticated identity, not body.
+			await new Promise((r) => setImmediate(r));
+			const issuedEvent = events.find((e) => e.type === "token.issued");
+			expect(issuedEvent).toBeDefined();
+			expect(issuedEvent?.clientId).toBe(TEST_CLIENT_ID);
+		});
+
+		it("error path with errorDescription + 401 sets WWW-Authenticate: Bearer + audit failure", async () => {
+			// A grant handler returning status 401 (e.g. ctx.authenticatedClient
+			// missing in a custom wiring) should route to the error branch with
+			// `WWW-Authenticate: Bearer` per RFC 6750 §3.
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSinkBase = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async (_ctx) => ({
+					result: {
+						status: 401,
+						error: "invalid_client",
+						errorDescription: "stub denied",
+					},
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "stub" });
+
+			expect(res.status).toBe(401);
+			expect(res.headers["www-authenticate"]).toBe("Bearer");
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("stub denied");
+			await new Promise((r) => setImmediate(r));
+			const failEvent = events.find((e) => e.type === "token.issued.failure");
+			expect(failEvent).toBeDefined();
+			expect(failEvent?.clientId).toBe(TEST_CLIENT_ID);
+		});
+
+		it("missing grant_type: returns 400 unsupported_grant_type + audit failure", async () => {
+			// Covers the early `if (typeof grant_type !== "string" ...)` branch.
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSinkBase = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: { status: 200, tokens: { access_token: "x", token_type: "Bearer" } },
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({}); // no grant_type
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("unsupported_grant_type");
+			await new Promise((r) => setImmediate(r));
+			expect(events.find((e) => e.type === "token.issued.failure")).toBeDefined();
+		});
 	});
 });

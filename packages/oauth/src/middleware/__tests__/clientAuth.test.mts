@@ -338,6 +338,48 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error).toBe("invalid_client");
 			expect(res.body.error_description).toBeUndefined();
 		});
+
+		it("body-path: returns 401 fail-closed when authenticate throws — no WWW-Authenticate (body attempt)", async () => {
+			// Confidential client_secret_post + authenticate throws → rejectPlain
+			// (no Basic challenge — the caller never tried Basic).
+			const throwingRepo: ClientRepository = {
+				findById: async (id) =>
+					id === "alice" ? buildPublicClient(postConfidential("alice", "s3cret")) : null,
+				authenticate: async () => {
+					throw new Error("store unavailable");
+				},
+			};
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "s3cret" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBeUndefined();
+			// Body-path failure → no Basic challenge.
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+		});
+
+		it("body-path: returns 401 Invalid client credentials when authenticate returns null", async () => {
+			// Confidential client_secret_post + wrong secret → authenticate
+			// returns null → rejectPlain "Invalid client credentials".
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([postConfidential("alice", "s3cret")])),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "wrong" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Invalid client credentials");
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+		});
 	});
 
 	describe("Basic header parsing edge cases", () => {
