@@ -2,6 +2,17 @@
 
 Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core`.
 
+## Requirements
+
+- **Node.js** `>=18.19.0`
+- **Redis server** `>=7.2 LTS` — the session adapters use `PEXPIREAT … GT` for
+  safe concurrent TTL writes (D-10). Redis 6.x is not supported. Tested
+  against:
+  - AWS ElastiCache for Redis 7.2
+  - Upstash Redis (7.2 compatible)
+  - Redis Cloud 7.2
+  - Self-managed `redis:7.2-alpine`
+
 This package ships nine adapters covering every redis-backed component that
 `@o3co/auth-provider-core` exposes as a typed slot:
 

@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Breaking Changes (Phase F — D-10 Redis 7.2 LTS minimum, v0.5.1)
+
+- **Redis 7.2 LTS minimum required** (`@o3co/auth-provider-redis`): the Redis-backed
+  session adapters (`createRedisSidSortedSet`, `createRedisSidHash`) now use
+  `PEXPIREAT … NX` + `PEXPIREAT … GT` (Redis 7.0+ flags) on the per-sid TTL
+  pipeline to prevent TTL truncation under concurrent writes (CR-3). The pair
+  is required because Redis treats a non-volatile (no-TTL) key as having
+  infinite TTL for the GT flag, so a bare `PEXPIREAT … GT` silently no-ops on
+  the first write — the NX clause sets the TTL on first write, the GT clause
+  raises it on subsequent writes only when the new ts is strictly greater.
+  Redis 6.x servers do not support either flag and will return `ERR syntax
+  error` at the first session write.
+  **Migration**: upgrade your Redis server to 7.2 LTS or later before deploying
+  v0.5.1. AWS ElastiCache for Redis 7.2, Upstash Redis, and Redis Cloud all
+  support the GT/NX flags. See `SessionRPRegistryMultiClient.pExpireGT` JSDoc
+  in `packages/redis/src/clients.mts` for the full semantics.
+
+- **`engines.node >=18.19.0`** (all eight published packages): every
+  `@o3co/auth-provider-*` package now declares `"engines": { "node": ">=18.19.0" }`.
+  npm/pnpm prints a warning by default; **pnpm enables `engines-strict=true` by
+  default in some configurations**, which causes a hard install failure on
+  Node <18.19. Consumers on Node 18.0.0–18.18.x should upgrade to Node 18.19.0
+  LTS or later before installing v0.5.1; Node 20 LTS and 22 LTS are unaffected.
+
+- **`pExpireGT` added to `SessionRPRegistryClient`/`MultiClient` and
+  `SessionSidSortedSetClient`/`MultiClient`** (`@o3co/auth-provider-redis`): the
+  four backing-client interfaces gain a non-optional `pExpireGT(key, msTimestamp)`
+  method (multi-client variant returns the chainable client for pipelining). The
+  bundled `makeIoredisClients()` adapter implements the new method as a
+  `pexpireat(k, ms, "NX")` + `pexpireat(k, ms, "GT")` pair (the bare GT form
+  silently no-ops on a key with no existing TTL — see method JSDoc). Custom
+  backing-client implementations (non-ioredis) must add `pExpireGT` to compile.
+
 ### Breaking Changes (Phase 1-9 — Module System Redesign)
 
 #### Module manifest pipeline (A2-α/β/γ)

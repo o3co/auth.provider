@@ -3,6 +3,9 @@
 	"description": "Session and federation routes module for auth.provider",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=18.19.0"
+	},
 	"type": "module",
 	"exports": {
 		".": {

@@ -3,6 +3,9 @@
 	"description": "Redis-backed adapters (ChallengeStore, ReplaySeenSet) for @o3co/auth-provider-core",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=18.19.0"
+	},
 	"type": "module",
 	"exports": {
 		".": {

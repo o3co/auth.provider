@@ -85,9 +85,11 @@ function deserialize(json: string): RegisteredRP {
  *   logical clientId, creating duplicate set members. HSET uses the field
  *   name as the dedup key, which is exactly `clientId`.
  *
- * TTL: PEXPIREAT is applied atomically in the same pipeline as HSET via
+ * TTL: PEXPIREAT … GT is applied atomically in the same pipeline as HSET via
  * `createRedisSidHash.setField`. The timestamp is `session.expiresAt`,
- * which is post-create immutable per A4 §5.1.
+ * which is post-create immutable per A4 §5.1. The GT modifier (Redis 7.0+)
+ * prevents TTL truncation under concurrent same-sid writes — required floor
+ * is Redis 7.2 LTS per D-10.
  */
 export function createRedisSessionRPRegistry(
 	opts: RedisSessionRPRegistryOptions,

@@ -116,6 +116,14 @@ export function makeIoredisClients(io: Redis): {
 		del: (k) => io.del(k),
 	};
 
+	// `pExpireGT` is implemented as `PEXPIREAT NX` followed by `PEXPIREAT GT`
+	// (D-10). Redis 7.0+ treats a non-volatile key as having infinite TTL for
+	// the GT/LT/NX flags, so a bare `PEXPIREAT … GT` against a freshly-created
+	// key (no existing TTL) would silently no-op and leave the key persistent.
+	// The NX clause sets the TTL on first write; the GT clause raises it on
+	// subsequent same-sid writes only when the new ts is strictly greater
+	// (preventing the CR-3 truncation race when a stale `expiresAt` value
+	// arrives concurrently). Same effect in 2 commands within one pipeline.
 	const buildRPRegistryMulti = (p: ReturnType<Redis["multi"]>): SessionRPRegistryMultiClient => {
 		const m: SessionRPRegistryMultiClient = {
 			hSet: (k, f, v) => {
@@ -124,6 +132,11 @@ export function makeIoredisClients(io: Redis): {
 			},
 			pExpireAt: (k, ms) => {
 				p.pexpireat(k, ms);
+				return m;
+			},
+			pExpireGT: (k, ms) => {
+				p.pexpireat(k, ms, "NX");
+				p.pexpireat(k, ms, "GT");
 				return m;
 			},
 			exec: async () => p.exec(),
@@ -137,12 +150,26 @@ export function makeIoredisClients(io: Redis): {
 		hVals: (k) => io.hvals(k),
 		multi: () => buildRPRegistryMulti(io.multi()),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
+		// Returns 1 when either NX (first-write) or GT (raise) sets the TTL,
+		// 0 otherwise. Without the early return on NX success the caller would
+		// observe a "failure" (0 from the GT clause that no-ops once NX has
+		// already set TTL == ms), which misreports first-write success.
+		pExpireGT: async (k, ms) => {
+			const nx = await io.pexpireat(k, ms, "NX");
+			if (nx === 1) return nx;
+			return io.pexpireat(k, ms, "GT");
+		},
 	};
 
 	const buildSortedSetMulti = (p: ReturnType<Redis["multi"]>): SessionSidSortedSetMultiClient => {
 		const m: SessionSidSortedSetMultiClient = {
 			pExpireAt: (k, ms) => {
 				p.pexpireat(k, ms);
+				return m;
+			},
+			pExpireGT: (k, ms) => {
+				p.pexpireat(k, ms, "NX");
+				p.pexpireat(k, ms, "GT");
 				return m;
 			},
 			zAdd: (k, e, opts) => {
@@ -159,6 +186,12 @@ export function makeIoredisClients(io: Redis): {
 		del: (k) => io.del(k),
 		multi: () => buildSortedSetMulti(io.multi()),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
+		// See sessionRPRegistryClient.pExpireGT above for return-value rationale.
+		pExpireGT: async (k, ms) => {
+			const nx = await io.pexpireat(k, ms, "NX");
+			if (nx === 1) return nx;
+			return io.pexpireat(k, ms, "GT");
+		},
 		zAdd: (k, e, opts) =>
 			opts?.NX
 				? (io.zadd(k, "NX", e.score, e.value) as Promise<unknown> as Promise<number>)

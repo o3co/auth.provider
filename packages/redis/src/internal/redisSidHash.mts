@@ -29,18 +29,19 @@ export interface RedisSidHash {
 
 /**
  * Private redis helper used by `SessionRPRegistry`. Single-key HSET +
- * PEXPIREAT pipeline keyed by `${keyPrefix}${sid}`. Per A4 §7.2.1.
+ * PEXPIREAT … GT pipeline keyed by `${keyPrefix}${sid}`. Per A4 §7.2.1.
  *
  * **HASH-keyed-by-element-id rationale**: SADD-of-JSON cannot dedup by
  * `clientId` when other RP fields change (different bytewise JSON for the
  * same logical clientId would create duplicate entries). HSET dedups on
  * field name = `clientId`, semantically correct for RP upsert.
  *
- * **TTL contract**: callers MUST pass `session.expiresAt`. PEXPIREAT is
- * NOT monotonic; passing a different timestamp across writes for the same
- * sid would shorten the TTL. This restriction is enforced structurally:
+ * **TTL contract**: callers MUST pass `session.expiresAt`. The `pExpireGT`
+ * (PEXPIREAT … GT) modifier guards against stale-`expiresAt` writes
+ * shortening the key's TTL on concurrent same-sid writes; D-10 / CR-3.
+ * Requires Redis 7.0+; v0.5.1 pins the floor to Redis 7.2 LTS.
  * `UserSession.expiresAt` is post-create immutable per A4 §5.1, so the
- * only legal `expiresAt` is the session-create-time value.
+ * legal value is fixed at session-create time.
  *
  * **Writes after expiry are no-op**: prevents zombie keys with no TTL.
  */
@@ -52,7 +53,7 @@ export function createRedisSidHash(opts: RedisSidHashOptions): RedisSidHash {
 			if (expiresAtMs <= Date.now()) return;
 			const pipeline = opts.client.multi();
 			pipeline.hSet(k(sid), id, jsonValue);
-			pipeline.pExpireAt(k(sid), expiresAtMs);
+			pipeline.pExpireGT(k(sid), expiresAtMs);
 			await pipeline.exec();
 		},
 		async listValues(sid) {
