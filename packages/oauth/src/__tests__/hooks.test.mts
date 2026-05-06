@@ -536,6 +536,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			// but the session got tampered to ["write"]. Code must win.
 			const persistedCode: Code = {
 				code: "code-xyz",
+				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
 				grantedScope: ["read"],
 				sid: "test-sid-1",

@@ -6,6 +6,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Breaking Changes (Phase F — D-1 Code/CodeData identity binding, v0.5.1)
+
+- **`CodeData.client_id` and `CodeData.redirect_uri` are now required fields**
+  (`@o3co/auth-provider-core`): `CodeRepository.createCode(...)` requires
+  `client_id: string` and `redirect_uri: string` on the params object. The
+  compile-time guard `Parameters<CodeRepository["createCode"]>[0]` makes
+  every implementation site fail typecheck when a field is added but not
+  destructured. Custom `CodeRepository` implementations must accept and
+  persist both fields.
+  **Migration**: callers building a `CodeData` literal must add `client_id`
+  and `redirect_uri`. The bundled `InMemoryCodeRepository` and
+  `RedisCodeRepository` are updated; consumer composition roots that wire a
+  custom repository must update its createCode signature.
+
+- **`/oauth/authorize` no longer writes `req.session.code`,
+  `req.session.code_client_id`, `req.session.code_redirect_uri`, or
+  `req.session.granted_scopes`** (`@o3co/auth-provider-oauth`): the four
+  session writes at the end of the GET `/authorize` handler are removed.
+  Identity binding is embedded in the code record (`Code.client_id` /
+  `Code.redirect_uri`) and is exchanged at `/token` exclusively via
+  `consumeByCode` (atomic single-use). Custom middleware that read these
+  session fields will no longer see them populated.
+  **Migration**: rewrite middleware that observed `req.session.code*` to
+  inspect the request body or the `codeRepository.getByCode` return value
+  instead.
+
+- **`/oauth/token` (authorization_code grant) drops the session-based
+  identity gates** (`@o3co/auth-provider-oauth`): the previous
+  `code !== session.code` and `client_id !== session.code_client_id`
+  checks are removed. `consumeByCode` is the sole authenticity gate;
+  `client_id` and `redirect_uri` are verified against `codeData.*` fields
+  populated at `/authorize` time. The `redirect_uri` binding (RFC 6749
+  §4.1.3) is now strictly enforced — when `codeData.redirect_uri` is
+  absent (legacy/corrupt records), the request is rejected with
+  `invalid_grant` rather than vacuously accepted.
+
+- **`sessionMutation.clear` shrinks** (`@o3co/auth-provider-oauth`): the
+  authorization grant's returned `sessionMutation.clear` list no longer
+  contains `code_client_id`, `code_redirect_uri`, or `granted_scopes`
+  (only `code` remains, to scrub residual values from sessions issued
+  before v0.5.1 ships).
+
+### Bug Fixes (Phase F — D-1, v0.5.1)
+
+- **Redis deployments with `userSessionStore` could not complete a single
+  authorization-code exchange** (`@o3co/auth-provider-redis`):
+  `RedisCodeRepository.createCode` silently discarded `sid`, `nonce`,
+  `redirect_uri`, `grantedScope`, and `grantedAudience`, causing every
+  `/token` exchange to fail with `invalid_grant: code record is missing
+  session identifier`. Fixed by persisting all fields in the Redis JSON
+  payload (closes IH-2 / TS-1 / TD-1).
+
+- **RFC 6749 §4.1.3 `redirect_uri` binding was silently skipped in Redis
+  deployments** (`@o3co/auth-provider-oauth`): when `codeData.redirect_uri`
+  was undefined (the IH-2 drop bug), the binding check at `/token` was
+  guarded by `if (storedRedirectUri)` and skipped entirely. The check is
+  now strict: absent or mismatched `redirect_uri` returns `invalid_grant`
+  (closes IH-4).
+
+- **Concurrent `/authorize` requests sharing an Express session could
+  race** (`@o3co/auth-provider-oauth`): two simultaneous `/authorize` calls
+  on the same session would clobber each other's `req.session.code`
+  last-write-wins, leaving the losing request's code orphaned in the
+  repository (unredeemable because the `code !== session.code` gate would
+  reject it). Fixed by removing the four `req.session.code*` writes and
+  binding identity to the code record (closes CR-2).
+
 ### Breaking Changes (Phase F — D-10 Redis 7.2 LTS minimum, v0.5.1)
 
 - **Redis 7.2 LTS minimum required** (`@o3co/auth-provider-redis`): the Redis-backed

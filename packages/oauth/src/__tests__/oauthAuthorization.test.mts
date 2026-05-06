@@ -105,6 +105,7 @@ const authorizeClientRepo: ClientRepository = {
 async function buildAuthorizeApp(opts: {
 	sessionFields: Record<string, unknown>;
 	captureCode: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
+	captureSession?: (session: Record<string, unknown>) => void;
 }) {
 	const app = express();
 	app.use(express.json());
@@ -112,11 +113,16 @@ async function buildAuthorizeApp(opts: {
 
 	// Inline session substitute — minimal surface needed by the /authorize route.
 	app.use((req, _res, next) => {
-		(req as unknown as { session: Record<string, unknown> }).session = {
+		const session: Record<string, unknown> = {
 			isAuthenticated: true,
 			user: { id: "user-1" },
 			...opts.sessionFields,
 		};
+		(req as unknown as { session: Record<string, unknown> }).session = session;
+		// CR-2: capture the session reference so the test can inspect post-route mutations.
+		// The /authorize route writes req.session.code* synchronously before res.redirect,
+		// so the captured reference reflects the route's writes after the request resolves.
+		opts.captureSession?.(session);
 		next();
 	});
 
@@ -339,7 +345,12 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			removeBySid: vi.fn(async () => {}),
 		};
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
-		const consumeByCode = vi.fn().mockResolvedValue({ code: "auth-code", sid: "sid-wired" });
+		const consumeByCode = vi.fn().mockResolvedValue({
+			code: "auth-code",
+			sid: "sid-wired",
+			client_id: "client1",
+			redirect_uri: "https://rp.example/cb",
+		});
 
 		const deps: GrantDependencies & {
 			codeRepository: CodeRepository;
@@ -370,7 +381,11 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 
 		const handler = createAuthorizationGrant(deps);
 		const { result } = await handler.handle({
-			body: { code: "auth-code", client_id: "client1" },
+			body: {
+				code: "auth-code",
+				client_id: "client1",
+				redirect_uri: "https://rp.example/cb",
+			},
 			session: {
 				code: "auth-code",
 				code_client_id: "client1",
@@ -555,5 +570,96 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 		expect(captured?.nonce).toBeUndefined();
 		// sid is still captured even without nonce
 		expect(captured?.sid).toBe("sid-1");
+	});
+});
+
+// D-1 / CR-2: /authorize MUST embed the identity binding in the code record,
+// not in the Express session. Pre-fix, four session writes (req.session.code,
+// req.session.code_client_id, req.session.code_redirect_uri,
+// req.session.granted_scopes) at routes.mts:572-575 created a last-write-wins
+// race when concurrent /authorize requests shared a session — the losing
+// request's code was orphaned in the repository because session.code had been
+// overwritten by the winning request and the /token gate would reject it.
+//
+// Per spec Codex calibration: prefer structural assertion (session writes are
+// gone) as a regression guard alongside the functional check (createCode is
+// called with client_id + redirect_uri).
+describe("D-1 / CR-2: /authorize binds identity to code record, not Express session", () => {
+	it("does NOT write code, code_client_id, code_redirect_uri, granted_scopes to req.session", async () => {
+		let capturedCode: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		let capturedSession: Record<string, unknown> | undefined;
+
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-cr2" },
+			captureCode: (p) => {
+				capturedCode = p;
+			},
+			captureSession: (s) => {
+				capturedSession = s;
+			},
+		});
+
+		await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			scope: "openid profile",
+		});
+
+		// The route must have called createCode with the identity binding embedded.
+		expect(capturedCode).toBeDefined();
+		expect(capturedCode?.client_id).toBe("client-1");
+		expect(capturedCode?.redirect_uri).toBe("https://example.test/cb");
+
+		// And the session must NOT carry any code* identity binding — otherwise
+		// concurrent /authorize requests could race on session.code overwrite.
+		expect(capturedSession).toBeDefined();
+		expect(capturedSession).not.toHaveProperty("code");
+		expect(capturedSession).not.toHaveProperty("code_client_id");
+		expect(capturedSession).not.toHaveProperty("code_redirect_uri");
+		expect(capturedSession).not.toHaveProperty("granted_scopes");
+	});
+
+	it("two concurrent /authorize requests sharing a session both produce a code with intact identity binding", async () => {
+		// Functional verification: with no session writes, two concurrent
+		// authorize calls cannot clobber each other. Both createCode calls
+		// receive distinct client_id + redirect_uri arguments and the captured
+		// session shows neither overwrote the other.
+		const capturedCodes: Parameters<CodeRepository["createCode"]>[0][] = [];
+		const capturedSessions: Record<string, unknown>[] = [];
+
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-concurrent" },
+			captureCode: (p) => {
+				capturedCodes.push(p);
+			},
+			captureSession: (s) => {
+				capturedSessions.push(s);
+			},
+		});
+
+		await Promise.all([
+			request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+			}),
+			request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+			}),
+		]);
+
+		expect(capturedCodes).toHaveLength(2);
+		for (const params of capturedCodes) {
+			expect(params.client_id).toBe("client-1");
+			expect(params.redirect_uri).toBe("https://example.test/cb");
+		}
+		// Neither captured session should carry a code identity binding.
+		for (const session of capturedSessions) {
+			expect(session).not.toHaveProperty("code");
+			expect(session).not.toHaveProperty("code_client_id");
+		}
 	});
 });

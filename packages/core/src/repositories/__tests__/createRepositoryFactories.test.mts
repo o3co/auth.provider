@@ -117,7 +117,10 @@ describe("createRepositoryFactories", () => {
 		it("creates a code repository from memory config and supports createCode/getByCode", async () => {
 			const { codeFactory } = createRepositoryFactories();
 			const repo = await codeFactory.create({ type: "memory" });
-			const code = await repo.createCode({});
+			const code = await repo.createCode({
+				client_id: "test-client",
+				redirect_uri: "https://rp.example/cb",
+			});
 
 			expect(code.code).toBeDefined();
 			const fetched = await repo.getByCode(code.code);

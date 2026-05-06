@@ -17,10 +17,17 @@
 import type { Code } from "./types.mjs";
 
 export interface CodeRepository {
+	/**
+	 * Issue an authorization code and persist all associated data atomically.
+	 * After `consumeByCode`, the code is single-use; `client_id` and
+	 * `redirect_uri` embedded in the record replace the session-based identity
+	 * binding removed in v0.5.1 (D-1 spec).
+	 */
 	createCode(params: {
+		client_id: string; // required (D-1)
+		redirect_uri: string; // required (D-1)
 		code_challenge?: string;
 		code_challenge_method?: string;
-		redirect_uri?: string;
 		expiresIn?: number;
 		grantedScope?: readonly string[];
 		grantedAudience?: readonly string[];
@@ -29,6 +36,11 @@ export interface CodeRepository {
 		sid?: string;
 	}): Promise<Code>;
 	getByCode(code: string): Promise<Code | null>;
+	/**
+	 * Atomically retrieve and delete the code record. This is the sole
+	 * authenticity gate for authorization code exchange. Returns null when the
+	 * code is unknown or has already been consumed (replay prevention).
+	 */
 	consumeByCode(code: string): Promise<Code | null>;
 	removeByCode(code: string): Promise<void>;
 }

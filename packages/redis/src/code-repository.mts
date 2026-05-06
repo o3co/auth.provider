@@ -45,6 +45,28 @@ interface RedisClientWithQuit extends RedisClient {
 	quit(): Promise<void>;
 }
 
+/**
+ * Shape persisted as JSON in Redis for each authorization code (D-1).
+ *
+ * Mirrors `Parameters<CodeRepository["createCode"]>[0]` plus a private
+ * `expiresIn` echo so reads can reconstruct the original record. The
+ * destructure of `createCode` MUST stay in sync with this shape — adding
+ * a field to `CodeData` requires destructuring it AND extending this
+ * interface, otherwise the Redis path silently drops it (which was the
+ * IH-2 / TS-1 / TD-1 production bug v0.5.1 closes).
+ */
+interface StoredCodePayload {
+	client_id: string;
+	redirect_uri: string;
+	code_challenge?: string;
+	code_challenge_method?: string;
+	nonce?: string;
+	sid?: string;
+	expiresIn?: number;
+	grantedScope?: string[];
+	grantedAudience?: string[];
+}
+
 export class RedisCodeRepository implements CodeRepository {
 	private redis: RedisClient;
 	private defaultExpiresIn: number;
@@ -98,23 +120,30 @@ export class RedisCodeRepository implements CodeRepository {
 	}
 
 	async createCode({
+		client_id,
+		redirect_uri,
 		code_challenge,
 		code_challenge_method,
+		nonce,
+		sid,
 		expiresIn = this.defaultExpiresIn,
-	}: {
-		code_challenge?: string;
-		code_challenge_method?: string;
-		expiresIn?: number;
-	}): Promise<Code> {
+		grantedScope,
+		grantedAudience,
+	}: Parameters<CodeRepository["createCode"]>[0]): Promise<Code> {
 		const code = crypto.randomBytes(32).toString("base64url");
-
-		await this.redis.set(
-			KEY_PREFIX + code,
-			JSON.stringify({ code_challenge, code_challenge_method }),
-			{ EX: expiresIn },
-		);
-
-		return { code, code_challenge, code_challenge_method, expiresIn };
+		const payload: StoredCodePayload = {
+			client_id,
+			redirect_uri,
+			code_challenge,
+			code_challenge_method,
+			nonce,
+			sid,
+			expiresIn,
+			grantedScope: grantedScope ? [...grantedScope] : undefined,
+			grantedAudience: grantedAudience ? [...grantedAudience] : undefined,
+		};
+		await this.redis.set(KEY_PREFIX + code, JSON.stringify(payload), { EX: expiresIn });
+		return { code, ...payload };
 	}
 
 	async getByCode(code: string): Promise<Code | null> {
@@ -134,7 +163,36 @@ export class RedisCodeRepository implements CodeRepository {
 	private parseCodeValue(code: string, value: string | null): Code | null {
 		if (!value) return null;
 		try {
-			return { ...JSON.parse(value), code } as Code;
+			// The cast trusts the stored format — `StoredCodePayload` is a private
+			// internal type that exactly mirrors what `createCode` serializes; no
+			// external writer touches this key namespace.
+			const p = JSON.parse(value) as StoredCodePayload;
+			// Pre-v0.5.1 codes lack `client_id` / `redirect_uri` (the IH-2 / TS-1
+			// production drop bug). Treat them as corrupt — the strict identity
+			// gates in /token would reject them anyway, but failing here keeps the
+			// failure mode aligned with the corrupted-JSON branch and prevents
+			// `client_id: undefined` from leaking into downstream gates as a
+			// runtime null.
+			if (typeof p.client_id !== "string" || typeof p.redirect_uri !== "string") {
+				const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
+				this.logger.error(
+					{ codeHash },
+					"RedisCodeRepository: legacy/corrupted code record missing required identity fields",
+				);
+				return null;
+			}
+			return {
+				code,
+				client_id: p.client_id,
+				redirect_uri: p.redirect_uri,
+				code_challenge: p.code_challenge,
+				code_challenge_method: p.code_challenge_method,
+				nonce: p.nonce,
+				sid: p.sid,
+				expiresIn: p.expiresIn,
+				grantedScope: p.grantedScope,
+				grantedAudience: p.grantedAudience,
+			};
 		} catch (err) {
 			const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
 			this.logger.error({ err, codeHash }, "RedisCodeRepository: corrupted data for code");

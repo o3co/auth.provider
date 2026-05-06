@@ -8,7 +8,8 @@
 		"src/boot/**/*.mts",
 		"src/refresh-token-family/**/*.mts",
 		"src/user-sessions/**/*.mts",
-		"src/adapters/**/*.mts"
+		"src/adapters/**/*.mts",
+		"src/repositories/__tests__/InMemoryCodeRepository.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

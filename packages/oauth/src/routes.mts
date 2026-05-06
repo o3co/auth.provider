@@ -44,14 +44,17 @@ import * as logoutRoute from "./routes/logout.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
 
 // Session data type augmentation
+//
+// D-1 (v0.5.1): `code_client_id`, `code_redirect_uri`, `granted_scopes` were
+// removed because /authorize no longer writes identity binding into the
+// session — `Code.client_id` and `Code.redirect_uri` carry it instead. `code`
+// is retained because the /token grant clears it from in-flight pre-v0.5.1
+// sessions (see authorization.mts `sessionMutation.clear`).
 declare module "express-session" {
 	interface SessionData {
 		client?: Record<string, unknown>;
 		user?: Record<string, unknown>;
 		code?: string;
-		code_client_id?: string;
-		code_redirect_uri?: string;
-		granted_scopes?: string[];
 		isAuthenticated?: boolean;
 		/** UserSession ID — set by the federation callback hook or local login (`POST /session/login`) and preserved across session regeneration. */
 		sid?: string;
@@ -555,9 +558,10 @@ export const createOAuthRouter = async (
 				let issue: Awaited<ReturnType<typeof codeRepository.createCode>>;
 				try {
 					issue = await codeRepository.createCode({
+						client_id, // D-1: identity binding embedded in the code record (replaces session.code_client_id)
+						redirect_uri, // D-1: required field (closes IH-4 vacuous-pass)
 						code_challenge: toStr(code_challenge),
 						code_challenge_method: resolvedMethod,
-						redirect_uri,
 						grantedScope: scopeForPersist,
 						grantedAudience: audienceForPersist,
 						// NEW (TODO-F-3): OIDC round-trip state on the code record.
@@ -573,10 +577,11 @@ export const createOAuthRouter = async (
 					);
 				}
 
-				req.session.code = issue.code;
-				req.session.code_client_id = client_id;
-				req.session.code_redirect_uri = redirect_uri;
-				req.session.granted_scopes = grantedScopes.length > 0 ? [...grantedScopes] : undefined;
+				// D-1 / CR-2: identity binding lives in the code record only — no
+				// session writes. Concurrent /authorize requests sharing a session
+				// previously raced on `req.session.code` last-write-wins; the
+				// losing request's code became unredeemable. consumeByCode (atomic
+				// getDel on a single Redis node) is now the sole authenticity gate.
 
 				const url = new URL(redirect_uri);
 				url.searchParams.append("code", issue.code);

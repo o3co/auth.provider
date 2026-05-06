@@ -10,6 +10,7 @@ export default defineConfig({
 				"src/boot/**/*.test.mts",
 				"src/refresh-token-family/**/*.test.mts",
 				"src/user-sessions/__tests__/**/*.test.mts",
+				"src/repositories/__tests__/InMemoryCodeRepository.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},

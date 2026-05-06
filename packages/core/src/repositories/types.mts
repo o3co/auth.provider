@@ -55,10 +55,24 @@ export interface User {
 	[key: string]: unknown;
 }
 
+/**
+ * Data persisted in the code record at /authorize time.
+ *
+ * `consumeByCode` (atomic single-use) is the sole authenticity gate; `client_id`
+ * and `redirect_uri` embedded in the record replace the session-based identity
+ * gates removed in v0.5.1 (see CHANGELOG and the D-1 spec at
+ * `auth/.claude/superpowers/specs/2026-05-05-d1-code-repository-rewrite.md`).
+ *
+ * Breaking change for custom CodeRepository implementations: `client_id` and
+ * `redirect_uri` are now required. The compile-time guard
+ * `Parameters<CodeRepository["createCode"]>[0]` makes any implementation that
+ * misses either field fail typecheck at the destructure site.
+ */
 export interface CodeData {
+	client_id: string; // required — replaces the session.code_client_id gate
+	redirect_uri: string; // required — closes IH-4 vacuous-pass (RFC 6749 §4.1.3)
 	code_challenge?: string;
 	code_challenge_method?: string;
-	redirect_uri?: string;
 	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
 	// These fields are persisted at /authorize and read at /token.
 	nonce?: string;
