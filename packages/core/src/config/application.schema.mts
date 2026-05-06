@@ -140,6 +140,15 @@ export const CoreConfigSchema = z.object({
 				adapter: z.enum(["memory", "redis"]).optional(),
 			})
 			.optional(),
+		// IH-16 (v0.5.1): bound the OIDC `nonce` query parameter at /authorize
+		// ingress so a malicious RP cannot exhaust per-request memory or amplify
+		// the id_token payload by sending a multi-megabyte nonce. Shape-only —
+		// per the v0.5.1 ADR (defaults live in HOCON, not in zod).
+		nonce: z
+			.object({
+				maxLength: z.coerce.number().int().positive(),
+			})
+			.optional(),
 	}),
 });
 

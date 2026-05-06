@@ -88,4 +88,68 @@ describe("createRefreshTokenFamilyRotation", () => {
 		const unknown = await rotation.rotate("jti-x", "jti-y", "ghost", FUTURE());
 		expect(Object.isFrozen(unknown)).toBe(true);
 	});
+
+	// IH-13 (v0.5.1): RT family expiresAtMs is set ONCE at creation and
+	// never extended on rotation (OAuth 2.1 BCP §4.14.1 absolute expiry).
+	// `Math.min(requestedExpiresAtMs, current.expiresAtMs)` enforces the
+	// ceiling. The committed value is exposed via the optional
+	// `cappedExpiresAtMs` field on the "rotated" outcome.
+	describe("IH-13: absolute expiry cap (no sliding window)", () => {
+		it("does not extend family expiresAtMs on rotation when caller requests later expiry", async () => {
+			const store = createMemoryRefreshTokenFamilyStore();
+			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+
+			const ceiling = Date.now() + 1000; // 1s ceiling
+			await rotation.register("jti-1", "fam-1", ceiling);
+
+			// Caller requests rotation with a much-later expiry (sliding-window
+			// behaviour pre-IH-13). After the cap, the stored value MUST NOT
+			// exceed the original ceiling.
+			const later = Date.now() + 86_400_000; // 1 day
+			const out = await rotation.rotate("jti-1", "jti-2", "fam-1", later);
+
+			expect(out.outcome).toBe("rotated");
+			const after = await store.findFamily("fam-1");
+			expect(after?.expiresAtMs).toBeLessThanOrEqual(ceiling);
+		});
+
+		it("rotated outcome carries cappedExpiresAtMs equal to the committed family ceiling", async () => {
+			const store = createMemoryRefreshTokenFamilyStore();
+			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+
+			const ceiling = Date.now() + 60_000;
+			await rotation.register("jti-1", "fam-1", ceiling);
+
+			const later = Date.now() + 86_400_000;
+			const out = await rotation.rotate("jti-1", "jti-2", "fam-1", later);
+
+			expect(out.outcome).toBe("rotated");
+			if (out.outcome !== "rotated") return; // type narrowing
+			expect(out.cappedExpiresAtMs).toBeDefined();
+			expect(out.cappedExpiresAtMs).toBeLessThanOrEqual(ceiling);
+
+			// And matches the actually-stored value.
+			const after = await store.findFamily("fam-1");
+			expect(out.cappedExpiresAtMs).toBe(after?.expiresAtMs);
+		});
+
+		it("caller-supplied expiresAtMs is honoured when it is smaller than the ceiling", async () => {
+			// The cap is a one-way clamp: requested > ceiling collapses to
+			// ceiling, but requested < ceiling is honoured (the caller chose
+			// to shrink the TTL — e.g., session-bound RT). This test guards
+			// against an over-eager `Math.max` swap during refactor.
+			const store = createMemoryRefreshTokenFamilyStore();
+			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+
+			const ceiling = Date.now() + 86_400_000; // 1 day
+			await rotation.register("jti-1", "fam-1", ceiling);
+
+			const earlier = Date.now() + 1000; // 1s
+			const out = await rotation.rotate("jti-1", "jti-2", "fam-1", earlier);
+
+			expect(out.outcome).toBe("rotated");
+			if (out.outcome !== "rotated") return;
+			expect(out.cappedExpiresAtMs).toBe(earlier);
+		});
+	});
 });

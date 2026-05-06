@@ -585,6 +585,116 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 	});
 });
 
+// IH-16 (v0.5.1): /authorize must bound the `nonce` query parameter.
+//
+// Pre-IH-16 the route accepted any-length nonce verbatim and stored it on
+// the code record + echoed it into the id_token. A malicious RP sending
+// nonce=<huge-string> could exhaust per-request memory or amplify the
+// id_token payload. The route now enforces a default 256-char ceiling
+// (configurable via `oauth.nonce.maxLength`) and rejects non-printable
+// ASCII via `redirectError` — the redirect_uri is already client-allowlisted
+// at this point in the route, so RFC 6749 §4.1.2.1 redirect-based errors
+// apply (Codex calibration delta 2).
+describe("IH-16: /authorize nonce length + character-set validation", () => {
+	it("accepts a normal-sized printable nonce (32 chars)", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+
+		const nonce = "a".repeat(32);
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			nonce,
+		});
+
+		// Successful /authorize redirects (302) to redirect_uri with `code` —
+		// the absence of an `error` parameter confirms the gate passed.
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.nonce).toBe(nonce);
+	});
+
+	it("accepts a nonce at the boundary (256 chars exactly)", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+
+		const nonce = "a".repeat(256);
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			nonce,
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.nonce).toBe(nonce);
+	});
+
+	it("rejects an oversized nonce (257 chars) with redirect-based invalid_request", async () => {
+		const captureCode = vi.fn();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode,
+		});
+
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				state: "client-state-xyz",
+				nonce: "a".repeat(257),
+			});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.origin + location.pathname).toBe("https://example.test/cb");
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		expect(location.searchParams.get("error_description")).toMatch(/nonce/i);
+		// `state` MUST round-trip on error redirects per RFC 6749 §4.1.2.1.
+		expect(location.searchParams.get("state")).toBe("client-state-xyz");
+		expect(captureCode).not.toHaveBeenCalled();
+	});
+
+	it("rejects a non-printable nonce with redirect-based invalid_request", async () => {
+		const captureCode = vi.fn();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode,
+		});
+
+		// `\x00` is below the printable ASCII range (0x20-0x7E).
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			nonce: "a\x00b",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.origin + location.pathname).toBe("https://example.test/cb");
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		expect(location.searchParams.get("error_description")).toMatch(/non-printable|character/i);
+		expect(captureCode).not.toHaveBeenCalled();
+	});
+});
+
 // D-1 / CR-2: /authorize MUST embed the identity binding in the code record,
 // not in the Express session. Pre-fix, four session writes (req.session.code,
 // req.session.code_client_id, req.session.code_redirect_uri,

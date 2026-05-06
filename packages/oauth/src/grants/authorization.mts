@@ -18,6 +18,7 @@ import crypto from "node:crypto";
 import {
 	type ClientRepository,
 	type CodeRepository,
+	constantTimeStringEqual,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -29,6 +30,7 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
+import { resolvePkceSupportedMethods } from "./pkce.mjs";
 
 export const createAuthorizationGrant = (
 	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
@@ -53,10 +55,12 @@ export const createAuthorizationGrant = (
 	})();
 
 	// B-7: structured pkce config (supportedMethods, defaultMethod, required)
-	// Fall back to legacy requireS256 for backward compatibility
-	const supportedMethods: string[] = Array.isArray(pkceConfig?.supportedMethods)
-		? (pkceConfig.supportedMethods as string[])
-		: ["S256", "plain"];
+	// Fall back to legacy requireS256 for backward compatibility.
+	// TS-4 (v0.5.1): per-element string validation lives in
+	// `resolvePkceSupportedMethods` — the previous `Array.isArray(...) ? (... as string[])`
+	// pattern silently accepted operator-typed garbage like `[123, null]`
+	// because `Array.isArray` does not constrain element types.
+	const supportedMethods = resolvePkceSupportedMethods(pkceConfig);
 	const pkceRequired: boolean = pkceConfig?.required === true;
 	// Legacy fallback: requireS256=true means only S256 is supported
 	const requireS256Legacy = pkceConfig?.requireS256 === true;
@@ -187,6 +191,23 @@ export const createAuthorizationGrant = (
 
 			// Validate code_verifier using code data from repository
 			if (codeData.code_challenge_method) {
+				// SF-3 (v0.5.1): a code record with `code_challenge_method` set
+				// but no `code_challenge` is structurally invalid — the two are a
+				// pair persisted together at /authorize. Pre-SF-3 this state was
+				// silently accepted because `verifier !== undefined` is always
+				// true (the comparison "passed" for the wrong reason). Now that
+				// `constantTimeStringEqual` requires both arguments to be
+				// strings, the malformed shape is rejected explicitly. Reject as
+				// invalid_request; the code is consumed already so no replay risk.
+				if (typeof codeData.code_challenge !== "string") {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "code_challenge missing on code record",
+						},
+					};
+				}
 				// B-7: check method is in supportedMethods
 				if (!effectiveSupportedMethods.includes(codeData.code_challenge_method)) {
 					return {
@@ -221,7 +242,11 @@ export const createAuthorizationGrant = (
 					case "S256": {
 						const hash = crypto.createHash("sha256").update(code_verifier).digest();
 						const base64url = hash.toString("base64url");
-						if (base64url !== codeData.code_challenge) {
+						// SF-3 + MIN-4 (v0.5.1): timing-safe compare. Replaces a
+						// short-circuit `!==` whose per-byte timing leaked progress
+						// of a candidate verifier against the stored challenge —
+						// see RFC 7636 §4.1 + OAuth 2.1 BCP §4.5.
+						if (!constantTimeStringEqual(base64url, codeData.code_challenge)) {
 							return {
 								result: {
 									status: 400,
@@ -233,7 +258,11 @@ export const createAuthorizationGrant = (
 						break;
 					}
 					case "plain":
-						if (code_verifier !== codeData.code_challenge) {
+						// SF-3 + MIN-4 (v0.5.1): timing-safe compare on the plain
+						// branch as well — the same timing-leak applies regardless
+						// of whether the stored value is a challenge digest (S256)
+						// or the raw verifier (plain).
+						if (!constantTimeStringEqual(code_verifier, codeData.code_challenge)) {
 							return {
 								result: {
 									status: 400,

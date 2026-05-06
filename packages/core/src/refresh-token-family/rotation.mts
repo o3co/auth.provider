@@ -72,10 +72,17 @@ export function createRefreshTokenFamilyRotation(
 					abortReason = "replayed";
 					return null;
 				}
+				// IH-13: absolute expiry cap. The family TTL is SET ONCE at
+				// creation. Subsequent rotations MUST NOT extend the ceiling
+				// — `Math.min` clamps a sliding-window-style request back to
+				// the original creation value (or honours a smaller caller-
+				// supplied value, e.g. a session-bound RT). Per OAuth 2.1
+				// BCP §4.14.1.
+				const cappedExpiresAtMs = Math.min(expiresAtMs, current.expiresAtMs);
 				return Object.freeze({
 					...current,
 					activeJti: newJti,
-					expiresAtMs,
+					expiresAtMs: cappedExpiresAtMs,
 				});
 			});
 
@@ -87,7 +94,15 @@ export function createRefreshTokenFamilyRotation(
 						outcome: abortReason ?? "replayed",
 					} as const) as RefreshTokenFamilyRotationOutcome;
 				case "committed":
-					return Object.freeze({ outcome: "rotated" } as const);
+					// IH-13: surface the committed ceiling so the grant handler
+					// can detect when the cap reduced the requested expiry and
+					// (Phase F) re-mint the issued JWT to match. For v0.5.1
+					// the storage cap alone is the security primary; JWT exp
+					// alignment is deferred per the spec's open question.
+					return Object.freeze({
+						outcome: "rotated",
+						cappedExpiresAtMs: result.family.expiresAtMs,
+					} as const);
 			}
 		},
 	};

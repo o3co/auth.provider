@@ -70,8 +70,11 @@ test("RefreshTokenFamilyUpdateResult committed variant carries family", () => {
 });
 
 test("RefreshTokenFamilyRotationOutcome is a 4-variant discriminated union", () => {
+	// IH-13 (v0.5.1): "rotated" variant carries optional `cappedExpiresAtMs`.
+	// Optional, not required, so existing stubs returning `{ outcome: "rotated" }`
+	// without the field continue to type-check (Codex Delta 2).
 	expectTypeOf<RefreshTokenFamilyRotationOutcome>().toEqualTypeOf<
-		| { readonly outcome: "rotated" }
+		| { readonly outcome: "rotated"; readonly cappedExpiresAtMs?: number }
 		| { readonly outcome: "replayed" }
 		| { readonly outcome: "revoked" }
 		| { readonly outcome: "unknown_family" }
