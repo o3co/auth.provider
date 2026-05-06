@@ -380,6 +380,45 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.error_description).toBe("Invalid client credentials");
 			expect(res.headers["www-authenticate"]).toBeUndefined();
 		});
+
+		it("body-path: returns 401 fail-closed when findById throws — no WWW-Authenticate (body attempt)", async () => {
+			// Body-only client_id + findById throws → rejectPlain. The Basic-path
+			// version (line 266) is covered above; this exercises the matching
+			// rejectPlain branch when no Authorization header was supplied.
+			const throwingRepo: ClientRepository = {
+				findById: async () => {
+					throw new Error("store unavailable");
+				},
+				authenticate: async () => null,
+			};
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
+			const res = await request(app)
+				.post("/test")
+				.type("form")
+				.send({ client_id: "alice", client_secret: "s3cret" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBeUndefined();
+			expect(res.headers["www-authenticate"]).toBeUndefined();
+			expect(JSON.stringify(res.body)).not.toContain("store unavailable");
+		});
+
+		it("Basic header + unknown client → 401 Invalid client credentials with WWW-Authenticate", async () => {
+			// Basic auth used with a client_id that the repository does not know.
+			// Per RFC 6749 §5.2, Basic-attempt failures must include the Basic
+			// challenge; the description ("Invalid client credentials") is
+			// indistinguishable from "wrong secret" so an attacker cannot enumerate
+			// valid client_ids by message.
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([])), (_req, res) => res.end());
+			const basic = Buffer.from("ghost:s3cret").toString("base64");
+			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toBe("Invalid client credentials");
+			expect(res.headers["www-authenticate"]).toMatch(/^Basic realm=/);
+		});
 	});
 
 	describe("Basic header parsing edge cases", () => {

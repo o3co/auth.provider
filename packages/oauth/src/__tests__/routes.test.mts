@@ -269,5 +269,96 @@ describe("createOAuthRouter", () => {
 			await new Promise((r) => setImmediate(r));
 			expect(events.find((e) => e.type === "token.issued.failure")).toBeDefined();
 		});
+
+		it("sessionMutation.clear and .set: route propagates both to req.session", async () => {
+			// Grants returning `sessionMutation` (e.g., session-bound flows that
+			// need to clear ephemeral state and write a new sid) rely on the
+			// /token route applying both `clear` and `set` on the request session
+			// before responding. Without this propagation, downstream routes would
+			// observe stale session state.
+			let observedSession: Record<string, unknown> | undefined;
+			const sessionGrant: GrantHandler = {
+				handle: async () => ({
+					result: {
+						status: 200,
+						tokens: { access_token: "at.x", token_type: "Bearer", expires_in: 60 },
+					},
+					sessionMutation: {
+						clear: ["clearMe"],
+						set: { setMe: "newValue" },
+					},
+				}),
+			};
+
+			const app = express();
+			app.set("trust proxy", 1);
+			app.use(express.json());
+			app.use(express.urlencoded({ extended: false }));
+			app.use((req, _res, next) => {
+				const session: Record<string, unknown> = {
+					clearMe: "old",
+					existingKey: "stays",
+				};
+				(req as unknown as { session: Record<string, unknown> }).session = session;
+				observedSession = session;
+				next();
+			});
+
+			const registry = new GrantRegistry();
+			registry.register("session-mutating", sessionGrant);
+			const { router } = await createOAuthRouter(express, {
+				registry,
+				config: fullConfig,
+				clientRepository: integrationClientRepo,
+				codeRepository: integrationCodeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+			});
+			app.use("/oauth", router);
+
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "session-mutating" });
+
+			expect(res.status).toBe(200);
+			// `clear` sets the property to undefined (route does not delete).
+			expect(observedSession?.clearMe).toBeUndefined();
+			expect(observedSession?.setMe).toBe("newValue");
+			expect(observedSession?.existingKey).toBe("stays");
+		});
+	});
+
+	describe("D-6 /oauth/introspect non-Bearer fallback", () => {
+		// When /introspect is called WITHOUT a `Bearer` Authorization header, the
+		// route hands off to `introspectClientAuthMw` (RFC 7662 §2.1) — the same
+		// confidential-client auth used for /token. This exercises the fallback
+		// branch + the post-auth body-token-missing branch (200 { active: false }).
+		async function buildIntrospectApp() {
+			const app = express();
+			app.set("trust proxy", 1);
+			app.use(express.json());
+			app.use(express.urlencoded({ extended: false }));
+			const { router } = await createOAuthRouter(express, {
+				registry: new GrantRegistry(),
+				config: fullConfig,
+				clientRepository: integrationClientRepo,
+				codeRepository: integrationCodeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+			});
+			app.use("/oauth", router);
+			return app;
+		}
+
+		it("Basic auth + missing token returns 200 { active: false } via client-auth fallback", async () => {
+			const app = await buildIntrospectApp();
+			const res = await request(app)
+				.post("/oauth/introspect")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({}); // no token field
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ active: false });
+		});
 	});
 });

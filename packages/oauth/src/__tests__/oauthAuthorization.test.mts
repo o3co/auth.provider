@@ -675,3 +675,159 @@ describe("D-1 / CR-2: /authorize binds identity to code record, not Express sess
 		}
 	});
 });
+
+// D-6 (RFC 9700 §2.1.1): for public clients (`tokenEndpointAuthMethod === "none"`)
+// PKCE/S256 is the ONLY authenticity gate on the code redemption — Basic/Post
+// client auth is not available, so accepting `plain` or no code_challenge would
+// allow anyone with the code to redeem it. The route must enforce these even
+// when operator config sets `pkce.required = false`.
+describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory", () => {
+	// Canonical RFC 7636 example pair — a 43-char base64url-encoded SHA-256
+	// digest of `dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk`. Using a
+	// spec-valid challenge here means a future PKCE syntax check (e.g.,
+	// "must be 43-128 chars from [A-Z][a-z][0-9]-._~") would not break
+	// these tests — only the gate logic they target.
+	const VALID_S256_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
+	const publicClientRepo: ClientRepository = {
+		findById: async () => ({
+			clientId: "public-app",
+			tokenEndpointAuthMethod: "none",
+			allowedRedirectUris: ["https://spa.example.test/cb"],
+			allowedScopes: ["openid", "profile"],
+		}),
+		authenticate: async () => null,
+	};
+
+	async function buildPublicAuthorizeApp(opts: {
+		captureCode?: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
+	}) {
+		const app = express();
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		app.use((req, _res, next) => {
+			(req as unknown as { session: Record<string, unknown> }).session = {
+				isAuthenticated: true,
+				user: { id: "user-1" },
+			};
+			next();
+		});
+
+		const codeRepo: CodeRepository = {
+			createCode: async (params) => {
+				opts.captureCode?.(params);
+				return {
+					code: "auth-code-public",
+					client_id: params.client_id,
+					redirect_uri: params.redirect_uri,
+				};
+			},
+			getByCode: async () => null,
+			consumeByCode: async () => null,
+			removeByCode: async () => {},
+		};
+
+		const { router } = await createOAuthRouter(express, {
+			registry: new GrantRegistry(),
+			config: authorizeConfig,
+			clientRepository: publicClientRepo,
+			codeRepository: codeRepo,
+			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+		});
+		app.use("/oauth", router);
+		return app;
+	}
+
+	it("rejects public client when code_challenge is missing → invalid_request redirect", async () => {
+		const app = await buildPublicAuthorizeApp({});
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "public-app",
+			redirect_uri: "https://spa.example.test/cb",
+			state: "state-abc",
+			// no code_challenge
+		});
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.origin + location.pathname).toBe("https://spa.example.test/cb");
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		expect(location.searchParams.get("error_description")).toBe(
+			"code_challenge is required for public clients",
+		);
+		expect(location.searchParams.get("state")).toBe("state-abc");
+	});
+
+	it('rejects public client when code_challenge_method is "plain" → invalid_request redirect', async () => {
+		const app = await buildPublicAuthorizeApp({});
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "public-app",
+			redirect_uri: "https://spa.example.test/cb",
+			state: "state-plain",
+			code_challenge: VALID_S256_CHALLENGE,
+			code_challenge_method: "plain",
+		});
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		expect(location.searchParams.get("error_description")).toBe(
+			'code_challenge_method must be "S256" for public clients',
+		);
+		expect(location.searchParams.get("state")).toBe("state-plain");
+	});
+
+	it("rejects public client when code_challenge_method is omitted (defaults to plain) → invalid_request redirect", async () => {
+		// Omitting code_challenge_method MUST NOT silently fall back to the
+		// operator-configured `defaultMethod` for public clients. The check uses
+		// the raw query parameter so absence is rejected the same as `plain`.
+		const app = await buildPublicAuthorizeApp({});
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "public-app",
+			redirect_uri: "https://spa.example.test/cb",
+			state: "state-omit",
+			code_challenge: VALID_S256_CHALLENGE,
+			// no code_challenge_method → routes.mts treats absence as "plain"
+		});
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		expect(location.searchParams.get("error_description")).toBe(
+			'code_challenge_method must be "S256" for public clients',
+		);
+	});
+
+	it("accepts public client with S256 + code_challenge → 302 redirect with code (happy path)", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildPublicAuthorizeApp({
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "public-app",
+			redirect_uri: "https://spa.example.test/cb",
+			state: "state-ok",
+			scope: "openid profile",
+			code_challenge: VALID_S256_CHALLENGE,
+			code_challenge_method: "S256",
+		});
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.origin + location.pathname).toBe("https://spa.example.test/cb");
+		expect(location.searchParams.get("code")).toBe("auth-code-public");
+		expect(location.searchParams.get("state")).toBe("state-ok");
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.client_id).toBe("public-app");
+		expect(captured?.redirect_uri).toBe("https://spa.example.test/cb");
+		// The /authorize gate is only the first half of the public-client
+		// protection. The verifier check at /token requires the challenge to
+		// have been persisted on the Code record — if a future refactor drops
+		// either field from `createCode`, the public-client gate would still
+		// pass requests through but `/token` would have no verifier to check
+		// against. Asserting persistence here closes that regression window.
+		expect(captured?.code_challenge).toBe(VALID_S256_CHALLENGE);
+		expect(captured?.code_challenge_method).toBe("S256");
+	});
+});
