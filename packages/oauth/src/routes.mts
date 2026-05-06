@@ -115,8 +115,19 @@ export const createOAuthRouter = async (
 	// challenges (RFC 7235 §2.2). When the operator has not configured a
 	// canonical issuer (or this router is constructed in a partial-config test
 	// fixture), the middleware falls back to the literal "oauth".
-	const clientAuthMw = createClientAuthMiddleware(clientRepository, {
-		issuer: (config as { oauth?: { jwt?: { issuer?: string } } }).oauth?.jwt?.issuer,
+	const issuerForRealm = (config as { oauth?: { jwt?: { issuer?: string } } }).oauth?.jwt?.issuer;
+	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
+	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
+	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
+		issuer: issuerForRealm,
+		logger,
+		allowPublicClients: true,
+	});
+	// `/oauth/introspect` MUST reject public clients per RFC 7662 §2.1 — a
+	// known client_id is a non-secret value and would otherwise let any party
+	// query token metadata. The default (`allowPublicClients: false`) applies.
+	const introspectClientAuthMw = createClientAuthMiddleware(clientRepository, {
+		issuer: issuerForRealm,
 		logger,
 	});
 
@@ -192,7 +203,7 @@ export const createOAuthRouter = async (
 				if (!(await checkRateLimit(req, res, "token"))) return;
 				next();
 			},
-			clientAuthMw,
+			tokenClientAuthMw,
 			async (req: Request, res: Response) => {
 				const { grant_type } = req.body;
 				const issuer = config.oauth.jwt.issuer ?? req.get("host");
@@ -309,7 +320,7 @@ export const createOAuthRouter = async (
 						return res.status(200).json({ active: false });
 					}
 				}
-				return clientAuthMw(req, res, next);
+				return introspectClientAuthMw(req, res, next);
 			},
 			async (req: Request, res: Response) => {
 				const { token } = req.body;

@@ -103,11 +103,21 @@ function buildGrant(
 	});
 }
 
-const ctx = (body: Record<string, unknown>): GrantContext => ({
+/**
+ * Default test context. The standalone-wiring path (no `clientAuthMw`) is
+ * exercised by leaving `authenticatedClient: null`; tests that need to verify
+ * the route-bound (`/oauth/token` after `clientAuthMw`) path override it.
+ */
+const ctx = (
+	body: Record<string, unknown>,
+	overrides: Partial<GrantContext> = {},
+): GrantContext => ({
 	body,
 	session: {},
 	issuer: ISSUER,
 	metadata: {},
+	authenticatedClient: null,
+	...overrides,
 });
 
 describe("createTokenExchangeGrant — request errors", () => {
@@ -927,5 +937,81 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		);
 		expect(captured).not.toBeNull();
 		expect(captured?.resource).toEqual(["https://api.example.com"]);
+	});
+});
+
+// D-6 Codex post-review P2: when this grant runs behind `clientAuthMw` on
+// `/oauth/token`, the route already authenticated the client via Basic header
+// or body credentials and populated `ctx.authenticatedClient`. Trusting that
+// identity (and falling back to body credentials only when it is null) keeps
+// Basic-authenticated callers working AND retains the body-credential gate
+// for consumers wiring the grant onto a custom route.
+describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound flow", () => {
+	const authedConfidential = {
+		clientId: "client-a",
+		tokenEndpointAuthMethod: "client_secret_basic" as const,
+	};
+
+	it("accepts a request with no body credentials when ctx.authenticatedClient is set (Basic auth at /token)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx(
+				{
+					// no client_secret in body — Basic auth supplied it via clientAuthMw
+					client_id: "client-a",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				},
+				{ authenticatedClient: authedConfidential },
+			),
+		);
+		expect(result.status).toBe(200);
+	});
+
+	it("rejects when body.client_id differs from ctx.authenticatedClient.clientId (cross-client spoof)", async () => {
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx(
+				{
+					client_id: "spoofed-client", // ≠ authenticatedClient.clientId
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				},
+				{ authenticatedClient: authedConfidential },
+			),
+		);
+		expect(result.status).toBe(400);
+		if (!("error" in result)) expect.fail("Expected error in result");
+		expect(result.error).toBe("invalid_request");
+		expect(result.errorDescription).toMatch(/client_id does not match/);
+	});
+
+	it("rejects public clients (`tokenEndpointAuthMethod: 'none'`) regardless of route", async () => {
+		// `clientAuthMw` admits public clients on `/oauth/token` (PKCE is
+		// the authenticity gate at `/oauth/authorize`), but Token Exchange
+		// has no PKCE and is confidential-only. The grant must refuse.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx(
+				{
+					client_id: "spa-client",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				},
+				{
+					authenticatedClient: {
+						clientId: "spa-client",
+						tokenEndpointAuthMethod: "none",
+					},
+				},
+			),
+		);
+		expect(result.status).toBe(401);
+		if (!("error" in result)) expect.fail("Expected error in result");
+		expect(result.error).toBe("invalid_client");
+		expect(result.errorDescription).toMatch(/does not support public clients/);
 	});
 });

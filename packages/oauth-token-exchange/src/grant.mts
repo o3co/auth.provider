@@ -23,6 +23,7 @@ import type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
 	GrantPolicyRequest,
+	PublicClient,
 } from "@o3co/auth-provider-core";
 import { formatObject, generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
 import { buildActClaim } from "./act.mjs";
@@ -101,36 +102,66 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
-			// Client authentication: confidential clients only. Reject when
-			// client_secret is omitted (see clientSecretRaw handling above for the
-			// rationale).
+			// Client authentication. Token Exchange supports confidential clients
+			// only — public (`"none"`) clients are refused regardless of route.
 			//
-			// D-6 note (v0.5.1): when this grant is dispatched from the standard
-			// `/token` route, `clientAuthMw` runs first and has already
-			// authenticated the client via the same `ClientRepository.authenticate`
-			// call below. The in-grant call is therefore a no-op double-auth in
-			// the route-bound flow. We retain it because:
-			// (a) the grant is a public OSS export — consumers may wire it onto a
-			//     custom route that bypasses `clientAuthMw`, where this remains
-			//     the only authenticity gate, and
-			// (b) this grant intentionally rejects public clients (`"none"`) at
-			//     this site, regardless of route configuration — a public client
-			//     calling Token Exchange with no `client_secret` falls through
-			//     here and gets `invalid_client`. Removing the check would let
-			//     `clientAuthMw`'s public-client path admit a request that has
-			//     no business reaching Token Exchange (which has no PKCE).
-			// `ctx.authenticatedClient` is intentionally NOT consulted: this grant
-			// owns its credential model and must remain self-contained.
-			if (clientSecret === null) {
-				return {
-					result: {
-						status: 401,
-						error: "invalid_client",
-						errorDescription: "client_secret is required",
-					},
-				};
+			// D-6 (v0.5.1): when this grant is dispatched from the standard
+			// `/token` route, `clientAuthMw` has already authenticated the client
+			// (via Basic header OR body credentials) and populated
+			// `ctx.authenticatedClient`. We trust that identity over the body —
+			// without this branch, Basic-authenticated callers would fail here
+			// because `body.client_secret` is empty when credentials travel in
+			// the `Authorization` header. For consumers wiring this grant onto a
+			// custom route that bypasses `clientAuthMw`, the `else` branch keeps
+			// the original body-credential gate as the sole authenticity check.
+			let client: PublicClient | null;
+			if (ctx.authenticatedClient) {
+				if (ctx.authenticatedClient.tokenEndpointAuthMethod === "none") {
+					return {
+						result: {
+							status: 401,
+							error: "invalid_client",
+							errorDescription: "Token Exchange does not support public clients",
+						},
+					};
+				}
+				// Body-supplied client_id MUST match the authenticated identity —
+				// otherwise an attacker could authenticate as A and request a
+				// token exchange under B's allowlist.
+				if (clientId !== ctx.authenticatedClient.clientId) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "client_id does not match authenticated client",
+						},
+					};
+				}
+				try {
+					client = await clientRepository.findById(ctx.authenticatedClient.clientId);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "client repository unavailable",
+						},
+					};
+				}
+			} else {
+				// Standalone wiring: no `clientAuthMw` ahead of us, so verify
+				// the body-supplied secret directly.
+				if (clientSecret === null) {
+					return {
+						result: {
+							status: 401,
+							error: "invalid_client",
+							errorDescription: "client_secret is required",
+						},
+					};
+				}
+				client = await clientRepository.authenticate(clientId, clientSecret);
 			}
-			const client = await clientRepository.authenticate(clientId, clientSecret);
 			if (!client) {
 				return {
 					result: {

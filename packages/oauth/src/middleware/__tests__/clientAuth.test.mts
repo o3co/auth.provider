@@ -152,14 +152,21 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body.client).toBe("alice");
 		});
 
-		it("B-6: public client supplies only client_id in body → next() with public method", async () => {
+		it("B-6: public client supplies only client_id in body → next() with public method (when allowPublicClients=true)", async () => {
+			// `/oauth/token` admits public clients (PKCE/S256 enforces authenticity
+			// at `/oauth/authorize`). Other routes leave `allowPublicClients` at
+			// the default `false` and would reject — see the dedicated P1 group.
 			const app = express().use(express.urlencoded({ extended: false }));
-			app.post("/test", createClientAuthMiddleware(fakeRepo([publicClient("spa")])), (req, res) => {
-				res.json({
-					client: req.oauthClient?.clientId,
-					method: req.oauthClient?.tokenEndpointAuthMethod,
-				});
-			});
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([publicClient("spa")]), { allowPublicClients: true }),
+				(req, res) => {
+					res.json({
+						client: req.oauthClient?.clientId,
+						method: req.oauthClient?.tokenEndpointAuthMethod,
+					});
+				},
+			);
 			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
 			expect(res.status).toBe(200);
 			expect(res.body.client).toBe("spa");
@@ -426,6 +433,45 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.status).toBe(401);
 			expect(res.body.error).toBe("invalid_client");
 			expect(res.body.error_description).toBe("Malformed client credentials");
+		});
+	});
+
+	describe("P1 (Codex post-review): allowPublicClients gates the public-client path", () => {
+		it("default (allowPublicClients omitted) rejects public clients with 401 invalid_client", async () => {
+			// /oauth/introspect (RFC 7662 §2.1) and any non-/token route MUST
+			// reject public clients — knowledge of a client_id is not a credential.
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post("/test", createClientAuthMiddleware(fakeRepo([publicClient("spa")])), (_req, res) =>
+				res.end(),
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("invalid_client");
+			expect(res.body.error_description).toMatch(/Public clients are not allowed/);
+		});
+
+		it("allowPublicClients: false also rejects (explicit form)", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([publicClient("spa")]), { allowPublicClients: false }),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
+			expect(res.status).toBe(401);
+			expect(res.body.error_description).toMatch(/Public clients are not allowed/);
+		});
+
+		it("allowPublicClients: true accepts public clients (used by /oauth/token only)", async () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([publicClient("spa")]), { allowPublicClients: true }),
+				(req, res) => res.json({ client: req.oauthClient?.clientId }),
+			);
+			const res = await request(app).post("/test").type("form").send({ client_id: "spa" });
+			expect(res.status).toBe(200);
+			expect(res.body.client).toBe("spa");
 		});
 	});
 

@@ -52,6 +52,18 @@ interface ClientAuthMiddlewareOptions {
 	 * `consoleLogger` so existing callers compile unchanged.
 	 */
 	logger?: Logger;
+	/**
+	 * Whether `tokenEndpointAuthMethod === "none"` (public) clients are
+	 * accepted on this route. Defaults to `false` because the only routes that
+	 * can soundly admit them are `/oauth/token` (where PKCE/S256 is the
+	 * authenticity gate, enforced separately at `/oauth/authorize`).
+	 *
+	 * RFC 7662 §2.1 requires that introspection callers be authenticated;
+	 * accepting a public client there would let anyone who knows a client_id
+	 * (a non-secret value) query token metadata. Routes other than `/token`
+	 * MUST leave this option at the default.
+	 */
+	allowPublicClients?: boolean;
 }
 
 /**
@@ -141,6 +153,7 @@ export function createClientAuthMiddleware(
 	const logger: Logger = opts.logger ?? consoleLogger;
 	const realm = opts.issuer && opts.issuer.length > 0 ? opts.issuer : "oauth";
 	const wwwAuth = `Basic realm="${realm}"`;
+	const allowPublicClients = opts.allowPublicClients === true;
 
 	function rejectBasic(res: Response, status: number, errorDescription?: string): void {
 		res.set("WWW-Authenticate", wwwAuth);
@@ -269,6 +282,15 @@ export function createClientAuthMiddleware(
 		}
 
 		if (client.tokenEndpointAuthMethod === "none") {
+			// Public-client routes are opt-in: only `/oauth/token` (where PKCE/S256
+			// is the authenticity gate enforced at `/authorize`) sets
+			// `allowPublicClients: true`. Other routes — `/oauth/introspect` per
+			// RFC 7662 §2.1, federation endpoints, etc. — must reject so a known
+			// public client_id (a non-secret value) cannot authorize requests.
+			if (!allowPublicClients) {
+				rejectPlain(res, 401, "Public clients are not allowed on this endpoint");
+				return;
+			}
 			req.oauthClient = client;
 			next();
 			return;

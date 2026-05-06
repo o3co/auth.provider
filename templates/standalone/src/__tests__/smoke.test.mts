@@ -102,16 +102,26 @@ const SMOKE_BASIC_AUTH = `Basic ${Buffer.from(`${SMOKE_CLIENT_ID}:${SMOKE_CLIENT
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
 	provides: {
+		// `InMemoryClientRepository` constructor takes `Map<string, ClientEntry>`
+		// where `ClientEntry = z.infer<typeof ClientEntrySchema>` (output type) —
+		// fields with `.default(...)` are required in the output even though the
+		// input shape only requires the discriminator + secret. Tests supply the
+		// input shape and let the schema fill defaults at parse time, hence the
+		// cast at the construction boundary.
 		clientRepository: () =>
 			new InMemoryClientRepository(
 				new Map([
 					[
 						SMOKE_CLIENT_ID,
 						{
-							tokenEndpointAuthMethod: "client_secret_basic" as const,
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: SMOKE_CLIENT_SECRET,
 							allowedRedirectUris: [],
 							allowedScopes: [],
+							allowedAudiences: [],
+							backchannelLogoutSessionRequired: true,
+							frontchannelLogoutSessionRequired: true,
+							allowedAzpForFederationToken: false,
 						},
 					],
 				]),
