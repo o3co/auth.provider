@@ -239,7 +239,7 @@ function supportsRefresh(
 import { supportsRefresh } from "@o3co/auth-provider-session";
 
 if (supportsRefresh(provider)) {
-  const refreshed = await provider.refreshFederationToken(storedRefreshToken);
+  const refreshed = await provider.refreshToken(storedRefreshToken);
   // refreshed.accessToken, refreshed.expiresAt …
 }
 ```

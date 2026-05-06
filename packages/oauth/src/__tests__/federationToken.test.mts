@@ -1028,12 +1028,22 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	// ---------------------------------------------------------------------------
-	// D-8 regression: published SupportsRefresh interface uses `refreshToken`
-	// (not `refreshToken`). Real providers (federation-google, etc.)
-	// follow the published name. Pre-rename the route's duck-type guard probed
-	// the wrong identifier, so every refresh request silently returned 503
-	// `refresh_not_supported` in production. Locks the route to the published
-	// interface name so future audits cannot regress.
+	// D-8 regression marker: published SupportsRefresh interface uses
+	// `refreshToken` (NOT `refreshFederationToken` — the broken name pre-rename
+	// at v0.5.0). Real providers (e.g. federation-google) follow the published
+	// name. Pre-rename the route's duck-type guard probed the wrong identifier
+	// and every refresh request returned 503 `refresh_not_supported` in
+	// production.
+	//
+	// This is a sanity-check regression marker, not a full structural lock.
+	// The mock provider's shape mirrors whatever method name the route probes,
+	// so a future "wrong-rename" of the route would fail this test only via
+	// the same mechanism as the pre-existing happy-path test above. A stronger
+	// anchor (a compile-time type assertion that the route's local
+	// `SupportsRefreshShape` is structurally compatible with the published
+	// `@o3co/auth-provider-session` `SupportsRefresh`) would require importing
+	// session in oauth tests, crossing the package independence boundary
+	// stated at federationToken.mts:40-41. Deferred to a follow-up spec.
 	// ---------------------------------------------------------------------------
 
 	describe("D-8 regression: route detects provider.refreshToken (published interface name)", () => {

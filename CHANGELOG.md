@@ -39,6 +39,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   silently no-ops on a key with no existing TTL — see method JSDoc). Custom
   backing-client implementations (non-ioredis) must add `pExpireGT` to compile.
 
+### Bug Fixes (Phase F — v0.5.1)
+
+- **federation-refresh:** Fix Google (and other built-in) federation token refresh
+  broken in v0.5.0. The route-side duck-type capability check in
+  `packages/oauth/src/routes/federationToken.mts` probed for `refreshFederationToken`
+  while the published `SupportsRefresh` interface (and all built-in providers,
+  e.g. `@o3co/auth-provider-federation-google`) declare `refreshToken`. The
+  mismatch caused every request that required an upstream token refresh to return
+  `503 refresh_not_supported`, forcing users to re-authenticate with the identity
+  provider on every new session. The route now probes the correct capability name.
+  No changes to `SupportsRefresh`, `FederationProvider`, or any provider
+  implementation; consumer-visible public API is unchanged. (Closes Area-4-NEW,
+  D-8.)
+
 ### Breaking Changes (Phase 1-9 — Module System Redesign)
 
 #### Module manifest pipeline (A2-α/β/γ)
