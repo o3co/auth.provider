@@ -165,8 +165,8 @@ describe("fullSectionsSchema endpoints optionality", () => {
 		expect(result.success).toBe(true);
 	});
 
-	it("still accepts endpoints with all fields provided", () => {
-		const endpointsFull = {
+	it("strips dead endpoints fields (client / authCallback removed in IH-10)", () => {
+		const endpointsWithDeadFields = {
 			endpoints: {
 				login: { url: "/login" },
 				client: { url: "http://localhost:3001" },
@@ -174,8 +174,13 @@ describe("fullSectionsSchema endpoints optionality", () => {
 			},
 		};
 		const schema = fullSectionsSchema.pick({ endpoints: true });
-		const result = schema.safeParse(endpointsFull);
+		const result = schema.safeParse(endpointsWithDeadFields);
 		expect(result.success).toBe(true);
+		// IH-10: client/authCallback are stripped (not in schema anymore).
+		if (result.success) {
+			expect((result.data.endpoints as Record<string, unknown>).client).toBeUndefined();
+			expect((result.data.endpoints as Record<string, unknown>).authCallback).toBeUndefined();
+		}
 	});
 
 	it("accepts rateLimit + endpoints without client or authCallback", () => {
@@ -238,9 +243,9 @@ describe("AppConfigSchema backward compatibility", () => {
 				code: { type: "memory", memory: { defaultExpiresIn: 600 } },
 			},
 			endpoints: {
-				login: {},
-				client: {},
-				authCallback: {},
+				// IH-17: login.url is now required at the base schema level.
+				// IH-10: client / authCallback are removed — stripped if present.
+				login: { url: "/login" },
 			},
 			cors: { allowedOrigins: [] },
 		};

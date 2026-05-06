@@ -24,6 +24,7 @@ import {
 	createKeyStoreFactory,
 	createRepositoryFactories,
 	defineModule,
+	type LifecycleRegistrar,
 	type Module,
 	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
@@ -140,19 +141,40 @@ export const repositoriesModule: Module = defineModule({
 });
 
 /**
- * Stores module — provides the four-store user-session split + federation
- * token store. The standalone template uses in-memory stores by default; a
- * redis-backed deployment swaps this module for `@o3co/auth-provider-redis`'s
- * equivalent (per A4 §10 / Phase 5).
+ * In-memory user-session stores module — provides the four-store
+ * user-session split (userSessionStore, sessionRPRegistry,
+ * sessionFamilyIndex, sessionFederationIndex). This module is wired by
+ * `buildModules` only when `userSessionStores.adapter = "memory"`. The
+ * Redis branch swaps in `redisSessionStoresModule` from
+ * `@o3co/auth-provider-redis`.
+ *
+ * Pre-Wave-5d this module also provided `federationTokenStore` (now
+ * extracted into a separate always-wired module so the redis session
+ * branch doesn't drop the federation-token-store provider — Copilot
+ * review on PR #121).
  */
-export const storesModule: Module = defineModule({
-	name: "standalone:stores",
-	requires: ["config"] as const,
+export const inMemorySessionStoresModule: Module = defineModule({
+	name: "standalone:in-memory-session-stores",
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
 		sessionFamilyIndex: () => createInMemorySessionFamilyIndex(),
 		sessionFederationIndex: () => createInMemorySessionFederationIndex(),
+	},
+});
+
+/**
+ * Federation token store module — always wired (independent of the
+ * `userSessionStores.adapter` switch). Pre-Wave-5d this slot was bundled
+ * into the larger `storesModule`; that meant the redis session-stores
+ * branch dropped the federation-token-store provider entirely and boot
+ * failed on the missing component (Copilot review on PR #121). Splitting
+ * the slot out lets both adapters reuse it unchanged.
+ */
+export const federationTokenStoreModule: Module = defineModule({
+	name: "standalone:federation-token-store",
+	requires: ["config"] as const,
+	provides: {
 		federationTokenStore: async ({ config }) => {
 			const factory = createFederationTokenStoreFactory();
 			registerBuiltinFederationTokenStores(factory);
@@ -168,81 +190,139 @@ export const storesModule: Module = defineModule({
 });
 
 /**
- * RefreshTokenFamilyClient module — provides the long-lived ioredis-backed
- * client consumed by `redisRefreshTokenFamilyStoreModule` (D-2 v2).
- *
- * Replaces the in-memory `memoryRefreshTokenFamilyStoreModule` previously
- * wired in `buildModules`. The in-memory variant lost RT-family records on
- * every replica restart and across replicas (OR-1) — multi-replica
- * deployments returned `invalid_grant` on every other refresh request.
- *
- * Lifecycle: registers `io.quit()` with the boot-planner-pre-seeded
- * `lifecycleRegistrar` (D-5 ComponentMap slot) so `handle.dispose()` quits
- * the connection cleanly. The registrar is `optional` because the module
- * remains usable in unit tests that bootstrap without seeding the registrar.
- *
- * Config: reads `refreshTokenFamilyStore.redis.{url, password}` from the
- * already-validated `deps.config`. The `application.schema.mts` extension
- * (D-2 v2 §1) ensures Zod does NOT strip these keys at validate time. No
- * `zod` import in standalone code (BLOCKER 2 closure) — config is read
- * directly off the typed `AppConfig` shape.
- *
- * Fails fast (throws) when `refreshTokenFamilyStore.redis.url` is absent.
- * The HOCON default in `application.conf` covers single-instance / dev
- * scenarios; an operator who deliberately removes the section in production
- * sees an explicit error instead of a silent localhost fallback (the multi-
- * replica failure mode OR-1 was supposed to close in the first place).
- *
- * @see {@link makeIoredisClients} — wraps the connection into the typed
- * `RefreshTokenFamilyClient` shape including the `duplicate()` method
- * required for WATCH/MULTI/EXEC CAS isolation.
+ * @deprecated since Wave 5d (F4 PR2): split into `inMemorySessionStoresModule`
+ * + `federationTokenStoreModule`. Re-exported for backward compatibility
+ * with consumers that imported `storesModule` from this file. New code
+ * should use the two split modules directly.
  */
-export const refreshTokenFamilyClientModule: Module = defineModule({
-	name: "standalone:refresh-token-family-client",
+export const storesModule: Module = defineModule({
+	name: "standalone:stores",
+	requires: ["config"] as const,
+	provides: {
+		...inMemorySessionStoresModule.provides,
+		...federationTokenStoreModule.provides,
+	},
+});
+
+/**
+ * Shared ioredis clients module — opens ONE long-lived ioredis connection
+ * per replica, wraps it via `makeIoredisClients()` (returns 9 typed
+ * per-purpose clients), and exposes the slots consumed by the standalone's
+ * Redis-backed adapters (refresh-token-family + 4 user-session stores +
+ * rate limiter).
+ *
+ * Per F4 PR1 (D-2 v2) + Wave 5d unification: the previous design opened a
+ * separate ioredis socket per Redis-backed module (3+ sockets per replica).
+ * This module consolidates them — `makeIoredisClients(io)` was always
+ * designed to derive multiple per-purpose typed clients from a single
+ * connection; using one socket realises that intent and minimises
+ * connection-pool pressure on the upstream Redis.
+ *
+ * Connection-config: reuses `refreshTokenFamilyStore.redis.{url, password}`
+ * (declared in `fullSectionsSchema` by D-2 v2 §1). No new top-level config
+ * key is introduced — the connection is shared so its config is too. Future
+ * splits (per-store distinct Redis instances) are operator-side via custom
+ * composition roots, not standalone configuration.
+ *
+ * Fails fast (throws) when the Redis URL is absent. The HOCON default in
+ * `application.conf` covers single-instance / dev scenarios; an operator
+ * who deliberately removes the section in production sees an explicit
+ * error instead of a silent localhost fallback (the multi-replica failure
+ * mode OR-1 was supposed to close).
+ *
+ * Lifecycle: registers `io.quit()` once with the boot-planner-pre-seeded
+ * `lifecycleRegistrar` (D-5 ComponentMap slot) so `handle.dispose()` quits
+ * the single connection cleanly.
+ *
+ * Conditional inclusion: `buildModules` only adds this module to the
+ * manifest when at least one Redis-backed adapter is selected
+ * (`userSessionStores.adapter = "redis"` OR `rateLimiter.adapter = "redis"`
+ * — refresh-token-family is always Redis-backed in production). Adding the
+ * module unconditionally would open an ioredis socket for memory-only
+ * deployments.
+ */
+export const standaloneRedisClientsModule: Module = defineModule({
+	name: "standalone:redis-clients",
 	requires: ["config"] as const,
 	optional: ["lifecycleRegistrar"] as const,
 	provides: {
 		refreshTokenFamilyClient: async ({ config, lifecycleRegistrar }) => {
-			const cfg = (config as AppConfig).refreshTokenFamilyStore?.redis;
-			if (typeof cfg?.url !== "string" || cfg.url.length === 0) {
-				throw new Error(
-					"refreshTokenFamilyClientModule: `refreshTokenFamilyStore.redis.url` is required. " +
-						"Set REFRESH_TOKEN_FAMILY_STORE_REDIS_URL or restore the `refreshTokenFamilyStore.redis` " +
-						"block in application.conf. Multi-replica deployments require a shared Redis 7.2+ instance.",
-				);
-			}
-			const password = typeof cfg.password === "string" ? cfg.password : undefined;
-
-			// `lazyConnect: false` is the ioredis 5.x default; the explicit
-			// option documents the boot-time-connect contract so a future
-			// ioredis version flip does not silently change the failure mode.
-			const io = new Redis(cfg.url, {
-				password,
-				lazyConnect: false,
-			});
-
-			// Attach error handler so unhandled "error" events from ioredis
-			// 5.x do not crash the Node.js process. Initial connection
-			// failures surface here; the first `/oauth/token refresh_token`
-			// request will then fail because the store throws. TODO(D-4):
-			// swap `console.error` for the Logger interface once a v0.5.2
-			// polish PR lands.
-			io.on("error", (err: unknown) => {
-				console.error("[standalone:refresh-token-family-client] ioredis error", err);
-			});
-
-			// D-5: register cleanup with the boot-planner-pre-seeded
-			// lifecycleRegistrar. Optional chaining keeps the module usable in
-			// unit tests that bootstrap without seeding the registrar.
-			lifecycleRegistrar?.register(async () => {
-				await io.quit();
-			});
-
-			const { refreshTokenFamilyClient } = makeIoredisClients(io);
-			return refreshTokenFamilyClient;
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).refreshTokenFamilyClient;
+		},
+		userSessionStoreClient: async ({ config, lifecycleRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).userSessionStoreClient;
+		},
+		sessionRPRegistryClient: async ({ config, lifecycleRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).sessionRPRegistryClient;
+		},
+		sessionFamilyIndexClient: async ({ config, lifecycleRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).sessionFamilyIndexClient;
+		},
+		sessionFederationIndexClient: async ({ config, lifecycleRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar)
+				.sessionFederationIndexClient;
+		},
+		rateLimiterClient: async ({ config, lifecycleRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).rateLimiterClient;
 		},
 	},
 });
+
+// Module-scoped cache so each `provides.*` factory invocation reuses the
+// same `Redis` instance (and its `makeIoredisClients()` derivation) within
+// a single createApp() invocation. The boot planner calls each `provides`
+// in dependency order; without this, every consumed slot would create its
+// own Redis socket, defeating the unification purpose.
+//
+// Cache key: the `lifecycleRegistrar` IDENTITY (which is per-boot — each
+// `createApp()` invocation seeds a fresh registrar via the boot planner).
+// Keying solely on `config` would incorrectly share connections across
+// boots when the same config object is reused with a new registrar (and
+// only the FIRST boot's registrar would receive disposal — Copilot review
+// on PR #121). When `lifecycleRegistrar` is undefined (test scenarios
+// that don't seed it), each call creates a fresh client; tests are
+// isolated and don't need cross-slot sharing.
+const clientsCache = new WeakMap<LifecycleRegistrar, ReturnType<typeof makeIoredisClients>>();
+function getOrCreateClients(
+	config: AppConfig,
+	lifecycleRegistrar: LifecycleRegistrar | undefined,
+): ReturnType<typeof makeIoredisClients> {
+	const cached = lifecycleRegistrar ? clientsCache.get(lifecycleRegistrar) : undefined;
+	if (cached) return cached;
+
+	const cfg = config.refreshTokenFamilyStore?.redis;
+	if (typeof cfg?.url !== "string" || cfg.url.length === 0) {
+		throw new Error(
+			"standaloneRedisClientsModule: `refreshTokenFamilyStore.redis.url` is required when any " +
+				"Redis-backed adapter is selected. Set REFRESH_TOKEN_FAMILY_STORE_REDIS_URL or " +
+				"restore the `refreshTokenFamilyStore.redis` block in application.conf. Multi-replica " +
+				"deployments require a shared Redis 7.2+ instance.",
+		);
+	}
+	const password = typeof cfg.password === "string" ? cfg.password : undefined;
+
+	// `lazyConnect: false` is the ioredis 5.x default; the explicit option
+	// documents the boot-time-connect contract so a future ioredis version
+	// flip does not silently change the failure mode.
+	const io = new Redis(cfg.url, { password, lazyConnect: false });
+
+	// Attach error handler so unhandled "error" events from ioredis 5.x do
+	// not crash the Node.js process. Initial connection failures surface
+	// here; downstream adapter operations then fail visibly. TODO(D-4):
+	// swap `console.error` for the Logger interface once a v0.5.2 polish
+	// PR lands.
+	io.on("error", (err: unknown) => {
+		console.error("[standalone:redis-clients] ioredis error", err);
+	});
+
+	lifecycleRegistrar?.register(async () => {
+		await io.quit();
+	});
+
+	const clients = makeIoredisClients(io);
+	if (lifecycleRegistrar) clientsCache.set(lifecycleRegistrar, clients);
+	return clients;
+}
 
 /**
  * Google federation config bridge — supplies the typed `googleFederationConfig`

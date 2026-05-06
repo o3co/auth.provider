@@ -6,6 +6,81 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed (Phase F — F4 PR2 standalone wiring batch + IH-10/17/18, v0.5.1)
+
+- **Single shared ioredis socket per replica** (`templates/standalone`):
+  the standalone composition root now opens **one** ioredis connection
+  and derives all per-purpose clients (refresh-token-family, 4 user-session
+  stores, OAuth-endpoint rate limiter) via `makeIoredisClients(io)`. The
+  F4 PR1 `refreshTokenFamilyClientModule` is replaced by a unified
+  `standaloneRedisClientsModule` that provides all 6 client slots from the
+  shared connection. Connection-pool pressure on the upstream Redis drops
+  proportionally; lifecycle drains 1 socket instead of 3+. Memory-only
+  deployments skip the shared module entirely so they don't open an unused
+  socket.
+
+- **OAuth-endpoint rate limiter is wired by default** (`templates/standalone`,
+  closes IH-14 + OR-M1): `buildModules` now includes `memoryRateLimiterModule`
+  by default. Pre-fix, no rate-limiter module was wired at all and
+  `checkRateLimit` in `routes.mts` unconditionally fail-opened — production
+  deployments had ZERO rate limiting on `/token` + `/authorize` despite
+  having config for it. Set `rateLimiter.adapter = "redis"` (or
+  `RATE_LIMITER_ADAPTER=redis`) for shared counters across replicas.
+
+- **Multi-replica session stores via Redis** (`templates/standalone`,
+  closes OR-4): `buildModules` now switches the four user-session stores
+  (`userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
+  `sessionFederationIndex`) to `redisSessionStoresModule` when
+  `userSessionStores.adapter = "redis"` (or
+  `USER_SESSION_STORES_ADAPTER=redis`). Pre-fix, all four were unconditionally
+  in-memory in production, losing state on restart and across replicas.
+
+- **`AppConfigSchema` adapter selectors** (`@o3co/auth-provider-core`):
+  `rateLimiter.adapter: "memory" | "redis"` and
+  `userSessionStores.adapter: "memory" | "redis"` added as top-level
+  optional sections on `fullSectionsSchema`. Defaults `"memory"` live in
+  HOCON (`packages/core/config/application.conf` +
+  `templates/standalone/config/application.conf`), per the project ADR
+  ("schema is a pure type contract; defaults live in HOCON").
+
+- **`BuildModulesOverrides.refreshTokenFamilyModules` semantics**
+  (`templates/standalone`): the override now drops both the shared
+  `standaloneRedisClientsModule` and the redis store module (was: dropped
+  PR1's per-purpose `refreshTokenFamilyClientModule` + redis store). Smoke
+  tests pass `[memoryRefreshTokenFamilyStoreModule]` here exactly as
+  before — no test fixture change required.
+
+### Bug Fixes (Phase F — IH-10 / IH-17, v0.5.1)
+
+- **`AppConfigSchema.endpoints.client` and `endpoints.authCallback` removed**
+  (closes IH-10): no production consumer reads either field. The pre-fix
+  env-var-only HOCON lines (`client { url = ${?ENDPOINTS_CLIENT_URL} }` and
+  the `authCallback` analogue) silently leaked values into `AppConfig` that
+  nothing consumed. Federation provider callback URLs are configured
+  per-provider (e.g. `federations.google.callbackURL`), not via a generic
+  `endpoints.authCallback`.
+  **Migration**: configs that wrote either field continue to validate (Zod
+  strips unknown keys); the parsed `AppConfig.endpoints` no longer exposes
+  the keys at the type level.
+
+- **`endpoints.login.url` is now required at the base schema level**
+  (closes IH-17): tightened from `z.string().optional()` to `z.string()`.
+  The runtime invariant was already enforced by `oauthModule.configSchema`
+  at boot time; the base schema now matches the contract so `AppConfig` no
+  longer types the field as `string | undefined`. Default `"/login"` added
+  to `packages/core/config/application.conf` so deployments that omit
+  `ENDPOINTS_LOGIN_URL` boot successfully (previously: confusing late
+  failure from `oauthConfigSchema`).
+
+### Documentation (Phase F — IH-18, v0.5.1)
+
+- **`rateLimit.login.windowMs` JSDoc clarification** (`@o3co/auth-provider-core`):
+  the existing `rateLimit.login.windowMs` (express-rate-limit, milliseconds,
+  governs session-route bruteforce protection) is intentionally distinct from
+  the OAuth-endpoint `RateLimitSpec.windowSeconds` (seconds, governs the
+  pluggable `RateLimiterBase` adapter). Inline JSDoc + HOCON comments now
+  spell this out to prevent operator confusion. No code change.
+
 ### Changed (Phase F — D-2 v2 standalone ioredis unification, v0.5.1)
 
 - **Multi-replica refresh-token persistence** (`templates/standalone`): the

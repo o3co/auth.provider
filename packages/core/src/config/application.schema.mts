@@ -190,6 +190,20 @@ export const fullSectionsSchema = z.object({
 			})
 			.passthrough(),
 	}),
+	/**
+	 * Rate-limit config for SESSION routes (e.g. `/session/login` bruteforce
+	 * protection). Uses `windowMs` (milliseconds) because this section is
+	 * consumed by `express-rate-limit` in
+	 * `packages/session/src/routes/Session.mts`.
+	 *
+	 * IH-18 — config split:
+	 * This section ONLY governs session-route rate limiting. OAuth endpoint
+	 * rate limiting (`/token`, `/authorize`) is provided via the optional
+	 * `rateLimiter` component slot; the built-in module config lives under
+	 * `memoryRateLimiter.*` / `redisRateLimiter.*` and uses `windowSeconds`
+	 * (seconds) per `RateLimitSpec` in `packages/core/src/ratelimit/types.mts`.
+	 * Two independent systems, different keys, different units.
+	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
 	}),
@@ -212,9 +226,15 @@ export const fullSectionsSchema = z.object({
 			.passthrough(),
 	}),
 	endpoints: z.object({
-		login: z.object({ url: z.string().optional() }),
-		client: z.object({ url: z.string().optional() }).optional(),
-		authCallback: z.object({ url: z.string().optional() }).optional(),
+		// IH-17: tightened from `z.string().optional()` to `z.string()`. The
+		// runtime invariant was already enforced by `oauthModule.configSchema`
+		// at boot time; the base schema now matches the contract so AppConfig
+		// no longer types the field as optional + downstream consumers don't
+		// need null guards. Default `/login` lives in HOCON.
+		login: z.object({ url: z.string() }),
+		// IH-10: `client` / `authCallback` removed — no production consumer
+		// reads them. The pre-fix env-var-only HOCON lines silently leaked
+		// values into AppConfig that nothing consumed.
 	}),
 	cors: z.object({
 		allowedOrigins: z.array(z.string()),
@@ -232,6 +252,29 @@ export const fullSectionsSchema = z.object({
 					password: z.string().optional(),
 				})
 				.optional(),
+		})
+		.optional(),
+	// Wave 5d (IH-14 + OR-M1): adapter switch for the OAuth-endpoint
+	// rate limiter. Default `"memory"` lives in HOCON. NOTE: this is a
+	// SEPARATE rate-limit system from `rateLimit.login.windowMs` (which
+	// governs session-route bruteforce protection via express-rate-limit
+	// in `packages/session/src/routes/Session.mts`). See `RateLimitSpec`
+	// JSDoc + `application.conf` comments for the IH-18 split rationale.
+	rateLimiter: z
+		.object({
+			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// Wave 5d (OR-4): adapter switch for the four user-session stores
+	// (`userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`,
+	// `sessionFederationIndex`). Multi-replica deployments MUST set this
+	// to `"redis"`; the in-memory variant loses session state on restart
+	// and across replicas. Top-level key (not `oauth.session.*`) to avoid
+	// confusion with the existing `session.*` cookie/express-session
+	// configuration tree (different responsibility, different backend).
+	userSessionStores: z
+		.object({
+			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
 	// D-2 v2: module-internal config for `redisRefreshTokenFamilyStoreModule`.
