@@ -26,7 +26,7 @@ let container: StartedTestContainer;
 let raw: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7-alpine").withExposedPorts(6379).start();
+	container = await new GenericContainer("redis:7.2-alpine").withExposedPorts(6379).start();
 	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
 }, 60_000);
 

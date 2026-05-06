@@ -57,7 +57,7 @@ let _insertionCounter = 0;
 
 /**
  * Private redis helper used by `SessionFamilyIndex` + `SessionFederationIndex`.
- * Single-key ZADD NX + PEXPIREAT pipeline keyed by `${keyPrefix}${sid}`.
+ * Single-key ZADD NX + PEXPIREAT … GT pipeline keyed by `${keyPrefix}${sid}`.
  *
  * Per A4 §7.2.2.
  *
@@ -68,7 +68,10 @@ let _insertionCounter = 0;
  *
  * **TTL contract** (identical to `createRedisSidHash`): callers MUST pass
  * `session.expiresAt`; same-sid writes use the SAME `expiresAt`; writes
- * after expiry no-op.
+ * after expiry no-op. The `pExpireGT` (PEXPIREAT … GT) modifier ensures a
+ * stale-`expiresAt` write does NOT shorten the key's existing TTL — required
+ * for safety under concurrent same-sid writes (D-10 / CR-3). Requires
+ * Redis 7.0+; v0.5.1 pins the floor to Redis 7.2 LTS.
  *
  * **Score**: monotonic module-level counter (see `_insertionCounter` above).
  * The counter replaces `Date.now()` as the score source to guarantee strict
@@ -86,7 +89,7 @@ export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSi
 			const score = ++_insertionCounter;
 			const pipeline = opts.client.multi();
 			pipeline.zAdd(k(sid), { score, value: member }, { NX: true });
-			pipeline.pExpireAt(k(sid), expiresAtMs);
+			pipeline.pExpireGT(k(sid), expiresAtMs);
 			await pipeline.exec();
 		},
 		async list(sid) {

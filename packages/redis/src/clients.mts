@@ -120,6 +120,25 @@ export interface UserSessionStoreClient {
 export interface SessionRPRegistryMultiClient {
 	hSet(key: string, field: string, value: string): SessionRPRegistryMultiClient;
 	pExpireAt(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
+	/**
+	 * Safely set the key's expiry under concurrent writes (D-10 / CR-3).
+	 *
+	 * Effective semantics:
+	 *   - If the key has no TTL, set it to `msTimestamp` (first-write case).
+	 *   - If the key has a TTL ≥ `msTimestamp`, leave it unchanged
+	 *     (truncation prevented under stale-`expiresAt` races).
+	 *   - If the key has a TTL < `msTimestamp`, raise it to `msTimestamp`
+	 *     (legitimate extension allowed).
+	 *
+	 * Implemented as a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair (Redis 7.0+
+	 * flags). A bare `PEXPIREAT … GT` is insufficient: Redis treats a
+	 * non-volatile key as having infinite TTL for `GT`, so the GT clause
+	 * silently no-ops on first write. The NX clause covers that bootstrap
+	 * gap; the GT clause provides the truncation guard once a TTL exists.
+	 *
+	 * Requires Redis 7.0+. v0.5.1 pins the floor to Redis 7.2 LTS.
+	 */
+	pExpireGT(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
 	exec(): Promise<unknown[] | null>;
 }
 
@@ -133,6 +152,8 @@ export interface SessionRPRegistryClient {
 	hVals(key: string): Promise<string[]>;
 	multi(): SessionRPRegistryMultiClient;
 	pExpireAt(key: string, msTimestamp: number): Promise<number>;
+	/** Non-pipeline variant of `pExpireGT`. See multi-client for semantics. */
+	pExpireGT(key: string, msTimestamp: number): Promise<number>;
 }
 
 // --- SessionSidSortedSetClient ---------------------------------------------
@@ -142,6 +163,25 @@ export interface SessionRPRegistryClient {
  */
 export interface SessionSidSortedSetMultiClient {
 	pExpireAt(key: string, msTimestamp: number): SessionSidSortedSetMultiClient;
+	/**
+	 * Safely set the key's expiry under concurrent writes (D-10 / CR-3).
+	 *
+	 * Effective semantics:
+	 *   - If the key has no TTL, set it to `msTimestamp` (first-write case).
+	 *   - If the key has a TTL ≥ `msTimestamp`, leave it unchanged
+	 *     (truncation prevented under stale-`expiresAt` races).
+	 *   - If the key has a TTL < `msTimestamp`, raise it to `msTimestamp`
+	 *     (legitimate extension allowed).
+	 *
+	 * Implemented as a `PEXPIREAT … NX` + `PEXPIREAT … GT` pair (Redis 7.0+
+	 * flags). A bare `PEXPIREAT … GT` is insufficient: Redis treats a
+	 * non-volatile key as having infinite TTL for `GT`, so the GT clause
+	 * silently no-ops on first write. The NX clause covers that bootstrap
+	 * gap; the GT clause provides the truncation guard once a TTL exists.
+	 *
+	 * Requires Redis 7.0+. v0.5.1 pins the floor to Redis 7.2 LTS.
+	 */
+	pExpireGT(key: string, msTimestamp: number): SessionSidSortedSetMultiClient;
 	zAdd(
 		key: string,
 		entry: { score: number; value: string },
@@ -159,6 +199,8 @@ export interface SessionSidSortedSetClient {
 	del(key: string): Promise<number>;
 	multi(): SessionSidSortedSetMultiClient;
 	pExpireAt(key: string, msTimestamp: number): Promise<number>;
+	/** Non-pipeline variant of `pExpireGT`. See multi-client for semantics. */
+	pExpireGT(key: string, msTimestamp: number): Promise<number>;
 	zAdd(key: string, entry: { score: number; value: string }, opts?: { NX: true }): Promise<number>;
 	zRange(key: string, start: number, stop: number): Promise<string[]>;
 	zRem(key: string, member: string): Promise<number>;

@@ -163,14 +163,16 @@ describe("Per-purpose multi-client interfaces", () => {
 		>();
 	});
 
-	it("SessionRPRegistryMultiClient has chainable hSet + pExpireAt + exec", () => {
+	it("SessionRPRegistryMultiClient has chainable hSet + pExpireAt + pExpireGT + exec", () => {
 		expectTypeOf<SessionRPRegistryMultiClient["hSet"]>().toBeFunction();
 		expectTypeOf<SessionRPRegistryMultiClient["pExpireAt"]>().toBeFunction();
+		expectTypeOf<SessionRPRegistryMultiClient["pExpireGT"]>().toBeFunction();
 		expectTypeOf<SessionRPRegistryMultiClient["exec"]>().toBeFunction();
 	});
 
-	it("SessionSidSortedSetMultiClient has chainable pExpireAt + zAdd + exec", () => {
+	it("SessionSidSortedSetMultiClient has chainable pExpireAt + pExpireGT + zAdd + exec", () => {
 		expectTypeOf<SessionSidSortedSetMultiClient["pExpireAt"]>().toBeFunction();
+		expectTypeOf<SessionSidSortedSetMultiClient["pExpireGT"]>().toBeFunction();
 		expectTypeOf<SessionSidSortedSetMultiClient["zAdd"]>().toBeFunction();
 		expectTypeOf<SessionSidSortedSetMultiClient["exec"]>().toBeFunction();
 	});
