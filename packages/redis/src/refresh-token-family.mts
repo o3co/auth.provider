@@ -66,7 +66,15 @@ const SerializedFamilySchema = z
 		familyId: z.string(),
 		activeJti: z.string(),
 		revoked: z.boolean(),
-		expiresAtMs: z.number(),
+		// `expiresAtMs` is a positive epoch-ms integer. The looser `z.number()`
+		// would have accepted `Infinity` and fractional values, neither of
+		// which is a valid stored epoch — `Infinity` would defeat the
+		// `pttl <= 0` expiry gate (effectively "never expires") and
+		// fractional values cannot survive a `new Date(ms)` round-trip
+		// without precision loss. Tightened so corrupt operator-injected
+		// values trip `corrupt-data` rather than silently passing.
+		// Per Copilot review on PR #123.
+		expiresAtMs: z.number().int().positive().finite(),
 	})
 	.strict();
 

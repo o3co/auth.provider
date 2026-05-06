@@ -47,20 +47,45 @@ interface Envelope {
 }
 
 /**
+ * Maximum representable date in milliseconds (`new Date(8_640_000_000_000_000)`
+ * is the upper bound of valid JavaScript Date values per ECMA-262 §21.4.1.1).
+ * Values outside `[0, MAX_DATE_MS]` cannot survive a `new Date(ms)` round-trip
+ * — they produce `Invalid Date` whose `getTime()` returns `NaN`.
+ */
+const MAX_DATE_MS = 8_640_000_000_000_000;
+
+/**
+ * Per-field timestamp predicate: must be a non-negative safe integer within
+ * the `Date` valid range. Using `Number.isSafeInteger` (vs the looser
+ * `Number.isFinite`) closes a stricter form of the TS-3 expiry-bypass:
+ * very large finite numbers (e.g. `Number.MAX_VALUE` or any value > 2^53)
+ * lose precision and may produce `Invalid Date` via `new Date(ms)`. The
+ * comparison `expiresAtMs <= Date.now()` could then evaluate to `false`
+ * against an effectively-never-expiring envelope, again silently bypassing
+ * the gate. Per Copilot review on PR #123.
+ *
+ * Negative values are rejected because session timestamps are always
+ * positive epoch milliseconds; a negative value would map to a pre-1970
+ * Date, which is structurally meaningless for OAuth session lifecycle.
+ */
+const isValidTimestamp = (x: unknown): x is number =>
+	typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= MAX_DATE_MS;
+
+/**
  * Hand-rolled type predicate for `Envelope`. Lighter than Zod for the
  * storage layer and matches the Wave 5g `ts-safety-batch` convention.
  *
- * `Number.isFinite` rejects `NaN`, `Infinity`, `-Infinity`, and non-number
- * types in one check — the original `expiresAtMs <= Date.now()` comparison
- * silently returned `false` for `undefined`/`NaN`, bypassing the expiry
- * filter and propagating `Invalid Date` into the returned `UserSession`.
+ * Timestamp validation uses `isValidTimestamp` (safe integer + Date-range
+ * bounded). The original `expiresAtMs <= Date.now()` comparison silently
+ * returned `false` for `undefined`/`NaN`, bypassing the expiry filter and
+ * propagating `Invalid Date` into the returned `UserSession`.
  *
  * `claims` must be a plain object — `[]` and `null` both fail the
  * `typeof === "object"` plus index-signature contract. Callers that need
  * to support `claims: null` should change the predicate explicitly; the
  * fail-closed default is the safer posture for a security-critical path.
  *
- * Per TS-3 (Wave 5j).
+ * Per TS-3 (Wave 5j) + Copilot review on PR #123 (timestamp tightening).
  */
 const isValidEnvelope = (v: unknown): v is Envelope => {
 	if (typeof v !== "object" || v === null) return false;
@@ -68,12 +93,9 @@ const isValidEnvelope = (v: unknown): v is Envelope => {
 	return (
 		typeof e.sid === "string" &&
 		typeof e.sub === "string" &&
-		typeof e.authTimeMs === "number" &&
-		Number.isFinite(e.authTimeMs) &&
-		typeof e.createdAtMs === "number" &&
-		Number.isFinite(e.createdAtMs) &&
-		typeof e.expiresAtMs === "number" &&
-		Number.isFinite(e.expiresAtMs) &&
+		isValidTimestamp(e.authTimeMs) &&
+		isValidTimestamp(e.createdAtMs) &&
+		isValidTimestamp(e.expiresAtMs) &&
 		typeof e.claims === "object" &&
 		e.claims !== null &&
 		!Array.isArray(e.claims)
@@ -151,19 +173,23 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 			let parsed: unknown;
 			try {
 				parsed = JSON.parse(raw);
-			} catch {
-				opts.logger?.warn(`user_session_corrupt_envelope: JSON.parse failed for sid=${sid}`, {
-					sid,
-					reason: "json_parse",
-				});
+			} catch (cause) {
+				// Object-first call shape per the D-4 Logger interface — keeps
+				// `sid` / `reason` reliably emitted as structured fields across
+				// `Logger` implementations (pino, console, custom). Per Copilot
+				// review on PR #123.
+				opts.logger?.warn(
+					{ sid, reason: "json_parse", cause },
+					"user_session_corrupt_envelope: JSON.parse failed",
+				);
 				return null;
 			}
 
 			if (!isValidEnvelope(parsed)) {
-				opts.logger?.warn(`user_session_corrupt_envelope: shape invalid for sid=${sid}`, {
-					sid,
-					reason: "shape_invalid",
-				});
+				opts.logger?.warn(
+					{ sid, reason: "shape_invalid" },
+					"user_session_corrupt_envelope: shape invalid",
+				);
 				return null;
 			}
 

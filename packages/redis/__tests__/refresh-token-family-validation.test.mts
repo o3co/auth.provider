@@ -132,6 +132,41 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 		expect((err as RefreshTokenStorageError).reason).toBe("corrupt-data");
 	});
 
+	// Per Copilot review on PR #123: `expiresAtMs` is now
+	// `z.number().int().positive().finite()` rather than the looser
+	// `z.number()`. Each of these previously-accepted bad values must now
+	// surface as `corrupt-data`. Note: `Infinity` / `NaN` cannot survive
+	// `JSON.stringify` (they serialize to `null`); operator-injected raw
+	// JSON containing those tokens is invalid JSON and would already trip
+	// the parse-failure branch. The cases below cover values that DO
+	// JSON-roundtrip but were silently accepted by the looser schema.
+	it.each([
+		["expiresAtMs zero", 0],
+		["expiresAtMs negative", -1],
+		["expiresAtMs fractional (1.5)", 1.5],
+		["expiresAtMs fractional (Date.now()+0.5)", Date.now() + 0.5],
+	])("throws corrupt-data when %s passes JSON.parse but fails the tightened schema", async (_label, badValue) => {
+		const store = new Map<string, string>([
+			[
+				`${keyPrefix}fam-tight`,
+				JSON.stringify({
+					familyId: "fam-tight",
+					activeJti: "j1",
+					revoked: false,
+					expiresAtMs: badValue,
+				}),
+			],
+		]);
+		const pttls = new Map<string, number>([[`${keyPrefix}fam-tight`, 60_000]]);
+		const repo = createRedisRefreshTokenFamilyStore({
+			client: makeMockClient(store, pttls),
+			keyPrefix,
+		});
+
+		const err = await repo.findFamily("fam-tight").catch((e: unknown) => e);
+		expect((err as RefreshTokenStorageError).reason).toBe("corrupt-data");
+	});
+
 	it("returns the family normally for a valid envelope (regression guard)", async () => {
 		const expiresAtMs = Date.now() + 60_000;
 		const store = new Map<string, string>([

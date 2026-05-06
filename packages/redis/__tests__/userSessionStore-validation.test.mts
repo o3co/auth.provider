@@ -55,7 +55,7 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		expect(result?.sub).toBe("user-1");
 	});
 
-	it("returns null and logs json_parse warn on malformed JSON", async () => {
+	it("returns null and logs json_parse warn on malformed JSON (object-first call shape)", async () => {
 		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 		const client = makeMockClient();
 		const store = createRedisUserSessionStore({ client, keyPrefix, logger });
@@ -63,9 +63,11 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 
 		const result = await store.get("sid-bad");
 		expect(result).toBeNull();
+		// Object-first per the D-4 Logger interface: structured fields are the
+		// 1st arg, the human-readable message is the 2nd arg.
 		expect(logger.warn).toHaveBeenCalledWith(
-			expect.any(String),
 			expect.objectContaining({ sid: "sid-bad", reason: "json_parse" }),
+			expect.any(String),
 		);
 	});
 
@@ -90,6 +92,24 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 			"claims is array (not object)",
 			{ ...validEnvelope, claims: [] as unknown as Record<string, unknown> },
 		],
+		// Per Copilot review on PR #123: timestamps must be safe integers in
+		// the JS Date valid range. The previous `Number.isFinite` check
+		// accepted very large finite numbers (`Number.MAX_VALUE`, `2 ** 60`,
+		// fractional ms) that lose precision through `new Date(ms)` and
+		// could either propagate `Invalid Date` or appear effectively-never-
+		// expiring against `expiresAtMs <= Date.now()`.
+		[
+			"expiresAtMs > MAX_DATE_MS (8.64e15)",
+			{ ...validEnvelope, expiresAtMs: 8_640_000_000_000_001 as unknown as number },
+		],
+		[
+			"expiresAtMs unsafe-integer above 2^53",
+			{ ...validEnvelope, expiresAtMs: Number.MAX_VALUE as unknown as number },
+		],
+		["expiresAtMs fractional", { ...validEnvelope, expiresAtMs: 1.5 as unknown as number }],
+		["expiresAtMs negative", { ...validEnvelope, expiresAtMs: -1 as unknown as number }],
+		["authTimeMs unsafe-integer", { ...validEnvelope, authTimeMs: (2 ** 60) as unknown as number }],
+		["createdAtMs fractional", { ...validEnvelope, createdAtMs: 1.5 as unknown as number }],
 	])("returns null and logs shape_invalid warn for %s", async (_label, corrupt) => {
 		const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 		const client = makeMockClient();
@@ -98,9 +118,11 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 
 		const result = await store.get("sid-corrupt");
 		expect(result).toBeNull();
+		// Object-first per the D-4 Logger interface: structured fields are the
+		// 1st arg, the human-readable message is the 2nd arg.
 		expect(logger.warn).toHaveBeenCalledWith(
-			expect.any(String),
 			expect.objectContaining({ sid: "sid-corrupt", reason: "shape_invalid" }),
+			expect.any(String),
 		);
 	});
 
