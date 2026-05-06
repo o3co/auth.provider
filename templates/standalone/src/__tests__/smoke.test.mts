@@ -70,8 +70,6 @@ const config: AppConfig = {
 	},
 	endpoints: {
 		login: { url: "/login" },
-		client: { url: undefined },
-		authCallback: { url: undefined },
 	},
 	cors: { allowedOrigins: [] },
 };
@@ -200,19 +198,21 @@ describe("standalone smoke test", () => {
 	// when each replica holds families in-process; this test guards the
 	// production default. The override path is exercised by the smoke tests
 	// above (which substitute the memory store for CI).
-	describe("D-2: refresh token family modules wiring", () => {
-		it("buildModules includes the redis pair (client + store) by default", () => {
+	describe("D-2 v2 + Wave 5d: redis-clients + adapter wiring", () => {
+		it("buildModules includes the shared redis-clients module + redis store by default", () => {
 			const modules = buildModules(config, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
 			});
 			const names = modules.map((m) => m.name);
-			expect(names).toContain("standalone:refresh-token-family-client");
+			// Wave 5d: single shared ioredis client module (was per-purpose
+			// `standalone:refresh-token-family-client` in PR1).
+			expect(names).toContain("standalone:redis-clients");
 			expect(names).toContain("redis-refresh-token-family-store");
 			expect(names).not.toContain("core-refresh-token-family-store-memory");
 		});
 
-		it("buildModules respects the refreshTokenFamilyModules override (memory-only)", () => {
+		it("buildModules drops the shared redis-clients module when override forces memory-only", () => {
 			const modules = buildModules(config, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
@@ -220,8 +220,52 @@ describe("standalone smoke test", () => {
 			});
 			const names = modules.map((m) => m.name);
 			expect(names).toContain("core-refresh-token-family-store-memory");
-			expect(names).not.toContain("standalone:refresh-token-family-client");
+			expect(names).not.toContain("standalone:redis-clients");
 			expect(names).not.toContain("redis-refresh-token-family-store");
+		});
+
+		it("buildModules wires memoryRateLimiterModule by default (closes IH-14)", () => {
+			const modules = buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("core-rate-limiter-memory");
+			expect(names).not.toContain("redis-rate-limiter");
+		});
+
+		it("buildModules switches to redisRateLimiterModule when rateLimiter.adapter = 'redis'", () => {
+			const redisRlConfig = {
+				...config,
+				rateLimiter: { adapter: "redis" as const },
+			};
+			const modules = buildModules(redisRlConfig, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("redis-rate-limiter");
+			expect(names).not.toContain("core-rate-limiter-memory");
+			// Adapter = redis pulls in the shared redis-clients module too.
+			expect(names).toContain("standalone:redis-clients");
+		});
+
+		it("buildModules switches to redisSessionStoresModule when userSessionStores.adapter = 'redis'", () => {
+			const redisSessConfig = {
+				...config,
+				userSessionStores: { adapter: "redis" as const },
+			};
+			const modules = buildModules(redisSessConfig, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("redisSessionStores");
+			expect(names).not.toContain("standalone:stores");
+			expect(names).toContain("standalone:redis-clients");
 		});
 	});
 

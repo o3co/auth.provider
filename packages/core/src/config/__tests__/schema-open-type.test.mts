@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, fullSectionsSchema } from "#/config/application.schema.mjs";
+import { makeValidFullSections } from "#/testing/fixtures/valid-config.mjs";
 
 /**
  * Per ADR 2026-04-30: schema is a pure type contract; defaults live in
@@ -236,5 +237,71 @@ describe("schema nested repositories", () => {
 			},
 		});
 		expect(parsed.user.type).toBe("yaml");
+	});
+
+	// IH-10: dead schema fields `endpoints.client` / `endpoints.authCallback`
+	// removed. No production consumer reads them; pre-fix configs that wrote
+	// the env-var-only HOCON lines silently leaked them through to AppConfig.
+	describe("IH-10: endpoints.client / endpoints.authCallback are removed from schema", () => {
+		it("parsed result does not expose client or authCallback keys", () => {
+			const result = fullSectionsSchema.parse(makeValidFullSections());
+			expect(Object.keys(result.endpoints)).not.toContain("client");
+			expect(Object.keys(result.endpoints)).not.toContain("authCallback");
+		});
+
+		it("strips endpoints.client and endpoints.authCallback when present in input", () => {
+			const base = makeValidFullSections();
+			const configWithDeadFields = {
+				...base,
+				endpoints: {
+					...base.endpoints,
+					client: { url: "https://example.com/client" },
+					authCallback: { url: "https://example.com/callback" },
+				},
+			};
+			const result = fullSectionsSchema.parse(configWithDeadFields);
+			expect((result.endpoints as Record<string, unknown>).client).toBeUndefined();
+			expect((result.endpoints as Record<string, unknown>).authCallback).toBeUndefined();
+		});
+	});
+
+	// IH-17: `endpoints.login.url` tightened from `z.string().optional()` to
+	// `z.string()`. The runtime invariant was already enforced by the oauth
+	// module's `configSchema` at boot time; the base schema now matches that
+	// contract so AppConfig type no longer types the field as optional.
+	describe("IH-17: endpoints.login.url is required at the base schema level", () => {
+		it("rejects config missing endpoints.login.url", () => {
+			const base = makeValidFullSections();
+			const configWithoutLoginUrl = {
+				...base,
+				endpoints: { login: {} },
+			};
+			expect(() => fullSectionsSchema.parse(configWithoutLoginUrl)).toThrow();
+		});
+
+		it("accepts config with endpoints.login.url", () => {
+			const result = fullSectionsSchema.parse(makeValidFullSections());
+			expect(result.endpoints.login.url).toBe("/login");
+		});
+	});
+
+	// IH-18: `rateLimit.login.windowMs` (express-rate-limit) is intentionally
+	// distinct from the OAuth-endpoint `RateLimitSpec.windowSeconds`. Keep
+	// the field name as a semantic anchor — renaming requires updating every
+	// `express-rate-limit` consumer's unit conversion.
+	describe("IH-18: rateLimit.login.windowMs is the canonical field name (express-rate-limit)", () => {
+		it("rateLimit.login uses windowMs, not windowSeconds", () => {
+			const result = fullSectionsSchema.shape.rateLimit.parse({
+				login: { windowMs: 900000, limit: 20 },
+			});
+			expect(result.login.windowMs).toBe(900000);
+			expect(result.login.limit).toBe(20);
+			// Negative: windowSeconds is not accepted (semantic anchor against rename)
+			expect(() =>
+				fullSectionsSchema.shape.rateLimit.parse({
+					login: { windowSeconds: 900, limit: 20 },
+				}),
+			).toThrow();
+		});
 	});
 });

@@ -56,10 +56,10 @@ vi.mock("ioredis", () => {
 // Imported AFTER vi.mock so the mocked ioredis is in scope.
 const importModule = async () =>
 	(await import("../modules.mjs")) as typeof import("../modules.mjs") & {
-		refreshTokenFamilyClientModule: import("@o3co/auth-provider-core").Module;
+		standaloneRedisClientsModule: import("@o3co/auth-provider-core").Module;
 	};
 
-// D-1 / D-5 are already merged on develop, so importing `refreshTokenFamilyClientModule`
+// D-1 / D-5 are already merged on develop, so importing `standaloneRedisClientsModule`
 // from `../modules.mjs` is the natural integration point. Pre-fix the export does not
 // exist — TS error → RED.
 
@@ -69,7 +69,7 @@ const baseConfig = {
 	},
 };
 
-describe("D-2 / refreshTokenFamilyClientModule", () => {
+describe("D-2 / standaloneRedisClientsModule", () => {
 	beforeEach(() => {
 		redisCtorCalls.length = 0;
 		quitSpies.length = 0;
@@ -81,13 +81,13 @@ describe("D-2 / refreshTokenFamilyClientModule", () => {
 	});
 
 	it("passes operator-supplied Redis URL + password from config to the ioredis constructor (BLOCKER 1 closure)", async () => {
-		const { refreshTokenFamilyClientModule } = await importModule();
+		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
-			refreshTokenFamilyClientModule as unknown as {
+			standaloneRedisClientsModule as unknown as {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: baseConfig });
+		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
 
 		expect(redisCtorCalls).toHaveLength(1);
 		expect(redisCtorCalls[0]?.url).toBe("redis://example.com:6379");
@@ -102,13 +102,13 @@ describe("D-2 / refreshTokenFamilyClientModule", () => {
 			},
 		};
 
-		const { refreshTokenFamilyClientModule } = await importModule();
+		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
-			refreshTokenFamilyClientModule as unknown as {
+			standaloneRedisClientsModule as unknown as {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: baseConfig, lifecycleRegistrar });
+		await provides.refreshTokenFamilyClient({ config: { ...baseConfig }, lifecycleRegistrar });
 
 		expect(registered).toHaveLength(1);
 		// Pre-drain: quit not yet called.
@@ -120,9 +120,9 @@ describe("D-2 / refreshTokenFamilyClientModule", () => {
 	});
 
 	it("does not crash when lifecycleRegistrar is absent (graceful no-op, no quit registered)", async () => {
-		const { refreshTokenFamilyClientModule } = await importModule();
+		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
-			refreshTokenFamilyClientModule as unknown as {
+			standaloneRedisClientsModule as unknown as {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
@@ -131,14 +131,16 @@ describe("D-2 / refreshTokenFamilyClientModule", () => {
 		// register a cleanup (verified by the absence of any quit invocation
 		// after the factory resolves; the registrar branch is the only place
 		// `quit()` would be wired up in the no-real-shutdown unit-test path).
-		await expect(provides.refreshTokenFamilyClient({ config: baseConfig })).resolves.toBeDefined();
+		await expect(
+			provides.refreshTokenFamilyClient({ config: { ...baseConfig } }),
+		).resolves.toBeDefined();
 		expect(quitSpies[0]).not.toHaveBeenCalled();
 	});
 
 	it("fails fast when refreshTokenFamilyStore.redis.url is missing (no silent localhost fallback)", async () => {
-		const { refreshTokenFamilyClientModule } = await importModule();
+		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
-			refreshTokenFamilyClientModule as unknown as {
+			standaloneRedisClientsModule as unknown as {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
@@ -155,20 +157,20 @@ describe("D-2 / refreshTokenFamilyClientModule", () => {
 	});
 
 	it("attaches an error event handler to the ioredis client (prevents unhandled-error crash)", async () => {
-		const { refreshTokenFamilyClientModule } = await importModule();
+		const { standaloneRedisClientsModule } = await importModule();
 		const provides = (
-			refreshTokenFamilyClientModule as unknown as {
+			standaloneRedisClientsModule as unknown as {
 				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
 			}
 		).provides;
-		await provides.refreshTokenFamilyClient({ config: baseConfig });
+		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
 
 		expect(onSpies[0]).toHaveBeenCalledWith("error", expect.any(Function));
 	});
 
 	it("declares 'config' as required and 'lifecycleRegistrar' as optional", async () => {
-		const { refreshTokenFamilyClientModule } = await importModule();
-		const m = refreshTokenFamilyClientModule as {
+		const { standaloneRedisClientsModule } = await importModule();
+		const m = standaloneRedisClientsModule as {
 			requires?: readonly string[];
 			optional?: readonly string[];
 		};
