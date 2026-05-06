@@ -18,6 +18,7 @@ import {
 	AdapterFactoryError,
 	type BuilderContext,
 	createAdapterFactory,
+	createLifecycleRegistrar,
 } from "#/adapters/AdapterFactory.mjs";
 
 interface MockAdapter {
@@ -300,5 +301,60 @@ describe("AdapterFactory contract: no freeze method (A6+A7 §2.3)", () => {
 		// composition is not protocol-module registration.
 		const factory = createAdapterFactory<MockAdapter>("Mock");
 		expect("freeze" in factory).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// D-5: createLifecycleRegistrar — LIFO drain, sequential await, error
+// continuation contract.
+// ---------------------------------------------------------------------------
+
+describe("createLifecycleRegistrar (D-5)", () => {
+	it("drains cleanups in LIFO order with sequential await", async () => {
+		const order: number[] = [];
+		let inFlight = 0;
+		let maxConcurrent = 0;
+		const reg = createLifecycleRegistrar();
+		const makeCleanup = (n: number) => async () => {
+			inFlight++;
+			maxConcurrent = Math.max(maxConcurrent, inFlight);
+			await new Promise<void>((r) => setTimeout(r, 5));
+			order.push(n);
+			inFlight--;
+		};
+		reg.register(makeCleanup(1));
+		reg.register(makeCleanup(2));
+		reg.register(makeCleanup(3));
+		const errors = await reg._drain({ error: () => {} });
+		expect(order).toEqual([3, 2, 1]);
+		expect(maxConcurrent).toBe(1);
+		expect(errors).toEqual([]);
+	});
+
+	it("continues drain on individual cleanup error and aggregates errors", async () => {
+		const ran: string[] = [];
+		const logged: unknown[] = [];
+		const reg = createLifecycleRegistrar();
+		reg.register(async () => {
+			ran.push("first-registered");
+		});
+		reg.register(async () => {
+			throw new Error("boom");
+		});
+		reg.register(async () => {
+			ran.push("third-registered");
+		});
+		const errors = await reg._drain({ error: (obj) => logged.push(obj) });
+		// LIFO: third runs, then boom (caught), then first.
+		expect(ran).toEqual(["third-registered", "first-registered"]);
+		expect(errors).toHaveLength(1);
+		expect((errors[0] as Error).message).toBe("boom");
+		expect(logged).toHaveLength(1);
+	});
+
+	it("empty registrar drain returns empty error array (no-op)", async () => {
+		const reg = createLifecycleRegistrar();
+		const errors = await reg._drain({ error: () => {} });
+		expect(errors).toEqual([]);
 	});
 });

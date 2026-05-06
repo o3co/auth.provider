@@ -49,6 +49,12 @@ export class RedisCodeRepository implements CodeRepository {
 	private redis: RedisClient;
 	private defaultExpiresIn: number;
 	private logger: Logger;
+	// D-5: idempotence flag — `[Symbol.asyncDispose]` fallback in the boot
+	// planner AND the LifecycleRegistrar drain both target the same instance,
+	// so `dispose()` may be called twice. The second call must be a no-op
+	// instead of issuing a second `quit()` against a closed client (which
+	// throws `ClientClosedError` on node-redis v5).
+	private disposed = false;
 
 	constructor(redis: RedisClient, defaultExpiresIn = 600, logger: Logger = consoleLogger) {
 		this.redis = redis;
@@ -145,6 +151,8 @@ export class RedisCodeRepository implements CodeRepository {
 	 * `feedback_no_vendor_in_interface`).
 	 */
 	async [Symbol.asyncDispose](): Promise<void> {
+		if (this.disposed) return;
+		this.disposed = true;
 		await (this.redis as RedisClientWithQuit).quit();
 	}
 

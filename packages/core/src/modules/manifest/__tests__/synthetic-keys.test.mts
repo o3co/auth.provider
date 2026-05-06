@@ -12,13 +12,15 @@ import {
 } from "../synthetic-keys.mjs";
 
 describe("SYNTHETIC_COMPONENT_KEYS", () => {
-	test("contains exactly the v0.5.0 baseline 4 synthetic keys", () => {
-		// Per A2-α §6.5: 4 keys after A5 (Phase 7) added
-		// federationRedirectPolicyResolver. Phase 1 shipped 3; A5 adds the 4th.
-		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(4);
+	test("contains exactly the v0.5.1 baseline 5 synthetic keys", () => {
+		// Per A2-α §6.5 + A5 + D-5: Phase 1 shipped 3; A5 (Phase 7) added
+		// federationRedirectPolicyResolver (4); D-5 added lifecycleRegistrar (5).
+		expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(5);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("federationProviders")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("tokenExchangeValidatorResolver")).toBe(true);
 		expect(SYNTHETIC_COMPONENT_KEYS.has("grantHandlerResolver")).toBe(true);
+		expect(SYNTHETIC_COMPONENT_KEYS.has("federationRedirectPolicyResolver")).toBe(true);
+		expect(SYNTHETIC_COMPONENT_KEYS.has("lifecycleRegistrar")).toBe(true);
 	});
 
 	test("is frozen via Object.freeze (own-property additions blocked)", () => {

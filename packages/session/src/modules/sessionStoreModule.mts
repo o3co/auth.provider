@@ -15,10 +15,7 @@ import {
 	fullSectionsSchema,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
-import {
-	createSessionStoreFactory,
-	registerBuiltinSessionStores,
-} from "../store/factory.mjs";
+import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
 
 /**
  * Module-level config schema: this module owns the `session` config slice via
@@ -58,10 +55,7 @@ export const sessionStoreModule = defineModule<"config", "lifecycleRegistrar">({
 				const ctx: BuilderContext = { lifecycle: deps.lifecycleRegistrar };
 				const factory = createSessionStoreFactory(ctx);
 				registerBuiltinSessionStores(factory);
-				const storageSlice = config.session.storage as { type: string } & Record<
-					string,
-					unknown
-				>;
+				const storageSlice = config.session.storage as { type: string } & Record<string, unknown>;
 				const store = await factory.create({
 					type: storageSlice.type,
 					...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
@@ -80,14 +74,19 @@ export const sessionStoreModule = defineModule<"config", "lifecycleRegistrar">({
 						domain: config.session.domain || undefined,
 					},
 				});
+				// Mount-order contract (D-5): no `before` clause, because
+				// `before: ["...absent..."]` raises a `route-order-target-missing`
+				// BootError when the consumer omits the named module (e.g. an
+				// oauth-only deployment that doesn't include sessionModule).
+				// Instead, the middleware relies on declarationIndex tie-breaking:
+				// the composition root MUST list `sessionStoreModule` ahead of
+				// every session-consuming module in `buildModules(...)`. The
+				// standalone template puts it first; documented in the
+				// v0.5.1 CHANGELOG migration note.
 				return {
 					id: "session-middleware",
 					mountPath: "/",
 					handler: middleware,
-					// Mount BEFORE every downstream top-level route so they observe
-					// `req.session`. Add additional ids here when new top-level
-					// routes are introduced.
-					before: ["session-routes", "federation-routes", "oauth-endpoints"],
 				};
 			},
 		],

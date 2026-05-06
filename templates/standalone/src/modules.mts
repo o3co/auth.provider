@@ -85,9 +85,16 @@ export const keyStoreModule: Module = defineModule({
 export const repositoriesModule: Module = defineModule({
 	name: "standalone:repositories",
 	requires: ["config"] as const,
+	// D-5 / OR-2 / IH-11: forward `lifecycleRegistrar` into the repository
+	// factories so the redis/memory CodeRepository builders can register their
+	// disposal callbacks (RedisCodeRepository.quit() and the InMemory GC
+	// interval, respectively). Without this, builders' `ctx.lifecycle?.register`
+	// is a no-op and the leaks remain.
+	optional: ["lifecycleRegistrar"] as const,
 	provides: {
-		clientRepository: async ({ config }) => {
-			const { clientFactory, userFactory } = createRepositoryFactories();
+		clientRepository: async ({ config, lifecycleRegistrar }) => {
+			const ctx = { lifecycle: lifecycleRegistrar };
+			const { clientFactory, userFactory } = createRepositoryFactories(ctx);
 			registerBuiltinAdapters({ userFactory });
 			const slice = flattenAdapterConfig(
 				(config as AppConfig).repositories.client as { type: string } & Record<string, unknown>,
@@ -97,8 +104,9 @@ export const repositoriesModule: Module = defineModule({
 			}
 			return clientFactory.create(slice);
 		},
-		userRepository: async ({ config }) => {
-			const { userFactory } = createRepositoryFactories();
+		userRepository: async ({ config, lifecycleRegistrar }) => {
+			const ctx = { lifecycle: lifecycleRegistrar };
+			const { userFactory } = createRepositoryFactories(ctx);
 			registerBuiltinAdapters({ userFactory });
 			return userFactory.create(
 				flattenAdapterConfig(
@@ -106,8 +114,9 @@ export const repositoriesModule: Module = defineModule({
 				),
 			);
 		},
-		codeRepository: async ({ config }) => {
-			const { userFactory, codeFactory } = createRepositoryFactories();
+		codeRepository: async ({ config, lifecycleRegistrar }) => {
+			const ctx = { lifecycle: lifecycleRegistrar };
+			const { userFactory, codeFactory } = createRepositoryFactories(ctx);
 			registerBuiltinAdapters({ userFactory });
 			codeFactory.register("redis", redisCodeRepositoryBuilder);
 			return codeFactory.create(
