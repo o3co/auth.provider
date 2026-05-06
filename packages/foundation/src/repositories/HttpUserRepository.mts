@@ -16,6 +16,27 @@
 
 import type { User, UserRepository } from "@o3co/auth-provider-core";
 
+/**
+ * Runtime guard for the upstream user-service response. The previous
+ * `(await res.json()) as User` was a compile-time cast only — a malformed
+ * upstream payload (`{ status: "ok" }`, schema migration, tampered
+ * response) silently produced a `User` with `undefined` required fields,
+ * leaking `sub: undefined` into the authentication flow.
+ *
+ * The guard accepts any object with string `id` and `username`,
+ * preserving the index-signature `[key: string]: unknown` extras that
+ * `User` allows. Empty strings pass — bcrypt compare and downstream
+ * gates prevent empty-credential authentication in practice; tightening
+ * to `.min(1)` is a Phase F follow-up if needed.
+ *
+ * Per TS-2 (Wave 5g).
+ */
+function isUser(v: unknown): v is User {
+	if (typeof v !== "object" || v === null) return false;
+	const o = v as Record<string, unknown>;
+	return typeof o.id === "string" && typeof o.username === "string";
+}
+
 export class HttpUserRepository implements UserRepository {
 	private authenticateUrl: string;
 	private authenticateByTokenUrl: string;
@@ -56,7 +77,15 @@ export class HttpUserRepository implements UserRepository {
 			});
 
 			if (res.ok) {
-				return (await res.json()) as User;
+				const parsed: unknown = await res.json();
+				if (!isUser(parsed)) {
+					// Upstream returned 2xx with an unexpected shape — this is an
+					// "upstream is broken" case, not a "user not found" case, so
+					// throw rather than return null. The thrown error propagates
+					// as a 500 to the client (correct: upstream-service failure).
+					throw new Error(`HttpUserRepository: upstream ${url} returned an invalid User shape`);
+				}
+				return parsed;
 			}
 
 			if (res.status === 401 || res.status === 403) {

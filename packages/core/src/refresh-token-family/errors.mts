@@ -23,13 +23,19 @@
  *   at call time; the storage layer fails closed.
  * - `conflict-exhausted`: updateFamily's CAS retry budget exhausted under
  *   sustained contention; load-shedding signal.
+ * - `corrupt-data`: stored value failed Zod schema validation on
+ *   deserialization (truncated JSON, missing required fields, wrong
+ *   field types, or unknown fields from a schema migration). The
+ *   family is treated as non-existent/unreadable; callers must NOT
+ *   trust the partial value. Per TS-M1 (Wave 5g).
  *
- * Per A3 §5.4.
+ * Per A3 §5.4 + TS-M1.
  */
 export type RefreshTokenStorageErrorReason =
 	| "duplicate-family"
 	| "expired-at-issue"
-	| "conflict-exhausted";
+	| "conflict-exhausted"
+	| "corrupt-data";
 
 /**
  * Single error class for `RefreshTokenFamilyStore` domain failures.

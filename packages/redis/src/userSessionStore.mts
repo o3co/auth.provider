@@ -16,6 +16,7 @@
 
 import type {
 	CreateUserSessionInput,
+	Logger,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,
@@ -25,6 +26,15 @@ import type { UserSessionStoreClient } from "./clients.mjs";
 export interface RedisUserSessionStoreOptions {
 	readonly client: UserSessionStoreClient;
 	readonly keyPrefix: string;
+	/**
+	 * Optional structured logger consumed by `get()` when a stored
+	 * envelope fails JSON.parse or shape validation (TS-3). Optional
+	 * chaining is used so callers that don't inject a logger get the
+	 * same fail-closed `null` return without an emitted warn. Phase F
+	 * will add a `consoleLogger` fallback once the D-4 ComponentMap
+	 * `logger` slot lands and module wiring threads it through.
+	 */
+	readonly logger?: Logger;
 }
 
 interface Envelope {
@@ -35,6 +45,62 @@ interface Envelope {
 	expiresAtMs: number;
 	claims: Record<string, unknown>;
 }
+
+/**
+ * Maximum representable date in milliseconds (`new Date(8_640_000_000_000_000)`
+ * is the upper bound of valid JavaScript Date values per ECMA-262 §21.4.1.1).
+ * Values outside `[0, MAX_DATE_MS]` cannot survive a `new Date(ms)` round-trip
+ * — they produce `Invalid Date` whose `getTime()` returns `NaN`.
+ */
+const MAX_DATE_MS = 8_640_000_000_000_000;
+
+/**
+ * Per-field timestamp predicate: must be a non-negative safe integer within
+ * the `Date` valid range. Using `Number.isSafeInteger` (vs the looser
+ * `Number.isFinite`) closes a stricter form of the TS-3 expiry-bypass:
+ * very large finite numbers (e.g. `Number.MAX_VALUE` or any value > 2^53)
+ * lose precision and may produce `Invalid Date` via `new Date(ms)`. The
+ * comparison `expiresAtMs <= Date.now()` could then evaluate to `false`
+ * against an effectively-never-expiring envelope, again silently bypassing
+ * the gate. Per Copilot review on PR #123.
+ *
+ * Negative values are rejected because session timestamps are always
+ * positive epoch milliseconds; a negative value would map to a pre-1970
+ * Date, which is structurally meaningless for OAuth session lifecycle.
+ */
+const isValidTimestamp = (x: unknown): x is number =>
+	typeof x === "number" && Number.isSafeInteger(x) && x >= 0 && x <= MAX_DATE_MS;
+
+/**
+ * Hand-rolled type predicate for `Envelope`. Lighter than Zod for the
+ * storage layer and matches the Wave 5g `ts-safety-batch` convention.
+ *
+ * Timestamp validation uses `isValidTimestamp` (safe integer + Date-range
+ * bounded). The original `expiresAtMs <= Date.now()` comparison silently
+ * returned `false` for `undefined`/`NaN`, bypassing the expiry filter and
+ * propagating `Invalid Date` into the returned `UserSession`.
+ *
+ * `claims` must be a plain object — `[]` and `null` both fail the
+ * `typeof === "object"` plus index-signature contract. Callers that need
+ * to support `claims: null` should change the predicate explicitly; the
+ * fail-closed default is the safer posture for a security-critical path.
+ *
+ * Per TS-3 (Wave 5j) + Copilot review on PR #123 (timestamp tightening).
+ */
+const isValidEnvelope = (v: unknown): v is Envelope => {
+	if (typeof v !== "object" || v === null) return false;
+	const e = v as Partial<Envelope>;
+	return (
+		typeof e.sid === "string" &&
+		typeof e.sub === "string" &&
+		isValidTimestamp(e.authTimeMs) &&
+		isValidTimestamp(e.createdAtMs) &&
+		isValidTimestamp(e.expiresAtMs) &&
+		typeof e.claims === "object" &&
+		e.claims !== null &&
+		!Array.isArray(e.claims)
+	);
+};
 
 const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelope => ({
 	sid: input.sid,
@@ -96,9 +162,39 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 		async get(sid) {
 			const raw = await opts.client.get(k(sid));
 			if (raw === null) return null;
-			const env = JSON.parse(raw) as Envelope;
-			if (env.expiresAtMs <= Date.now()) return null;
-			return fromEnvelope(env);
+
+			// TS-3 (Wave 5j): the previous `JSON.parse(raw) as Envelope` was a
+			// compile-time cast only. A corrupt envelope with `expiresAtMs:
+			// undefined` made `expiresAtMs <= Date.now()` evaluate to `false`
+			// (NaN comparison), bypassing the expiry filter and returning a
+			// session with `Invalid Date` fields. Treat any parse / shape
+			// failure as fail-closed (return null) and emit a structured
+			// warn for operator observability.
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(raw);
+			} catch (cause) {
+				// Object-first call shape per the D-4 Logger interface — keeps
+				// `sid` / `reason` reliably emitted as structured fields across
+				// `Logger` implementations (pino, console, custom). Per Copilot
+				// review on PR #123.
+				opts.logger?.warn(
+					{ sid, reason: "json_parse", cause },
+					"user_session_corrupt_envelope: JSON.parse failed",
+				);
+				return null;
+			}
+
+			if (!isValidEnvelope(parsed)) {
+				opts.logger?.warn(
+					{ sid, reason: "shape_invalid" },
+					"user_session_corrupt_envelope: shape invalid",
+				);
+				return null;
+			}
+
+			if (parsed.expiresAtMs <= Date.now()) return null;
+			return fromEnvelope(parsed);
 		},
 		async delete(sid) {
 			await opts.client.del(k(sid));

@@ -48,8 +48,57 @@ interface SerializedFamily {
 const serialize = (fam: RefreshTokenFamily): string =>
 	JSON.stringify(fam satisfies SerializedFamily);
 
-const deserialize = (raw: string): RefreshTokenFamily =>
-	Object.freeze(JSON.parse(raw) as SerializedFamily);
+/**
+ * Runtime schema for `SerializedFamily`. `.strict()` rejects extra fields so
+ * a future schema migration that adds keys is detected as `corrupt-data`
+ * rather than silently dropped. Forward-compat callers that need to
+ * tolerate extra fields across rolling deploys can wrap the store; the
+ * default fail-closed posture is the safer choice.
+ *
+ * Per TS-M1 (Wave 5g): `JSON.parse(raw) as SerializedFamily` is a
+ * compile-time cast only. A corrupt or schema-migrated value would
+ * silently propagate `undefined` required fields into the rotation logic
+ * — `fam.activeJti` comparisons against `undefined` are always false,
+ * masking either a crash or a security bypass.
+ */
+const SerializedFamilySchema = z
+	.object({
+		familyId: z.string(),
+		activeJti: z.string(),
+		revoked: z.boolean(),
+		// `expiresAtMs` is a positive epoch-ms integer. The looser `z.number()`
+		// would have accepted `Infinity` and fractional values, neither of
+		// which is a valid stored epoch — `Infinity` would defeat the
+		// `pttl <= 0` expiry gate (effectively "never expires") and
+		// fractional values cannot survive a `new Date(ms)` round-trip
+		// without precision loss. Tightened so corrupt operator-injected
+		// values trip `corrupt-data` rather than silently passing.
+		// Per Copilot review on PR #123.
+		expiresAtMs: z.number().int().positive().finite(),
+	})
+	.strict();
+
+/**
+ * Parse + validate a stored family JSON. Throws
+ * `RefreshTokenStorageError({ reason: "corrupt-data" })` on either parse
+ * failure or shape failure — callers (`findFamily`, `updateFamily`)
+ * expect either a result or a `RefreshTokenStorageError`, so a raw
+ * `ZodError` would be an unexpected generic error type leaking past the
+ * adapter contract.
+ */
+const deserialize = (raw: string): RefreshTokenFamily => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (cause) {
+		throw new RefreshTokenStorageError({ reason: "corrupt-data", cause });
+	}
+	const result = SerializedFamilySchema.safeParse(parsed);
+	if (!result.success) {
+		throw new RefreshTokenStorageError({ reason: "corrupt-data", cause: result.error });
+	}
+	return Object.freeze(result.data satisfies SerializedFamily);
+};
 
 /**
  * Redis-backed RefreshTokenFamilyStore.
@@ -214,10 +263,19 @@ export const redisRefreshTokenFamilyStoreBuilder: AdapterBuilder<RefreshTokenFam
 	_ctx,
 ) => {
 	const c = config as {
-		client: RefreshTokenFamilyClient;
+		client?: RefreshTokenFamilyClient;
 		keyPrefix?: string;
 		casRetryLimit?: number;
 	};
+	// TS-6 (Wave 5g): structural guard. Without this, a misconfigured DI
+	// graph (`client: undefined`) propagates to first-Redis-call time as a
+	// cryptic `TypeError: Cannot read properties of undefined (reading
+	// 'set')`. Failing fast at builder-invocation makes the boot-time
+	// configuration error obvious and aligns with the
+	// `redisFederationTokenStoreBuilder` precedent.
+	if (!c.client) {
+		throw new Error("redisRefreshTokenFamilyStoreBuilder: 'client' option is required");
+	}
 	return createRedisRefreshTokenFamilyStore({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "rtfam:",
