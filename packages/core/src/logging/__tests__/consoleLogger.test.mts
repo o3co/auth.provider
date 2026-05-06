@@ -51,6 +51,17 @@ describe("consoleLogger level routing", () => {
 		// When string is passed, emit { ...bindings } as obj + the string as msg.
 		expect(spy).toHaveBeenCalledWith({}, "plain string message");
 	});
+
+	// Copilot review on PR #113: previously the object-first branch always
+	// forwarded `msg` to `console[method]`, so `logger.warn({ a: 1 })` printed
+	// an extra `undefined` argument. The branch now mirrors the string-first
+	// conditional and omits `msg` when it is `undefined`.
+	it("object-first call with no msg does NOT forward undefined", () => {
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		consoleLogger.warn({ a: 1 });
+		expect(spy).toHaveBeenCalledWith({ a: 1 });
+		expect(spy).not.toHaveBeenCalledWith({ a: 1 }, undefined);
+	});
 });
 
 describe("consoleLogger.child binding propagation", () => {

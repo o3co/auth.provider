@@ -49,7 +49,11 @@ function emit(
 		console[method]({ ...bindings }, obj, ...(msg !== undefined ? [msg] : []), ...args);
 	} else {
 		// biome-ignore lint/suspicious/noConsole: this IS the default Logger fallback
-		console[method]({ ...bindings, ...obj }, msg, ...args);
+		console[method](
+			{ ...bindings, ...obj },
+			...(msg !== undefined ? [msg] : []),
+			...args,
+		);
 	}
 }
 
