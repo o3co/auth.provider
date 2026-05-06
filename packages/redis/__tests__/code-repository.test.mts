@@ -131,6 +131,29 @@ describe("RedisCodeRepository", () => {
 			const result = await repo.getByCode("corrupted");
 			expect(result).toBeNull();
 		});
+
+		// D-1: pre-v0.5.1 records persisted via the old createCode path lacked
+		// `client_id` / `redirect_uri` because RedisCodeRepository.createCode
+		// silently dropped both. parseCodeValue treats such records as corrupt
+		// (returns null + structured error log) so the strict identity gates
+		// in /token never see `client_id: undefined` or `redirect_uri: undefined`.
+		it("treats pre-v0.5.1 records lacking client_id and redirect_uri as corrupt", async () => {
+			store.set(`${KEY_PREFIX}legacy-1`, JSON.stringify({ code_challenge: "x" }));
+			expect(await repo.getByCode("legacy-1")).toBeNull();
+		});
+
+		it("treats records with non-string client_id as corrupt", async () => {
+			store.set(
+				`${KEY_PREFIX}legacy-2`,
+				JSON.stringify({ client_id: 123, redirect_uri: "https://rp/cb" }),
+			);
+			expect(await repo.getByCode("legacy-2")).toBeNull();
+		});
+
+		it("treats records with missing redirect_uri as corrupt even if client_id is present", async () => {
+			store.set(`${KEY_PREFIX}legacy-3`, JSON.stringify({ client_id: "client-1" }));
+			expect(await repo.getByCode("legacy-3")).toBeNull();
+		});
 	});
 
 	describe("consumeByCode", () => {
