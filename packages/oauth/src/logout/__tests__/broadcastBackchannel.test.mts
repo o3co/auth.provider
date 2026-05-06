@@ -16,6 +16,7 @@
 import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
+import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
 import { broadcastBackchannelLogout } from "../broadcastBackchannel.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx");
@@ -136,7 +137,7 @@ describe("broadcastBackchannelLogout", () => {
 		const fetchImpl = vi.fn((url: string, init?: RequestInit) => {
 			return url === "https://slow.example/bc" ? slow(url, init) : fast(url, init);
 		}) as unknown as typeof fetch;
-		const logger = { warn: vi.fn() };
+		const logger = createMockLogger();
 		const start = Date.now();
 		await broadcastBackchannelLogout({
 			rps: [
@@ -162,7 +163,7 @@ describe("broadcastBackchannelLogout", () => {
 			status: 500,
 			statusText: "Internal Server Error",
 		}));
-		const logger = { warn: vi.fn() };
+		const logger = createMockLogger();
 		await expect(
 			broadcastBackchannelLogout({
 				rps: [{ clientId: "rp1", backchannelLogoutUri: "https://rp.example/bc" }],
@@ -179,7 +180,7 @@ describe("broadcastBackchannelLogout", () => {
 
 	it("uses opts.logger over console.warn when provided", async () => {
 		const fetchMock = vi.fn(async () => ({ ok: false, status: 500, statusText: "" }));
-		const logger = { warn: vi.fn() };
+		const logger = createMockLogger();
 		const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			await broadcastBackchannelLogout({
@@ -202,7 +203,7 @@ describe("broadcastBackchannelLogout", () => {
 		const fetchMock = vi.fn(async () => {
 			throw new Error("network partition");
 		});
-		const logger = { warn: vi.fn() };
+		const logger = createMockLogger();
 		await expect(
 			broadcastBackchannelLogout({
 				rps: [

@@ -16,6 +16,7 @@
 
 import {
 	type AppConfig,
+	consoleLogger,
 	defineModule,
 	type FederationProviderHandle,
 	type GrantRegistry,
@@ -117,6 +118,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 		| "sessionFederationIndex"
 		| "federationTokenStore"
 		| "federationProviders"
+		| "logger"
 	>({
 		name: "oauth",
 		configSchema: oauthConfigSchema,
@@ -138,6 +140,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 			"sessionFederationIndex", // Amendment 4 (§1.1.4)
 			"federationTokenStore", // Phase 9 Task 4 augmentation — federation-token routes
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
+			"logger", // D-4 — structured logger; falls back to consoleLogger when absent
 		],
 		contributes: {
 			routes: [
@@ -163,6 +166,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 						sessionFamilyIndex: deps.sessionFamilyIndex,
 						sessionFederationIndex: deps.sessionFederationIndex,
 						federationTokenStore: deps.federationTokenStore,
+						logger: deps.logger ?? consoleLogger,
 						// Theme E structural fix: typed deps replace the v0.4.x lazy
 						// () => ctx.federationProviders closure. The closure here only
 						// re-wraps the typed read so the legacy `getFederationProviders`
@@ -198,6 +202,7 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 									| "sessionFederationIndex"
 									| "federationTokenStore"
 									| "federationProviders"
+									| "logger"
 								>,
 							) => {
 								const logoutSupported =

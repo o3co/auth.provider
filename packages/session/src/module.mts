@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import { type AppConfig, defineModule, fullSectionsSchema } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	consoleLogger,
+	defineModule,
+	fullSectionsSchema,
+} from "@o3co/auth-provider-core";
 import express from "express";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import type { FederationProvider } from "./federations/types.mjs";
@@ -104,7 +109,8 @@ export const sessionModule = defineModule<
 	| "federationTokenStore"
 	| "sessionFederationIndex"
 	| "federationProviders"
-	| "federationRedirectPolicyResolver"
+	| "federationRedirectPolicyResolver",
+	"logger"
 >({
 	name: "session",
 	configSchema: sessionConfigSchema,
@@ -117,6 +123,7 @@ export const sessionModule = defineModule<
 		"federationProviders",
 		"federationRedirectPolicyResolver",
 	],
+	optional: ["logger"],
 	contributes: {
 		routes: [
 			(deps) => {
@@ -129,6 +136,7 @@ export const sessionModule = defineModule<
 						config,
 						userSessionStore: deps.userSessionStore,
 						sessionTtlMs: config.session.maxAge,
+						logger: deps.logger ?? consoleLogger,
 					}),
 				};
 			},
@@ -156,6 +164,7 @@ export const sessionModule = defineModule<
 						sessionFederationIndex: deps.sessionFederationIndex,
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: config.session.maxAge,
+						logger: deps.logger ?? consoleLogger,
 					}),
 				};
 			},

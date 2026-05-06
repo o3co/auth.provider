@@ -67,6 +67,17 @@ export interface AdapterFactory<T> {
 	 * - If `type` is NOT registered: throws {@link AdapterFactoryError} with
 	 *   `reason: "unknown-replace"`. Replacing a non-existent entry is an
 	 *   error — the caller's mental model is wrong about what is registered.
+	 *
+	 * Security note: `replace()` has zero production callers at v0.5.0 and is
+	 * intended exclusively for test-fixture override of built-in adapters
+	 * (e.g., substituting a memory adapter for a Redis adapter in tests). The
+	 * runtime security boundary is the resolved adapter instance returned by
+	 * {@link AdapterFactory.create}, not this factory's builders map.
+	 * Freezing this factory would protect an object already off the runtime
+	 * path post-boot. See ADR:
+	 * `.claude/audit/decisions/D-3-resolution.md` (D-3, 2026-05-05) for the
+	 * full wrong-layer framing analysis and the explicit decision to close
+	 * SF-11 by documentation, not by adding `freeze()`.
 	 */
 	replace(type: string, builder: AdapterBuilder<T>): void;
 

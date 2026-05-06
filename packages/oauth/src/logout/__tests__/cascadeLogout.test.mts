@@ -7,6 +7,7 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
+import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
 import { cascadeLogout } from "../cascadeLogout.mjs";
 
 // ---------------------------------------------------------------------------
@@ -331,7 +332,7 @@ describe("cascadeLogout (A4 §6.2)", () => {
 					listFamilyIds: vi.fn(async () => ["f"]),
 				}),
 				sessionFederationIndex: makeSessionFederationIndex(),
-				logger: { warn: loggerWarn },
+				logger: Object.assign(createMockLogger(), { warn: loggerWarn }),
 			});
 			expect(loggerWarn).toHaveBeenCalledTimes(1);
 			expect(loggerWarn.mock.calls[0]?.[0]).toMatch(/cascadeLogout/);

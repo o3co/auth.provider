@@ -34,6 +34,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -664,8 +665,8 @@ describe("POST /oauth/logout", () => {
 				name: "google",
 				endSession: vi.fn().mockRejectedValue(new Error("IdP down")),
 			};
-			const warnSpy = vi.fn<(message: string, ...args: unknown[]) => void>();
-			const logger: Logger = { warn: warnSpy };
+			const logger = createMockLogger();
+			const warnSpy = logger.warn;
 			const app = buildApp({
 				sessionStore,
 				sessionFederationIndex,
@@ -974,8 +975,8 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 	describe("logger routing", () => {
 		it("routes /federation/:name/logout failures to opts.logger (not console)", async () => {
-			const warnSpy = vi.fn<(message: string, ...args: unknown[]) => void>();
-			const logger: Logger = { warn: warnSpy };
+			const logger = createMockLogger();
+			const warnSpy = logger.warn;
 			const fedTokenStore = makeFedTokenStore({
 				delete: vi.fn().mockRejectedValue(new Error("boom")),
 			});

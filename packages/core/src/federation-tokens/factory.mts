@@ -4,6 +4,8 @@
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+import type { Logger } from "../logging/Logger.mjs";
 import { createInMemoryFederationTokenStore } from "./adapters/memory.mjs";
 import type { FederationTokenStoreBase, FederationTokenStoreFactory } from "./types.mjs";
 
@@ -21,11 +23,17 @@ export function createFederationTokenStoreFactory(): FederationTokenStoreFactory
  *
  * Or use the declarative `redisFederationTokenStoreModule` in their `modules`
  * array.
+ *
+ * @param factory - the FederationTokenStore factory to populate.
+ * @param logger - structured logger for the dev/test warning emitted at
+ *                 builder invocation. Defaults to `consoleLogger`.
  */
-export function registerBuiltinFederationTokenStores(factory: FederationTokenStoreFactory): void {
+export function registerBuiltinFederationTokenStores(
+	factory: FederationTokenStoreFactory,
+	logger: Logger = consoleLogger,
+): void {
 	factory.register("memory", () => {
-		// eslint-disable-next-line no-console
-		console.warn(
+		logger.warn(
 			"federationTokenStore: in-memory adapter is for dev/test only — do not use in production (tokens are lost on restart, no cross-instance replication).",
 		);
 		return createInMemoryFederationTokenStore();
