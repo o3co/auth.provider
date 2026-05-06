@@ -564,7 +564,26 @@ export const createOAuthRouter = async (
 				// any earlier than this is unsafe — it must follow `redirect_uri`
 				// validation so errors can use `redirectError`.
 				const nonceMaxLength = config.oauth.nonce?.maxLength ?? 256;
-				if (typeof req.query.nonce === "string") {
+				if (req.query.nonce !== undefined) {
+					// Reject non-string `nonce` (Copilot review on PR #126):
+					// Express + qs parses repeated `?nonce=a&nonce=b` as an
+					// array, which silently failed the previous
+					// `typeof === "string"` gate, causing the request to
+					// proceed with `nonce: undefined` on the issued code. The
+					// client's downstream OIDC nonce check would then fail
+					// long after `/authorize` returned 302 + code, surfacing
+					// as a confusing client-side error. Reject as
+					// `invalid_request` immediately so the failure is at the
+					// request boundary, not asynchronously at id_token
+					// validation time.
+					if (typeof req.query.nonce !== "string") {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							"nonce must be a single string value",
+							toStr(state),
+						);
+					}
 					const nonceValue = req.query.nonce;
 					if (nonceValue.length > nonceMaxLength) {
 						return redirectError(

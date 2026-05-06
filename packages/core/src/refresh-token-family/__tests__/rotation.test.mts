@@ -94,12 +94,19 @@ describe("createRefreshTokenFamilyRotation", () => {
 	// `Math.min(requestedExpiresAtMs, current.expiresAtMs)` enforces the
 	// ceiling. The committed value is exposed via the optional
 	// `cappedExpiresAtMs` field on the "rotated" outcome.
+	//
+	// Test stability (Copilot review on PR #126): all ceilings here use
+	// `>= 60s` so loaded CI runners cannot lazy-GC the family between
+	// `register` and `rotate`/`findFamily`. The cap logic does not depend
+	// on the absolute ceiling value — only on the relative ordering of
+	// `ceiling` vs the rotation's requested expiry — so a 60s ceiling is
+	// equivalent to a 1s ceiling for what these tests assert.
 	describe("IH-13: absolute expiry cap (no sliding window)", () => {
 		it("does not extend family expiresAtMs on rotation when caller requests later expiry", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
 			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
 
-			const ceiling = Date.now() + 1000; // 1s ceiling
+			const ceiling = Date.now() + 60_000; // 60s ceiling — CI-safe; see describe block comment
 			await rotation.register("jti-1", "fam-1", ceiling);
 
 			// Caller requests rotation with a much-later expiry (sliding-window
@@ -144,7 +151,9 @@ describe("createRefreshTokenFamilyRotation", () => {
 			const ceiling = Date.now() + 86_400_000; // 1 day
 			await rotation.register("jti-1", "fam-1", ceiling);
 
-			const earlier = Date.now() + 1000; // 1s
+			// 30s — well above the lazy-GC window but still smaller than the
+			// 1-day ceiling, exercising the requested-< -ceiling branch.
+			const earlier = Date.now() + 30_000;
 			const out = await rotation.rotate("jti-1", "jti-2", "fam-1", earlier);
 
 			expect(out.outcome).toBe("rotated");

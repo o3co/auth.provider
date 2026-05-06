@@ -196,15 +196,22 @@ export const createAuthorizationGrant = (
 			// (challenge is stored only when method is resolved — see
 			// `routes.mts:632-661`), so in practice this guard fires only on
 			// a corrupt store record or a custom CodeRepository implementation
-			// that wrote the partial state. Reject as `invalid_request`; a
-			// vacuous-pass would be a silent verifier bypass.
+			// that wrote the partial state.
+			//
+			// RFC 6749 error mapping (Copilot review on PR #126): the request
+			// itself is well-formed; the persisted authorization code is
+			// unredeemable. `invalid_grant` is the standard code for "this
+			// code cannot be used", which matches what is happening here
+			// (and is also what the other unredeemable-code branches in this
+			// handler return). errorDescription says "invalid code" (the
+			// same wording used by the other invalid-code branches above)
+			// so storage implementation details do not leak to the client.
 			if (codeData.code_challenge && !codeData.code_challenge_method) {
 				return {
 					result: {
 						status: 400,
-						error: "invalid_request",
-						errorDescription:
-							"code_challenge present but code_challenge_method missing on code record",
+						error: "invalid_grant",
+						errorDescription: "invalid code",
 					},
 				};
 			}
