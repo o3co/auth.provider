@@ -20,7 +20,6 @@ import type { Code } from "./types.mjs";
 
 interface StoredCode extends Code {
 	expiresAt: number;
-	redirect_uri?: string;
 	grantedScope?: readonly string[];
 	grantedAudience?: readonly string[];
 	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
@@ -44,24 +43,15 @@ export class InMemoryCodeRepository implements CodeRepository {
 		}, 10_000);
 	}
 
-	async createCode(params: {
-		code_challenge?: string;
-		code_challenge_method?: string;
-		redirect_uri?: string;
-		expiresIn?: number;
-		grantedScope?: readonly string[];
-		grantedAudience?: readonly string[];
-		// NEW (TODO-F-3): OIDC authorize → token round-trip state.
-		nonce?: string;
-		sid?: string;
-	}): Promise<Code> {
+	async createCode(params: Parameters<CodeRepository["createCode"]>[0]): Promise<Code> {
 		const code = crypto.randomBytes(32).toString("base64url");
 		const expiresIn = params.expiresIn ?? this.defaultExpiresIn;
 		const stored: StoredCode = {
 			code,
+			client_id: params.client_id,
+			redirect_uri: params.redirect_uri,
 			code_challenge: params.code_challenge,
 			code_challenge_method: params.code_challenge_method,
-			redirect_uri: params.redirect_uri,
 			expiresIn,
 			expiresAt: Date.now() + expiresIn * 1000,
 			grantedScope: params.grantedScope,
@@ -72,9 +62,10 @@ export class InMemoryCodeRepository implements CodeRepository {
 		this.codes.set(code, stored);
 		return {
 			code,
+			client_id: params.client_id,
+			redirect_uri: params.redirect_uri,
 			code_challenge: params.code_challenge,
 			code_challenge_method: params.code_challenge_method,
-			redirect_uri: params.redirect_uri,
 			expiresIn,
 			grantedScope: params.grantedScope,
 			grantedAudience: params.grantedAudience,
@@ -92,9 +83,10 @@ export class InMemoryCodeRepository implements CodeRepository {
 		}
 		return {
 			code: stored.code,
+			client_id: stored.client_id,
+			redirect_uri: stored.redirect_uri,
 			code_challenge: stored.code_challenge,
 			code_challenge_method: stored.code_challenge_method,
-			redirect_uri: stored.redirect_uri,
 			expiresIn: stored.expiresIn,
 			grantedScope: stored.grantedScope,
 			grantedAudience: stored.grantedAudience,
@@ -110,9 +102,10 @@ export class InMemoryCodeRepository implements CodeRepository {
 		if (Date.now() >= stored.expiresAt) return null;
 		return {
 			code: stored.code,
+			client_id: stored.client_id,
+			redirect_uri: stored.redirect_uri,
 			code_challenge: stored.code_challenge,
 			code_challenge_method: stored.code_challenge_method,
-			redirect_uri: stored.redirect_uri,
 			expiresIn: stored.expiresIn,
 			grantedScope: stored.grantedScope,
 			grantedAudience: stored.grantedAudience,

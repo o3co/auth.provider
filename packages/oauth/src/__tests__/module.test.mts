@@ -49,7 +49,12 @@ const fakeClientRepository: ClientRepository = {
 };
 
 const fakeCodeRepository: CodeRepository = {
-	createCode: async () => ({ code: "fake-code" }),
+	// D-1: Code requires client_id + redirect_uri.
+	createCode: async () => ({
+		code: "fake-code",
+		client_id: "client1",
+		redirect_uri: "https://rp.example/cb",
+	}),
 	getByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},

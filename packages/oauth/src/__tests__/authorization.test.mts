@@ -28,6 +28,14 @@ import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 
+// D-1 / v0.5.1: codeData must carry client_id and redirect_uri (required fields).
+// `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
+const RP_URI = "https://rp.example/cb";
+const validCode = {
+	client_id: "client1",
+	redirect_uri: RP_URI,
+};
+
 const mockConfig = {
 	oauth: {
 		jwt: { secret: "test-secret" },
@@ -135,7 +143,7 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue(null));
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -147,10 +155,12 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("returns 200 with access and refresh tokens on valid code exchange (no PKCE)", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
+			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -172,11 +182,14 @@ describe("createAuthorizationGrant", () => {
 				expect(decoded.sub).toBe("u1");
 				expect((decoded as Record<string, unknown>).azp).toBe("client1");
 			}
-			// Session must be cleared
+			// D-1: only `code` remains in clear list. `code_client_id` and
+			// `granted_scopes` are no longer written by /authorize, so the
+			// /token grant no longer needs to clear them.
 			expect(sessionMutation).toBeDefined();
 			expect(sessionMutation?.clear).toContain("code");
-			expect(sessionMutation?.clear).toContain("code_client_id");
-			expect(sessionMutation?.clear).toContain("granted_scopes");
+			expect(sessionMutation?.clear).not.toContain("code_client_id");
+			expect(sessionMutation?.clear).not.toContain("code_redirect_uri");
+			expect(sessionMutation?.clear).not.toContain("granted_scopes");
 		});
 
 		it("registers initial rt+jwt via refreshTokenFamilyRotation.register (CP-2)", async () => {
@@ -186,12 +199,12 @@ describe("createAuthorizationGrant", () => {
 				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			};
 			const deps = {
-				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode })),
 				refreshTokenFamilyRotation,
 			};
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -228,13 +241,13 @@ describe("createAuthorizationGrant", () => {
 				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
 			};
 			const deps = {
-				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" })),
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode })),
 				refreshTokenFamilyRotation: throwingRotation,
 			};
 			const handler = createAuthorizationGrant(deps);
 
 			const { result } = await handler.handle({
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -251,10 +264,12 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("skips initial-register when no refreshTokenFamilyRotation is configured (CP-2 graceful)", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
+			);
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -268,10 +283,12 @@ describe("createAuthorizationGrant", () => {
 		});
 
 		it("issues an initial rt+jwt carrying a new family_id (C-3)", async () => {
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
+			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -298,10 +315,12 @@ describe("createAuthorizationGrant", () => {
 
 		it("omits scope from token response when granted scopes is empty (CP-12)", async () => {
 			// Code has neither grantedScope nor session.granted_scopes.
-			const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }));
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
+			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -327,13 +346,15 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
 					sid: "test-sid-1",
 					grantedScope: [] as readonly string[],
 				}),
 			);
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -353,13 +374,15 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
 					code_challenge: "challenge",
 					code_challenge_method: "S256",
 				}),
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1" },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -374,6 +397,8 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
 					code_challenge: "challenge",
 					code_challenge_method: "S256",
 				}),
@@ -395,6 +420,8 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
 					code_challenge: "wrong-challenge",
 					code_challenge_method: "S256",
 				}),
@@ -403,7 +430,7 @@ describe("createAuthorizationGrant", () => {
 			// Valid format verifier that won't match the challenge
 			const verifier = "a".repeat(43);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", code_verifier: verifier },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -422,6 +449,8 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
 					sid: "test-sid-1",
 					code_challenge: challenge,
 					code_challenge_method: "S256",
@@ -429,7 +458,7 @@ describe("createAuthorizationGrant", () => {
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", code_verifier: verifier },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -445,6 +474,8 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
 					sid: "test-sid-1",
 					code_challenge: verifier,
 					code_challenge_method: "plain",
@@ -452,7 +483,7 @@ describe("createAuthorizationGrant", () => {
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", code_verifier: verifier },
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -488,6 +519,8 @@ describe("createAuthorizationGrant", () => {
 					codeRepository: {
 						consumeByCode: vi.fn().mockResolvedValue({
 							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							code_challenge: verifier,
 							code_challenge_method: "plain",
 						}),
@@ -499,7 +532,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", code_verifier: verifier },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: verifier,
+					},
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -522,6 +560,8 @@ describe("createAuthorizationGrant", () => {
 					codeRepository: {
 						consumeByCode: vi.fn().mockResolvedValue({
 							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							sid: "test-sid-1",
 							code_challenge: challenge,
 							code_challenge_method: "S256",
@@ -534,7 +574,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", code_verifier: verifier },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: verifier,
+					},
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -546,11 +591,15 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
+		// A-2 redirect_uri binding — D-1 made redirect_uri a required field on
+		// CodeData; the previous "vacuous-pass when not stored" behavior (IH-4)
+		// is closed. session.code_redirect_uri fallback is removed.
 		describe("A-2: redirect_uri binding", () => {
 			it("returns invalid_grant when stored redirect_uri does not match body redirect_uri", async () => {
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
+						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
 					}),
 				);
@@ -560,7 +609,6 @@ describe("createAuthorizationGrant", () => {
 					session: {
 						code: "abc",
 						code_client_id: "client1",
-						code_redirect_uri: "https://example.com/callback",
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -576,16 +624,16 @@ describe("createAuthorizationGrant", () => {
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
+						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1" /* no redirect_uri */ },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
-						code_redirect_uri: "https://example.com/callback",
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -602,6 +650,7 @@ describe("createAuthorizationGrant", () => {
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
 					}),
 				);
@@ -611,7 +660,6 @@ describe("createAuthorizationGrant", () => {
 					session: {
 						code: "abc",
 						code_client_id: "client1",
-						code_redirect_uri: "https://example.com/callback",
 					},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -622,16 +670,21 @@ describe("createAuthorizationGrant", () => {
 				expect(result.status).toBe(200);
 			});
 
-			it("returns 200 when no redirect_uri was stored (redirect_uri not required in authorize)", async () => {
+			it("D-1 / IH-4: rejects when codeData has no redirect_uri (was: vacuous-pass returns 200)", async () => {
+				// Pre-v0.5.1 this returned 200 because the redirect_uri binding
+				// check was guarded by `if (storedRedirectUri)`. Post-D-1
+				// codeData.redirect_uri is required and the check is unconditional.
 				const deps = makeDeps(
 					vi.fn().mockResolvedValue({
 						code: "abc",
 						sid: "test-sid-1",
+						client_id: "client1",
+						// redirect_uri intentionally omitted to model legacy/corrupt records.
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -639,7 +692,8 @@ describe("createAuthorizationGrant", () => {
 
 				const { result } = await handler.handle(ctx);
 
-				expect(result.status).toBe(200);
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_grant");
 			});
 		});
 
@@ -653,10 +707,15 @@ describe("createAuthorizationGrant", () => {
 					}),
 					authenticate: vi.fn().mockResolvedValue(null), // secret mismatch
 				};
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" }), clientRepo);
+				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }), clientRepo);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", client_secret: "wrong-secret" },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						client_secret: "wrong-secret",
+					},
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -682,12 +741,17 @@ describe("createAuthorizationGrant", () => {
 					}),
 				};
 				const deps = makeDeps(
-					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }),
+					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
 					clientRepo,
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", client_secret: "correct-secret" },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						client_secret: "correct-secret",
+					},
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -709,12 +773,12 @@ describe("createAuthorizationGrant", () => {
 					authenticate: vi.fn().mockResolvedValue(null),
 				};
 				const deps = makeDeps(
-					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1" }),
+					vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode }),
 					clientRepo,
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1" }, // no client_secret
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI }, // no client_secret
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -753,6 +817,8 @@ describe("createAuthorizationGrant", () => {
 					codeRepository: {
 						consumeByCode: vi.fn().mockResolvedValue({
 							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							code_challenge: verifier,
 							code_challenge_method: "plain",
 						}),
@@ -764,7 +830,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", code_verifier: verifier },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: verifier,
+					},
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -784,6 +855,8 @@ describe("createAuthorizationGrant", () => {
 					codeRepository: {
 						consumeByCode: vi.fn().mockResolvedValue({
 							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							// no code_challenge_method
 						}),
 						createCode: vi.fn(),
@@ -794,7 +867,7 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -814,6 +887,8 @@ describe("createAuthorizationGrant", () => {
 					codeRepository: {
 						consumeByCode: vi.fn().mockResolvedValue({
 							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							sid: "test-sid-1",
 							// no code_challenge_method
 						}),
@@ -825,7 +900,7 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -907,6 +982,8 @@ describe("createAuthorizationGrant", () => {
 					...makeDepsWithIssuer(
 						vi.fn().mockResolvedValue({
 							code: "c1",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							sid: "sid-1",
 							nonce: "client-nonce",
 							grantedScope: ["openid", "email"],
@@ -918,7 +995,7 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c1", client_id: "client1" },
+					body: { code: "c1", client_id: "client1", redirect_uri: RP_URI },
 					session: { code: "c1", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
@@ -953,6 +1030,8 @@ describe("createAuthorizationGrant", () => {
 					...makeDeps(
 						vi.fn().mockResolvedValue({
 							code: "c-noiss",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							sid: "sid-noiss",
 							grantedScope: ["openid", "email"],
 							nonce: "client-nonce",
@@ -964,7 +1043,7 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c-noiss", client_id: "client1" },
+					body: { code: "c-noiss", client_id: "client1", redirect_uri: RP_URI },
 					session: { code: "c-noiss", code_client_id: "client1" },
 					// issuer intentionally omitted
 					metadata: { ip: "127.0.0.1" },
@@ -988,6 +1067,8 @@ describe("createAuthorizationGrant", () => {
 					...makeDepsWithIssuer(
 						vi.fn().mockResolvedValue({
 							code: "c2",
+							client_id: "client1",
+							redirect_uri: RP_URI,
 							sid: "sid-2",
 							grantedScope: ["profile", "email"],
 						}),
@@ -998,7 +1079,7 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c2", client_id: "client1" },
+					body: { code: "c2", client_id: "client1", redirect_uri: RP_URI },
 					session: { code: "c2", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
@@ -1015,13 +1096,15 @@ describe("createAuthorizationGrant", () => {
 				const deps = makeDepsWithIssuer(
 					vi.fn().mockResolvedValue({
 						code: "c3",
+						client_id: "client1",
+						redirect_uri: RP_URI,
 						sid: "sid-3",
 						grantedScope: ["openid"],
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c3", client_id: "client1" },
+					body: { code: "c3", client_id: "client1", redirect_uri: RP_URI },
 					session: { code: "c3", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
@@ -1034,12 +1117,112 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
+		// D-1 / IH-4 / IH-2: identity gates move from the Express session to the
+		// code record. consumeByCode (atomic getDel on a single Redis node)
+		// becomes the sole authenticity gate; client_id and redirect_uri are
+		// verified against codeData fields populated at /authorize time.
+		describe("D-1: identity gates derive from codeData not session", () => {
+			it("IH-4: rejects when both body.redirect_uri AND codeData.redirect_uri are missing (vacuous-pass closure)", async () => {
+				// Per Codex calibration: include session.code / session.code_client_id
+				// matching the body so the early session gates would otherwise let
+				// this through, and exercise the new strict redirect_uri check directly.
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						sid: "test-sid-1",
+						// redirect_uri intentionally absent — pre-fix this is the Redis
+						// drop scenario where IH-4 vacuous-pass would skip the check.
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: { code: "abc", client_id: "client1" /* no redirect_uri */ },
+					session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_grant");
+			});
+
+			it("IH-4: rejects when body.redirect_uri is supplied but codeData.redirect_uri is missing", async () => {
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						sid: "test-sid-1",
+						// redirect_uri intentionally absent on the codeData side.
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: "https://attacker.example/steal",
+					},
+					session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_grant");
+			});
+
+			it("IH-2: client_id check derives from codeData.client_id, not session.code_client_id", async () => {
+				// Per Codex calibration: set session.code_client_id to MATCH the body
+				// so the pre-fix session-based gate (`client_id !== session.code_client_id`)
+				// would let the request through. The new gate must reject because
+				// codeData.client_id differs from the body's client_id.
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+						sid: "test-sid-1",
+						client_id: "real-client",
+						redirect_uri: "https://rp.example/cb",
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: {
+						code: "abc",
+						client_id: "spoofed-client",
+						redirect_uri: "https://rp.example/cb",
+					},
+					session: {
+						code: "abc",
+						// matches body.client_id — pre-fix session gate passes.
+						code_client_id: "spoofed-client",
+						user: { id: "u1" },
+					},
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_grant");
+			});
+		});
+
 		describe("TODO-F-3: family_id + sid claims, RP registration", () => {
 			it("happy path: access_token and refresh_token both carry family_id and sid claims (F-3-1)", async () => {
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" }));
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode }),
+				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1079,12 +1262,12 @@ describe("createAuthorizationGrant", () => {
 					async delete() {},
 				};
 				const deps = {
-					...makeDeps(vi.fn().mockResolvedValue({ code: "abc" /* no sid */ })),
+					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode } /* no sid */)),
 					userSessionStore,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1103,10 +1286,12 @@ describe("createAuthorizationGrant", () => {
 			it("backward compat — no userSessionStore + no sid → grant succeeds without sid claim (F-3-2-compat)", async () => {
 				// Deployments that have not wired userSessionStore do not write sid at login
 				// time and must continue to work. No store → sid not required.
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc" /* no sid */ }));
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc", ...validCode } /* no sid */),
+				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1149,14 +1334,14 @@ describe("createAuthorizationGrant", () => {
 				const sessionFamilyIndex = makeSessionFamilyIndex({ addFamilyId: addFamilyIdSpy });
 				const sessionRPRegistry = makeSessionRPRegistry({ registerRP: registerRPSpy });
 				const deps = {
-					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz" })),
+					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz", ...validCode })),
 					userSessionStore,
 					sessionFamilyIndex,
 					sessionRPRegistry,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1195,10 +1380,12 @@ describe("createAuthorizationGrant", () => {
 
 			it("backward compat: issues tokens without userSessionStore (F-3-4)", async () => {
 				// No userSessionStore in deps — grant must succeed without linkFamily/registerRP.
-				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" }));
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode }),
+				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1228,12 +1415,14 @@ describe("createAuthorizationGrant", () => {
 					async delete() {},
 				};
 				const deps = {
-					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-gone" })),
+					...makeDeps(
+						vi.fn().mockResolvedValue({ code: "abc", sid: "session-gone", ...validCode }),
+					),
 					userSessionStore,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1261,12 +1450,12 @@ describe("createAuthorizationGrant", () => {
 					async delete() {},
 				};
 				const deps = {
-					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" })),
+					...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode })),
 					userSessionStore,
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1305,7 +1494,7 @@ describe("createAuthorizationGrant", () => {
 				};
 				const deps = {
 					...makeDeps(
-						vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc" }),
+						vi.fn().mockResolvedValue({ code: "abc", sid: "session-abc", ...validCode }),
 						throwingClientRepo,
 					),
 					userSessionStore,
@@ -1314,7 +1503,7 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1" },
+					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 					session: {
 						code: "abc",
 						code_client_id: "client1",

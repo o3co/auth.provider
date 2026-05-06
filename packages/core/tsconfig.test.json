@@ -8,7 +8,13 @@
 		"src/boot/**/*.mts",
 		"src/refresh-token-family/**/*.mts",
 		"src/user-sessions/**/*.mts",
-		"src/adapters/**/*.mts"
+		"src/adapters/**/*.mts",
+		"src/repositories/__tests__/InMemoryCodeRepository.test.mts"
+		// D-1 FOLLOW-UP: this entry is a single file, not a `repositories/__tests__/**` glob,
+		// because `InMemoryClientRepository.test.mts` has 16 pre-existing TS errors
+		// (Map<...> shape mismatches) unrelated to D-1. Widen this to the glob
+		// once that file is cleaned up — track in the next core/repositories
+		// hygiene PR.
 	],
 	"exclude": ["node_modules", "dist"]
 }

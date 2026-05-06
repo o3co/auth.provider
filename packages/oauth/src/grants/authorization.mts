@@ -79,7 +79,12 @@ export const createAuthorizationGrant = (
 				redirect_uri?: string | null;
 			};
 
-			if (!code || code !== session.code) {
+			// D-1: presence-only check on `code`. The string itself is verified by
+			// `consumeByCode` (atomic getDel), which is the sole authenticity gate.
+			// The previous `code !== session.code` cross-check was redundant
+			// defense-in-depth that introduced the CR-2 last-write-wins race when
+			// two /authorize requests shared an Express session.
+			if (!code) {
 				return {
 					result: {
 						status: 400,
@@ -89,12 +94,26 @@ export const createAuthorizationGrant = (
 				};
 			}
 
-			if (!client_id || client_id !== session.code_client_id) {
+			// D-1: hoist client_id and redirect_uri presence checks ahead of
+			// consumeByCode so requests missing either reject without burning
+			// the (otherwise valid) code via the atomic getDel. The full
+			// equality checks against codeData.* still happen below — these
+			// hoisted checks only short-circuit the malformed-request path.
+			if (!client_id) {
 				return {
 					result: {
 						status: 400,
 						error: "invalid_grant",
 						errorDescription: "invalid client_id",
+					},
+				};
+			}
+			if (!redirect_uri) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "redirect_uri mismatch",
 					},
 				};
 			}
@@ -127,26 +146,42 @@ export const createAuthorizationGrant = (
 				};
 			}
 
-			// A-2: redirect_uri binding (RFC 6749 §4.1.3)
-			// If redirect_uri was stored at authorization time, it MUST be present and match.
-			const storedRedirectUri = codeData.redirect_uri ?? session.code_redirect_uri;
-			if (storedRedirectUri) {
-				if (!redirect_uri || redirect_uri !== storedRedirectUri) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "redirect_uri mismatch",
-						},
-					};
-				}
+			// D-1: client_id binding moved from session.code_client_id to
+			// codeData.client_id. Custom impls predating v0.5.1 may emit a
+			// codeData without client_id — treat that as invalid_grant rather
+			// than crashing on undefined comparison.
+			if (client_id !== codeData.client_id) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "invalid client_id",
+					},
+				};
 			}
 
-			// C-2: prefer narrowed values persisted on Code at /authorize time; fall back
-			// to session for pre-C-2 codes and tests that bypass the authorize endpoint.
-			// Do NOT re-run grantPolicy here — evaluate-once-at-authorize is the contract.
-			const grantedScopes: readonly string[] | undefined =
-				codeData.grantedScope ?? session.granted_scopes;
+			// A-2: redirect_uri binding (RFC 6749 §4.1.3)
+			// D-1: codeData.redirect_uri is now always populated (required field).
+			// The previous `?? session.code_redirect_uri` fallback hid the IH-4
+			// vacuous-pass bug where Redis silently dropped redirect_uri and the
+			// check was skipped entirely. Now strictly enforced. The presence
+			// check on `redirect_uri` is hoisted above consumeByCode; this site
+			// only verifies the equality binding.
+			if (redirect_uri !== codeData.redirect_uri) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "redirect_uri mismatch",
+					},
+				};
+			}
+
+			// C-2 / D-1: only the values persisted on Code at /authorize time are
+			// authoritative. The session.granted_scopes fallback is removed along
+			// with the four /authorize session writes. Do NOT re-run grantPolicy
+			// here — evaluate-once-at-authorize is the contract.
+			const grantedScopes: readonly string[] | undefined = codeData.grantedScope;
 			const grantedAudiencesFromCode = codeData.grantedAudience;
 
 			// B-8: PKCE required check at token endpoint
@@ -449,7 +484,13 @@ export const createAuthorizationGrant = (
 					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }),
 				},
 				sessionMutation: {
-					clear: ["code", "code_client_id", "code_redirect_uri", "granted_scopes"],
+					// D-1: /authorize no longer writes session.code* in v0.5.1.
+					// `code` is the only key still cleared here because the
+					// authorization grant doesn't read the other v0.4.x keys
+					// (`code_client_id`, `code_redirect_uri`, `granted_scopes`)
+					// at all anymore — they age out with the session TTL on
+					// rolling-deploy nodes that still have stale values.
+					clear: ["code"],
 				},
 			};
 		},
