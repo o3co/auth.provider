@@ -19,7 +19,22 @@ import type { Client } from "./types.mjs";
 export type PublicClient = Omit<Client, "clientSecret">;
 
 export interface ClientRepository {
+	/**
+	 * Look up a client without authentication. Returns the client's public
+	 * fields (everything except `clientSecret`) or `null` when the client does
+	 * not exist. Used by `clientAuthMw` for the public-client (`tokenEndpoint-
+	 * AuthMethod === "none"`) path and by `/authorize` for redirect-URI /
+	 * scope validation that does not require credential authentication.
+	 */
 	findById(clientId: string): Promise<PublicClient | null>;
+	/**
+	 * Authenticate a confidential client by `clientId` + secret pair. Returns
+	 * the public projection on success, `null` when the client does not exist
+	 * or the secret does not match. Implementations MUST return `null` (and
+	 * SHOULD NOT throw) when called for a `tokenEndpointAuthMethod === "none"`
+	 * client — public clients have no secret to authenticate against, and
+	 * accepting any string would silently promote them to confidential.
+	 */
 	authenticate(clientId: string, secret: string): Promise<PublicClient | null>;
 }
 

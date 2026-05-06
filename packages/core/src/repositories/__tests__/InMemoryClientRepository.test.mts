@@ -28,6 +28,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"test-app",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "test-secret",
 							allowedRedirectUris: ["http://localhost:3000/callback"],
 							allowedScopes: ["read", "write"],
@@ -49,6 +50,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"test-app",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "test-secret",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -59,6 +61,38 @@ describe("InMemoryClientRepository", () => {
 			const client = await repo.findById("nonexistent-client");
 			expect(client).toBeNull();
 		});
+
+		// D-6 (v0.5.1): findById exposes the configured authentication method on
+		// every PublicClient projection so downstream middleware (`clientAuthMw`)
+		// and grant handlers (`refreshToken`, `authorization`) can branch on it
+		// without re-fetching the client record.
+		it("D-6: returns tokenEndpointAuthMethod from findById", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"basic-client",
+						{
+							tokenEndpointAuthMethod: "client_secret_basic",
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+					[
+						"public-client",
+						{
+							tokenEndpointAuthMethod: "none",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+				]),
+			);
+			const basic = await repo.findById("basic-client");
+			expect(basic?.tokenEndpointAuthMethod).toBe("client_secret_basic");
+			const pub = await repo.findById("public-client");
+			expect(pub?.tokenEndpointAuthMethod).toBe("none");
+		});
 	});
 
 	describe("logout metadata fields round-trip", () => {
@@ -68,6 +102,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"logout-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "secret",
 							allowedRedirectUris: ["http://localhost:3000/callback"],
 							allowedScopes: ["openid"],
@@ -101,6 +136,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"no-logout-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "secret",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -126,6 +162,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"explicit-false-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "secret",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -149,6 +186,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"rp",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "secret",
 							allowedRedirectUris: ["https://rp.example/cb"],
 							allowedScopes: ["openid"],
@@ -167,6 +205,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"rp",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "secret",
 							allowedRedirectUris: ["https://rp.example/cb"],
 							allowedScopes: ["openid"],
@@ -184,6 +223,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"rp",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "secret",
 							allowedRedirectUris: ["https://rp.example/cb"],
 							allowedScopes: ["openid"],
@@ -200,6 +240,7 @@ describe("InMemoryClientRepository", () => {
 	describe("ClientEntrySchema URI validation", () => {
 		it("rejects an invalid URL in backchannelLogoutUri", () => {
 			const result = ClientEntrySchema.safeParse({
+				tokenEndpointAuthMethod: "client_secret_basic",
 				clientSecret: "secret",
 				allowedRedirectUris: [],
 				allowedScopes: [],
@@ -211,6 +252,7 @@ describe("InMemoryClientRepository", () => {
 
 	describe("ClientEntrySchema URL scheme allowlist (F-5 XSS hardening)", () => {
 		const baseEntry = {
+			tokenEndpointAuthMethod: "client_secret_basic" as const,
 			clientSecret: "secret",
 			allowedRedirectUris: [],
 			allowedScopes: [],
@@ -258,6 +300,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"client-a",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "s",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -275,6 +318,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"client-b",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "s",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -293,6 +337,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"client-c",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "correct-horse-battery-staple",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -313,6 +358,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"my-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "plain-secret",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -332,6 +378,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"my-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "plain-secret",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -349,6 +396,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"my-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: "plain-secret",
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -367,6 +415,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"bcrypt-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: realHash,
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -386,6 +435,7 @@ describe("InMemoryClientRepository", () => {
 					[
 						"bcrypt-client",
 						{
+							tokenEndpointAuthMethod: "client_secret_basic",
 							clientSecret: realHash,
 							allowedRedirectUris: [],
 							allowedScopes: [],
@@ -395,6 +445,162 @@ describe("InMemoryClientRepository", () => {
 			);
 			const client = await repo.authenticate("bcrypt-client", "wrong-secret");
 			expect(client).toBeNull();
+		});
+	});
+
+	// D-6 (v0.5.1): tokenEndpointAuthMethod discriminator + ClientEntrySchema
+	// superRefine. The schema is now the single source of truth for whether a
+	// client is confidential (basic/post — secret required) or public (none —
+	// secret forbidden). Historically these tests would have been split between
+	// ClientEntrySchema and InMemoryClientRepository, but the schema is invoked
+	// from the constructor so both surfaces share the same RED tests.
+	describe("D-6 tokenEndpointAuthMethod discriminator (RED Group A)", () => {
+		it("A-1: client_secret_basic without clientSecret throws at construction", () => {
+			expect(
+				() =>
+					new InMemoryClientRepository(
+						new Map([
+							[
+								"missing-secret",
+								{
+									tokenEndpointAuthMethod: "client_secret_basic",
+									allowedRedirectUris: [],
+									allowedScopes: [],
+								},
+							],
+						]),
+					),
+			).toThrow(/clientSecret is required/);
+		});
+
+		it("A-1b: client_secret_post without clientSecret throws at construction", () => {
+			expect(
+				() =>
+					new InMemoryClientRepository(
+						new Map([
+							[
+								"missing-secret-post",
+								{
+									tokenEndpointAuthMethod: "client_secret_post",
+									allowedRedirectUris: [],
+									allowedScopes: [],
+								},
+							],
+						]),
+					),
+			).toThrow(/clientSecret is required/);
+		});
+
+		it("A-2: tokenEndpointAuthMethod=none with clientSecret throws", () => {
+			expect(
+				() =>
+					new InMemoryClientRepository(
+						new Map([
+							[
+								"public-with-secret",
+								{
+									tokenEndpointAuthMethod: "none",
+									clientSecret: "secret",
+									allowedRedirectUris: [],
+									allowedScopes: [],
+								},
+							],
+						]),
+					),
+			).toThrow(/clientSecret must not be set/);
+		});
+
+		it("A-3: tokenEndpointAuthMethod=none without clientSecret succeeds", () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"public-spa",
+						{
+							tokenEndpointAuthMethod: "none",
+							allowedRedirectUris: ["https://app.example/cb"],
+							allowedScopes: ["openid"],
+						},
+					],
+				]),
+			);
+			expect(repo).toBeDefined();
+		});
+
+		it("A-4: authenticate() on a public client returns null (does not throw)", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"public-spa",
+						{
+							tokenEndpointAuthMethod: "none",
+							allowedRedirectUris: ["https://app.example/cb"],
+							allowedScopes: ["openid"],
+						},
+					],
+				]),
+			);
+			// Public clients have no secret. `authenticate()` MUST return null
+			// rather than throwing, so the timing surface stays uniform with the
+			// "wrong secret" path (which also returns null).
+			const result = await repo.authenticate("public-spa", "any-fake-secret");
+			expect(result).toBeNull();
+		});
+
+		it("A-5: findById() returns tokenEndpointAuthMethod on the PublicClient projection", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"basic-rp",
+						{
+							tokenEndpointAuthMethod: "client_secret_basic",
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+					[
+						"post-rp",
+						{
+							tokenEndpointAuthMethod: "client_secret_post",
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+					[
+						"public-rp",
+						{
+							tokenEndpointAuthMethod: "none",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+				]),
+			);
+			expect((await repo.findById("basic-rp"))?.tokenEndpointAuthMethod).toBe(
+				"client_secret_basic",
+			);
+			expect((await repo.findById("post-rp"))?.tokenEndpointAuthMethod).toBe("client_secret_post");
+			expect((await repo.findById("public-rp"))?.tokenEndpointAuthMethod).toBe("none");
+		});
+
+		it("A-6: omitted tokenEndpointAuthMethod throws at construction (no silent default)", () => {
+			expect(
+				() =>
+					new InMemoryClientRepository(
+						new Map([
+							[
+								"unspecified",
+								{
+									clientSecret: "secret",
+									allowedRedirectUris: [],
+									allowedScopes: [],
+									// biome-ignore lint/suspicious/noExplicitAny: deliberately bypass the type system to verify runtime defence
+								} as any,
+							],
+						]),
+					),
+			).toThrow();
 		});
 	});
 });

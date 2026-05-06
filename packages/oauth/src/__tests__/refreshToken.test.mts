@@ -48,12 +48,26 @@ const mockDeps: GrantDependencies = {
 	keyStore,
 };
 
+// D-6 (v0.5.1): every test that hits the binding gate must supply both an
+// `aud` (or `azp`) on the signed RT and a matching `authenticatedClient` on
+// the GrantContext. We default both to "client1" so existing tests continue
+// to exercise the same scope/policy/family code paths without per-test
+// boilerplate; tests that need an explicit identity mismatch override the
+// `body.refresh_token` aud or the ctx authenticatedClient.
+const DEFAULT_CLIENT_ID = "client1";
+
 async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
 	return new SignJWT({ sub: "u1", scope: "read write", ...overrides })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+		.setAudience(DEFAULT_CLIENT_ID)
 		.setExpirationTime("24h")
 		.sign(secretKey);
 }
+
+const DEFAULT_AUTH_CLIENT = {
+	clientId: DEFAULT_CLIENT_ID,
+	tokenEndpointAuthMethod: "client_secret_basic" as const,
+};
 
 describe("createRefreshTokenGrant", () => {
 	describe("handle", () => {
@@ -64,6 +78,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -79,6 +94,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -97,6 +113,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -104,7 +121,10 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(400);
 		});
 
-		it("returns 400 when client_id does not match token audience", async () => {
+		it("D-6: returns 400 invalid_grant when authenticatedClient does not match RT azp/aud", async () => {
+			// Token is bound to "client1" via aud; authenticatedClient is a
+			// different client. The binding gate must reject — accepting it
+			// would let any authenticated client redeem any RT, defeating PB-2.
 			const token = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
 				.setAudience("client1")
@@ -112,15 +132,70 @@ describe("createRefreshTokenGrant", () => {
 				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
 			const ctx: GrantContext = {
-				body: { refresh_token: token, client_id: "wrong-client" },
+				body: { refresh_token: token },
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: {
+					clientId: "different-client",
+					tokenEndpointAuthMethod: "client_secret_basic",
+				},
 			};
 
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(400);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("invalid_grant");
+			expect(result.errorDescription).toBe("refresh_token was not issued to this client");
+		});
+
+		it("D-6: returns 401 invalid_client when ctx.authenticatedClient is null", async () => {
+			// Direct grant invocation with no client auth — must be refused
+			// regardless of the RT contents.
+			const token = await makeRefreshToken();
+			const handler = createRefreshTokenGrant(mockDeps);
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: null,
+			});
+
+			expect(result.status).toBe(401);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("invalid_client");
+		});
+
+		it("D-6 R-legacy-azp: legacy RT (aud only, no azp) + matching authenticatedClient → 200, new RT emits azp", async () => {
+			// Pre-D-6 tokens carry only `aud`; the binding gate falls back to
+			// `aud === authenticatedClient.clientId`. The newly minted RT must
+			// emit `azp = authenticatedClient.clientId` so subsequent rotations
+			// no longer rely on the `aud` fallback.
+			const legacyToken = await new SignJWT({ sub: "u1", scope: "read" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setAudience("client1")
+				// note: no .azp claim (legacy)
+				.setExpirationTime("24h")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(mockDeps);
+			const { result } = await handler.handle({
+				body: { refresh_token: legacyToken },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			const newRt = result.tokens.refresh_token as string;
+			const payload = JSON.parse(
+				Buffer.from(newRt.split(".")[1] ?? "", "base64url").toString("utf-8"),
+			) as Record<string, unknown>;
+			expect(payload.azp).toBe(DEFAULT_CLIENT_ID);
+			expect(payload.aud).toBe(DEFAULT_CLIENT_ID);
 		});
 
 		it("returns 200 with new access and refresh tokens on valid refresh token", async () => {
@@ -131,6 +206,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -155,6 +231,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -170,6 +247,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -189,6 +267,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -207,6 +286,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -226,6 +306,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -242,6 +323,7 @@ describe("createRefreshTokenGrant", () => {
 			// instead of typ: "rt+jwt" in the protected header.
 			const legacyToken = await new SignJWT({ type: "refresh", sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
@@ -250,6 +332,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -261,6 +344,7 @@ describe("createRefreshTokenGrant", () => {
 		it("accepts legacy tokens without kid header", async () => {
 			const legacyToken = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", typ: "rt+jwt" })
+				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.sign(secretKey);
 			const handler = createRefreshTokenGrant(mockDeps);
@@ -269,6 +353,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -285,6 +370,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { sessionMutation } = await handler.handle(ctx);
@@ -314,6 +400,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -342,6 +429,7 @@ describe("createRefreshTokenGrant", () => {
 			// Token must include a jti so that previousJti !== null and rotate() is called
 			const token = await new SignJWT({ sub: "u1", scope: "read write" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("prev-jti-replay")
 				.sign(secretKey);
@@ -351,6 +439,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -377,6 +466,7 @@ describe("createRefreshTokenGrant", () => {
 			};
 			const token = await new SignJWT({ sub: "u1", scope: "read write" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("prev-jti-503")
 				.sign(secretKey);
@@ -387,6 +477,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(503);
@@ -400,6 +491,7 @@ describe("createRefreshTokenGrant", () => {
 			// Token must include a jti so that previousJti !== null and rotate() is called
 			const token = await new SignJWT({ sub: "u1", scope: "read write" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("prev-jti-revoked")
 				.sign(secretKey);
@@ -409,6 +501,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -441,6 +534,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -469,6 +563,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "10.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 				ip: "10.0.0.1",
 				userAgent: "test-agent/1.0",
 			};
@@ -493,6 +588,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -519,6 +615,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -542,6 +639,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(503);
@@ -564,6 +662,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(200);
@@ -611,6 +710,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(200);
@@ -636,6 +736,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(400);
@@ -657,6 +758,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(503);
@@ -674,6 +776,7 @@ describe("createRefreshTokenGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
 
 			expect(result.status).toBe(200);

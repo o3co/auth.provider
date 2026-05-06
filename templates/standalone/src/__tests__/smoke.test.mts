@@ -89,11 +89,33 @@ const config: AppConfig = {
  * via the `oauth.code.adapter` switch in `buildModules`. The smoke test
  * config sets `oauth.code.adapter = "memory"`, so `inMemoryCodeRepositoryModule`
  * is added automatically and provides the slot.
+ *
+ * D-6 (v0.5.1): a single confidential client is registered so the
+ * `clientAuthMw` middleware in front of `/oauth/token` has a record to
+ * authenticate against. Smoke tests that hit `/oauth/token` send
+ * `Authorization: ${SMOKE_BASIC_AUTH}`.
  */
+const SMOKE_CLIENT_ID = "smoke-client";
+const SMOKE_CLIENT_SECRET = "smoke-secret";
+const SMOKE_BASIC_AUTH = `Basic ${Buffer.from(`${SMOKE_CLIENT_ID}:${SMOKE_CLIENT_SECRET}`).toString("base64")}`;
+
 const testRepositoriesModule = defineModule({
 	name: "test:repositories",
 	provides: {
-		clientRepository: () => new InMemoryClientRepository(new Map()),
+		clientRepository: () =>
+			new InMemoryClientRepository(
+				new Map([
+					[
+						SMOKE_CLIENT_ID,
+						{
+							tokenEndpointAuthMethod: "client_secret_basic" as const,
+							clientSecret: SMOKE_CLIENT_SECRET,
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+				]),
+			),
 		userRepository: () => new InMemoryUserRepository(new Map()),
 	},
 });
@@ -156,6 +178,7 @@ describe("standalone smoke test", () => {
 		handleRef = handle;
 		const res = await request(app)
 			.post("/oauth/token")
+			.set("Authorization", SMOKE_BASIC_AUTH)
 			.type("form")
 			.send({ grant_type: "unsupported" });
 		expect(res.status).toBe(400);
@@ -166,6 +189,7 @@ describe("standalone smoke test", () => {
 		handleRef = handle;
 		const res = await request(app)
 			.post("/oauth/token")
+			.set("Authorization", SMOKE_BASIC_AUTH)
 			.type("form")
 			.send({ grant_type: "unsupported" });
 		expect(res.status).toBe(400);

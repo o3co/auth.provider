@@ -121,6 +121,7 @@ export {
 	type TokenResponse,
 } from "./grants/token.mjs";
 export type {
+	AuthenticatedClient,
 	GrantContext,
 	GrantDependencies,
 	GrantError,
@@ -254,7 +255,13 @@ export {
 export { loadYamlMap } from "./repositories/loadYamlMap.mjs";
 // Default repository factories
 export { createRepositoryFactories } from "./repositories/RepositoryFactory.mjs";
-export type { Client, Code, CodeData, User } from "./repositories/types.mjs";
+export type {
+	Client,
+	Code,
+	CodeData,
+	TokenEndpointAuthMethod,
+	User,
+} from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
 export {
 	createSessionFamilyIndexFactory,

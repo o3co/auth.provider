@@ -68,16 +68,32 @@ export const createAuthorizationGrant = (
 			const {
 				code,
 				code_verifier = null,
-				client_id,
-				client_secret = null,
 				redirect_uri = null,
 			} = body as {
 				code?: string;
 				code_verifier?: string | null;
-				client_id?: string;
-				client_secret?: string | null;
+				// D-6: `client_id` / `client_secret` from body are no longer
+				// destructured — `clientAuthMw` populates `ctx.authenticatedClient`
+				// and the binding gate below verifies `codeData.client_id` against
+				// the authenticated identity.
 				redirect_uri?: string | null;
 			};
+
+			// D-6: client identity comes from RFC 6749 §2.3 token-endpoint
+			// authentication (clientAuthMw). A grant invocation that did not pass
+			// through that middleware (custom route, direct unit-test call) cannot
+			// be bound to a client and MUST be refused — the previous body-based
+			// `client_secret` check was superseded by route-level middleware.
+			if (!ctx.authenticatedClient) {
+				return {
+					result: {
+						status: 401,
+						error: "invalid_client",
+						errorDescription: "Client authentication is required",
+					},
+				};
+			}
+			const authenticatedClientId = ctx.authenticatedClient.clientId;
 
 			// D-1: presence-only check on `code`. The string itself is verified by
 			// `consumeByCode` (atomic getDel), which is the sole authenticity gate.
@@ -94,20 +110,10 @@ export const createAuthorizationGrant = (
 				};
 			}
 
-			// D-1: hoist client_id and redirect_uri presence checks ahead of
-			// consumeByCode so requests missing either reject without burning
-			// the (otherwise valid) code via the atomic getDel. The full
-			// equality checks against codeData.* still happen below — these
-			// hoisted checks only short-circuit the malformed-request path.
-			if (!client_id) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription: "invalid client_id",
-					},
-				};
-			}
+			// D-1: hoist redirect_uri presence check ahead of consumeByCode so
+			// requests missing it reject without burning the (otherwise valid)
+			// code via the atomic getDel. The full equality check against
+			// codeData.redirect_uri still happens below.
 			if (!redirect_uri) {
 				return {
 					result: {
@@ -116,22 +122,6 @@ export const createAuthorizationGrant = (
 						errorDescription: "redirect_uri mismatch",
 					},
 				};
-			}
-
-			// A-3: Client secret verification (RFC 6749 §3.2.1)
-			// Only verify when client_secret is provided (confidential clients send it;
-			// public clients omit it). If provided, authenticate against the repository.
-			if (client_secret !== null && client_secret !== undefined) {
-				const authenticated = await clientRepository.authenticate(client_id, client_secret);
-				if (!authenticated) {
-					return {
-						result: {
-							status: 401,
-							error: "invalid_client",
-							errorDescription: "client authentication failed",
-						},
-					};
-				}
 			}
 
 			// Atomically consume code data from repository (replay attack prevention)
@@ -146,16 +136,16 @@ export const createAuthorizationGrant = (
 				};
 			}
 
-			// D-1: client_id binding moved from session.code_client_id to
-			// codeData.client_id. Custom impls predating v0.5.1 may emit a
-			// codeData without client_id — treat that as invalid_grant rather
-			// than crashing on undefined comparison.
-			if (client_id !== codeData.client_id) {
+			// D-6: canonical authority binding. The middleware authenticated the
+			// presenter; the code repository persisted the original `/authorize`
+			// caller. They must agree, otherwise an authenticated client could
+			// redeem a code issued to a different client.
+			if (codeData.client_id !== authenticatedClientId) {
 				return {
 					result: {
 						status: 400,
 						error: "invalid_grant",
-						errorDescription: "invalid client_id",
+						errorDescription: "code was not issued to this client",
 					},
 				};
 			}
@@ -297,10 +287,14 @@ export const createAuthorizationGrant = (
 			// generateToken carries a single `aud` claim; if policy narrowed to multiple
 			// audiences we flatten to the first. Multi-audience tokens are out of scope
 			// for the authorization code grant.
+			// D-6: default `aud` to the authenticated client (was raw body
+			// `client_id`). The binding gate above already proved the two are
+			// identical to `codeData.client_id`, so this rewrite is equivalent
+			// and removes the body-spoofable surface that Codex M2 flagged.
 			const audience =
 				grantedAudiencesFromCode && grantedAudiencesFromCode.length > 0
 					? grantedAudiencesFromCode[0]
-					: client_id;
+					: authenticatedClientId;
 
 			// CP-12: normalize empty scope array to null so the token response
 			// omits `scope` entirely instead of emitting `scope: ""` (which
@@ -319,7 +313,8 @@ export const createAuthorizationGrant = (
 					issuer,
 					audience,
 					subject: userId ?? null,
-					authorizedParty: client_id ?? null,
+					// D-6: `azp` is the authenticated client (was raw body `client_id`).
+					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
 				},
@@ -332,7 +327,8 @@ export const createAuthorizationGrant = (
 					issuer,
 					audience,
 					subject: userId ?? null,
-					authorizedParty: client_id ?? null,
+					// D-6: `azp` is the authenticated client (was raw body `client_id`).
+					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
 				},
@@ -408,7 +404,11 @@ export const createAuthorizationGrant = (
 				// so a throw here returns a controlled 503 instead of propagating to the
 				// express default handler as an unhandled HTML 500.
 				try {
-					const clientRecord = await clientRepository.findById(client_id);
+					// D-6: logout-metadata lookup uses the authenticated client id
+					// (was raw body `client_id`). The two are guaranteed equal by
+					// the binding gate above, but reading from the authenticated
+					// slot keeps Codex M2's "no raw body for identity" invariant.
+					const clientRecord = await clientRepository.findById(authenticatedClientId);
 					// Composition-root invariant (A4 §3.4/§8): the bundled session-stores
 					// module wires all 4 sibling stores together. When deps.userSessionStore is
 					// present (outer guard), sessionFamilyIndex and sessionRPRegistry are also
@@ -420,7 +420,8 @@ export const createAuthorizationGrant = (
 					await deps.sessionRPRegistry!.registerRP(
 						sid,
 						{
-							clientId: client_id,
+							// D-6: RP record carries the authenticated client id.
+							clientId: authenticatedClientId,
 							backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
 								?.backchannelLogoutUri as string | undefined,
 							backchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
@@ -466,8 +467,9 @@ export const createAuthorizationGrant = (
 			if (grantedScopes?.includes("openid") && userSession && sid && configuredIssuer) {
 				idToken = await generateIdToken({
 					sub: userSession.sub,
-					aud: client_id,
-					azp: client_id,
+					// D-6: id_token `aud` / `azp` bind to the authenticated client.
+					aud: authenticatedClientId,
+					azp: authenticatedClientId,
 					authTime: userSession.authTime,
 					...(nonce ? { nonce } : {}),
 					sid,

@@ -104,6 +104,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// Client authentication: confidential clients only. Reject when
 			// client_secret is omitted (see clientSecretRaw handling above for the
 			// rationale).
+			//
+			// D-6 note (v0.5.1): when this grant is dispatched from the standard
+			// `/token` route, `clientAuthMw` runs first and has already
+			// authenticated the client via the same `ClientRepository.authenticate`
+			// call below. The in-grant call is therefore a no-op double-auth in
+			// the route-bound flow. We retain it because:
+			// (a) the grant is a public OSS export — consumers may wire it onto a
+			//     custom route that bypasses `clientAuthMw`, where this remains
+			//     the only authenticity gate, and
+			// (b) this grant intentionally rejects public clients (`"none"`) at
+			//     this site, regardless of route configuration — a public client
+			//     calling Token Exchange with no `client_secret` falls through
+			//     here and gets `invalid_client`. Removing the check would let
+			//     `clientAuthMw`'s public-client path admit a request that has
+			//     no business reaching Token Exchange (which has no PKCE).
+			// `ctx.authenticatedClient` is intentionally NOT consulted: this grant
+			// owns its credential model and must remain self-contained.
 			if (clientSecret === null) {
 				return {
 					result: {

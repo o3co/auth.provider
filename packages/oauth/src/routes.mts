@@ -111,7 +111,14 @@ export const createOAuthRouter = async (
 	const router = express.Router();
 
 	// Construct once at router-creation time so the closure is not re-allocated per request.
-	const clientAuthMw = createClientAuthMiddleware(clientRepository, logger);
+	// `issuer` populates the `realm` parameter on `WWW-Authenticate: Basic`
+	// challenges (RFC 7235 §2.2). When the operator has not configured a
+	// canonical issuer (or this router is constructed in a partial-config test
+	// fixture), the middleware falls back to the literal "oauth".
+	const clientAuthMw = createClientAuthMiddleware(clientRepository, {
+		issuer: (config as { oauth?: { jwt?: { issuer?: string } } }).oauth?.jwt?.issuer,
+		logger,
+	});
 
 	async function checkRateLimit(req: Request, res: Response, tag: string): Promise<boolean> {
 		if (!rateLimiter) return true;
@@ -176,87 +183,108 @@ export const createOAuthRouter = async (
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
-		.post("/token", async (req: Request, res: Response) => {
-			if (!(await checkRateLimit(req, res, "token"))) return;
-			const { grant_type } = req.body;
-			const issuer = config.oauth.jwt.issuer ?? req.get("host");
+		.post(
+			"/token",
+			// D-6 ordering: rate limit BEFORE client auth so repeated unauthenticated
+			// hits cannot escape rate limiting via the clientAuthMw rejection path
+			// (and so DoS amplification through repository lookups is bounded).
+			async (req: Request, res: Response, next) => {
+				if (!(await checkRateLimit(req, res, "token"))) return;
+				next();
+			},
+			clientAuthMw,
+			async (req: Request, res: Response) => {
+				const { grant_type } = req.body;
+				const issuer = config.oauth.jwt.issuer ?? req.get("host");
 
-			if (typeof grant_type !== "string" || grant_type === "") {
-				await emitAuditEvent(auditSink, {
-					timestamp: new Date(),
-					type: "token.issued.failure",
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { reason: "missing_grant_type" },
-				});
-				return res.status(400).json({
-					error: "unsupported_grant_type",
-					error_description: "grant_type must be a non-empty string",
-				});
-			}
-
-			const handler = registry.get(grant_type);
-			if (!handler) {
-				await emitAuditEvent(auditSink, {
-					timestamp: new Date(),
-					type: "token.issued.failure",
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { reason: "unsupported_grant_type", grant_type },
-				});
-				return res.status(400).json({
-					error: "unsupported_grant_type",
-					error_description: `grant_type "${grant_type}" is not supported`,
-				});
-			}
-
-			const ctx = {
-				body: req.body,
-				session: req.session,
-				issuer,
-				metadata: { ip: req.ip },
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-			};
-			const { result, sessionMutation } = await handler.handle(ctx);
-
-			if (sessionMutation?.clear) {
-				for (const key of sessionMutation.clear) {
-					(req.session as unknown as Record<string, unknown>)[key] = undefined;
+				if (typeof grant_type !== "string" || grant_type === "") {
+					await emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "token.issued.failure",
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { reason: "missing_grant_type" },
+					});
+					return res.status(400).json({
+						error: "unsupported_grant_type",
+						error_description: "grant_type must be a non-empty string",
+					});
 				}
-			}
-			if (sessionMutation?.set) {
-				Object.assign(req.session, sessionMutation.set);
-			}
 
-			if ("tokens" in result) {
-				res.set("Cache-Control", "no-store");
-				res.set("Pragma", "no-cache");
-				await emitAuditEvent(auditSink, {
-					timestamp: new Date(),
-					type: "token.issued",
-					clientId: typeof req.body.client_id === "string" ? req.body.client_id : undefined,
+				const handler = registry.get(grant_type);
+				if (!handler) {
+					await emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "token.issued.failure",
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { reason: "unsupported_grant_type", grant_type },
+					});
+					return res.status(400).json({
+						error: "unsupported_grant_type",
+						error_description: `grant_type "${grant_type}" is not supported`,
+					});
+				}
+
+				// D-6: `clientAuthMw` populates `req.oauthClient` after RFC 6749 §2.3
+				// authentication. Grant handlers consult `ctx.authenticatedClient`
+				// rather than the raw body so identity flows are not body-spoofable.
+				const ctx = {
+					body: req.body,
+					session: req.session,
+					issuer,
+					metadata: { ip: req.ip },
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
-					details: { grant_type },
+					authenticatedClient: req.oauthClient
+						? {
+								clientId: req.oauthClient.clientId,
+								tokenEndpointAuthMethod: req.oauthClient.tokenEndpointAuthMethod,
+							}
+						: null,
+				};
+				const { result, sessionMutation } = await handler.handle(ctx);
+
+				if (sessionMutation?.clear) {
+					for (const key of sessionMutation.clear) {
+						(req.session as unknown as Record<string, unknown>)[key] = undefined;
+					}
+				}
+				if (sessionMutation?.set) {
+					Object.assign(req.session, sessionMutation.set);
+				}
+
+				if ("tokens" in result) {
+					res.set("Cache-Control", "no-store");
+					res.set("Pragma", "no-cache");
+					await emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "token.issued",
+						// D-6: prefer the authenticated client over the raw body — body
+						// `client_id` is no longer authoritative once `clientAuthMw` runs.
+						clientId: req.oauthClient?.clientId,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { grant_type },
+					});
+					return res.status(result.status).json(result.tokens);
+				}
+				const errorBody: Record<string, unknown> = { error: result.error };
+				if (result.errorDescription) errorBody.error_description = result.errorDescription;
+				if (result.status === 401) {
+					res.set("WWW-Authenticate", "Bearer");
+				}
+				await emitAuditEvent(auditSink, {
+					timestamp: new Date(),
+					type: "token.issued.failure",
+					clientId: req.oauthClient?.clientId,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { grant_type, error: result.error },
 				});
-				return res.status(result.status).json(result.tokens);
-			}
-			const errorBody: Record<string, unknown> = { error: result.error };
-			if (result.errorDescription) errorBody.error_description = result.errorDescription;
-			if (result.status === 401) {
-				res.set("WWW-Authenticate", "Bearer");
-			}
-			await emitAuditEvent(auditSink, {
-				timestamp: new Date(),
-				type: "token.issued.failure",
-				clientId: typeof req.body.client_id === "string" ? req.body.client_id : undefined,
-				ip: req.ip,
-				userAgent: req.get("user-agent"),
-				details: { grant_type, error: result.error },
-			});
-			return res.status(result.status).json(errorBody);
-		})
+				return res.status(result.status).json(errorBody);
+			},
+		)
 		// RFC 7662: Token Introspection
 		.post(
 			"/introspect",
@@ -458,6 +486,37 @@ export const createOAuthRouter = async (
 				const supportedMethods: string[] = Array.isArray(pkceConfig?.supportedMethods)
 					? (pkceConfig.supportedMethods as string[])
 					: ["S256", "plain"];
+
+				// D-6 (RFC 9700 §2.1.1): PKCE/S256 is mandatory for public clients
+				// regardless of operator `pkce.required` config. Public clients have
+				// no transport-level credential at /token, so the only authenticity
+				// gate on the code redemption is the verifier — accepting `plain`
+				// or omitting PKCE entirely would let anyone with the issued code
+				// exchange it for tokens.
+				if (client.tokenEndpointAuthMethod === "none") {
+					if (typeof code_challenge !== "string" || !code_challenge) {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							"code_challenge is required for public clients",
+							toStr(state),
+						);
+					}
+					const requestedMethod = toStr(code_challenge_method);
+					// Public clients must explicitly select S256 — no defaulting to
+					// `plain` per the operator-configured `defaultMethod`. The check
+					// uses the raw query parameter so absence (= would silently pick
+					// up `defaultMethod`) is rejected as `plain` would be.
+					const effectivePublicMethod = requestedMethod ?? "plain";
+					if (effectivePublicMethod !== "S256") {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							'code_challenge_method must be "S256" for public clients',
+							toStr(state),
+						);
+					}
+				}
 
 				// B-8: PKCE required check at authorize endpoint
 				if (pkceRequired && (typeof code_challenge !== "string" || !code_challenge)) {

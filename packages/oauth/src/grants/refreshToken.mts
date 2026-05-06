@@ -32,13 +32,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, issuer } = ctx;
-			const {
-				refresh_token: refreshTokenValue,
-				client_id,
-				scope: requestedScope,
-			} = body as {
+			const { refresh_token: refreshTokenValue, scope: requestedScope } = body as {
 				refresh_token?: string;
-				client_id?: string;
+				// D-6: `client_id` from body is no longer authoritative — `clientAuthMw`
+				// populates `ctx.authenticatedClient` and we read identity from there.
 				scope?: string;
 			};
 
@@ -51,6 +48,22 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					},
 				};
 			}
+
+			// D-6: client identity comes from RFC 6749 §2.3 token-endpoint
+			// authentication (clientAuthMw). A grant invocation that did not pass
+			// through that middleware (custom route, direct unit-test call) cannot
+			// be bound to a client and MUST be refused — accepting it would
+			// re-introduce the body-spoofable flow that PB-2 closes.
+			if (!ctx.authenticatedClient) {
+				return {
+					result: {
+						status: 401,
+						error: "invalid_client",
+						errorDescription: "Client authentication is required",
+					},
+				};
+			}
+			const authenticatedClientId = ctx.authenticatedClient.clientId;
 
 			let tokenPayload: JWTPayload;
 			let typ: string | undefined;
@@ -84,31 +97,31 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			// Validate client_id matches audience if provided
+			// D-6: bind RT to its issuing client via `azp` (RFC 9068 §2.2). Pre-D-6
+			// tokens predate explicit `azp` issuance — for backward compat the
+			// gate falls back to `aud`. Tokens minted by post-D-6 issuers always
+			// emit `azp = ctx.authenticatedClient.clientId`, so once the legacy
+			// upgrade window closes the `aud` fallback is dead code.
 			const tokenAud = Array.isArray(tokenPayload.aud) ? tokenPayload.aud[0] : tokenPayload.aud;
-			if (client_id && tokenAud !== client_id) {
+			const claims = tokenPayload as Record<string, unknown>;
+			const tokenAzp =
+				typeof claims.azp === "string" && claims.azp.length > 0 ? claims.azp : tokenAud;
+			if (tokenAzp !== authenticatedClientId) {
 				return {
 					result: {
 						status: 400,
 						error: "invalid_grant",
-						errorDescription: "invalid client_id",
+						errorDescription: "refresh_token was not issued to this client",
 					},
 				};
 			}
 
-			const claims = tokenPayload as Record<string, unknown>;
 			// Read standard claims, with legacy fallback for pre-standardization tokens
 			const subjectStr =
 				typeof tokenPayload.sub === "string"
 					? tokenPayload.sub
 					: typeof (claims.user as Record<string, unknown> | undefined)?.id === "string"
 						? ((claims.user as Record<string, unknown>).id as string)
-						: undefined;
-			const azpStr =
-				typeof claims.azp === "string"
-					? (claims.azp as string)
-					: typeof (claims.client as Record<string, unknown> | undefined)?.id === "string"
-						? ((claims.client as Record<string, unknown>).id as string)
 						: undefined;
 			const scopeStr =
 				typeof claims.scope === "string"
@@ -146,7 +159,13 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			}
 
 			let finalScope = grantedScope;
-			let finalAudience: string | null = tokenAud ?? client_id ?? null;
+			// D-6: token aud/azp default to the authenticated client. `tokenAud`
+			// from the input refresh token is no longer authoritative for new-
+			// token issuance — the binding gate above already proves authenticated
+			// client matched the input azp/aud, so reusing
+			// `ctx.authenticatedClient.clientId` directly is equivalent and avoids
+			// a body-spoofable identity flow.
+			let finalAudience: string | null = authenticatedClientId;
 
 			if (deps.grantPolicy) {
 				// CP-18: fail-closed. grantPolicy is a security boundary (it
@@ -159,7 +178,9 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					decision = await deps.grantPolicy.evaluate(
 						{
 							grantType: "refresh_token",
-							clientId: client_id,
+							// D-6: policy gate sees the authenticated client, not the
+							// raw body — same rationale as for token aud/azp.
+							clientId: authenticatedClientId,
 							subject: subjectStr,
 							requestedScope: requestedScope
 								? [...new Set(requestedScope.split(" ").filter(Boolean))]
@@ -260,7 +281,14 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					issuer,
 					audience: finalAudience,
 					subject: subjectStr ?? null,
-					authorizedParty: azpStr ?? null,
+					// D-6: new token `azp` is the authenticated client. The legacy
+					// `claims.azp ?? claims.client.id` decoder was the only other
+					// code path that could populate this slot; both have been
+					// subsumed by the binding gate above (which proves the input
+					// token's azp/aud equalled `authenticatedClientId`), so reading
+					// from `ctx.authenticatedClient.clientId` is strictly equivalent
+					// and removes the body-spoofable surface.
+					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
 				},
@@ -274,7 +302,9 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					issuer,
 					audience: finalAudience,
 					subject: subjectStr ?? null,
-					authorizedParty: azpStr ?? null,
+					// D-6: same rationale as above — `azp` is bound to the
+					// authenticated client at issuance.
+					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
 				},
