@@ -536,6 +536,24 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.headers["www-authenticate"]).toBe('Basic realm="oauth"');
 		});
 
+		it("Copilot review: rejects unsafe realm characters and falls back to 'oauth'", async () => {
+			// `WWW-Authenticate: Basic realm="..."` is a quoted-string (RFC 7235
+			// §2.2 + RFC 7230). An issuer containing `"`, `\`, CR, LF, or other
+			// control bytes either produces a malformed header or opens a
+			// header-injection vector. The middleware validates the issuer and
+			// falls back to literal "oauth" on any unsafe character.
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([]), {
+					issuer: 'https://attacker.example/"\r\nSet-Cookie: x',
+				}),
+				(_req, res) => res.end(),
+			);
+			const res = await request(app).post("/test");
+			expect(res.headers["www-authenticate"]).toBe('Basic realm="oauth"');
+		});
+
 		it("backward-compat: accepts a Logger argument directly", async () => {
 			// F1 D-4 callers passed `Logger` as the second argument; the new signature
 			// takes an options object but keeps the legacy form working.

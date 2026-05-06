@@ -282,9 +282,14 @@ export const createOAuthRouter = async (
 				}
 				const errorBody: Record<string, unknown> = { error: result.error };
 				if (result.errorDescription) errorBody.error_description = result.errorDescription;
-				if (result.status === 401) {
-					res.set("WWW-Authenticate", "Bearer");
-				}
+				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
+				// The token endpoint is not a protected resource (RFC 6750 §3 applies to
+				// resource servers, not authorization endpoints), and `clientAuthMw`
+				// already set the appropriate `WWW-Authenticate: Basic realm="..."`
+				// challenge for client-auth failures upstream. Setting Bearer here
+				// clobbered that more-correct value for any grant returning 401
+				// (e.g., the new `ctx.authenticatedClient === null` branch). RFC 6749
+				// §5.2 token-endpoint error responses do not mandate WWW-Authenticate.
 				await emitAuditEvent(auditSink, {
 					timestamp: new Date(),
 					type: "token.issued.failure",

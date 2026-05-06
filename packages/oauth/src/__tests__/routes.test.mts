@@ -201,10 +201,14 @@ describe("createOAuthRouter", () => {
 			expect(issuedEvent?.clientId).toBe(TEST_CLIENT_ID);
 		});
 
-		it("error path with errorDescription + 401 sets WWW-Authenticate: Bearer + audit failure", async () => {
+		it("error path with errorDescription + 401 does NOT inject WWW-Authenticate (Copilot review)", async () => {
 			// A grant handler returning status 401 (e.g. ctx.authenticatedClient
-			// missing in a custom wiring) should route to the error branch with
-			// `WWW-Authenticate: Bearer` per RFC 6750 §3.
+			// missing in a custom wiring) does NOT cause a `WWW-Authenticate:
+			// Bearer` challenge to be set on the token endpoint — RFC 6750 §3
+			// applies to protected resource servers, not authorization endpoints,
+			// and clobbering `clientAuthMw`'s upstream `WWW-Authenticate: Basic`
+			// challenge on auth failures would mislead callers into retrying with
+			// the wrong scheme.
 			const events: AuditEvent[] = [];
 			const auditSink: AuditSinkBase = {
 				kind: "spy",
@@ -229,7 +233,9 @@ describe("createOAuthRouter", () => {
 				.send({ grant_type: "stub" });
 
 			expect(res.status).toBe(401);
-			expect(res.headers["www-authenticate"]).toBe("Bearer");
+			// No WWW-Authenticate set by the route — clientAuthMw passed, the
+			// 401 came from the handler itself, and we do not impose Bearer here.
+			expect(res.headers["www-authenticate"]).toBeUndefined();
 			expect(res.body.error).toBe("invalid_client");
 			expect(res.body.error_description).toBe("stub denied");
 			await new Promise((r) => setImmediate(r));

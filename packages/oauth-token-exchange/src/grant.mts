@@ -177,7 +177,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			} else {
 				// Standalone wiring: no `clientAuthMw` ahead of us, so verify
-				// the body-supplied secret directly.
+				// the body-supplied secret directly. Repository failures are
+				// surfaced as a controlled 503 to match the authenticated-client
+				// branch — without this guard, a transient repository outage
+				// would propagate as an unhandled 500.
 				if (clientSecret === null) {
 					return {
 						result: {
@@ -187,7 +190,17 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
-				client = await clientRepository.authenticate(clientId, clientSecret);
+				try {
+					client = await clientRepository.authenticate(clientId, clientSecret);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "client repository unavailable",
+						},
+					};
+				}
 			}
 			if (!client) {
 				return {

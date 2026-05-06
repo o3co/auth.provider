@@ -236,6 +236,32 @@ describe("createTokenExchangeGrant — request errors", () => {
 		});
 	});
 
+	it("Copilot review: standalone-wiring authenticate throw → 503 temporarily_unavailable (matches authenticated-client branch)", async () => {
+		// Standalone wiring (no `clientAuthMw`) — the in-grant `authenticate(...)`
+		// call must be guarded so a transient repository outage surfaces as a
+		// controlled 503 instead of an unhandled 500. This mirrors the
+		// authenticated-client branch's try/catch.
+		const throwingRepo: ClientRepository = {
+			findById: async () => null,
+			authenticate: async () => {
+				throw new Error("redis down");
+			},
+		};
+		const g = buildGrant({ clientRepository: throwingRepo });
+		const token = await signSelfIssuedAccessToken({});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(503);
+		if (!("error" in result)) expect.fail("Expected error in result");
+		expect(result.error).toBe("temporarily_unavailable");
+	});
+
 	it.each([
 		["number", 123],
 		["object", { a: 1 }],
