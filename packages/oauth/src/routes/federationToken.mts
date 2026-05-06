@@ -41,7 +41,7 @@ type ExpressLike = {
  * defined here to keep the oauth package independent of session.
  */
 interface SupportsRefreshShape {
-	refreshFederationToken(refreshToken: string): Promise<{
+	refreshToken(refreshToken: string): Promise<{
 		accessToken: string;
 		refreshToken?: string;
 		idToken?: string;
@@ -57,16 +57,14 @@ interface SupportsRefreshShape {
 }
 
 /**
- * Duck-type guard: does `provider` expose a `refreshFederationToken` method?
+ * Duck-type guard: does `provider` expose a `refreshToken` method?
  * Returns `false` for null/undefined so callers can pass Map.get() results directly.
  */
 function supportsRefresh(
 	provider: FederationProviderHandle | undefined | null,
 ): provider is FederationProviderHandle & SupportsRefreshShape {
 	if (provider == null) return false;
-	return (
-		typeof (provider as { refreshFederationToken?: unknown }).refreshFederationToken === "function"
-	);
+	return typeof (provider as { refreshToken?: unknown }).refreshToken === "function";
 }
 
 export interface FederationTokenRouterOptions {
@@ -464,12 +462,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// waiter will call the IdP too — not dangerous because federationTokenStore.update
 			// is atomic and last-write-wins preserves a valid token, but operators
 			// should tune ttlMs via the lock adapter config if their IdP is slow.
-			let refreshed: Awaited<ReturnType<typeof provider.refreshFederationToken>>;
+			let refreshed: Awaited<ReturnType<typeof provider.refreshToken>>;
 			try {
-				refreshed = await provider.refreshFederationToken(currentTokens.refreshToken ?? "");
+				refreshed = await provider.refreshToken(currentTokens.refreshToken ?? "");
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : String(error);
-				logger.warn(`POST /oauth/federation/${name}/token: refreshFederationToken failed:`, error);
+				logger.warn(`POST /oauth/federation/${name}/token: refreshToken failed:`, error);
 
 				// 11e → Step 12: Classify the error.
 				if (msg.includes("invalid_grant")) {

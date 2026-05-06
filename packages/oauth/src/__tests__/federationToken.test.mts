@@ -204,7 +204,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("happy path refresh: expired token + provider supportsRefresh", () => {
-		it("calls provider.refreshFederationToken, updates store, returns 200 with new token", async () => {
+		it("calls provider.refreshToken, updates store, returns 200 with new token", async () => {
 			// Tokens expired just now (well within the buffer)
 			const expiredTokens = {
 				...baseFedTokens,
@@ -222,14 +222,14 @@ describe("POST /oauth/federation/:name/token", () => {
 				get: vi.fn().mockResolvedValue(expiredTokens),
 			});
 			const mockProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{
+				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
 				name: "google",
-				refreshFederationToken: refreshFn,
+				refreshToken: refreshFn,
 			};
 			const app = buildApp({
 				fedTokenStore,
@@ -533,10 +533,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				expiresAt: new Date(Date.now() - 1000),
 			};
 			const refreshProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
+				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi.fn(),
+				refreshToken: vi.fn(),
 			};
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredNoRt) }),
@@ -558,7 +558,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),
 			};
-			// Provider without refreshFederationToken method
+			// Provider without refreshToken method
 			const bareProvider: FederationProviderHandle = { name: "google" };
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
@@ -574,7 +574,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 	});
 
-	describe("refresh: provider.refreshFederationToken throws invalid_grant", () => {
+	describe("refresh: provider.refreshToken throws invalid_grant", () => {
 		it("returns 410 re_authentication_required + cleans up + emits audit event", async () => {
 			const auditSink: AuditSinkBase = {
 				kind: "mock",
@@ -590,12 +590,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				get: vi.fn().mockResolvedValue(expiredTokens),
 			});
 			const failingProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<never>;
+				refreshToken: (rt: string) => Promise<never>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi
-					.fn()
-					.mockRejectedValue(new Error("invalid_grant: token revoked")),
+				refreshToken: vi.fn().mockRejectedValue(new Error("invalid_grant: token revoked")),
 			};
 			const app = buildApp({
 				sessionFederationIndex,
@@ -625,12 +623,10 @@ describe("POST /oauth/federation/:name/token", () => {
 		it("returns 503 temporarily_unavailable", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const failingProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<never>;
+				refreshToken: (rt: string) => Promise<never>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi
-					.fn()
-					.mockRejectedValue(new Error("temporarily_unavailable: provider 503")),
+				refreshToken: vi.fn().mockRejectedValue(new Error("temporarily_unavailable: provider 503")),
 			};
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
@@ -654,10 +650,10 @@ describe("POST /oauth/federation/:name/token", () => {
 			};
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const failingProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<never>;
+				refreshToken: (rt: string) => Promise<never>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi.fn().mockRejectedValue(new Error("unexpected provider error")),
+				refreshToken: vi.fn().mockRejectedValue(new Error("unexpected provider error")),
 			};
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
@@ -695,10 +691,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				acquireLock: vi.fn().mockResolvedValue({ acquired: false, reason: "timeout" }),
 			};
 			const refreshProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
+				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi.fn(),
+				refreshToken: vi.fn(),
 			};
 			const app = buildApp({
 				fedTokenStore: lockingStore,
@@ -730,10 +726,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
 			};
 			const refreshProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
+				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi.fn(),
+				refreshToken: vi.fn(),
 			};
 			const app = buildApp({
 				fedTokenStore: lockingStore,
@@ -747,7 +743,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(200);
 			expect(res.body.access_token).toBe("already-refreshed-at");
 			// Provider refresh must NOT be called
-			expect(refreshProvider.refreshFederationToken).not.toHaveBeenCalled();
+			expect(refreshProvider.refreshToken).not.toHaveBeenCalled();
 			// Lock must be released
 			expect(release).toHaveBeenCalled();
 		});
@@ -766,10 +762,10 @@ describe("POST /oauth/federation/:name/token", () => {
 			};
 			const newExpiresAt = new Date(Date.now() + 3_600_000);
 			const refreshProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
+				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi.fn().mockResolvedValue({
+				refreshToken: vi.fn().mockResolvedValue({
 					accessToken: "new-at",
 					// No refreshToken returned — IdP did NOT rotate
 					expiresAt: newExpiresAt,
@@ -831,14 +827,14 @@ describe("POST /oauth/federation/:name/token", () => {
 			};
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{
+				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi.fn().mockResolvedValue({
+				refreshToken: vi.fn().mockResolvedValue({
 					accessToken: "new-at",
 					expiresAt: new Date(Date.now() + 3_600_000),
 				}),
@@ -868,7 +864,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("post-lock refresh uses currentTokens.refreshToken (Codex P2 regression)", () => {
-		it("calls refreshFederationToken with the FRESH refresh_token read after lock, not the pre-lock stale one", async () => {
+		it("calls refreshToken with the FRESH refresh_token read after lock, not the pre-lock stale one", async () => {
 			const staleRefreshToken = "stale-rt-pre-lock";
 			const freshRefreshToken = "fresh-rt-post-lock";
 
@@ -906,14 +902,14 @@ describe("POST /oauth/federation/:name/token", () => {
 				expiresAt: newExpiresAt,
 			});
 			const refreshProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{
+				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
 				name: "google",
-				refreshFederationToken: refreshFn,
+				refreshToken: refreshFn,
 			};
 
 			const app = buildApp({
@@ -938,7 +934,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("preserves stored id_token when IdP omits it on refresh (Claude I1)", () => {
-		it("stores original idToken when provider.refreshFederationToken returns no idToken", async () => {
+		it("stores original idToken when provider.refreshToken returns no idToken", async () => {
 			const storedIdToken = "stored-id-token-for-logout-hint";
 			const expiredTokens = {
 				...baseFedTokens,
@@ -947,14 +943,14 @@ describe("POST /oauth/federation/:name/token", () => {
 			};
 			const newExpiresAt = new Date(Date.now() + 3_600_000);
 			const refreshProvider: FederationProviderHandle & {
-				refreshFederationToken: (rt: string) => Promise<{
+				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
 				name: "google",
-				refreshFederationToken: vi.fn().mockResolvedValue({
+				refreshToken: vi.fn().mockResolvedValue({
 					accessToken: "new-at",
 					refreshToken: "new-rt",
 					// idToken deliberately absent — Google-style refresh
@@ -1028,6 +1024,59 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// D-8 regression: published SupportsRefresh interface uses `refreshToken`
+	// (not `refreshToken`). Real providers (federation-google, etc.)
+	// follow the published name. Pre-rename the route's duck-type guard probed
+	// the wrong identifier, so every refresh request silently returned 503
+	// `refresh_not_supported` in production. Locks the route to the published
+	// interface name so future audits cannot regress.
+	// ---------------------------------------------------------------------------
+
+	describe("D-8 regression: route detects provider.refreshToken (published interface name)", () => {
+		it("succeeds with 200 when provider exposes refreshToken (real-provider shape)", async () => {
+			const expiredTokens = {
+				...baseFedTokens,
+				accessToken: "old-upstream-at",
+				refreshToken: "upstream-rt-xyz",
+				expiresAt: new Date(Date.now() - 1000),
+			};
+			const newExpiresAt = new Date(Date.now() + 3_600_000);
+			const refreshFn = vi.fn().mockResolvedValue({
+				accessToken: "new-upstream-at",
+				refreshToken: "new-upstream-rt",
+				expiresAt: newExpiresAt,
+			});
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			// Mock provider exposes `refreshToken` per the published SupportsRefresh
+			// interface — exactly what `federation-google/src/google.mts` ships.
+			const realShapeProvider: FederationProviderHandle & {
+				refreshToken: (rt: string) => Promise<{
+					accessToken: string;
+					refreshToken?: string;
+					expiresAt: Date;
+				}>;
+			} = {
+				name: "google",
+				refreshToken: refreshFn,
+			};
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", realShapeProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(200);
+			expect(res.body.access_token).toBe("new-upstream-at");
+			expect(refreshFn).toHaveBeenCalledWith("upstream-rt-xyz");
 		});
 	});
 });
