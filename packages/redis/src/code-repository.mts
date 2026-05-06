@@ -36,10 +36,25 @@ interface RedisClient {
 	del(key: string): Promise<number>;
 }
 
+// Quit shape lives on the concrete node-redis client returned by `createClient`
+// but is intentionally NOT part of the public `RedisClient` interface (which
+// stays minimal per `feedback_no_vendor_in_interface`). The cast in
+// `[Symbol.asyncDispose]` reaches the runtime quit() method via the private
+// `redis` field — no interface widening needed.
+interface RedisClientWithQuit extends RedisClient {
+	quit(): Promise<void>;
+}
+
 export class RedisCodeRepository implements CodeRepository {
 	private redis: RedisClient;
 	private defaultExpiresIn: number;
 	private logger: Logger;
+	// D-5: idempotence flag — `[Symbol.asyncDispose]` fallback in the boot
+	// planner AND the LifecycleRegistrar drain both target the same instance,
+	// so `dispose()` may be called twice. The second call must be a no-op
+	// instead of issuing a second `quit()` against a closed client (which
+	// throws `ClientClosedError` on node-redis v5).
+	private disposed = false;
 
 	constructor(redis: RedisClient, defaultExpiresIn = 600, logger: Logger = consoleLogger) {
 		this.redis = redis;
@@ -126,6 +141,43 @@ export class RedisCodeRepository implements CodeRepository {
 			return null;
 		}
 	}
+
+	/**
+	 * Disconnect the underlying Redis client (D-5 / OR-2). The
+	 * `redisCodeRepositoryBuilder` registers this with `BuilderContext.lifecycle`
+	 * so `AppHandle.dispose()` drains the connection automatically. The cast
+	 * reaches the runtime `quit()` method on the concrete node-redis client
+	 * without widening the minimal `RedisClient` interface (per
+	 * `feedback_no_vendor_in_interface`).
+	 */
+	async [Symbol.asyncDispose](): Promise<void> {
+		if (this.disposed) return;
+		this.disposed = true;
+		// Runtime guard: the public `RedisClient` interface does NOT declare
+		// `quit()` (kept minimal per `feedback_no_vendor_in_interface`), but
+		// the concrete node-redis client returned by `createClient()` always
+		// provides it. Custom `RedisClient` implementations passed via the
+		// public constructor MUST also implement `quit()` for D-5 lifecycle
+		// integration to work — fail loudly with a clear message instead of
+		// throwing an opaque `client.quit is not a function` TypeError.
+		const client = this.redis as Partial<RedisClientWithQuit>;
+		if (typeof client.quit !== "function") {
+			throw new Error(
+				"RedisCodeRepository.dispose(): underlying redis client does not implement quit(). " +
+					"Custom RedisClient implementations passed to the constructor must provide a `quit(): Promise<void>` " +
+					"method for D-5 lifecycle integration.",
+			);
+		}
+		await client.quit();
+	}
+
+	/**
+	 * Alias for `[Symbol.asyncDispose]` for call sites that cannot use
+	 * `await using`. Returns the same Promise.
+	 */
+	dispose(): Promise<void> {
+		return this[Symbol.asyncDispose]();
+	}
 }
 
 /**
@@ -136,17 +188,22 @@ export class RedisCodeRepository implements CodeRepository {
  *
  * The repository is constructed and connected lazily on first call to
  * `factory.create(...)`. The redis client lifetime is owned by the repo
- * instance — for clean disposal across restarts, consumers should track
- * the resulting CodeRepository and orchestrate closure in their composition
- * root (no `dispose()` hook on the CodeRepository interface as of v0.5.0).
+ * instance: D-5 wired the builder to `ctx.lifecycle?.register(...)` so
+ * `AppHandle.dispose()` drains `repo.dispose()` (which calls `quit()` on the
+ * underlying client) automatically. Call sites that cannot use `await using`
+ * may invoke `repo.dispose()` directly.
  *
  * Module pattern wrapper for `codeRepository` slot is intentionally NOT
  * provided in v0.5.0 — see Phase 10 plan §1 / Q4 (deferred to a separate
  * "legacy-slot module-parity" PR).
  */
-export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (config, _ctx) => {
+export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = async (config, ctx) => {
 	if (typeof config.endpointUri !== "string") {
 		throw new Error('RedisCodeRepository requires "endpointUri" in config');
 	}
-	return RedisCodeRepository.create(config);
+	const repo = await RedisCodeRepository.create(config);
+	ctx.lifecycle?.register(async () => {
+		await repo.dispose();
+	});
+	return repo;
 };

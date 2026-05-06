@@ -39,6 +39,67 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   silently no-ops on a key with no existing TTL — see method JSDoc). Custom
   backing-client implementations (non-ioredis) must add `pExpireGT` to compile.
 
+### Breaking Changes (Phase F — D-5 BuilderContext.lifecycle, v0.5.1)
+
+- **Standalone session wiring moved into `sessionStoreModule`**
+  (`@o3co/auth-provider-session`): the standalone composition root
+  (`templates/standalone/src/app.mts`) no longer constructs the
+  `express-session` middleware manually. The new `sessionStoreModule`
+  contributes the middleware via the boot planner, so the underlying
+  `connect-redis` client lifetime is owned by the new
+  `BuilderContext.lifecycle` and drained on `handle.dispose()` (closes
+  OR-M2 — connect-redis client never quit).
+  **Migration**: operators who copied `templates/standalone/src/app.mts`
+  into their own composition root must (1) remove the manual
+  `app.use(session(...))` block and the surrounding session-store factory
+  setup, (2) prepend `sessionStoreModule` to their `buildModules(...)`
+  list (it MUST be ahead of every session-consuming module —
+  declarationIndex order tie-breaks the route mount), (3) ensure their
+  app declares `express-session` (now a peer dependency of
+  `@o3co/auth-provider-session`).
+
+- **`BuilderContext.lifecycle?: LifecycleRegistrar` slot added**
+  (`@o3co/auth-provider-core`): `AdapterFactory` builders that create
+  disposable sub-resources (Redis clients, interval timers) SHOULD now
+  call `ctx.lifecycle?.register(async () => { await resource.close(); })`.
+  The boot planner pre-seeds a `LifecycleRegistrar` instance into the
+  bootstrap component map; modules forward it via
+  `optional: ["lifecycleRegistrar"]` and `createAdapterFactory(kind, {
+  lifecycle: deps.lifecycleRegistrar })`. `AppHandle.dispose()` drains the
+  registrar in LIFO order after component-level cleanups.
+  Existing builders that ignore `ctx` continue to work — the field is
+  additive optional. The `lifecycleRegistrar` slot is reserved by the
+  boot planner; `bootstrap-component-collision` /
+  `synthetic-key-collision` errors fire if a consumer supplies it via
+  `bootstrapComponents` / `overrideComponents`.
+
+- **`@o3co/auth-provider-session` peerDependencies**: adds
+  `express-session ^1.17.0`. Previously declared only via
+  `@types/express-session`. Standalone consumers already have it
+  installed transitively via `connect-redis`; the explicit declaration
+  documents the requirement for module pattern users.
+
+- **`RedisCodeRepository.[Symbol.asyncDispose]()` + `dispose()` added**
+  (`@o3co/auth-provider-redis`): both methods call `quit()` on the
+  underlying node-redis client (idempotent — safe to call twice).
+  `redisCodeRepositoryBuilder` now registers `repo.dispose()` with
+  `ctx.lifecycle` automatically (closes OR-2 — RedisCodeRepository
+  never quit).
+
+- **`InMemoryCodeRepository` `dispose()` registered automatically**
+  (`@o3co/auth-provider-core`): the memory `codeRepository` adapter
+  builder now registers the existing `repo.dispose()` (clears the
+  periodic-GC `setInterval`) with `ctx.lifecycle`. Closes IH-11 —
+  `setInterval` never cleared. The `setInterval` no longer keeps the
+  Node.js event loop alive past `handle.dispose()`.
+
+- **DEFERRED to a separate cross-repo PR**:
+  `repos/auth.utils/src/shutdown.mts` `gracefulShutdown()` rewrite —
+  await cleanup inside `server.close()` callback, add
+  `closeAllConnections()`. This is required as a prerequisite to v0.5.1
+  publish but ships as a `@o3co/auth.utils` patch release independent of
+  auth.provider's release cadence. (Closes OR-3.)
+
 ### Breaking Changes (Phase F — D-9 federation-tokens lock CAS, v0.5.1)
 
 - **`FederationTokenStoreClient.compareAndDelete` added** (`@o3co/auth-provider-redis`):

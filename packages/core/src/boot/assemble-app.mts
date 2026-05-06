@@ -28,6 +28,7 @@
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Express, Router } from "express";
+import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import type {
 	AppHandle,
@@ -356,7 +357,10 @@ function computeMountOrder(
  *
  * Per A2-β §8.1.
  */
-function buildDispose(frozen: FrozenWorld): () => Promise<void> {
+function buildDispose(
+	frozen: FrozenWorld,
+	lifecycleReg?: InternalLifecycleRegistrar,
+): () => Promise<void> {
 	let cachedPromise: Promise<void> | undefined;
 
 	return function dispose(): Promise<void> {
@@ -417,6 +421,28 @@ function buildDispose(frozen: FrozenWorld): () => Promise<void> {
 				}
 			}
 
+			// Step 3: D-5 LifecycleRegistrar drain (LIFO across all builder-
+			// registered cleanups). Component cleanups (Steps 1-2) ran first
+			// because they operate at the module level; sub-resource cleanups
+			// (registered via LifecycleRegistrar) operate on resources owned by
+			// those components. A Redis client backing a session store should
+			// outlive the component's own cleanup so the component can issue a
+			// final command if needed.
+			if (lifecycleReg !== undefined) {
+				const log = (frozen.components as Record<string, unknown>).logger as
+					| { error(obj: unknown): void }
+					| undefined;
+				const fallbackLogger = { error: (obj: unknown) => console.error(obj) };
+				const drainErrors = await lifecycleReg._drain(log ?? fallbackLogger);
+				for (const err of drainErrors) {
+					errorsWithOrigin.push({
+						module: "(lifecycle-registrar)",
+						componentKey: "(adapter-sub-resource)",
+						error: err,
+					});
+				}
+			}
+
 			// Step 4: reject with AggregateError if any errors accumulated (§8.1 step 4).
 			if (errorsWithOrigin.length > 0) {
 				const originSummary = errorsWithOrigin
@@ -455,7 +481,17 @@ function buildDispose(frozen: FrozenWorld): () => Promise<void> {
  */
 export function assembleApp(
 	frozen: FrozenWorld,
-	options: { readonly express?: { Router: () => Router } } = {},
+	options: {
+		readonly express?: { Router: () => Router };
+		/**
+		 * D-5: Boot-planner-owned LifecycleRegistrar threaded through createApp.
+		 * `AppHandle.dispose()` drains the registrar's cleanups in LIFO order
+		 * after the component-level cleanup steps (1-2) complete. Optional
+		 * because direct callers of `assembleApp` (test harnesses) need not
+		 * provide one — Steps 1-2 still run.
+		 */
+		readonly lifecycleReg?: InternalLifecycleRegistrar;
+	} = {},
 ): AppHandle {
 	// Pre-pass: post-apply route collision check (MUST-FIX 2 / §5.6 pre-pass).
 	// Catches collisions produced by factory-generated routes that were opaque
@@ -500,7 +536,7 @@ export function assembleApp(
 	}
 
 	// Step 3: Construct AppHandle (§6.3).
-	const dispose = buildDispose(frozen);
+	const dispose = buildDispose(frozen, options.lifecycleReg);
 
 	const handle: AppHandle = {
 		router,

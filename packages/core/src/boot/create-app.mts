@@ -30,6 +30,7 @@
  */
 
 import type { Router } from "express";
+import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
 import { assembleApp } from "./assemble-app.mjs";
@@ -94,34 +95,58 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	});
 	const validatedBootstrap = validated.bootstrapComponents;
 
-	// Stage 2: planBoot. Per A2-β §5.2.
-	const plan = planBoot(validated, validatedBootstrap, overrideComponents);
+	// D-5: Pre-seed the lifecycle registrar as a bootstrap component so modules
+	// that declare `optional: ["lifecycleRegistrar"]` receive it via deps and
+	// can forward it into `createAdapterFactory(kind, { lifecycle: ... })`.
+	// Owned by the boot planner (not consumer-overridable — guarded in
+	// validateManifests via `bootstrap-component-collision` if a consumer
+	// supplies it via overrideComponents).
+	const lifecycleReg = createLifecycleRegistrar();
+	const bootstrapWithLifecycle = {
+		...validatedBootstrap,
+		lifecycleRegistrar: lifecycleReg,
+	} as typeof validatedBootstrap;
 
-	// Stage 3: materializeComponents. Per A2-β §5.3.
-	const material = await materializeComponents(plan, validatedBootstrap, overrideComponents);
-
-	// Stage 4: applyContributions. Per A2-β §5.4.
-	const registry = await applyContributions(material, merged);
-
-	// Stage 5: freezeWorld. Per A2-β §5.5.
-	const frozen = freezeWorld(registry);
-
-	// Pre-import express before calling the synchronous assembleApp.
-	// assembleApp is synchronous but needs express.Router; pre-importing here
-	// (in the async orchestrator) avoids making assembleApp async.
-	// Per task §6.3 pattern: orchestrator does `await import("express")` and
-	// passes the result to assembleApp via options.express.
-	let expressMod: { Router: () => Router } | undefined;
 	try {
-		expressMod = (await import("express")) as { Router: () => Router };
-	} catch {
-		// express is an optional peer dep; assembleApp will fall back to
-		// createRequire if not resolvable via dynamic import.
-		expressMod = undefined;
-	}
+		// Stage 2: planBoot. Per A2-β §5.2.
+		const plan = planBoot(validated, bootstrapWithLifecycle, overrideComponents);
 
-	// Stage 6: assembleApp. Per A2-β §5.6 / §6.3.
-	return assembleApp(frozen, { express: expressMod });
+		// Stage 3: materializeComponents. Per A2-β §5.3.
+		const material = await materializeComponents(plan, bootstrapWithLifecycle, overrideComponents);
+
+		// Stage 4: applyContributions. Per A2-β §5.4.
+		const registry = await applyContributions(material, merged);
+
+		// Stage 5: freezeWorld. Per A2-β §5.5.
+		const frozen = freezeWorld(registry);
+
+		// Pre-import express before calling the synchronous assembleApp.
+		// assembleApp is synchronous but needs express.Router; pre-importing here
+		// (in the async orchestrator) avoids making assembleApp async.
+		// Per task §6.3 pattern: orchestrator does `await import("express")` and
+		// passes the result to assembleApp via options.express.
+		let expressMod: { Router: () => Router } | undefined;
+		try {
+			expressMod = (await import("express")) as { Router: () => Router };
+		} catch {
+			// express is an optional peer dep; assembleApp will fall back to
+			// createRequire if not resolvable via dynamic import.
+			expressMod = undefined;
+		}
+
+		// Stage 6: assembleApp. Per A2-β §5.6 / §6.3.
+		return assembleApp(frozen, { express: expressMod, lifecycleReg });
+	} catch (err) {
+		// D-5 partial-boot failure: any builder may have already registered a
+		// cleanup callback before a later stage threw. Best-effort drain so
+		// adapter sub-resources do not leak when boot fails.
+		await lifecycleReg._drain({
+			// Boot-failure path: no AppHandle exists yet, so no Logger slot to
+			// resolve. console.error is the only available emission channel.
+			error: (obj) => console.error("[boot-failure lifecycle drain]", obj),
+		});
+		throw err;
+	}
 }
 
 // ---------------------------------------------------------------------------

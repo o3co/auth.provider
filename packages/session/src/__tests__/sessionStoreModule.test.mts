@@ -1,0 +1,104 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ */
+
+// D-5: sessionStoreModule manifest invokes the express-session middleware
+// factory and forwards `BuilderContext.lifecycle` so the underlying session
+// store registers its disposal callback. Tests exercise the route-contribution
+// factory directly with mock deps — the boot planner integration path is
+// covered by templates/standalone/src/__tests__/smoke.test.mts.
+
+import type { LifecycleRegistrar, Module } from "@o3co/auth-provider-core";
+import { describe, expect, it } from "vitest";
+import { sessionStoreModule } from "../modules/sessionStoreModule.mjs";
+
+interface SessionLikeConfig {
+	session: {
+		secret: string;
+		secure: boolean;
+		maxAge: number;
+		sameSite: "lax" | "strict" | "none";
+		domain: string;
+		storage: { type: string };
+	};
+}
+
+const baseConfig: SessionLikeConfig = {
+	session: {
+		secret: "test-secret-at-least-32-chars-long!",
+		secure: false,
+		maxAge: 3600_000,
+		sameSite: "lax",
+		domain: "",
+		storage: { type: "memory" },
+	},
+};
+
+function makeRegistrar(): LifecycleRegistrar & { calls: Array<() => Promise<void>> } {
+	const calls: Array<() => Promise<void>> = [];
+	return {
+		register: (cleanup) => {
+			calls.push(cleanup);
+		},
+		calls,
+	};
+}
+
+describe("sessionStoreModule (D-5)", () => {
+	it("declares lifecycleRegistrar as optional and config as required", () => {
+		const m = sessionStoreModule as unknown as Module;
+		expect(m.name).toBe("sessionStoreModule");
+		expect(m.requires).toContain("config");
+		expect(m.optional).toContain("lifecycleRegistrar");
+	});
+
+	it("contributes a single route factory at mountPath '/' with id session-middleware", async () => {
+		const m = sessionStoreModule as unknown as Module;
+		expect(m.contributes?.routes).toHaveLength(1);
+		const factory = m.contributes?.routes?.[0];
+		if (typeof factory !== "function") {
+			throw new Error("expected sessionStoreModule.contributes.routes[0] to be a factory");
+		}
+		const route = await factory({
+			config: baseConfig as never,
+			lifecycleRegistrar: undefined,
+		} as never);
+		expect(route.id).toBe("session-middleware");
+		expect(route.mountPath).toBe("/");
+		// No `before` clause — declarationIndex contract per D-5 calibration.
+		expect(route.before).toBeUndefined();
+		expect(typeof route.handler).toBe("function");
+	});
+
+	it("returns a route factory whose handler is callable (express middleware shape)", async () => {
+		const m = sessionStoreModule as unknown as Module;
+		const factory = m.contributes?.routes?.[0];
+		if (typeof factory !== "function") throw new Error("not a factory");
+		const route = await factory({
+			config: baseConfig as never,
+			lifecycleRegistrar: undefined,
+		} as never);
+		// express middleware signature: (req, res, next) => void; verify it's a 3-arg function.
+		const handler = route.handler as (req: unknown, res: unknown, next: unknown) => void;
+		expect(handler.length).toBe(3);
+	});
+
+	it("forwards lifecycleRegistrar through createSessionStoreFactory (memory builder is a no-op)", async () => {
+		const m = sessionStoreModule as unknown as Module;
+		const factory = m.contributes?.routes?.[0];
+		if (typeof factory !== "function") throw new Error("not a factory");
+		const reg = makeRegistrar();
+		const route = await factory({
+			config: baseConfig as never,
+			lifecycleRegistrar: reg,
+		} as never);
+		// Route is constructed successfully even with a registrar present; the
+		// memory builder doesn't register anything (no sub-resources to clean).
+		// The redis builder path WOULD register `client.quit()` — that branch is
+		// covered by the standalone smoke test when `session.storage.type` is
+		// configured to "redis".
+		expect(route.id).toBe("session-middleware");
+		expect(reg.calls).toHaveLength(0);
+	});
+});

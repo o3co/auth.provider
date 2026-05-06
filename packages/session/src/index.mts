@@ -43,6 +43,7 @@ export {
 	supportsRefresh,
 } from "./federations/types.mjs";
 export { sessionModule } from "./module.mjs";
+export { sessionStoreModule } from "./modules/sessionStoreModule.mjs";
 export type { SessionStoreFactory } from "./store/factory.mjs";
 export {
 	createSessionStoreFactory,

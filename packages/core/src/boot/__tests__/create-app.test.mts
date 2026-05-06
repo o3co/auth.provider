@@ -358,3 +358,55 @@ describe("createApp — 6. stage 6 error: route-order-cycle → stage: assembleA
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 7. D-5 boot-failure LifecycleRegistrar drain
+// ---------------------------------------------------------------------------
+
+describe("createApp — 7. boot-failure LifecycleRegistrar drain (D-5)", () => {
+	it("registered cleanups run when a later stage fails", async () => {
+		let cleanupRan = false;
+
+		// Module A: registers a cleanup with the lifecycle registrar via
+		// optional dep, then succeeds. Module B: throws at materialization
+		// time, triggering the boot-failure path. Use the same `slotCA`/`slotCB`
+		// keys declared at the top of this file.
+		const okMod = defineModule<never, "lifecycleRegistrar">({
+			name: "OkMod-with-cleanup",
+			optional: ["lifecycleRegistrar"],
+			provides: {
+				slotCA: async (deps) => {
+					deps.lifecycleRegistrar?.register(async () => {
+						cleanupRan = true;
+					});
+					return 1;
+				},
+			},
+			lifecycle: {
+				slotCA: { eager: true },
+			},
+		});
+		const failMod = defineModule({
+			name: "FailMod",
+			provides: {
+				slotCB: async () => {
+					throw new Error("stage-3-boom");
+				},
+			},
+			lifecycle: {
+				slotCB: { eager: true },
+			},
+		});
+
+		const promise = createApp({
+			modules: [okMod, failMod],
+			bootstrapComponents: minBoot,
+			contributionKinds: makeStubCollectors(),
+		});
+
+		await expect(promise).rejects.toBeInstanceOf(BootError);
+		// The boot-failure path drained the registrar even though assembleApp
+		// was never reached.
+		expect(cleanupRan).toBe(true);
+	});
+});

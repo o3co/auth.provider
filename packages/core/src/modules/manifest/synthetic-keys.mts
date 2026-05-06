@@ -77,6 +77,12 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"tokenExchangeValidatorResolver",
 		"grantHandlerResolver",
 		"federationRedirectPolicyResolver",
+		// D-5: lifecycleRegistrar is boot-planner-owned (pre-seeded into the
+		// bootstrap map by createApp). Consumer-supplied values via
+		// bootstrapComponents/overrideComponents would create two registrars
+		// that silently diverge — the planner drains its own instance while
+		// builders register cleanups on the consumer's. Reserve the key.
+		"lifecycleRegistrar",
 	]),
 );
 

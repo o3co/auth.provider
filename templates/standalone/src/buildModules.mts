@@ -26,7 +26,7 @@ import {
 	oauthModule,
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
-import { sessionModule } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import {
 	googleFederationConfigModule,
 	keyStoreModule,
@@ -63,6 +63,12 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		(config.federations?.google as { enabled?: boolean } | undefined)?.enabled === true;
 
 	return [
+		// D-5: sessionStoreModule wires the express-session middleware into the
+		// boot-planner-managed lifecycle. **Mount order is enforced by this
+		// list position (declarationIndex tie-breaking)** — the module
+		// intentionally has no `before`/`after` clause, so it MUST be listed
+		// ahead of every session-consuming module here. Do not reorder.
+		sessionStoreModule,
 		oauthModule({ config }),
 		oauthSessionModule({ config }),
 		oauthAuthorizationModule({ config }),
