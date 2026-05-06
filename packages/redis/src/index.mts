@@ -29,6 +29,7 @@ export {
 // ---------------------------------------------------------------------------
 export type {
 	ChallengeStoreClient,
+	CodeRepositoryClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,

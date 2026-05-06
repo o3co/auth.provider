@@ -74,7 +74,22 @@ export class RedisCodeRepository implements CodeRepository {
 	constructor(client: CodeRepositoryClient, opts: RedisCodeRepositoryOptions = {}) {
 		this.client = client;
 		this.keyPrefix = opts.keyPrefix ?? DEFAULT_KEY_PREFIX;
-		this.defaultExpiresIn = opts.defaultExpiresIn ?? DEFAULT_EXPIRES_IN_SECONDS;
+		// Direct-construction guard: the module configSchema already rejects
+		// non-positive integers, but consumers calling
+		// `new RedisCodeRepository(client, { defaultExpiresIn: 0 })`
+		// directly would otherwise sail past validation and hit Redis with
+		// a bad PX argument. Reject at construction time with a clear
+		// message so the failure mode is the same regardless of wiring path.
+		// Per Copilot review on PR #122.
+		const expiresIn = opts.defaultExpiresIn;
+		if (expiresIn !== undefined) {
+			if (!Number.isInteger(expiresIn) || expiresIn <= 0) {
+				throw new RangeError(
+					`RedisCodeRepository: defaultExpiresIn must be a positive integer (seconds), got ${expiresIn}`,
+				);
+			}
+		}
+		this.defaultExpiresIn = expiresIn ?? DEFAULT_EXPIRES_IN_SECONDS;
 		this.logger = opts.logger ?? consoleLogger;
 	}
 
@@ -223,7 +238,13 @@ export const redisCodeRepositoryModule = defineModule({
 		redisCodeRepository: z
 			.object({
 				keyPrefix: z.string().optional(),
-				defaultExpiresIn: z.coerce.number().optional(),
+				// `defaultExpiresIn` controls the Redis PX TTL (seconds) for
+				// authorization codes. Constrained to a positive integer so a
+				// bad env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`,
+				// `="-1"`, or `="abc"`) fails Zod validation at boot rather
+				// than producing a non-positive PX argument that Redis rejects
+				// at first /authorize call. Per Copilot review on PR #122.
+				defaultExpiresIn: z.coerce.number().int().positive().optional(),
 			})
 			.optional(),
 	}),

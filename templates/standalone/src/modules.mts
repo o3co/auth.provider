@@ -149,14 +149,18 @@ export const inMemoryCodeRepositoryModule: Module = defineModule({
 	provides: {
 		codeRepository: async ({ config, lifecycleRegistrar }) => {
 			const ctx = { lifecycle: lifecycleRegistrar };
-			const { userFactory, codeFactory } = createRepositoryFactories(ctx);
-			registerBuiltinAdapters({ userFactory });
-			// codeFactory.register("memory", ...) is wired by registerBuiltinAdapters
-			// indirectly; the memory builder is the default registered shape. The
-			// flattened slice MAY still have `type = "redis"` when only the legacy
-			// `repositories.code.type` is set — buildModules' adapter resolution
-			// already chose memory by the time we get here, so override the type
-			// explicitly to keep this module robust against legacy HOCON shapes.
+			const { codeFactory } = createRepositoryFactories(ctx);
+			// `codeFactory.register("memory", ...)` is wired automatically by
+			// `createRepositoryFactories` itself (see core/repositories/RepositoryFactory.mts).
+			// `registerBuiltinAdapters` from `@o3co/auth-provider-foundation` only
+			// registers the HTTP user adapter on `userFactory`; it does NOT touch
+			// `codeFactory`, so calling it here would be misleading and unnecessary.
+			//
+			// The flattened slice MAY still have `type = "redis"` when only the
+			// legacy `repositories.code.type` is set — `buildModules`' adapter
+			// resolution already chose memory by the time we get here, so
+			// override the type explicitly to keep this module robust against
+			// legacy HOCON shapes.
 			const slice = flattenAdapterConfig(
 				(config as AppConfig).repositories.code as { type: string } & Record<string, unknown>,
 			);

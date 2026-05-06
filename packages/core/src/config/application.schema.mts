@@ -327,7 +327,15 @@ export const fullSectionsSchema = z.object({
 	redisCodeRepository: z
 		.object({
 			keyPrefix: z.string().optional(),
-			defaultExpiresIn: z.coerce.number().optional(),
+			// `defaultExpiresIn` is the Redis PX TTL (seconds) for OAuth
+			// authorization codes. Constrained to a positive integer: a bad
+			// env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`, `="-1"`,
+			// non-numeric) fails AppConfigSchema parse at boot rather than
+			// silently propagating to a Redis PX call that errors per
+			// request. Mirrored at the module configSchema level + at the
+			// `RedisCodeRepository` constructor for defense in depth.
+			// Per Copilot review on PR #122.
+			defaultExpiresIn: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
 });

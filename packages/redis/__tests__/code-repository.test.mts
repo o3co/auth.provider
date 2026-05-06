@@ -265,6 +265,28 @@ describe("RedisCodeRepository", () => {
 			expect(r.dispose).toBeUndefined();
 			expect(r[Symbol.asyncDispose as unknown as string]).toBeUndefined();
 		});
+
+		// Defense-in-depth: the module configSchema rejects non-positive
+		// integers at boot, but direct constructor callers must also fail
+		// loudly so the failure mode is identical regardless of wiring path.
+		// Per Copilot review on PR #122.
+		it.each([
+			["zero", 0],
+			["negative", -1],
+			["fractional", 1.5],
+			["NaN", Number.NaN],
+			["Infinity", Number.POSITIVE_INFINITY],
+		])("constructor throws RangeError when defaultExpiresIn is %s", (_label, badValue) => {
+			const c = createMockClient();
+			expect(() => new RedisCodeRepository(c, { defaultExpiresIn: badValue })).toThrow(RangeError);
+		});
+
+		it("constructor accepts undefined defaultExpiresIn (falls back to 600s default)", async () => {
+			const c = createMockClient();
+			const r = new RedisCodeRepository(c, {});
+			const result = await r.createCode(minimalParams);
+			expect(result.expiresIn).toBe(600);
+		});
 	});
 
 	// D-1 / TD-1 / IH-2 / TS-1: extended-fields round-trip
