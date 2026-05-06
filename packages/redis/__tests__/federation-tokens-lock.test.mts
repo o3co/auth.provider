@@ -63,10 +63,7 @@ describe("D-9 — lock release is atomic compare-and-delete (no spurious DEL)", 
 		}
 
 		// Post-fix: compareAndDelete called once, returned false; del NOT called.
-		expect(compareAndDeleteSpy).toHaveBeenCalledWith(
-			"ftlock:sid-1:google",
-			expect.any(String),
-		);
+		expect(compareAndDeleteSpy).toHaveBeenCalledWith("ftlock:sid-1:google", expect.any(String));
 		expect(delSpy).not.toHaveBeenCalled();
 	});
 

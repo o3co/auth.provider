@@ -416,4 +416,46 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 		expect(warnSpy).not.toHaveBeenCalled();
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
+
+	// I-1 (multi-agent-review M2): the lower-level public factory
+	// `createRedisFederationTokenStore` MUST run the same OR-12 production
+	// guard as the builder. Pre-fix the guard only ran in the builder, so a
+	// consumer calling the factory directly with `mode: "allow-plaintext"` in
+	// production shipped unencrypted refresh tokens.
+	it("createRedisFederationTokenStore (lower-level export) ALSO throws in production+allow-plaintext", () => {
+		process.env.NODE_ENV = "production";
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		const fake = createFakeRedis();
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: fake,
+				encryption: { mode: "allow-plaintext" },
+			}),
+		).toThrow(/mode "allow-plaintext" is not allowed in NODE_ENV="production"/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// I-2 (multi-agent-review convergent — Claude + Codex P2): builder structural
+// validator must reject clients missing `compareAndDelete`. Pre-fix a custom
+// client missing this method passed the builder shape check then failed at
+// first lock release with an obscure runtime TypeError.
+// ---------------------------------------------------------------------------
+
+describe("redisFederationTokenStoreBuilder structural validator", () => {
+	it("rejects clients missing compareAndDelete with a clear message", () => {
+		const oldShapeClient = {
+			get: vi.fn(),
+			set: vi.fn(),
+			del: vi.fn(),
+			scanIterator: vi.fn(),
+			// compareAndDelete intentionally absent
+		};
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{ client: oldShapeClient, encryption: { mode: "required", key: encryptionKey } },
+				{},
+			),
+		).toThrow(/missing required method.*compareAndDelete/);
+	});
 });

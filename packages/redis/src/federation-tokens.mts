@@ -103,6 +103,12 @@ interface Envelope {
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
 ): FederationTokenStoreBase & SupportsLock {
+	// OR-12: hard production guard MUST run before any encryption-key parsing
+	// so the same gate fires regardless of which entry point a consumer picks.
+	// `redisFederationTokenStoreBuilder` does its own pre-construction
+	// validation; this guard closes the gap when consumers call this lower-
+	// level factory directly (the OR-12 spec's M2 calibration delta).
+	validateEncryptionMode(opts.encryption.mode, process.env.NODE_ENV ?? "development");
 	if (opts.encryption.mode === "required" && opts.encryption.key.length !== 32) {
 		throw new Error("FederationTokenStore redis: encryption key must be 32 bytes");
 	}
@@ -258,12 +264,16 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		throw new Error("federationTokenStore.redis: 'client' option is required");
 	}
 	const clientObj = cfg.client as Record<string, unknown>;
-	const requiredMethods = ["get", "set", "del", "scanIterator"] as const;
+	// `compareAndDelete` is required by the advisory-lock release path (D-9).
+	// Validate it here so a custom client missing the method fails at builder
+	// time with a clear message rather than at first lock release with an
+	// obscure `TypeError`.
+	const requiredMethods = ["get", "set", "del", "scanIterator", "compareAndDelete"] as const;
 	const missing = requiredMethods.filter((m) => typeof clientObj[m] !== "function");
 	if (missing.length > 0) {
 		throw new Error(
 			`federationTokenStore.redis: client is missing required method(s): ${missing.join(", ")}. ` +
-				`Pass a wrapper that implements get/set/del/scanIterator (e.g. makeIoredisClients(io).federationTokenStoreClient).`,
+				`Pass a wrapper that implements get/set/del/scanIterator/compareAndDelete (e.g. makeIoredisClients(io).federationTokenStoreClient).`,
 		);
 	}
 	const mode = cfg.encryption?.mode ?? "required";
