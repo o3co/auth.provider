@@ -12,6 +12,12 @@ export default defineConfig({
 		typecheck: {
 			enabled: true,
 			tsconfig: "./tsconfig.json",
+			// Type-level assertions in __tests__/types.test.mts (per-purpose client
+			// shapes + ComponentMap declaration-merge invariants) must run through
+			// tsc rather than be silently treated as runtime no-ops. The default
+			// vitest typecheck pattern is `*.test-d.mts`; widen to include this
+			// runtime+typecheck hybrid.
+			include: ["__tests__/types.test.mts"],
 		},
 	},
 });

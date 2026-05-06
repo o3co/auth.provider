@@ -15,6 +15,15 @@ Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core
   - Upstash Redis (7.2 compatible)
   - Redis Cloud 7.2
   - Self-managed `redis:7.2-alpine`
+- **Redis Lua scripting** (`EVAL` / `EVALSHA`) — the federation-token
+  advisory lock release path is implemented via an atomic Lua compare-and-
+  delete script (D-9, closes CR-1 / OR-13 / SF-4). Lua is enabled by default
+  on Redis standalone and Sentinel mode. **Redis Cluster mode with Lua
+  scripting disabled is not supported by the bundled `makeIoredisClients()`
+  adapter** — operators on AWS ElastiCache for Redis Cluster mode must
+  either enable Lua scripting in their cluster configuration, or wire a
+  custom `FederationTokenStoreClient` whose `compareAndDelete` uses an
+  alternative atomic primitive (e.g., a Cluster-safe transaction).
 
 This package ships nine adapters covering every redis-backed component that
 `@o3co/auth-provider-core` exposes as a typed slot:

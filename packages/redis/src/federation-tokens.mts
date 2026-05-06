@@ -17,6 +17,52 @@ import { createRedisLock } from "./internal/lock.mjs";
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
+/**
+ * NODE_ENV values treated as production for the purpose of OR-12's hard guard
+ * on `allow-plaintext` encryption mode. Federation tokens carry long-lived IdP
+ * refresh tokens; storing them unencrypted in production is a security risk.
+ */
+const PRODUCTION_ENVS = new Set(["production", "staging"]);
+
+/**
+ * OR-12 — refuse to construct a federation-token store with
+ * `mode = "allow-plaintext"` in production unless the operator explicitly
+ * sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`. Logs a CRITICAL warning when the
+ * escape hatch is active. Dev/test (`NODE_ENV !== production|staging`) emits
+ * a soft `console.warn` but does not throw.
+ *
+ * Runs at factory time before the DI container is fully wired, so direct
+ * `console.*` is the appropriate emission channel (no Logger available yet).
+ */
+function validateEncryptionMode(mode: "required" | "allow-plaintext", nodeEnv: string): void {
+	if (mode === "required") return;
+	const isProduction = PRODUCTION_ENVS.has(nodeEnv);
+	const allowInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE === "1";
+
+	if (isProduction) {
+		if (allowInsecure) {
+			// Factory-time emission, no Logger available yet.
+			console.error(
+				`[federation-tokens] CRITICAL: running with mode="${mode}" in NODE_ENV="${nodeEnv}" ` +
+					"because FEDERATION_TOKENS_ALLOW_INSECURE=1. Federation tokens (IdP refresh tokens) " +
+					"are stored UNENCRYPTED. This is a security risk. Do NOT use in normal production.",
+			);
+			return;
+		}
+		throw new Error(
+			`[federation-tokens] mode "${mode}" is not allowed in NODE_ENV="${nodeEnv}". ` +
+				'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
+				"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).",
+		);
+	}
+
+	// Dev/test: warn but do not throw. Factory-time emission, no Logger available yet.
+	console.warn(
+		`[federation-tokens] WARNING: mode="${mode}" stores federation tokens (IdP refresh tokens) ` +
+			"unencrypted. Use only in development/test environments.",
+	);
+}
+
 export interface RedisFederationTokenStoreOptions {
 	client: FederationTokenStoreClient;
 	encryption: EncryptionConfig;
@@ -75,7 +121,6 @@ export function createRedisFederationTokenStore(
 	const lockKeyPrefix = `${prefix}lock:`;
 	const lock = createRedisLock({
 		client: {
-			get: (key) => opts.client.get(key),
 			set: (key, value, o) => {
 				// RedisLockClient uses options-object form; bridge to positional form.
 				if (o?.NX && o.PX !== undefined) {
@@ -84,9 +129,16 @@ export function createRedisFederationTokenStore(
 				if (o?.PX !== undefined) {
 					return opts.client.set(key, value, "PX", o.PX) as Promise<string | null>;
 				}
-				return Promise.resolve(null);
+				// CR-5 fix: unknown option shape is a programming error, not a silent
+				// no-op. The pre-D-9 silent `Promise.resolve(null)` fallback caused
+				// the lock acquire loop to spin until timeout when the bridge was
+				// passed a non-standard option shape.
+				throw new Error(
+					"FederationTokenStore lock bridge: unrecognized set() option shape. " +
+						"Expected { PX: number } or { PX: number, NX: true }.",
+				);
 			},
-			del: (key) => opts.client.del(key),
+			compareAndDelete: (key, expected) => opts.client.compareAndDelete(key, expected),
 		},
 		keyPrefix: lockKeyPrefix,
 	});
@@ -215,6 +267,11 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		);
 	}
 	const mode = cfg.encryption?.mode ?? "required";
+	const nodeEnv = process.env.NODE_ENV ?? "development";
+	// OR-12: hard production guard (throws on plaintext in production unless
+	// FEDERATION_TOKENS_ALLOW_INSECURE=1). Validate before constructing the
+	// EncryptionConfig so the failure surfaces before any key parsing.
+	validateEncryptionMode(mode, nodeEnv);
 	let encryption: EncryptionConfig;
 	if (mode === "required") {
 		const rawKey = cfg.encryption?.key;
@@ -231,10 +288,6 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		}
 		encryption = { mode: "required", key: keyBuf };
 	} else {
-		// eslint-disable-next-line no-console
-		console.warn(
-			"federationTokenStore.redis: running with encryption.mode = allow-plaintext. Do not use in production.",
-		);
 		encryption = { mode: "allow-plaintext" };
 	}
 	return createRedisFederationTokenStore({

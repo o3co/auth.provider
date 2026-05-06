@@ -9,9 +9,12 @@ import {
 	type SupportsLock,
 	supportsLock,
 } from "@o3co/auth-provider-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FederationTokenStoreClient } from "../src/clients.mjs";
-import { createRedisFederationTokenStore } from "../src/federation-tokens.mjs";
+import {
+	createRedisFederationTokenStore,
+	redisFederationTokenStoreBuilder,
+} from "../src/federation-tokens.mjs";
 
 function createFakeRedis() {
 	const data = new Map<string, string>();
@@ -46,6 +49,14 @@ function createFakeRedis() {
 			return (async function* () {
 				for (const k of matched) yield k;
 			})();
+		}),
+		compareAndDelete: vi.fn(async (k: string, expected: string): Promise<boolean> => {
+			const stored = data.get(k);
+			if (stored !== undefined && stored === expected) {
+				data.delete(k);
+				return true;
+			}
+			return false;
 		}),
 	} satisfies FederationTokenStoreClient & { data: Map<string, string>; ttls: Map<string, number> };
 }
@@ -310,5 +321,99 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 		await store.attach("sid-gh", "github", { ...tokens, expiresAt: null });
 		const round = await store.get("sid-gh", "github");
 		expect(round?.expiresAt).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// OR-12 — federation-tokens production guard for `allow-plaintext` mode
+// ---------------------------------------------------------------------------
+
+describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard", () => {
+	let origEnv: string | undefined;
+	let origInsecure: string | undefined;
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		origEnv = process.env.NODE_ENV;
+		origInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		if (origEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = origEnv;
+		if (origInsecure === undefined) delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		else process.env.FEDERATION_TOKENS_ALLOW_INSECURE = origInsecure;
+		warnSpy.mockRestore();
+		errorSpy.mockRestore();
+	});
+
+	const mockClient = createFakeRedis() as unknown as FederationTokenStoreClient;
+
+	it("throws when NODE_ENV=production and mode=allow-plaintext (no override)", () => {
+		process.env.NODE_ENV = "production";
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{},
+			),
+		).toThrow(/mode "allow-plaintext" is not allowed in NODE_ENV="production"/);
+	});
+
+	it("throws when NODE_ENV=staging and mode=allow-plaintext (no override)", () => {
+		process.env.NODE_ENV = "staging";
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{},
+			),
+		).toThrow(/mode "allow-plaintext" is not allowed in NODE_ENV="staging"/);
+	});
+
+	it("succeeds in production with FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch (emits CRITICAL)", () => {
+		process.env.NODE_ENV = "production";
+		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{},
+			),
+		).not.toThrow();
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("FEDERATION_TOKENS_ALLOW_INSECURE=1"),
+		);
+	});
+
+	it("succeeds in development with allow-plaintext (warn-only)", () => {
+		process.env.NODE_ENV = "development";
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
+				{},
+			),
+		).not.toThrow();
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("allow-plaintext"));
+	});
+
+	it("succeeds silently with mode=required in production (no warn, no throw)", () => {
+		process.env.NODE_ENV = "production";
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		const key32 = Buffer.alloc(32, 1).toString("base64");
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{
+					client: mockClient,
+					encryption: { mode: "required", key: key32 },
+				},
+				{},
+			),
+		).not.toThrow();
+		expect(warnSpy).not.toHaveBeenCalled();
+		expect(errorSpy).not.toHaveBeenCalled();
 	});
 });

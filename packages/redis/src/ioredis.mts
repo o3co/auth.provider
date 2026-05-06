@@ -19,6 +19,30 @@ import type {
 } from "./clients.mjs";
 
 /**
+ * Lua compare-and-delete script — atomic alternative to GET+DEL.
+ * Returns 1 when the key was deleted (caller's token matched), 0 otherwise.
+ * `KEYS[1]` = the lock key; `ARGV[1]` = the caller's acquire token.
+ */
+const LUA_COMPARE_AND_DELETE = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+`.trim();
+
+/**
+ * Module-level cache of the SHA-1 digest returned by `SCRIPT LOAD` for
+ * `LUA_COMPARE_AND_DELETE`. Lazily populated by the first `EVALSHA`
+ * fallback path. Module scope (not per-`makeIoredisClients` call) because
+ * the script is constant — multiple ioredis clients in the same process
+ * share the same SHA on the same Redis server. The fallback path resets
+ * this to `null` on `NOSCRIPT` (e.g. after `SCRIPT FLUSH` or cluster
+ * failover) and re-loads on the next call.
+ */
+let cachedLuaSha: string | null = null;
+
+/**
  * Wrap a single ioredis connection into the 9 typed client wrappers
  * needed by `@o3co/auth-provider-redis` adapters. Production consumers
  * use this factory in their composition root and spread the result into
@@ -215,6 +239,26 @@ export function makeIoredisClients(io: Redis): {
 					for (const key of batch as string[]) yield key;
 				}
 			})(),
+		// D-9: atomic compare-and-delete via Lua. EVALSHA + cached SHA-1 on the
+		// hot path; falls back to EVAL on NOSCRIPT (cold cache, SCRIPT FLUSH,
+		// cluster failover) and re-loads the script for future calls.
+		async compareAndDelete(key, expectedValue) {
+			if (cachedLuaSha !== null) {
+				try {
+					const r = (await io.evalsha(cachedLuaSha, 1, key, expectedValue)) as number;
+					return r === 1;
+				} catch (err) {
+					if (!(err instanceof Error) || !err.message.includes("NOSCRIPT")) throw err;
+					cachedLuaSha = null;
+					// Fall through to EVAL.
+				}
+			}
+			const r = (await io.eval(LUA_COMPARE_AND_DELETE, 1, key, expectedValue)) as number;
+			// Cache the SHA for the next call. `script("LOAD", ...)` returns
+			// the SHA-1 digest; future EVALSHA hits the server-side cache.
+			cachedLuaSha = (await io.script("LOAD", LUA_COMPARE_AND_DELETE)) as string;
+			return r === 1;
+		},
 	};
 
 	const rateLimiterClient: RateLimiterClient = {

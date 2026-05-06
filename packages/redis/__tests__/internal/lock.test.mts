@@ -9,6 +9,7 @@ import { createRedisLock, type RedisLockClient } from "../../src/internal/lock.m
 function makeFakeRedis(): RedisLockClient & {
 	data: Map<string, string>;
 	set: ReturnType<typeof vi.fn>;
+	compareAndDelete: ReturnType<typeof vi.fn>;
 } {
 	const data = new Map<string, string>();
 	const set = vi.fn(async (key: string, value: string, opts?: { PX?: number; NX?: boolean }) => {
@@ -16,11 +17,18 @@ function makeFakeRedis(): RedisLockClient & {
 		data.set(key, value);
 		return "OK";
 	});
+	const compareAndDelete = vi.fn(async (key: string, expected: string): Promise<boolean> => {
+		const stored = data.get(key);
+		if (stored !== undefined && stored === expected) {
+			data.delete(key);
+			return true;
+		}
+		return false;
+	});
 	return {
 		data,
 		set,
-		get: async (key: string) => data.get(key) ?? null,
-		del: async (key: string) => (data.delete(key) ? 1 : 0),
+		compareAndDelete,
 	};
 }
 
