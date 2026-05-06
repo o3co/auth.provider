@@ -36,6 +36,15 @@ import {
 } from "@o3co/auth-provider-redis";
 import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
+// Named import is required here, not default. Under `module: "nodenext"`
+// with esModuleInterop, the default import resolves to the entire ioredis
+// CJS module-exports namespace object (because ioredis 5.x ships
+// `export = Redis`), so `new Redis(...)` raises TS2351 "not constructable".
+// The 11 default-import sites elsewhere in the repo all live under
+// `packages/redis/__tests__/` which `packages/redis/tsconfig.json`
+// explicitly excludes from strict tsc build (vitest's vue-tsc is more
+// permissive about CJS interop). Standalone production source is built
+// with strict nodenext, so the named import is the right shape here.
 import { Redis } from "ioredis";
 
 /**
@@ -194,11 +203,7 @@ export const refreshTokenFamilyClientModule: Module = defineModule({
 	optional: ["lifecycleRegistrar"] as const,
 	provides: {
 		refreshTokenFamilyClient: async ({ config, lifecycleRegistrar }) => {
-			const cfg = (
-				config as AppConfig & {
-					refreshTokenFamilyStore?: { redis?: { url?: string; password?: string } };
-				}
-			).refreshTokenFamilyStore?.redis;
+			const cfg = (config as AppConfig).refreshTokenFamilyStore?.redis;
 			if (typeof cfg?.url !== "string" || cfg.url.length === 0) {
 				throw new Error(
 					"refreshTokenFamilyClientModule: `refreshTokenFamilyStore.redis.url` is required. " +
