@@ -57,21 +57,23 @@ let _insertionCounter = 0;
 
 /**
  * Private redis helper used by `SessionFamilyIndex` + `SessionFederationIndex`.
- * Single-key ZADD NX + PEXPIREAT … GT pipeline keyed by `${keyPrefix}${sid}`.
+ * Single-key ZADD NX + (`PEXPIREAT … NX` + `PEXPIREAT … GT`) pipeline keyed
+ * by `${keyPrefix}${sid}`.
  *
  * Per A4 §7.2.2.
  *
- * **NX semantics**: ZADD ... NX does NOT update the existing member's score.
- * Original insertion-time score is preserved, so re-add of an existing
+ * **NX semantics on ZADD**: ZADD ... NX does NOT update the existing member's
+ * score. Original insertion-time score is preserved, so re-add of an existing
  * member does NOT promote its position. Load-bearing for
  * `SessionFederationIndex` ordering contract (A4 §5.4).
  *
  * **TTL contract** (identical to `createRedisSidHash`): callers MUST pass
  * `session.expiresAt`; same-sid writes use the SAME `expiresAt`; writes
- * after expiry no-op. The `pExpireGT` (PEXPIREAT … GT) modifier ensures a
- * stale-`expiresAt` write does NOT shorten the key's existing TTL — required
- * for safety under concurrent same-sid writes (D-10 / CR-3). Requires
- * Redis 7.0+; v0.5.1 pins the floor to Redis 7.2 LTS.
+ * after expiry no-op. The `pExpireGT` method emits a `PEXPIREAT … NX` +
+ * `PEXPIREAT … GT` pair: NX sets the TTL on first write (a bare GT silently
+ * no-ops on a key with no existing TTL), GT prevents TTL truncation when
+ * a stale-`expiresAt` writer races against a longer existing TTL
+ * (D-10 / CR-3). Requires Redis 7.0+; v0.5.1 pins the floor to Redis 7.2 LTS.
  *
  * **Score**: monotonic module-level counter (see `_insertionCounter` above).
  * The counter replaces `Date.now()` as the score source to guarantee strict
