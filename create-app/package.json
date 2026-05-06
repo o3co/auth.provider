@@ -27,7 +27,11 @@
 	"scripts": {
 		"build": "tsc",
 		"prebuild": "node scripts/copy-templates.mjs",
+		"prepack": "rimraf dist && node scripts/copy-templates.mjs && tsc",
 		"test": "vitest run"
+	},
+	"engines": {
+		"node": ">=18.19.0"
 	},
 	"devDependencies": {
 		"@types/node": "^25.1.0",
