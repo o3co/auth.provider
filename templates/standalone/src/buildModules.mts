@@ -27,6 +27,7 @@ import {
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
 import {
+	redisCodeRepositoryModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 	redisSessionStoresModule,
@@ -35,6 +36,7 @@ import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import {
 	federationTokenStoreModule,
 	googleFederationConfigModule,
+	inMemoryCodeRepositoryModule,
 	inMemorySessionStoresModule,
 	keyStoreModule,
 	repositoriesModule,
@@ -81,17 +83,38 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const googleEnabled =
 		(config.federations?.google as { enabled?: boolean } | undefined)?.enabled === true;
 
-	// Wave 5d (IH-14 + OR-M1 + OR-4): adapter-driven branching for the
-	// OAuth-endpoint rate limiter and the user-session-store family. The RT
-	// family store always uses Redis in the production manifest (D-2 v2 /
-	// OR-1) unless `overrides.refreshTokenFamilyModules` swaps it out. When
-	// EITHER consumer adapter is `"redis"` (or the RT family override
-	// includes a Redis-backed store module), the shared
-	// `standaloneRedisClientsModule` is added once and provides every
-	// per-purpose ComponentMap slot from a single ioredis socket per
-	// replica. Memory-only deployments skip it.
+	// Wave 5d (IH-14 + OR-M1 + OR-4) + OR-9: adapter-driven branching for
+	// the OAuth-endpoint rate limiter, the user-session-store family, AND
+	// the OAuth code repository. The RT family store always uses Redis in
+	// the production manifest (D-2 v2 / OR-1) unless
+	// `overrides.refreshTokenFamilyModules` swaps it out. When ANY consumer
+	// adapter is `"redis"` (or the RT family override includes a
+	// Redis-backed store module), the shared `standaloneRedisClientsModule`
+	// is added once and provides every per-purpose ComponentMap slot from a
+	// single ioredis socket per replica. Memory-only deployments skip it.
 	const rateLimiterAdapter = config.rateLimiter?.adapter ?? "memory";
 	const userSessionStoresAdapter = config.userSessionStores?.adapter ?? "memory";
+
+	// OR-9: effective code-repo adapter. `oauth.code.adapter` is the
+	// authoritative switch; the legacy `repositories.code.type = "redis"`
+	// path is honored for one release with a deprecation warn so existing
+	// operators relying on `CLIENT_CODE_TYPE=redis` env-var overrides keep
+	// working until they migrate. Removed in v0.6.
+	const oauthCodeAdapter = config.oauth?.code?.adapter;
+	const legacyCodeType = (config.repositories?.code as { type?: string } | undefined)?.type;
+	let codeRepositoryAdapter: "memory" | "redis";
+	if (oauthCodeAdapter !== undefined) {
+		codeRepositoryAdapter = oauthCodeAdapter;
+	} else if (legacyCodeType === "redis") {
+		console.warn(
+			'[buildModules] `repositories.code.type = "redis"` is deprecated; use ' +
+				'`oauth.code.adapter = "redis"` instead (will be removed in v0.6).',
+		);
+		codeRepositoryAdapter = "redis";
+	} else {
+		codeRepositoryAdapter = "memory";
+	}
+
 	const refreshTokenFamilyModules: readonly Module[] = overrides.refreshTokenFamilyModules ?? [
 		redisRefreshTokenFamilyStoreModule,
 	];
@@ -106,7 +129,8 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const usingRedisAnywhere =
 		refreshTokenFamilyUsesRedis ||
 		rateLimiterAdapter === "redis" ||
-		userSessionStoresAdapter === "redis";
+		userSessionStoresAdapter === "redis" ||
+		codeRepositoryAdapter === "redis";
 
 	// Federation-token store is always wired; only the 4 user-session
 	// stores switch on the adapter. Pre-Wave-5d the redis branch dropped
@@ -121,6 +145,15 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 
 	const rateLimiterModules: Module[] =
 		rateLimiterAdapter === "redis" ? [redisRateLimiterModule] : [memoryRateLimiterModule];
+
+	// OR-9: code-repository module — mutually exclusive memory/redis pair.
+	// Same pattern as sessionStoresModules + rateLimiterModules. The two
+	// modules provide the same `codeRepository` slot; including both would
+	// be a boot-time slot collision.
+	const codeRepositoryModules: Module[] =
+		codeRepositoryAdapter === "redis"
+			? [redisCodeRepositoryModule]
+			: [inMemoryCodeRepositoryModule];
 
 	return [
 		// D-5: sessionStoreModule wires the express-session middleware into the
@@ -149,6 +182,8 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...sessionStoresModules,
 		// OAuth-endpoint rate limiter: redis (shared counters) or memory.
 		...rateLimiterModules,
+		// OAuth code repository: redis (multi-replica) or memory (single-instance).
+		...codeRepositoryModules,
 		// RT family store: redis by default (closes OR-1); override path
 		// swaps to `[memoryRefreshTokenFamilyStoreModule]` for unit tests.
 		...refreshTokenFamilyModules,

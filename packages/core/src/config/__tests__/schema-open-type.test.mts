@@ -128,6 +128,7 @@ describe("schema open type", () => {
 			},
 			rateLimit: {
 				login: { windowMs: 900000, limit: 20 },
+				failMode: "open",
 			},
 			federations: {},
 			// Legacy key — must fail. The renamed key `repositories` is absent.
@@ -293,6 +294,7 @@ describe("schema nested repositories", () => {
 		it("rateLimit.login uses windowMs, not windowSeconds", () => {
 			const result = fullSectionsSchema.shape.rateLimit.parse({
 				login: { windowMs: 900000, limit: 20 },
+				failMode: "open",
 			});
 			expect(result.login.windowMs).toBe(900000);
 			expect(result.login.limit).toBe(20);
@@ -300,6 +302,7 @@ describe("schema nested repositories", () => {
 			expect(() =>
 				fullSectionsSchema.shape.rateLimit.parse({
 					login: { windowSeconds: 900, limit: 20 },
+					failMode: "open",
 				}),
 			).toThrow();
 		});

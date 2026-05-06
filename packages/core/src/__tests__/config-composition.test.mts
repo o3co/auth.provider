@@ -187,6 +187,7 @@ describe("fullSectionsSchema endpoints optionality", () => {
 		const sessionModuleConfig = {
 			rateLimit: {
 				login: { windowMs: 60000, limit: 10 },
+				failMode: "open" as const,
 			},
 			endpoints: {
 				login: { url: "/login" },
@@ -233,6 +234,7 @@ describe("AppConfigSchema backward compatibility", () => {
 			},
 			rateLimit: {
 				login: { windowMs: 60000, limit: 10 },
+				failMode: "open",
 			},
 			federations: {
 				google: { enabled: false },

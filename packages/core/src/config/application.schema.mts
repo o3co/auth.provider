@@ -123,6 +123,23 @@ export const CoreConfigSchema = z.object({
 			expiresIn: z.coerce.number(),
 		}),
 		grants: z.object({}).passthrough(),
+		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
+		// repository. Multi-replica deployments MUST set this to `"redis"`;
+		// the in-memory variant loses codes on restart and across replicas.
+		//
+		// `adapter` is `.optional()` (not required-when-code-is-present)
+		// because the core HOCON binds it to `${?OAUTH_CODE_ADAPTER}` with
+		// no literal default — when the env var is unset, HOCON still
+		// produces an empty `oauth.code = {}` block. Requiring `adapter`
+		// here would reject that valid "no override" state. The
+		// `buildModules` legacy `repositories.code.type = "redis"` fallback
+		// only fires when `adapter` is undefined, so leaving it optional
+		// is what keeps the deprecation window real.
+		code: z
+			.object({
+				adapter: z.enum(["memory", "redis"]).optional(),
+			})
+			.optional(),
 	}),
 });
 
@@ -206,6 +223,13 @@ export const fullSectionsSchema = z.object({
 	 */
 	rateLimit: z.object({
 		login: rateLimitSchema,
+		// OR-5: fail-mode policy for the OAuth-endpoint rate limiter when
+		// the limiter backend itself errors. `"open"` (default in HOCON)
+		// preserves existing fail-open behavior + adds `logger.error`
+		// emission so operators see the outage even when the audit sink
+		// is also down. `"closed"` returns HTTP 503 + logs — recommended
+		// for security-sensitive deployments. No `.default()` per ADR.
+		failMode: z.enum(["open", "closed"]),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),
 	repositories: z.object({
@@ -291,6 +315,27 @@ export const fullSectionsSchema = z.object({
 		.object({
 			keyPrefix: z.string().optional(),
 			casRetryLimit: z.coerce.number().optional(),
+		})
+		.optional(),
+	// OR-9 (Wave 5d): module-internal config for `redisCodeRepositoryModule`.
+	// MUST be declared here (in `fullSectionsSchema`) so `AppConfigSchema.parse(...)`
+	// in `app.mts` preserves operator overrides
+	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`) before
+	// the module's `configSchema` runs at boot time. Same gotcha as D-2 v2's
+	// `redisRefreshTokenFamilyStore` block above. Defaults stay in
+	// `application.conf`; this entry is presence-only (both fields optional).
+	redisCodeRepository: z
+		.object({
+			keyPrefix: z.string().optional(),
+			// `defaultExpiresIn` is the Redis PX TTL (seconds) for OAuth
+			// authorization codes. Constrained to a positive integer: a bad
+			// env-var override (`CLIENT_CODE_DEFAULT_EXPIRES_IN=0`, `="-1"`,
+			// non-numeric) fails AppConfigSchema parse at boot rather than
+			// silently propagating to a Redis PX call that errors per
+			// request. Mirrored at the module configSchema level + at the
+			// `RedisCodeRepository` constructor for defense in depth.
+			// Per Copilot review on PR #122.
+			defaultExpiresIn: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
 });
