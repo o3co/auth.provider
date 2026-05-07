@@ -3,9 +3,6 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	"include": [
-		"src/validator/**/*.mts",
-		"src/__tests__/readonly-types.test.mts"
-	],
+	"include": ["src/validator/**/*.mts", "src/__tests__/readonly-types.test.mts"],
 	"exclude": ["node_modules", "dist"]
 }
