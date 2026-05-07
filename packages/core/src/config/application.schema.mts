@@ -121,6 +121,21 @@ export const CoreConfigSchema = z.object({
 		}),
 		refreshToken: z.object({
 			expiresIn: z.coerce.number(),
+			// CC-2 (v0.5.1): policy for refresh tokens whose `family_id` does not
+			// match a known family record. `"reject"` is the safe default; the
+			// pre-fix behavior was implicit `"accept"` (silent fall-through to
+			// success). `"accept"` is intended only for time-bounded migration
+			// windows. Per the v0.5.1 ADR the literal default lives in
+			// `application.conf`, not here.
+			unknownFamilyPolicy: z.enum(["accept", "reject"]),
+			// SF-6 (v0.5.1): policy for refresh tokens lacking `jti` or
+			// `family_id` claims when family rotation is wired. `"reject"` is
+			// the safe default; `"accept-with-warning"` skips replay detection
+			// for the request and emits an audit log — intended only for time-
+			// bounded migration windows where v0.4.x tokens are still in
+			// circulation. Per the v0.5.1 ADR the literal default lives in
+			// `application.conf`, not here.
+			legacyRtPolicy: z.enum(["reject", "accept-with-warning"]),
 		}),
 		grants: z.object({}).passthrough(),
 		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code

@@ -72,11 +72,19 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			// policy enforcement. Boot planner only injects keys listed here, so
 			// omitting them silently drops both features at the grant boundary.
 			"refreshTokenFamilyRotation", // A3 §5.2 — replaces legacy refreshTokenStore (#101)
+			// PB-1 (v0.5.1): the refresh grant must call `revokeFamily` on
+			// rotation `replayed` outcome (RFC 6819 §5.2.2). Listed optional so
+			// deployments without rotation wired (no replay path reachable)
+			// remain valid; when rotation IS wired, omitting revocation is
+			// caught at runtime by the fail-closed 503 path in
+			// `refreshToken.mts` rather than silently no-op-ing.
+			"refreshTokenFamilyRevocation",
 			"grantPolicy",
 			"userSessionStore",
 			"sessionRPRegistry", // Amendment 4 (§1.1.4)
 			"sessionFamilyIndex", // Amendment 4 (§1.1.4)
 			"sessionFederationIndex", // Amendment 4 (§1.1.4)
+			"logger", // D-4 — structured logger; security audit logs (PB-1/CC-2/SF-6)
 		],
 		contributes: { grants },
 	});

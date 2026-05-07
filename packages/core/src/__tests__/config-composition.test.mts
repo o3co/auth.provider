@@ -34,7 +34,11 @@ const minimalCoreConfig = {
 			},
 		},
 		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
+		refreshToken: {
+			expiresIn: 86400,
+			unknownFamilyPolicy: "reject",
+			legacyRtPolicy: "reject",
+		},
 		grants: {},
 	},
 };
@@ -214,7 +218,11 @@ describe("AppConfigSchema backward compatibility", () => {
 					},
 				},
 				accessToken: { expiresIn: 3600 },
-				refreshToken: { expiresIn: 86400 },
+				refreshToken: {
+					expiresIn: 86400,
+					unknownFamilyPolicy: "reject",
+					legacyRtPolicy: "reject",
+				},
 				grants: {
 					session: { enabled: true },
 					authorization_code: { enabled: true },

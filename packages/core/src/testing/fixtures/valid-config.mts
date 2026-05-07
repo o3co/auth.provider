@@ -80,7 +80,11 @@ export function makeValidCoreConfig() {
 				},
 			},
 			accessToken: { expiresIn: 3600 },
-			refreshToken: { expiresIn: 86400 },
+			refreshToken: {
+				expiresIn: 86400,
+				unknownFamilyPolicy: "reject",
+				legacyRtPolicy: "reject",
+			},
 			grants: {},
 		},
 	} satisfies CoreConfig;
