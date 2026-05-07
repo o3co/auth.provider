@@ -1680,6 +1680,12 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 		expect(result.status).toBe(503);
 		if (!("error" in result)) throw new Error("expected error");
 		expect(result.error).toBe("temporarily_unavailable");
+		// errorDescription matches the first-get's wording — the second `get` has its
+		// own try/catch (not the outer findById/addFamilyId catch) so operators see a
+		// store-availability error description, not a misleading "session linking" one.
+		expect((result as { errorDescription?: string }).errorDescription).toBe(
+			"session store unavailable",
+		);
 		expect(getCallCount).toBe(2);
 		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
 	});

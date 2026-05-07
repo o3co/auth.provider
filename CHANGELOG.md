@@ -28,9 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `sessionFamilyIndex.removeBySid(sid)` runs AFTER
   `userSessionStore.delete(sid)` to clear any orphan family-index entry
   written into the index by an authorization grant racing through the
-  remaining window described above. Idempotent (ZSET removal of a missing
-  member is a no-op) and best-effort: a failure here does not change the
-  cascade outcome (orphan entries are bounded by the family ZSET TTL even
+  remaining window described above. Idempotent per the
+  `SessionFamilyIndex.removeBySid` contract (no-op when the sid has no
+  entries) and best-effort: a failure here does not change the cascade
+  outcome (orphan entries are bounded by the family-index TTL even
   without the second pass).
 
 #### Migration

@@ -84,7 +84,7 @@ function makeSessionFederationIndex(
 // ---------------------------------------------------------------------------
 
 describe("cascadeLogout (A4 §6.2)", () => {
-	it("executes in §6.2 order: listFamilyIds → revokeFamily (each) → deleteBySession → removeBySid (×3) → delete", async () => {
+	it("executes in §6.2 order: listFamilyIds → revokeFamily (each) → deleteBySession → removeBySid (×3) → delete → post-step-4 sessionFamilyIndex.removeBySid (CR-4)", async () => {
 		const sessionFamilyIndex = makeSessionFamilyIndex({
 			listFamilyIds: vi.fn(async () => ["fam-1", "fam-2"]),
 		});
@@ -113,11 +113,14 @@ describe("cascadeLogout (A4 §6.2)", () => {
 		expect(rts.revokeFamily).toHaveBeenNthCalledWith(2, "fam-2");
 		// Step 2: federation tokens deleted
 		expect(fts.deleteBySession).toHaveBeenCalledWith("sid-1");
-		// Step 3: all three reverse-index removeBySid called
+		// Step 3: all three reverse-index removeBySid called.
 		expect(sessionRPRegistry.removeBySid).toHaveBeenCalledWith("sid-1");
-		expect(sessionFamilyIndex.removeBySid).toHaveBeenCalledWith("sid-1");
 		expect(sessionFederationIndex.removeBySid).toHaveBeenCalledWith("sid-1");
-		// Step 4: session deleted last
+		// CR-4: sessionFamilyIndex.removeBySid is now called twice — once at Step 3
+		// and again as defense-in-depth after Step 4 (see CR-4 invocation-order test
+		// below). Both calls receive the same sid argument.
+		expect(sessionFamilyIndex.removeBySid).toHaveBeenCalledWith("sid-1");
+		// Step 4: primary invalidation must succeed.
 		expect(uss.delete).toHaveBeenCalledWith("sid-1");
 	});
 

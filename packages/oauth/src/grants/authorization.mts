@@ -474,11 +474,30 @@ export const createAuthorizationGrant = (
 					// (logout fully completes before the second check). It does NOT close
 					// the sub-millisecond window between this check and `addFamilyId`;
 					// Phase F's atomic `addFamilyIdIfSessionActive` Lua EVAL closes that.
-					// A throw here is caught by the outer catch and surfaces as 503.
-					const revalidatedSession = await deps.userSessionStore.get(sid);
+					//
+					// The store-availability path is handled by its OWN try/catch (mirrors
+					// the first-get pattern at line ~437) so a Redis blip emits the same
+					// `"session store unavailable"` errorDescription as the first-get path,
+					// rather than being misattributed to the outer "session linking
+					// unavailable" catch (which spans findById + addFamilyId + registerRP).
+					let revalidatedSession: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
+					try {
+						revalidatedSession = await deps.userSessionStore.get(sid);
+					} catch {
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "session store unavailable",
+							},
+						};
+					}
 					if (!revalidatedSession) {
 						// Codex Delta 3: log security-relevant rejection so SIEMs can
-						// correlate against cascadeLogout audit events.
+						// correlate against cascadeLogout audit events. The audit payload
+						// intentionally omits a code identifier — the `Code` / `CodeData`
+						// type does not carry a stable jti, and logging the raw `code`
+						// string would leak secret material.
 						logger?.warn(
 							{ sid, clientId: authenticatedClientId },
 							"authorization_grant_rejected_session_invalidated_during_token_issuance",
