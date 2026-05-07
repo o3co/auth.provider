@@ -153,8 +153,41 @@ export async function createAsymmetricKeyStore(
 	};
 }
 
-export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
+export interface SymmetricPreviousSecret {
+	kid: string;
+	secret: string;
+	expiresAt: Date;
+}
+
+/**
+ * Creates an HS256 KeyStore that resolves the verification key by `kid`.
+ *
+ * Rotation (IH-9): when `previousSecrets` is non-empty, the keystore can
+ * verify tokens signed by an older key whose `kid` is recorded in that
+ * array. Issuance always uses the current `secret`/`kid`. Lookup is by
+ * the JWT `kid` header — the keystore returns the matching key directly,
+ * never trial-verifies across multiple keys, mirroring the asymmetric
+ * `previousKeys` rotation path.
+ */
+export function createSymmetricKeyStore(
+	secret: string,
+	kid = "v0",
+	previousSecrets: ReadonlyArray<SymmetricPreviousSecret> = [],
+): KeyStore {
 	const secretKey: KeyObject = createSecretKey(Buffer.from(secret));
+
+	const allKids = [kid, ...previousSecrets.map((p) => p.kid)];
+	const duplicates = allKids.filter((k, i) => allKids.indexOf(k) !== i);
+	if (duplicates.length > 0) {
+		throw new Error(`Duplicate kid values: ${[...new Set(duplicates)].join(", ")}`);
+	}
+
+	const resolvedPrevious: ReadonlyArray<{ kid: string; secretKey: KeyObject; expiresAt: Date }> =
+		previousSecrets.map((p) => ({
+			kid: p.kid,
+			secretKey: createSecretKey(Buffer.from(p.secret)),
+			expiresAt: p.expiresAt,
+		}));
 
 	return {
 		algorithm: "HS256",
@@ -174,14 +207,25 @@ export function createSymmetricKeyStore(secret: string, kid = "v0"): KeyStore {
 		},
 
 		async getVerificationKeys(): Promise<ManagedKey[]> {
-			return [{ kid, publicKey: secretKey }];
+			const now = new Date();
+			const active = resolvedPrevious
+				.filter((p) => p.expiresAt > now)
+				.map((p) => ({ kid: p.kid, publicKey: p.secretKey, expiresAt: p.expiresAt }));
+			return [{ kid, publicKey: secretKey }, ...active];
 		},
 
 		async getVerificationKey(requestedKid: string): Promise<KeyLike> {
-			if (requestedKid !== kid) {
+			if (requestedKid === kid) {
+				return secretKey;
+			}
+			const prev = resolvedPrevious.find((p) => p.kid === requestedKid);
+			if (!prev) {
 				throw new Error(`Unknown kid: ${requestedKid}`);
 			}
-			return secretKey;
+			if (prev.expiresAt <= new Date()) {
+				throw new Error(`Expired kid: ${requestedKid}`);
+			}
+			return prev.secretKey;
 		},
 	};
 }

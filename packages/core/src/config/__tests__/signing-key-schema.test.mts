@@ -33,7 +33,7 @@ function validLocal(overrides: Record<string, unknown> = {}) {
 		algorithm: "HS256",
 		kid: "v0",
 		secret: "s3cret",
-		previousKeys: [],
+		previousSecrets: [],
 		...overrides,
 	};
 }
@@ -85,7 +85,7 @@ describe("oauth.jwt.signingKey schema", () => {
 			jwtSchema.parse({
 				signingKey: {
 					provider: "local",
-					local: { algorithm: "HS256", kid: "v0", previousKeys: [] },
+					local: { algorithm: "HS256", kid: "v0", previousSecrets: [] },
 				},
 			}),
 		).not.toThrow();
@@ -95,6 +95,95 @@ describe("oauth.jwt.signingKey schema", () => {
 describe("AppConfigSchema exports signingKey shape (integration)", () => {
 	it("AppConfigSchema is defined and accessible", () => {
 		expect(AppConfigSchema).toBeDefined();
+	});
+});
+
+describe("signingKey.local schema - HS256 rotation (IH-9)", () => {
+	it("rejects HS256 with previousKeys (asymmetric-shaped field) via discriminated union strict", () => {
+		const result = jwtSchema.safeParse({
+			signingKey: {
+				provider: "local",
+				local: {
+					algorithm: "HS256",
+					kid: "v0",
+					secret: "s3cret",
+					previousKeys: [
+						{
+							kid: "v-old",
+							publicKey: "...pem...",
+							expiresAt: "2099-12-31T00:00:00Z",
+						},
+					],
+				},
+			},
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			// Zod's `.strict()` reports `previousKeys` as the unrecognized key
+			// inside the parent path `signingKey.local`. Combine the issue's
+			// `keys` array with its message to make the assertion robust.
+			const flagged = result.error.issues.some(
+				(issue) =>
+					(Array.isArray((issue as { keys?: unknown }).keys) &&
+						((issue as { keys?: string[] }).keys ?? []).includes("previousKeys")) ||
+					issue.message.includes("previousKeys"),
+			);
+			expect(flagged).toBe(true);
+		}
+	});
+
+	it("accepts HS256 with previousSecrets containing kid+secret+expiresAt entries", () => {
+		const result = jwtSchema.safeParse({
+			signingKey: {
+				provider: "local",
+				local: {
+					algorithm: "HS256",
+					kid: "v1",
+					secret: "new-secret",
+					previousSecrets: [
+						{
+							kid: "v0",
+							secret: "old-secret",
+							expiresAt: "2099-12-31T00:00:00Z",
+						},
+					],
+				},
+			},
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts HS256 without previousSecrets (optional field — backward compatible)", () => {
+		const result = jwtSchema.safeParse({
+			signingKey: {
+				provider: "local",
+				local: {
+					algorithm: "HS256",
+					kid: "v0",
+					secret: "s3cret",
+				},
+			},
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("flags legacy flat oauth.jwt.previousSecrets as a migration error", () => {
+		const result = jwtSchema.safeParse({
+			previousSecrets: [
+				{
+					kid: "v0",
+					secret: "old-secret",
+					expiresAt: "2099-12-31T00:00:00Z",
+				},
+			],
+			issuer: "https://auth.example.com",
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const msg = result.error.issues.map((i) => i.message).join("\n");
+			expect(msg).toMatch(/legacy flat fields/i);
+			expect(msg).toMatch(/previousSecrets/);
+		}
 	});
 });
 

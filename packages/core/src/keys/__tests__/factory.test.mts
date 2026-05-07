@@ -16,10 +16,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
+import { decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair, jwtVerify } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
+import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -63,7 +64,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 			algorithm: "HS256",
 			kid: "v1",
 			secret: "s3cret",
-			previousKeys: [],
+			previousSecrets: [],
 		});
 		expect(keyStore.algorithm).toBe("HS256");
 		expect(keyStore.getSigningKidFallback()).toBe("v1");
@@ -73,7 +74,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
 		await expect(
-			factory.create({ type: "local", algorithm: "HS256", kid: "v1", previousKeys: [] }),
+			factory.create({ type: "local", algorithm: "HS256", kid: "v1", previousSecrets: [] }),
 		).rejects.toThrow(/secret is required for HS256/i);
 	});
 
@@ -86,9 +87,85 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 				algorithm: "HS256",
 				kid: "v1",
 				secret: "",
-				previousKeys: [],
+				previousSecrets: [],
 			}),
 		).rejects.toThrow(/secret is required for HS256/i);
+	});
+});
+
+describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
+	it("factory passes previousSecrets through to createSymmetricKeyStore so an old token verifies via the new keystore", async () => {
+		// Old keystore signs a token with kid "v0".
+		const oldKs = createSymmetricKeyStore("old-secret", "v0");
+		const oldToken = await oldKs.sign({ claims: { sub: "user1" } });
+
+		// Factory builds a new keystore with v0 in previousSecrets.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		const newKs = await factory.create({
+			type: "local",
+			algorithm: "HS256",
+			kid: "v1",
+			secret: "new-secret",
+			previousSecrets: [
+				{
+					kid: "v0",
+					secret: "old-secret",
+					expiresAt: "2099-12-31T00:00:00Z",
+				},
+			],
+		});
+
+		const header = decodeProtectedHeader(oldToken);
+		expect(header.kid).toBe("v0");
+		// Pre-fix: factory drops previousSecrets, getVerificationKey("v0") throws.
+		const key = await newKs.getVerificationKey(header.kid as string);
+		const { payload } = await jwtVerify(oldToken, key);
+		expect(payload.sub).toBe("user1");
+	});
+
+	it("throws on invalid expiresAt for a previous secret", async () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "HS256",
+				kid: "v1",
+				secret: "new-secret",
+				previousSecrets: [
+					{
+						kid: "v0",
+						secret: "old-secret",
+						expiresAt: "not-a-date",
+					},
+				],
+			}),
+		).rejects.toThrow(/previousSecrets\[0\]\.expiresAt is not a valid date/i);
+	});
+
+	it("rejects HS256 config that includes asymmetric-shaped previousKeys (defense-in-depth at factory level)", async () => {
+		// Schema-level strict union already rejects this, but `factory.create()`
+		// accepts `Record<string, unknown>` and bypasses the schema. The factory
+		// must catch the misconfig directly so programmatic callers cannot
+		// reproduce the IH-9 silent-ignore bug.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "HS256",
+				kid: "v1",
+				secret: "new-secret",
+				previousKeys: [
+					{
+						kid: "v0",
+						publicKey: "...pem...",
+						expiresAt: "2099-12-31T00:00:00Z",
+					},
+				],
+			}),
+		).rejects.toThrow(/previousKeys is not valid for HS256/i);
 	});
 });
 

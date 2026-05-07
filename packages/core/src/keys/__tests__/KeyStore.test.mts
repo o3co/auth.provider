@@ -85,6 +85,125 @@ describe("SymmetricKeyStore", () => {
 	});
 });
 
+describe("SymmetricKeyStore — multi-key rotation (IH-9)", () => {
+	it("getVerificationKeys returns only current key when previousSecrets is empty", async () => {
+		const ks = createSymmetricKeyStore("current-secret", "v1", []);
+		const keys = await ks.getVerificationKeys();
+		expect(keys).toHaveLength(1);
+		expect(keys[0].kid).toBe("v1");
+	});
+
+	it("getVerificationKeys includes a non-expired previousSecret entry", async () => {
+		const ks = createSymmetricKeyStore("new-secret", "v1", [
+			{
+				kid: "v0",
+				secret: "old-secret",
+				expiresAt: new Date(Date.now() + 3_600_000),
+			},
+		]);
+		const keys = await ks.getVerificationKeys();
+		expect(keys).toHaveLength(2);
+		const kids = keys.map((k) => k.kid);
+		expect(kids).toContain("v0");
+		expect(kids).toContain("v1");
+	});
+
+	it("token signed with the current key verifies with getVerificationKey(currentKid)", async () => {
+		const ks = createSymmetricKeyStore("new-secret", "v1", [
+			{
+				kid: "v0",
+				secret: "old-secret",
+				expiresAt: new Date(Date.now() + 3_600_000),
+			},
+		]);
+		const token = await ks.sign({ claims: { sub: "user1" } });
+		const header = decodeProtectedHeader(token);
+		expect(header.kid).toBe("v1");
+		const key = await ks.getVerificationKey(header.kid as string);
+		const { payload } = await jwtVerify(token, key);
+		expect(payload.sub).toBe("user1");
+	});
+
+	it("token signed by previous key (rotated kid) verifies via previousSecrets lookup", async () => {
+		// Simulate rotation: token was signed by the old key store (kid "v0").
+		const oldKs = createSymmetricKeyStore("old-secret", "v0");
+		const oldToken = await oldKs.sign({ claims: { sub: "user1" } });
+		// New key store with v0 in previousSecrets.
+		const newKs = createSymmetricKeyStore("new-secret", "v1", [
+			{
+				kid: "v0",
+				secret: "old-secret",
+				expiresAt: new Date(Date.now() + 3_600_000),
+			},
+		]);
+		const header = decodeProtectedHeader(oldToken);
+		expect(header.kid).toBe("v0");
+		// FAILS pre-fix: throws "Unknown kid: v0".
+		const key = await newKs.getVerificationKey(header.kid as string);
+		const { payload } = await jwtVerify(oldToken, key);
+		expect(payload.sub).toBe("user1");
+	});
+
+	it("getVerificationKey throws Unknown kid for an unrelated attacker token", async () => {
+		const attackerKs = createSymmetricKeyStore("attacker-secret", "evil");
+		const attackerToken = await attackerKs.sign({ claims: { sub: "victim" } });
+		const newKs = createSymmetricKeyStore("new-secret", "v1", [
+			{
+				kid: "v0",
+				secret: "old-secret",
+				expiresAt: new Date(Date.now() + 3_600_000),
+			},
+		]);
+		const header = decodeProtectedHeader(attackerToken);
+		await expect(newKs.getVerificationKey(header.kid as string)).rejects.toThrow(
+			"Unknown kid: evil",
+		);
+	});
+
+	it("throws Duplicate kid when current kid collides with a previousSecrets entry", () => {
+		expect(() =>
+			createSymmetricKeyStore("new-secret", "v0", [
+				{
+					kid: "v0",
+					secret: "old-secret",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				},
+			]),
+		).toThrow(/Duplicate kid values: v0/);
+	});
+
+	it("throws Duplicate kid when two previousSecrets entries share the same kid", () => {
+		expect(() =>
+			createSymmetricKeyStore("new-secret", "v1", [
+				{
+					kid: "dup",
+					secret: "old-a",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				},
+				{
+					kid: "dup",
+					secret: "old-b",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				},
+			]),
+		).toThrow(/Duplicate kid values: dup/);
+	});
+
+	it("getVerificationKeys excludes expired previousSecrets and getVerificationKey throws Expired kid", async () => {
+		const ks = createSymmetricKeyStore("current-secret", "v1", [
+			{
+				kid: "expired-kid",
+				secret: "old-secret",
+				expiresAt: new Date(Date.now() - 1_000),
+			},
+		]);
+		const keys = await ks.getVerificationKeys();
+		expect(keys).toHaveLength(1);
+		expect(keys[0].kid).toBe("v1");
+		await expect(ks.getVerificationKey("expired-kid")).rejects.toThrow("Expired kid: expired-kid");
+	});
+});
+
 describe("AsymmetricKeyStore", () => {
 	it.each([
 		"ES256",

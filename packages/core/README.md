@@ -158,7 +158,7 @@ function formatObject<T extends object>(data: T): Partial<T>;
 
 ### Key Store
 
-The `KeyStore` interface abstracts over symmetric (HS256) and asymmetric (RS256, ES256, EdDSA) signing keys, including key rotation via `previousKeys`. `sign(options)` returns a compact JWT; the KeyStore self-injects the `alg` and `kid` protected header fields, so callers cannot override them. This contract lets remote-sign adapters (KMS/HSM) implement `sign()` without exposing private key material. `getSigningKidFallback()` is a cheap accessor returning the current signing kid for verifying legacy/malformed tokens that lack a `kid` header. Do not use it for rotation-safe lookup.
+The `KeyStore` interface abstracts over symmetric (HS256) and asymmetric (RS256, ES256, EdDSA) signing keys, including key rotation. Rotation is shape-specific: asymmetric algorithms use `previousKeys` (kid + publicKey + expiresAt), and HS256 uses `previousSecrets` (kid + secret + expiresAt). `getVerificationKey(kid)` resolves the key by kid — the keystore returns the matching key directly, never trial-verifies across keys. `sign(options)` returns a compact JWT; the KeyStore self-injects the `alg` and `kid` protected header fields, so callers cannot override them. This contract lets remote-sign adapters (KMS/HSM) implement `sign()` without exposing private key material. `getSigningKidFallback()` is a cheap accessor returning the current signing kid for verifying legacy/malformed tokens that lack a `kid` header. Do not use it for rotation-safe lookup.
 
 ```typescript
 type KeyLike = CryptoKey | KeyObject | Uint8Array;
@@ -203,13 +203,49 @@ interface AsymmetricKeyStoreOptions {
 
 type KeyStoreFactory = AdapterFactory<KeyStore>;
 
+interface SymmetricPreviousSecret {
+  kid: string;
+  secret: string;
+  expiresAt: Date;
+}
+
 function createAsymmetricKeyStore(options: AsymmetricKeyStoreOptions): Promise<KeyStore>;
-function createSymmetricKeyStore(secret: string, kid?: string): KeyStore;
+function createSymmetricKeyStore(
+  secret: string,
+  kid?: string,
+  previousSecrets?: ReadonlyArray<SymmetricPreviousSecret>,
+): KeyStore;
 function createKeyStoreFactory(): KeyStoreFactory;
 function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
 ```
 
 `createKeyStoreFactory` creates a new factory with no registered types. `registerBuiltinKeyStores` registers the built-in `"local"` provider, which dispatches to `createAsymmetricKeyStore` or `createSymmetricKeyStore` based on `algorithm`. The factory pattern follows the same `AdapterFactory<T>` contract as `ClientRepository`, `UserRepository`, and `CodeRepository` factories.
+
+#### HS256 key rotation (IH-9)
+
+To rotate an HS256 signing key without a maintenance window:
+
+1. Record the current `kid` and `secret` values.
+2. Generate a new secret: `openssl rand -hex 32`.
+3. Update `application.conf` to set the new `kid` + `secret` and move the old pair into `previousSecrets`:
+
+   ```hocon
+   oauth.jwt.signingKey.local {
+     algorithm = "HS256"
+     kid = "v1"           # new kid
+     secret = "<new-secret>"
+     previousSecrets = [{
+       kid = "v0"          # old kid
+       secret = "<old-secret>"
+       expiresAt = "2026-06-05T00:00:00Z"  # access-token TTL + buffer
+     }]
+   }
+   ```
+
+4. Restart the server. Tokens signed by `v0` continue to verify (resolved by `kid` from the JWT header) until `expiresAt`.
+5. After the overlap window passes (all `v0` tokens have expired), remove `v0` from `previousSecrets` and restart again.
+
+The schema rejects mixing the asymmetric `previousKeys` shape with HS256 — operators on RS256/ES256/EdDSA use the existing `previousKeys` field instead.
 
 ### Repositories
 
