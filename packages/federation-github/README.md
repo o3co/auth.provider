@@ -27,6 +27,11 @@ const githubConfigBridgeModule = defineModule({
         clientId: slice.clientId as string,
         clientSecret: slice.clientSecret as string,
         callbackURL: slice.callbackURL as string,
+        // IH-12: required. Use "oauth-app" for legacy GitHub Developer Settings
+        // OAuth App registrations (PKCE silently ignored by GitHub) and
+        // "github-app" for newer GitHub Apps (PKCE enforced). The provider
+        // emits PKCE parameters only on the github-app branch.
+        appKind: (slice.appKind as "oauth-app" | "github-app") ?? "oauth-app",
       };
     },
   },

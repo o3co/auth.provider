@@ -45,6 +45,7 @@ describe("githubFederationModule const Module", () => {
 				clientId: "abc",
 				clientSecret: "xyz",
 				callbackURL: "https://example.com/cb",
+				appKind: "oauth-app",
 			},
 		} as never);
 		expect(provider.name).toBe("github");

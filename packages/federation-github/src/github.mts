@@ -45,6 +45,24 @@ export interface GithubProviderConfig {
 	clientId: string;
 	clientSecret: string;
 	callbackURL: string;
+	/**
+	 * IH-12: discriminates between the two GitHub registration types so the
+	 * authorization-code flow only emits PKCE parameters when GitHub actually enforces
+	 * them.
+	 *
+	 * - `"oauth-app"`: GitHub OAuth Apps (Developer Settings → OAuth Apps). PKCE is NOT
+	 *   enforced by GitHub for this registration type — `code_challenge` /
+	 *   `code_verifier` are silently ignored. We omit them to remove the misleading
+	 *   security signal that PKCE is providing protection. Most consumers registered
+	 *   before the GitHub Apps platform are on this kind.
+	 * - `"github-app"`: GitHub Apps (Developer Settings → GitHub Apps). PKCE IS
+	 *   enforced. `code_challenge` + `code_challenge_method=S256` are sent on the
+	 *   authorization URL and `code_verifier` is sent on the token exchange.
+	 *
+	 * Required field — no default. Existing v0.5.0 callers MUST add `appKind:
+	 * "oauth-app"` to migrate (the legacy default is OAuth Apps; see CHANGELOG).
+	 */
+	appKind: "oauth-app" | "github-app";
 	/** Cookie / session domain used to validate redirect URLs (e.g. ".example.com"). Optional. */
 	sessionDomain?: string;
 	/** URL of the auth-callback page (used to build the post-login redirect). Optional. */
@@ -83,12 +101,22 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			readonly state: string;
 			readonly codeVerifier: string;
 		}): URL {
+			// IH-12: only emit PKCE on registration types that actually enforce it. GitHub
+			// OAuth Apps silently drop `code_challenge` / `code_challenge_method`, so sending
+			// them is a misleading security signal — strip them in the oauth-app branch.
+			// Inline the conditional spread so the inferred record type stays
+			// `Record<string, string>` (a precomputed `pkceParams` constant produces a
+			// union that openid-client's `Record<string, string>` parameter rejects).
 			return oidc.buildAuthorizationUrl(oidcConfig, {
 				redirect_uri: params.redirectUri,
 				scope: SCOPES.join(" "),
 				state: params.state,
-				code_challenge: codeChallenge(params.codeVerifier),
-				code_challenge_method: "S256",
+				...(config.appKind === "github-app"
+					? {
+							code_challenge: codeChallenge(params.codeVerifier),
+							code_challenge_method: "S256",
+						}
+					: {}),
 			});
 		},
 
@@ -101,8 +129,12 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			const callbackUrl = new URL(params.redirectUri);
 			callbackUrl.searchParams.set("code", params.code);
 
+			// IH-12: pair with `buildAuthorizationUrl` — only thread the verifier on the
+			// github-app branch so the upstream library's PKCE flow is exercised symmetrically.
+			// On oauth-app, GitHub's token endpoint ignores `pkceCodeVerifier`; omitting it
+			// keeps the request payload clean and the security contract explicit.
 			const tokens = await oidc.authorizationCodeGrant(oidcConfig, callbackUrl, {
-				pkceCodeVerifier: params.codeVerifier,
+				...(config.appKind === "github-app" ? { pkceCodeVerifier: params.codeVerifier } : {}),
 				expectedState: oidc.skipStateCheck,
 			});
 

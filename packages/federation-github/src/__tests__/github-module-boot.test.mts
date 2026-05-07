@@ -48,6 +48,8 @@ const stubGithubConfig: GithubProviderConfig = {
 	clientId: "test-client-id",
 	clientSecret: "test-client-secret",
 	callbackURL: "https://example.com/auth/github/callback",
+	// IH-12: boot integration covers the OAuth App registration shape (legacy default).
+	appKind: "oauth-app",
 	sessionDomain: "example.com",
 	authCallbackUrl: "https://example.com/auth/callback",
 	clientUrl: "https://example.com/",

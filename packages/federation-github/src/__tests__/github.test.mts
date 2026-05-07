@@ -49,6 +49,10 @@ describe("createGithubProvider on openid-client", () => {
 		clientId: "client-id",
 		clientSecret: "client-secret",
 		callbackURL: "https://app.example.com/session/oauth/federation/github/callback",
+		// IH-12: legacy registration default. Existing v0.5.0 tests run as OAuth Apps
+		// (PKCE not enforced by GitHub). Each test that needs the github-app branch
+		// constructs its own config explicitly.
+		appKind: "oauth-app" as const,
 	};
 
 	beforeEach(() => {
@@ -61,11 +65,14 @@ describe("createGithubProvider on openid-client", () => {
 		expect([...p.scope]).toEqual(["read:user", "user:email"]);
 	});
 
-	it("buildAuthorizationUrl forwards redirect_uri/state/code_challenge to openid-client with GitHub authorize URL", () => {
+	it("buildAuthorizationUrl forwards redirect_uri/state/code_challenge to openid-client with GitHub authorize URL (github-app branch)", () => {
+		// IH-12: PKCE is only emitted on the github-app branch. baseConfig is "oauth-app"
+		// (legacy default) so this test explicitly opts into github-app to exercise PKCE
+		// forwarding. Dedicated oauth-app tests below assert that those params are absent.
 		mockBuildAuthorizationUrl.mockReturnValueOnce(
 			new URL("https://github.com/login/oauth/authorize?stub=1"),
 		);
-		const p = createGithubProvider(baseConfig);
+		const p = createGithubProvider({ ...baseConfig, appKind: "github-app" });
 		const verifier = "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef";
 		const url = p.buildAuthorizationUrl({
 			redirectUri: baseConfig.callbackURL,
@@ -100,7 +107,11 @@ describe("createGithubProvider on openid-client", () => {
 				{ email: "alice@personal.com", primary: false, verified: true },
 			],
 		});
-		const p = createGithubProvider(baseConfig);
+		// IH-12: this test exercises PKCE forwarding alongside the rest of the
+		// composition contract, so opt explicitly into the github-app branch (oauth-app
+		// strips pkceCodeVerifier; that branch is covered by the dedicated IH-12 RED
+		// tests below).
+		const p = createGithubProvider({ ...baseConfig, appKind: "github-app" });
 		const profile = await p.exchangeCode({
 			code: "gh-code",
 			codeVerifier: "v",
@@ -271,5 +282,130 @@ describe("createGithubProvider on openid-client", () => {
 		const { url, method } = await p.endSession({});
 		expect(method).toBe("GET");
 		expect(url.href).toContain("https://github.com/logout");
+	});
+
+	// -----------------------------------------------------------------------
+	// IH-12 — appKind discriminator + PKCE branching
+	// -----------------------------------------------------------------------
+
+	describe("IH-12: appKind discriminator + PKCE branching", () => {
+		// IH-12 RED-1 — compile-time guard. `appKind` is a required field on
+		// GithubProviderConfig with no default; omitting it must fail tsc. The
+		// `@ts-expect-error` directive itself errors if the next line type-checks
+		// successfully, so this is the runnable form of the spec's "config without
+		// appKind → TypeScript error" assertion.
+		it("appKind is required at the type level", () => {
+			// @ts-expect-error appKind is required; omitting it must fail TypeScript.
+			createGithubProvider({
+				clientId: "id",
+				clientSecret: "sec",
+				callbackURL: "https://app.example.com/cb",
+			});
+			// Runtime: the omission compiles via the @ts-expect-error escape, and the
+			// provider returns without throwing — the contract is enforced at the type
+			// level, not at runtime, by design (matches the spec's explicit-choice goal).
+		});
+
+		// IH-12 RED-2 — oauth-app branch must NOT emit PKCE params. Pre-fix the route
+		// always sends `code_challenge` + `code_challenge_method`, GitHub silently ignores
+		// them, and consumers reading the auth URL get a misleading security signal that
+		// PKCE is binding the request.
+		it("oauth-app: buildAuthorizationUrl does not include code_challenge or code_challenge_method", () => {
+			mockBuildAuthorizationUrl.mockReturnValueOnce(
+				new URL("https://github.com/login/oauth/authorize?stub=1"),
+			);
+			const p = createGithubProvider({ ...baseConfig, appKind: "oauth-app" });
+			p.buildAuthorizationUrl({
+				redirectUri: baseConfig.callbackURL,
+				state: "s",
+				codeVerifier: "verifier-0123456789-abcdef",
+			});
+			const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [
+				unknown,
+				Record<string, unknown>,
+			];
+			expect(params.code_challenge).toBeUndefined();
+			expect(params.code_challenge_method).toBeUndefined();
+			// Sibling-fields that are NOT gated by appKind must still be present so the
+			// strip is surgical, not a regression of the rest of the auth URL.
+			expect(params.state).toBe("s");
+			expect(params.redirect_uri).toBe(baseConfig.callbackURL);
+		});
+
+		// IH-12 RED-3 — github-app branch MUST emit PKCE params (positive guard;
+		// complements the migrated existing test by asserting from the perspective of a
+		// reviewer who lands on RED-2 first and needs to confirm the branch isn't
+		// always-off).
+		it("github-app: buildAuthorizationUrl includes code_challenge=<base64url> + code_challenge_method=S256", () => {
+			mockBuildAuthorizationUrl.mockReturnValueOnce(
+				new URL("https://github.com/login/oauth/authorize?stub=1"),
+			);
+			const p = createGithubProvider({ ...baseConfig, appKind: "github-app" });
+			p.buildAuthorizationUrl({
+				redirectUri: baseConfig.callbackURL,
+				state: "s",
+				codeVerifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+			});
+			const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [
+				unknown,
+				Record<string, string>,
+			];
+			expect(params.code_challenge_method).toBe("S256");
+			expect(params.code_challenge).toMatch(/^[A-Za-z0-9_-]+$/);
+		});
+
+		// IH-12 RED-4 — oauth-app branch must NOT pass `pkceCodeVerifier` to the token
+		// exchange. GitHub OAuth Apps ignore it, and including it muddies the upstream
+		// library's idea of which flow is in use.
+		it("oauth-app: exchangeCode omits pkceCodeVerifier from authorizationCodeGrant", async () => {
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "gh-at",
+				expires_in: 28800,
+			});
+			mockFetchUserInfo.mockResolvedValueOnce({
+				id: 12345,
+				login: "octocat",
+				email: "octocat@example.com",
+			});
+			const p = createGithubProvider({ ...baseConfig, appKind: "oauth-app" });
+			await p.exchangeCode({
+				code: "auth-code",
+				codeVerifier: "v",
+				redirectUri: baseConfig.callbackURL,
+			});
+			const [, , checks] = mockAuthorizationCodeGrant.mock.calls[0] as [
+				unknown,
+				unknown,
+				Record<string, unknown>,
+			];
+			expect(checks).not.toHaveProperty("pkceCodeVerifier");
+		});
+
+		// IH-12 RED-5 — github-app branch MUST pass `pkceCodeVerifier` so openid-client
+		// posts `code_verifier` to GitHub's token endpoint and the upstream PKCE check
+		// runs.
+		it("github-app: exchangeCode passes pkceCodeVerifier to authorizationCodeGrant", async () => {
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "gh-at",
+				expires_in: 28800,
+			});
+			mockFetchUserInfo.mockResolvedValueOnce({
+				id: 12345,
+				login: "octocat",
+				email: "octocat@example.com",
+			});
+			const p = createGithubProvider({ ...baseConfig, appKind: "github-app" });
+			await p.exchangeCode({
+				code: "auth-code",
+				codeVerifier: "my-verifier",
+				redirectUri: baseConfig.callbackURL,
+			});
+			const [, , checks] = mockAuthorizationCodeGrant.mock.calls[0] as [
+				unknown,
+				unknown,
+				{ pkceCodeVerifier?: string },
+			];
+			expect(checks.pkceCodeVerifier).toBe("my-verifier");
+		});
 	});
 });
