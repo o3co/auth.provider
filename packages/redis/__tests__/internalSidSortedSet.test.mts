@@ -16,7 +16,7 @@
 
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
 
@@ -148,6 +148,111 @@ describe("createRedisSidSortedSet", () => {
 			Array.from({ length: 100 }, () => z.add("sid-conc-same", "m-shared", expiresAt)),
 		);
 		expect(await z.list("sid-conc-same")).toEqual(["m-shared"]);
+	});
+
+	// OR-8 RED tests — `_insertionCounter` monotonic across restart.
+	describe("OR-8: _insertionCounter restart-monotonicity", () => {
+		it("RED-1: two add() calls with same expiresAt — second member sorts after first in list()", async () => {
+			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-same-exp") });
+			const sharedExp = FUTURE();
+			await z.add("sid-or8-1", "first", sharedExp);
+			await z.add("sid-or8-1", "second", sharedExp);
+			// Insertion order preserved even when expiresAt is identical (the
+			// pre-fix score formula depended on the counter alone, so this case
+			// tests the same-millisecond invariant).
+			expect(await z.list("sid-or8-1")).toEqual(["first", "second"]);
+		});
+
+		it("RED-2: post-restart simulation via fresh module load — first score from a freshly-imported module exceeds an injected high pre-crash baseline", async () => {
+			// Codex review: the original RED-2 was not a meaningful TDD guard
+			// because earlier tests in this file already advanced the module-
+			// scoped `_insertionCounter` past low injected scores, so pre-fix
+			// the counter would already be high enough to win the order
+			// assertion. Force a true module reset via `vi.resetModules()` +
+			// dynamic re-import so the counter re-initialises (post-fix:
+			// `Date.now()`; pre-fix: `0`). Then inject a pre-crash score that
+			// is HIGH enough to require the Date.now() baseline to beat —
+			// `100_000` is well above any plausible counter value pre-fix
+			// (this whole test file performs ~10 adds total) and well below
+			// `Date.now()` (~1.75×10^12 in 2026). Assert via raw `zscore`
+			// that the new module's first add produces a score greater than
+			// the injected baseline.
+			//
+			// NX semantics: pre-crash members must use DIFFERENT names from
+			// the post-restart member; ZADD NX would otherwise preserve the
+			// pre-existing low score and the bug would silently mask
+			// (Codex Delta 1).
+			const sid = "sid-or8-restart-v2";
+			const key = `${prefix("or8-restart-v2")}${sid}`;
+			const PRE_CRASH_HIGH = 100_000;
+			await raw.zadd(key, "NX", PRE_CRASH_HIGH, "pre-crash-high");
+
+			vi.resetModules();
+			const fresh = (await import(
+				"../src/internal/redisSidSortedSet.mjs?freshOR8RED2"
+			)) as typeof import("../src/internal/redisSidSortedSet.mjs");
+			const z = fresh.createRedisSidSortedSet({ client, keyPrefix: prefix("or8-restart-v2") });
+			await z.add(sid, "post-restart-fresh", FUTURE());
+
+			const score = await raw.zscore(key, "post-restart-fresh");
+			expect(score).not.toBeNull();
+			expect(Number(score)).toBeGreaterThan(PRE_CRASH_HIGH);
+			// Order assertion: the high-but-pre-fix-unreachable injected
+			// score is itself > 0 yet < Date.now(), so post-fix the new
+			// member sorts AFTER the pre-crash member.
+			expect(await z.list(sid)).toEqual(["pre-crash-high", "post-restart-fresh"]);
+		});
+
+		it("RED-3: module counter is shared across multiple createRedisSidSortedSet instances — interleaved adds get strictly increasing scores globally", async () => {
+			const za = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-shared-A") });
+			const zb = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-shared-B") });
+			await za.add("sid-X", "a-1", FUTURE());
+			await zb.add("sid-X", "b-1", FUTURE());
+			await za.add("sid-X", "a-2", FUTURE());
+			await zb.add("sid-X", "b-2", FUTURE());
+
+			const scoreA1 = await raw.zscore(`${prefix("or8-shared-A")}sid-X`, "a-1");
+			const scoreB1 = await raw.zscore(`${prefix("or8-shared-B")}sid-X`, "b-1");
+			const scoreA2 = await raw.zscore(`${prefix("or8-shared-A")}sid-X`, "a-2");
+			const scoreB2 = await raw.zscore(`${prefix("or8-shared-B")}sid-X`, "b-2");
+
+			expect(scoreA1).not.toBeNull();
+			expect(scoreB1).not.toBeNull();
+			expect(scoreA2).not.toBeNull();
+			expect(scoreB2).not.toBeNull();
+			// Strict global monotonicity: a-1 < b-1 < a-2 < b-2.
+			expect(Number(scoreA1)).toBeLessThan(Number(scoreB1));
+			expect(Number(scoreB1)).toBeLessThan(Number(scoreA2));
+			expect(Number(scoreA2)).toBeLessThan(Number(scoreB2));
+		});
+
+		it("RED-4: a freshly-loaded module emits a first score that exceeds 10^12 (structural assertion of the Date.now() baseline, not a tautology)", async () => {
+			// Codex review: the previous RED-4 (`expect(Date.now() > 1e12)`)
+			// was tautological — passes through year ~33658 regardless of
+			// production state. Replaced with a structural test that exercises
+			// the module's actual init: `vi.resetModules()` re-evaluates the
+			// `let _insertionCounter = ...` line, then a single add() through
+			// the fresh instance must produce a score above 10^12. Pre-fix
+			// (counter starts at 0) the first score is `1` and this fails;
+			// post-fix (`Date.now()`) the first score is `~1.75×10^12` and
+			// this passes.
+			const sid = "sid-or8-fresh-baseline";
+			const key = `${prefix("or8-fresh-baseline")}${sid}`;
+
+			vi.resetModules();
+			const fresh = (await import(
+				"../src/internal/redisSidSortedSet.mjs?freshOR8RED4"
+			)) as typeof import("../src/internal/redisSidSortedSet.mjs");
+			const z = fresh.createRedisSidSortedSet({
+				client,
+				keyPrefix: prefix("or8-fresh-baseline"),
+			});
+			await z.add(sid, "first-after-reload", FUTURE());
+
+			const score = await raw.zscore(key, "first-after-reload");
+			expect(score).not.toBeNull();
+			expect(Number(score)).toBeGreaterThan(1_000_000_000_000);
+		});
 	});
 });
 
