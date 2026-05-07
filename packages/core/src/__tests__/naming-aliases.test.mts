@@ -21,7 +21,6 @@ import type {
 	FederationTokenStoreBase,
 } from "../federation-tokens/types.mjs";
 import type { MfaProvider, MfaProviderBase } from "../mfa/types.mjs";
-import type { GrantPolicyHookContribution } from "../modules/manifest/contributes-map.mjs";
 import type { GrantPolicyHook, GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RateLimiter, RateLimiterBase } from "../ratelimit/types.mjs";
 
@@ -56,23 +55,7 @@ describe("AS-7: deprecation aliases for *Base interfaces", () => {
 	});
 });
 
-// AS-7 collision resolution: the manifest's contributes-map placeholder
-// previously named `GrantPolicyHook` is renamed to
-// `GrantPolicyHookContribution`. The new `GrantPolicyHook` (from policy)
-// must NOT be assignable to / from `unknown` trivially — i.e. the
-// `unknown` placeholder semantics belong to `GrantPolicyHookContribution`.
-
-describe("AS-7 collision: GrantPolicyHook (policy) vs GrantPolicyHookContribution (manifest)", () => {
-	it("GrantPolicyHookContribution is the renamed manifest placeholder (still `unknown`)", () => {
-		// Type-only assertion: if the manifest-side rename ever regresses
-		// (someone reverts the placeholder back to `GrantPolicyHook`), the
-		// type-import above fails resolution and this test breaks at
-		// typecheck. The `expectTypeOf<X>().toEqualTypeOf<unknown>()` pins
-		// the placeholder semantics — Phase 9 substitution will replace
-		// `unknown` with the concrete contribution type at which point this
-		// assertion intentionally fails and must be updated alongside the
-		// substitution work.
-		expectTypeOf<GrantPolicyHookContribution>().toEqualTypeOf<unknown>();
-		expect(true).toBe(true);
-	});
-});
+// Note: the AS-7 collision resolution from PR3 introduced
+// `GrantPolicyHookContribution` (the renamed manifest placeholder). Its
+// type-equivalence assertion lives in `contributes-map-substitution.test.mts`
+// alongside the AS-M1 substitution checks (PR6 / Phase 9 substitution work).

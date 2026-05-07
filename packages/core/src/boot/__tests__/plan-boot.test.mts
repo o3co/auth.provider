@@ -14,12 +14,21 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
+import type { AuditSink } from "../../audit/types.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { planBoot } from "../plan-boot.mjs";
 import type { BootstrapMap as BM, BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
+
+// AS-M1 (Phase F F9 PR6): typed AuditSink stub for the auditHooks
+// contributions. Pre-AS-M1 the inline literal `{ name, run }` worked because
+// `AuditHook` was `unknown`; post-narrow it must satisfy `AuditSink`.
+const fakeAuditSink = (kind = "stub"): AuditSink => ({
+	kind,
+	record: async () => {},
+});
 
 // ---------------------------------------------------------------------------
 // Test-only ComponentMap slot augmentation
@@ -38,31 +47,31 @@ declare module "@o3co/auth-provider-core" {
 // collector implementations.
 // ---------------------------------------------------------------------------
 
-function makeStubNameCollector() {
-	const m = new Map<string, unknown>();
+function makeStubNameCollector<V = unknown>() {
+	const m = new Map<string, V>();
 	return {
 		kind: "name-keyed" as const,
-		register: (n: string, v: unknown) => {
+		register: (n: string, v: V) => {
 			if (m.has(n)) throw new Error(`already registered: ${n}`);
 			m.set(n, v);
 		},
-		replace: (n: string, v: unknown) => {
+		replace: (n: string, v: V) => {
 			if (!m.has(n)) throw new Error(`unknown key: ${n}`);
 			m.set(n, v);
 		},
 		get: (n: string) => m.get(n),
-		entries: () => m.entries() as IterableIterator<readonly [string, unknown]>,
+		entries: () => m.entries() as IterableIterator<readonly [string, V]>,
 	};
 }
 
-function makeStubListCollector() {
-	const arr: unknown[] = [];
+function makeStubListCollector<V = unknown>() {
+	const arr: V[] = [];
 	return {
 		kind: "list" as const,
-		append: (v: unknown) => {
+		append: (v: V) => {
 			arr.push(v);
 		},
-		values: () => arr.values() as IterableIterator<unknown>,
+		values: () => arr.values() as IterableIterator<V>,
 	};
 }
 
@@ -272,12 +281,12 @@ describe("planBoot — step 4: closure root via contributes", () => {
 			name: "C",
 			requires: ["slotC"] as const,
 			contributes: {
-				auditHooks: [() => ({ name: "hook", run: async () => {} })],
+				auditHooks: [() => fakeAuditSink("hook")],
 			},
 		});
 
 		const vm = validated([modP, modC], minBootstrap, {
-			auditHooks: makeStubListCollector(),
+			auditHooks: makeStubListCollector<AuditSink>(),
 		});
 		const plan = planBoot(vm, minBootstrap, undefined);
 
@@ -397,12 +406,12 @@ describe("planBoot — eager flag semantics", () => {
 			name: "C",
 			requires: ["slotC"] as const,
 			contributes: {
-				auditHooks: [() => ({ name: "hook", run: async () => {} })],
+				auditHooks: [() => fakeAuditSink("hook")],
 			},
 		});
 
 		const vm = validated([modP, modC], minBootstrap, {
-			auditHooks: makeStubListCollector(),
+			auditHooks: makeStubListCollector<AuditSink>(),
 		});
 		const plan = planBoot(vm, minBootstrap, undefined);
 
@@ -426,12 +435,12 @@ describe("planBoot — depsBlueprint", () => {
 			name: "C",
 			requires: ["slotC"] as const,
 			contributes: {
-				auditHooks: [() => ({ name: "hook", run: async () => {} })],
+				auditHooks: [() => fakeAuditSink("hook")],
 			},
 		});
 
 		const vm = validated([modP, modC], minBootstrap, {
-			auditHooks: makeStubListCollector(),
+			auditHooks: makeStubListCollector<AuditSink>(),
 		});
 		const plan = planBoot(vm, minBootstrap, undefined);
 
@@ -446,12 +455,12 @@ describe("planBoot — depsBlueprint", () => {
 			name: "C",
 			requires: ["slotC"] as const,
 			contributes: {
-				auditHooks: [() => ({ name: "hook", run: async () => {} })],
+				auditHooks: [() => fakeAuditSink("hook")],
 			},
 		});
 
 		const vm = validated([modP, modC], minBootstrap, {
-			auditHooks: makeStubListCollector(),
+			auditHooks: makeStubListCollector<AuditSink>(),
 		});
 		const plan = planBoot(vm, minBootstrap, undefined);
 

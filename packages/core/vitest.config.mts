@@ -23,6 +23,8 @@ export default defineConfig({
 				"src/__tests__/repository-types-readonly.test.mts",
 				// AS-7 deprecation alias type-equivalence assertions.
 				"src/__tests__/naming-aliases.test.mts",
+				// AS-M1 contributes-map concrete-type substitution assertions.
+				"src/__tests__/contributes-map-substitution.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},

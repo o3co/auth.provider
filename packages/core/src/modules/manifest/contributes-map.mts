@@ -14,72 +14,86 @@
  * limitations under the License.
  */
 
+import type { AuditSink } from "../../audit/types.mjs";
+import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
+import type { MfaProvider } from "../../mfa/types.mjs";
+import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { ProviderDeps } from "./provider.mjs";
 import type { RouteContributionEntry } from "./route-contribution.mjs";
 
-// Domain-type placeholders.
+// Domain-type substitution status (AS-M1 / Phase F F9 PR6).
 //
 // Per A2-α §4.1: each per-kind factory type produces a value owned by
-// the package that declares the kind. Phase 9 substitutes the concrete
-// types when the federation, oauth, and oauth-token-exchange packages
-// migrate to manifest shape. For now, structural placeholders avoid
-// circular package imports.
+// the package that declares the kind. The four kinds owned by `core`
+// itself have been substituted from `unknown` placeholders to their
+// concrete same-package types. The two cross-package kinds remain as
+// `unknown` pending Phase F resolution of a circular-import concern
+// (`session` and `oauth-token-exchange` are downstream of `core`, so
+// importing their types from this file would create a package-level
+// cycle).
 //
-// Inventory of concrete types (paths verified 2026-04-28):
-//   GrantHandler       — packages/core/src/grants/types.mts:67
-//   FederationProvider — packages/session/src/federations/types.mts:69
-//   ExchangeTokenValidator — packages/oauth-token-exchange/src/validator/types.mts:26
-//   MfaFactor          — no dedicated interface found; mfa uses MfaProviderBase
-//                        (packages/core/src/mfa/types.mts). Phase 9 clarifies.
-//   AuditHook          — AuditSinkBase at packages/core/src/audit/types.mts:38
-//   GrantPolicyHookContribution — placeholder; concrete type substitution
-//                        TBD by Phase 9. The canonical `GrantPolicyHook`
-//                        (alias of `GrantPolicyHookBase` at
-//                        packages/core/src/policy/types.mts:50) is the
-//                        public-API name and is exported from the package
-//                        root; this manifest placeholder describes only
-//                        the value type produced by a contribution factory.
+//   GrantHandler                — packages/core/src/grants/types.mts:120 (concrete, AS-M1)
+//   AuditHook                   — AuditSink at packages/core/src/audit/types.mts (AS-M1, canonical alias of AuditSinkBase)
+//   MfaFactor                   — MfaProvider at packages/core/src/mfa/types.mts (AS-M1, canonical alias of MfaProviderBase)
+//   GrantPolicyHookContribution — GrantPolicyHook at packages/core/src/policy/types.mts (AS-M1, canonical alias of GrantPolicyHookBase)
+//   FederationProvider          — packages/session/src/federations/types.mts (Phase F deferred — circular import)
+//   ExchangeTokenValidator      — packages/oauth-token-exchange/src/validator/types.mts (Phase F deferred — circular import)
+//
+// Canonical names are used for the substitution RHS; the deprecated
+// `*Base` aliases are kept by `audit/types.mts`, `mfa/types.mts`, and
+// `policy/types.mts` for v0.5.1-era consumer back-compat (PR3 / AS-7) but
+// new code should reference the un-suffixed canonical names.
 
 /**
- * Structural placeholder for GrantHandler. Phase 9 substitutes the concrete
- * type from packages/core/src/grants/types.mts.
+ * Type produced by a `GrantFactory<Deps>` contribution. Substituted in
+ * v0.5.1 (AS-M1) from the `unknown` placeholder to the concrete
+ * `GrantHandler` interface from `packages/core/src/grants/types.mts`.
  */
-export type GrantHandler = unknown;
+export type GrantHandler = ConcreteGrantHandler;
 
 /**
- * Structural placeholder for FederationProvider. Phase 9 substitutes the
- * concrete type from packages/session/src/federations/types.mts.
+ * Type produced by a `FederationFactory<Deps>` contribution. Still
+ * `unknown` pending Phase F: substituting with `FederationProvider` from
+ * `packages/session/src/federations/types.mts` requires resolving the
+ * core ↔ session circular package import.
  */
 export type FederationProvider = unknown;
 
 /**
- * Structural placeholder for ExchangeTokenValidator. Phase 9 substitutes the
- * concrete type from packages/oauth-token-exchange/src/validator/types.mts.
+ * Type produced by an `ExchangeTokenValidatorFactory<Deps>` contribution.
+ * Still `unknown` pending Phase F: substituting with `ExchangeTokenValidator`
+ * from `packages/oauth-token-exchange/src/validator/types.mts` requires
+ * resolving the core ↔ oauth-token-exchange circular package import.
  */
 export type ExchangeTokenValidator = unknown;
 
 /**
- * Structural placeholder for MfaFactor. Phase 9 substitutes the concrete
- * type; the mfa package uses MfaProviderBase as the extension interface.
+ * Type produced by an `MfaFactorFactory<Deps>` contribution. Substituted
+ * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
+ * `MfaProvider` (alias of `MfaProviderBase`) from
+ * `packages/core/src/mfa/types.mts`.
  */
-export type MfaFactor = unknown;
+export type MfaFactor = MfaProvider;
 
 /**
- * Structural placeholder for AuditHook. Phase 9 substitutes the concrete
- * type from packages/core/src/audit/types.mts (AuditSinkBase).
+ * Type produced by an `AuditHookFactory<Deps>` contribution. Substituted
+ * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
+ * `AuditSink` (alias of `AuditSinkBase`) from
+ * `packages/core/src/audit/types.mts`.
  */
-export type AuditHook = unknown;
+export type AuditHook = AuditSink;
 
 /**
- * Structural placeholder for the value type produced by a
- * `GrantPolicyHookFactory<Deps>` contribution on a module manifest.
+ * Type produced by a `GrantPolicyHookFactory<Deps>` contribution.
  *
- * Renamed from `GrantPolicyHook` in v0.5.1 (AS-7 collision resolution): the
- * canonical `GrantPolicyHook` now refers to the policy-package interface
- * (an alias of `GrantPolicyHookBase`). Phase 9 substitutes this placeholder
- * with the concrete type produced by a factory contribution.
+ * Renamed from `GrantPolicyHook` in v0.5.1 (AS-7 collision resolution):
+ * the canonical `GrantPolicyHook` now refers to the policy-package
+ * interface (an alias of `GrantPolicyHookBase`). Substituted in v0.5.1
+ * (AS-M1) from the `unknown` placeholder to that canonical
+ * `GrantPolicyHook` interface — a contribution factory now produces a
+ * concrete grant-policy-hook adapter rather than an opaque value.
  */
-export type GrantPolicyHookContribution = unknown;
+export type GrantPolicyHookContribution = GrantPolicyHook;
 
 // Per-kind factory types — each follows `(deps: Deps) => Value` per A2-α §4.1.
 
