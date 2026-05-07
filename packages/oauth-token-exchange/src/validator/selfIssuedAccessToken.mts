@@ -114,19 +114,18 @@ export function createSelfIssuedAccessTokenValidator(
 				if (revoked) return null;
 			}
 
-			const result: ValidatedToken = {
+			return {
 				sub: payload.sub,
 				claims: payload,
+				...(typeof payload.scope === "string" ? { scope: payload.scope } : {}),
+				...(typeof payload.aud === "string" || Array.isArray(payload.aud)
+					? { aud: payload.aud as string | string[] }
+					: {}),
+				...(familyId ? { familyId } : {}),
+				...(payload.act && typeof payload.act === "object" && !Array.isArray(payload.act)
+					? { act: payload.act as Record<string, unknown> }
+					: {}),
 			};
-			if (typeof payload.scope === "string") result.scope = payload.scope;
-			if (typeof payload.aud === "string" || Array.isArray(payload.aud)) {
-				result.aud = payload.aud as string | string[];
-			}
-			if (familyId) result.familyId = familyId;
-			if (payload.act && typeof payload.act === "object" && !Array.isArray(payload.act)) {
-				result.act = payload.act as Record<string, unknown>;
-			}
-			return result;
 		},
 	};
 }
