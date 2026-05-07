@@ -134,6 +134,14 @@ export type {
 	SessionData,
 	SessionMutation,
 } from "./grants/types.mjs";
+// JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
+export type {
+	JwtType,
+	JwtVerificationReason,
+	JwtVerifyOptions,
+	VerifiedJwt,
+} from "./jwt/verify.mjs";
+export { JwtVerificationError, verifyJwt } from "./jwt/verify.mjs";
 export type { KeyStoreFactory } from "./keys/factory.mjs";
 export { createKeyStoreFactory, registerBuiltinKeyStores } from "./keys/factory.mjs";
 // Keys

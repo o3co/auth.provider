@@ -35,9 +35,9 @@ import {
 	type SessionFederationIndex,
 	type SessionRPRegistry,
 	type UserSessionStore,
+	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { decodeProtectedHeader, jwtVerify } from "jose";
 import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
 import { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
@@ -117,6 +117,11 @@ export const createOAuthRouter = async (
 	// canonical issuer (or this router is constructed in a partial-config test
 	// fixture), the middleware falls back to the literal "oauth".
 	const issuerForRealm = (config as { oauth?: { jwt?: { issuer?: string } } }).oauth?.jwt?.issuer;
+	// SF-1: legacyTypAccept default is `true` for v0.5.x. Use the same
+	// defensive cast as `issuerForRealm` so partial-config test fixtures
+	// (no `oauth.jwt` block at all) don't throw at router construction.
+	const legacyTypAcceptOpt = (config as { oauth?: { jwt?: { legacyTypAccept?: boolean } } }).oauth
+		?.jwt?.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
@@ -318,9 +323,16 @@ export const createOAuthRouter = async (
 						return res.status(200).json({ active: false });
 					}
 					try {
-						const { kid } = decodeProtectedHeader(bearerToken);
-						const key = await keyStore.getVerificationKey(kid ?? keyStore.getSigningKidFallback());
-						await jwtVerify(bearerToken, key);
+						// SF-1: bearer self-intro — calling-client identity is not yet
+						// established (introspectClientAuthMw is skipped on this fall-
+						// through path), so audience pinning is deferred. alg / iss /
+						// typ + signature are still pinned by the central verifier.
+						await verifyJwt(bearerToken, keyStore, {
+							type: "access_token",
+							expectedIssuer: issuerForRealm ?? "",
+							legacyTypAccept: legacyTypAcceptOpt ?? true,
+							logger,
+						});
 						return next();
 					} catch {
 						return res.status(200).json({ active: false });
@@ -334,11 +346,18 @@ export const createOAuthRouter = async (
 					return res.status(200).json({ active: false });
 				}
 				try {
-					const header = decodeProtectedHeader(token);
-					const key = await keyStore.getVerificationKey(
-						header.kid ?? keyStore.getSigningKidFallback(),
-					);
-					const { payload } = await jwtVerify(token, key);
+					// SF-1: bind aud to the calling client when introspectClientAuthMw
+					// has identified them; for the bearer-self-intro fall-through path
+					// the identity is unknown and the verifier records the gap via
+					// `jwt_verify_aud_skipped`.
+					const verified = await verifyJwt(token, keyStore, {
+						type: "access_token",
+						expectedIssuer: issuerForRealm ?? "",
+						...(req.oauthClient ? { expectedAudience: req.oauthClient.clientId } : {}),
+						legacyTypAccept: legacyTypAcceptOpt ?? true,
+						logger,
+					});
+					const { payload, header } = verified;
 
 					// TODO-F-3: cascading revoke (RFC 7009 §2.1 SHOULD). When a refresh_token
 					// family has been revoked, all access_tokens minted under the same
@@ -774,6 +793,9 @@ export const createOAuthRouter = async (
 			keyStore,
 			userSessionStore,
 			refreshTokenFamilyRevocation,
+			issuer: issuerForRealm,
+			legacyTypAccept: legacyTypAcceptOpt,
+			logger,
 		}),
 	);
 
@@ -828,6 +850,7 @@ export const createOAuthRouter = async (
 				getFederationProviders,
 				auditSink,
 				logger,
+				legacyTypAccept: legacyTypAcceptOpt,
 			}),
 		);
 	}
@@ -848,6 +871,8 @@ export const createOAuthRouter = async (
 				getFederationProviders,
 				auditSink,
 				logger,
+				issuer: issuerForRealm,
+				legacyTypAccept: legacyTypAcceptOpt,
 			}),
 		);
 	}

@@ -69,6 +69,7 @@ const mockCodeRepository: CodeRepository = {
 async function makeAccessToken(overrides: Record<string, unknown> = {}): Promise<string> {
 	return new SignJWT({ sub: "u1", scope: "read", ...overrides })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+		.setIssuer("https://auth.example")
 		.setExpirationTime("1h")
 		.sign(secretKey);
 }

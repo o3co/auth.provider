@@ -374,6 +374,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 
 		const accessToken = await new SignJWT({ sub: "u-1", sid: "sid-1", family_id: "fam-1" })
 			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+			.setIssuer("https://auth.example.com")
 			.setExpirationTime("1h")
 			.setIssuedAt()
 			.sign(secretKey);

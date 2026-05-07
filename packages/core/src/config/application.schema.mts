@@ -112,6 +112,11 @@ const LEGACY_JWT_FIELDS = [
 const jwtSchemaBase = z.object({
 	issuer: z.string().optional(),
 	signingKey: signingKeySchema,
+	// SF-1 (v0.5.1): when true (default in HOCON), the central JWT verifier
+	// accepts tokens whose `typ` header is absent and emits a deprecation
+	// warning. v0.6+ should set this to false and reject typ-less tokens.
+	// Per the v0.5.1 ADR the literal default lives in `application.conf`.
+	legacyTypAccept: z.boolean().optional(),
 });
 
 /**

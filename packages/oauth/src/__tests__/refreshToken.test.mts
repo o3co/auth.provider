@@ -83,6 +83,7 @@ const DEFAULT_CLIENT_ID = "client1";
 async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
 	return new SignJWT({ sub: "u1", scope: "read write", ...overrides })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+		.setIssuer("localhost")
 		.setAudience(DEFAULT_CLIENT_ID)
 		.setExpirationTime("24h")
 		.sign(secretKey);
@@ -151,6 +152,7 @@ describe("createRefreshTokenGrant", () => {
 			// would let any authenticated client redeem any RT, defeating PB-2.
 			const token = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience("client1")
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -199,6 +201,7 @@ describe("createRefreshTokenGrant", () => {
 			// no longer rely on the `aud` fallback.
 			const legacyToken = await new SignJWT({ sub: "u1", scope: "read" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience("client1")
 				// note: no .azp claim (legacy)
 				.setExpirationTime("24h")
@@ -246,6 +249,7 @@ describe("createRefreshTokenGrant", () => {
 		it("returns 200 when client_id matches token audience", async () => {
 			const token = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience("client1")
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -347,6 +351,7 @@ describe("createRefreshTokenGrant", () => {
 			// instead of typ: "rt+jwt" in the protected header.
 			const legacyToken = await new SignJWT({ type: "refresh", sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -368,6 +373,7 @@ describe("createRefreshTokenGrant", () => {
 		it("accepts legacy tokens without kid header", async () => {
 			const legacyToken = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -467,6 +473,7 @@ describe("createRefreshTokenGrant", () => {
 			// jti AND family_id, otherwise the legacy gate fires before rotation.
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("prev-jti-replay")
@@ -505,6 +512,7 @@ describe("createRefreshTokenGrant", () => {
 			// SF-6 (v0.5.1): token must carry family_id when rotation is wired.
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("prev-jti-503")
@@ -530,6 +538,7 @@ describe("createRefreshTokenGrant", () => {
 			// SF-6 (v0.5.1): token must carry family_id when rotation is wired.
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("prev-jti-revoked")
@@ -570,6 +579,7 @@ describe("createRefreshTokenGrant", () => {
 		async function makeReplayedRt(familyId = "fam-1"): Promise<string> {
 			return new SignJWT({ sub: "u1", scope: "read write", family_id: familyId })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("jti-A")
@@ -737,6 +747,7 @@ describe("createRefreshTokenGrant", () => {
 			};
 			const rt = await new SignJWT({ sub: "u1", scope: "read", family_id: "fam-2" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("jti-fresh")
@@ -771,6 +782,7 @@ describe("createRefreshTokenGrant", () => {
 		async function makeRtWithFamily(familyId = "fam-unknown"): Promise<string> {
 			return new SignJWT({ sub: "u1", scope: "read write", family_id: familyId })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("jti-X")
@@ -910,6 +922,7 @@ describe("createRefreshTokenGrant", () => {
 			// RT with no family_id claim — familyId resolves to null
 			const rt = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("jti-no-fam")
@@ -985,6 +998,7 @@ describe("createRefreshTokenGrant", () => {
 			// Token has family_id but no jti — legacy gate must fire
 			const rt = await new SignJWT({ sub: "u1", scope: "read", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -1008,6 +1022,7 @@ describe("createRefreshTokenGrant", () => {
 			// Token has jti but no family_id
 			const rt = await new SignJWT({ sub: "u1", scope: "read" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("jti-only")
@@ -1050,6 +1065,7 @@ describe("createRefreshTokenGrant", () => {
 			// Legacy token with no jti
 			const rt = await new SignJWT({ sub: "u1", scope: "read", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.sign(secretKey);
@@ -1080,6 +1096,7 @@ describe("createRefreshTokenGrant", () => {
 			};
 			const rt = await new SignJWT({ sub: "u1", scope: "read", family_id: "fam-1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("jti-1")
@@ -1409,6 +1426,7 @@ describe("createRefreshTokenGrant", () => {
 				family_id: "fam-future",
 			})
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuer("localhost")
 				.setAudience(DEFAULT_CLIENT_ID)
 				.setExpirationTime("24h")
 				.setJti("prev-jti-future")

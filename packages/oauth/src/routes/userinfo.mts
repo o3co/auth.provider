@@ -17,11 +17,12 @@
 import {
 	filterClaimsByScope,
 	type KeyStore,
+	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type UserSessionStore,
+	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { decodeProtectedHeader, jwtVerify } from "jose";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -33,6 +34,14 @@ export interface UserinfoRouterOptions {
 	keyStore: KeyStore;
 	userSessionStore?: UserSessionStore;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
+	/** Configured issuer — pinned by the SF-1 central verifier. */
+	issuer?: string;
+	/**
+	 * SF-1 (v0.5.1): when true, accept tokens whose `typ` header is absent
+	 * (a deprecation warning is emitted). Defaults to true through v0.5.x.
+	 */
+	legacyTypAccept?: boolean;
+	logger?: Logger;
 }
 
 /**
@@ -65,23 +74,20 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		}
 		const token = auth.slice(7);
 
-		// Verify JWT signature + reject non-access tokens. Refresh tokens
-		// (typ: rt+jwt) and id_tokens (typ: id+jwt) are signed by the same
-		// KeyStore and carry sub/sid/scope claims, so without a typ check
-		// they would also pass signature verification here. RFC 9068
-		// establishes `typ: "at+jwt"` as the indicator that a JWT is
-		// specifically an OAuth 2.0 access token; userinfo is an access-token
-		// resource (OIDC Core §5.3.1), so we require that typ exactly.
+		// SF-1: alg / iss / typ + signature pinned by the central verifier
+		// (typ: at+jwt is required per RFC 9068 since userinfo is an
+		// access-token resource — OIDC Core §5.3.1). Audience pinning is
+		// deferred: userinfo is bearer-as-credential and the calling-client
+		// identity is not separately authenticated here, so the verifier
+		// records the gap via `jwt_verify_aud_skipped`.
 		let payload: Record<string, unknown>;
 		try {
-			const header = decodeProtectedHeader(token);
-			if (header.typ !== "at+jwt") {
-				throw new Error("invalid token type");
-			}
-			const key = await opts.keyStore.getVerificationKey(
-				header.kid ?? opts.keyStore.getSigningKidFallback(),
-			);
-			const verified = await jwtVerify(token, key);
+			const verified = await verifyJwt(token, opts.keyStore, {
+				type: "access_token",
+				expectedIssuer: opts.issuer ?? "",
+				legacyTypAccept: opts.legacyTypAccept ?? true,
+				logger: opts.logger,
+			});
 			payload = verified.payload as Record<string, unknown>;
 		} catch {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');

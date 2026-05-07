@@ -14,8 +14,12 @@
  * limitations under the License.
  */
 
-import type { KeyStore, RefreshTokenFamilyRevocation } from "@o3co/auth-provider-core";
-import { decodeProtectedHeader, jwtVerify } from "jose";
+import {
+	type KeyStore,
+	type Logger,
+	type RefreshTokenFamilyRevocation,
+	verifyJwt,
+} from "@o3co/auth-provider-core";
 import type {
 	ExchangeTokenValidationContext,
 	ExchangeTokenValidator,
@@ -28,6 +32,12 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	keyStore: KeyStore;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	issuer: string;
+	/**
+	 * SF-1 (v0.5.1): when true (default), the central JWT verifier accepts
+	 * tokens whose `typ` header is absent and emits a deprecation warning.
+	 */
+	legacyTypAccept?: boolean;
+	logger?: Logger;
 }
 
 /**
@@ -59,7 +69,7 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
 ): ExchangeTokenValidator {
-	const { keyStore, refreshTokenFamilyRevocation, issuer } = options;
+	const { keyStore, refreshTokenFamilyRevocation, issuer, legacyTypAccept, logger } = options;
 	if (typeof issuer !== "string" || issuer.length === 0) {
 		throw new Error(
 			"createSelfIssuedAccessTokenValidator: issuer is required (a non-empty string). Without an issuer to compare against, an at+jwt signed by the same KeyStore but with a different `iss` claim could be accepted.",
@@ -71,29 +81,24 @@ export function createSelfIssuedAccessTokenValidator(
 			token: string,
 			_context: ExchangeTokenValidationContext,
 		): Promise<ValidatedToken | null> {
+			// SF-1: alg / iss / typ (=at+jwt) + signature pinned by the central
+			// verifier. Token-type-confusion (id_tokens / logout_tokens minted by
+			// the same KeyStore) is closed by the typ pin. Audience is NOT
+			// pinned here: ExchangeTokenValidationContext intentionally does not
+			// carry the calling-client identity (the grant handler authenticated
+			// it upstream and applies may_act / policy gates downstream), so the
+			// expected aud is unknown at this layer. The verifier records the
+			// gap via `jwt_verify_aud_skipped`.
 			let payload: Record<string, unknown>;
-			let header: Awaited<ReturnType<typeof decodeProtectedHeader>>;
 			try {
-				header = decodeProtectedHeader(token);
-				const key = await keyStore.getVerificationKey(
-					header.kid ?? keyStore.getSigningKidFallback(),
-				);
-				const verified = await jwtVerify(token, key);
+				const verified = await verifyJwt(token, keyStore, {
+					type: "access_token",
+					expectedIssuer: issuer,
+					legacyTypAccept: legacyTypAccept ?? true,
+					logger,
+				});
 				payload = verified.payload as Record<string, unknown>;
 			} catch {
-				return null;
-			}
-
-			// Token-type-confusion defense: the RFC 8693 `access_token` subject_token_type
-			// means "a token that was issued as an access_token". Reject any JWT whose
-			// `typ` header is anything other than `at+jwt` — in particular id_tokens
-			// (typ=JWT or typ=id+jwt) and logout_tokens (typ=logout+jwt) minted by the
-			// same KeyStore must never be accepted as a Token Exchange subject.
-			if (header.typ !== "at+jwt") {
-				return null;
-			}
-
-			if (payload.iss !== issuer) {
 				return null;
 			}
 

@@ -25,9 +25,8 @@ import type {
 	SessionFederationIndex,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { emitAuditEvent, supportsLock } from "@o3co/auth-provider-core";
+import { emitAuditEvent, supportsLock, verifyJwt } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { decodeProtectedHeader, jwtVerify } from "jose";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -89,6 +88,13 @@ export interface FederationTokenRouterOptions {
 	 * Default: 30_000 (30 seconds).
 	 */
 	refreshBufferMs?: number;
+	/** Configured issuer — pinned by the SF-1 central verifier. */
+	issuer?: string;
+	/**
+	 * SF-1 (v0.5.1): when true (default), accept tokens whose `typ` header is
+	 * absent and emit a deprecation warning. v0.6+ should set this to false.
+	 */
+	legacyTypAccept?: boolean;
 }
 
 /**
@@ -125,17 +131,18 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		}
 		const token = auth.slice(auth.indexOf(" ") + 1);
 
-		// Step 2 + 3: Verify JWT signature + check typ === "at+jwt".
+		// Step 2 + 3: SF-1 — alg / iss / typ (=at+jwt) + signature pinned by
+		// the central verifier. Audience is deferred — bearer-as-credential
+		// route, calling-client identity is not separately authenticated; the
+		// verifier records the gap via `jwt_verify_aud_skipped`.
 		let payload: Record<string, unknown>;
 		try {
-			const header = decodeProtectedHeader(token);
-			if (header.typ !== "at+jwt") {
-				throw new Error("invalid token type");
-			}
-			const key = await opts.keyStore.getVerificationKey(
-				header.kid ?? opts.keyStore.getSigningKidFallback(),
-			);
-			const verified = await jwtVerify(token, key);
+			const verified = await verifyJwt(token, opts.keyStore, {
+				type: "access_token",
+				expectedIssuer: opts.issuer ?? "",
+				legacyTypAccept: opts.legacyTypAccept ?? true,
+				logger: opts.logger,
+			});
 			payload = verified.payload as Record<string, unknown>;
 		} catch (error) {
 			logger.warn(

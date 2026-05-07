@@ -22,8 +22,9 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	verifyJwt,
 } from "@o3co/auth-provider-core";
-import { decodeProtectedHeader, type JWTPayload, jwtVerify } from "jose";
+import type { JWTPayload } from "jose";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
@@ -68,13 +69,22 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			let tokenPayload: JWTPayload;
 			let typ: string | undefined;
 			try {
-				const header = decodeProtectedHeader(refreshTokenValue);
-				typ = header.typ;
-				const key = await keyStore.getVerificationKey(
-					header.kid ?? keyStore.getSigningKidFallback(),
-				);
-				const { payload } = await jwtVerify(refreshTokenValue, key);
-				tokenPayload = payload;
+				// SF-1: pin alg / iss / typ + signature in one place.
+				// aud + azp are NOT pinned at the verifier — the manual azp /
+				// aud-fallback check below produces a more specific error
+				// ("refresh_token was not issued to this client", which is the
+				// PB-2 binding-violation signal) and accommodates pre-D-6 RTs
+				// that emit aud only (no azp). v0.6+ can pass
+				// `expectedAzp: authenticatedClientId` once the legacy upgrade
+				// window closes and remove the manual check.
+				const verified = await verifyJwt(refreshTokenValue, keyStore, {
+					type: "refresh_token",
+					expectedIssuer: issuer ?? "",
+					legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? true,
+					logger,
+				});
+				tokenPayload = verified.payload;
+				typ = verified.header.typ;
 			} catch {
 				return {
 					result: {
@@ -85,7 +95,12 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			// Accept both new typ header ("rt+jwt") and legacy type payload ("refresh")
+			// SF-1 retains this gate so a typ-less but signature-valid v0.4 token
+			// (legacyTypAccept=true at the verifier) is still required to declare
+			// "refresh" via the legacy `type` payload field. Without this guard
+			// the central verifier's typ-skip would silently accept any AT lacking
+			// typ as a refresh token. v0.6+ flips legacyTypAccept=false at the
+			// verifier and removes this block.
 			const legacyType = (tokenPayload as Record<string, unknown>).type;
 			if (typ !== "rt+jwt" && legacyType !== "refresh") {
 				return {

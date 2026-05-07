@@ -52,7 +52,10 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 	});
 
 	it("returns null for an expired token", async () => {
-		const token = await signSelfIssuedAccessToken({}, { expiresIn: "-1s" });
+		// SF-1: the central verifier defaults clockSkewMs to 300_000 (5 min)
+		// per RFC 8725 §3.10, so a "-1s" past exp falls inside skew. Use a
+		// past exp well beyond the default skew so the rejection is robust.
+		const token = await signSelfIssuedAccessToken({}, { expiresIn: "-10m" });
 		const result = await validator().validate(token, { role: "subject" });
 		expect(result).toBeNull();
 	});
