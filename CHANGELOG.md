@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security (Phase F — F6 PR2 PKCE + RT family hardening, v0.5.1)
+
+- **PKCE `code_verifier` comparison is now timing-safe** (`@o3co/auth-provider-oauth`,
+  closes SF-3 + MIN-4): both the S256 and `plain` branches in the
+  authorization-code grant now use `constantTimeStringEqual` (re-exported
+  from `@o3co/auth-provider-core`), replacing JavaScript `!==` whose
+  short-circuit on the first mismatched byte leaked progress information
+  about how many bytes of a candidate verifier matched the stored challenge
+  (RFC 7636 §4.1, OAuth 2.1 BCP §4.5). The helper encodes inputs to UTF-8
+  buffers before the byte-length comparison so it is safe for any string
+  including multi-byte Unicode.
+
+- **`/authorize` bounds the OIDC `nonce` query parameter** (`@o3co/auth-provider-oauth`,
+  closes IH-16): nonce values exceeding 256 characters or containing
+  non-printable bytes are rejected via `redirectError invalid_request`.
+  Pre-fix, an unbounded nonce was stored on the code record and echoed
+  verbatim into the `id_token` payload — a malicious RP could exhaust
+  per-request memory or amplify the JWT payload by several orders of
+  magnitude. The ceiling is configurable via `oauth.nonce.maxLength`
+  (env `OAUTH_NONCE_MAX_LENGTH`, default 256). Standard OIDC libraries
+  generate 22–44 char nonces, so legitimate clients are unaffected.
+
+- **Refresh-token family TTL is fixed at creation, no longer slides**
+  (`@o3co/auth-provider-core`, closes IH-13): the rotation wrapper now
+  applies `Math.min(requestedExpiresAtMs, current.expiresAtMs)` inside the
+  CAS updater so subsequent rotations cannot extend the family's absolute
+  ceiling. Before this fix, every rotation re-stamped `expiresAtMs` to
+  `now + refreshToken.expiresIn`, letting an attacker who continuously
+  rotated a stolen RT keep the family alive indefinitely (OAuth 2.1 BCP
+  §4.14.1). The committed ceiling is exposed via the new optional
+  `cappedExpiresAtMs` field on the `"rotated"` outcome — reserved for a
+  Phase F follow-up that re-mints the issued JWT to match. For v0.5.1 the
+  storage-level cap is the security primary; the issued refresh-token
+  JWT's `exp` claim may still reflect `now + expiresIn` and the actual
+  refresh-token lifetime is bounded by the server-side family TTL.
+
+- **`pkceConfig.supportedMethods` element-type validation** (`@o3co/auth-provider-oauth`,
+  closes TS-4): a new `resolvePkceSupportedMethods` helper replaces the
+  duplicated `Array.isArray(...) ? (... as string[])` cast at
+  `authorization.mts:57` and `routes.mts:431`. The cast was compile-time
+  only — operator config such as `pkce.supportedMethods = [123, null, "S256"]`
+  would have been accepted as `string[]` at the type level and the
+  non-string elements silently relied on `.includes()` mismatch to be
+  filtered. The helper performs per-element type narrowing, falls back to
+  `["S256", "plain"]` on empty / non-array / all-non-string input, and
+  emits a structured `pkce_supportedMethods_non_string_filtered` warn log
+  when filtering occurs (logger plumbing at the call sites is deferred to
+  D-4).
+
+#### Migration
+
+No client- or operator-visible behavioural changes for well-formed
+configurations. Operators using `oauth.nonce.maxLength` env override should
+note the field name (`OAUTH_NONCE_MAX_LENGTH`). Custom rotation-wrapper
+implementations that destructure the `"rotated"` outcome remain
+source-compatible because `cappedExpiresAtMs` is optional.
+
 ### BREAKING (Phase F — F6 PR1 D-6 PB-2 client authentication redesign, v0.5.1)
 
 - **`Client` interface gains `tokenEndpointAuthMethod`** (`@o3co/auth-provider-core`)

@@ -111,6 +111,13 @@ async function buildAuthorizeApp(opts: {
 	sessionFields: Record<string, unknown>;
 	captureCode: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
 	captureSession?: (session: Record<string, unknown>) => void;
+	/**
+	 * Optional config override merged into the default `authorizeConfig`.
+	 * Used by IH-16 tests that need to set a non-default
+	 * `oauth.nonce.maxLength` so the configurable code path is exercised
+	 * (the no-override path uses the `?? 256` fallback only).
+	 */
+	configOverride?: Partial<AppConfig>;
 }) {
 	const app = express();
 	app.use(express.json());
@@ -143,9 +150,22 @@ async function buildAuthorizeApp(opts: {
 		removeByCode: async () => {},
 	};
 
+	const mergedConfig = (
+		opts.configOverride
+			? {
+					...authorizeConfig,
+					...opts.configOverride,
+					oauth: {
+						...(authorizeConfig as unknown as { oauth: Record<string, unknown> }).oauth,
+						...((opts.configOverride as { oauth?: Record<string, unknown> }).oauth ?? {}),
+					},
+				}
+			: authorizeConfig
+	) as AppConfig;
+
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
-		config: authorizeConfig,
+		config: mergedConfig,
 		clientRepository: authorizeClientRepo,
 		codeRepository: codeRepo,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -582,6 +602,154 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 		expect(captured?.nonce).toBeUndefined();
 		// sid is still captured even without nonce
 		expect(captured?.sid).toBe("sid-1");
+	});
+});
+
+// IH-16 (v0.5.1): /authorize must bound the `nonce` query parameter.
+//
+// Pre-IH-16 the route accepted any-length nonce verbatim and stored it on
+// the code record + echoed it into the id_token. A malicious RP sending
+// nonce=<huge-string> could exhaust per-request memory or amplify the
+// id_token payload. The route now enforces a default 256-char ceiling
+// (configurable via `oauth.nonce.maxLength`) and rejects non-printable
+// ASCII via `redirectError` — the redirect_uri is already client-allowlisted
+// at this point in the route, so RFC 6749 §4.1.2.1 redirect-based errors
+// apply (Codex calibration delta 2).
+describe("IH-16: /authorize nonce length + character-set validation", () => {
+	it("accepts a normal-sized printable nonce (32 chars)", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+
+		const nonce = "a".repeat(32);
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			nonce,
+		});
+
+		// Successful /authorize redirects (302) to redirect_uri with `code` —
+		// the absence of an `error` parameter confirms the gate passed.
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.nonce).toBe(nonce);
+	});
+
+	it("accepts a nonce at the boundary (256 chars exactly)", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+
+		const nonce = "a".repeat(256);
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			nonce,
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.nonce).toBe(nonce);
+	});
+
+	it("rejects an oversized nonce (257 chars) with redirect-based invalid_request", async () => {
+		const captureCode = vi.fn();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode,
+		});
+
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				state: "client-state-xyz",
+				nonce: "a".repeat(257),
+			});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.origin + location.pathname).toBe("https://example.test/cb");
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		expect(location.searchParams.get("error_description")).toMatch(/nonce/i);
+		// `state` MUST round-trip on error redirects per RFC 6749 §4.1.2.1.
+		expect(location.searchParams.get("state")).toBe("client-state-xyz");
+		expect(captureCode).not.toHaveBeenCalled();
+	});
+
+	it("rejects a non-printable nonce with redirect-based invalid_request", async () => {
+		const captureCode = vi.fn();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode,
+		});
+
+		// `\x00` is below the printable ASCII range (0x20-0x7E).
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			nonce: "a\x00b",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.origin + location.pathname).toBe("https://example.test/cb");
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		expect(location.searchParams.get("error_description")).toMatch(/non-printable|character/i);
+		expect(captureCode).not.toHaveBeenCalled();
+	});
+
+	it("honours an operator-configured `oauth.nonce.maxLength` (not just the default 256)", async () => {
+		// Without this test, the configurable code path was completely
+		// untested — the other IH-16 tests exercise only the `?? 256`
+		// fallback. Drop the limit to 10 and verify both an 11-char nonce
+		// rejects and a 10-char nonce passes; this proves
+		// `config.oauth.nonce.maxLength` actually flows through to the gate.
+		const captureCode = vi.fn();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-1" },
+			captureCode,
+			configOverride: {
+				oauth: {
+					jwt: { issuer: "https://auth.example" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					nonce: { maxLength: 10 },
+				},
+			} as unknown as Partial<AppConfig>,
+		});
+
+		// Over the operator limit — must redirect-error with the configured value.
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				nonce: "a".repeat(11),
+			});
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBe("invalid_request");
+		// The error description must echo the OPERATOR's value (not 256) —
+		// proves the override took effect.
+		expect(location.searchParams.get("error_description")).toMatch(/maximum length of 10\b/);
+		expect(captureCode).not.toHaveBeenCalled();
 	});
 });
 

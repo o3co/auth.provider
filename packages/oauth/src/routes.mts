@@ -38,6 +38,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { decodeProtectedHeader, jwtVerify } from "jose";
+import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
 import { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
@@ -499,9 +500,10 @@ export const createOAuthRouter = async (
 				const pkceRequired: boolean = pkceConfig?.required === true;
 				const defaultMethod: string =
 					typeof pkceConfig?.defaultMethod === "string" ? pkceConfig.defaultMethod : "plain";
-				const supportedMethods: string[] = Array.isArray(pkceConfig?.supportedMethods)
-					? (pkceConfig.supportedMethods as string[])
-					: ["S256", "plain"];
+				// TS-4 (v0.5.1): per-element validation via `resolvePkceSupportedMethods`.
+				// See authorization.mts for the rationale — `Array.isArray + as string[]`
+				// silently accepted non-string operator-typed values.
+				const supportedMethods = resolvePkceSupportedMethods(pkceConfig);
 
 				// D-6 (RFC 9700 §2.1.1): PKCE/S256 is mandatory for public clients
 				// regardless of operator `pkce.required` config. Public clients have
@@ -542,6 +544,67 @@ export const createOAuthRouter = async (
 						"code_challenge is required",
 						toStr(state),
 					);
+				}
+
+				// IH-16 (v0.5.1): bound the OIDC `nonce` query parameter BEFORE the
+				// scope/policy block runs. Pre-fix the value was stored on the code
+				// record + echoed verbatim into the id_token, letting a malicious
+				// RP exhaust per-request memory or amplify the token payload with a
+				// multi-megabyte string. The 256-char ceiling is operator-tunable
+				// via `oauth.nonce.maxLength` (default in core HOCON, env-var
+				// `OAUTH_NONCE_MAX_LENGTH`). Errors use `redirectError` because
+				// `redirect_uri` is already validated against the client allowlist
+				// at this point — RFC 6749 §4.1.2.1 requires error redirects from
+				// here on.
+				//
+				// Placement (Claude review fixup): the gate runs BEFORE
+				// `grantPolicy.evaluate()` so an oversized nonce cannot trigger
+				// external policy I/O (Redis lookup / HTTP call) before the cheap
+				// length+character-set check rejects the request. Moving the gate
+				// any earlier than this is unsafe — it must follow `redirect_uri`
+				// validation so errors can use `redirectError`.
+				const nonceMaxLength = config.oauth.nonce?.maxLength ?? 256;
+				if (req.query.nonce !== undefined) {
+					// Reject non-string `nonce` (Copilot review on PR #126):
+					// Express + qs parses repeated `?nonce=a&nonce=b` as an
+					// array, which silently failed the previous
+					// `typeof === "string"` gate, causing the request to
+					// proceed with `nonce: undefined` on the issued code. The
+					// client's downstream OIDC nonce check would then fail
+					// long after `/authorize` returned 302 + code, surfacing
+					// as a confusing client-side error. Reject as
+					// `invalid_request` immediately so the failure is at the
+					// request boundary, not asynchronously at id_token
+					// validation time.
+					if (typeof req.query.nonce !== "string") {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							"nonce must be a single string value",
+							toStr(state),
+						);
+					}
+					const nonceValue = req.query.nonce;
+					if (nonceValue.length > nonceMaxLength) {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							`nonce exceeds maximum length of ${nonceMaxLength}`,
+							toStr(state),
+						);
+					}
+					// Printable ASCII only (0x20-0x7E). Non-printable input could
+					// confuse downstream JWT libraries that don't escape control
+					// chars in JSON payloads. OIDC Core §3.1.2.1 leaves the
+					// alphabet unconstrained; this is a defensive narrowing.
+					if (!/^[\x20-\x7E]*$/.test(nonceValue)) {
+						return redirectError(
+							redirect_uri,
+							"invalid_request",
+							"nonce contains non-printable characters",
+							toStr(state),
+						);
+					}
 				}
 
 				const requestedScopes = toStr(scope)?.split(" ").filter(Boolean) ?? [];

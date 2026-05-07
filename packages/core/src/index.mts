@@ -376,3 +376,9 @@ export type {
 	RefreshTokenFamilyStore,
 	RefreshTokenFamilyUpdateResult,
 } from "./refresh-token-family/types.mjs";
+
+// SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
+// root because `packages/core/package.json#exports` does not register a
+// `./security/*` subpath — Codex Delta 1 confirmed the subpath approach
+// would fail at runtime under Node's exports gating.
+export { constantTimeStringEqual } from "./security/timingSafe.mjs";
