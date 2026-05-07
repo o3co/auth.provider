@@ -251,7 +251,10 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
 }
 
 /**
- * Build a plain `Map`-backed `NameKeyedCollector<unknown>`.
+ * Build a plain `Map`-backed `NameKeyedCollector<T>`. Generic-parametric
+ * since AS-M1 (PR6): callers pass the concrete contributes-map slot type
+ * (e.g. `<MfaFactor>`, `<FederationProvider>`) so the produced collector
+ * matches the narrowed `ContributionCollectorMap` slot.
  *
  * Used for `tokenExchangeValidators`, `federations`, and `mfaFactors`.
  * `tokenExchangeValidators` uses this form because `ExchangeTokenValidatorRegistry`
@@ -302,7 +305,11 @@ function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
 }
 
 /**
- * Build a `ListCollector<unknown>` with same-instance deduplication.
+ * Build a `ListCollector<T>` with same-instance deduplication.
+ * Generic-parametric since AS-M1 (PR6): callers pass the concrete
+ * contributes-map slot type (e.g. `<AuditHook>`, `<GrantPolicyHookContribution>`)
+ * so the produced collector matches the narrowed `ContributionCollectorMap`
+ * slot.
  *
  * Used for `auditHooks` and `grantPolicyHooks`. The `Set`-based identity
  * check silently skips re-registration of the same reference per A2-α §4.5.
