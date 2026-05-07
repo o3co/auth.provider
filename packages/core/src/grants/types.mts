@@ -127,6 +127,14 @@ export interface GrantDependencies {
 	sessionRPRegistry?: SessionRPRegistry;
 	sessionFamilyIndex?: SessionFamilyIndex;
 	sessionFederationIndex?: SessionFederationIndex;
+	/**
+	 * Optional structured logger for security-relevant grant audit events
+	 * (RT replay detection, unknown-family policy decisions, legacy-token
+	 * acceptance). Falls back silently when absent so the grant factory
+	 * remains usable from minimal test harnesses; production wires the
+	 * `logger` slot per `ComponentMap.logger` declaration merge.
+	 */
+	logger?: import("../logging/Logger.mjs").Logger;
 }
 
 /**

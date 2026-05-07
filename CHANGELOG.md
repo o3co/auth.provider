@@ -6,6 +6,79 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security (Phase F — F6 PR3 refresh-token grant hardening, v0.5.1)
+
+- **Refresh-token reuse now revokes the entire family** (`@o3co/auth-provider-oauth`,
+  closes PB-1): when `refreshTokenFamilyRotation.rotate` reports the
+  `"replayed"` outcome, the grant handler now calls
+  `refreshTokenFamilyRevocation.revokeFamily(familyId)` before returning
+  `400 invalid_grant / replay_detected`. Pre-fix, only the present request
+  was rejected — sibling refresh tokens issued from the same family
+  remained valid, contradicting RFC 6819 §5.2.2 / OAuth 2.1 BCP §4.14.2.
+  Fail-closed semantics: a rotation wired without a revocation dependency,
+  or a `revokeFamily` call that throws, returns
+  `503 temporarily_unavailable` rather than silently rejecting only the
+  current request. Audit log
+  `rt_reuse_detected_family_revoked { familyId, clientId }` is emitted
+  on the success path; `rt_reuse_detected_but_no_revocation_dep` flags
+  the misconfiguration case.
+
+- **Unknown `family_id` is now rejected by default** (`@o3co/auth-provider-core` +
+  `@o3co/auth-provider-oauth`, closes CC-2 / IH-3 / TD-2): a new
+  `oauth.refreshToken.unknownFamilyPolicy` config key (default `"reject"`,
+  defined in `application.conf`) replaces the v0.4.x implicit fall-through
+  to success. An attacker presenting a refresh token whose `family_id`
+  claim does not match any registered family now receives
+  `400 invalid_grant / unknown_family` instead of fresh tokens. Operators
+  migrating from v0.4.x in-memory family stores to Redis can opt into
+  `"accept"` for a bounded migration window — that path emits the audit
+  log `unknown_family_accepted_legacy_mode` so each acceptance is traceable.
+  A defense-in-depth `familyId === null` guard hard-rejects regardless
+  of policy (covered by SF-6's gate but kept for resilience).
+
+- **Refresh tokens missing `jti` or `family_id` claims are rejected**
+  (`@o3co/auth-provider-core` + `@o3co/auth-provider-oauth`, closes
+  SF-6 / TD-7): when `refreshTokenFamilyRotation` is wired, refresh
+  tokens MUST carry both claims to enter the rotation block. Pre-fix,
+  the entire rotation block was skipped when `previousJti === null`,
+  letting v0.4.x-shaped tokens bypass replay detection entirely. New
+  `oauth.refreshToken.legacyRtPolicy` config key (default `"reject"`)
+  hard-rejects such tokens with
+  `400 invalid_grant / missing_jti_or_family_id`; the
+  `"accept-with-warning"` opt-in skips rotation for a migration window
+  and emits `legacy_rt_accepted_no_replay_protection`. Pair with
+  `unknownFamilyPolicy = "accept"` for a one-refresh sliding bridge
+  (the issued RT's fresh `family_id` is not registered in the store, so
+  the next rotation hits `unknown_family`).
+
+- **Rotation outcome handling is now an exhaustive switch**
+  (`@o3co/auth-provider-oauth`): the four-outcome rotation union
+  (`rotated | replayed | revoked | unknown_family`) is now classified by
+  a `switch` with a `never`-typed default. A future addition to
+  `RefreshTokenFamilyRotationOutcome` that forgets to update the handler
+  produces a TypeScript compile error rather than silently falling
+  through to token issuance — the failure mode that v0.4.x's implicit
+  fall-through enabled for `unknown_family`.
+
+#### Migration
+
+**BREAKING** for deployments that previously relied on either of:
+
+- A refresh token with an unknown `family_id` succeeding (rare; see CC-2
+  rationale above) — set
+  `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY=accept` for a bounded window.
+- v0.4.x-shaped refresh tokens (no `jti` / `family_id`) succeeding while
+  family rotation is wired — set
+  `OAUTH_REFRESH_TOKEN_LEGACY_RT_POLICY=accept-with-warning` until all
+  v0.4.x tokens have expired (≤ `OAUTH_REFRESH_TOKEN_EXPIRES_IN` seconds
+  after deployment), and pair with `OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY=accept`
+  to bridge the next refresh.
+
+Deployments without `refreshTokenFamilyRotation` wired are unaffected
+(the gate only fires when rotation is present). Newly issued tokens
+already carry both `jti` and `family_id` since v0.5.0, so the long-tail
+exposure is bounded by `oauth.refreshToken.expiresIn`.
+
 ### Security (Phase F — F6 PR2 PKCE + RT family hardening, v0.5.1)
 
 - **PKCE `code_verifier` comparison is now timing-safe** (`@o3co/auth-provider-oauth`,

@@ -178,10 +178,16 @@ export interface RefreshTokenFamilyStore {
  *   MUST reject and treat as a replay-attack audit signal.
  * - `revoked`: family exists but its `revoked` flag is set. Caller MUST
  *   reject and treat as a logout-cascade signal.
- * - `unknown_family`: no family record matches. Caller policy decides
- *   whether to accept or reject — the v0.4.x default was accept; the
- *   v0.5.0 default is configurable via `oauth.refreshToken.unknownFamilyPolicy`
- *   (owned by the oauth grant handler module, NOT this wrapper).
+ * - `unknown_family`: no family record matches `family_id`. The grant
+ *   handler consults `oauth.refreshToken.unknownFamilyPolicy`:
+ *   - `"reject"` (default, safe-by-default in v0.5.1+): returns
+ *     `400 invalid_grant / "unknown_family"`.
+ *   - `"accept"` (legacy migration mode only): falls through to issuance
+ *     and emits a warn audit log. Intended for time-bounded migration
+ *     windows when moving from v0.4.x in-memory family stores to Redis.
+ *   The v0.4.x behavior was unconditional accept; v0.5.1+ defaults to
+ *   reject per CC-2. Policy ownership lives in the oauth grant handler
+ *   module, NOT this wrapper.
  *
  * Per A3 §5.2 + IH-13 (v0.5.1).
  */

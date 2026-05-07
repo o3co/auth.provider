@@ -45,7 +45,11 @@ const config: AppConfig = {
 			},
 		},
 		accessToken: { expiresIn: 3600 },
-		refreshToken: { expiresIn: 86400 },
+		refreshToken: {
+			expiresIn: 86400,
+			unknownFamilyPolicy: "reject" as const,
+			legacyRtPolicy: "reject" as const,
+		},
 		grants: {},
 		// OR-9: explicit memory adapter for the smoke test. The legacy
 		// `repositories.code.type` fallback would also pick memory here,
