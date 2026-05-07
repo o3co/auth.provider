@@ -425,4 +425,81 @@ describe("cascadeLogout (A4 §6.2)", () => {
 			expect(result.errors[0]).toBeInstanceOf(Error);
 		}
 	});
+
+	// -------------------------------------------------------------------------
+	// CR-4 — post-step-4 sessionFamilyIndex cleanup
+	//
+	// Defense-in-depth: any addFamilyId call that raced into the family index
+	// between Step 3 and Step 4 (the TOCTOU window the authorization grant's
+	// second-check fix narrows but does not fully close) leaves an orphan entry.
+	// A second removeBySid AFTER the session delete clears that orphan. The
+	// invocation order MUST be: Step 3 removeBySid → Step 4 delete → post-step-4
+	// removeBySid. Codex Delta 5: pin the order to catch accidental reshuffling.
+	// -------------------------------------------------------------------------
+
+	it("CR-4: runs sessionFamilyIndex.removeBySid AFTER userSessionStore.delete (post-step-4 cleanup)", async () => {
+		const sessionFamilyIndex = makeSessionFamilyIndex({
+			listFamilyIds: vi.fn(async () => []),
+		});
+		const uss = makeUserSessionStore();
+
+		const result = await cascadeLogout({
+			sid: "sid-cr4",
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+			federationTokenStore: makeFedStore(),
+			userSessionStore: uss,
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex,
+			sessionFederationIndex: makeSessionFederationIndex(),
+		});
+
+		expect(result.outcome).toBe("done");
+
+		// Step 3 removeBySid + post-step-4 removeBySid → twice total.
+		expect(sessionFamilyIndex.removeBySid).toHaveBeenCalledTimes(2);
+		expect(sessionFamilyIndex.removeBySid).toHaveBeenNthCalledWith(1, "sid-cr4");
+		expect(sessionFamilyIndex.removeBySid).toHaveBeenNthCalledWith(2, "sid-cr4");
+
+		// Codex Delta 5: pin invocation order.
+		// removeBySid call 1 (Step 3) MUST precede userSessionStore.delete (Step 4).
+		// userSessionStore.delete (Step 4) MUST precede removeBySid call 2 (post-step-4).
+		const removeOrders = (sessionFamilyIndex.removeBySid as ReturnType<typeof vi.fn>).mock
+			.invocationCallOrder;
+		const deleteOrder = (uss.delete as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+		expect(removeOrders).toHaveLength(2);
+		expect(removeOrders[0]).toBeLessThan(deleteOrder);
+		expect(deleteOrder).toBeLessThan(removeOrders[1]);
+	});
+
+	it("CR-4: post-step-4 removeBySid failure does NOT change cascade outcome (best-effort)", async () => {
+		// First removeBySid (Step 3) succeeds, second (post-step-4) throws — must be
+		// swallowed and logged so the cascade still reports done.
+		let calls = 0;
+		const sessionFamilyIndex = makeSessionFamilyIndex({
+			listFamilyIds: vi.fn(async () => []),
+			removeBySid: vi.fn(async () => {
+				calls++;
+				if (calls === 2) {
+					throw new Error("post-delete cleanup failed");
+				}
+			}),
+		});
+		const logger = createMockLogger();
+
+		const result = await cascadeLogout({
+			sid: "sid-besteffort",
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+			federationTokenStore: makeFedStore(),
+			userSessionStore: makeUserSessionStore(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+			sessionFamilyIndex,
+			sessionFederationIndex: makeSessionFederationIndex(),
+			logger,
+		});
+
+		expect(result.outcome).toBe("done");
+		expect(calls).toBe(2);
+		// Failure surfaces via the structured logger.
+		expect(logger.warn).toHaveBeenCalled();
+	});
 });
