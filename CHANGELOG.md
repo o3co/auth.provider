@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Breaking (Phase F — F9 PR3 GrantPolicyHook manifest rename, v0.5.1)
+
+- **Compile-time breaking change for deep manifest imports**: the manifest
+  contributes-map placeholder previously exported as `GrantPolicyHook`
+  from `@o3co/auth-provider-core/modules/manifest` has been renamed to
+  `GrantPolicyHookContribution`. TypeScript code importing the old name
+  from this entrypoint will fail to compile until the import is renamed.
+  This is the only breaking part of F9 PR3; the rest is additive
+  deprecation (see below).
+
+#### Migration
+
+- Replace `import type { GrantPolicyHook } from "@o3co/auth-provider-core/modules/manifest"`
+  with `import type { GrantPolicyHookContribution } from "@o3co/auth-provider-core/modules/manifest"`.
+- Imports of `GrantPolicyHook` from the package root
+  (`@o3co/auth-provider-core`) keep working — the root export now resolves
+  to the canonical policy alias (an alias of `GrantPolicyHookBase`),
+  which has the same shape downstream code expected from the previous
+  `unknown` placeholder for any structural use.
+- The placeholder retains its `unknown` semantics under the new name
+  (Phase 9 will substitute the concrete contribution type).
+- No runtime behavior change.
+
 ### Deprecated (Phase F — F9 PR3 AS-7 + AS-10 naming consistency, v0.5.1)
 
 - **Adapter primitive interfaces add canonical aliases without the `*Base`
@@ -23,16 +46,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 | `MfaProviderBase` | `MfaProvider` | `@o3co/auth-provider-core` |
 | `GrantPolicyHookBase` | `GrantPolicyHook` | `@o3co/auth-provider-core` |
 
-- **`GrantPolicyHook` collision resolved**: the manifest contributes-map
-  placeholder (`packages/core/src/modules/manifest/contributes-map.mts`)
-  previously named `GrantPolicyHook` — the same name as the new policy
-  alias above — has been renamed to `GrantPolicyHookContribution`. Code
-  importing `GrantPolicyHook` from
-  `@o3co/auth-provider-core/modules/manifest` should switch to
-  `GrantPolicyHookContribution`. Code importing `GrantPolicyHook` from
-  `@o3co/auth-provider-core` (root) now resolves to the canonical policy
-  alias of `GrantPolicyHookBase` — this is the intended path going
-  forward.
 - **AS-10 documentation**: JSDoc on
   `ClientRepository.findById` and `CodeRepository.getByCode` documents the
   v0.5.1 naming convention (`findBy<Field>` for repository lookups; `get(<id>)`
@@ -45,10 +58,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - No action required for v0.5.x consumers — the `*Base` names are still
   exported and TypeScript treats the aliases as identical types. Migrate
   imports at your convenience.
-- For consumers of the manifest contributes-map: rename `GrantPolicyHook`
-  imports from `@o3co/auth-provider-core/modules/manifest` to
-  `GrantPolicyHookContribution`. The placeholder retains its `unknown`
-  semantics (Phase 9 will replace with the concrete contribution type).
+- For the breaking manifest-path rename of the `GrantPolicyHook`
+  placeholder, see the dedicated **Breaking** section above.
 - No runtime behavior change.
 
 ### Breaking (Phase F — F9 PR2 AS-1 + AS-2 error envelope unification, v0.5.1)
