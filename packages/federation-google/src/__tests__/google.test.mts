@@ -24,6 +24,7 @@ const {
 	mockFetchUserInfo,
 	mockRefreshTokenGrant,
 	skipStateCheckSym,
+	skipSubjectCheckSym,
 } = hoisted;
 
 vi.mock("openid-client", () => ({
@@ -43,6 +44,7 @@ vi.mock("openid-client", () => ({
 }));
 
 import { createGoogleProvider } from "../google.mjs";
+import { makeTestGoogleIdToken } from "./helpers.mjs";
 
 describe("createGoogleProvider on openid-client", () => {
 	const baseConfig = {
@@ -71,6 +73,7 @@ describe("createGoogleProvider on openid-client", () => {
 			redirectUri: baseConfig.callbackURL,
 			state: "abc",
 			codeVerifier: verifier,
+			nonce: "fixture-nonce",
 		});
 		expect(url.hostname).toBe("accounts.google.com");
 		const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [unknown, Record<string, string>];
@@ -83,11 +86,17 @@ describe("createGoogleProvider on openid-client", () => {
 	});
 
 	it("exchangeCode composes authorizationCodeGrant + fetchUserInfo into a FederationProfile", async () => {
+		const { jwt, sub: idTokenSub } = await makeTestGoogleIdToken({ sub: "g-123" });
 		mockAuthorizationCodeGrant.mockResolvedValueOnce({
 			access_token: "at",
 			refresh_token: "rt",
-			id_token: "it",
+			id_token: jwt,
 			expires_in: 3600,
+			claims: () => ({
+				sub: idTokenSub,
+				iss: "https://accounts.google.com",
+				aud: "client-id",
+			}),
 		});
 		mockFetchUserInfo.mockResolvedValueOnce({
 			sub: "g-123",
@@ -102,6 +111,7 @@ describe("createGoogleProvider on openid-client", () => {
 			code: "auth-code",
 			codeVerifier: "v",
 			redirectUri: baseConfig.callbackURL,
+			nonce: "fixture-nonce",
 		});
 		expect(profile.issuer).toBe("https://accounts.google.com");
 		expect(profile.sub).toBe("g-123");
@@ -111,7 +121,7 @@ describe("createGoogleProvider on openid-client", () => {
 		expect(profile.picture).toBe("https://example.com/p");
 		expect(profile.accessToken).toBe("at");
 		expect(profile.refreshToken).toBe("rt");
-		expect(profile.idToken).toBe("it");
+		expect(profile.idToken).toBe(jwt);
 		expect(profile.expiresAt).toBeInstanceOf(Date);
 		expect(profile.hd).toBe("example.com");
 		const [, , checks] = mockAuthorizationCodeGrant.mock.calls[0] as [
@@ -154,5 +164,262 @@ describe("createGoogleProvider on openid-client", () => {
 		expect(claims.name).toBe("Alice");
 		expect(claims.picture).toBe("https://example.com/p");
 		expect(claims.hd).toBe("example.com");
+	});
+
+	// -----------------------------------------------------------------------
+	// PB-4 — Google federation OIDC compliance (nonce, jwks_uri, alg pin)
+	// -----------------------------------------------------------------------
+
+	describe("PB-4: id_token verification + nonce binding", () => {
+		// PB-4 RED-1: jwks_uri + alg pin in serverMetadata
+		// Pre-fix: serverMetadata has neither jwks_uri nor id_token_signing_alg_values_supported,
+		// so openid-client cannot verify the RS256 signature. Post-fix: both are present and the
+		// alg list is locked to RS256 (no `none`/`HS256` confusion).
+		it("constructs serverMetadata with Google's jwks_uri and RS256 alg pin", async () => {
+			type CapturedMetadata = {
+				jwks_uri?: unknown;
+				id_token_signing_alg_values_supported?: unknown;
+			};
+			let captured: CapturedMetadata | undefined;
+			mockBuildAuthorizationUrl.mockImplementationOnce((cfg: unknown) => {
+				captured = (cfg as { serverMetadata: CapturedMetadata }).serverMetadata;
+				return new URL("https://accounts.google.com/o/oauth2/v2/auth?stub=1");
+			});
+			const p = createGoogleProvider(baseConfig);
+			p.buildAuthorizationUrl({
+				redirectUri: baseConfig.callbackURL,
+				state: "s",
+				codeVerifier: "v",
+				nonce: "n",
+			});
+			expect(captured).toBeDefined();
+			const sm = captured as CapturedMetadata;
+			expect(sm.jwks_uri).toBe("https://www.googleapis.com/oauth2/v3/certs");
+			expect(sm.id_token_signing_alg_values_supported).toEqual(["RS256"]);
+		});
+
+		// PB-4 RED-2: jwksUri config override is honored
+		it("honours config.jwksUri override (test injection)", () => {
+			type CapturedMetadata = { jwks_uri?: unknown };
+			let captured: CapturedMetadata | undefined;
+			mockBuildAuthorizationUrl.mockImplementationOnce((cfg: unknown) => {
+				captured = (cfg as { serverMetadata: CapturedMetadata }).serverMetadata;
+				return new URL("https://accounts.google.com/o/oauth2/v2/auth?stub=1");
+			});
+			const p = createGoogleProvider({
+				...baseConfig,
+				jwksUri: "https://test.example.com/jwks.json",
+			});
+			p.buildAuthorizationUrl({
+				redirectUri: baseConfig.callbackURL,
+				state: "s",
+				codeVerifier: "v",
+				nonce: "n",
+			});
+			expect(captured).toBeDefined();
+			expect((captured as CapturedMetadata).jwks_uri).toBe("https://test.example.com/jwks.json");
+		});
+
+		// PB-4 RED-3: buildAuthorizationUrl forwards nonce to upstream when supplied
+		it("forwards nonce param to oidc.buildAuthorizationUrl when present", () => {
+			mockBuildAuthorizationUrl.mockReturnValueOnce(
+				new URL("https://accounts.google.com/o/oauth2/v2/auth?stub=1"),
+			);
+			const p = createGoogleProvider(baseConfig);
+			p.buildAuthorizationUrl({
+				redirectUri: baseConfig.callbackURL,
+				state: "s",
+				codeVerifier: "v",
+				nonce: "session-nonce-abcdef",
+			});
+			const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [
+				unknown,
+				Record<string, string>,
+			];
+			expect(params.nonce).toBe("session-nonce-abcdef");
+		});
+
+		// PB-4 RED-4 (Round 2 fail-closed): caller-omitted nonce throws synchronously. Google
+		// is OIDC-only — silently dropping nonce would build an authorization URL whose returned
+		// id_token cannot be bound. The throw happens before any oidc.* call, so the upstream
+		// mock is never invoked.
+		it("buildAuthorizationUrl throws when caller omits nonce (Google is OIDC-only)", () => {
+			const p = createGoogleProvider(baseConfig);
+			expect(() =>
+				p.buildAuthorizationUrl({
+					redirectUri: baseConfig.callbackURL,
+					state: "s",
+					codeVerifier: "v",
+				}),
+			).toThrow(/nonce/i);
+			expect(mockBuildAuthorizationUrl).not.toHaveBeenCalled();
+		});
+
+		// PB-4 RED-4b (Round 2 fail-closed): empty-string nonce is also rejected — falsy length
+		// guard so callers cannot pass `""` and bypass the check.
+		it("buildAuthorizationUrl throws when caller passes empty-string nonce", () => {
+			const p = createGoogleProvider(baseConfig);
+			expect(() =>
+				p.buildAuthorizationUrl({
+					redirectUri: baseConfig.callbackURL,
+					state: "s",
+					codeVerifier: "v",
+					nonce: "",
+				}),
+			).toThrow(/nonce/i);
+		});
+
+		// PB-4 RED-5: exchangeCode threads nonce → expectedNonce (TD-9 M2 pattern: inspect checks
+		// argument so the test is RED for the right reason — pre-fix `checks.expectedNonce` is
+		// `undefined`, the mock rejects; post-fix it equals the provided nonce, the mock resolves.)
+		it("threads nonce param into oidc.authorizationCodeGrant as expectedNonce", async () => {
+			const { jwt, sub: idTokenSub } = await makeTestGoogleIdToken({ nonce: "session-n" });
+			mockAuthorizationCodeGrant.mockImplementationOnce(
+				(_cfg: unknown, _url: unknown, checks: { expectedNonce?: string }) => {
+					if (checks.expectedNonce !== "session-n") {
+						return Promise.reject(new Error("nonce mismatch / expectedNonce missing"));
+					}
+					return Promise.resolve({
+						access_token: "at",
+						refresh_token: "rt",
+						id_token: jwt,
+						expires_in: 3600,
+						claims: () => ({ sub: idTokenSub, iss: "https://accounts.google.com" }),
+					});
+				},
+			);
+			mockFetchUserInfo.mockResolvedValueOnce({ sub: idTokenSub });
+			const p = createGoogleProvider(baseConfig);
+			const profile = await p.exchangeCode({
+				code: "c",
+				codeVerifier: "v",
+				redirectUri: baseConfig.callbackURL,
+				nonce: "session-n",
+			});
+			expect(profile.sub).toBe(idTokenSub);
+			const [, , checks] = mockAuthorizationCodeGrant.mock.calls[0] as [
+				unknown,
+				unknown,
+				{ expectedNonce?: string },
+			];
+			expect(checks.expectedNonce).toBe("session-n");
+		});
+
+		// PB-4 RED-6 (Round 2 fail-closed): exchangeCode also rejects synchronously when nonce is
+		// missing. Pre-Round-2 the upstream mock would have caught this via `checks.expectedNonce`
+		// being undefined; post-Round-2 the throw fires *before* any upstream call so resource
+		// servers cannot leak a verification-skipped pathway under any test or production caller.
+		it("exchangeCode throws when caller omits nonce (no upstream call made)", async () => {
+			const p = createGoogleProvider(baseConfig);
+			await expect(
+				p.exchangeCode({
+					code: "c",
+					codeVerifier: "v",
+					redirectUri: baseConfig.callbackURL,
+				}),
+			).rejects.toThrow(/nonce/i);
+			expect(mockAuthorizationCodeGrant).not.toHaveBeenCalled();
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// PB-5 — UserInfo sub binding (OIDC §5.3.2)
+	// -----------------------------------------------------------------------
+
+	describe("PB-5: UserInfo sub binding against id_token sub", () => {
+		// PB-5 RED-1: when id_token has a sub, the route passes that sub (not skipSubjectCheck)
+		// as expectedSubject to fetchUserInfo. openid-client compares it against UserInfo.sub
+		// and throws on mismatch.
+		it("binds UserInfo to id_token sub when id_token claims include sub", async () => {
+			const { jwt, sub: idTokenSub } = await makeTestGoogleIdToken({ sub: "id-tok-user" });
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "at",
+				id_token: jwt,
+				expires_in: 3600,
+				claims: () => ({ sub: idTokenSub, iss: "https://accounts.google.com" }),
+			});
+			mockFetchUserInfo.mockResolvedValueOnce({ sub: idTokenSub });
+			const p = createGoogleProvider(baseConfig);
+			await p.exchangeCode({
+				code: "c",
+				codeVerifier: "v",
+				redirectUri: baseConfig.callbackURL,
+				nonce: "n",
+			});
+			const [, , expectedSubject] = mockFetchUserInfo.mock.calls[0] as [unknown, unknown, unknown];
+			expect(expectedSubject).toBe(idTokenSub);
+			// Critically NOT the skipSubjectCheck symbol: PB-5 fix replaces the unconditional
+			// skip with the bound id_token sub on the OIDC happy path.
+			expect(expectedSubject).not.toBe(skipSubjectCheckSym);
+		});
+
+		// PB-5 RED-2 (Round 2 fail-closed): when id_token claims lack a string sub the helper
+		// MUST reject. Falling back to skipSubjectCheck (the original Round 1 behavior) silently
+		// downgrades the binding contract for a Google id_token we cannot identify — exactly the
+		// drift Codex flagged as fail-open for an OIDC-only provider.
+		it("throws when id_token claims have no sub (no UserInfo call made)", async () => {
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "at",
+				id_token: "it",
+				expires_in: 3600,
+				claims: () => undefined,
+			});
+			const p = createGoogleProvider(baseConfig);
+			await expect(
+				p.exchangeCode({
+					code: "c",
+					codeVerifier: "v",
+					redirectUri: baseConfig.callbackURL,
+					nonce: "n",
+				}),
+			).rejects.toThrow(/sub claim/i);
+			expect(mockFetchUserInfo).not.toHaveBeenCalled();
+		});
+
+		// PB-5 RED-2b (Round 2): empty-string sub on id_token is also rejected — the length
+		// guard catches the case `??` would otherwise let through (since `""` is a string).
+		it("throws when id_token sub is an empty string", async () => {
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "at",
+				id_token: "it",
+				expires_in: 3600,
+				claims: () => ({ sub: "" }),
+			});
+			const p = createGoogleProvider(baseConfig);
+			await expect(
+				p.exchangeCode({
+					code: "c",
+					codeVerifier: "v",
+					redirectUri: baseConfig.callbackURL,
+					nonce: "n",
+				}),
+			).rejects.toThrow(/sub claim/i);
+			expect(mockFetchUserInfo).not.toHaveBeenCalled();
+		});
+
+		// PB-5 RED-3: a UserInfo response with a sub mismatched against id_token's sub must
+		// surface as an exchangeCode failure (openid-client throws `RPError` in production;
+		// the mock simulates that contract here).
+		it("rejects when fetchUserInfo throws (UserInfo sub mismatch)", async () => {
+			const { jwt, sub: idTokenSub } = await makeTestGoogleIdToken({ sub: "id-sub" });
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "at",
+				id_token: jwt,
+				expires_in: 3600,
+				claims: () => ({ sub: idTokenSub }),
+			});
+			mockFetchUserInfo.mockRejectedValueOnce(
+				new Error("UserInfo sub mismatch (expected id-sub, got attacker)"),
+			);
+			const p = createGoogleProvider(baseConfig);
+			await expect(
+				p.exchangeCode({
+					code: "c",
+					codeVerifier: "v",
+					redirectUri: baseConfig.callbackURL,
+					nonce: "n",
+				}),
+			).rejects.toThrow(/UserInfo sub mismatch/);
+		});
 	});
 });

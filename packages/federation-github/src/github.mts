@@ -106,6 +106,10 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				expectedState: oidc.skipStateCheck,
 			});
 
+			// PB-5 N/A for GitHub: GitHub OAuth Apps do not issue OIDC id_tokens, so there is no
+			// id_token sub to bind UserInfo against. `skipSubjectCheck` is intentional and correct
+			// per OIDC §5.3.2 (the section only applies when an id_token is in scope). Do NOT
+			// blindly mirror the Google PB-5 fix here — there is no claim to bind to.
 			const userInfo = await oidc.fetchUserInfo(
 				oidcConfig,
 				tokens.access_token,
