@@ -502,8 +502,10 @@ export const createOAuthRouter = async (
 					typeof pkceConfig?.defaultMethod === "string" ? pkceConfig.defaultMethod : "plain";
 				// TS-4 (v0.5.1): per-element validation via `resolvePkceSupportedMethods`.
 				// See authorization.mts for the rationale — `Array.isArray + as string[]`
-				// silently accepted non-string operator-typed values.
-				const supportedMethods = resolvePkceSupportedMethods(pkceConfig);
+				// silently accepted non-string operator-typed values. The router
+				// already has `logger` in scope (createOAuthRouter options); forward
+				// it so the helper's misconfig warnings reach the operator.
+				const supportedMethods = resolvePkceSupportedMethods(pkceConfig, logger);
 
 				// D-6 (RFC 9700 §2.1.1): PKCE/S256 is mandatory for public clients
 				// regardless of operator `pkce.required` config. Public clients have

@@ -149,5 +149,22 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 		return { outcome: "failed", step: 4, errors: [error] };
 	}
 
+	// CR-4 defense-in-depth: re-run sessionFamilyIndex cleanup AFTER the session
+	// delete. The authorization grant's second-check (re-validate session before
+	// addFamilyId) reduces but does not fully close the TOCTOU window — an
+	// addFamilyId call interleaved between this Step 3 removeBySid and Step 4
+	// delete leaves an orphan entry. This second pass clears it. Idempotent
+	// (the SessionFamilyIndex contract treats removeBySid on a missing sid as a
+	// no-op — Redis impl `DEL`s the sid's family-index key, in-memory impl
+	// `Map.delete`s the entry, both no-ops on a non-existent target) and
+	// best-effort: a failure here does not change the cascade outcome (orphan
+	// entries are bounded by the family index's TTL anyway).
+	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
+		logger.warn(
+			`cascadeLogout: post-delete sessionFamilyIndex.removeBySid(${opts.sid}) failed:`,
+			error,
+		);
+	});
+
 	return { outcome: "done" };
 }

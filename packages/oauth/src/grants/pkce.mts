@@ -35,15 +35,14 @@ const DEFAULT_PKCE_METHODS: readonly string[] = Object.freeze(["S256", "plain"])
  * - Array filtered to empty (or literal `[]`) → fall back to default
  *   (defensive: an empty allowlist would disable PKCE entirely).
  *
- * The `logger` argument is optional. v0.5.1 consumers (`authorization.mts`,
- * `routes.mts`) call without a logger because there is no logger slot on
- * `GrantDependencies` / `createOAuthRouter` deps in this release; the warn
- * branch is exercised via direct unit tests on the helper. Logger plumbing
- * to the call sites is deferred to D-4 (ComponentMap.logger wiring).
+ * The `logger` argument is optional. As of F6 PR4 (v0.5.1) both production
+ * call sites (`authorization.mts` via `GrantDependencies.logger`, and
+ * `routes.mts` via `createOAuthRouter` options) DO supply a logger so the
+ * misconfig warnings reach operators' structured logging stack. Tests
+ * continue to call without a logger to exercise the optional-logger path.
  *
- * Per TS-4 spec (Wave 5j) + Codex calibration delta 1 (no logger at consumer
- * sites in v0.5.1) + delta 2 (literal-empty + filtered-empty cases tested
- * separately).
+ * Per TS-4 spec (Wave 5j) + Codex calibration delta 2 (literal-empty +
+ * filtered-empty cases tested separately).
  */
 export function resolvePkceSupportedMethods(
 	pkceConfig: Record<string, unknown> | undefined,

@@ -27,6 +27,7 @@ import {
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 // D-1 / v0.5.1: codeData must carry client_id and redirect_uri (required fields).
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
@@ -1541,5 +1542,154 @@ describe("createAuthorizationGrant", () => {
 				expect(result.error).toBe("temporarily_unavailable");
 			});
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// CR-4 — TOCTOU: re-validate session before returning tokens
+//
+// Background: between the first `userSessionStore.get(sid)` and the call to
+// `sessionFamilyIndex.addFamilyId`, the handler awaits `clientRepository.findById`.
+// If `cascadeLogout` runs during that await window, the session is gone and
+// the just-issued tokens become orphaned from logout orchestration. CR-4 closes
+// the common case (logout fully completes before the second check) by adding a
+// second `userSessionStore.get(sid)` immediately before `addFamilyId`. Per
+// Codex Delta 1, this REDUCES the window — it does not eliminate it. Phase F
+// follow-up is the atomic Lua EVAL `addFamilyIdIfSessionActive`.
+// ---------------------------------------------------------------------------
+
+describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
+	it("returns 400 invalid_grant / session_invalidated when session is deleted between findById and addFamilyId", async () => {
+		// Mock: first get returns session (initial check at line ~439), second get
+		// returns null (the new CR-4 re-check immediately before addFamilyId).
+		let getCallCount = 0;
+		const userSessionStore = {
+			kind: "spy",
+			async create() {},
+			async get() {
+				getCallCount++;
+				if (getCallCount === 1) {
+					return {
+						sid: "sid-toctou",
+						sub: "u1",
+						authTime: new Date(),
+						createdAt: new Date(),
+						expiresAt: new Date(Date.now() + 3600_000),
+						claims: {},
+					};
+				}
+				return null;
+			},
+			async delete() {},
+		};
+		const sessionFamilyIndex = makeSessionFamilyIndex();
+		const sessionRPRegistry = makeSessionRPRegistry();
+		const logger = createMockLogger();
+
+		const deps = {
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-toctou", ...validCode })),
+			userSessionStore,
+			sessionFamilyIndex,
+			sessionRPRegistry,
+			logger,
+		};
+
+		const handler = createAuthorizationGrant(deps);
+		const { result } = await handler.handle({
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			session: {
+				code: "abc",
+				code_client_id: "client1",
+				granted_scopes: ["read"],
+				user: { id: "u1" },
+			},
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+
+		// Behavioral: 400 invalid_grant / session_invalidated (distinct from the
+		// existing first-check rejection which returns "session_invalid").
+		expect(result.status).toBe(400);
+		if (!("error" in result)) throw new Error("expected error");
+		expect(result.error).toBe("invalid_grant");
+		expect((result as { errorDescription?: string }).errorDescription).toBe("session_invalidated");
+
+		// Proof of re-check: get was called twice (first + CR-4 second).
+		expect(getCallCount).toBe(2);
+
+		// Negative invariants: token-linking ops MUST NOT run when second check fails.
+		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
+		expect(sessionRPRegistry.registerRP).not.toHaveBeenCalled();
+
+		// Codex Delta 3: audit log MUST fire on session_invalidated rejection.
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		const [warnPayload, warnMsg] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(warnPayload).toMatchObject({
+			sid: "sid-toctou",
+			clientId: "client1",
+		});
+		expect(warnMsg).toBe("authorization_grant_rejected_session_invalidated_during_token_issuance");
+	});
+
+	it("returns 503 temporarily_unavailable when the second userSessionStore.get throws", async () => {
+		// First get succeeds; second get throws (e.g. Redis blip mid-grant).
+		// The CR-4 second `get` has its own dedicated try/catch — store-availability
+		// failures here surface as `503 / "session store unavailable"`, matching the
+		// first-get path and not the broader outer catch that wraps findById /
+		// addFamilyId / registerRP (which surfaces as `503 / "session linking
+		// unavailable"`).
+		let getCallCount = 0;
+		const userSessionStore = {
+			kind: "spy",
+			async create() {},
+			async get() {
+				getCallCount++;
+				if (getCallCount === 1) {
+					return {
+						sid: "sid-blip",
+						sub: "u1",
+						authTime: new Date(),
+						createdAt: new Date(),
+						expiresAt: new Date(Date.now() + 3600_000),
+						claims: {},
+					};
+				}
+				throw new Error("store down on second check");
+			},
+			async delete() {},
+		};
+		const sessionFamilyIndex = makeSessionFamilyIndex();
+		const deps = {
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-blip", ...validCode })),
+			userSessionStore,
+			sessionFamilyIndex,
+			sessionRPRegistry: makeSessionRPRegistry(),
+		};
+		const handler = createAuthorizationGrant(deps);
+		const { result } = await handler.handle({
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			session: {
+				code: "abc",
+				code_client_id: "client1",
+				granted_scopes: ["read"],
+				user: { id: "u1" },
+			},
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+
+		expect(result.status).toBe(503);
+		if (!("error" in result)) throw new Error("expected error");
+		expect(result.error).toBe("temporarily_unavailable");
+		// errorDescription matches the first-get's wording — the second `get` has its
+		// own try/catch (not the outer findById/addFamilyId catch) so operators see a
+		// store-availability error description, not a misleading "session linking" one.
+		expect((result as { errorDescription?: string }).errorDescription).toBe(
+			"session store unavailable",
+		);
+		expect(getCallCount).toBe(2);
+		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
 	});
 });

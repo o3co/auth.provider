@@ -35,7 +35,7 @@ import { resolvePkceSupportedMethods } from "./pkce.mjs";
 export const createAuthorizationGrant = (
 	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
 ): GrantHandler => {
-	const { config, codeRepository, clientRepository, keyStore } = deps;
+	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
 
 	const grantsConfig = config.oauth.grants as Record<string, Record<string, unknown>> | undefined;
 	const authorizationConfig = grantsConfig?.authorization_code as
@@ -59,8 +59,12 @@ export const createAuthorizationGrant = (
 	// TS-4 (v0.5.1): per-element string validation lives in
 	// `resolvePkceSupportedMethods` — the previous `Array.isArray(...) ? (... as string[])`
 	// pattern silently accepted operator-typed garbage like `[123, null]`
-	// because `Array.isArray` does not constrain element types.
-	const supportedMethods = resolvePkceSupportedMethods(pkceConfig);
+	// because `Array.isArray` does not constrain element types. Pass `logger`
+	// so the helper's misconfig warnings (non-string elements, filtered-empty
+	// fallback) reach the operator's structured logger; F6 PR3 added the
+	// `logger` slot to GrantDependencies so the TS-4-deferred plumbing is now
+	// available at this call site.
+	const supportedMethods = resolvePkceSupportedMethods(pkceConfig, logger);
 	const pkceRequired: boolean = pkceConfig?.required === true;
 	// Legacy fallback: requireS256=true means only S256 is supported
 	const requireS256Legacy = pkceConfig?.requireS256 === true;
@@ -465,6 +469,55 @@ export const createAuthorizationGrant = (
 					// the binding gate above, but reading from the authenticated
 					// slot keeps Codex M2's "no raw body for identity" invariant.
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
+
+					// CR-4: re-validate session liveness immediately before mutating the
+					// family index. Between the first `get` (line above) and `addFamilyId`,
+					// `findById` is awaited — a `cascadeLogout` interleaving in that window
+					// would leave the just-issued tokens orphaned from logout orchestration.
+					// Per Codex Delta 1, this REDUCES the window for the common case
+					// (logout fully completes before the second check). It does NOT close
+					// the sub-millisecond window between this check and `addFamilyId`;
+					// Phase F's atomic `addFamilyIdIfSessionActive` Lua EVAL closes that.
+					//
+					// The store-availability path is handled by its OWN try/catch (mirrors
+					// the first-get pattern at line ~437) so a Redis blip emits the same
+					// `"session store unavailable"` errorDescription as the first-get path,
+					// rather than being misattributed to the outer "session linking
+					// unavailable" catch (which spans findById + addFamilyId + registerRP).
+					let revalidatedSession: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
+					try {
+						revalidatedSession = await deps.userSessionStore.get(sid);
+					} catch {
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "session store unavailable",
+							},
+						};
+					}
+					if (!revalidatedSession) {
+						// Codex Delta 3: log security-relevant rejection so SIEMs can
+						// correlate against cascadeLogout audit events. The audit payload
+						// intentionally omits a code identifier — the `Code` / `CodeData`
+						// type does not carry a stable jti, and logging the raw `code`
+						// string would leak secret material.
+						logger?.warn(
+							{ sid, clientId: authenticatedClientId },
+							"authorization_grant_rejected_session_invalidated_during_token_issuance",
+						);
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "session_invalidated",
+							},
+						};
+					}
+					// Use the revalidated session for downstream TTL bookkeeping. Subsequent
+					// id_token generation reads `userSession`, so refresh the outer binding.
+					userSession = revalidatedSession;
+
 					// Composition-root invariant (A4 §3.4/§8): the bundled session-stores
 					// module wires all 4 sibling stores together. When deps.userSessionStore is
 					// present (outer guard), sessionFamilyIndex and sessionRPRegistry are also

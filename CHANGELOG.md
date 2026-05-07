@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security (Phase F — F6 PR4 authorization-grant TOCTOU re-check, v0.5.1)
+
+- **Authorization-code grant re-validates session liveness before linking the
+  token family** (`@o3co/auth-provider-oauth`, closes CR-4): a second
+  `userSessionStore.get(sid)` runs immediately before
+  `sessionFamilyIndex.addFamilyId`, after the `clientRepository.findById`
+  await that previously left a TOCTOU window open. If the session was
+  invalidated by `cascadeLogout` during that window, the grant now returns
+  `400 invalid_grant / session_invalidated` and emits the audit log
+  `authorization_grant_rejected_session_invalidated_during_token_issuance`.
+  Per Codex calibration, this **reduces** rather than eliminates the window
+  — a logout interleaved between the second `get` and `addFamilyId` (sub-
+  millisecond) is still possible. The fully-atomic
+  `addFamilyIdIfSessionActive` Lua EVAL is deferred to a Phase F follow-up
+  to avoid an interface change to `SessionFamilyIndex` for an already-narrow
+  remaining window.
+
+- **`cascadeLogout` defense-in-depth: post-step-4 `removeBySid` cleanup**
+  (`@o3co/auth-provider-oauth`): a second
+  `sessionFamilyIndex.removeBySid(sid)` runs AFTER
+  `userSessionStore.delete(sid)` to clear any orphan family-index entry
+  written into the index by an authorization grant racing through the
+  remaining window described above. Idempotent per the
+  `SessionFamilyIndex.removeBySid` contract (no-op when the sid has no
+  entries) and best-effort: a failure here does not change the cascade
+  outcome (orphan entries are bounded by the family-index TTL even
+  without the second pass).
+
+#### Migration
+
+No public-API change. The new `session_invalidated` error from the
+authorization code grant is a new behavior that surfaces only on the narrow
+race path (logout completing between `findById` and `addFamilyId`); clients
+that previously succeeded in this race window will now receive
+`400 invalid_grant`. This is the correct behavior per RFC 6749 §5.2.
+
 ### Security (Phase F — F6 PR3 refresh-token grant hardening, v0.5.1)
 
 - **Refresh-token reuse now revokes the entire family** (`@o3co/auth-provider-oauth`,
