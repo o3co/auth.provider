@@ -36,25 +36,59 @@ const rateLimitSchema = z.object({
 	limit: z.coerce.number(),
 });
 
-const signingKeyLocalSchema = z
+// IH-9: HS256 key rotation is symmetric — `previousSecrets` carries
+// shared secrets keyed by `kid`, distinct from the asymmetric
+// `previousKeys` shape (publicKey / publicKeyPath). The schema is split
+// via discriminated union so an operator who wires `previousKeys`
+// (asymmetric-shaped) under HS256 gets a clear validation error at
+// boot rather than silent rotation breakage at the first refresh —
+// Codex calibration m1 requires strict() rejection rather than relying
+// on field omission, since `.passthrough()` would otherwise let
+// `previousKeys` survive into the parsed config.
+const hs256PreviousSecretSchema = z.object({
+	kid: z.string(),
+	secret: z.string(),
+	expiresAt: z.string(),
+});
+
+const signingKeyLocalHs256Schema = z
 	.object({
-		algorithm: z.enum(["HS256", "RS256", "ES256", "EdDSA"]),
+		algorithm: z.literal("HS256"),
 		kid: z.string(),
 		secret: z.string().optional(),
+		previousSecrets: z.array(hs256PreviousSecretSchema).optional(),
+	})
+	.strict();
+
+const signingKeyLocalAsymmetricSchema = z
+	.object({
+		algorithm: z.enum(["RS256", "ES256", "EdDSA"]),
+		kid: z.string(),
 		privateKey: z.string().optional(),
 		privateKeyPath: z.string().optional(),
 		publicKey: z.string().optional(),
 		publicKeyPath: z.string().optional(),
-		previousKeys: z.array(
-			z.object({
-				kid: z.string(),
-				publicKey: z.string().optional(),
-				publicKeyPath: z.string().optional(),
-				expiresAt: z.string(),
-			}),
-		),
+		// IH-9: optional so the shared HOCON default file can omit
+		// `previousKeys = []` without forcing all asymmetric operators
+		// to add boilerplate. The factory's `narrowPreviousKeysArray`
+		// treats absent/null/[] equivalently.
+		previousKeys: z
+			.array(
+				z.object({
+					kid: z.string(),
+					publicKey: z.string().optional(),
+					publicKeyPath: z.string().optional(),
+					expiresAt: z.string(),
+				}),
+			)
+			.optional(),
 	})
 	.passthrough();
+
+const signingKeyLocalSchema = z.discriminatedUnion("algorithm", [
+	signingKeyLocalHs256Schema,
+	signingKeyLocalAsymmetricSchema,
+]);
 
 const signingKeySchema = z
 	.object({
@@ -72,6 +106,7 @@ const LEGACY_JWT_FIELDS = [
 	"publicKey",
 	"publicKeyPath",
 	"previousKeys",
+	"previousSecrets",
 ] as const;
 
 const jwtSchemaBase = z.object({

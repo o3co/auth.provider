@@ -15,7 +15,7 @@
  */
 import { readFileSync } from "node:fs";
 import { type AdapterFactory, createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { KeyStore } from "./KeyStore.mjs";
+import type { KeyStore, SymmetricPreviousSecret } from "./KeyStore.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "./KeyStore.mjs";
 
 export type KeyStoreFactory = AdapterFactory<KeyStore>;
@@ -84,6 +84,41 @@ function narrowPreviousKeysArray(value: unknown): PreviousKeyEntry[] {
 	});
 }
 
+/**
+ * Narrows config.previousSecrets from unknown to a typed array of
+ * SymmetricPreviousSecret. Mirrors narrowPreviousKeysArray (asymmetric)
+ * but builds Date objects from ISO strings and validates the shared-secret
+ * shape (kid + secret + expiresAt). HS256-only — IH-9 rotation support.
+ */
+function narrowPreviousSecretsArray(value: unknown): SymmetricPreviousSecret[] {
+	if (value === undefined || value === null) {
+		return [];
+	}
+	if (!Array.isArray(value)) {
+		throw new TypeError("previousSecrets must be an array (or undefined/null for empty)");
+	}
+	return value.map((entry: unknown, index: number) => {
+		if (typeof entry !== "object" || entry === null) {
+			throw new Error(`previousSecrets[${index}] is not an object`);
+		}
+		const raw = entry as Record<string, unknown>;
+		if (typeof raw.kid !== "string" || raw.kid.length === 0) {
+			throw new Error(`previousSecrets[${index}].kid must be a non-empty string`);
+		}
+		if (typeof raw.secret !== "string" || raw.secret.length === 0) {
+			throw new Error(`previousSecrets[${index}].secret must be a non-empty string`);
+		}
+		if (typeof raw.expiresAt !== "string" || raw.expiresAt.length === 0) {
+			throw new Error(`previousSecrets[${index}].expiresAt must be a non-empty ISO string`);
+		}
+		const expiresAt = new Date(raw.expiresAt);
+		if (Number.isNaN(expiresAt.getTime())) {
+			throw new Error(`previousSecrets[${index}].expiresAt is not a valid date: ${raw.expiresAt}`);
+		}
+		return { kid: raw.kid, secret: raw.secret, expiresAt };
+	});
+}
+
 export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 	factory.register("local", async (config) => {
 		const rawAlgorithm = config.algorithm;
@@ -97,7 +132,8 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 			}
 			const rawKid = config.kid;
 			const kid = typeof rawKid === "string" && rawKid.length > 0 ? rawKid : "v0";
-			return createSymmetricKeyStore(secret, kid);
+			const previousSecrets = narrowPreviousSecretsArray(config.previousSecrets);
+			return createSymmetricKeyStore(secret, kid, previousSecrets);
 		}
 
 		if (algorithm === "RS256" || algorithm === "ES256" || algorithm === "EdDSA") {

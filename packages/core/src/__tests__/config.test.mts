@@ -107,24 +107,22 @@ describe("provider config", () => {
 describe("jwt config schema", () => {
 	// Schema-level acceptance tests — verify the nested signingKey shape is
 	// accepted. Per ADR 2026-04-30 the schema is a pure type contract:
-	// algorithm/kid/previousKeys are required at the schema boundary, and
-	// hocon (`packages/core/config/application.conf`) supplies the runtime
-	// defaults that production callers rely on.
+	// algorithm/kid are required at the schema boundary, and hocon
+	// (`packages/core/config/application.conf`) supplies the runtime
+	// defaults that production callers rely on. IH-9: the schema is a
+	// discriminated union on `algorithm`, so a bare local sub-section
+	// fails the discriminator check before per-branch field validation.
 
-	it("rejects bare local sub-section (algorithm/kid/previousKeys are required at the schema boundary)", () => {
+	it("rejects bare local sub-section (algorithm/kid are required at the schema boundary)", () => {
 		const result = jwtSchema.safeParse({
 			signingKey: { provider: "local", local: { secret: "x" } },
 		});
 		expect(result.success).toBe(false);
 		if (!result.success) {
 			const paths = result.error.issues.map((i) => i.path.join("."));
-			expect(paths).toEqual(
-				expect.arrayContaining([
-					"signingKey.local.algorithm",
-					"signingKey.local.kid",
-					"signingKey.local.previousKeys",
-				]),
-			);
+			// Discriminated union reports the discriminator error first; the
+			// branch-level kid check fires only once `algorithm` parses.
+			expect(paths).toEqual(expect.arrayContaining(["signingKey.local.algorithm"]));
 		}
 	});
 
@@ -233,7 +231,7 @@ describe("jwt config schema", () => {
 		const parsed = jwtSchema.parse({
 			signingKey: {
 				provider: "local",
-				local: { algorithm: "HS256", kid: "v0", previousKeys: [] },
+				local: { algorithm: "HS256", kid: "v0", previousSecrets: [] },
 			},
 		});
 		const local = parsed.signingKey.local as Record<string, unknown>;

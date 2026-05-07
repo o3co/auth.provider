@@ -75,7 +75,7 @@ export function makeValidCoreConfig() {
 						algorithm: "HS256",
 						kid: "v0",
 						secret: "test-secret",
-						previousKeys: [],
+						previousSecrets: [],
 					},
 				},
 			},

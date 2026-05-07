@@ -30,7 +30,7 @@ const minimalCoreConfig = {
 		jwt: {
 			signingKey: {
 				provider: "local",
-				local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+				local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousSecrets: [] },
 			},
 		},
 		accessToken: { expiresIn: 3600 },
@@ -99,7 +99,7 @@ describe("CoreConfigSchema", () => {
 				jwt: {
 					signingKey: {
 						provider: "local",
-						local: { algorithm: "HS256", kid: "v0", previousKeys: [] },
+						local: { algorithm: "HS256", kid: "v0", previousSecrets: [] },
 					},
 				},
 			},
@@ -214,7 +214,7 @@ describe("AppConfigSchema backward compatibility", () => {
 				jwt: {
 					signingKey: {
 						provider: "local",
-						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousKeys: [] },
+						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousSecrets: [] },
 					},
 				},
 				accessToken: { expiresIn: 3600 },

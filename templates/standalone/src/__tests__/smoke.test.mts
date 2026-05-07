@@ -40,7 +40,7 @@ const config: AppConfig = {
 					algorithm: "HS256",
 					secret: "test-secret-for-smoke-test",
 					kid: "v0",
-					previousKeys: [],
+					previousSecrets: [],
 				},
 			},
 		},

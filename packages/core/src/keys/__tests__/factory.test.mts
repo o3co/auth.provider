@@ -16,10 +16,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
+import { decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair, jwtVerify } from "jose";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AdapterFactoryError } from "#/adapters/AdapterFactory.mjs";
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
+import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
 async function generateTestKeyPair(alg: string) {
 	const { privateKey, publicKey } = await generateKeyPair(alg, { extractable: true });
@@ -89,6 +90,58 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 				previousKeys: [],
 			}),
 		).rejects.toThrow(/secret is required for HS256/i);
+	});
+});
+
+describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
+	it("factory passes previousSecrets through to createSymmetricKeyStore so an old token verifies via the new keystore", async () => {
+		// Old keystore signs a token with kid "v0".
+		const oldKs = createSymmetricKeyStore("old-secret", "v0");
+		const oldToken = await oldKs.sign({ claims: { sub: "user1" } });
+
+		// Factory builds a new keystore with v0 in previousSecrets.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		const newKs = await factory.create({
+			type: "local",
+			algorithm: "HS256",
+			kid: "v1",
+			secret: "new-secret",
+			previousSecrets: [
+				{
+					kid: "v0",
+					secret: "old-secret",
+					expiresAt: "2099-12-31T00:00:00Z",
+				},
+			],
+		});
+
+		const header = decodeProtectedHeader(oldToken);
+		expect(header.kid).toBe("v0");
+		// Pre-fix: factory drops previousSecrets, getVerificationKey("v0") throws.
+		const key = await newKs.getVerificationKey(header.kid as string);
+		const { payload } = await jwtVerify(oldToken, key);
+		expect(payload.sub).toBe("user1");
+	});
+
+	it("throws on invalid expiresAt for a previous secret", async () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "HS256",
+				kid: "v1",
+				secret: "new-secret",
+				previousSecrets: [
+					{
+						kid: "v0",
+						secret: "old-secret",
+						expiresAt: "not-a-date",
+					},
+				],
+			}),
+		).rejects.toThrow(/previousSecrets\[0\]\.expiresAt is not a valid date/i);
 	});
 });
 
