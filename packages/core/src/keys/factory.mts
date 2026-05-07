@@ -126,6 +126,17 @@ export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 			typeof rawAlgorithm === "string" && rawAlgorithm.length > 0 ? rawAlgorithm : "HS256";
 
 		if (algorithm === "HS256") {
+			// IH-9 defense-in-depth: the Zod schema's strict HS256 branch
+			// already rejects asymmetric-shaped `previousKeys`, but
+			// `factory.create()` accepts `Record<string, unknown>` and bypasses
+			// the schema — programmatic callers (tests, custom composition
+			// roots) could otherwise reproduce the original silent-ignore bug.
+			if (config.previousKeys !== undefined) {
+				throw new Error(
+					"previousKeys is not valid for HS256 — use previousSecrets (kid + secret + expiresAt). " +
+						"previousKeys is the asymmetric-shaped field for RS256/ES256/EdDSA rotation.",
+				);
+			}
 			const secret = config.secret;
 			if (typeof secret !== "string" || secret.length === 0) {
 				throw new Error("secret is required for HS256 algorithm");

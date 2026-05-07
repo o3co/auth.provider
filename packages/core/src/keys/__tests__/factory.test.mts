@@ -143,6 +143,30 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 			}),
 		).rejects.toThrow(/previousSecrets\[0\]\.expiresAt is not a valid date/i);
 	});
+
+	it("rejects HS256 config that includes asymmetric-shaped previousKeys (defense-in-depth at factory level)", async () => {
+		// Schema-level strict union already rejects this, but `factory.create()`
+		// accepts `Record<string, unknown>` and bypasses the schema. The factory
+		// must catch the misconfig directly so programmatic callers cannot
+		// reproduce the IH-9 silent-ignore bug.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "HS256",
+				kid: "v1",
+				secret: "new-secret",
+				previousKeys: [
+					{
+						kid: "v0",
+						publicKey: "...pem...",
+						expiresAt: "2099-12-31T00:00:00Z",
+					},
+				],
+			}),
+		).rejects.toThrow(/previousKeys is not valid for HS256/i);
+	});
 });
 
 describe("registerBuiltinKeyStores - local asymmetric", () => {
