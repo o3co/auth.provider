@@ -27,6 +27,7 @@
 	"scripts": {
 		"build": "tsc",
 		"prebuild": "node scripts/copy-templates.mjs",
+		"prepack": "rimraf dist && node scripts/copy-templates.mjs && tsc",
 		"test": "vitest run"
 	},
 	"devDependencies": {
