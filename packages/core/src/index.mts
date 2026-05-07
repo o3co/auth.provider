@@ -116,9 +116,16 @@ export {
 } from "./grants/logoutToken.mjs";
 // Grant types and interfaces
 /**
- * @deprecated Since v0.5.1 (AS-8). Use module-based grant contributions
- * (`contributes.grants` on module definitions) instead of direct registry
- * mutation. Will be removed from the public API at 1.0 GA. See A2-γ §3.3.
+ * @deprecated Since v0.5.1 (AS-8). The `GrantRegistry` class export AND its
+ * companion `GrantRegistryError` are both deprecated as PUBLIC re-exports
+ * from `@o3co/auth-provider-core` and will be removed at 1.0 GA per A2-γ
+ * §3.3. The `@deprecated` tag on this `export {}` site annotates BOTH names
+ * — TypeScript / IDE diagnostics fire on import for either symbol. Replace
+ * direct `new GrantRegistry()` / `register()` wiring with module-based
+ * `contributes.grants` declarations on module definitions; the boot
+ * planner runs `register` / `replace` / `freeze` (and may throw
+ * `GrantRegistryError`) internally on your behalf, so consumer code no
+ * longer needs to reference either symbol.
  */
 export { GrantRegistry, GrantRegistryError } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
