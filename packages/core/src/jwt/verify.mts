@@ -44,7 +44,12 @@ export type JwtVerificationReason =
 	| "signature"
 	| "expired"
 	| "not_yet_valid"
-	| "kid_unknown";
+	| "kid_unknown"
+	// `kid_expired` is distinct from `kid_unknown`: an expired kid is an
+	// operator-rotation signal (the previous key's expiresAt has passed), an
+	// unknown kid is an attacker-fabricated header signal. SIEM filters can
+	// page differently on each.
+	| "kid_expired";
 
 /**
  * Thrown by {@link verifyJwt} on any verification failure. The `reason` field
@@ -189,9 +194,15 @@ export async function verifyJwt(
 		throw err;
 	}
 
-	// typ check — header-only, runs before signature so a wrong-type token
-	// never even attempts crypto verification (also avoids leaking timing
-	// signal that would distinguish "wrong typ" from "wrong key").
+	// typ check — header-only, runs before signature as a cheap token-type-
+	// confusion screen. typ is in the public protected header (not part of
+	// the signed claims set), so checking it pre-signature is a no-op for an
+	// attacker who controls the header but not the key; it does NOT add a
+	// timing oracle since rejecting on typ short-circuits before the HMAC /
+	// RSA op the attacker would otherwise time. Pre-signature placement also
+	// short-circuits id_token / logout_token tokens reaching an at+jwt-only
+	// route (they would still fail signature against the same KeyStore, but
+	// failing here keeps the audit log honest about *why*).
 	const effectiveExpectedTyp = expectedTyp === undefined ? DEFAULT_TYP_BY_TYPE[type] : expectedTyp;
 	if (effectiveExpectedTyp !== null) {
 		const headerTyp = header.typ;
@@ -229,8 +240,16 @@ export async function verifyJwt(
 	let verificationKey: Awaited<ReturnType<KeyStore["getVerificationKey"]>>;
 	try {
 		verificationKey = await keyStore.getVerificationKey(requestedKid);
-	} catch {
-		const err = new JwtVerificationError("kid_unknown", `Unknown or expired kid: ${requestedKid}`);
+	} catch (cause) {
+		// IH-9 KeyStore distinguishes the two failure modes by message
+		// prefix (`Expired kid:` vs `Unknown kid:`). Surface them as separate
+		// reasons so SIEM pipelines can tell operator-rotation expiry apart
+		// from attacker-fabricated header values.
+		const causeMessage = cause instanceof Error ? cause.message : String(cause);
+		const reason: JwtVerificationReason = causeMessage.startsWith("Expired kid:")
+			? "kid_expired"
+			: "kid_unknown";
+		const err = new JwtVerificationError(reason, causeMessage);
 		emitRejection(logger, err, undefined, header);
 		throw err;
 	}

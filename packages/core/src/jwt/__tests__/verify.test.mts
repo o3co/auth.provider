@@ -211,6 +211,35 @@ describe("verifyJwt", () => {
 		});
 	});
 
+	it("Test 8b — distinguishes expired kid from unknown kid (reason=kid_expired)", async () => {
+		// Multi-agent review (Claude Important): expired and unknown kids
+		// represent different operator-vs-attacker signals. The verifier must
+		// surface them as separate reasons so SIEM rules can page differently.
+		const SECRET = "test-secret-32-bytes-long-string12";
+		const expiredKid = "v0";
+		const expiredAt = new Date(Date.now() - 1000); // expired 1s ago
+		// Build a keystore where v0 is "current" but a previousSecret with the
+		// same secret rotates in as `vRot` already-expired. We then sign with
+		// `vRot` so verification fails with kid_expired.
+		const rotatingKeyStore = createSymmetricKeyStore(SECRET, "vCurrent", [
+			{ kid: expiredKid, secret: SECRET, expiresAt: expiredAt },
+		]);
+		const secretKey = createSecretKey(Buffer.from(SECRET));
+		const jwt = await new SignJWT({
+			iss: TEST_ISSUER,
+			aud: TEST_AUDIENCE,
+			sub: "user-1",
+		})
+			.setProtectedHeader({ alg: "HS256", kid: expiredKid, typ: "at+jwt" })
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(secretKey);
+		await expect(verifyJwt(jwt, rotatingKeyStore, baseOptions)).rejects.toMatchObject({
+			name: "JwtVerificationError",
+			reason: "kid_expired",
+		});
+	});
+
 	it("Test 9 — rejects JWT with iat in future beyond clock skew with reason=not_yet_valid", async () => {
 		const keyStore = makeKeyStore();
 		const futureIat = Math.floor(Date.now() / 1000) + 400; // > 300s skew
