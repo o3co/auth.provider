@@ -14,8 +14,9 @@
  * limitations under the License.
  */
 import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { shouldCopyTemplateEntry } from "./internal/template-filter.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = resolve(__dirname, "../templates/standalone");
@@ -52,13 +53,9 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	}
 
 	// Copy template to target
-	const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 	cpSync(TEMPLATES_DIR, targetDir, {
 		recursive: true,
-		filter: (source) => {
-			const segments = source.split(sep);
-			return !segments.some((s) => EXCLUDED_DIRS.has(s));
-		},
+		filter: (source) => shouldCopyTemplateEntry(source, TEMPLATES_DIR),
 	});
 
 	// Rewrite package.json

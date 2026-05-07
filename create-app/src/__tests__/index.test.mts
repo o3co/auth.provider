@@ -1,8 +1,77 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidDirName, isValidProjectName, main, scaffold } from "../index.mjs";
+import { shouldCopyTemplateEntry } from "../internal/template-filter.mjs";
+
+// Both POSIX and Windows separators are exercised explicitly so the suite
+// validates the separator-relative segment logic regardless of the host
+// platform. (`path.sep` is the production default; tests pass it explicitly.)
+const platforms = [
+	{
+		name: "POSIX-style paths",
+		sep: posix.sep,
+		installRoot:
+			"/Users/x/.npm/_npx/abc/node_modules/@o3co/create-auth-provider/templates/standalone",
+		localRoot: "/repo/templates/standalone",
+	},
+	{
+		name: "Windows-style paths",
+		sep: win32.sep,
+		installRoot:
+			"C:\\Users\\x\\AppData\\Roaming\\npm-cache\\_npx\\abc\\node_modules\\@o3co\\create-auth-provider\\templates\\standalone",
+		localRoot: "C:\\repo\\templates\\standalone",
+	},
+] as const;
+
+describe.each(platforms)("shouldCopyTemplateEntry on $name", ({ sep, installRoot, localRoot }) => {
+	const joinSegments = (base: string, ...rest: readonly string[]): string =>
+		[base, ...rest].join(sep);
+
+	it("includes the template root itself", () => {
+		expect(shouldCopyTemplateEntry(installRoot, installRoot, sep)).toBe(true);
+	});
+
+	it("includes a file directly under the template root even when ancestor path contains 'node_modules'", () => {
+		// Regression for v0.5.0 npx install bug: when the package is installed
+		// at .../node_modules/@o3co/create-auth-provider/..., the previous filter
+		// checked every segment of the absolute source path and excluded
+		// everything, so cpSync copied no files.
+		expect(
+			shouldCopyTemplateEntry(joinSegments(installRoot, "package.json"), installRoot, sep),
+		).toBe(true);
+	});
+
+	it("includes nested template files even when ancestor path contains 'node_modules' or 'dist'", () => {
+		expect(
+			shouldCopyTemplateEntry(joinSegments(installRoot, "src", "app.mts"), installRoot, sep),
+		).toBe(true);
+		expect(
+			shouldCopyTemplateEntry(
+				joinSegments(installRoot, "config", "application.conf"),
+				installRoot,
+				sep,
+			),
+		).toBe(true);
+	});
+
+	it("excludes node_modules subdirectories that live INSIDE the template root", () => {
+		expect(
+			shouldCopyTemplateEntry(
+				joinSegments(localRoot, "node_modules", "foo", "index.js"),
+				localRoot,
+				sep,
+			),
+		).toBe(false);
+	});
+
+	it("excludes dist subdirectories that live INSIDE the template root", () => {
+		expect(
+			shouldCopyTemplateEntry(joinSegments(localRoot, "dist", "index.mjs"), localRoot, sep),
+		).toBe(false);
+	});
+});
 
 describe("scaffold", () => {
 	let tempDir: string;
