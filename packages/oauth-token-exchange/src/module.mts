@@ -92,6 +92,10 @@ export const tokenExchangeModule: Module = defineModule({
 		// it here, token-exchange would silently sit outside CP-18 enforcement
 		// while sibling grants are gated.
 		"grantPolicy",
+		// SF-1: forwarded to the central JWT verifier so verifier rejection /
+		// aud-skip warnings emit through the operator's structured logger
+		// rather than being silently dropped.
+		"logger",
 	],
 	contributes: {
 		grants: {
@@ -105,6 +109,13 @@ export const tokenExchangeModule: Module = defineModule({
 					keyStore: deps.keyStore,
 					issuer: deps.config.oauth.jwt.issuer,
 					refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+					// SF-1: thread legacyTypAccept through so the operator's
+					// HOCON / env-var override governs the validator. Without
+					// this, the validator's `?? true` fallback masked any
+					// explicit `legacyTypAccept = false` configuration — the
+					// strict mode would not actually engage at this site.
+					legacyTypAccept: deps.config.oauth.jwt.legacyTypAccept,
+					logger: deps.logger,
 				}),
 		},
 	},

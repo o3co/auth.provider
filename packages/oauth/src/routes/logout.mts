@@ -27,10 +27,9 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { emitAuditEvent } from "@o3co/auth-provider-core";
+import { emitAuditEvent, verifyJwt } from "@o3co/auth-provider-core";
 import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { decodeProtectedHeader, jwtVerify } from "jose";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
 import { cascadeLogout } from "../logout/cascadeLogout.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
@@ -92,6 +91,12 @@ export interface LogoutRouterOptions {
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSinkBase;
+	/**
+	 * SF-1 (v0.5.1): when true (default), the central JWT verifier accepts
+	 * tokens whose `typ` header is absent and emits a deprecation warning.
+	 * Forwarded to `verifyJwt` for the bearer AT and id_token_hint paths.
+	 */
+	legacyTypAccept?: boolean;
 }
 
 /**
@@ -148,18 +153,20 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			}
 			const token = auth.slice(auth.indexOf(" ") + 1);
 
-			// Step 2: Verify JWT signature + check typ === "at+jwt".
-			// Reject refresh (rt+jwt), id (id+jwt), and logout (logout+jwt) tokens.
+			// Step 2: SF-1 — alg / iss / typ + signature pinned by the central
+			// verifier. typ must be at+jwt (refresh and id_tokens are signed by
+			// the same KeyStore so a typ check is the only defense against
+			// cross-type acceptance). Audience is deferred — bearer-as-credential
+			// route, calling-client identity is not separately authenticated
+			// here; the verifier records the gap via `jwt_verify_aud_skipped`.
 			let payload: Record<string, unknown>;
 			try {
-				const header = decodeProtectedHeader(token);
-				if (header.typ !== "at+jwt") {
-					throw new Error("invalid token type");
-				}
-				const key = await opts.keyStore.getVerificationKey(
-					header.kid ?? opts.keyStore.getSigningKidFallback(),
-				);
-				const verified = await jwtVerify(token, key);
+				const verified = await verifyJwt(token, opts.keyStore, {
+					type: "access_token",
+					expectedIssuer: opts.issuer ?? "",
+					legacyTypAccept: opts.legacyTypAccept ?? true,
+					logger: opts.logger,
+				});
 				payload = verified.payload as Record<string, unknown>;
 			} catch (error) {
 				// Log the reason at warn level — keep minimal (don't log the token itself,
@@ -394,11 +401,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 			let payload: Record<string, unknown>;
 			try {
-				const header = decodeProtectedHeader(idTokenHint);
-				const key = await opts.keyStore.getVerificationKey(
-					header.kid ?? opts.keyStore.getSigningKidFallback(),
-				);
-				const verified = await jwtVerify(idTokenHint, key);
+				// SF-1: pin alg / iss / typ (=id+jwt) + signature. Audience is
+				// derived from the id_token's aud claim post-verification (the
+				// id_token was issued for a specific client); we can't pin aud
+				// before knowing the client, so the verifier records the gap.
+				const verified = await verifyJwt(idTokenHint, opts.keyStore, {
+					type: "id_token",
+					expectedIssuer: opts.issuer ?? "",
+					legacyTypAccept: opts.legacyTypAccept ?? true,
+					logger: opts.logger,
+				});
 				payload = verified.payload as Record<string, unknown>;
 			} catch {
 				return res.status(400).json({

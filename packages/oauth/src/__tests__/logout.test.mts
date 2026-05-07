@@ -48,7 +48,7 @@ async function mintIdToken(extra: Record<string, unknown> = {}): Promise<string>
 		sid: "sid-1",
 		...extra,
 	})
-		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
 		.setExpirationTime("1h")
 		.setIssuedAt()
 		.setIssuer("https://auth.example.com")
@@ -264,7 +264,8 @@ describe("POST /oauth/logout", () => {
 			const app = buildApp();
 			// Mint a token without sid
 			const token = await new SignJWT({ sub: "u-1", aud: "client-1" })
-				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
+				.setIssuer("https://auth.example.com")
 				.setExpirationTime("1h")
 				.setIssuedAt()
 				.sign(secretKey);

@@ -53,6 +53,35 @@ export interface ManagedKey {
 
 export type Algorithm = "HS256" | "RS256" | "ES256" | "EdDSA";
 
+/**
+ * Thrown by {@link KeyStore.getVerificationKey} when the requested `kid` is
+ * not registered in the keystore. Callers (notably the SF-1 central JWT
+ * verifier) `instanceof`-check this so SIEM pipelines can distinguish
+ * attacker-fabricated kids from operator-rotation expiry.
+ */
+export class UnknownKidError extends Error {
+	override readonly name = "UnknownKidError";
+	constructor(readonly kid: string) {
+		super(`Unknown kid: ${kid}`);
+	}
+}
+
+/**
+ * Thrown by {@link KeyStore.getVerificationKey} when the requested `kid` is
+ * registered but its `expiresAt` has passed. Distinct from
+ * {@link UnknownKidError} so audit pipelines can page differently on
+ * rotation-window expiry vs. attacker-fabricated header values.
+ */
+export class ExpiredKidError extends Error {
+	override readonly name = "ExpiredKidError";
+	constructor(
+		readonly kid: string,
+		readonly expiredAt: Date,
+	) {
+		super(`Expired kid: ${kid}`);
+	}
+}
+
 export interface KeyStore {
 	readonly algorithm: Algorithm;
 	/**
@@ -143,10 +172,10 @@ export async function createAsymmetricKeyStore(
 			}
 			const prev = resolvedPrevious.find((k) => k.kid === requestedKid);
 			if (!prev) {
-				throw new Error(`Unknown kid: ${requestedKid}`);
+				throw new UnknownKidError(requestedKid);
 			}
 			if (prev.expiresAt <= new Date()) {
-				throw new Error(`Expired kid: ${requestedKid}`);
+				throw new ExpiredKidError(requestedKid, prev.expiresAt);
 			}
 			return prev.publicKey;
 		},
@@ -220,10 +249,10 @@ export function createSymmetricKeyStore(
 			}
 			const prev = resolvedPrevious.find((p) => p.kid === requestedKid);
 			if (!prev) {
-				throw new Error(`Unknown kid: ${requestedKid}`);
+				throw new UnknownKidError(requestedKid);
 			}
 			if (prev.expiresAt <= new Date()) {
-				throw new Error(`Expired kid: ${requestedKid}`);
+				throw new ExpiredKidError(requestedKid, prev.expiresAt);
 			}
 			return prev.secretKey;
 		},
