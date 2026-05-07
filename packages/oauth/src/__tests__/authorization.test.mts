@@ -1634,8 +1634,11 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 
 	it("returns 503 temporarily_unavailable when the second userSessionStore.get throws", async () => {
 		// First get succeeds; second get throws (e.g. Redis blip mid-grant).
-		// The throw is inside the existing try/catch that wraps findById/addFamilyId/
-		// registerRP, so it must surface as a controlled 503.
+		// The CR-4 second `get` has its own dedicated try/catch — store-availability
+		// failures here surface as `503 / "session store unavailable"`, matching the
+		// first-get path and not the broader outer catch that wraps findById /
+		// addFamilyId / registerRP (which surfaces as `503 / "session linking
+		// unavailable"`).
 		let getCallCount = 0;
 		const userSessionStore = {
 			kind: "spy",

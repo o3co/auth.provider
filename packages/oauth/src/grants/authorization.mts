@@ -59,8 +59,12 @@ export const createAuthorizationGrant = (
 	// TS-4 (v0.5.1): per-element string validation lives in
 	// `resolvePkceSupportedMethods` — the previous `Array.isArray(...) ? (... as string[])`
 	// pattern silently accepted operator-typed garbage like `[123, null]`
-	// because `Array.isArray` does not constrain element types.
-	const supportedMethods = resolvePkceSupportedMethods(pkceConfig);
+	// because `Array.isArray` does not constrain element types. Pass `logger`
+	// so the helper's misconfig warnings (non-string elements, filtered-empty
+	// fallback) reach the operator's structured logger; F6 PR3 added the
+	// `logger` slot to GrantDependencies so the TS-4-deferred plumbing is now
+	// available at this call site.
+	const supportedMethods = resolvePkceSupportedMethods(pkceConfig, logger);
 	const pkceRequired: boolean = pkceConfig?.required === true;
 	// Legacy fallback: requireS256=true means only S256 is supported
 	const requireS256Legacy = pkceConfig?.requireS256 === true;
