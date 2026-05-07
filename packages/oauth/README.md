@@ -261,12 +261,13 @@ Each `Client` supports five optional fields for logout behavior:
 | 401 | `invalid_token` | Bearer missing, invalid, wrong type (not `at+jwt`), or family revoked |
 | 403 | `forbidden` | Client not opted in via `allowedAzpForFederationToken` |
 | 404 | `federation_not_linked` | The named federation isn't linked to this session |
-| 410 | `refresh_token_absent` | Stored tokens have no refresh_token (upstream didn't return one at login) |
-| 410 | `re_authentication_required` | IdP returned `invalid_grant` — session federation is cleared; user must re-authenticate with the IdP |
-| 500 | `refresh_failed` | Generic error from the IdP refresh |
+| 410 | `refresh_token_absent` | Stored tokens have no refresh_token (upstream didn't return one at login, or post-lock re-read found a record without one) |
+| 410 | `re_authentication_required` | IdP returned `invalid_grant` / `invalid_token` — session federation is cleared; user must re-authenticate with the IdP |
+| 429 | `rate_limited` | Upstream IdP rate limit exceeded (`status: 429` or `error: "too_many_requests"`); retry later |
+| 500 | `refresh_failed` | Generic / unclassified error from the IdP refresh path; SIEM should group on the `details.reason` audit field |
 | 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh` |
 | 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window |
-| 503 | `temporarily_unavailable` | Store outage or IdP 5xx / temporarily_unavailable response |
+| 503 | `temporarily_unavailable` | Store outage, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError) |
 
 All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.
 
@@ -292,8 +293,8 @@ The following audit events fire on this endpoint:
 - `federation.token.success` — on token issuance (details include `refreshed: boolean` to distinguish cache hits from refresh path)
 - `federation.token.forbidden` — on 403 (client not opted in)
 - `federation.token.family_revoked` — on 401 via revoked family
-- `federation.token.refresh_failed` — on provider.refreshToken throwing (non-invalid_grant)
-- `federation.token.reauthentication_required` — on `invalid_grant` from IdP
+- `federation.token.refresh_failed` — on provider.refreshToken throwing with an unclassified error. SF-13 (v0.5.1): `details.reason` carries the classifier enum (`"invalid_grant" | "rate_limited" | "network" | "unknown"`); SIEM rules should group on this field. Pre-v0.5.1 the detail field was `details.error: <raw message>` — migrate dashboards.
+- `federation.token.reauthentication_required` — on `invalid_grant` or `invalid_token` from IdP
 
 ## Migrating from v0.3.x to v0.4.0
 
