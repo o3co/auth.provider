@@ -41,17 +41,22 @@ import { validateManifests } from "../validate-manifests.mjs";
 // the slot contracts. The boot-pipeline tests verify routing behaviour
 // (registration order, collector dedup, factory error wrapping), not
 // contract semantics, so these stubs are intentionally no-op. Tests that
-// assert value identity construct typed instances directly (e.g.
-// `const sharedHook: AuditSink = { ... }`) rather than going through these
-// helpers.
+// need value-identity (`expect(...).toBe(stub)`) capture the helper output
+// once into a typed `const sharedHook: AuditSink = fakeAuditSink(...)` and
+// reuse the reference inside factory closures (`() => sharedHook`).
 // ---------------------------------------------------------------------------
 
+// `tag` is propagated into `GrantSuccess.tokens.access_token` so spy
+// collectors that record values can distinguish stub instances. The shape
+// matches `GrantSuccess` (the success arm of `GrantResult`) — `status: 200`
+// + a minimal `TokenResponse`. Pipeline tests don't exercise the result
+// downstream, so the rest of `TokenResponse` is filled with `as never`.
 const fakeGrantHandler = (tag = "stub"): GrantHandler => ({
 	handle: async () => ({
-		// `as never` justified: stubs are never invoked; the boot-pipeline
-		// tests only check registration/dedup. The concrete `GrantResult` /
-		// `SessionMutation` shapes are exercised by the grants-package tests.
-		result: { kind: "success", access_token: tag } as never,
+		result: {
+			status: 200,
+			tokens: { access_token: tag } as never,
+		},
 	}),
 });
 

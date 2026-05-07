@@ -37,11 +37,20 @@ import type { BootstrapMap } from "../types.mjs";
 import { BootError } from "../types.mjs";
 
 // AS-M1 (Phase F F9 PR6): typed GrantHandler stub for the grants
-// contributions. Pre-AS-M1 inline literal `{ grantType: ... }` worked
-// because the contributes-map placeholder was `unknown`; post-narrow
-// it must satisfy `GrantHandler` (handle / cleanup interface).
+// contributions. Pre-AS-M1 the inline literal `{ grantType: ... }` worked
+// because the contributes-map placeholder was `unknown`; post-narrow it
+// must satisfy `GrantHandler` (handle / cleanup interface). The result
+// shape mirrors `GrantSuccess` — `status: 200` + a minimal `TokenResponse`
+// with `tag` in `access_token` so pipeline assertions can distinguish
+// stubs. The handler is never invoked; the rest of `TokenResponse` is
+// filled with `as never`.
 const fakeGrantHandler = (tag = "stub"): GrantHandler => ({
-	handle: async () => ({ result: { kind: "success", access_token: tag } as never }),
+	handle: async () => ({
+		result: {
+			status: 200,
+			tokens: { access_token: tag } as never,
+		},
+	}),
 });
 
 // ---------------------------------------------------------------------------
