@@ -21,6 +21,7 @@ import type {
 	FederationTokenStoreBase,
 } from "../federation-tokens/types.mjs";
 import type { MfaProvider, MfaProviderBase } from "../mfa/types.mjs";
+import type { GrantPolicyHookContribution } from "../modules/manifest/contributes-map.mjs";
 import type { GrantPolicyHook, GrantPolicyHookBase } from "../policy/types.mjs";
 import type { RateLimiter, RateLimiterBase } from "../ratelimit/types.mjs";
 
@@ -62,12 +63,16 @@ describe("AS-7: deprecation aliases for *Base interfaces", () => {
 // `unknown` placeholder semantics belong to `GrantPolicyHookContribution`.
 
 describe("AS-7 collision: GrantPolicyHook (policy) vs GrantPolicyHookContribution (manifest)", () => {
-	it("GrantPolicyHookContribution exists in manifest contributes-map", async () => {
-		const mod = await import("../modules/manifest/contributes-map.mjs");
-		// Module exports a type alias — the runtime export object should
-		// expose the symbol name through the module record. We can't directly
-		// inspect type-only exports at runtime, so this acts as an
-		// import-resolves-correctly proof.
-		expect(mod).toBeDefined();
+	it("GrantPolicyHookContribution is the renamed manifest placeholder (still `unknown`)", () => {
+		// Type-only assertion: if the manifest-side rename ever regresses
+		// (someone reverts the placeholder back to `GrantPolicyHook`), the
+		// type-import above fails resolution and this test breaks at
+		// typecheck. The `expectTypeOf<X>().toEqualTypeOf<unknown>()` pins
+		// the placeholder semantics — Phase 9 substitution will replace
+		// `unknown` with the concrete contribution type at which point this
+		// assertion intentionally fails and must be updated alongside the
+		// substitution work.
+		expectTypeOf<GrantPolicyHookContribution>().toEqualTypeOf<unknown>();
+		expect(true).toBe(true);
 	});
 });

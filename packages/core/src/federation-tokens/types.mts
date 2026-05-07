@@ -30,8 +30,8 @@ export interface FederationTokens {
 /**
  * Adapter primitive for federation token storage.
  *
- * @deprecated Since v0.5.1. Use {@link FederationTokenStore} (no `Base` suffix) — the alias
- * is the canonical name going forward. The `*Base` form will be removed at 1.0 GA.
+ * @deprecated Since v0.5.1. Use {@link FederationTokenStore} (no `Base` suffix). The
+ * `*Base` form will be removed at 1.0 GA.
  */
 export interface FederationTokenStoreBase {
 	readonly kind: string;

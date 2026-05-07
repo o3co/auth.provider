@@ -32,7 +32,13 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 //   MfaFactor          — no dedicated interface found; mfa uses MfaProviderBase
 //                        (packages/core/src/mfa/types.mts). Phase 9 clarifies.
 //   AuditHook          — AuditSinkBase at packages/core/src/audit/types.mts:38
-//   GrantPolicyHook    — GrantPolicyHookBase at packages/core/src/policy/types.mts:50
+//   GrantPolicyHookContribution — placeholder; concrete type substitution
+//                        TBD by Phase 9. The canonical `GrantPolicyHook`
+//                        (alias of `GrantPolicyHookBase` at
+//                        packages/core/src/policy/types.mts:50) is the
+//                        public-API name and is exported from the package
+//                        root; this manifest placeholder describes only
+//                        the value type produced by a contribution factory.
 
 /**
  * Structural placeholder for GrantHandler. Phase 9 substitutes the concrete
