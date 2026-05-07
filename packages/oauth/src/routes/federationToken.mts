@@ -48,22 +48,45 @@ type ExpressLike = {
  */
 type FederationRefreshErrorReason = "invalid_grant" | "rate_limited" | "network" | "unknown";
 
+/**
+ * Node/undici fetch failures bubble up as `TypeError("fetch failed")` with the underlying
+ * network error code on `.cause.code` (one level deep). openid-client v6 rethrows these
+ * as-is. Walk the cause chain so `ECONNREFUSED` / `ENOTFOUND` / `ETIMEDOUT` reach the
+ * `network` classification regardless of whether the code lands on the top-level error
+ * or its `cause`.
+ */
+const NETWORK_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "EAI_AGAIN"] as const);
+
+function extractNetworkCode(error: unknown): string | undefined {
+	let cur: unknown = error;
+	for (let depth = 0; depth < 4 && cur !== null && typeof cur === "object"; depth++) {
+		const code = (cur as { code?: unknown }).code;
+		if (typeof code === "string" && NETWORK_CODES.has(code as never)) {
+			return code;
+		}
+		cur = (cur as { cause?: unknown }).cause;
+	}
+	return undefined;
+}
+
 function classifyFederationRefreshError(error: unknown): FederationRefreshErrorReason {
 	if (error !== null && typeof error === "object") {
-		const e = error as { error?: unknown; status?: unknown; code?: unknown };
+		const e = error as { error?: unknown; status?: unknown };
 		// openid-client v6 surfaces token-endpoint errors with `.error` populated from the
 		// IdP response body (RFC 6749 §5.2 error codes). `invalid_grant` is the canonical
 		// "refresh token rejected"; `invalid_token` is RFC 6750 §3.1 — both require re-auth.
 		if (e.error === "invalid_grant" || e.error === "invalid_token") return "invalid_grant";
-		// Rate-limit indicators per RFC 6749 token-endpoint behavior + RFC 6585 §4.
+		// Rate-limit indicators per RFC 6749 token-endpoint behavior + RFC 6585 §4. RFC 6585
+		// defines `too_many_requests` as an HTTP status name — some IdPs (Google, Microsoft)
+		// echo it back as the error code in `.error`.
 		if (e.error === "too_many_requests" || e.status === 429) return "rate_limited";
 		// Generic upstream 5xx — IdP outage. Surfaced via openid-client `.status` even when
 		// the message is opaque ("service down").
 		if (typeof e.status === "number" && e.status >= 500 && e.status < 600) return "network";
-		// Node network-layer failures: ECONNREFUSED / ENOTFOUND / ETIMEDOUT propagate as `.code`.
-		if (e.code === "ECONNREFUSED" || e.code === "ENOTFOUND" || e.code === "ETIMEDOUT") {
-			return "network";
-		}
+		// Node network-layer failures: ECONNREFUSED / ENOTFOUND / ETIMEDOUT may be on the
+		// top-level error (legacy adapters) or wrapped as `.cause` of a TypeError thrown by
+		// undici/fetch (openid-client v6's transport).
+		if (extractNetworkCode(error) !== undefined) return "network";
 	}
 	// Defense-in-depth string fallback for non-openid-client errors (legacy stubs, mocks,
 	// custom adapters). Less precise than structured inspection, kept so v0.5.0 callers
@@ -500,12 +523,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			}
 
 			// SF-12 — post-lock RT guard.
-			// The pre-lock guard (lines 372-378) catches the case where the very first
+			// The pre-lock guard (Step 11b above) catches the case where the very first
 			// federationTokenStore.get returns a record without a refresh_token. The post-lock
-			// re-read above can ALSO produce such a record (e.g. concurrent revoke stripped
-			// the RT, or the IdP rotated to a token set without an RT and the store recorded
-			// that). Without this guard the IdP call would be made with `?? ""` — which the
-			// upstream rejects opaquely and lands in 500 refresh_failed via the SF-13 fallback.
+			// re-read can ALSO produce such a record (e.g. concurrent revoke stripped the RT,
+			// or the IdP rotated to a token set without an RT and the store recorded that).
+			// Without this guard the IdP call would be made with `?? ""` — which the upstream
+			// rejects opaquely and lands in 500 refresh_failed via the SF-13 fallback.
 			// Returning 410 refresh_token_absent gives the caller a precise re-auth signal.
 			if (!currentTokens.refreshToken) {
 				return res.status(410).json({

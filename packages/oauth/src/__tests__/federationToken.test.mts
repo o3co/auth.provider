@@ -1099,11 +1099,11 @@ describe("POST /oauth/federation/:name/token", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("SF-12: post-lock refresh-token guard", () => {
-		// SF-12 RED-1: provider receives the actual RT, not an empty string.
-		// Current code at federationToken.mts:474 has `?? ""` fallback. With currentTokens.refreshToken
-		// truthy, the fallback is not exercised and the spy sees the real RT — but the assertion is
-		// the regression guard: if a future refactor drops currentTokens and reaches for `freshTokens.refreshToken ?? ""`,
-		// this test catches it.
+		// SF-12 characterization test (NOT a true RED — pre-fix `?? ""` fallback is not
+		// triggered when currentTokens.refreshToken is truthy, so this assertion passes
+		// both pre- and post-fix). Kept as a regression guard against a future refactor
+		// that drops `currentTokens` and reaches for `freshTokens.refreshToken ?? ""`. The
+		// next two tests are the actual RED guards for SF-12.
 		it('passes the real refresh_token to provider.refreshToken (no ?? "" fallback)', async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshFn = vi.fn().mockResolvedValue({
@@ -1271,6 +1271,24 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.error).toBe("rate_limited");
 		});
 
+		// SF-13 RED-3b (Round 1 Claude Minor): the helper also classifies on `.error ===
+		// "too_many_requests"` (RFC 6585 §4 status name echoed back by some IdPs in the
+		// OAuth `error` field). Without this branch the only path to `rate_limited` is
+		// the HTTP status — IdPs that surface the rate-limit signal only on `.error`
+		// would fall through to `unknown` → 500.
+		it("returns 429 rate_limited when provider throws { error: 'too_many_requests' }", async () => {
+			const providerError = Object.assign(new Error("rate limit hit"), {
+				error: "too_many_requests",
+			});
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(429);
+			expect(res.body.error).toBe("rate_limited");
+		});
+
 		// SF-13 RED-4: structured 5xx via `.status` (openid-client surfaces upstream HTTP code
 		// here even when the message doesn't contain it). Pre-fix: 500 generic (no /5\d\d/ match
 		// when the message is just "service down"). Post-fix: 503 temporarily_unavailable.
@@ -1291,6 +1309,24 @@ describe("POST /oauth/federation/:name/token", () => {
 		it("returns 503 when provider throws { code: 'ECONNREFUSED' }", async () => {
 			const providerError = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), {
 				code: "ECONNREFUSED",
+			});
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+
+		// SF-13 RED-5b (Round 1 Codex Important): Node/undici fetch failures are thrown as
+		// `TypeError("fetch failed")` with the actual network code on `.cause.code`, not on
+		// `.code`. openid-client v6 rethrows these as-is. Without walking the cause chain
+		// the helper would classify these as `unknown` → 500, defeating SF-13's intent that
+		// network failures return 503.
+		it("returns 503 when provider throws TypeError with cause.code = 'ENOTFOUND'", async () => {
+			const providerError = Object.assign(new TypeError("fetch failed"), {
+				cause: { code: "ENOTFOUND" },
 			});
 			const app = buildRefreshFailure(providerError);
 			const token = await mintAccessToken();
