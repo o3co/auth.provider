@@ -556,7 +556,6 @@ describe("createRefreshTokenGrant", () => {
 	});
 
 	describe("F6 PR3 — PB-1 RT reuse → family revoke", () => {
-		console.log("DEBUG: F6 PR3 PB-1 describe being collected");
 		// Stub rotation that always reports "replayed" (jti mismatch).
 		const replayedRotation: RefreshTokenFamilyRotation = {
 			async register() {},
@@ -857,11 +856,40 @@ describe("createRefreshTokenGrant", () => {
 			);
 		});
 
-		it("force-rejects unknown_family when familyId is null even with accept policy (CC-2 Codex Delta 3)", async () => {
-			// SF-6 normally blocks tokens lacking family_id — but to exercise
-			// CC-2's defense-in-depth guard we set legacyRtPolicy=accept-with-warning
-			// so the SF-6 gate falls through. Then the rotation block is reached
-			// with familyId === null, and the unknown_family branch must hard-reject.
+		it("SF-6 short-circuits null-familyId tokens before CC-2's null guard (defense-in-depth invariant)", async () => {
+			// CC-2 Codex Delta 3 originally asked for a RED test exercising the
+			// `familyId === null` hard-reject guard inside the unknown_family
+			// branch when `unknownFamilyPolicy = "accept"`. With SF-6's gate
+			// in place, that guard is structurally unreachable: when familyId
+			// is null the SF-6 gate fires FIRST and either rejects (default)
+			// or short-circuits to issuance with `accept-with-warning` —
+			// rotation never runs, so the unknown_family branch is never
+			// entered with null familyId.
+			//
+			// This test pins the invariant by:
+			//   1. Setting BOTH `unknownFamilyPolicy = "accept"` (so the
+			//      CC-2 branch would issue tokens if reached) AND
+			//      `legacyRtPolicy = "accept-with-warning"` (so SF-6 doesn't
+			//      hard-reject upstream).
+			//   2. Asserting the SF-6 audit log fires (proves the gate
+			//      caught the null familyId before rotation).
+			//   3. Asserting the rotation stub is NOT called (proves the
+			//      else-branch with the unknown_family case never runs).
+			//   4. Asserting tokens are issued (the surface behaviour, also
+			//      asserted indirectly by the audit log).
+			//
+			// If a future change reorders gates so rotation runs with
+			// familyId === null, the rotation stub `unknownFamilyRotation`
+			// would be invoked (assertion 3 would fail), at which point
+			// the CC-2 null guard inside the unknown_family case would
+			// kick in. Either failure mode catches a regression.
+			const warn = vi.fn();
+			const logger = makeStubLogger(warn);
+			const rotateSpy = vi.fn().mockResolvedValue({ outcome: "unknown_family" });
+			const rotation: RefreshTokenFamilyRotation = {
+				async register() {},
+				rotate: rotateSpy,
+			};
 			const config = {
 				...mockConfig,
 				oauth: {
@@ -876,7 +904,8 @@ describe("createRefreshTokenGrant", () => {
 			const deps: GrantDependencies = {
 				config,
 				keyStore: mockDeps.keyStore,
-				refreshTokenFamilyRotation: unknownFamilyRotation,
+				refreshTokenFamilyRotation: rotation,
+				logger,
 			};
 			// RT with no family_id claim — familyId resolves to null
 			const rt = await new SignJWT({ sub: "u1" })
@@ -891,14 +920,13 @@ describe("createRefreshTokenGrant", () => {
 				body: { refresh_token: rt },
 			});
 
-			// SF-6 accept-with-warning skips the rotation block entirely, so
-			// CC-2's familyId===null guard is reached only via a code path that
-			// SF-6 today already blocks. The expected behavior is that
-			// accept-with-warning skips rotation → tokens issued (200). We
-			// document this: the CC-2 null guard is defense-in-depth, currently
-			// unreachable when SF-6 holds. If a future change moves the rotation
-			// block ahead of the SF-6 gate, this test catches it.
 			expect(result.status).toBe(200);
+			// Pin the invariant: SF-6 fired and rotation was skipped.
+			expect(warn).toHaveBeenCalledWith(
+				expect.objectContaining({ hasFamilyId: false }),
+				"legacy_rt_accepted_no_replay_protection",
+			);
+			expect(rotateSpy).not.toHaveBeenCalled();
 		});
 
 		it("still handles replayed outcome correctly (RED 4 — orthogonality)", async () => {
