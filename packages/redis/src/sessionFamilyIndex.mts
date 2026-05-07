@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { SessionFamilyIndex } from "@o3co/auth-provider-core";
+import type { AdapterBuilder, SessionFamilyIndex } from "@o3co/auth-provider-core";
 import type { SessionSidSortedSetClient } from "./clients.mjs";
 import { createRedisSidSortedSet } from "./internal/redisSidSortedSet.mjs";
 
@@ -48,3 +48,29 @@ export function createRedisSessionFamilyIndex(
 		},
 	};
 }
+
+/**
+ * AdapterFactory builder for the Redis-backed `SessionFamilyIndex` (AS-9).
+ *
+ * Use when per-adapter `AdapterFactory` granularity is needed; for the common
+ * case the bundled `redisSessionStoresModule` is sufficient. Default
+ * `keyPrefix` matches the bundle's production layout (`ss:fi:`) so swapping
+ * between bundle and individual builder does not change the keyspace.
+ *
+ * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
+ * (TS-M2): missing `client` throws at boot rather than crashing at first
+ * Redis op.
+ */
+export const redisSessionFamilyIndexBuilder: AdapterBuilder<SessionFamilyIndex> = (
+	config,
+	_ctx,
+) => {
+	const c = config as { client?: SessionSidSortedSetClient; keyPrefix?: string };
+	if (!c.client) {
+		throw new Error("redisSessionFamilyIndexBuilder: 'client' option is required");
+	}
+	return createRedisSessionFamilyIndex({
+		client: c.client,
+		keyPrefix: c.keyPrefix ?? "ss:fi:",
+	});
+};

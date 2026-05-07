@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { RegisteredRP, SessionRPRegistry } from "@o3co/auth-provider-core";
+import type { AdapterBuilder, RegisteredRP, SessionRPRegistry } from "@o3co/auth-provider-core";
 import type { SessionRPRegistryClient } from "./clients.mjs";
 import { createRedisSidHash } from "./internal/redisSidHash.mjs";
 
@@ -112,3 +112,26 @@ export function createRedisSessionRPRegistry(
 		},
 	};
 }
+
+/**
+ * AdapterFactory builder for the Redis-backed `SessionRPRegistry` (AS-9).
+ *
+ * Use when per-adapter `AdapterFactory` granularity is needed; for the common
+ * case the bundled `redisSessionStoresModule` is sufficient. Default
+ * `keyPrefix` matches the bundle's production layout (`ss:rp:`) so swapping
+ * between bundle and individual builder does not change the keyspace.
+ *
+ * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
+ * (TS-M2): missing `client` throws at boot rather than crashing at first
+ * Redis op.
+ */
+export const redisSessionRPRegistryBuilder: AdapterBuilder<SessionRPRegistry> = (config, _ctx) => {
+	const c = config as { client?: SessionRPRegistryClient; keyPrefix?: string };
+	if (!c.client) {
+		throw new Error("redisSessionRPRegistryBuilder: 'client' option is required");
+	}
+	return createRedisSessionRPRegistry({
+		client: c.client,
+		keyPrefix: c.keyPrefix ?? "ss:rp:",
+	});
+};

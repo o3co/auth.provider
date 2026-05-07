@@ -97,14 +97,17 @@ export {
 export {
 	createRedisSessionFamilyIndex,
 	type RedisSessionFamilyIndexOptions,
+	redisSessionFamilyIndexBuilder,
 } from "./sessionFamilyIndex.mjs";
 export {
 	createRedisSessionFederationIndex,
 	type RedisSessionFederationIndexOptions,
+	redisSessionFederationIndexBuilder,
 } from "./sessionFederationIndex.mjs";
 export {
 	createRedisSessionRPRegistry,
 	type RedisSessionRPRegistryOptions,
+	redisSessionRPRegistryBuilder,
 } from "./sessionRPRegistry.mjs";
 // ---------------------------------------------------------------------------
 // A4 user-session adapters (Phase 8b).
@@ -113,4 +116,5 @@ export {
 export {
 	createRedisUserSessionStore,
 	type RedisUserSessionStoreOptions,
+	redisUserSessionStoreBuilder,
 } from "./userSessionStore.mjs";
