@@ -1764,8 +1764,12 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		// RFC 7636 §4.1: code_verifier is 43-128 chars from the unreserved set.
 		// "too-short" is 9 chars → must reject. The pre-existing test for this
 		// branch omitted body.redirect_uri and so was returning early at the
-		// redirect_uri-mismatch gate (status 400, but for the wrong reason).
-		// This test pins redirect_uri so the regex check is the actual cause.
+		// redirect_uri *presence* gate (authorization.mts:125, after D-1
+		// hoisted the absence check ahead of consumeByCode). The error string
+		// happened to be `"redirect_uri mismatch"` either way, but it was
+		// firing at presence-check, not at the equality-check at L168, and
+		// never reached the regex at L263. This test pins redirect_uri so
+		// the regex check is the actual cause and errorDescription is asserted.
 		const deps = makeDeps(
 			vi.fn().mockResolvedValue({
 				code: "abc",
