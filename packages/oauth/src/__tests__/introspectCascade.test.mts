@@ -278,11 +278,12 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 			.sign(secretKey);
 	}
 
-	it("RED-1: returns active=true with token_type=Bearer for a valid access token (NOT 'at+jwt')", async () => {
+	it("RED-1: returns active=true with token_type=Bearer + jti for a valid access token (NOT 'at+jwt')", async () => {
 		// RFC 6750 §6.1.1 — `Bearer` is the OAuth Token Type. The pre-SF-8
 		// response leaked the JOSE `typ` ("at+jwt"), wrong namespace per
-		// RFC 7662 §2.2.
-		const token = await makeAccessToken({ client_id: "client1" });
+		// RFC 7662 §2.2. RFC 7662 §2.2 also lists `jti` as a registered
+		// response field (Codex calibration m3) — confirm presence.
+		const token = await makeAccessToken({ client_id: "client1", jti: "jti-sf8-red1" });
 		const app = await buildApp();
 		const res = await introspect(app, token);
 
@@ -290,6 +291,7 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 		expect(res.body.active).toBe(true);
 		expect(res.body.token_type).toBe("Bearer");
 		expect(res.body.token_type).not.toBe("at+jwt");
+		expect(res.body.jti).toBe("jti-sf8-red1");
 	});
 
 	it("RED-2: returns active=false for a refresh token (no leak of RT validity)", async () => {

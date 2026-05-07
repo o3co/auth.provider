@@ -16,7 +16,7 @@
 
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
 
@@ -163,35 +163,44 @@ describe("createRedisSidSortedSet", () => {
 			expect(await z.list("sid-or8-1")).toEqual(["first", "second"]);
 		});
 
-		it("RED-2: post-restart simulation — pre-crash entries injected with low scores via raw ZADD sort BEFORE post-restart entries added via the module", async () => {
-			// Pre-crash members: injected via raw redis.zadd() with low scores
-			// (1, 2, 3) — bypasses the module counter entirely, simulating a
-			// session that survives a process restart.
+		it("RED-2: post-restart simulation via fresh module load — first score from a freshly-imported module exceeds an injected high pre-crash baseline", async () => {
+			// Codex review: the original RED-2 was not a meaningful TDD guard
+			// because earlier tests in this file already advanced the module-
+			// scoped `_insertionCounter` past low injected scores, so pre-fix
+			// the counter would already be high enough to win the order
+			// assertion. Force a true module reset via `vi.resetModules()` +
+			// dynamic re-import so the counter re-initialises (post-fix:
+			// `Date.now()`; pre-fix: `0`). Then inject a pre-crash score that
+			// is HIGH enough to require the Date.now() baseline to beat —
+			// `100_000` is well above any plausible counter value pre-fix
+			// (this whole test file performs ~10 adds total) and well below
+			// `Date.now()` (~1.75×10^12 in 2026). Assert via raw `zscore`
+			// that the new module's first add produces a score greater than
+			// the injected baseline.
 			//
-			// Post-restart new members: added via createRedisSidSortedSet.add()
-			// using DIFFERENT member names (NX flag preserves existing-member
-			// scores, so re-adding the same name would not exercise the bug).
-			//
-			// Post-fix expectation: post-restart scores start at Date.now()
-			// (~1.75×10^12 in 2026) and exceed all pre-crash scores; new
-			// members sort AFTER pre-crash ones in the ascending zRange.
-			const sid = "sid-or8-restart";
-			const key = `${prefix("or8-restart")}${sid}`;
-			await raw.zadd(key, "NX", 1, "pre-crash-A");
-			await raw.zadd(key, "NX", 2, "pre-crash-B");
-			await raw.zadd(key, "NX", 3, "pre-crash-C");
+			// NX semantics: pre-crash members must use DIFFERENT names from
+			// the post-restart member; ZADD NX would otherwise preserve the
+			// pre-existing low score and the bug would silently mask
+			// (Codex Delta 1).
+			const sid = "sid-or8-restart-v2";
+			const key = `${prefix("or8-restart-v2")}${sid}`;
+			const PRE_CRASH_HIGH = 100_000;
+			await raw.zadd(key, "NX", PRE_CRASH_HIGH, "pre-crash-high");
 
-			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-restart") });
-			await z.add(sid, "post-restart-A", FUTURE());
-			await z.add(sid, "post-restart-B", FUTURE());
+			vi.resetModules();
+			const fresh = (await import(
+				"../src/internal/redisSidSortedSet.mjs?freshOR8RED2"
+			)) as typeof import("../src/internal/redisSidSortedSet.mjs");
+			const z = fresh.createRedisSidSortedSet({ client, keyPrefix: prefix("or8-restart-v2") });
+			await z.add(sid, "post-restart-fresh", FUTURE());
 
-			expect(await z.list(sid)).toEqual([
-				"pre-crash-A",
-				"pre-crash-B",
-				"pre-crash-C",
-				"post-restart-A",
-				"post-restart-B",
-			]);
+			const score = await raw.zscore(key, "post-restart-fresh");
+			expect(score).not.toBeNull();
+			expect(Number(score)).toBeGreaterThan(PRE_CRASH_HIGH);
+			// Order assertion: the high-but-pre-fix-unreachable injected
+			// score is itself > 0 yet < Date.now(), so post-fix the new
+			// member sorts AFTER the pre-crash member.
+			expect(await z.list(sid)).toEqual(["pre-crash-high", "post-restart-fresh"]);
 		});
 
 		it("RED-3: module counter is shared across multiple createRedisSidSortedSet instances — interleaved adds get strictly increasing scores globally", async () => {
@@ -217,13 +226,32 @@ describe("createRedisSidSortedSet", () => {
 			expect(Number(scoreA2)).toBeLessThan(Number(scoreB2));
 		});
 
-		it("RED-4: counter baseline starts above realistic pre-crash counter values (Date.now() > 10^12 in 2026)", () => {
-			// Unit test (no Redis): documents the assumption that the post-fix
-			// epoch baseline is astronomically above any counter that started
-			// at 0 and incremented per add() under realistic operational
-			// throughput. See OR-8 spec Codex Delta 3 — sufficient under
-			// realistic throughput, NOT mathematically absolute.
-			expect(Date.now()).toBeGreaterThan(1_000_000_000_000);
+		it("RED-4: a freshly-loaded module emits a first score that exceeds 10^12 (structural assertion of the Date.now() baseline, not a tautology)", async () => {
+			// Codex review: the previous RED-4 (`expect(Date.now() > 1e12)`)
+			// was tautological — passes through year ~33658 regardless of
+			// production state. Replaced with a structural test that exercises
+			// the module's actual init: `vi.resetModules()` re-evaluates the
+			// `let _insertionCounter = ...` line, then a single add() through
+			// the fresh instance must produce a score above 10^12. Pre-fix
+			// (counter starts at 0) the first score is `1` and this fails;
+			// post-fix (`Date.now()`) the first score is `~1.75×10^12` and
+			// this passes.
+			const sid = "sid-or8-fresh-baseline";
+			const key = `${prefix("or8-fresh-baseline")}${sid}`;
+
+			vi.resetModules();
+			const fresh = (await import(
+				"../src/internal/redisSidSortedSet.mjs?freshOR8RED4"
+			)) as typeof import("../src/internal/redisSidSortedSet.mjs");
+			const z = fresh.createRedisSidSortedSet({
+				client,
+				keyPrefix: prefix("or8-fresh-baseline"),
+			});
+			await z.add(sid, "first-after-reload", FUTURE());
+
+			const score = await raw.zscore(key, "first-after-reload");
+			expect(score).not.toBeNull();
+			expect(Number(score)).toBeGreaterThan(1_000_000_000_000);
 		});
 	});
 });

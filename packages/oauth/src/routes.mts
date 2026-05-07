@@ -340,6 +340,11 @@ export const createOAuthRouter = async (
 						// can spot a refresh / id token presented as a Bearer
 						// credential. RFC 7662 §2.2 forbids leaking the typ to the
 						// caller — the audit log carries the signal instead.
+						// Other JwtVerificationError reasons (alg / iss / aud /
+						// signature / expired / kid_*) already emit
+						// `jwt_verify_rejected` from the central verifier — SIEM
+						// rule authors should NOT double-count by also matching
+						// `introspect_non_access_token` for those reasons.
 						if (cause instanceof JwtVerificationError && cause.reason === "typ") {
 							logger.warn(
 								{ reason: "non_access_token", site: "introspect_bearer" },
@@ -443,6 +448,10 @@ export const createOAuthRouter = async (
 					// SF-8: same non-access-token signal as the bearer path above.
 					// `active: false` is required by RFC 7662 §2.2 regardless of
 					// rejection reason; audit log carries the typ-mismatch signal.
+					// Symmetric with the bearer-self-intro catch: only `reason
+					// === "typ"` triggers `introspect_non_access_token`. All other
+					// rejection reasons emit `jwt_verify_rejected` from the
+					// central verifier; SIEM rules should NOT double-count.
 					if (cause instanceof JwtVerificationError && cause.reason === "typ") {
 						logger.warn(
 							{ reason: "non_access_token", site: "introspect_body" },
