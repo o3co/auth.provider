@@ -157,6 +157,8 @@ export type {
 export {
 	createAsymmetricKeyStore,
 	createSymmetricKeyStore,
+	ExpiredKidError,
+	UnknownKidError,
 } from "./keys/KeyStore.mjs";
 export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";
 // Logging

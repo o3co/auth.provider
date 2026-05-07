@@ -211,6 +211,35 @@ describe("verifyJwt", () => {
 		});
 	});
 
+	it("Test 7b — rejects typ-less token with contradicting legacy payload.type even when legacyTypAccept=true (reason=typ)", async () => {
+		// Multi-agent review (Copilot Important): legacyTypAccept=true was
+		// silently accepting cross-type tokens whose v0.3-era `payload.type`
+		// disagreed with the expected JwtType. Example: a typ-less RT
+		// (payload.type=refresh) accepted as an access token at /userinfo.
+		const keyStore = makeKeyStore();
+		const secretKey = createSecretKey(Buffer.from(TEST_SECRET));
+		const jwt = await new SignJWT({
+			iss: TEST_ISSUER,
+			aud: TEST_AUDIENCE,
+			sub: "user-1",
+			type: "refresh",
+		})
+			.setProtectedHeader({ alg: "HS256", kid: TEST_KID })
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(secretKey);
+		await expect(
+			verifyJwt(jwt, keyStore, {
+				...baseOptions,
+				type: "access_token",
+				legacyTypAccept: true,
+			}),
+		).rejects.toMatchObject({
+			name: "JwtVerificationError",
+			reason: "typ",
+		});
+	});
+
 	it("Test 8b — distinguishes expired kid from unknown kid (reason=kid_expired)", async () => {
 		// Multi-agent review (Claude Important): expired and unknown kids
 		// represent different operator-vs-attacker signals. The verifier must

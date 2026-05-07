@@ -163,7 +163,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				const verified = await verifyJwt(token, opts.keyStore, {
 					type: "access_token",
-					expectedIssuer: opts.issuer,
+					expectedIssuer: opts.issuer ?? "",
 					legacyTypAccept: opts.legacyTypAccept ?? true,
 					logger: opts.logger,
 				});
@@ -407,7 +407,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				// before knowing the client, so the verifier records the gap.
 				const verified = await verifyJwt(idTokenHint, opts.keyStore, {
 					type: "id_token",
-					expectedIssuer: opts.issuer,
+					expectedIssuer: opts.issuer ?? "",
 					legacyTypAccept: opts.legacyTypAccept ?? true,
 					logger: opts.logger,
 				});

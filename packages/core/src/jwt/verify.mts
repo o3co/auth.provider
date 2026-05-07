@@ -20,7 +20,7 @@ import {
 	jwtVerify,
 	type ProtectedHeaderParameters,
 } from "jose";
-import type { KeyStore } from "../keys/KeyStore.mjs";
+import { ExpiredKidError, type KeyStore } from "../keys/KeyStore.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 
 /**
@@ -144,6 +144,19 @@ const DEFAULT_TYP_BY_TYPE: Record<JwtType, string> = {
 	id_token: "id+jwt",
 };
 
+/**
+ * Maps the v0.3-era `payload.type` legacy claim back to a {@link JwtType}.
+ * v0.3 tokens predated the `typ` header convention; refresh tokens emitted
+ * `payload.type = "refresh"` instead. Unknown values map to `undefined`
+ * (the verifier accepts them under `legacyTypAccept` rather than rejecting,
+ * matching the philosophy that an unrecognized legacy hint is not evidence
+ * of cross-type confusion).
+ */
+const LEGACY_PAYLOAD_TYPE_MAP: Record<string, JwtType> = {
+	refresh: "refresh_token",
+	access: "access_token",
+};
+
 const DEFAULT_CLOCK_SKEW_MS = 300_000;
 
 /**
@@ -241,15 +254,14 @@ export async function verifyJwt(
 	try {
 		verificationKey = await keyStore.getVerificationKey(requestedKid);
 	} catch (cause) {
-		// IH-9 KeyStore distinguishes the two failure modes by message
-		// prefix (`Expired kid:` vs `Unknown kid:`). Surface them as separate
-		// reasons so SIEM pipelines can tell operator-rotation expiry apart
-		// from attacker-fabricated header values.
-		const causeMessage = cause instanceof Error ? cause.message : String(cause);
-		const reason: JwtVerificationReason = causeMessage.startsWith("Expired kid:")
-			? "kid_expired"
-			: "kid_unknown";
-		const err = new JwtVerificationError(reason, causeMessage);
+		// KeyStore distinguishes the two failure modes via typed errors
+		// (ExpiredKidError / UnknownKidError) so SIEM pipelines can tell
+		// operator-rotation expiry apart from attacker-fabricated header
+		// values without coupling to message text.
+		const reason: JwtVerificationReason =
+			cause instanceof ExpiredKidError ? "kid_expired" : "kid_unknown";
+		const message = cause instanceof Error ? cause.message : String(cause);
+		const err = new JwtVerificationError(reason, message);
 		emitRejection(logger, err, undefined, header);
 		throw err;
 	}
@@ -270,7 +282,11 @@ export async function verifyJwt(
 				? expectedAudience
 				: [...expectedAudience];
 	if (expectedAudience === undefined) {
-		logger?.warn({ reason: "aud", iss: expectedIssuer, type }, "jwt_verify_aud_skipped");
+		// Once-per-(logger, reason, type) so /userinfo and other hot bearer-as-
+		// credential routes don't flood ingestion with a warn record per request.
+		// Operators see the gap on first occurrence; volume signal is preserved
+		// in route-level request counters, not the audit log.
+		warnAuditGapOnce(logger, "aud", type, { iss: expectedIssuer }, "jwt_verify_aud_skipped");
 	}
 	// Issuer pinning is normally required, but operators who haven't
 	// configured `oauth.jwt.issuer` (e.g. partial-config test fixtures, dev
@@ -279,7 +295,7 @@ export async function verifyJwt(
 	// expected issuer so it's auditable.
 	const skipIssuer = expectedIssuer === "";
 	if (skipIssuer) {
-		logger?.warn({ reason: "iss", type }, "jwt_verify_iss_skipped");
+		warnAuditGapOnce(logger, "iss", type, {}, "jwt_verify_iss_skipped");
 	}
 
 	let payload: JoseJWTPayload;
@@ -299,6 +315,24 @@ export async function verifyJwt(
 		);
 		emitRejection(logger, err, undefined, header);
 		throw err;
+	}
+
+	// Legacy cross-type acceptance guard (Copilot review): when the header
+	// `typ` was absent and `legacyTypAccept` waved through the typ check,
+	// a v0.3-era token whose `payload.type` claim contradicts the expected
+	// {@link JwtType} would otherwise pass — e.g. a typ-less RT carrying
+	// `payload.type: "refresh"` accepted as an access token at /userinfo.
+	// Map the legacy claim back to the type universe and reject contradictions.
+	if (header.typ === undefined && typeof payload.type === "string") {
+		const mappedType = LEGACY_PAYLOAD_TYPE_MAP[payload.type];
+		if (mappedType !== undefined && mappedType !== type) {
+			const err = new JwtVerificationError(
+				"typ",
+				`JWT legacy payload.type ${payload.type} maps to ${mappedType}, expected ${type}`,
+			);
+			emitRejection(logger, err, payload, header);
+			throw err;
+		}
 	}
 
 	// iat in future beyond skew — jose does not enforce this; RFC 8725 §3.10
@@ -384,4 +418,37 @@ function emitRejection(
 		},
 		"jwt_verify_rejected",
 	);
+}
+
+/**
+ * Per-logger once-per-(reason, type) memoization for audit-gap warnings
+ * (`jwt_verify_aud_skipped`, `jwt_verify_iss_skipped`). Hot bearer-as-
+ * credential routes (e.g. /userinfo) would otherwise emit one warn record
+ * per request — operationally noisy and a real ingestion-cost issue.
+ *
+ * The map is keyed by Logger identity so each unique logger instance gets
+ * its own dedupe set: production deployments with a singleton logger emit
+ * each gap exactly once; tests that construct fresh mock loggers per case
+ * see a fresh emission per test (so assertions on warn calls remain
+ * deterministic). WeakMap auto-clears on logger GC.
+ */
+const auditGapEmitted = new WeakMap<Logger, Set<string>>();
+
+function warnAuditGapOnce(
+	logger: Logger | undefined,
+	reason: "aud" | "iss",
+	type: JwtType,
+	bindings: Record<string, unknown>,
+	msg: string,
+): void {
+	if (!logger) return;
+	let seen = auditGapEmitted.get(logger);
+	if (!seen) {
+		seen = new Set<string>();
+		auditGapEmitted.set(logger, seen);
+	}
+	const key = `${reason}:${type}`;
+	if (seen.has(key)) return;
+	seen.add(key);
+	logger.warn({ reason, type, ...bindings }, msg);
 }
