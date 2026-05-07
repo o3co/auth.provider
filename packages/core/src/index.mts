@@ -115,6 +115,11 @@ export {
 	generateLogoutToken,
 } from "./grants/logoutToken.mjs";
 // Grant types and interfaces
+/**
+ * @deprecated Since v0.5.1 (AS-8). Use module-based grant contributions
+ * (`contributes.grants` on module definitions) instead of direct registry
+ * mutation. Will be removed from the public API at 1.0 GA. See A2-γ §3.3.
+ */
 export { GrantRegistry, GrantRegistryError } from "./grants/registry.mjs";
 // Token formatting utility (used by oauth package)
 export {

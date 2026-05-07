@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (Phase F — F9 PR5 AS-9 Redis session sub-adapter builders, v0.5.1)
+
+- **Four new `*Builder` exports complete the tripartite
+  `create* + *Builder + *Module` pattern for Redis session sub-adapters**
+  (`@o3co/auth-provider-redis`, closes AS-9):
+  - `redisSessionFamilyIndexBuilder`
+  - `redisSessionFederationIndexBuilder`
+  - `redisSessionRPRegistryBuilder`
+  - `redisUserSessionStoreBuilder`
+
+  Each builder follows the existing `redisChallengeStoreBuilder` /
+  `redisRateLimiterBuilder` pattern: `(config, _ctx) => Adapter`, with a
+  boot-time guard that throws when `config.client` is missing (TS-M2
+  pattern from Wave 5g) instead of crashing at first Redis op. Default
+  `keyPrefix` for each builder matches the production layout that
+  `redisSessionStoresModule` produces (`ss:fi:`, `ss:fed:`, `ss:rp:`,
+  `ss:us:`), so swapping between the bundled module and an individual
+  builder does not change the keyspace.
+
+  This is **purely additive** — the bundled `redisSessionStoresModule`
+  remains the recommended wiring path for most consumers. The new builders
+  are for consumers that need per-adapter `AdapterFactory` granularity
+  (e.g., to substitute a custom adapter while keeping the others).
+
+### Deprecated (Phase F — F9 PR5 AS-8 GrantRegistry public export, v0.5.1)
+
+- **`GrantRegistry` and `GrantRegistryError` are deprecated as public
+  exports** (`@o3co/auth-provider-core`, closes AS-8): `GrantRegistry`
+  was historically exposed for v0.4.x consumers that registered grants by
+  direct registry mutation. The v0.5.0 architecture migrated grant
+  contribution to the module manifest pattern (`contributes.grants` on
+  module definitions), and the boot planner is now the only intended
+  caller of `register` / `replace` / `freeze`. The class itself is
+  unchanged and continues to work for its internal callers; only its
+  re-export from the package root is being withdrawn.
+
+  Following A2-γ §3.3, the public re-export will be removed at 1.0 GA.
+  The symmetric `ExchangeTokenValidatorRegistry` was already internalised
+  in v0.5.0 — `GrantRegistry`'s deprecation closes the half-migration.
+
+#### Migration
+
+- Convert any `new GrantRegistry()` + `register(...)` wiring into a module
+  definition with `contributes.grants: { [grantType]: factory }` and load
+  the module via the standard composition path. The boot planner will
+  invoke `register` / `freeze` on your behalf.
+- The `@deprecated` JSDoc tag is now visible on the class itself and on
+  the public export site, so IDEs / TypeScript surface the deprecation
+  inline.
+
 ### Breaking (Phase F — F9 PR3 GrantPolicyHook manifest rename, v0.5.1)
 
 - **Compile-time breaking change for deep manifest imports**: the manifest

@@ -64,6 +64,13 @@ export class GrantRegistryError extends Error {
  * them from each module's `contributes.grants` and `overrides.grants`
  * declarations. Phase 9 (A2-γ caller migration) internalises the registry
  * and removes it from the public API. Phase 3 establishes the contract.
+ *
+ * @deprecated Since v0.5.1 (AS-8). Use module-based grant contributions
+ * (`contributes.grants` on module definitions) instead of direct registry
+ * mutation. The `GrantRegistry` export will be removed from the public API
+ * at 1.0 GA. Internal boot-planner use of this class is unaffected — only
+ * the public re-export from `@o3co/auth-provider-core` is being withdrawn.
+ * See A2-γ §3.3 migration guide.
  */
 export class GrantRegistry {
 	private handlers = new Map<string, GrantHandler>();

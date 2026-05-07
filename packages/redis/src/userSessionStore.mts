@@ -15,6 +15,7 @@
  */
 
 import type {
+	AdapterBuilder,
 	CreateUserSessionInput,
 	Logger,
 	UserSession,
@@ -201,3 +202,28 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 		},
 	};
 }
+
+/**
+ * AdapterFactory builder for the Redis-backed `UserSessionStore` (AS-9).
+ *
+ * Use when per-adapter `AdapterFactory` granularity is needed; for the common
+ * case the bundled `redisSessionStoresModule` is sufficient. Default
+ * `keyPrefix` matches the bundle's production layout (`ss:us:`) so swapping
+ * between bundle and individual builder does not change the keyspace.
+ *
+ * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
+ * (TS-M2): missing `client` throws at boot rather than crashing at first
+ * Redis op. Optional `logger` is passed through for the TS-3 corrupt-envelope
+ * warn path; absent logger fails closed silently per existing convention.
+ */
+export const redisUserSessionStoreBuilder: AdapterBuilder<UserSessionStore> = (config, _ctx) => {
+	const c = config as { client?: UserSessionStoreClient; keyPrefix?: string; logger?: Logger };
+	if (!c.client) {
+		throw new Error("redisUserSessionStoreBuilder: 'client' option is required");
+	}
+	return createRedisUserSessionStore({
+		client: c.client,
+		keyPrefix: c.keyPrefix ?? "ss:us:",
+		...(c.logger !== undefined ? { logger: c.logger } : {}),
+	});
+};
