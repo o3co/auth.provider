@@ -160,6 +160,35 @@ describe("SymmetricKeyStore — multi-key rotation (IH-9)", () => {
 		);
 	});
 
+	it("throws Duplicate kid when current kid collides with a previousSecrets entry", () => {
+		expect(() =>
+			createSymmetricKeyStore("new-secret", "v0", [
+				{
+					kid: "v0",
+					secret: "old-secret",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				},
+			]),
+		).toThrow(/Duplicate kid values: v0/);
+	});
+
+	it("throws Duplicate kid when two previousSecrets entries share the same kid", () => {
+		expect(() =>
+			createSymmetricKeyStore("new-secret", "v1", [
+				{
+					kid: "dup",
+					secret: "old-a",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				},
+				{
+					kid: "dup",
+					secret: "old-b",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				},
+			]),
+		).toThrow(/Duplicate kid values: dup/);
+	});
+
 	it("getVerificationKeys excludes expired previousSecrets and getVerificationKey throws Expired kid", async () => {
 		const ks = createSymmetricKeyStore("current-secret", "v1", [
 			{

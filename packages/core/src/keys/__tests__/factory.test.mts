@@ -64,7 +64,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 			algorithm: "HS256",
 			kid: "v1",
 			secret: "s3cret",
-			previousKeys: [],
+			previousSecrets: [],
 		});
 		expect(keyStore.algorithm).toBe("HS256");
 		expect(keyStore.getSigningKidFallback()).toBe("v1");
@@ -74,7 +74,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 		const factory = createKeyStoreFactory();
 		registerBuiltinKeyStores(factory);
 		await expect(
-			factory.create({ type: "local", algorithm: "HS256", kid: "v1", previousKeys: [] }),
+			factory.create({ type: "local", algorithm: "HS256", kid: "v1", previousSecrets: [] }),
 		).rejects.toThrow(/secret is required for HS256/i);
 	});
 
@@ -87,7 +87,7 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 				algorithm: "HS256",
 				kid: "v1",
 				secret: "",
-				previousKeys: [],
+				previousSecrets: [],
 			}),
 		).rejects.toThrow(/secret is required for HS256/i);
 	});

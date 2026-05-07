@@ -164,8 +164,10 @@ export interface SymmetricPreviousSecret {
  *
  * Rotation (IH-9): when `previousSecrets` is non-empty, the keystore can
  * verify tokens signed by an older key whose `kid` is recorded in that
- * array. Issuance always uses the current `secret`/`kid`. Lookup is O(1)
- * via the JWT `kid` header — there is no trial verification across keys.
+ * array. Issuance always uses the current `secret`/`kid`. Lookup is by
+ * the JWT `kid` header — the keystore returns the matching key directly,
+ * never trial-verifies across multiple keys, mirroring the asymmetric
+ * `previousKeys` rotation path.
  */
 export function createSymmetricKeyStore(
 	secret: string,
