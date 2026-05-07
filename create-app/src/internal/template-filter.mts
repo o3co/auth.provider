@@ -30,15 +30,20 @@ const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
  * reject every file whenever the package itself happens to live under a
  * `node_modules` directory (which is the v0.5.0 npx regression this fixes).
  *
- * NOTE: `sep` is the load-bearing platform abstraction here — DO NOT replace it
- * with a hardcoded `"/"`. On Windows `sep === "\\"` and `cpSync` passes
- * back-slash-delimited absolute paths, so segment splitting must follow the
- * platform separator.
+ * The `pathSep` parameter exists so unit tests can exercise both POSIX and
+ * Windows separators regardless of the host platform; production callers omit
+ * it and pick up `path.sep` of the running platform. DO NOT change this to a
+ * hardcoded `"/"` — `cpSync` passes back-slash-delimited absolute paths on
+ * Windows, so segment splitting must follow the platform separator.
  */
-export const shouldCopyTemplateEntry = (source: string, templateRoot: string): boolean => {
+export const shouldCopyTemplateEntry = (
+	source: string,
+	templateRoot: string,
+	pathSep: string = sep,
+): boolean => {
 	if (source === templateRoot) return true;
-	const prefix = templateRoot.endsWith(sep) ? templateRoot : `${templateRoot}${sep}`;
+	const prefix = templateRoot.endsWith(pathSep) ? templateRoot : `${templateRoot}${pathSep}`;
 	if (!source.startsWith(prefix)) return true;
 	const rel = source.slice(prefix.length);
-	return !rel.split(sep).some((s) => EXCLUDED_DIRS.has(s));
+	return !rel.split(pathSep).some((s) => EXCLUDED_DIRS.has(s));
 };
