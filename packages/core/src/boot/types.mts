@@ -38,7 +38,7 @@ import type {
 	ExchangeTokenValidator,
 	FederationProvider,
 	GrantHandler,
-	GrantPolicyHook,
+	GrantPolicyHookContribution,
 	MfaFactor,
 } from "../modules/manifest/contributes-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
@@ -421,7 +421,7 @@ export interface ContributionCollectorMap {
 	readonly mfaFactors?: NameKeyedCollector<MfaFactor>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
-	readonly grantPolicyHooks?: ListCollector<GrantPolicyHook>;
+	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
 }
 
 /**

@@ -35,6 +35,17 @@ export interface CodeRepository {
 		nonce?: string;
 		sid?: string;
 	}): Promise<Code>;
+	/**
+	 * Retrieve a code record by the authorization code string.
+	 *
+	 * Naming note (AS-10): `getByCode` predates the v0.5.1 `findBy<Field>`
+	 * convention used by `ClientRepository.findById`. It is preserved at
+	 * v0.5.x for backward compatibility and will be normalized to
+	 * `findByCode` at 1.0 GA. New repository methods on this interface
+	 * SHOULD follow the `findBy<Field>` convention. Operation-specific
+	 * names like `consumeByCode` (atomic single-use) are NOT subject to
+	 * this convention.
+	 */
 	getByCode(code: string): Promise<Code | null>;
 	/**
 	 * Atomically retrieve and delete the code record. This is the sole

@@ -16,7 +16,8 @@
 		// once that file is cleaned up — track in the next core/repositories
 		// hygiene PR.
 		"src/__tests__/grant-context-readonly.test.mts",
-		"src/__tests__/repository-types-readonly.test.mts"
+		"src/__tests__/repository-types-readonly.test.mts",
+		"src/__tests__/naming-aliases.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

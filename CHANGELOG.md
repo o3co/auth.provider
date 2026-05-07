@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Breaking (Phase F — F9 PR3 GrantPolicyHook manifest rename, v0.5.1)
+
+- **Compile-time breaking change for deep manifest imports**: the manifest
+  contributes-map placeholder previously exported as `GrantPolicyHook`
+  from `@o3co/auth-provider-core/modules/manifest` has been renamed to
+  `GrantPolicyHookContribution`. TypeScript code importing the old name
+  from this entrypoint will fail to compile until the import is renamed.
+  This is the only breaking part of F9 PR3; the rest is additive
+  deprecation (see below).
+
+#### Migration
+
+- Replace `import type { GrantPolicyHook } from "@o3co/auth-provider-core/modules/manifest"`
+  with `import type { GrantPolicyHookContribution } from "@o3co/auth-provider-core/modules/manifest"`.
+- Imports of `GrantPolicyHook` from the package root
+  (`@o3co/auth-provider-core`) keep working — the root export now resolves
+  to the canonical policy alias (an alias of `GrantPolicyHookBase`),
+  which has the same shape downstream code expected from the previous
+  `unknown` placeholder for any structural use.
+- The placeholder retains its `unknown` semantics under the new name
+  (Phase 9 will substitute the concrete contribution type).
+- No runtime behavior change.
+
+### Deprecated (Phase F — F9 PR3 AS-7 + AS-10 naming consistency, v0.5.1)
+
+- **Adapter primitive interfaces add canonical aliases without the `*Base`
+  suffix; `*Base` forms are deprecated and will be removed at 1.0 GA**
+  (`@o3co/auth-provider-core`, closes AS-7 + AS-10): the v0.5.1 canonical
+  names are the new aliases. Existing code referencing `*Base` continues to
+  compile (the aliases are type equivalences, not replacements). Update at
+  your convenience before 1.0 GA.
+
+| Deprecated | Canonical (v0.5.1) | Source |
+|---|---|---|
+| `FederationTokenStoreBase` | `FederationTokenStore` | `@o3co/auth-provider-core` |
+| `RateLimiterBase` | `RateLimiter` | `@o3co/auth-provider-core` |
+| `AuditSinkBase` | `AuditSink` | `@o3co/auth-provider-core` |
+| `MfaProviderBase` | `MfaProvider` | `@o3co/auth-provider-core` |
+| `GrantPolicyHookBase` | `GrantPolicyHook` | `@o3co/auth-provider-core` |
+
+- **AS-10 documentation**: JSDoc on
+  `ClientRepository.findById` and `CodeRepository.getByCode` documents the
+  v0.5.1 naming convention (`findBy<Field>` for repository lookups; `get(<id>)`
+  for single-object stores; operation-specific names like `consumeByCode`
+  retain their semantic shape). `getByCode` will be normalized to
+  `findByCode` at 1.0 GA. No code change.
+
+#### Migration
+
+- No action required for v0.5.x consumers — the `*Base` names are still
+  exported and TypeScript treats the aliases as identical types. Migrate
+  imports at your convenience.
+- For the breaking manifest-path rename of the `GrantPolicyHook`
+  placeholder, see the dedicated **Breaking** section above.
+- No runtime behavior change.
+
 ### Breaking (Phase F — F9 PR2 AS-1 + AS-2 error envelope unification, v0.5.1)
 
 - **All session and rate-limit error responses now use the RFC 6749 §5.2

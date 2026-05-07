@@ -27,6 +27,12 @@ export interface FederationTokens {
 	readonly rawParams?: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * Adapter primitive for federation token storage.
+ *
+ * @deprecated Since v0.5.1. Use {@link FederationTokenStore} (no `Base` suffix). The
+ * `*Base` form will be removed at 1.0 GA.
+ */
 export interface FederationTokenStoreBase {
 	readonly kind: string;
 
@@ -52,6 +58,13 @@ export interface FederationTokenStoreBase {
 	/** Delete a specific (sid, federationName) entry. Idempotent. */
 	delete(sid: string, federationName: string): Promise<void>;
 }
+
+/**
+ * Canonical name (since v0.5.1) for the federation token store adapter
+ * primitive interface. {@link FederationTokenStoreBase} remains as a
+ * deprecated alias and will be removed at 1.0 GA.
+ */
+export type FederationTokenStore = FederationTokenStoreBase;
 
 export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStoreBase>;
 
