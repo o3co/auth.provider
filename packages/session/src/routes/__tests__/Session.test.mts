@@ -61,6 +61,9 @@ function buildApp(
 		userRepository?: UserRepository;
 		userSessionStore?: UserSessionStore;
 		sessionTtlMs?: number;
+		regenerateError?: Error;
+		destroyError?: Error;
+		config?: AppConfig;
 	} = {},
 ) {
 	const {
@@ -74,25 +77,42 @@ function buildApp(
 		} as unknown as UserRepository,
 		userSessionStore,
 		sessionTtlMs,
+		regenerateError,
+		destroyError,
+		config = stubConfig,
 	} = opts;
 
 	const app = express();
 
-	// Minimal express-session stub so req.session.regenerate / req.session.sid work
+	// Minimal express-session stub so req.session.regenerate / destroy / save work.
+	// regenerateError/destroyError opt-ins simulate session-store failures so tests
+	// can drive the AS-1 500 server_error envelope paths.
 	app.use((req, _res, next) => {
 		const sessionData: Record<string, unknown> = {};
 		(req as unknown as { session: Record<string, unknown> }).session = {
 			...sessionData,
-			regenerate(cb: (err: null) => void) {
+			regenerate(cb: (err: Error | null) => void) {
+				if (regenerateError) {
+					cb(regenerateError);
+					return;
+				}
 				// After regenerate, session data is reset — mirror real express-session behaviour.
 				const fresh: Record<string, unknown> = {
 					regenerate: this.regenerate,
 					save: this.save,
+					destroy: this.destroy,
 				};
 				Object.assign(req as unknown as { session: Record<string, unknown> }, { session: fresh });
 				cb(null);
 			},
 			save(cb: (err: null) => void) {
+				cb(null);
+			},
+			destroy(cb: (err: Error | null) => void) {
+				if (destroyError) {
+					cb(destroyError);
+					return;
+				}
 				cb(null);
 			},
 		};
@@ -101,7 +121,7 @@ function buildApp(
 
 	const router = createRouter(express, {
 		userRepository,
-		config: stubConfig,
+		config,
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
 		...(sessionTtlMs !== undefined ? { sessionTtlMs } : {}),
 	});
@@ -345,6 +365,67 @@ describe("Session routes — POST /session/login", () => {
 
 			expect(res.status).toBe(400);
 			expect(res.body).toMatchObject({ error: "invalid_redirect" });
+		});
+	});
+
+	// AS-1 RFC 6749 §5.2 envelope unification — the 3 historically `{message: …}`
+	// error responses on this router migrate to `{error, error_description}`.
+	describe("AS-1: RFC 6749 §5.2 error envelope", () => {
+		it("CSRF origin mismatch returns 403 access_denied with error_description (no `message`)", async () => {
+			const { app } = buildApp({
+				config: {
+					...stubConfig,
+					cors: { allowedOrigins: ["https://app.example.com"] },
+				} as AppConfig,
+			});
+
+			const res = await request(app)
+				.post("/session/login")
+				.set("Origin", "https://evil.example.com")
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send("username=alice&password=secret");
+
+			expect(res.status).toBe(403);
+			expect(res.body).toMatchObject({
+				error: "access_denied",
+				error_description: expect.any(String),
+			});
+			expect(res.body).not.toHaveProperty("message");
+		});
+
+		it("session regeneration failure returns 500 server_error envelope (no `message`)", async () => {
+			const { app } = buildApp({
+				userSessionStore: makeUserSessionStore(),
+				sessionTtlMs: 3600_000,
+				regenerateError: new Error("regenerate failed"),
+			});
+
+			const res = await request(app)
+				.post("/session/login")
+				.send("username=alice&password=secret")
+				.set("Content-Type", "application/x-www-form-urlencoded");
+
+			expect(res.status).toBe(500);
+			expect(res.body).toMatchObject({
+				error: "server_error",
+				error_description: expect.any(String),
+			});
+			expect(res.body).not.toHaveProperty("message");
+		});
+
+		it("logout session destroy failure returns 500 server_error envelope (no `message`)", async () => {
+			const { app } = buildApp({
+				destroyError: new Error("destroy failed"),
+			});
+
+			const res = await request(app).post("/session/logout");
+
+			expect(res.status).toBe(500);
+			expect(res.body).toMatchObject({
+				error: "server_error",
+				error_description: expect.any(String),
+			});
+			expect(res.body).not.toHaveProperty("message");
 		});
 	});
 });

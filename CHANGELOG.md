@@ -6,6 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Breaking (Phase F — F9 PR2 AS-1 + AS-2 error envelope unification, v0.5.1)
+
+- **All session and rate-limit error responses now use the RFC 6749 §5.2
+  `{error, error_description}` envelope** (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-session`, `@o3co/auth-provider-oauth`, closes AS-1
+  + AS-2): six historically divergent error responses migrate to a single
+  shape so consumer code can parse error bodies without per-route
+  branching. New `errorEnvelope(error, description?, uri?)` helper
+  exported from `@o3co/auth-provider-core` produces the canonical shape
+  and omits absent optional fields.
+
+| Site | Before | After |
+|---|---|---|
+| `Session.mts` CSRF origin mismatch (403) | `{message:"forbidden"}` | `{error:"access_denied", error_description}` |
+| `Session.mts` regenerate failure (500) | `{message:"Error regenerating session"}` | `{error:"server_error", error_description}` |
+| `Session.mts` logout failure (500) | `{message:"Error logging out"}` | `{error:"server_error", error_description}` |
+| `Federation.mts` unknown provider on start (404) | `{message:"NotFound"}` | `{error:"not_found", error_description}` |
+| `Federation.mts` unknown provider on callback (404) | `{message:"NotFound"}` | `{error:"not_found", error_description}` |
+| `oauth/routes.mts` rate-limit (429) | `{error:"rate_limited", reason}` | `{error:"rate_limited", error_description}` |
+
+#### Migration
+
+- Replace `body.message` checks with `body.error_description` for the five
+  session-router error responses, and replace `body.reason` with
+  `body.error_description` for `429 rate_limited`.
+- Replace `body.message === "forbidden"` with `body.error === "access_denied"`
+  on CSRF-origin failures, `body.message === "NotFound"` with
+  `body.error === "not_found"` on federation 404s, and the two 500-level
+  `{message:"Error …"}` shapes with `body.error === "server_error"`.
+- Consumer code building custom routes can import the helper as
+  `import { errorEnvelope } from "@o3co/auth-provider-core"` to keep the
+  shape consistent.
+- Success 200 responses on `/session/login` and `/session/logout`
+  (`{message:"Logged in successfully"}` / `{message:"Logged out successfully"}`)
+  are intentionally left unchanged — RFC 6749 §5.2 governs error response
+  shapes only.
+
 ### Breaking (Phase F — F9 PR1 CC-5 readonly Theme D, v0.5.1)
 
 - **Public DTOs are now fully `readonly`** (`@o3co/auth-provider-core`,

@@ -17,6 +17,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
 	type AppConfig,
 	consoleLogger,
+	errorEnvelope,
 	type FederationTokenStoreBase,
 	type Logger,
 	type SessionFederationIndex,
@@ -100,7 +101,14 @@ export const createRouter = (
 		.get("/oauth/federation/:name", async (req: Request, res: Response) => {
 			const provider = federationProviders.get(String(req.params.name));
 			if (!provider) {
-				return res.status(404).json({ message: "NotFound" });
+				return res
+					.status(404)
+					.json(
+						errorEnvelope(
+							"not_found",
+							`Federation provider not registered: ${String(req.params.name)}`,
+						),
+					);
 			}
 
 			const { redirect_to } = req.query;
@@ -192,7 +200,14 @@ export const createRouter = (
 		.get("/oauth/federation/:name/callback", async (req: Request, res: Response) => {
 			const provider = federationProviders.get(String(req.params.name));
 			if (!provider) {
-				return res.status(404).json({ message: "NotFound" });
+				return res
+					.status(404)
+					.json(
+						errorEnvelope(
+							"not_found",
+							`Federation provider not registered: ${String(req.params.name)}`,
+						),
+					);
 			}
 
 			// Per-handler logger child carrying the provider binding. After
