@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Breaking (Phase F — F9 PR1 CC-5 readonly Theme D, v0.5.1)
+
+- **Public DTOs are now fully `readonly`** (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-oauth-token-exchange`, closes CC-5 / AS-5 / AS-6 /
+  AS-M2): `ValidatedToken`, `ExchangeTokenValidationContext`,
+  `GrantContext`, `Client`, `User`, `CodeData`, and `Code` field declarations
+  now carry `readonly` modifiers. Array-typed fields on `Client`
+  (`allowedRedirectUris`, `allowedScopes`, `allowedAudiences`,
+  `postLogoutRedirectUris`) are `readonly string[]` so element-level mutation
+  (`.push`, index assignment) is rejected at compile time. `GrantContext.session`
+  is `readonly` (wholesale `ctx.session = {…}` rejected); `SessionData`
+  field-level writes (`ctx.session.isAuthenticated = true`) continue to
+  compile so handlers writing through Express's `req.session` keep working.
+  `selfIssuedAccessToken.mts` was refactored from sequential mutable-builder
+  assignment to object-spread construction so it survives the new
+  `readonly ValidatedToken` contract.
+
+#### Migration
+
+- Validator implementations using sequential `result.scope = …` builders
+  must switch to object-spread (`{ sub, claims, ...(condition ? { x } : {}) }`).
+- Custom code mutating `Client.allowedRedirectUris.push(…)` or assigning
+  `Client.allowedScopes = […]` directly fails to compile — use the
+  repository's create/upsert API to issue a new `Client` instead.
+- Direct field assignments on `User`, `CodeData`, or `Code` instances
+  (e.g. `user.id = "…"`, `codeData.client_id = "…"`, `code.code = "…"`)
+  fail to compile. Replace with repository create / upsert calls so the
+  store always issues a fresh record.
+- No runtime behavior change: `readonly` is compile-time only; no
+  `Object.freeze()` is applied. Existing valid call sites continue to work
+  unchanged.
+
 ### Security (Phase F — F6 PR4 authorization-grant TOCTOU re-check, v0.5.1)
 
 - **Authorization-code grant re-validates session liveness before linking the

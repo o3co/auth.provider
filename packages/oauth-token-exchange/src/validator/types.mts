@@ -20,7 +20,7 @@
  * - "actor":   the token of the party performing the exchange (`actor_token`)
  */
 export interface ExchangeTokenValidationContext {
-	role: "subject" | "actor";
+	readonly role: "subject" | "actor";
 }
 
 export interface ExchangeTokenValidator {
@@ -70,10 +70,10 @@ export interface ExchangeTokenValidator {
  *     preserves this when applicable (RFC 8693 §4.1).
  */
 export interface ValidatedToken {
-	sub: string;
-	scope?: string;
-	aud?: string | string[];
-	familyId?: string;
-	act?: Record<string, unknown>;
-	claims: Record<string, unknown>;
+	readonly sub: string;
+	readonly scope?: string;
+	readonly aud?: string | readonly string[];
+	readonly familyId?: string;
+	readonly act?: Readonly<Record<string, unknown>>;
+	readonly claims: Readonly<Record<string, unknown>>;
 }

@@ -68,12 +68,18 @@ export interface SessionData {
 }
 
 export interface GrantContext {
-	body: Record<string, unknown>;
-	session: SessionData;
-	issuer?: string;
-	metadata: Record<string, unknown>;
-	ip?: string;
-	userAgent?: string;
+	readonly body: Readonly<Record<string, unknown>>;
+	/**
+	 * Readonly property — wholesale `ctx.session = {…}` replacement is rejected
+	 * at compile time. Field-level mutation (`ctx.session.isAuthenticated = …`)
+	 * is intentionally still allowed because handlers write through Express's
+	 * `req.session` object; `SessionData` mirrors that mutable surface.
+	 */
+	readonly session: SessionData;
+	readonly issuer?: string;
+	readonly metadata: Readonly<Record<string, unknown>>;
+	readonly ip?: string;
+	readonly userAgent?: string;
 	/**
 	 * The authenticated client established by `clientAuthMw` before grant
 	 * dispatch on `/token`. Grant handlers that bind tokens to client identity

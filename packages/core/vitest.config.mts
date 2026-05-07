@@ -17,6 +17,10 @@ export default defineConfig({
 				// is cleaned up — track in the next core/repositories
 				// hygiene PR.
 				"src/repositories/__tests__/InMemoryCodeRepository.test.mts",
+				// CC-5 readonly compile-time contract tests. The @ts-expect-error
+				// directives in these files only fire under typecheck mode.
+				"src/__tests__/grant-context-readonly.test.mts",
+				"src/__tests__/repository-types-readonly.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},

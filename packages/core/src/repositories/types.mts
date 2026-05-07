@@ -41,16 +41,16 @@ export interface Client {
 	 * `"none"`. The `ClientEntrySchema` superRefine enforces both directions.
 	 */
 	readonly clientSecret?: string;
-	readonly allowedRedirectUris: string[];
-	readonly allowedScopes: string[];
+	readonly allowedRedirectUris: readonly string[];
+	readonly allowedScopes: readonly string[];
 	/**
 	 * Audience URIs that this client may request in Token Exchange (RFC 8693)
 	 * `audience` parameter. Empty or undefined means only the client's own
 	 * clientId is allowed as audience. Not used outside Token Exchange.
 	 */
-	readonly allowedAudiences?: string[];
+	readonly allowedAudiences?: readonly string[];
 	// NEW (TODO-F-5): Logout metadata.
-	readonly postLogoutRedirectUris?: string[];
+	readonly postLogoutRedirectUris?: readonly string[];
 	readonly backchannelLogoutUri?: string;
 	// default: true (includes sid in logout_token) — intentional deviation from OIDC Back-Channel
 	// Logout 1.0 §2.2 spec default of false, to default to the safer behavior. See ClientEntrySchema.
@@ -74,9 +74,9 @@ export interface Client {
 }
 
 export interface User {
-	id: string;
-	username: string;
-	[key: string]: unknown;
+	readonly id: string;
+	readonly username: string;
+	readonly [key: string]: unknown;
 }
 
 /**
@@ -93,19 +93,19 @@ export interface User {
  * misses either field fail typecheck at the destructure site.
  */
 export interface CodeData {
-	client_id: string; // required — replaces the session.code_client_id gate
-	redirect_uri: string; // required — closes IH-4 vacuous-pass (RFC 6749 §4.1.3)
-	code_challenge?: string;
-	code_challenge_method?: string;
+	readonly client_id: string; // required — replaces the session.code_client_id gate
+	readonly redirect_uri: string; // required — closes IH-4 vacuous-pass (RFC 6749 §4.1.3)
+	readonly code_challenge?: string;
+	readonly code_challenge_method?: string;
 	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
 	// These fields are persisted at /authorize and read at /token.
-	nonce?: string;
-	sid?: string;
+	readonly nonce?: string;
+	readonly sid?: string;
 }
 
 export interface Code extends CodeData {
-	code: string;
-	expiresIn?: number;
-	grantedScope?: readonly string[];
-	grantedAudience?: readonly string[];
+	readonly code: string;
+	readonly expiresIn?: number;
+	readonly grantedScope?: readonly string[];
+	readonly grantedAudience?: readonly string[];
 }
