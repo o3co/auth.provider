@@ -43,17 +43,31 @@ export interface RedisSidSortedSet {
  *     member are no-ops (score preserved), satisfying the NX contract.
  *   - ZRANGE ascending score == call-site insertion order unconditionally.
  *
- * Process-restart behaviour: the counter resets to 0. If the same Redis key
- * survives a restart (i.e. it has not yet TTL-expired), new members added
- * after restart may receive a lower score than pre-restart members and
- * therefore sort ahead of them. In practice this case cannot occur because
- * PEXPIREAT synchronises key lifetime to session.expiresAt; a restarted
- * process issues a new session (new key prefix) before any add.
+ * Process-restart behaviour (OR-8): the counter is initialised from
+ * `Date.now()` at module load. Epoch-ms in 2026 (~1.75×10^12) exceeds any
+ * pre-crash counter that started at 0 and incremented once per `add()`,
+ * provided the process did not run continuously at ~100k adds/sec for ~200
+ * days — sufficient under realistic operational throughput, not
+ * mathematically absolute. Post-restart members therefore receive scores
+ * strictly greater than pre-crash members in the same Redis key, preserving
+ * insertion order across restart boundaries for long-lived sessions (e.g.
+ * 24 h TTL). Verified live path: `SessionFamilyIndex.addFamilyId` is called
+ * after restart on a surviving session during the auth-code grant
+ * (`packages/oauth/src/grants/authorization.mts`).
  *
- * JavaScript `number` range: 2^53 - 1 ≈ 9 × 10^15. At 1 million adds/second
- * the counter overflows after ~285 years — treated as unbounded in practice.
+ * Edge case: a backward system-clock step (NTP correction, VM migration)
+ * can invert the guarantee. Phase F may switch to `process.hrtime.bigint()`.
+ *
+ * Non-goal: cluster-wide total ordering. Two replicas starting in the same
+ * millisecond can independently emit identical scores against the same
+ * Redis key — only single-process restart baseline inversion is fixed.
+ * Cross-replica monotonic scores remain Phase F (e.g. Redis `INCR`).
+ *
+ * JavaScript `number` range: 2^53 - 1 ≈ 9 × 10^15. At 1M adds/second from
+ * the Date.now() baseline (~1.75×10^12), headroom is ~7.25×10^15 — still
+ * ~285 years before overflow. Treated as unbounded in practice.
  */
-let _insertionCounter = 0;
+let _insertionCounter = Date.now();
 
 /**
  * Private redis helper used by `SessionFamilyIndex` + `SessionFederationIndex`.

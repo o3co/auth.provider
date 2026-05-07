@@ -26,6 +26,7 @@ import {
 	formatObject,
 	type GrantPolicyHookBase,
 	type GrantRegistry,
+	JwtVerificationError,
 	type KeyStore,
 	type Logger,
 	type PublicClient,
@@ -334,7 +335,17 @@ export const createOAuthRouter = async (
 							logger,
 						});
 						return next();
-					} catch {
+					} catch (cause) {
+						// SF-8: distinguish non-access-token typ rejections so SIEM
+						// can spot a refresh / id token presented as a Bearer
+						// credential. RFC 7662 §2.2 forbids leaking the typ to the
+						// caller — the audit log carries the signal instead.
+						if (cause instanceof JwtVerificationError && cause.reason === "typ") {
+							logger.warn(
+								{ reason: "non_access_token", site: "introspect_bearer" },
+								"introspect_non_access_token",
+							);
+						}
 						return res.status(200).json({ active: false });
 					}
 				}
@@ -357,7 +368,7 @@ export const createOAuthRouter = async (
 						legacyTypAccept: legacyTypAcceptOpt ?? true,
 						logger,
 					});
-					const { payload, header } = verified;
+					const { payload } = verified;
 
 					// TODO-F-3: cascading revoke (RFC 7009 §2.1 SHOULD). When a refresh_token
 					// family has been revoked, all access_tokens minted under the same
@@ -401,10 +412,18 @@ export const createOAuthRouter = async (
 						}
 					}
 
-					const { exp, iat, iss, aud, sub } = payload;
+					const { exp, iat, iss, aud, sub, jti } = payload;
 					const claims = payload as Record<string, unknown>;
 					const azp = typeof claims.azp === "string" ? claims.azp : undefined;
+					const rawClientId = claims.client_id;
+					const clientId = typeof rawClientId === "string" ? rawClientId : azp;
 					const scope = typeof claims.scope === "string" ? claims.scope : undefined;
+					// SF-8 (RFC 7662 §2.2): `token_type` is the OAuth 2.0 token-type
+					// identifier registry value (`Bearer` per RFC 6750 §6.1.1), NOT
+					// the JOSE `typ` header value (`at+jwt`). Hardcode the literal —
+					// the SF-1 verifier with `type: "access_token"` already enforces
+					// `typ: "at+jwt"` upstream, so any token reaching this point
+					// has been confirmed as a Bearer access token.
 					return res.status(200).json(
 						formatObject({
 							active: true,
@@ -414,11 +433,22 @@ export const createOAuthRouter = async (
 							aud,
 							sub,
 							azp,
+							client_id: clientId,
 							scope,
-							token_type: header.typ,
+							token_type: "Bearer",
+							jti: typeof jti === "string" ? jti : undefined,
 						}),
 					);
-				} catch {
+				} catch (cause) {
+					// SF-8: same non-access-token signal as the bearer path above.
+					// `active: false` is required by RFC 7662 §2.2 regardless of
+					// rejection reason; audit log carries the typ-mismatch signal.
+					if (cause instanceof JwtVerificationError && cause.reason === "typ") {
+						logger.warn(
+							{ reason: "non_access_token", site: "introspect_body" },
+							"introspect_non_access_token",
+						);
+					}
 					return res.status(200).json({ active: false });
 				}
 			},

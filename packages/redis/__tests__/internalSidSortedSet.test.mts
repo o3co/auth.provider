@@ -149,6 +149,83 @@ describe("createRedisSidSortedSet", () => {
 		);
 		expect(await z.list("sid-conc-same")).toEqual(["m-shared"]);
 	});
+
+	// OR-8 RED tests — `_insertionCounter` monotonic across restart.
+	describe("OR-8: _insertionCounter restart-monotonicity", () => {
+		it("RED-1: two add() calls with same expiresAt — second member sorts after first in list()", async () => {
+			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-same-exp") });
+			const sharedExp = FUTURE();
+			await z.add("sid-or8-1", "first", sharedExp);
+			await z.add("sid-or8-1", "second", sharedExp);
+			// Insertion order preserved even when expiresAt is identical (the
+			// pre-fix score formula depended on the counter alone, so this case
+			// tests the same-millisecond invariant).
+			expect(await z.list("sid-or8-1")).toEqual(["first", "second"]);
+		});
+
+		it("RED-2: post-restart simulation — pre-crash entries injected with low scores via raw ZADD sort BEFORE post-restart entries added via the module", async () => {
+			// Pre-crash members: injected via raw redis.zadd() with low scores
+			// (1, 2, 3) — bypasses the module counter entirely, simulating a
+			// session that survives a process restart.
+			//
+			// Post-restart new members: added via createRedisSidSortedSet.add()
+			// using DIFFERENT member names (NX flag preserves existing-member
+			// scores, so re-adding the same name would not exercise the bug).
+			//
+			// Post-fix expectation: post-restart scores start at Date.now()
+			// (~1.75×10^12 in 2026) and exceed all pre-crash scores; new
+			// members sort AFTER pre-crash ones in the ascending zRange.
+			const sid = "sid-or8-restart";
+			const key = `${prefix("or8-restart")}${sid}`;
+			await raw.zadd(key, "NX", 1, "pre-crash-A");
+			await raw.zadd(key, "NX", 2, "pre-crash-B");
+			await raw.zadd(key, "NX", 3, "pre-crash-C");
+
+			const z = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-restart") });
+			await z.add(sid, "post-restart-A", FUTURE());
+			await z.add(sid, "post-restart-B", FUTURE());
+
+			expect(await z.list(sid)).toEqual([
+				"pre-crash-A",
+				"pre-crash-B",
+				"pre-crash-C",
+				"post-restart-A",
+				"post-restart-B",
+			]);
+		});
+
+		it("RED-3: module counter is shared across multiple createRedisSidSortedSet instances — interleaved adds get strictly increasing scores globally", async () => {
+			const za = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-shared-A") });
+			const zb = createRedisSidSortedSet({ client, keyPrefix: prefix("or8-shared-B") });
+			await za.add("sid-X", "a-1", FUTURE());
+			await zb.add("sid-X", "b-1", FUTURE());
+			await za.add("sid-X", "a-2", FUTURE());
+			await zb.add("sid-X", "b-2", FUTURE());
+
+			const scoreA1 = await raw.zscore(`${prefix("or8-shared-A")}sid-X`, "a-1");
+			const scoreB1 = await raw.zscore(`${prefix("or8-shared-B")}sid-X`, "b-1");
+			const scoreA2 = await raw.zscore(`${prefix("or8-shared-A")}sid-X`, "a-2");
+			const scoreB2 = await raw.zscore(`${prefix("or8-shared-B")}sid-X`, "b-2");
+
+			expect(scoreA1).not.toBeNull();
+			expect(scoreB1).not.toBeNull();
+			expect(scoreA2).not.toBeNull();
+			expect(scoreB2).not.toBeNull();
+			// Strict global monotonicity: a-1 < b-1 < a-2 < b-2.
+			expect(Number(scoreA1)).toBeLessThan(Number(scoreB1));
+			expect(Number(scoreB1)).toBeLessThan(Number(scoreA2));
+			expect(Number(scoreA2)).toBeLessThan(Number(scoreB2));
+		});
+
+		it("RED-4: counter baseline starts above realistic pre-crash counter values (Date.now() > 10^12 in 2026)", () => {
+			// Unit test (no Redis): documents the assumption that the post-fix
+			// epoch baseline is astronomically above any counter that started
+			// at 0 and incremented per add() under realistic operational
+			// throughput. See OR-8 spec Codex Delta 3 — sufficient under
+			// realistic throughput, NOT mathematically absolute.
+			expect(Date.now()).toBeGreaterThan(1_000_000_000_000);
+		});
+	});
 });
 
 function makeWrapper(io: Redis): SessionSidSortedSetClient {

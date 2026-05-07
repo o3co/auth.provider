@@ -251,6 +251,91 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// SF-8: /introspect token_type + access-only enforcement (RFC 7662 §2.2)
+//
+// Pre-SF-8, /introspect echoed the JOSE `typ` header value (e.g. "at+jwt") in
+// `token_type` — wrong namespace per RFC 7662 (which references the OAuth
+// Token Type registry, not JOSE). It also accepted RT / id_token JWTs as
+// `active: true` since the verifier was signature-only. SF-8 hardcodes
+// `token_type: "Bearer"` for active access tokens and relies on SF-1's typ
+// pin to filter non-access tokens to `{ active: false }`.
+// ---------------------------------------------------------------------------
+
+describe("/introspect — SF-8: token_type + access-only enforcement", () => {
+	async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
+		return new SignJWT({ sub: "u1", scope: "read", ...overrides })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("https://auth.example")
+			.setExpirationTime("1h")
+			.sign(secretKey);
+	}
+
+	async function makeIdToken(overrides: Record<string, unknown> = {}): Promise<string> {
+		return new SignJWT({ sub: "u1", aud: "client1", ...overrides })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
+			.setIssuer("https://auth.example")
+			.setExpirationTime("1h")
+			.sign(secretKey);
+	}
+
+	it("RED-1: returns active=true with token_type=Bearer for a valid access token (NOT 'at+jwt')", async () => {
+		// RFC 6750 §6.1.1 — `Bearer` is the OAuth Token Type. The pre-SF-8
+		// response leaked the JOSE `typ` ("at+jwt"), wrong namespace per
+		// RFC 7662 §2.2.
+		const token = await makeAccessToken({ client_id: "client1" });
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.status).toBe(200);
+		expect(res.body.active).toBe(true);
+		expect(res.body.token_type).toBe("Bearer");
+		expect(res.body.token_type).not.toBe("at+jwt");
+	});
+
+	it("RED-2: returns active=false for a refresh token (no leak of RT validity)", async () => {
+		// RFC 7662 §2.1 + OAuth Security Topics §5.1: introspection is for
+		// access tokens only. A valid RT MUST return active:false to prevent
+		// a resource server from probing RT validity via the introspect
+		// endpoint.
+		const token = await makeRefreshToken();
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.status).toBe(200);
+		expect(res.body.active).toBe(false);
+		expect(res.body.token_type).toBeUndefined();
+	});
+
+	it("RED-3: returns active=false for an id_token", async () => {
+		// Same RFC 7662 §2.1 reasoning as RT: id_tokens are not introspectable
+		// access tokens; treating them as active leaks information.
+		const token = await makeIdToken();
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.status).toBe(200);
+		expect(res.body.active).toBe(false);
+	});
+
+	it("RED-4: response carries client_id (RFC 7662 §2.2 RECOMMENDED) — sourced from client_id when present, falls back to azp for v0.5.1 compat", async () => {
+		// Codex calibration m2: current issuance emits `azp` (RFC 9068 §2.2),
+		// not `client_id`. RFC 7662 §2.2 lists `client_id` as RECOMMENDED in
+		// the response. SF-8 returns `client_id: payload.client_id ?? azp`
+		// so resource servers see the authorized-party identifier under the
+		// standard field name regardless of which side of the v0.5/v0.6
+		// upgrade window the issuance is on. v0.6+ flips issuance to emit
+		// `client_id` directly; this fallback becomes a no-op then.
+		const token = await makeAccessToken({ azp: "client1" });
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.status).toBe(200);
+		expect(res.body.active).toBe(true);
+		expect(res.body.client_id).toBe("client1");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // oauthModule — refreshTokenFamilyRevocation composition (C1) via createTestApp
 //
 // Migrated to createTestApp pattern: oauthModule is booted via the Phase 4
