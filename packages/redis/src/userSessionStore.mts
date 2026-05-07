@@ -213,8 +213,13 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
  *
  * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
  * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op. Optional `logger` is passed through for the TS-3 corrupt-envelope
- * warn path; absent logger fails closed silently per existing convention.
+ * Redis op. Optional `logger` is forwarded to the adapter for the TS-3
+ * corrupt-envelope warn path emitted inside `get()`; the corrupt-envelope
+ * fail-closed (returns `null`) is independent of logger presence — when
+ * the logger is absent the warn is silently swallowed but the security
+ * gate still triggers. The spread idiom omits the field when the caller
+ * did not supply one (preserves "absent" semantics under
+ * `exactOptionalPropertyTypes`).
  */
 export const redisUserSessionStoreBuilder: AdapterBuilder<UserSessionStore> = (config, _ctx) => {
 	const c = config as { client?: UserSessionStoreClient; keyPrefix?: string; logger?: Logger };
