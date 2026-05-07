@@ -15,6 +15,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import type { AuditSink } from "../../audit/types.mjs";
+import type { GrantHandler } from "../../grants/types.mjs";
 import { defineModule } from "../../modules/manifest/index.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { applyContributions } from "../apply-contributions.mjs";
@@ -25,9 +27,43 @@ import type {
 	CollectedRouteContribution,
 	ComponentWorld,
 	ContributionCollectorMap,
+	ListCollector,
+	NameKeyedCollector,
 } from "../types.mjs";
 import { BootError } from "../types.mjs";
 import { validateManifests } from "../validate-manifests.mjs";
+
+// ---------------------------------------------------------------------------
+// AS-M1 (Phase F F9 PR6): minimal typed fixtures. The contributes-map
+// placeholders for `GrantHandler`, `AuditHook`, `MfaFactor`, and
+// `GrantPolicyHookContribution` were narrowed from `unknown` to concrete
+// same-package types in v0.5.1, so inline-literal stubs no longer satisfy
+// the slot contracts. The boot-pipeline tests verify routing behaviour
+// (registration order, collector dedup, factory error wrapping), not
+// contract semantics, so these stubs are intentionally no-op. Tests that
+// need value-identity (`expect(...).toBe(stub)`) capture the helper output
+// once into a typed `const sharedHook: AuditSink = fakeAuditSink(...)` and
+// reuse the reference inside factory closures (`() => sharedHook`).
+// ---------------------------------------------------------------------------
+
+// `tag` is propagated into `GrantSuccess.tokens.access_token` so spy
+// collectors that record values can distinguish stub instances. The shape
+// matches `GrantSuccess` (the success arm of `GrantResult`) — `status: 200`
+// + a minimal `TokenResponse`. Pipeline tests don't exercise the result
+// downstream, so the rest of `TokenResponse` is filled with `as never`.
+const fakeGrantHandler = (tag = "stub"): GrantHandler => ({
+	handle: async () => ({
+		result: {
+			status: 200,
+			tokens: { access_token: tag } as never,
+		},
+	}),
+});
+
+const fakeAuditSink = (tag = "stub"): AuditSink => ({
+	kind: tag,
+	record: async () => {},
+});
 
 // ---------------------------------------------------------------------------
 // Test-only ComponentMap slot augmentation
@@ -117,7 +153,7 @@ function stubHandler(): never {
 
 describe("applyContributions — step 0: synthetic projections", () => {
 	it("grants provided → grantHandlerResolver is defined in component map; lazy read-through works after step 2", async () => {
-		const grantCollector = makeStubNameCollector<unknown>();
+		const grantCollector = makeStubNameCollector<GrantHandler>();
 		const contributionKinds: ContributionCollectorMap = {
 			grants: grantCollector,
 		};
@@ -126,7 +162,7 @@ describe("applyContributions — step 0: synthetic projections", () => {
 			name: "ModA",
 			contributes: {
 				grants: {
-					authorization_code: () => ({ type: "grant" }),
+					authorization_code: () => fakeGrantHandler("authcode"),
 				},
 			},
 		});
@@ -162,14 +198,14 @@ describe("applyContributions — step 2: register order = initOrder", () => {
 	it("2 modules contributing different grants: register call order matches initOrder", async () => {
 		const registerOrder: string[] = [];
 
-		const spyCollector = {
+		const spyCollector: NameKeyedCollector<GrantHandler> = {
 			kind: "name-keyed" as const,
-			register: (n: string, _v: unknown) => {
+			register: (n: string, _v: GrantHandler) => {
 				registerOrder.push(n);
 			},
-			replace: (_n: string, _v: unknown) => {},
+			replace: (_n: string, _v: GrantHandler) => {},
 			get: (_n: string) => undefined,
-			entries: () => new Map<string, unknown>().entries(),
+			entries: () => new Map<string, GrantHandler>().entries(),
 		};
 
 		const contributionKinds: ContributionCollectorMap = {
@@ -184,7 +220,7 @@ describe("applyContributions — step 2: register order = initOrder", () => {
 				slotAC: () => 1,
 			},
 			contributes: {
-				grants: { grant_a: () => "handlerA" as unknown },
+				grants: { grant_a: () => fakeGrantHandler("a") },
 			},
 		});
 
@@ -192,7 +228,7 @@ describe("applyContributions — step 2: register order = initOrder", () => {
 			name: "ModB",
 			requires: ["slotAC"] as const,
 			contributes: {
-				grants: { grant_b: () => "handlerB" as unknown },
+				grants: { grant_b: () => fakeGrantHandler("b") },
 			},
 		});
 
@@ -213,13 +249,16 @@ describe("applyContributions — step 3: append order = input-array order", () =
 	it("append order for auditHooks matches input array order, not initOrder", async () => {
 		const appendOrder: string[] = [];
 
-		// Spy collector that records which hook's tag was appended
-		const auditCollector = {
+		// Spy collector that records which hook's `kind` was appended.
+		// Pre-AS-M1 the synthetic stubs used a `tag` field; after the
+		// AuditHook narrowing the stubs are real `AuditSink`s so we read
+		// from `kind` (the discriminant on `AuditSinkBase`).
+		const auditCollector: ListCollector<AuditSink> = {
 			kind: "list" as const,
-			append: (v: unknown) => {
-				appendOrder.push((v as { tag: string }).tag);
+			append: (v: AuditSink) => {
+				appendOrder.push(v.kind);
 			},
-			values: () => ([] as unknown[]).values(),
+			values: () => ([] as AuditSink[]).values(),
 		};
 
 		const contributionKinds: ContributionCollectorMap = {
@@ -232,7 +271,7 @@ describe("applyContributions — step 3: append order = input-array order", () =
 			name: "ModA",
 			requires: ["slotAC"] as const,
 			contributes: {
-				auditHooks: [() => ({ tag: "hook_a" }) as unknown],
+				auditHooks: [() => fakeAuditSink("hook_a")],
 			},
 		});
 
@@ -242,7 +281,7 @@ describe("applyContributions — step 3: append order = input-array order", () =
 				slotAC: () => 42,
 			},
 			contributes: {
-				auditHooks: [() => ({ tag: "hook_b" }) as unknown],
+				auditHooks: [() => fakeAuditSink("hook_b")],
 			},
 		});
 
@@ -302,7 +341,7 @@ describe("applyContributions — step 3: bare RouteContribution value entries", 
 
 describe("applyContributions — step 2: factory throw wraps as BootError", () => {
 	it("cause === thrown (reference equality), details.module/kind/name/originalError correct", async () => {
-		const grantCollector = makeStubNameCollector<unknown>();
+		const grantCollector = makeStubNameCollector<GrantHandler>();
 		const contributionKinds: ContributionCollectorMap = { grants: grantCollector };
 
 		const thrown = new Error("factory exploded");
@@ -345,18 +384,23 @@ describe("applyContributions — step 2: factory throw wraps as BootError", () =
 
 describe("applyContributions — step 2: pre-scan prevents factory side-effect leak", () => {
 	it("if the second grant name of a module is already registered, no factory runs", async () => {
-		const spy1 = vi.fn(() => "handler1");
-		const spy2 = vi.fn(() => "handler2");
+		const spy1 = vi.fn((): GrantHandler => fakeGrantHandler("handler1"));
+		const spy2 = vi.fn((): GrantHandler => fakeGrantHandler("handler2"));
 
-		// Pre-populate the collector with "grant_conflict" so it already exists
-		const m = new Map<string, unknown>([["grant_conflict", "existing"]]);
-		const spyCollector = {
+		// Pre-populate the collector with "grant_conflict" so it already exists.
+		// `as unknown as GrantHandler` on the existing entry: the pre-scan
+		// path checks NAME presence (collector.entries()), not value shape;
+		// the placeholder string is never invoked.
+		const m = new Map<string, GrantHandler>([
+			["grant_conflict", "existing" as unknown as GrantHandler],
+		]);
+		const spyCollector: NameKeyedCollector<GrantHandler> = {
 			kind: "name-keyed" as const,
-			register: (n: string, v: unknown) => {
+			register: (n: string, v: GrantHandler) => {
 				if (m.has(n)) throw new Error(`already ${n}`);
 				m.set(n, v);
 			},
-			replace: (_n: string, _v: unknown) => {},
+			replace: (_n: string, _v: GrantHandler) => {},
 			get: (n: string) => m.get(n),
 			entries: () => m.entries(),
 		};
@@ -394,19 +438,19 @@ describe("applyContributions — step 2: pre-scan prevents factory side-effect l
 
 describe("applyContributions — step 2: overrides routed via collector.replace", () => {
 	it("override factory result is passed to collector.replace, not register", async () => {
-		const registerCalls: Array<[string, unknown]> = [];
-		const replaceCalls: Array<[string, unknown]> = [];
+		const registerCalls: Array<[string, GrantHandler]> = [];
+		const replaceCalls: Array<[string, GrantHandler]> = [];
 
 		// Collector whose internal map is mutated by both register and replace.
-		const m = new Map<string, unknown>();
-		const spyCollector = {
+		const m = new Map<string, GrantHandler>();
+		const spyCollector: NameKeyedCollector<GrantHandler> = {
 			kind: "name-keyed" as const,
-			register: (n: string, v: unknown) => {
+			register: (n: string, v: GrantHandler) => {
 				if (m.has(n)) throw new Error(`already registered: ${n}`);
 				m.set(n, v);
 				registerCalls.push([n, v]);
 			},
-			replace: (n: string, v: unknown) => {
+			replace: (n: string, v: GrantHandler) => {
 				if (!m.has(n)) throw new Error(`unknown: ${n}`);
 				m.set(n, v);
 				replaceCalls.push([n, v]);
@@ -417,20 +461,23 @@ describe("applyContributions — step 2: overrides routed via collector.replace"
 
 		const contributionKinds: ContributionCollectorMap = { grants: spyCollector };
 
-		const overrideValue = { type: "override_handler" };
+		// Typed instance for the identity-equality assertion at line 481.
+		// Pre-AS-M1 this was `{ type: "override_handler" }` (cast `as unknown`);
+		// post-narrow we construct a real `GrantHandler`.
+		const overrideValue: GrantHandler = fakeGrantHandler("override");
 
 		// ModA contributes base_grant via register; ModB overrides it via replace.
 		const modA = defineModule({
 			name: "ModA",
 			contributes: {
-				grants: { base_grant: () => "base_handler" as unknown },
+				grants: { base_grant: () => fakeGrantHandler("base") },
 			},
 		});
 
 		const modB = defineModule({
 			name: "ModB",
 			overrides: {
-				grants: { base_grant: () => overrideValue as unknown },
+				grants: { base_grant: () => overrideValue },
 			},
 		});
 
@@ -454,24 +501,25 @@ describe("applyContributions — step 2: overrides routed via collector.replace"
 
 describe("applyContributions — step 3: auditHooks same-instance dedup", () => {
 	it("two modules contributing the same hook reference: append called twice but collector dedupes", async () => {
-		const auditCollector = makeStubListCollector<unknown>();
+		const auditCollector = makeStubListCollector<AuditSink>();
 		const appendSpy = vi.spyOn(auditCollector, "append");
 
 		const contributionKinds: ContributionCollectorMap = { auditHooks: auditCollector };
 
-		const sharedHook = { type: "shared_hook" };
+		// Typed instance for the identity-equality assertion at line 521.
+		const sharedHook: AuditSink = fakeAuditSink("shared_hook");
 
 		const modA = defineModule({
 			name: "ModA",
 			contributes: {
-				auditHooks: [() => sharedHook as unknown],
+				auditHooks: [() => sharedHook],
 			},
 		});
 
 		const modB = defineModule({
 			name: "ModB",
 			contributes: {
-				auditHooks: [() => sharedHook as unknown],
+				auditHooks: [() => sharedHook],
 			},
 		});
 
@@ -507,7 +555,7 @@ describe("applyContributions — defence-in-depth: missing required dep", () => 
 			requires: ["slotAC"] as never,
 			contributes: {
 				grants: {
-					my_grant: () => ({ type: "grant" }),
+					my_grant: () => fakeGrantHandler("my_grant"),
 				},
 			},
 		});

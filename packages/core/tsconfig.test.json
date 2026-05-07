@@ -17,7 +17,8 @@
 		// hygiene PR.
 		"src/__tests__/grant-context-readonly.test.mts",
 		"src/__tests__/repository-types-readonly.test.mts",
-		"src/__tests__/naming-aliases.test.mts"
+		"src/__tests__/naming-aliases.test.mts",
+		"src/__tests__/contributes-map-substitution.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

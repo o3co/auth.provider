@@ -6,6 +6,56 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Improved (Phase F — F9 PR6 AS-M1 contributes-map concrete-type substitution, v0.5.1)
+
+- **The four same-package contributes-map placeholders are now concrete
+  types instead of `unknown`** (`@o3co/auth-provider-core/modules/manifest`,
+  closes AS-M1):
+
+  | Manifest type | Pre-v0.5.1 | v0.5.1 (substituted) |
+  |---|---|---|
+  | `GrantHandler` | `unknown` | `GrantHandler` from `grants/types.mts` |
+  | `AuditHook` | `unknown` | `AuditSink` (canonical alias of `AuditSinkBase`) |
+  | `MfaFactor` | `unknown` | `MfaProvider` (canonical alias of `MfaProviderBase`) |
+  | `GrantPolicyHookContribution` | `unknown` | `GrantPolicyHook` (canonical alias of `GrantPolicyHookBase`) |
+
+  Module authors now get real type-checking on contribution factory
+  return values — a typo or shape mismatch in
+  `contributes.grants["x"] = (deps) => myHandler` is caught at compile
+  time instead of at runtime when the boot pipeline invokes the factory.
+
+#### Cross-package types still deferred
+
+- `FederationProvider` and `ExchangeTokenValidator` remain `unknown`
+  pending Phase F resolution of a circular package import (`session`
+  and `oauth-token-exchange` are downstream of `core`, so importing
+  their concrete types from the manifest would create a package-level
+  cycle). A new typecheck assertion in
+  `packages/core/src/__tests__/contributes-map-substitution.test.mts`
+  pins both as `unknown` so any premature substitution is caught.
+
+#### Compatibility scope
+
+- **Public direction (additive)**: consumers passing concrete factory
+  return values into the manifest get tighter type checking. No code
+  change required for code that was already returning concrete types.
+- **Test scaffolding (breaking-internal)**: the boot-pipeline tests in
+  `packages/core/src/boot/__tests__/{apply-contributions, plan-boot,
+  integration}.test.mts` were written against the `unknown` placeholder
+  and used inline literals or `as unknown` casts that no longer satisfy
+  the narrowed types. v0.5.1 migrates these fixtures to typed `fakeGrantHandler` /
+  `fakeAuditSink` factories; downstream consumers who copied this
+  pattern will need similar updates.
+
+#### Internal: collector factory generic-ification
+
+- `mergeWithBuiltins` in `packages/core/src/boot/create-app.mts` now
+  parameterises its three built-in collector factories
+  (`makeGrantCollector`, `makeMapNameKeyedCollector<T>`,
+  `makeIdentityDedupListCollector<T>`) so they produce typed collectors
+  matching the narrowed contributes-map slots. Internal-only; no public
+  API change.
+
 ### Added (Phase F — F9 PR5 AS-9 Redis session sub-adapter builders, v0.5.1)
 
 - **Four new `*Builder` exports complete the tripartite

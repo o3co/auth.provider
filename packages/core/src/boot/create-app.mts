@@ -32,6 +32,14 @@
 import type { Router } from "express";
 import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
+import type {
+	AuditHook,
+	ExchangeTokenValidator,
+	FederationProvider,
+	GrantHandler,
+	GrantPolicyHookContribution,
+	MfaFactor,
+} from "../modules/manifest/contributes-map.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
 import { assembleApp } from "./assemble-app.mjs";
 import { freezeWorld } from "./freeze-world.mjs";
@@ -178,15 +186,19 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  * @internal
  */
 function mergeWithBuiltins(consumer: ContributionKindMap | undefined): ContributionCollectorMap {
+	// AS-M1 (PR6): explicit type arguments are required for the four kinds
+	// whose contributes-map placeholders were narrowed from `unknown` to
+	// concrete same-package types in v0.5.1. The factories themselves are
+	// type-parametric so the slot-side concrete type flows through.
 	const builtin: ContributionCollectorMap = {
 		grants: makeGrantCollector(),
-		tokenExchangeValidators: makeMapNameKeyedCollector(),
-		federations: makeMapNameKeyedCollector(),
-		federationRedirectPolicies: makeMapNameKeyedCollector(),
-		mfaFactors: makeMapNameKeyedCollector(),
-		auditHooks: makeIdentityDedupListCollector(),
+		tokenExchangeValidators: makeMapNameKeyedCollector<ExchangeTokenValidator>(),
+		federations: makeMapNameKeyedCollector<FederationProvider>(),
+		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
+		mfaFactors: makeMapNameKeyedCollector<MfaFactor>(),
+		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
-		grantPolicyHooks: makeIdentityDedupListCollector(),
+		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),
 	};
 	// Consumer keys override built-ins; unknown consumer kinds pass through.
 	return { ...builtin, ...(consumer ?? {}) } as ContributionCollectorMap;
@@ -207,39 +219,42 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
  *
  * @internal
  */
-function makeGrantCollector(): NameKeyedCollector<unknown> {
+function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
 	const registry = new GrantRegistry();
 	// Shadow Map: mirrors every register/replace for entries() support.
-	const shadow = new Map<string, unknown>();
+	const shadow = new Map<string, GrantHandler>();
 
 	return {
 		kind: "name-keyed" as const,
-		register(name: string, value: unknown): void {
+		register(name: string, value: GrantHandler): void {
 			// Delegate to GrantRegistry for throw-on-duplicate semantics.
-			registry.register(name, value as Parameters<GrantRegistry["register"]>[1]);
+			registry.register(name, value);
 			// Mirror into shadow (only if registry didn't throw).
 			shadow.set(name, value);
 		},
-		replace(name: string, value: unknown): void {
+		replace(name: string, value: GrantHandler): void {
 			// Delegate to GrantRegistry for throw-on-unknown semantics.
-			registry.replace(name, value as Parameters<GrantRegistry["replace"]>[1]);
+			registry.replace(name, value);
 			// Mirror into shadow.
 			shadow.set(name, value);
 		},
 		freeze(): void {
 			registry.freeze();
 		},
-		get(name: string): unknown {
+		get(name: string): GrantHandler | undefined {
 			return registry.get(name);
 		},
-		entries(): IterableIterator<readonly [string, unknown]> {
-			return shadow.entries() as IterableIterator<readonly [string, unknown]>;
+		entries(): IterableIterator<readonly [string, GrantHandler]> {
+			return shadow.entries() as IterableIterator<readonly [string, GrantHandler]>;
 		},
 	};
 }
 
 /**
- * Build a plain `Map`-backed `NameKeyedCollector<unknown>`.
+ * Build a plain `Map`-backed `NameKeyedCollector<T>`. Generic-parametric
+ * since AS-M1 (PR6): callers pass the concrete contributes-map slot type
+ * (e.g. `<MfaFactor>`, `<FederationProvider>`) so the produced collector
+ * matches the narrowed `ContributionCollectorMap` slot.
  *
  * Used for `tokenExchangeValidators`, `federations`, and `mfaFactors`.
  * `tokenExchangeValidators` uses this form because `ExchangeTokenValidatorRegistry`
@@ -249,13 +264,13 @@ function makeGrantCollector(): NameKeyedCollector<unknown> {
  *
  * @internal
  */
-function makeMapNameKeyedCollector(): NameKeyedCollector<unknown> {
-	const m = new Map<string, unknown>();
+function makeMapNameKeyedCollector<T>(): NameKeyedCollector<T> {
+	const m = new Map<string, T>();
 	let frozen = false;
 
 	return {
 		kind: "name-keyed" as const,
-		register(name: string, value: unknown): void {
+		register(name: string, value: T): void {
 			if (frozen) {
 				throw new Error(`NameKeyedCollector: frozen; cannot register "${name}"`);
 			}
@@ -266,7 +281,7 @@ function makeMapNameKeyedCollector(): NameKeyedCollector<unknown> {
 			}
 			m.set(name, value);
 		},
-		replace(name: string, value: unknown): void {
+		replace(name: string, value: T): void {
 			if (frozen) {
 				throw new Error(`NameKeyedCollector: frozen; cannot replace "${name}"`);
 			}
@@ -280,31 +295,35 @@ function makeMapNameKeyedCollector(): NameKeyedCollector<unknown> {
 		freeze(): void {
 			frozen = true;
 		},
-		get(name: string): unknown {
+		get(name: string): T | undefined {
 			return m.get(name);
 		},
-		entries(): IterableIterator<readonly [string, unknown]> {
-			return m.entries() as IterableIterator<readonly [string, unknown]>;
+		entries(): IterableIterator<readonly [string, T]> {
+			return m.entries() as IterableIterator<readonly [string, T]>;
 		},
 	};
 }
 
 /**
- * Build a `ListCollector<unknown>` with same-instance deduplication.
+ * Build a `ListCollector<T>` with same-instance deduplication.
+ * Generic-parametric since AS-M1 (PR6): callers pass the concrete
+ * contributes-map slot type (e.g. `<AuditHook>`, `<GrantPolicyHookContribution>`)
+ * so the produced collector matches the narrowed `ContributionCollectorMap`
+ * slot.
  *
  * Used for `auditHooks` and `grantPolicyHooks`. The `Set`-based identity
  * check silently skips re-registration of the same reference per A2-α §4.5.
  *
  * @internal
  */
-function makeIdentityDedupListCollector(): ListCollector<unknown> {
-	const arr: unknown[] = [];
-	const seen = new Set<unknown>();
+function makeIdentityDedupListCollector<T>(): ListCollector<T> {
+	const arr: T[] = [];
+	const seen = new Set<T>();
 	let frozen = false;
 
 	return {
 		kind: "list" as const,
-		append(value: unknown): void {
+		append(value: T): void {
 			if (frozen) {
 				throw new Error("ListCollector: frozen; cannot append");
 			}
@@ -317,7 +336,7 @@ function makeIdentityDedupListCollector(): ListCollector<unknown> {
 		freeze(): void {
 			frozen = true;
 		},
-		values(): IterableIterator<unknown> {
+		values(): IterableIterator<T> {
 			return arr.values();
 		},
 	};
