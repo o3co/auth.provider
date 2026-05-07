@@ -47,4 +47,11 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 		const e = errorEnvelope("rate_limited", undefined);
 		expect(Object.keys(e).sort()).toEqual(["error"]);
 	});
+
+	it("treats empty-string description and uri as omissions", () => {
+		const e = errorEnvelope("rate_limited", "", "");
+		expect(e).toEqual({ error: "rate_limited" });
+		expect(e).not.toHaveProperty("error_description");
+		expect(e).not.toHaveProperty("error_uri");
+	});
 });

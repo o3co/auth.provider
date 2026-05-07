@@ -32,14 +32,25 @@ export interface ErrorEnvelope {
  * the helper pre-omit keeps the in-memory object consistent for tests
  * that snapshot the structure with `toEqual`.
  *
+ * Empty-string `description` / `uri` are treated as omissions: RFC 6749
+ * §5.2 specifies these as optional human-readable / URI fields, and an
+ * empty string conveys no information while still serializing as a
+ * present-but-empty value. Callers that need an explicit empty string
+ * should construct the envelope literal directly.
+ *
+ * Contract scope: the three RFC 6749 §5.2 stock fields only (`error`,
+ * `error_description`, `error_uri`). Extension fields (e.g. namespaced
+ * sub-codes, rate-limit details) are not added here — pass through a
+ * separate helper or a literal envelope object.
+ *
  * @param error       Machine-readable error code (snake_case, e.g. `invalid_grant`).
- * @param description Optional human-readable detail.
- * @param uri         Optional reference URL.
+ * @param description Optional human-readable detail. Empty string is dropped.
+ * @param uri         Optional reference URL. Empty string is dropped.
  */
 export function errorEnvelope(error: string, description?: string, uri?: string): ErrorEnvelope {
 	return {
 		error,
-		...(description !== undefined ? { error_description: description } : {}),
-		...(uri !== undefined ? { error_uri: uri } : {}),
+		...(description !== undefined && description !== "" ? { error_description: description } : {}),
+		...(uri !== undefined && uri !== "" ? { error_uri: uri } : {}),
 	};
 }

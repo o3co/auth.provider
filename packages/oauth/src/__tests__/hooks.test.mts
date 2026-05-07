@@ -198,6 +198,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			expect(res.status).toBe(429);
 			expect(res.body.error).toBe("rate_limited");
+			// AS-2: same envelope on this 429 path. Lock in the contract on the
+			// introspect surface too, otherwise drift on this branch goes silent.
+			expect(res.body.error_description).toBe("limit:introspect");
+			expect(res.body).not.toHaveProperty("reason");
 		});
 
 		it("fails open when rateLimiter.check throws and emits rate_limit.unavailable audit (CP-6)", async () => {

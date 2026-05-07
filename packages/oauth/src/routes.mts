@@ -196,7 +196,10 @@ export const createOAuthRouter = async (
 			// AS-2: rate-limit body migrated from `{error, reason}` to RFC 6749 §5.2
 			// `{error, error_description}` so all auth-product error responses share
 			// a single shape. `decision.reason` is the operator-visible cause string.
-			res.status(429).json(errorEnvelope("rate_limited", decision.reason ?? "Rate limit exceeded"));
+			// `||` (not `??`) so that `decision.reason: ""` from a custom rate
+			// limiter also falls back — the envelope helper would otherwise drop
+			// the empty string and produce a 429 response with no `error_description`.
+			res.status(429).json(errorEnvelope("rate_limited", decision.reason || "Rate limit exceeded"));
 			return false;
 		}
 		return true;
