@@ -3,6 +3,41 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidDirName, isValidProjectName, main, scaffold } from "../index.mjs";
+import { shouldCopyTemplateEntry } from "../internal/template-filter.mjs";
+
+describe("shouldCopyTemplateEntry", () => {
+	const root =
+		"/Users/x/.npm/_npx/abc/node_modules/@o3co/create-auth-provider/templates/standalone";
+
+	it("includes the template root itself", () => {
+		expect(shouldCopyTemplateEntry(root, root)).toBe(true);
+	});
+
+	it("includes a file directly under the template root even when ancestor path contains 'node_modules'", () => {
+		// Regression for v0.5.0 npx install bug: when the package is installed
+		// at ~/.npm/_npx/<hash>/node_modules/..., the previous filter checked
+		// every segment of the absolute source path and excluded everything,
+		// so cpSync copied no files and the target directory was never created.
+		expect(shouldCopyTemplateEntry(`${root}/package.json`, root)).toBe(true);
+	});
+
+	it("includes nested template files even when ancestor path contains 'node_modules' or 'dist'", () => {
+		expect(shouldCopyTemplateEntry(`${root}/src/app.mts`, root)).toBe(true);
+		expect(shouldCopyTemplateEntry(`${root}/config/application.conf`, root)).toBe(true);
+	});
+
+	it("excludes node_modules subdirectories that live INSIDE the template root", () => {
+		const localRoot = "/repo/templates/standalone";
+		expect(shouldCopyTemplateEntry(`${localRoot}/node_modules/foo/index.js`, localRoot)).toBe(
+			false,
+		);
+	});
+
+	it("excludes dist subdirectories that live INSIDE the template root", () => {
+		const localRoot = "/repo/templates/standalone";
+		expect(shouldCopyTemplateEntry(`${localRoot}/dist/index.mjs`, localRoot)).toBe(false);
+	});
+});
 
 describe("scaffold", () => {
 	let tempDir: string;

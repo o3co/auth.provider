@@ -8,13 +8,22 @@ const dest = resolve(__dirname, "../templates/standalone");
 
 const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 
+// Mirrors `shouldCopyTemplateEntry` in src/index.mts: only segments INSIDE
+// `src` are checked against EXCLUDED_DIRS, not the absolute install-prefix
+// path above it. Without this, running the prebuild script with the workspace
+// itself living under a `node_modules` directory would copy zero files.
+const shouldCopy = (source) => {
+	if (source === src) return true;
+	const prefix = src.endsWith(sep) ? src : `${src}${sep}`;
+	if (!source.startsWith(prefix)) return true;
+	const rel = source.slice(prefix.length);
+	return !rel.split(sep).some((segment) => EXCLUDED_DIRS.has(segment));
+};
+
 rmSync(dest, { recursive: true, force: true });
 cpSync(src, dest, {
 	recursive: true,
-	filter: (source) => {
-		const segments = source.split(sep);
-		return !segments.some((segment) => EXCLUDED_DIRS.has(segment));
-	},
+	filter: shouldCopy,
 });
 
 // Embed package versions so they're available at runtime without
