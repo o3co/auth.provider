@@ -1693,3 +1693,202 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
 	});
 });
+
+// F6 coverage boost — patch lines for PR #126 (IH-13 + SF-3 + IH-16 + TS-4)
+// that are reachable but were not exercised by the original test suite.
+// Each test pins both status code AND errorDescription so a future refactor
+// that shifts an error to a different branch is caught.
+describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", () => {
+	it("returns 400 invalid_grant when code record has code_challenge without code_challenge_method (SF-3 corrupt code A)", async () => {
+		const deps = makeDeps(
+			vi.fn().mockResolvedValue({
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				// SF-3 corrupt shape: challenge persisted but method missing.
+				// /authorize never writes this pairing — only a misbehaving
+				// CodeRepository implementation could produce it.
+				code_challenge: "challenge",
+				// code_challenge_method intentionally omitted
+			}),
+		);
+		const handler = createAuthorizationGrant(deps);
+		const ctx: GrantContext = {
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			session: { code: "abc", code_client_id: "client1" },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		};
+
+		const { result } = await handler.handle(ctx);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+		expect((result as { errorDescription?: string }).errorDescription).toBe("invalid code");
+	});
+
+	it("returns 400 invalid_request when code_challenge_method is set but code_challenge is non-string (SF-3 corrupt code B)", async () => {
+		const deps = makeDeps(
+			vi.fn().mockResolvedValue({
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				// code_challenge typed as `unknown` from a corrupt store record.
+				// Pre-SF-3 this passed silently because `verifier !== undefined`
+				// is true; constantTimeStringEqual now rejects non-string args.
+				code_challenge: 12345 as unknown as string,
+				code_challenge_method: "S256",
+			}),
+		);
+		const handler = createAuthorizationGrant(deps);
+		const verifier = "a".repeat(43);
+		const ctx: GrantContext = {
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
+			session: { code: "abc", code_client_id: "client1" },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		};
+
+		const { result } = await handler.handle(ctx);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect((result as { errorDescription?: string }).errorDescription).toBe(
+			"code_challenge missing on code record",
+		);
+	});
+
+	it("returns 400 invalid_request when code_verifier fails RFC 7636 format check", async () => {
+		// RFC 7636 §4.1: code_verifier is 43-128 chars from the unreserved set.
+		// "too-short" is 9 chars → must reject. The pre-existing test for this
+		// branch omitted body.redirect_uri and so was returning early at the
+		// redirect_uri *presence* gate (authorization.mts:125, after D-1
+		// hoisted the absence check ahead of consumeByCode). The error string
+		// happened to be `"redirect_uri mismatch"` either way, but it was
+		// firing at presence-check, not at the equality-check at L168, and
+		// never reached the regex at L263. This test pins redirect_uri so
+		// the regex check is the actual cause and errorDescription is asserted.
+		const deps = makeDeps(
+			vi.fn().mockResolvedValue({
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_challenge: "challenge",
+				code_challenge_method: "S256",
+			}),
+		);
+		const handler = createAuthorizationGrant(deps);
+		const ctx: GrantContext = {
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: "too-short",
+			},
+			session: { code: "abc", code_client_id: "client1" },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		};
+
+		const { result } = await handler.handle(ctx);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect((result as { errorDescription?: string }).errorDescription).toBe(
+			"invalid code_verifier format",
+		);
+	});
+
+	it("returns 400 invalid_grant when plain method code_verifier does not match challenge (SF-3 + MIN-4 timing-safe)", async () => {
+		// Both verifier and challenge are valid 43-char RFC 7636 strings, but
+		// they differ. Pre-SF-3+MIN-4 the comparison was a short-circuit `!==`
+		// whose per-byte timing leaked progress against the stored challenge;
+		// constantTimeStringEqual replaces it on both S256 and plain branches.
+		const verifier = "a".repeat(43);
+		const challenge = "b".repeat(43);
+		const deps = makeDeps(
+			vi.fn().mockResolvedValue({
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_challenge: challenge,
+				code_challenge_method: "plain",
+			}),
+		);
+		const handler = createAuthorizationGrant(deps);
+		const ctx: GrantContext = {
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
+			session: { code: "abc", code_client_id: "client1" },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		};
+
+		const { result } = await handler.handle(ctx);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+		expect((result as { errorDescription?: string }).errorDescription).toBe(
+			"invalid code_verifier",
+		);
+	});
+
+	it("returns 400 invalid_request when code_challenge_method falls through the switch default (defense-in-depth)", async () => {
+		// The supportedMethods includes-check at the top of the PKCE block
+		// rejects unknown methods before the switch, so the `default` arm is
+		// structurally unreachable in production. We exercise it deliberately
+		// here by widening supportedMethods so includes() passes, then setting
+		// a method the switch doesn't case on. This pins the runtime guard
+		// that protects against future supportedMethods/switch divergence.
+		const config = {
+			oauth: {
+				jwt: { secret: "test-secret" },
+				accessToken: { expiresIn: 3600 },
+				refreshToken: { expiresIn: 86400 },
+				grants: {
+					authorization_code: {
+						enabled: true,
+						pkce: { supportedMethods: ["S256", "plain", "BOGUS"] },
+					},
+				},
+			},
+		} as unknown as GrantDependencies["config"];
+		const verifier = "a".repeat(43);
+		const deps = {
+			config,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			codeRepository: {
+				consumeByCode: vi.fn().mockResolvedValue({
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_challenge: verifier,
+					code_challenge_method: "BOGUS",
+				}),
+				createCode: vi.fn(),
+				getByCode: vi.fn(),
+				removeByCode: vi.fn(),
+			} as unknown as CodeRepository,
+			clientRepository: mockClientRepository,
+		};
+		const handler = createAuthorizationGrant(deps);
+		const ctx: GrantContext = {
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
+			session: { code: "abc", code_client_id: "client1" },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		};
+
+		const { result } = await handler.handle(ctx);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect((result as { errorDescription?: string }).errorDescription).toBe(
+			"invalid code_challenge_method",
+		);
+	});
+});

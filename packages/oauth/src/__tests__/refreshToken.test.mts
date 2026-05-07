@@ -1376,4 +1376,53 @@ describe("createRefreshTokenGrant", () => {
 			expect(Object.hasOwn(rtPayload, "sid")).toBe(false);
 		});
 	});
+
+	// F6 coverage boost — patch line for PR #127 (PB-1 + CC-2 + SF-6) that is
+	// reachable only via runtime-cast to a future outcome value not yet in the
+	// `RefreshTokenFamilyRotationOutcome` union. The `default` arm exists as a
+	// runtime invariant so a future outcome added without updating the switch
+	// is rejected with a stable error rather than silently falling through to
+	// token issuance. We exercise it deliberately to pin that contract.
+	describe("F6 PR3 patch coverage — exhaustive switch defense-in-depth", () => {
+		it("throws 'unhandled rotation outcome' when rotation returns an unknown outcome variant", async () => {
+			const rotation = {
+				async register() {},
+				async rotate() {
+					// Simulates a future outcome added to the union without
+					// updating the consumer switch — the type cast is the
+					// whole point: TypeScript would otherwise prevent this
+					// and only the runtime guard catches the divergence.
+					return { outcome: "future_outcome_xx" } as unknown as Awaited<
+						ReturnType<RefreshTokenFamilyRotation["rotate"]>
+					>;
+				},
+			} satisfies RefreshTokenFamilyRotation;
+			const depsWithStore: GrantDependencies = {
+				...mockDeps,
+				refreshTokenFamilyRotation: rotation,
+			};
+			// SF-6: token must carry both jti AND family_id so the legacy
+			// gate doesn't fire before rotation runs.
+			const token = await new SignJWT({
+				sub: "u1",
+				scope: "read write",
+				family_id: "fam-future",
+			})
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setAudience(DEFAULT_CLIENT_ID)
+				.setExpirationTime("24h")
+				.setJti("prev-jti-future")
+				.sign(secretKey);
+			const handler = createRefreshTokenGrant(depsWithStore);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			};
+
+			await expect(handler.handle(ctx)).rejects.toThrow(/unhandled rotation outcome/);
+		});
+	});
 });
