@@ -33,17 +33,32 @@ describe("CC-5: repository DTOs readonly (compile-time)", () => {
 		expect(true).toBe(true);
 	});
 
-	it("Client array fields are readonly arrays (push/element-mutation rejected)", () => {
+	it("Client array fields are readonly arrays (push/index/wholesale all rejected, all 4 array fields)", () => {
 		if (false as boolean) {
 			const c = {} as Client;
+			// push() rejected on readonly arrays
 			// @ts-expect-error — element mutation on readonly array
 			c.allowedRedirectUris.push("extra");
 			// @ts-expect-error — element mutation on readonly array
 			c.allowedScopes.push("extra");
+			// @ts-expect-error — element mutation on readonly array
+			c.allowedAudiences?.push("extra");
+			// @ts-expect-error — element mutation on readonly array
+			c.postLogoutRedirectUris?.push("extra");
+			// Index assignment rejected on readonly arrays
+			// @ts-expect-error — index assignment on readonly array
+			c.allowedRedirectUris[0] = "x";
+			// @ts-expect-error — index assignment on readonly array
+			c.allowedScopes[0] = "x";
+			// Wholesale array replacement rejected on readonly property
 			// @ts-expect-error — wholesale array replacement on readonly property
 			c.allowedRedirectUris = [];
 			// @ts-expect-error — wholesale array replacement on readonly property
 			c.allowedScopes = [];
+			// @ts-expect-error — wholesale array replacement on readonly property
+			c.allowedAudiences = [];
+			// @ts-expect-error — wholesale array replacement on readonly property
+			c.postLogoutRedirectUris = [];
 			void c;
 		}
 		expect(true).toBe(true);

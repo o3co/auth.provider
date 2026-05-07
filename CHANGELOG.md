@@ -30,6 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Custom code mutating `Client.allowedRedirectUris.push(…)` or assigning
   `Client.allowedScopes = […]` directly fails to compile — use the
   repository's create/upsert API to issue a new `Client` instead.
+- Direct field assignments on `User`, `CodeData`, or `Code` instances
+  (e.g. `user.id = "…"`, `codeData.client_id = "…"`, `code.code = "…"`)
+  fail to compile. Replace with repository create / upsert calls so the
+  store always issues a fresh record.
 - No runtime behavior change: `readonly` is compile-time only; no
   `Object.freeze()` is applied. Existing valid call sites continue to work
   unchanged.
