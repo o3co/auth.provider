@@ -82,11 +82,17 @@ export interface FederationProvider {
 	 * layer generates and stores it in the session before calling. Adapters compute
 	 * `code_challenge` via the shared `pkce` helper (`codeChallenge(codeVerifier)`); do
 	 * not accept a pre-computed challenge to avoid mismatches between transform methods.
+	 *
+	 * `nonce` is optional — OIDC providers MUST forward it as the upstream `nonce`
+	 * authorization param so that the matching `expectedNonce` check in `exchangeCode`
+	 * binds the returned id_token to this session (OIDC Core §3.1.3.7). OAuth-only
+	 * providers (e.g. GitHub OAuth Apps) ignore it.
 	 */
 	buildAuthorizationUrl(params: {
 		readonly redirectUri: string;
 		readonly state: string;
 		readonly codeVerifier: string;
+		readonly nonce?: string;
 	}): URL;
 
 	/**
@@ -95,11 +101,16 @@ export interface FederationProvider {
 	 * Adapters post to the IdP's token endpoint, optionally call the userinfo endpoint,
 	 * and return a `FederationProfile`. They MUST include `issuer` and `sub`; all other
 	 * standard fields are optional.
+	 *
+	 * `nonce` is optional — OIDC providers MUST pass it as `expectedNonce` to the
+	 * upstream library so that the id_token nonce claim is verified against the
+	 * session-stored value (OIDC Core §3.1.3.7). OAuth-only providers ignore it.
 	 */
 	exchangeCode(params: {
 		readonly code: string;
 		readonly codeVerifier: string;
 		readonly redirectUri: string;
+		readonly nonce?: string;
 	}): Promise<FederationProfile>;
 }
 

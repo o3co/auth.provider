@@ -37,6 +37,10 @@ declare module "express-session" {
 			name: string;
 			state: string;
 			codeVerifier: string;
+			/** PB-4 nonce: bound to the upstream id_token via openid-client `expectedNonce`.
+			 *  Optional so OAuth-only providers (GitHub OAuth Apps) can omit it without
+			 *  breaking the shared session shape. */
+			nonce?: string;
 			redirectTo?: string;
 		};
 		/** UserSession ID — set after successful federation callback. */
@@ -128,12 +132,21 @@ export const createRouter = (
 				redirectTo = redirect_to;
 			}
 
-			// Generate CSRF state and PKCE code verifier
+			// Generate CSRF state, PKCE code verifier, and OIDC nonce.
+			// PB-4: nonce is generated for every provider; OIDC adapters forward it to the IdP
+			// (then verify via openid-client `expectedNonce`). OAuth-only adapters ignore it.
 			const state = randomBytes(16).toString("base64url");
 			const codeVerifier = generateCodeVerifier();
+			const nonce = randomBytes(16).toString("base64url");
 
 			// Persist ephemeral federation state in the session
-			req.session.federation = { name: provider.name, state, codeVerifier, redirectTo };
+			req.session.federation = {
+				name: provider.name,
+				state,
+				codeVerifier,
+				nonce,
+				redirectTo,
+			};
 
 			// providerCallbackUrls is the authoritative map of per-provider callback URLs,
 			// populated by module wiring from config.federations.<name>.callbackURL.
@@ -149,6 +162,7 @@ export const createRouter = (
 				redirectUri: callbackUrl,
 				state,
 				codeVerifier,
+				nonce,
 			});
 
 			return res.redirect(authUrl.toString());
@@ -188,7 +202,7 @@ export const createRouter = (
 
 			// Copy ephemeral state to locals, then delete and persist BEFORE any async work
 			// to guarantee reuse prevention even if exchangeCode throws.
-			const { codeVerifier, redirectTo } = fed;
+			const { codeVerifier, redirectTo, nonce } = fed;
 			delete req.session.federation;
 			// Fail-closed: if the reuse-prevention save fails, the old federation state
 			// could still be replayed from the store on a subsequent read.  Return 500
@@ -231,6 +245,10 @@ export const createRouter = (
 					code: codeParam,
 					codeVerifier,
 					redirectUri: callbackUrl,
+					// PB-4: thread the session-stored nonce so OIDC adapters bind the returned
+					// id_token via openid-client `expectedNonce`. Adapters that ignore nonce
+					// (OAuth-only) accept undefined gracefully.
+					nonce,
 				});
 			} catch (err) {
 				log.warn({ err }, "federation token exchange failed");

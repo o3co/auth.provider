@@ -1239,5 +1239,130 @@ describe("Federation routes", () => {
 				expect(removeFedOrder).toBeLessThan(deleteSessionOrder);
 			});
 		});
+
+		// -----------------------------------------------------------------------
+		// PB-4 — Federation OIDC nonce wiring (start + callback)
+		// -----------------------------------------------------------------------
+
+		describe("PB-4: federation nonce generation + thread-through", () => {
+			// PB-4 RED-1: start handler generates a nonce and forwards it to the provider.
+			it("start handler generates a non-empty nonce and passes it to buildAuthorizationUrl", async () => {
+				const provider = makeFakeProvider();
+				const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
+				const app = buildStatelessApp({ providers: new Map([["test", provider]]) });
+
+				const res = await request(app).get("/oauth/federation/test");
+				expect(res.status).toBe(302);
+
+				expect(buildSpy).toHaveBeenCalledOnce();
+				const callArg = buildSpy.mock.calls[0][0] as { nonce?: unknown };
+				expect(typeof callArg.nonce).toBe("string");
+				expect((callArg.nonce as string).length).toBeGreaterThanOrEqual(16);
+			});
+
+			// PB-4 RED-2: callback handler threads session.federation.nonce into provider.exchangeCode.
+			it("callback handler threads session-stored nonce into provider.exchangeCode", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+
+				const { app } = buildCallbackApp({
+					providers,
+					federation: {
+						name: "test",
+						state: "s1",
+						codeVerifier: "v1",
+						nonce: "stored-nonce-9f3d",
+					},
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(302);
+
+				expect(provider.exchangeCode).toHaveBeenCalledOnce();
+				const callArg = (provider.exchangeCode as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+					nonce?: unknown;
+				};
+				expect(callArg.nonce).toBe("stored-nonce-9f3d");
+			});
+
+			// PB-4 RED-3: callback handler still works when planted federation has no nonce
+			// (defence-in-depth — adapters that ignore nonce must remain backward-compat).
+			it("callback handler tolerates absent session.federation.nonce (passes undefined)", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+
+				const { app } = buildCallbackApp({
+					providers,
+					// No nonce field — pre-PB-4 sessions or non-OIDC providers.
+					federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(302);
+
+				expect(provider.exchangeCode).toHaveBeenCalledOnce();
+				const callArg = (provider.exchangeCode as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+					nonce?: unknown;
+				};
+				expect(callArg.nonce).toBeUndefined();
+			});
+		});
+
+		// -----------------------------------------------------------------------
+		// TD-6 — Reuse / replay-prevention assertions
+		// -----------------------------------------------------------------------
+
+		describe("TD-6: session.federation cleanup on success path", () => {
+			// TD-6 RED-1: happy path must clear session.federation as part of reuse prevention.
+			// Pre-fix Test 10 only inspected sid, so a regression that re-introduced the
+			// pre-cleared federation envelope (e.g. by re-saving fed back onto the session)
+			// would silently slip through.
+			it("happy-path callback clears session.federation as part of reuse prevention", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+
+				const { app } = buildCallbackApp({
+					providers,
+					federation: { name: "test", state: "s1", codeVerifier: "v1", nonce: "n1" },
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(302);
+
+				const inspect = await agent.get("/_inspect");
+				const sessionData = JSON.parse(inspect.text) as Record<string, unknown>;
+				expect(sessionData.federation).toBeUndefined();
+			});
+
+			// TD-6 RED-2: replay prevention — re-using the same state after a successful
+			// callback must fail because the planted federation envelope is gone. The 400
+			// invalid_session response is the same one that protects against pre-completion
+			// CSRF state replay; we just assert it activates after the auth-grant has been
+			// consumed.
+			it("replay prevention: second callback with same state returns 400 invalid_session", async () => {
+				const provider = makeFakeProvider();
+				const providers = new Map([["test", provider]]);
+				const { app } = buildCallbackApp({
+					providers,
+					federation: { name: "test", state: "replay-state", codeVerifier: "v1", nonce: "n1" },
+				});
+				const agent = await plantAndGetAgent(app);
+
+				const first = await agent.get("/oauth/federation/test/callback?state=replay-state&code=c1");
+				expect(first.status).toBe(302);
+
+				// Second attempt — agent retains the cookie but session.federation is gone.
+				const second = await agent.get(
+					"/oauth/federation/test/callback?state=replay-state&code=c2",
+				);
+				expect(second.status).toBe(400);
+				expect(JSON.parse(second.text)).toMatchObject({ error: "invalid_session" });
+				// exchangeCode must NOT fire on the replay — the gate is the absent envelope.
+				expect(provider.exchangeCode).toHaveBeenCalledOnce();
+			});
+		});
 	});
 });
