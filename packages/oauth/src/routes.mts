@@ -21,6 +21,7 @@ import {
 	type CodeRepository,
 	consoleLogger,
 	emitAuditEvent,
+	errorEnvelope,
 	type FederationProviderHandle,
 	type FederationTokenStoreBase,
 	formatObject,
@@ -192,7 +193,13 @@ export const createOAuthRouter = async (
 				const secs = Math.max(0, Math.ceil((decision.resetAt.getTime() - Date.now()) / 1000));
 				res.setHeader("Retry-After", String(secs));
 			}
-			res.status(429).json({ error: "rate_limited", reason: decision.reason });
+			// AS-2: rate-limit body migrated from `{error, reason}` to RFC 6749 §5.2
+			// `{error, error_description}` so all auth-product error responses share
+			// a single shape. `decision.reason` is the operator-visible cause string.
+			// `||` (not `??`) so that `decision.reason: ""` from a custom rate
+			// limiter also falls back — the envelope helper would otherwise drop
+			// the empty string and produce a 429 response with no `error_description`.
+			res.status(429).json(errorEnvelope("rate_limited", decision.reason || "Rate limit exceeded"));
 			return false;
 		}
 		return true;

@@ -159,7 +159,9 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			expect(res.status).toBe(429);
 			expect(res.body.error).toBe("rate_limited");
-			expect(res.body.reason).toBe("limit:token");
+			// AS-2: 429 body migrated from `{reason}` to RFC 6749 §5.2 `{error_description}`.
+			expect(res.body.error_description).toBe("limit:token");
+			expect(res.body).not.toHaveProperty("reason");
 			const retryAfter = Number(res.headers["retry-after"]);
 			expect(retryAfter).toBeGreaterThanOrEqual(29);
 		});
@@ -196,6 +198,10 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			expect(res.status).toBe(429);
 			expect(res.body.error).toBe("rate_limited");
+			// AS-2: same envelope on this 429 path. Lock in the contract on the
+			// introspect surface too, otherwise drift on this branch goes silent.
+			expect(res.body.error_description).toBe("limit:introspect");
+			expect(res.body).not.toHaveProperty("reason");
 		});
 
 		it("fails open when rateLimiter.check throws and emits rate_limit.unavailable audit (CP-6)", async () => {

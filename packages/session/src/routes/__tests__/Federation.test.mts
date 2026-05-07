@@ -445,6 +445,19 @@ describe("Federation routes", () => {
 			expect(res.status).toBe(404);
 		});
 
+		// AS-1 RFC 6749 §5.2 envelope: 404 body shape migrates from {message:"NotFound"}
+		// to {error:"not_found", error_description}.
+		it("AS-1: 404 unknown provider returns RFC 6749 envelope (no `message`)", async () => {
+			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
+			const res = await request(app).get("/oauth/federation/unknown");
+			expect(res.status).toBe(404);
+			expect(res.body).toMatchObject({
+				error: "not_found",
+				error_description: expect.any(String),
+			});
+			expect(res.body).not.toHaveProperty("message");
+		});
+
 		// Test 2
 		it("redirects with state + code_challenge + code_challenge_method=S256 in Location", async () => {
 			const provider = makeFakeProvider();
@@ -862,6 +875,18 @@ describe("Federation routes", () => {
 			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
 			const res = await request(app).get("/oauth/federation/unknown/callback?state=x&code=y");
 			expect(res.status).toBe(404);
+		});
+
+		// AS-1 RFC 6749 §5.2 envelope: callback 404 body shape migrates same as start.
+		it("AS-1: 404 unknown provider on callback returns RFC 6749 envelope (no `message`)", async () => {
+			const app = buildStatelessApp({ providers: new Map([["test", makeFakeProvider()]]) });
+			const res = await request(app).get("/oauth/federation/unknown/callback?state=x&code=y");
+			expect(res.status).toBe(404);
+			expect(res.body).toMatchObject({
+				error: "not_found",
+				error_description: expect.any(String),
+			});
+			expect(res.body).not.toHaveProperty("message");
 		});
 
 		// Fix 1 — session fixation: regenerate is called; new session has correct sid/isAuthenticated/user

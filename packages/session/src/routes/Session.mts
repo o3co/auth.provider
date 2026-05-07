@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import {
 	type AppConfig,
 	consoleLogger,
+	errorEnvelope,
 	type Logger,
 	type User,
 	type UserRepository,
@@ -71,7 +72,7 @@ export const createRouter = (
 		}
 		const serverOrigin = `${req.protocol}://${req.get("host")}`;
 		if (origin !== serverOrigin && !allowedOrigins.includes(origin)) {
-			res.status(403).json({ message: "forbidden" });
+			res.status(403).json(errorEnvelope("access_denied", "CSRF origin check failed"));
 			return;
 		}
 		next();
@@ -200,7 +201,9 @@ export const createRouter = (
 								/* best-effort cleanup */
 							});
 						}
-						return res.status(500).json({ message: "Error regenerating session" });
+						return res
+							.status(500)
+							.json(errorEnvelope("server_error", "Session regeneration failed"));
 					}
 					req.session.isAuthenticated = true;
 					req.session.user = user as Record<string, unknown> | undefined;
@@ -218,7 +221,7 @@ export const createRouter = (
 		.post("/logout", verifyCsrfOrigin, (req: Request, res: Response) => {
 			req.session.destroy((err: Error | null) => {
 				if (err) {
-					return res.status(500).json({ message: "Error logging out" });
+					return res.status(500).json(errorEnvelope("server_error", "Session destroy failed"));
 				}
 				return res.status(200).json({ message: "Logged out successfully" });
 			});
