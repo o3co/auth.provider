@@ -35,6 +35,12 @@ export interface AuditEvent {
 	readonly details?: Record<string, unknown>;
 }
 
+/**
+ * Adapter primitive for audit-event sinks.
+ *
+ * @deprecated Since v0.5.1. Use {@link AuditSink} (no `Base` suffix). The
+ * `*Base` form will be removed at 1.0 GA.
+ */
 export interface AuditSinkBase {
 	readonly kind: string;
 	/**
@@ -44,6 +50,13 @@ export interface AuditSinkBase {
 	 */
 	record(event: AuditEvent): Promise<void>;
 }
+
+/**
+ * Canonical name (since v0.5.1) for the audit-sink adapter primitive
+ * interface. {@link AuditSinkBase} remains as a deprecated alias and will
+ * be removed at 1.0 GA.
+ */
+export type AuditSink = AuditSinkBase;
 
 export type AuditSinkFactory = AdapterFactory<AuditSinkBase>;
 

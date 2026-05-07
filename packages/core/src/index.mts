@@ -32,7 +32,7 @@ export {
 	registerBuiltinAuditSinks,
 } from "./audit/factory.mjs";
 // Audit
-export type { AuditEvent, AuditSinkBase, AuditSinkFactory } from "./audit/types.mjs";
+export type { AuditEvent, AuditSink, AuditSinkBase, AuditSinkFactory } from "./audit/types.mjs";
 export type {
 	AppHandle,
 	BootErrorDetails,
@@ -94,6 +94,7 @@ export { memoryFederationTokenStoreModule } from "./federation-tokens/module.mjs
 // (FederationTokenStoreClient) lives in @o3co/auth-provider-redis (S3).
 export type {
 	AcquireLockOptions,
+	FederationTokenStore,
 	FederationTokenStoreBase,
 	FederationTokenStoreFactory,
 	FederationTokens,
@@ -177,6 +178,7 @@ export type {
 	MfaCoordinator,
 	MfaIssueContext,
 	MfaPendingTransaction,
+	MfaProvider,
 	MfaProviderBase,
 	MfaProviderFactory,
 	MfaResumeState,
@@ -207,7 +209,12 @@ export type {
 	// ./grants/types.mjs exports at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
 	GrantHandlerResolver,
-	GrantPolicyHook,
+	// AS-7 collision resolution (v0.5.1): the manifest's contributes-map
+	// placeholder previously named `GrantPolicyHook` was renamed to
+	// `GrantPolicyHookContribution`. The canonical `GrantPolicyHook` (alias
+	// of `GrantPolicyHookBase`) is now re-exported from `./policy/types.mjs`
+	// in the policy block below.
+	GrantPolicyHookContribution,
 	// GrantPolicyHookFactory: excluded — name collides with legacy
 	// ./policy/types.mjs export at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
@@ -233,6 +240,7 @@ export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
 export type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
+	GrantPolicyHook,
 	GrantPolicyHookBase,
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
@@ -247,6 +255,7 @@ export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 export type {
 	RateLimitContext,
 	RateLimitDecision,
+	RateLimiter,
 	RateLimiterBase,
 	RateLimiterFactory,
 	RateLimitSpec,

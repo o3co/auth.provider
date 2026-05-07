@@ -21,6 +21,8 @@ export default defineConfig({
 				// directives in these files only fire under typecheck mode.
 				"src/__tests__/grant-context-readonly.test.mts",
 				"src/__tests__/repository-types-readonly.test.mts",
+				// AS-7 deprecation alias type-equivalence assertions.
+				"src/__tests__/naming-aliases.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},

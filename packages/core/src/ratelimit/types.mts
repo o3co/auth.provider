@@ -30,6 +30,12 @@ export interface RateLimitDecision {
 	readonly reason?: string;
 }
 
+/**
+ * Adapter primitive for rate-limiting decisions.
+ *
+ * @deprecated Since v0.5.1. Use {@link RateLimiter} (no `Base` suffix). The
+ * `*Base` form will be removed at 1.0 GA.
+ */
 export interface RateLimiterBase {
 	readonly kind: string;
 	/**
@@ -38,6 +44,13 @@ export interface RateLimiterBase {
 	 */
 	check(key: string, ctx: RateLimitContext): Promise<RateLimitDecision>;
 }
+
+/**
+ * Canonical name (since v0.5.1) for the rate-limiter adapter primitive
+ * interface. {@link RateLimiterBase} remains as a deprecated alias and will
+ * be removed at 1.0 GA.
+ */
+export type RateLimiter = RateLimiterBase;
 
 export type RateLimiterFactory = AdapterFactory<RateLimiterBase>;
 

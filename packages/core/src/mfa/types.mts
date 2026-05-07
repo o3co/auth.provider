@@ -34,11 +34,24 @@ export interface MfaVerifyResult {
 	readonly failureReason?: MfaVerifyFailureReason;
 }
 
+/**
+ * Adapter primitive for MFA challenge providers.
+ *
+ * @deprecated Since v0.5.1. Use {@link MfaProvider} (no `Base` suffix). The
+ * `*Base` form will be removed at 1.0 GA.
+ */
 export interface MfaProviderBase {
 	readonly kind: string;
 	issue(userId: string, ctx: MfaIssueContext): Promise<MfaChallenge | null>;
 	verify(challengeId: string, proof: unknown): Promise<MfaVerifyResult>;
 }
+
+/**
+ * Canonical name (since v0.5.1) for the MFA-provider adapter primitive
+ * interface. {@link MfaProviderBase} remains as a deprecated alias and will
+ * be removed at 1.0 GA.
+ */
+export type MfaProvider = MfaProviderBase;
 
 export interface EnrollResult {
 	readonly success: boolean;

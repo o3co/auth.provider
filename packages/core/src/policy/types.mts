@@ -47,10 +47,30 @@ export type GrantPolicyDecision =
 			readonly errorDescription?: string;
 	  };
 
+/**
+ * Adapter primitive for grant-policy hooks.
+ *
+ * @deprecated Since v0.5.1. Use {@link GrantPolicyHook} (no `Base` suffix). The
+ * `*Base` form will be removed at 1.0 GA.
+ */
 export interface GrantPolicyHookBase {
 	readonly kind: string;
 	evaluate(request: GrantPolicyRequest, ctx: GrantPolicyContext): Promise<GrantPolicyDecision>;
 }
+
+/**
+ * Canonical name (since v0.5.1) for the grant-policy-hook adapter primitive
+ * interface. {@link GrantPolicyHookBase} remains as a deprecated alias and
+ * will be removed at 1.0 GA.
+ *
+ * NOTE: this name previously belonged to the contributes-map placeholder
+ * (`type GrantPolicyHook = unknown`) at
+ * `packages/core/src/modules/manifest/contributes-map.mts`. As part of the
+ * v0.5.1 collision resolution, that placeholder was renamed to
+ * `GrantPolicyHookContribution`, freeing this name for the canonical
+ * interface.
+ */
+export type GrantPolicyHook = GrantPolicyHookBase;
 
 export type GrantPolicyHookFactory = AdapterFactory<GrantPolicyHookBase>;
 

@@ -65,10 +65,15 @@ export type MfaFactor = unknown;
 export type AuditHook = unknown;
 
 /**
- * Structural placeholder for GrantPolicyHook. Phase 9 substitutes the
- * concrete type from packages/core/src/policy/types.mts (GrantPolicyHookBase).
+ * Structural placeholder for the value type produced by a
+ * `GrantPolicyHookFactory<Deps>` contribution on a module manifest.
+ *
+ * Renamed from `GrantPolicyHook` in v0.5.1 (AS-7 collision resolution): the
+ * canonical `GrantPolicyHook` now refers to the policy-package interface
+ * (an alias of `GrantPolicyHookBase`). Phase 9 substitutes this placeholder
+ * with the concrete type produced by a factory contribution.
  */
-export type GrantPolicyHook = unknown;
+export type GrantPolicyHookContribution = unknown;
 
 // Per-kind factory types — each follows `(deps: Deps) => Value` per A2-α §4.1.
 
@@ -77,7 +82,7 @@ export type FederationFactory<Deps> = (deps: Deps) => FederationProvider;
 export type ExchangeTokenValidatorFactory<Deps> = (deps: Deps) => ExchangeTokenValidator;
 export type MfaFactorFactory<Deps> = (deps: Deps) => MfaFactor;
 export type AuditHookFactory<Deps> = (deps: Deps) => AuditHook;
-export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHook;
+export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContribution;
 
 /**
  * Declaration-merged map of contribution kinds.
