@@ -59,10 +59,6 @@ export interface GoogleProviderConfig {
 	/** Override Google's JWKS URI. Default: `https://www.googleapis.com/oauth2/v3/certs`.
 	 *  Test injection only — production deployments rely on the default. */
 	jwksUri?: string;
-	/** Clock skew tolerance in seconds for id_token iat/exp validation, applied via openid-client's
-	 *  `[clockSkew]` Symbol on the Configuration. Default: openid-client's built-in tolerance.
-	 *  Optional and bounded — RFC 8725 §3.10 cautions against unbounded skew. */
-	clockSkewSeconds?: number;
 }
 
 export type GoogleProvider = FederationProvider &
@@ -93,14 +89,6 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
 
-	// Optional clock-skew tolerance (RFC 8725 §3.10). openid-client v6 reads the value via
-	// the `[oidc.clockSkew]` Symbol on the Configuration object. Bounded by the operator —
-	// no implicit fallback so unset means "library default" rather than a silent permissive
-	// skew.
-	if (typeof config.clockSkewSeconds === "number" && Number.isFinite(config.clockSkewSeconds)) {
-		(oidcConfig as unknown as Record<symbol, number>)[oidc.clockSkew] = config.clockSkewSeconds;
-	}
-
 	return {
 		name: "google",
 		scope: SCOPES,
@@ -111,9 +99,14 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			readonly codeVerifier: string;
 			readonly nonce?: string;
 		}): URL {
-			// PB-4: when the route layer supplies a `nonce`, forward it as the upstream `nonce`
-			// authorization param so Google embeds it in the id_token. The matching
-			// `expectedNonce` check in `exchangeCode` then binds the id_token to this session.
+			// PB-4: Google is OIDC-only, so nonce binding is mandatory (OIDC §3.1.3.7).
+			// Fail closed when a caller forgets to thread nonce — silently dropping it would
+			// produce an authorization request whose id_token cannot be bound to the session.
+			if (typeof params.nonce !== "string" || params.nonce.length === 0) {
+				throw new Error(
+					'Google federation "google" requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.',
+				);
+			}
 			return oidc.buildAuthorizationUrl(oidcConfig, {
 				redirect_uri: params.redirectUri,
 				scope: SCOPES.join(" "),
@@ -121,7 +114,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				code_challenge: codeChallenge(params.codeVerifier),
 				code_challenge_method: "S256",
 				access_type: "offline",
-				...(params.nonce ? { nonce: params.nonce } : {}),
+				nonce: params.nonce,
 			});
 		},
 
@@ -131,32 +124,40 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			readonly redirectUri: string;
 			readonly nonce?: string;
 		}): Promise<FederationProfile> {
+			// PB-4: same fail-closed guard as buildAuthorizationUrl. Pre-PB-4 sessions written
+			// to the store before the upgrade have no `nonce` field; rather than silently
+			// degrading verification we reject so the user re-authenticates with a fresh
+			// (nonce-bearing) session.
+			if (typeof params.nonce !== "string" || params.nonce.length === 0) {
+				throw new Error(
+					'Google federation "google" requires a non-empty nonce — OIDC §3.1.3.7 nonce binding is mandatory.',
+				);
+			}
+
 			// openid-client's authorizationCodeGrant expects the full callback URL.
 			// We synthesize it from redirectUri + code since the route receives them separately.
 			const callbackUrl = new URL(params.redirectUri);
 			callbackUrl.searchParams.set("code", params.code);
 
 			// PB-4: passing `expectedNonce` activates openid-client's nonce check (OIDC §3.1.3.7)
-			// and *also* asserts an id_token is present in the response. When `params.nonce` is
-			// undefined the option is omitted entirely — callers without nonce wiring keep the
-			// pre-PB-4 behavior, but the route layer now always supplies it for OIDC providers.
+			// and *also* asserts an id_token is present in the response.
 			const tokens = await oidc.authorizationCodeGrant(oidcConfig, callbackUrl, {
 				pkceCodeVerifier: params.codeVerifier,
 				expectedState: oidc.skipStateCheck,
-				...(params.nonce !== undefined ? { expectedNonce: params.nonce } : {}),
+				expectedNonce: params.nonce,
 			});
 
 			// PB-5: bind UserInfo response sub against the verified id_token sub (OIDC §5.3.2).
-			// When the id_token carries no sub (degenerate or non-OIDC token sets) we fall back
-			// to skipSubjectCheck — the OAuth-only path was never bound here, and we do not want
-			// to start failing closed for tokens that legitimately have no id-level identity.
-			const idTokenClaims = tokens.claims();
-			const idTokenSub = typeof idTokenClaims?.sub === "string" ? idTokenClaims.sub : undefined;
-			const userInfo = await oidc.fetchUserInfo(
-				oidcConfig,
-				tokens.access_token,
-				idTokenSub ?? oidc.skipSubjectCheck,
-			);
+			// Google id_tokens always carry a non-empty string sub. If the claim is absent,
+			// non-string, or empty we MUST fail closed — falling back to `skipSubjectCheck`
+			// would silently downgrade the binding contract for a token we cannot identify.
+			const idTokenSub = tokens.claims()?.sub;
+			if (typeof idTokenSub !== "string" || idTokenSub.length === 0) {
+				throw new Error(
+					'Google federation "google" id_token is missing the sub claim required for UserInfo binding (OIDC §5.3.2).',
+				);
+			}
+			const userInfo = await oidc.fetchUserInfo(oidcConfig, tokens.access_token, idTokenSub);
 
 			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
 

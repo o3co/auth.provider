@@ -89,7 +89,7 @@ function makeSessionObject(
 
 function makeSessionApp(store: SessionStore): express.Express {
 	const app = express();
-	app.use((req, _res, next) => {
+	app.use((req, res, next) => {
 		// Parse the `sid` cookie manually
 		const cookieHeader = req.headers.cookie ?? "";
 		const sidMatch = cookieHeader.match(/(?:^|;\s*)sid=([^;]+)/);
@@ -103,6 +103,11 @@ function makeSessionApp(store: SessionStore): express.Express {
 			id,
 			req,
 		);
+
+		// Persist the session cookie so a supertest agent can carry it across requests.
+		// Real express-session does this on response writeHead — we mimic it idempotently
+		// here so end-to-end inspection (start handler → /_inspect) sees the same session.
+		res.cookie("sid", id, { httpOnly: true });
 
 		next();
 	});
@@ -260,6 +265,15 @@ function buildStatelessApp({
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
 		}),
 	);
+
+	// Inspect endpoint — exposes the cookie-bound session as JSON. Used by tests that
+	// need to verify a route wrote (or cleared) session fields end-to-end.
+	app.get("/_inspect", (req: Request, res: Response) => {
+		const s = (req as unknown as { session: Record<string, unknown> }).session;
+		const { save: _s, regenerate: _r, destroy: _d, ...data } = s;
+		res.json(data);
+	});
+
 	return app;
 }
 
@@ -1245,19 +1259,31 @@ describe("Federation routes", () => {
 		// -----------------------------------------------------------------------
 
 		describe("PB-4: federation nonce generation + thread-through", () => {
-			// PB-4 RED-1: start handler generates a nonce and forwards it to the provider.
-			it("start handler generates a non-empty nonce and passes it to buildAuthorizationUrl", async () => {
+			// PB-4 RED-1: start handler generates a nonce, persists it on session.federation,
+			// AND passes it to buildAuthorizationUrl. The session-side assertion catches the
+			// regression class where nonce reaches the provider but never lands in the session
+			// (so the callback can't bind id_token via expectedNonce).
+			it("start handler persists nonce on session.federation and forwards it to buildAuthorizationUrl", async () => {
 				const provider = makeFakeProvider();
 				const buildSpy = vi.spyOn(provider, "buildAuthorizationUrl");
 				const app = buildStatelessApp({ providers: new Map([["test", provider]]) });
+				const agent = request.agent(app);
 
-				const res = await request(app).get("/oauth/federation/test");
+				const res = await agent.get("/oauth/federation/test");
 				expect(res.status).toBe(302);
 
 				expect(buildSpy).toHaveBeenCalledOnce();
 				const callArg = buildSpy.mock.calls[0][0] as { nonce?: unknown };
 				expect(typeof callArg.nonce).toBe("string");
 				expect((callArg.nonce as string).length).toBeGreaterThanOrEqual(16);
+
+				// Cross-check: the same nonce must be persisted on session.federation so the
+				// callback handler can thread it back into provider.exchangeCode.
+				const inspect = await agent.get("/_inspect");
+				const sessionData = JSON.parse(inspect.text) as Record<string, unknown>;
+				const fed = sessionData.federation as { nonce?: unknown } | undefined;
+				expect(fed).toBeDefined();
+				expect(fed?.nonce).toBe(callArg.nonce);
 			});
 
 			// PB-4 RED-2: callback handler threads session.federation.nonce into provider.exchangeCode.

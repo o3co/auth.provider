@@ -97,7 +97,7 @@ export const createRouter = (
 		// ------------------------------------------------------------------
 		// GET /oauth/federation/:name  — start the OAuth 2 redirect leg
 		// ------------------------------------------------------------------
-		.get("/oauth/federation/:name", (req: Request, res: Response) => {
+		.get("/oauth/federation/:name", async (req: Request, res: Response) => {
 			const provider = federationProviders.get(String(req.params.name));
 			if (!provider) {
 				return res.status(404).json({ message: "NotFound" });
@@ -164,6 +164,24 @@ export const createRouter = (
 				codeVerifier,
 				nonce,
 			});
+
+			// Persist the federation envelope BEFORE redirecting to the IdP. Without an explicit
+			// save, async session stores (Redis, etc.) can lose the state/codeVerifier/nonce
+			// before the user reaches the callback, breaking CSRF + PKCE + nonce binding —
+			// fail-closed on store outages here is cheaper than a stranded callback.
+			const startSaveErr = await new Promise<unknown>((resolve) => {
+				req.session.save((err) => resolve(err ?? null));
+			});
+			if (startSaveErr) {
+				logger.warn(
+					{ err: startSaveErr, provider: provider.name },
+					"federation start session save failed",
+				);
+				return res.status(500).json({
+					error: "server_error",
+					error_description: "Session store unavailable",
+				});
+			}
 
 			return res.redirect(authUrl.toString());
 		})
