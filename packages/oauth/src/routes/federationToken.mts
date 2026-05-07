@@ -35,6 +35,46 @@ type ExpressLike = {
 };
 
 /**
+ * SF-13 — classification of upstream federation refresh errors.
+ *
+ * `invalid_grant`: IdP rejected the refresh_token (revoked, expired, mismatched). Triggers
+ *   cleanup + 410 re-authentication.
+ * `rate_limited`: IdP returned 429. Map to 429 so callers can implement Retry-After.
+ * `network`: upstream 5xx, connection refused / timed out / DNS failure. Map to 503.
+ * `unknown`: anything else — generic 500, audited with reason for SIEM grouping.
+ *
+ * Preference order: structured properties (`.error`, `.status`, `.code`) over message-string
+ * matching. The string fallback is defense-in-depth for legacy or non-openid-client errors.
+ */
+type FederationRefreshErrorReason = "invalid_grant" | "rate_limited" | "network" | "unknown";
+
+function classifyFederationRefreshError(error: unknown): FederationRefreshErrorReason {
+	if (error !== null && typeof error === "object") {
+		const e = error as { error?: unknown; status?: unknown; code?: unknown };
+		// openid-client v6 surfaces token-endpoint errors with `.error` populated from the
+		// IdP response body (RFC 6749 §5.2 error codes). `invalid_grant` is the canonical
+		// "refresh token rejected"; `invalid_token` is RFC 6750 §3.1 — both require re-auth.
+		if (e.error === "invalid_grant" || e.error === "invalid_token") return "invalid_grant";
+		// Rate-limit indicators per RFC 6749 token-endpoint behavior + RFC 6585 §4.
+		if (e.error === "too_many_requests" || e.status === 429) return "rate_limited";
+		// Generic upstream 5xx — IdP outage. Surfaced via openid-client `.status` even when
+		// the message is opaque ("service down").
+		if (typeof e.status === "number" && e.status >= 500 && e.status < 600) return "network";
+		// Node network-layer failures: ECONNREFUSED / ENOTFOUND / ETIMEDOUT propagate as `.code`.
+		if (e.code === "ECONNREFUSED" || e.code === "ENOTFOUND" || e.code === "ETIMEDOUT") {
+			return "network";
+		}
+	}
+	// Defense-in-depth string fallback for non-openid-client errors (legacy stubs, mocks,
+	// custom adapters). Less precise than structured inspection, kept so v0.5.0 callers
+	// that throw plain `Error("invalid_grant: ...")` still reach the cleanup path.
+	const msg = error instanceof Error ? error.message : String(error);
+	if (msg.includes("invalid_grant")) return "invalid_grant";
+	if (msg.includes("temporarily_unavailable") || /5\d\d/.test(msg)) return "network";
+	return "unknown";
+}
+
+/**
  * Structural narrowing of `FederationProviderHandle` for the refresh capability.
  * Local duck-type guard that mirrors `supportsRefresh` from @o3co/auth-provider-session,
  * defined here to keep the oauth package independent of session.
@@ -459,6 +499,21 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				}
 			}
 
+			// SF-12 — post-lock RT guard.
+			// The pre-lock guard (lines 372-378) catches the case where the very first
+			// federationTokenStore.get returns a record without a refresh_token. The post-lock
+			// re-read above can ALSO produce such a record (e.g. concurrent revoke stripped
+			// the RT, or the IdP rotated to a token set without an RT and the store recorded
+			// that). Without this guard the IdP call would be made with `?? ""` — which the
+			// upstream rejects opaquely and lands in 500 refresh_failed via the SF-13 fallback.
+			// Returning 410 refresh_token_absent gives the caller a precise re-auth signal.
+			if (!currentTokens.refreshToken) {
+				return res.status(410).json({
+					error: "refresh_token_absent",
+					error_description: "no refresh token available for this federation (post-lock re-read)",
+				});
+			}
+
 			// 11e: Call provider to refresh the federation token.
 			// currentTokens now holds the freshest available snapshot — any post-lock
 			// re-read value has been folded in above. This ensures we never call the IdP
@@ -471,13 +526,22 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// should tune ttlMs via the lock adapter config if their IdP is slow.
 			let refreshed: Awaited<ReturnType<typeof provider.refreshToken>>;
 			try {
-				refreshed = await provider.refreshToken(currentTokens.refreshToken ?? "");
+				// SF-12: `currentTokens.refreshToken` is narrowed to `string` by the guard
+				// above. The pre-fix `?? ""` fallback is gone — the IdP cannot receive an
+				// empty string under any branch.
+				refreshed = await provider.refreshToken(currentTokens.refreshToken);
 			} catch (error) {
-				const msg = error instanceof Error ? error.message : String(error);
-				logger.warn(`POST /oauth/federation/${name}/token: refreshToken failed:`, error);
+				// SF-13: classify via structured properties first (openid-client v6 surfaces
+				// `.error`, `.status`, `.code`), with message-string fallback for legacy /
+				// non-openid-client errors. The fragile `msg.includes(...)` / `/5\d\d/.test(msg)`
+				// path is now confined to the helper as last-resort.
+				const reason = classifyFederationRefreshError(error);
+				logger.warn(
+					`POST /oauth/federation/${name}/token: refreshToken failed (reason: ${reason}):`,
+					error,
+				);
 
-				// 11e → Step 12: Classify the error.
-				if (msg.includes("invalid_grant")) {
+				if (reason === "invalid_grant") {
 					// Cleanup: delete federation token + remove federation link.
 					try {
 						await opts.federationTokenStore.delete(sid, name);
@@ -509,20 +573,28 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					});
 				}
 
-				if (msg.includes("temporarily_unavailable") || /5\d\d/.test(msg)) {
+				if (reason === "rate_limited") {
+					return res.status(429).json({
+						error: "rate_limited",
+						error_description: "upstream IdP rate limit exceeded; retry later",
+					});
+				}
+
+				if (reason === "network") {
 					return res.status(503).json({
 						error: "temporarily_unavailable",
 						error_description: "upstream federation provider temporarily unavailable",
 					});
 				}
 
+				// reason === "unknown" — generic 500 + audit with classifier reason for SIEM.
 				emitAuditEvent(opts.auditSink, {
 					timestamp: new Date(),
 					type: "federation.token.refresh_failed",
 					subject: sub ?? undefined,
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
-					details: { federation: name, error: msg },
+					details: { federation: name, reason },
 				});
 				return res.status(500).json({
 					error: "refresh_failed",

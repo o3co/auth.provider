@@ -667,12 +667,16 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(500);
 			expect(res.body.error).toBe("refresh_failed");
+			// SF-13: audit details now carry the classifier reason (not the raw message)
+			// so SIEM rules can group on a stable enum. `"unexpected provider error"` is
+			// neither an OAuth-defined error code nor a 5xx-shaped string, so the helper
+			// classifies it as "unknown".
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "federation.token.refresh_failed",
 					details: expect.objectContaining({
 						federation: "google",
-						error: "unexpected provider error",
+						reason: "unknown",
 					}),
 				}),
 			);
@@ -1087,6 +1091,255 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.status).toBe(200);
 			expect(res.body.access_token).toBe("new-upstream-at");
 			expect(refreshFn).toHaveBeenCalledWith("upstream-rt-xyz");
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// SF-12 — post-lock RT guard (replaces ??"" fallback)
+	// ---------------------------------------------------------------------------
+
+	describe("SF-12: post-lock refresh-token guard", () => {
+		// SF-12 RED-1: provider receives the actual RT, not an empty string.
+		// Current code at federationToken.mts:474 has `?? ""` fallback. With currentTokens.refreshToken
+		// truthy, the fallback is not exercised and the spy sees the real RT — but the assertion is
+		// the regression guard: if a future refactor drops currentTokens and reaches for `freshTokens.refreshToken ?? ""`,
+		// this test catches it.
+		it('passes the real refresh_token to provider.refreshToken (no ?? "" fallback)', async () => {
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const refreshFn = vi.fn().mockResolvedValue({
+				accessToken: "new-at",
+				refreshToken: "new-rt",
+				expiresAt: new Date(Date.now() + 3_600_000),
+			});
+			const refreshProvider: FederationProviderHandle & {
+				refreshToken: typeof refreshFn;
+			} = { name: "google", refreshToken: refreshFn };
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(200);
+			expect(refreshFn).toHaveBeenCalledOnce();
+			expect(refreshFn).toHaveBeenCalledWith("upstream-rt-xyz");
+			expect(refreshFn).not.toHaveBeenCalledWith("");
+		});
+
+		// SF-12 RED-2: post-lock re-read returns FederationTokens record with refreshToken: undefined.
+		// Pre-fix: the code falls through to `provider.refreshToken("")` which the IdP rejects with
+		// some 4xx → mapped via SF-13 string-match to 500 refresh_failed. Post-fix: a dedicated guard
+		// fires BEFORE the IdP call and returns 410 refresh_token_absent.
+		it("returns 410 refresh_token_absent when post-lock re-read has no refreshToken", async () => {
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			// Post-lock re-read is still expired but missing refreshToken (e.g. concurrent revoke
+			// stripped it; or the IdP issued a token set without RT and the store records that).
+			const postLockTokens = {
+				...baseFedTokens,
+				refreshToken: undefined as string | undefined,
+				expiresAt: new Date(Date.now() - 1000),
+			};
+			const release = vi.fn().mockResolvedValue(undefined);
+			const getFn = vi
+				.fn()
+				.mockResolvedValueOnce(expiredTokens) // pre-lock read
+				.mockResolvedValueOnce(postLockTokens); // post-lock re-read
+			const lockingStore = {
+				...makeFedTokenStore({ get: getFn }),
+				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+			};
+			const refreshFn = vi.fn();
+			const refreshProvider: FederationProviderHandle & {
+				refreshToken: typeof refreshFn;
+			} = { name: "google", refreshToken: refreshFn };
+			const app = buildApp({
+				fedTokenStore: lockingStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(410);
+			expect(res.body.error).toBe("refresh_token_absent");
+		});
+
+		// SF-12 RED-3: with the post-lock guard firing, the provider must NOT be called.
+		// Spy assertion catches the regression where the guard exists but the IdP call still
+		// happens (e.g. the guard branches on `tokens.refreshToken` instead of `currentTokens.refreshToken`).
+		it("does not call provider.refreshToken when post-lock guard fires", async () => {
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const postLockTokens = {
+				...baseFedTokens,
+				refreshToken: undefined as string | undefined,
+				expiresAt: new Date(Date.now() - 1000),
+			};
+			const release = vi.fn().mockResolvedValue(undefined);
+			const getFn = vi
+				.fn()
+				.mockResolvedValueOnce(expiredTokens)
+				.mockResolvedValueOnce(postLockTokens);
+			const lockingStore = {
+				...makeFedTokenStore({ get: getFn }),
+				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+			};
+			const refreshFn = vi.fn();
+			const refreshProvider: FederationProviderHandle & {
+				refreshToken: typeof refreshFn;
+			} = { name: "google", refreshToken: refreshFn };
+			const app = buildApp({
+				fedTokenStore: lockingStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(410);
+			expect(refreshFn).not.toHaveBeenCalled();
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// SF-13 — Structured error classification (replaces fragile string match)
+	// ---------------------------------------------------------------------------
+
+	describe("SF-13: structured error classification", () => {
+		// Helper: build a refresh-failure path with a custom error object the helper must classify.
+		function buildRefreshFailure(error: unknown, opts: { auditSink?: AuditSinkBase } = {}) {
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const refreshFn = vi.fn().mockRejectedValue(error);
+			const refreshProvider: FederationProviderHandle & {
+				refreshToken: typeof refreshFn;
+			} = { name: "google", refreshToken: refreshFn };
+			return buildApp({
+				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
+				getFederationProviders: () =>
+					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+				auditSink: opts.auditSink,
+			});
+		}
+
+		// SF-13 RED-1: openid-client v6 throws errors with structured `{ error: "invalid_grant" }`
+		// — the message may be a generic OAuth wrapper without "invalid_grant" substring. Pre-fix
+		// the string match misses this and falls through to 500. Post-fix the helper inspects
+		// `.error` and classifies as invalid_grant → 410.
+		it("returns 410 when provider throws structured { error: 'invalid_grant' } without message match", async () => {
+			const providerError = Object.assign(new Error("OAuth provider rejected refresh"), {
+				error: "invalid_grant",
+			});
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(410);
+			expect(res.body.error).toBe("re_authentication_required");
+		});
+
+		// SF-13 RED-2: OIDC §5.2.2 error code "invalid_token" — RFC 6750 §3.1 also defines this for
+		// resource access. When an upstream returns invalid_token on refresh (treat-as-revoked
+		// signal from some IdPs), map to invalid_grant cleanup path so the user re-authenticates.
+		it("returns 410 when provider throws structured { error: 'invalid_token' }", async () => {
+			const providerError = Object.assign(new Error("token rejected"), {
+				error: "invalid_token",
+			});
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(410);
+			expect(res.body.error).toBe("re_authentication_required");
+		});
+
+		// SF-13 RED-3: rate-limited (429). Pre-fix: 500 generic. Post-fix: 429 rate_limited so
+		// callers can implement Retry-After / exponential backoff at a higher tier.
+		it("returns 429 rate_limited when provider throws { status: 429 }", async () => {
+			const providerError = Object.assign(new Error("rate limit hit"), { status: 429 });
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(429);
+			expect(res.body.error).toBe("rate_limited");
+		});
+
+		// SF-13 RED-4: structured 5xx via `.status` (openid-client surfaces upstream HTTP code
+		// here even when the message doesn't contain it). Pre-fix: 500 generic (no /5\d\d/ match
+		// when the message is just "service down"). Post-fix: 503 temporarily_unavailable.
+		it("returns 503 temporarily_unavailable when provider throws { status: 503 } without message match", async () => {
+			const providerError = Object.assign(new Error("service down"), { status: 503 });
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+
+		// SF-13 RED-5: Node's network error codes propagate as `.code` (ECONNREFUSED / ENOTFOUND
+		// / ETIMEDOUT) — these are upstream-network failures, not OAuth grant rejections. Pre-fix:
+		// 500. Post-fix: 503.
+		it("returns 503 when provider throws { code: 'ECONNREFUSED' }", async () => {
+			const providerError = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:443"), {
+				code: "ECONNREFUSED",
+			});
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+
+		// SF-13 RED-6: defense-in-depth string fallback still works for legacy / non-openid-client
+		// errors that only carry the OAuth code in the message. Confirms we did not regress the
+		// existing behavior when removing the fragile path.
+		it("returns 410 from string fallback when error.message contains invalid_grant", async () => {
+			const providerError = new Error("400 invalid_grant: token revoked");
+			const app = buildRefreshFailure(providerError);
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(410);
+			expect(res.body.error).toBe("re_authentication_required");
+		});
+
+		// SF-13 RED-7: unknown / non-OAuth error → 500 + audit emit with reason in details. Pre-fix
+		// the audit details capture the message string; post-fix they capture the helper's
+		// classification reason ("unknown") so SIEM can group.
+		it("returns 500 refresh_failed and emits audit event with reason='unknown' for unrecognized errors", async () => {
+			const auditSink: AuditSinkBase = {
+				kind: "mock",
+				record: vi.fn().mockResolvedValue(undefined),
+			};
+			const providerError = new Error("internal-bug-stack-trace");
+			const app = buildRefreshFailure(providerError, { auditSink });
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.token.refresh_failed",
+					details: expect.objectContaining({
+						federation: "google",
+						reason: "unknown",
+					}),
+				}),
+			);
 		});
 	});
 });
