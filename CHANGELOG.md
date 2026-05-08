@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (Phase F — F9 PR7 AS-12 legacyTokenCompat config flag, v0.5.1)
+
+- **`oauth.refreshToken.legacyTokenCompat` controls refresh-grant acceptance
+  of v0.4.x token shapes** (`@o3co/auth-provider-core` config,
+  `@o3co/auth-provider-oauth`, closes AS-12): default is `true`, preserving
+  current compatibility for tokens that use `payload.type = "refresh"` as a
+  header-typ substitute or `claims.user.id` as the subject fallback.
+
+- Setting `legacyTokenCompat = false` requires v0.5.x refresh-token shape for
+  the refresh grant: `payload.type = "refresh"` no longer substitutes for
+  missing `header.typ`, and `claims.user.id` is no longer accepted when
+  top-level `sub` is absent. This is opt-in and non-breaking while the default
+  remains `true`.
+
+- The pre-AS-12 strict marker requirement is preserved: a refresh token MUST
+  declare itself via either `header.typ === "rt+jwt"` or (when
+  `legacyTokenCompat = true`) `payload.type === "refresh"`. A typ-less JWT
+  with no `payload.type` is rejected at the refresh-grant gate regardless of
+  `legacyTokenCompat`, even when `oauth.jwt.legacyTypAccept = true` allows
+  it through SF-1's central verifier. This defends against AT-as-RT confusion
+  in deployments running `legacyTypAccept = true` during the v0.5.x transition
+  window.
+
+#### Migration
+
+Upgrade to v0.5.1 with the default `legacyTokenCompat = true`, wait for all
+v0.4.x refresh tokens to expire or be rotated into v0.5.x tokens, then set
+`oauth.refreshToken.legacyTokenCompat = false` and monitor for `invalid_grant`
+responses from clients still presenting legacy refresh tokens.
+
+#### Cross-spec coordination
+
+AS-12 is orthogonal to SF-1's `oauth.jwt.legacyTypAccept`: SF-1 owns whether
+missing `header.typ` is accepted by central JWT verification; AS-12 owns only
+the refresh-grant payload-level compatibility paths.
+
+### Documentation (Phase F — F9 PR7 AS-4 expiresAt two-tier design rationale, v0.5.1)
+
+- Added JSDoc explaining the intentional A4 `expiresAt: Date` / A3
+  `expiresAtMs: number` two-tier expiry design at all AS-4-listed sites:
+  `UserSession`, `CreateUserSessionInput`, `SessionRPRegistry.registerRP`,
+  `SessionFamilyIndex.addFamilyId`, `SessionFederationIndex.addFederation`,
+  `FederationTokens.expiresAt`, `MfaChallenge.expiresAt`, and
+  `MfaPendingTransaction.expiresAt`. Documentation-only; no runtime or type
+  behavior changes.
+
 ### Changed (Phase F — F9 PR4 AS-3 + AS-11 BREAKING method renames, v0.5.1)
 
 - **`FederationTokenStoreBase.deleteBySession(sid)` is renamed to

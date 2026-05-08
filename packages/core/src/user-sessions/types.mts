@@ -50,6 +50,15 @@ export interface RegisteredRP {
 /**
  * Authenticated user session aggregate. Post-create immutable at v0.5.0
  * (claims update deferred post-publish). Per A4 §5.1.
+ *
+ * Expiry encoding: `expiresAt: Date` (not `expiresAtMs: number`) is intentional
+ * for A4 aggregates. Per A3 §5.1: low-level storage primitives (A3:
+ * ChallengeStore, RefreshTokenFamilyStore, ReplaySeenSet) use epoch-ms
+ * `number` to eliminate Date mutation surface. A4 higher-level aggregates use
+ * `Date` for ergonomics at the application layer. Callers bridging A3 and A4
+ * convert explicitly at the boundary (`new Date(epochMs)` to lift, or
+ * `someDate.getTime()` to lower) so the two encodings never alias the same
+ * field. This is a deliberate two-tier design, not an inconsistency.
  */
 export interface UserSession {
 	readonly sid: string;
@@ -64,6 +73,9 @@ export interface UserSession {
  * Parameters for creating a new session. `federations` field DELETED vs
  * v0.4.x — federations are added separately via
  * `SessionFederationIndex.addFederation` after session create. Per A4 §5.1.
+ *
+ * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+ * for rationale.
  */
 export interface CreateUserSessionInput {
 	readonly sid: string;
@@ -110,6 +122,10 @@ export interface UserSessionStore {
  */
 export interface SessionRPRegistry {
 	readonly kind: string;
+	/**
+	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+	 * for rationale.
+	 */
 	registerRP(sid: string, rp: RegisteredRP, expiresAt: Date): Promise<void>;
 	listRPs(sid: string): Promise<ReadonlyArray<RegisteredRP>>;
 	removeBySid(sid: string): Promise<void>;
@@ -128,6 +144,10 @@ export interface SessionRPRegistry {
  */
 export interface SessionFamilyIndex {
 	readonly kind: string;
+	/**
+	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+	 * for rationale.
+	 */
 	addFamilyId(sid: string, familyId: string, expiresAt: Date): Promise<void>;
 	listFamilyIds(sid: string): Promise<ReadonlyArray<string>>;
 	removeBySid(sid: string): Promise<void>;
@@ -153,6 +173,10 @@ export interface SessionFamilyIndex {
  */
 export interface SessionFederationIndex {
 	readonly kind: string;
+	/**
+	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+	 * for rationale.
+	 */
 	addFederation(sid: string, federationName: string, expiresAt: Date): Promise<void>;
 	listFederations(sid: string): Promise<ReadonlyArray<string>>;
 	removeFederation(sid: string, federationName: string): Promise<void>;

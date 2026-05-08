@@ -176,6 +176,11 @@ export const CoreConfigSchema = z.object({
 			// circulation. Per the v0.5.1 ADR the literal default lives in
 			// `application.conf`, not here.
 			legacyRtPolicy: z.enum(["reject", "accept-with-warning"]),
+			// AS-12 (v0.5.1): refresh-grant compatibility gate for v0.4.x
+			// token shapes (`payload.type = "refresh"` and `claims.user.id`
+			// subject fallback). Per the v0.5.1 ADR the literal default lives
+			// in `application.conf`, not here.
+			legacyTokenCompat: z.boolean().optional(),
 		}),
 		grants: z.object({}).passthrough(),
 		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code

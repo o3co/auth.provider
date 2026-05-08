@@ -20,6 +20,9 @@ export interface FederationTokens {
 	 * Consumers MUST treat `null` as "do not attempt refresh; reuse until the
 	 * provider explicitly invalidates". Required (no `undefined`) so adapters
 	 * are forced to make an explicit decision per provider.
+	 *
+	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+	 * for rationale.
 	 */
 	readonly expiresAt: Date | null;
 	readonly tokenType?: string;
