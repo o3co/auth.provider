@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.5.2] — 2026-05-09
 
-### Dependencies
+### Changed (auth.utils dependency bump, v0.5.2)
 
 - **`@o3co/auth.utils` minimum version bumped from `^0.0.3` to
   `^0.0.4`** in `templates/standalone/package.json`. The 0.0.4 release
