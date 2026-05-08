@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import bcrypt from "bcrypt";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryUserRepository } from "#/repositories/InMemoryUserRepository.mjs";
 
 describe("InMemoryUserRepository", () => {
@@ -47,6 +47,26 @@ describe("InMemoryUserRepository", () => {
 			const user = await repo.authenticate("bob", "secret123");
 
 			expect(user).toBeNull();
+		});
+
+		it("runs a dummy bcrypt compare for unknown usernames", async () => {
+			const compareSpy = vi.spyOn(bcrypt, "compare").mockResolvedValue(false);
+			const hash = "$2b$10$39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
+			const repo = new InMemoryUserRepository(new Map([["alice", { password: hash, id: "u1" }]]));
+			try {
+				const [wrongPassword, unknownUser] = await Promise.all([
+					repo.authenticate("alice", "wrong"),
+					repo.authenticate("bob", "wrong"),
+				]);
+
+				expect(wrongPassword).toBeNull();
+				expect(unknownUser).toBeNull();
+				expect(compareSpy).toHaveBeenCalledTimes(2);
+				expect(compareSpy).toHaveBeenCalledWith("wrong", hash);
+				expect(compareSpy).toHaveBeenCalledWith("wrong", expect.stringMatching(/^\$2[aby]\$/));
+			} finally {
+				compareSpy.mockRestore();
+			}
 		});
 
 		it("supports bcrypt hashed passwords", async () => {
