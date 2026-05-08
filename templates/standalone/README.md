@@ -5,6 +5,7 @@ Deployable server template for auth.provider. This is the composition root — i
 ## Requirements
 
 - **Node.js** `>=18.19.0`
+- **Native build toolchain** for the `bcrypt` native binary: a working C++ compiler and Python (the standard Node.js native-addon toolchain). On Debian/Ubuntu this is `apt-get install build-essential python3`; on Alpine `apk add make g++ python3`; on macOS the Xcode Command Line Tools (`xcode-select --install`) suffice. `pnpm install` compiles the bcrypt addon at install time; without the toolchain the addon is missing and the first call to `bcrypt.hash()` throws `MODULE_NOT_FOUND` at runtime. (Runtime-only Docker images can skip the toolchain if the addon is built in an earlier multi-stage build.)
 - **Redis 7.2 LTS or later** for any Redis-backed adapter (refresh token family store, code repository, federation token store, session store). The `pExpireGT` flag pair on which several adapters depend was introduced in Redis 7.0+; 7.2 LTS is the tested floor. Tested against AWS ElastiCache for Redis 7.2, Upstash Redis, Redis Cloud 7.2, and self-managed `redis:7.2-alpine`.
 - **ioredis** `^5.4.1` (direct runtime dependency, used by the refresh-token-family client). Other Redis-backed adapters in this template still use the `redis` npm package; ioredis is added for the RT family store specifically.
 

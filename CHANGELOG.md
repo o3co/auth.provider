@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed (SC residual batch — supply-chain hygiene, v0.5.2)
+
+- **`pnpm.onlyBuiltDependencies` allowlist added at the workspace root**
+  (root `package.json`, closes SC-4). pnpm 10 gates native build scripts
+  behind explicit operator approval; without the allowlist a fresh
+  `pnpm install` printed `Ignored build scripts: bcrypt` and skipped the
+  native binary compilation, causing `bcrypt.hash()` to throw
+  `MODULE_NOT_FOUND` at runtime in containers built without a prior
+  binary cache. The allowlist now contains `bcrypt` (the only direct
+  production dependency that requires native compilation). Operator
+  impact: a build-time C++ toolchain (Python plus a C++ compiler — the
+  standard Node.js native-addon stack) is required during `pnpm install`;
+  documented in the standalone template README.
+
+- **`templates/standalone` `redis` range bumped from `^5.10.0` to
+  `^5.12.1`** (closes SC-5) to align with `packages/session`'s pin so
+  `pnpm-lock.yaml` cannot resolve two divergent redis versions over time.
+  No API behavior change between redis 5.11 and 5.12.
+
+- **`@o3co/auth-provider-oauth` `accepts` direct dependency upgraded from
+  `^1.3.8` to `^2.0.0`** (closes SC-6) to match the version Express 5
+  brings in transitively, eliminating a duplicate `accepts` resolution in
+  the lockfile. The `accepts(req).type([...])` API used at
+  `packages/oauth/src/routes/logout.mts:581` is unchanged across the
+  major bump (per upstream HISTORY.md the v2.0.0 changes are limited to
+  `mime-types@^3.0.0`, `negotiator@^1.0.0`, and `engines.node >= 18`,
+  which is already required by this package). `@types/accepts@^1.3.7` is
+  retained because workspace typecheck passes; it can be revisited if a
+  v2-compatible `@types/accepts` ships.
+
+- **Root `audit` script tightened from
+  `pnpm audit --audit-level=high` to
+  `pnpm audit --prod --audit-level=moderate`** (closes SC-7). The
+  `--prod` flag scopes the audit to production dependencies, matching the
+  evidence used in the supply-chain audit (devDependency-only advisories
+  do not reach deployed services). The `moderate` threshold catches
+  CVSS 4.0–6.9 advisories that the previous `high` threshold passed
+  silently. Verification at the time of this change: 0 advisories under
+  the new gate.
+
 ### Added (Phase F — F9 PR7 AS-12 legacyTokenCompat config flag, v0.5.1)
 
 - **`oauth.refreshToken.legacyTokenCompat` controls refresh-grant acceptance
