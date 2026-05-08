@@ -58,6 +58,10 @@ export class InMemoryUserRepository implements UserRepository {
 		if (isBcrypt) {
 			match = await bcrypt.compare(password, stored);
 		} else {
+			// Pay the bcrypt cost on the plain-text path too, so that timing
+			// converges across unknown-user / known-bcrypt / known-plain. The
+			// result is discarded — correctness comes from timingSafeEqual.
+			await bcrypt.compare(password, DUMMY_BCRYPT_PASSWORD_HASH);
 			const a = Buffer.from(password);
 			const b = Buffer.from(stored);
 			match = a.length === b.length && crypto.timingSafeEqual(a, b);
