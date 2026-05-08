@@ -73,7 +73,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   silently. Verification at the time of this change: 0 advisories under
   the new gate.
 
-### Added (Phase F — F9 PR7 AS-12 legacyTokenCompat config flag, v0.5.1)
+### Added (Phase F — F9 PR7 AS-12 legacyTokenCompat config flag, v0.5.2)
 
 - **`oauth.refreshToken.legacyTokenCompat` controls refresh-grant acceptance
   of v0.4.x token shapes** (`@o3co/auth-provider-core` config,
@@ -98,7 +98,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 #### Migration
 
-Upgrade to v0.5.1 with the default `legacyTokenCompat = true`, wait for all
+Upgrade to v0.5.2 with the default `legacyTokenCompat = true`, wait for all
 v0.4.x refresh tokens to expire or be rotated into v0.5.x tokens, then set
 `oauth.refreshToken.legacyTokenCompat = false` and monitor for `invalid_grant`
 responses from clients still presenting legacy refresh tokens.
@@ -109,7 +109,7 @@ AS-12 is orthogonal to SF-1's `oauth.jwt.legacyTypAccept`: SF-1 owns whether
 missing `header.typ` is accepted by central JWT verification; AS-12 owns only
 the refresh-grant payload-level compatibility paths.
 
-### Documentation (Phase F — F9 PR7 AS-4 expiresAt two-tier design rationale, v0.5.1)
+### Documentation (Phase F — F9 PR7 AS-4 expiresAt two-tier design rationale, v0.5.2)
 
 - Added JSDoc explaining the intentional A4 `expiresAt: Date` / A3
   `expiresAtMs: number` two-tier expiry design at all AS-4-listed sites:
@@ -119,7 +119,7 @@ the refresh-grant payload-level compatibility paths.
   `MfaPendingTransaction.expiresAt`. Documentation-only; no runtime or type
   behavior changes.
 
-### Changed (Phase F — F9 PR4 AS-3 + AS-11 BREAKING method renames, v0.5.1)
+### Changed (Phase F — F9 PR4 AS-3 + AS-11 BREAKING method renames, v0.5.2)
 
 - **`FederationTokenStoreBase.deleteBySession(sid)` is renamed to
   `removeBySid(sid)`** (`@o3co/auth-provider-core`, closes AS-3): aligns the
@@ -138,7 +138,7 @@ the refresh-grant payload-level compatibility paths.
 
 #### BREAKING — migration
 
-The v0.5.1 hotfix policy explicitly permits these renames because both
+The v0.5.2 hotfix policy explicitly permits these renames because both
 interfaces were new in v0.5.0 and have had no external consumers (the v0.5.0
 publish-to-hotfix window is days). No deprecation aliases are added.
 
@@ -153,7 +153,7 @@ Downstream implementers of either interface must rename methods:
 Callers must update method names accordingly. The built-in adapters in
 `@o3co/auth-provider-core` and `@o3co/auth-provider-redis` are already
 migrated; consumers using only those adapters need no changes beyond
-upgrading to v0.5.1.
+upgrading to v0.5.2.
 
 #### Cross-spec coordination
 
@@ -163,13 +163,13 @@ The `*Base` interface aliases added in F9 PR3 (AS-7) —
 underlying type alias. No additional action is required for consumers using
 the canonical names.
 
-### Improved (Phase F — F9 PR6 AS-M1 contributes-map concrete-type substitution, v0.5.1)
+### Improved (Phase F — F9 PR6 AS-M1 contributes-map concrete-type substitution, v0.5.2)
 
 - **The four same-package contributes-map placeholders are now concrete
   types instead of `unknown`** (`@o3co/auth-provider-core/modules/manifest`,
   closes AS-M1):
 
-  | Manifest type | Pre-v0.5.1 | v0.5.1 (substituted) |
+  | Manifest type | Pre-v0.5.2 | v0.5.2 (substituted) |
   |---|---|---|
   | `GrantHandler` | `unknown` | `GrantHandler` from `grants/types.mts` |
   | `AuditHook` | `unknown` | `AuditSink` (canonical alias of `AuditSinkBase`) |
@@ -200,7 +200,7 @@ the canonical names.
   `packages/core/src/boot/__tests__/{apply-contributions, plan-boot,
   integration}.test.mts` were written against the `unknown` placeholder
   and used inline literals or `as unknown` casts that no longer satisfy
-  the narrowed types. v0.5.1 migrates these fixtures to typed `fakeGrantHandler` /
+  the narrowed types. v0.5.2 migrates these fixtures to typed `fakeGrantHandler` /
   `fakeAuditSink` factories; downstream consumers who copied this
   pattern will need similar updates.
 
@@ -213,7 +213,7 @@ the canonical names.
   matching the narrowed contributes-map slots. Internal-only; no public
   API change.
 
-### Added (Phase F — F9 PR5 AS-9 Redis session sub-adapter builders, v0.5.1)
+### Added (Phase F — F9 PR5 AS-9 Redis session sub-adapter builders, v0.5.2)
 
 - **Four new `*Builder` exports complete the tripartite
   `create* + *Builder + *Module` pattern for Redis session sub-adapters**
@@ -237,7 +237,7 @@ the canonical names.
   are for consumers that need per-adapter `AdapterFactory` granularity
   (e.g., to substitute a custom adapter while keeping the others).
 
-### Deprecated (Phase F — F9 PR5 AS-8 GrantRegistry public export, v0.5.1)
+### Deprecated (Phase F — F9 PR5 AS-8 GrantRegistry public export, v0.5.2)
 
 - **`GrantRegistry` and `GrantRegistryError` are deprecated as public
   exports** (`@o3co/auth-provider-core`, closes AS-8): `GrantRegistry`
@@ -263,7 +263,7 @@ the canonical names.
   the public export site, so IDEs / TypeScript surface the deprecation
   inline.
 
-### Breaking (Phase F — F9 PR3 GrantPolicyHook manifest rename, v0.5.1)
+### Breaking (Phase F — F9 PR3 GrantPolicyHook manifest rename, v0.5.2)
 
 - **Compile-time breaking change for deep manifest imports**: the manifest
   contributes-map placeholder previously exported as `GrantPolicyHook`
@@ -286,16 +286,16 @@ the canonical names.
   (Phase 9 will substitute the concrete contribution type).
 - No runtime behavior change.
 
-### Deprecated (Phase F — F9 PR3 AS-7 + AS-10 naming consistency, v0.5.1)
+### Deprecated (Phase F — F9 PR3 AS-7 + AS-10 naming consistency, v0.5.2)
 
 - **Adapter primitive interfaces add canonical aliases without the `*Base`
   suffix; `*Base` forms are deprecated and will be removed at 1.0 GA**
-  (`@o3co/auth-provider-core`, closes AS-7 + AS-10): the v0.5.1 canonical
+  (`@o3co/auth-provider-core`, closes AS-7 + AS-10): the v0.5.2 canonical
   names are the new aliases. Existing code referencing `*Base` continues to
   compile (the aliases are type equivalences, not replacements). Update at
   your convenience before 1.0 GA.
 
-| Deprecated | Canonical (v0.5.1) | Source |
+| Deprecated | Canonical (v0.5.2) | Source |
 |---|---|---|
 | `FederationTokenStoreBase` | `FederationTokenStore` | `@o3co/auth-provider-core` |
 | `RateLimiterBase` | `RateLimiter` | `@o3co/auth-provider-core` |
@@ -305,7 +305,7 @@ the canonical names.
 
 - **AS-10 documentation**: JSDoc on
   `ClientRepository.findById` and `CodeRepository.getByCode` documents the
-  v0.5.1 naming convention (`findBy<Field>` for repository lookups; `get(<id>)`
+  v0.5.2 naming convention (`findBy<Field>` for repository lookups; `get(<id>)`
   for single-object stores; operation-specific names like `consumeByCode`
   retain their semantic shape). `getByCode` will be normalized to
   `findByCode` at 1.0 GA. No code change.
@@ -319,7 +319,7 @@ the canonical names.
   placeholder, see the dedicated **Breaking** section above.
 - No runtime behavior change.
 
-### Breaking (Phase F — F9 PR2 AS-1 + AS-2 error envelope unification, v0.5.1)
+### Breaking (Phase F — F9 PR2 AS-1 + AS-2 error envelope unification, v0.5.2)
 
 - **All session and rate-limit error responses now use the RFC 6749 §5.2
   `{error, error_description}` envelope** (`@o3co/auth-provider-core`,
@@ -356,7 +356,7 @@ the canonical names.
   are intentionally left unchanged — RFC 6749 §5.2 governs error response
   shapes only.
 
-### Breaking (Phase F — F9 PR1 CC-5 readonly Theme D, v0.5.1)
+### Breaking (Phase F — F9 PR1 CC-5 readonly Theme D, v0.5.2)
 
 - **Public DTOs are now fully `readonly`** (`@o3co/auth-provider-core`,
   `@o3co/auth-provider-oauth-token-exchange`, closes CC-5 / AS-5 / AS-6 /
@@ -388,7 +388,7 @@ the canonical names.
   `Object.freeze()` is applied. Existing valid call sites continue to work
   unchanged.
 
-### Security (Phase F — F6 PR4 authorization-grant TOCTOU re-check, v0.5.1)
+### Security (Phase F — F6 PR4 authorization-grant TOCTOU re-check, v0.5.2)
 
 - **Authorization-code grant re-validates session liveness before linking the
   token family** (`@o3co/auth-provider-oauth`, closes CR-4): a second
@@ -424,7 +424,7 @@ race path (logout completing between `findById` and `addFamilyId`); clients
 that previously succeeded in this race window will now receive
 `400 invalid_grant`. This is the correct behavior per RFC 6749 §5.2.
 
-### Security (Phase F — F6 PR3 refresh-token grant hardening, v0.5.1)
+### Security (Phase F — F6 PR3 refresh-token grant hardening, v0.5.2)
 
 - **Refresh-token reuse now revokes the entire family** (`@o3co/auth-provider-oauth`,
   closes PB-1): when `refreshTokenFamilyRotation.rotate` reports the
@@ -497,7 +497,7 @@ Deployments without `refreshTokenFamilyRotation` wired are unaffected
 already carry both `jti` and `family_id` since v0.5.0, so the long-tail
 exposure is bounded by `oauth.refreshToken.expiresIn`.
 
-### Security (Phase F — F6 PR2 PKCE + RT family hardening, v0.5.1)
+### Security (Phase F — F6 PR2 PKCE + RT family hardening, v0.5.2)
 
 - **PKCE `code_verifier` comparison is now timing-safe** (`@o3co/auth-provider-oauth`,
   closes SF-3 + MIN-4): both the S256 and `plain` branches in the
@@ -528,7 +528,7 @@ exposure is bounded by `oauth.refreshToken.expiresIn`.
   rotated a stolen RT keep the family alive indefinitely (OAuth 2.1 BCP
   §4.14.1). The committed ceiling is exposed via the new optional
   `cappedExpiresAtMs` field on the `"rotated"` outcome — reserved for a
-  Phase F follow-up that re-mints the issued JWT to match. For v0.5.1 the
+  Phase F follow-up that re-mints the issued JWT to match. For v0.5.2 the
   storage-level cap is the security primary; the issued refresh-token
   JWT's `exp` claim may still reflect `now + expiresIn` and the actual
   refresh-token lifetime is bounded by the server-side family TTL.
@@ -554,7 +554,7 @@ note the field name (`OAUTH_NONCE_MAX_LENGTH`). Custom rotation-wrapper
 implementations that destructure the `"rotated"` outcome remain
 source-compatible because `cappedExpiresAtMs` is optional.
 
-### BREAKING (Phase F — F6 PR1 D-6 PB-2 client authentication redesign, v0.5.1)
+### BREAKING (Phase F — F6 PR1 D-6 PB-2 client authentication redesign, v0.5.2)
 
 - **`Client` interface gains `tokenEndpointAuthMethod`** (`@o3co/auth-provider-core`)
   — REQUIRED discriminator with values
@@ -637,7 +637,7 @@ either HTTP Basic header or the body `client_id` + `client_secret` pair
 MUST send `client_id` in the body and (at `/authorize`) include
 `code_challenge` + `code_challenge_method = "S256"`.
 
-### Changed (Phase F — F4 PR2 standalone wiring batch + IH-10/17/18, v0.5.1)
+### Changed (Phase F — F4 PR2 standalone wiring batch + IH-10/17/18, v0.5.2)
 
 - **Single shared ioredis socket per replica** (`templates/standalone`):
   the standalone composition root now opens **one** ioredis connection
@@ -681,7 +681,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   tests pass `[memoryRefreshTokenFamilyStoreModule]` here exactly as
   before — no test fixture change required.
 
-### Bug Fixes (Phase F — IH-10 / IH-17, v0.5.1)
+### Bug Fixes (Phase F — IH-10 / IH-17, v0.5.2)
 
 - **`AppConfigSchema.endpoints.client` and `endpoints.authCallback` removed**
   (closes IH-10): no production consumer reads either field. The pre-fix
@@ -703,7 +703,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   `ENDPOINTS_LOGIN_URL` boot successfully (previously: confusing late
   failure from `oauthConfigSchema`).
 
-### Documentation (Phase F — IH-18, v0.5.1)
+### Documentation (Phase F — IH-18, v0.5.2)
 
 - **`rateLimit.login.windowMs` JSDoc clarification** (`@o3co/auth-provider-core`):
   the existing `rateLimit.login.windowMs` (express-rate-limit, milliseconds,
@@ -712,7 +712,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   pluggable `RateLimiterBase` adapter). Inline JSDoc + HOCON comments now
   spell this out to prevent operator confusion. No code change.
 
-### Changed (Phase F — D-2 v2 standalone ioredis unification, v0.5.1)
+### Changed (Phase F — D-2 v2 standalone ioredis unification, v0.5.2)
 
 - **Multi-replica refresh-token persistence** (`templates/standalone`): the
   standalone composition root now wires
@@ -752,7 +752,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   not in the Zod schema, per ADR). Existing configs that omit this
   section continue to validate without change.
 
-### Breaking Changes (Phase F — D-1 Code/CodeData identity binding, v0.5.1)
+### Breaking Changes (Phase F — D-1 Code/CodeData identity binding, v0.5.2)
 
 - **`CodeData.client_id` and `CodeData.redirect_uri` are now required fields**
   (`@o3co/auth-provider-core`): `CodeRepository.createCode(...)` requires
@@ -792,9 +792,9 @@ MUST send `client_id` in the body and (at `/authorize`) include
   authorization grant's returned `sessionMutation.clear` list no longer
   contains `code_client_id`, `code_redirect_uri`, or `granted_scopes`
   (only `code` remains, to scrub residual values from sessions issued
-  before v0.5.1 ships).
+  before v0.5.2 ships).
 
-### Bug Fixes (Phase F — D-1, v0.5.1)
+### Bug Fixes (Phase F — D-1, v0.5.2)
 
 - **Redis deployments with `userSessionStore` could not complete a single
   authorization-code exchange** (`@o3co/auth-provider-redis`):
@@ -819,7 +819,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   reject it). Fixed by removing the four `req.session.code*` writes and
   binding identity to the code record (closes CR-2).
 
-### Breaking Changes (Phase F — D-10 Redis 7.2 LTS minimum, v0.5.1)
+### Breaking Changes (Phase F — D-10 Redis 7.2 LTS minimum, v0.5.2)
 
 - **Redis 7.2 LTS minimum required** (`@o3co/auth-provider-redis`): the Redis-backed
   session adapters (`createRedisSidSortedSet`, `createRedisSidHash`) now use
@@ -832,7 +832,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   Redis 6.x servers do not support either flag and will return `ERR syntax
   error` at the first session write.
   **Migration**: upgrade your Redis server to 7.2 LTS or later before deploying
-  v0.5.1. AWS ElastiCache for Redis 7.2, Upstash Redis, and Redis Cloud all
+  v0.5.2. AWS ElastiCache for Redis 7.2, Upstash Redis, and Redis Cloud all
   support the GT/NX flags. See `SessionRPRegistryMultiClient.pExpireGT` JSDoc
   in `packages/redis/src/clients.mts` for the full semantics.
 
@@ -841,7 +841,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   npm/pnpm prints a warning by default; **pnpm enables `engines-strict=true` by
   default in some configurations**, which causes a hard install failure on
   Node <18.19. Consumers on Node 18.0.0–18.18.x should upgrade to Node 18.19.0
-  LTS or later before installing v0.5.1; Node 20 LTS and 22 LTS are unaffected.
+  LTS or later before installing v0.5.2; Node 20 LTS and 22 LTS are unaffected.
 
 - **`pExpireGT` added to `SessionRPRegistryClient`/`MultiClient` and
   `SessionSidSortedSetClient`/`MultiClient`** (`@o3co/auth-provider-redis`): the
@@ -852,7 +852,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   silently no-ops on a key with no existing TTL — see method JSDoc). Custom
   backing-client implementations (non-ioredis) must add `pExpireGT` to compile.
 
-### Breaking Changes (Phase F — D-5 BuilderContext.lifecycle, v0.5.1)
+### Breaking Changes (Phase F — D-5 BuilderContext.lifecycle, v0.5.2)
 
 - **Standalone session wiring moved into `sessionStoreModule`**
   (`@o3co/auth-provider-session`): the standalone composition root
@@ -909,11 +909,11 @@ MUST send `client_id` in the body and (at `/authorize`) include
 - **DEFERRED to a separate cross-repo PR**:
   `repos/auth.utils/src/shutdown.mts` `gracefulShutdown()` rewrite —
   await cleanup inside `server.close()` callback, add
-  `closeAllConnections()`. This is required as a prerequisite to v0.5.1
+  `closeAllConnections()`. This is required as a prerequisite to v0.5.2
   publish but ships as a `@o3co/auth.utils` patch release independent of
   auth.provider's release cadence. (Closes OR-3.)
 
-### Breaking Changes (Phase F — D-9 federation-tokens lock CAS, v0.5.1)
+### Breaking Changes (Phase F — D-9 federation-tokens lock CAS, v0.5.2)
 
 - **`FederationTokenStoreClient.compareAndDelete` added** (`@o3co/auth-provider-redis`):
   the `FederationTokenStoreClient` interface gains a required
@@ -938,7 +938,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   the package index and only used internally by the federation-tokens lock
   bridge — no external impact.
 
-### Bug Fixes (Phase F — v0.5.1)
+### Bug Fixes (Phase F — v0.5.2)
 
 - **federation-tokens lock release race**: federation-token refresh paths
   could spuriously evict a freshly-acquired lock held by a different process
