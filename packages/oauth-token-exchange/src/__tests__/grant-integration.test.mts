@@ -110,6 +110,7 @@ describe("token_exchange — integration", () => {
 		const subjectToken = await signSelfIssuedAccessToken({
 			family_id: "fam-1",
 			scope: "read write",
+			aud: "billing",
 		});
 
 		const { result } = await handler.handle(

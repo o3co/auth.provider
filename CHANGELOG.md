@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security (Phase F — F10 Token Exchange hardening)
+
+- Token Exchange now rejects policy hook scope/audience widening by default,
+  enforces `may_act` actor constraints when present, bounds nested RFC 8693
+  actor chains via `oauth.tokenExchange.maxActorChainDepth`, and requires
+  requested RFC 8707 resources to be represented in the effective issued-token
+  audience.
+
 ## [0.5.2] — 2026-05-09
 
 ### Changed (auth.utils dependency bump, v0.5.2)

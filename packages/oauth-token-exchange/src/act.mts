@@ -16,6 +16,10 @@
 
 import type { ValidatedToken } from "./validator/types.mjs";
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * Build the `act` claim for the token being issued, per RFC 8693 §4.1.
  *
@@ -39,4 +43,51 @@ export function buildActClaim(args: {
 		result.act = subject.act;
 	}
 	return result;
+}
+
+/**
+ * Count an existing RFC 8693 `act` delegation chain.
+ *
+ * Depth 0 means no subject `act`; depth N means N nested actor records.
+ * Malformed nested `act` values stop the count rather than throwing.
+ */
+export function countActorChainDepth(act: Readonly<Record<string, unknown>> | undefined): number {
+	if (!act) return 0;
+	let depth = 1;
+	let current = act.act;
+	while (isRecord(current)) {
+		depth += 1;
+		current = current.act;
+	}
+	return depth;
+}
+
+function mayActEntryMatches(
+	actor: ValidatedToken,
+	entry: Readonly<Record<string, unknown>>,
+): boolean {
+	const hasSub = "sub" in entry;
+	const hasIss = "iss" in entry;
+	if (!hasSub && !hasIss) return false;
+	if (hasSub && typeof entry.sub !== "string") return false;
+	if (hasIss && typeof entry.iss !== "string") return false;
+	if (typeof entry.sub === "string" && entry.sub !== actor.sub) return false;
+	if (typeof entry.iss === "string" && entry.iss !== actor.claims.iss) return false;
+	return true;
+}
+
+/**
+ * Check whether an actor satisfies a subject token's RFC 8693 `may_act` claim.
+ *
+ * Supported shape for v0.5.x: a single `{ sub?, iss? }` object or an array of
+ * those objects. Malformed values fail closed so a bad `may_act` claim cannot
+ * silently disable subject-declared delegation constraints.
+ */
+export function matchesMayAct(actor: ValidatedToken, mayAct: unknown): boolean {
+	if (Array.isArray(mayAct)) {
+		if (mayAct.length === 0) return false;
+		return mayAct.some((entry) => isRecord(entry) && mayActEntryMatches(actor, entry));
+	}
+	if (!isRecord(mayAct)) return false;
+	return mayActEntryMatches(actor, mayAct);
 }

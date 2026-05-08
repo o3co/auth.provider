@@ -28,6 +28,10 @@ import type {
 
 export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	keyStore: KeyStore;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
@@ -113,6 +117,11 @@ export function createSelfIssuedAccessTokenValidator(
 				const revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 				if (revoked) return null;
 			}
+			const mayAct =
+				isRecord(payload.may_act) ||
+				(Array.isArray(payload.may_act) && payload.may_act.every(isRecord))
+					? payload.may_act
+					: undefined;
 
 			return {
 				sub: payload.sub,
@@ -124,6 +133,13 @@ export function createSelfIssuedAccessTokenValidator(
 				...(familyId ? { familyId } : {}),
 				...(payload.act && typeof payload.act === "object" && !Array.isArray(payload.act)
 					? { act: payload.act as Record<string, unknown> }
+					: {}),
+				...(mayAct !== undefined
+					? {
+							may_act: mayAct as
+								| Readonly<Record<string, unknown>>
+								| readonly Readonly<Record<string, unknown>>[],
+						}
 					: {}),
 			};
 		},
