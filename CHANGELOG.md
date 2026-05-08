@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   requested RFC 8707 resources to be represented in the effective issued-token
   audience.
 
+### Security (Phase F — F12a rate limiter hardening)
+
+- The built-in in-memory OAuth endpoint rate limiter now bounds its bucket map
+  with `memoryRateLimiter.maxBuckets` (default `10000`, env override
+  `MEMORY_RATE_LIMITER_MAX_BUCKETS`) and evicts expired or earliest-reset
+  buckets when the cap is reached.
+
 ## [0.5.2] — 2026-05-09
 
 ### Changed (auth.utils dependency bump, v0.5.2)

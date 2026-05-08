@@ -78,6 +78,61 @@ describe("registerBuiltinRateLimiters (memory)", () => {
 		expect(first.allowed).toBe(true);
 		expect(second.allowed).toBe(false);
 	});
+
+	it("memory sink bounds bucket growth by evicting a bucket when full", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date("2026-05-09T00:00:00Z"));
+
+			const factory = createRateLimiterFactory();
+			registerBuiltinRateLimiters(factory);
+			const limiter = await factory.create({
+				type: "memory",
+				defaultLimit: { limit: 2, windowSeconds: 60 },
+				maxBuckets: 2,
+			});
+
+			await limiter.check("unknown:A", {});
+			vi.advanceTimersByTime(1);
+			await limiter.check("unknown:B", {});
+			vi.advanceTimersByTime(1);
+			await limiter.check("unknown:C", {});
+
+			const existingB = await limiter.check("unknown:B", {});
+			expect(existingB.allowed).toBe(true);
+			expect(existingB.remaining).toBe(0);
+
+			const recreatedA = await limiter.check("unknown:A", {});
+			expect(recreatedA.allowed).toBe(true);
+			expect(recreatedA.remaining).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("eviction makes progress even when bucket resetAt is non-finite (misconfigured windowSeconds)", async () => {
+		// Regression: a misconfigured spec with NaN windowSeconds produces
+		// NaN resetAt. evictEarliestResetBucket previously used `<` against
+		// POSITIVE_INFINITY, and `NaN < x` is false, so when every bucket
+		// had NaN resetAt no key was selected and the caller's
+		// `while (buckets.size >= maxBuckets)` loop pinned the event loop.
+		// This test would hang forever before the fix; vitest's default
+		// timeout makes the regression visible as a failure.
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		const limiter = await factory.create({
+			type: "memory",
+			defaultLimit: { limit: 1, windowSeconds: Number.NaN },
+			maxBuckets: 2,
+		});
+
+		// Fill: both buckets get resetAt = now + NaN*1000 = NaN.
+		await limiter.check("nan:A", {});
+		await limiter.check("nan:B", {});
+		// Trigger eviction: must return rather than spin-loop.
+		const result = await limiter.check("nan:C", {});
+		expect(result.allowed).toBe(true);
+	});
 });
 
 describe("memory rate limiter — per-key isolation", () => {
