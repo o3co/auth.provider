@@ -48,7 +48,7 @@ export function createMfaRouter(express: { Router: () => Router }, deps: MfaRout
 				.status(400)
 				.json({ error: "invalid_request", error_description: "transaction_id required" });
 		}
-		const tx = await deps.transactionStore.load(transactionId);
+		const tx = await deps.transactionStore.get(transactionId);
 		if (!tx) {
 			return res.status(400).json({
 				error: "invalid_grant",

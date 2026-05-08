@@ -19,7 +19,7 @@ const key = (sid: string, name: string) => `${sid}\u0000${name}`;
  * is the consumer's responsibility in F-6 flows.
  *
  * Cleanup of stale entries happens via UserSessionStore logout cascade, which
- * calls `deleteBySession(sid)` when a session ends. For process longevity
+ * calls `removeBySid(sid)` when a session ends. For process longevity
  * consider redis instead (production-grade TTL + cross-instance replication).
  */
 const cloneTokens = (t: FederationTokens): FederationTokens => ({
@@ -51,7 +51,7 @@ export function createInMemoryFederationTokenStore(): FederationTokenStoreBase &
 		async update(sid, name, tokens) {
 			store.set(key(sid, name), cloneTokens(tokens));
 		},
-		async deleteBySession(sid) {
+		async removeBySid(sid) {
 			for (const k of [...store.keys()]) {
 				if (k.startsWith(`${sid}\u0000`)) store.delete(k);
 			}

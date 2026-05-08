@@ -418,7 +418,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 			attach: vi.fn(),
 			get: vi.fn().mockResolvedValue({ idToken: "id-token-hint" }),
 			update: vi.fn(),
-			deleteBySession: vi.fn().mockResolvedValue(undefined),
+			removeBySid: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn().mockResolvedValue(undefined),
 		};
 		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
@@ -567,7 +567,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 			attach: vi.fn(),
 			get: vi.fn(),
 			update: vi.fn(),
-			deleteBySession: vi.fn(),
+			removeBySid: vi.fn(),
 			delete: vi.fn(),
 		};
 		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {

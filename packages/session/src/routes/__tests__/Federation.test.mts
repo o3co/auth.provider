@@ -208,7 +208,7 @@ function makeFederationTokenStore(): FederationTokenStoreBase & {
 		attach: vi.fn(async () => {}),
 		get: vi.fn(async () => null),
 		update: vi.fn(async () => {}),
-		deleteBySession: vi.fn(async () => {}),
+		removeBySid: vi.fn(async () => {}),
 		delete: vi.fn(async () => {}),
 	};
 }

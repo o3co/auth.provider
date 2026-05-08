@@ -52,8 +52,21 @@ export interface FederationTokenStoreBase {
 	/** Atomic replace. Called after a successful federation refresh. */
 	update(sid: string, federationName: string, tokens: FederationTokens): Promise<void>;
 
-	/** Delete all federation entries for a session. Idempotent. */
-	deleteBySession(sid: string): Promise<void>;
+	/**
+	 * Remove all federation entries for a session. Idempotent.
+	 *
+	 * Verb-aligned with sibling session stores
+	 * ({@link UserSessionStore}, {@link SessionRPRegistry},
+	 * {@link SessionFamilyIndex}, {@link SessionFederationIndex}) which all
+	 * expose `removeBySid(sid)` for the same "bulk-remove records scoped to
+	 * a session id" responsibility.
+	 *
+	 * Renamed from `deleteBySession` in v0.5.1 (AS-3); the old name is no
+	 * longer accepted because `FederationTokenStoreBase` was new in v0.5.0
+	 * and the v0.5.1 hotfix policy explicitly permits this rename for
+	 * interfaces that have had no external consumers.
+	 */
+	removeBySid(sid: string): Promise<void>;
 
 	/** Delete a specific (sid, federationName) entry. Idempotent. */
 	delete(sid: string, federationName: string): Promise<void>;

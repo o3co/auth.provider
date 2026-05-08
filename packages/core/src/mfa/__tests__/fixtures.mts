@@ -80,10 +80,10 @@ export function createTestMfaProviderWithCapabilities(options: {
 export function createInMemoryTransactionStore(): MfaTransactionStore {
 	const store = new Map<string, MfaPendingTransaction>();
 	return {
-		async save(tx) {
+		async set(tx) {
 			store.set(tx.transactionId, tx);
 		},
-		async load(transactionId) {
+		async get(transactionId) {
 			const tx = store.get(transactionId);
 			if (!tx) return null;
 			if (tx.expiresAt.getTime() <= Date.now()) return null;

@@ -30,7 +30,7 @@ describe("supportsLock type guard", () => {
 			attach: async () => {},
 			delete: async () => {},
 			update: async () => {},
-			deleteBySession: async () => {},
+			removeBySid: async () => {},
 		};
 		expect(supportsLock(store as any)).toBe(false);
 	});
@@ -42,7 +42,7 @@ describe("supportsLock type guard", () => {
 			attach: async () => {},
 			delete: async () => {},
 			update: async () => {},
-			deleteBySession: async () => {},
+			removeBySid: async () => {},
 			acquireLock: async () => ({ acquired: true as const, release: async () => {} }),
 		};
 		expect(supportsLock(store as any)).toBe(true);

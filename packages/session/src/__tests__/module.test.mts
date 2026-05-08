@@ -65,7 +65,7 @@ function makeFederationTokenStore(): FederationTokenStoreBase {
 			return null;
 		},
 		async update() {},
-		async deleteBySession() {},
+		async removeBySid() {},
 		async delete() {},
 	} as unknown as FederationTokenStoreBase;
 }

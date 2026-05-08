@@ -115,14 +115,24 @@ export interface MfaPendingTransaction {
 }
 
 export interface MfaTransactionStore {
-	save(tx: MfaPendingTransaction): Promise<void>;
 	/**
-	 * Load a pending transaction by id. Implementations MAY filter expired
-	 * transactions (return null when `expiresAt <= now`); core also rejects
-	 * expired transactions post-load as defense in depth. Either behavior is
-	 * acceptable.
+	 * Persist a pending MFA transaction.
+	 *
+	 * Renamed from `save` in v0.5.1 (AS-11) to align with map-like store
+	 * semantics ({@link UserSessionStore}, {@link KeyStore}). The old `save` name is
+	 * no longer accepted; the v0.5.1 hotfix policy explicitly permits this
+	 * rename for an interface that was new in v0.5.0.
 	 */
-	load(transactionId: string): Promise<MfaPendingTransaction | null>;
+	set(tx: MfaPendingTransaction): Promise<void>;
+	/**
+	 * Retrieve a pending transaction by id. Implementations MAY filter expired
+	 * transactions (return null when `expiresAt <= now`); core also rejects
+	 * expired transactions after retrieval as defense in depth. Either
+	 * behavior is acceptable.
+	 *
+	 * Renamed from `load` in v0.5.1 (AS-11) — see {@link MfaTransactionStore.set}.
+	 */
+	get(transactionId: string): Promise<MfaPendingTransaction | null>;
 	delete(transactionId: string): Promise<void>;
 }
 

@@ -212,7 +212,7 @@ export interface SessionSidSortedSetClient {
  * Backing client for FederationTokenStore adapters. Declares `get`, `set`
  * (two overloads: PX form, and PX+NX form for atomic insert-only),
  * variadic `del`, `scanIterator` for the cursor-based key scan used by
- * `deleteBySession`, and `compareAndDelete` for atomic advisory-lock
+ * `removeBySid`, and `compareAndDelete` for atomic advisory-lock
  * release.
  *
  * The plain-PX `set` overload always succeeds with `"OK"` per Redis

@@ -33,7 +33,7 @@ describe("/auth/mfa/verify", () => {
 			}),
 		);
 		const store = createInMemoryTransactionStore();
-		await store.save({
+		await store.set({
 			transactionId: "tx-1",
 			flow: "authorize",
 			subject: "user-1",
@@ -72,7 +72,7 @@ describe("/auth/mfa/verify", () => {
 		expect(res.status).toBe(200);
 		expect(res.body).toEqual({ resumed: "authorize", subject: "user-1", clientId: "client-1" });
 		expect(onAuthorizeResume).toHaveBeenCalledTimes(1);
-		expect(await store.load("tx-1")).toBeNull();
+		expect(await store.get("tx-1")).toBeNull();
 	});
 
 	it("rejects invalid proof with 401 and does not delete transaction (retry allowed)", async () => {
@@ -84,7 +84,7 @@ describe("/auth/mfa/verify", () => {
 			}),
 		);
 		const store = createInMemoryTransactionStore();
-		await store.save({
+		await store.set({
 			transactionId: "tx-retry",
 			flow: "login",
 			subject: "user-x",
@@ -110,7 +110,7 @@ describe("/auth/mfa/verify", () => {
 			.post("/auth/mfa/verify")
 			.send({ transaction_id: "tx-retry", proof: { code: "wrong" } });
 		expect(res.status).toBe(401);
-		expect(await store.load("tx-retry")).not.toBeNull();
+		expect(await store.get("tx-retry")).not.toBeNull();
 	});
 
 	it("rejects expired transaction even when store returns it (S-3)", async () => {
@@ -133,8 +133,8 @@ describe("/auth/mfa/verify", () => {
 		};
 		const deleteSpy = vi.fn(async () => {});
 		const unfilteringStore = {
-			async save() {},
-			async load() {
+			async set() {},
+			async get() {
 				return expiredTx;
 			},
 			delete: deleteSpy,
@@ -173,7 +173,7 @@ describe("/auth/mfa/verify", () => {
 			}),
 		);
 		const store = createInMemoryTransactionStore();
-		await store.save({
+		await store.set({
 			transactionId: "tx-boom",
 			flow: "login",
 			subject: "user-q",
@@ -202,14 +202,14 @@ describe("/auth/mfa/verify", () => {
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("server_error");
 		// Transaction is deleted — cannot retry against a broken provider
-		expect(await store.load("tx-boom")).toBeNull();
+		expect(await store.get("tx-boom")).toBeNull();
 	});
 
 	it("returns controlled 500 + deletes tx when providerFactory.create throws (CP-7)", async () => {
 		const factory = createMfaProviderFactory();
 		// No provider registered for "totp" → factory.create throws
 		const store = createInMemoryTransactionStore();
-		await store.save({
+		await store.set({
 			transactionId: "tx-noprov",
 			flow: "login",
 			subject: "user-q",
@@ -237,7 +237,7 @@ describe("/auth/mfa/verify", () => {
 
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("server_error");
-		expect(await store.load("tx-noprov")).toBeNull();
+		expect(await store.get("tx-noprov")).toBeNull();
 	});
 
 	it("returns invalid_grant for unknown/expired transaction", async () => {

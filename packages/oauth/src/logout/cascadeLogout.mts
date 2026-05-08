@@ -53,7 +53,7 @@ export type CascadeLogoutResult =
  *           Fail → return failed step:1 (steps 2–4 skipped; retry safe).
  *   Step 2: Fanout — collect-and-tally.
  *           - revokeFamily loop (per family; continues on per-op failure, tallies errors)
- *           - federationTokenStore.deleteBySession (tallied on failure)
+ *           - federationTokenStore.removeBySid (tallied on failure)
  *           If ANY failure → return failed step:2 with all errors (HALT before step 3).
  *           §6.2 critical rule: HALT preserves bookkeeping for retry. Running step 3
  *           would erase reverse-index entries and silently mark the cascade complete
@@ -117,11 +117,11 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	}
 
 	try {
-		await opts.federationTokenStore.deleteBySession(opts.sid);
+		await opts.federationTokenStore.removeBySid(opts.sid);
 	} catch (error) {
 		stepTwoFailures.push(error);
 		logger.warn(
-			`cascadeLogout: federationTokenStore.deleteBySession(${opts.sid}) failed (continuing tally):`,
+			`cascadeLogout: federationTokenStore.removeBySid(${opts.sid}) failed (continuing tally):`,
 			error,
 		);
 	}
