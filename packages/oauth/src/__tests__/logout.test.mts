@@ -142,7 +142,7 @@ function makeFedTokenStore(override?: Partial<FederationTokenStoreBase>): Federa
 		attach: vi.fn(),
 		get: vi.fn().mockResolvedValue(null),
 		update: vi.fn(),
-		deleteBySession: vi.fn().mockResolvedValue(undefined),
+		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn(),
 		...override,
 	};
@@ -228,7 +228,7 @@ describe("POST /oauth/logout", () => {
 			// cascadeLogout step 3: session deleted
 			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 			// cascadeLogout step 2: federation tokens cleared
-			expect(fedTokenStore.deleteBySession).toHaveBeenCalledWith("sid-1");
+			expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
 		});
 	});
 

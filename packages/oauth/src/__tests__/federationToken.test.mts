@@ -120,7 +120,7 @@ function makeFedTokenStore(override?: Partial<FederationTokenStoreBase>): Federa
 		attach: vi.fn(),
 		get: vi.fn().mockResolvedValue(baseFedTokens),
 		update: vi.fn().mockResolvedValue(undefined),
-		deleteBySession: vi.fn().mockResolvedValue(undefined),
+		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn().mockResolvedValue(undefined),
 		...override,
 	};

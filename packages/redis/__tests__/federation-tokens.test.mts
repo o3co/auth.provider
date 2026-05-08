@@ -97,7 +97,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		expect(await store.get("sid-1", "google")).toEqual(tokens);
 	});
 
-	it("deleteBySession removes all federations for sid", async () => {
+	it("removeBySid removes all federations for sid", async () => {
 		const store = createRedisFederationTokenStore({
 			client: redis,
 			encryption: { mode: "required", key: encryptionKey },
@@ -105,7 +105,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		await store.attach("sid-2", "google", tokens);
-		await store.deleteBySession("sid-1");
+		await store.removeBySid("sid-1");
 		expect(await store.get("sid-1", "google")).toBeNull();
 		expect(await store.get("sid-1", "github")).toBeNull();
 		expect(await store.get("sid-2", "google")).toEqual(tokens);

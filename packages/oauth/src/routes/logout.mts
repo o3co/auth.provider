@@ -113,7 +113,7 @@ export interface LogoutRouterOptions {
  *   3. Load session from userSessionStore. Missing → 200 JSON { logged_out: true } (no-op).
  *   4. Broadcast Back-Channel Logout to all registered RPs (best-effort).
  *   5. Resolve IdP end-session URI for the first federation (if any, if provider supportsEndSession).
- *   6. Cascade logout (revokeFamily + deleteBySession + delete session).
+ *   6. Cascade logout (revokeFamily + removeBySid + delete session).
  *   7. Respond: front-channel HTML | IdP redirect | post-logout redirect | 200 JSON.
  *
  * /oauth/federation/:name/logout is handled in Task 6b (not this file).

@@ -51,11 +51,11 @@ describe("in-memory FederationTokenStore", () => {
 		expect(await store.get("sid-1", "google")).toEqual(next);
 	});
 
-	it("deleteBySession removes all federation entries for sid", async () => {
+	it("removeBySid removes all federation entries for sid", async () => {
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);
 		await store.attach("sid-2", "google", tokens);
-		await store.deleteBySession("sid-1");
+		await store.removeBySid("sid-1");
 		expect(await store.get("sid-1", "google")).toBeNull();
 		expect(await store.get("sid-1", "github")).toBeNull();
 		expect(await store.get("sid-2", "google")).toEqual(tokens);
@@ -69,8 +69,8 @@ describe("in-memory FederationTokenStore", () => {
 		expect(await store.get("sid-1", "github")).toEqual(tokens);
 	});
 
-	it("deleteBySession / delete are idempotent", async () => {
-		await expect(store.deleteBySession("nope")).resolves.toBeUndefined();
+	it("removeBySid / delete are idempotent", async () => {
+		await expect(store.removeBySid("nope")).resolves.toBeUndefined();
 		await expect(store.delete("nope", "google")).resolves.toBeUndefined();
 	});
 

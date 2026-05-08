@@ -214,7 +214,7 @@ export function createRedisFederationTokenStore(
 		async update(sid, name, tokens) {
 			await writeEnv(sid, name, toEnvelope(tokens));
 		},
-		async deleteBySession(sid) {
+		async removeBySid(sid) {
 			// Use SCAN (non-blocking) instead of KEYS (O(N), blocking). Each
 			// batch of scanned keys is deleted before we await the next batch.
 			const keysBatch: string[] = [];

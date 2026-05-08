@@ -6,6 +6,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed (Phase F — F9 PR4 AS-3 + AS-11 BREAKING method renames, v0.5.1)
+
+- **`FederationTokenStoreBase.deleteBySession(sid)` is renamed to
+  `removeBySid(sid)`** (`@o3co/auth-provider-core`, closes AS-3): aligns the
+  verb with the four sibling session stores (`UserSessionStore.removeBySid`,
+  `SessionRPRegistry.removeBySid`, `SessionFamilyIndex.removeBySid`,
+  `SessionFederationIndex.removeBySid`), which all use `removeBySid` for the
+  same "bulk-remove records scoped to a session id" responsibility. Callers
+  that previously mixed both verbs in adjacent lines (notably the logout
+  cascade) now read uniformly.
+
+- **`MfaTransactionStore.save(tx)` and `MfaTransactionStore.load(transactionId)`
+  are renamed to `set(tx)` and `get(transactionId)`** (`@o3co/auth-provider-core`,
+  closes AS-11): aligns the verbs with map-like store semantics
+  (`UserSessionStore`, `KeyStore` patterns); replaces the orphan `save` /
+  `load` verbs that did not appear on any peer store.
+
+#### BREAKING — migration
+
+The v0.5.1 hotfix policy explicitly permits these renames because both
+interfaces were new in v0.5.0 and have had no external consumers (the v0.5.0
+publish-to-hotfix window is days). No deprecation aliases are added.
+
+Downstream implementers of either interface must rename methods:
+
+| Interface | Old name | New name |
+|---|---|---|
+| `FederationTokenStoreBase` (and its canonical alias `FederationTokenStore`) | `deleteBySession(sid)` | `removeBySid(sid)` |
+| `MfaTransactionStore` | `save(tx)` | `set(tx)` |
+| `MfaTransactionStore` | `load(transactionId)` | `get(transactionId)` |
+
+Callers must update method names accordingly. The built-in adapters in
+`@o3co/auth-provider-core` and `@o3co/auth-provider-redis` are already
+migrated; consumers using only those adapters need no changes beyond
+upgrading to v0.5.1.
+
+#### Cross-spec coordination
+
+The `*Base` interface aliases added in F9 PR3 (AS-7) —
+`FederationTokenStore`, `RateLimiter`, `AuditSink`, `MfaProvider`,
+`GrantPolicyHook` — automatically pick up the AS-3 method rename through the
+underlying type alias. No additional action is required for consumers using
+the canonical names.
+
 ### Improved (Phase F — F9 PR6 AS-M1 contributes-map concrete-type substitution, v0.5.1)
 
 - **The four same-package contributes-map placeholders are now concrete
