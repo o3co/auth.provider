@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import bcrypt from "bcrypt";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { InMemoryUserRepository } from "#/repositories/InMemoryUserRepository.mjs";
 
 describe("InMemoryUserRepository", () => {
@@ -47,6 +47,62 @@ describe("InMemoryUserRepository", () => {
 			const user = await repo.authenticate("bob", "secret123");
 
 			expect(user).toBeNull();
+		});
+
+		it("runs a dummy bcrypt compare for unknown usernames", async () => {
+			const compareSpy = vi.spyOn(bcrypt, "compare").mockResolvedValue(false);
+			// Use a hash deliberately distinct from the source's dummy hash so
+			// the regression assertion below can verify the unknown-user path
+			// uses a different bcrypt input than the real entry.
+			const hash = await bcrypt.hash("secret123", 10);
+			const repo = new InMemoryUserRepository(new Map([["alice", { password: hash, id: "u1" }]]));
+			try {
+				const [wrongPassword, unknownUser] = await Promise.all([
+					repo.authenticate("alice", "wrong"),
+					repo.authenticate("bob", "wrong"),
+				]);
+
+				expect(wrongPassword).toBeNull();
+				expect(unknownUser).toBeNull();
+				expect(compareSpy).toHaveBeenCalledTimes(2);
+				const realCall = compareSpy.mock.calls[0];
+				const dummyCall = compareSpy.mock.calls[1];
+				expect(realCall?.[0]).toBe("wrong");
+				expect(realCall?.[1]).toBe(hash);
+				expect(dummyCall?.[0]).toBe("wrong");
+				expect(dummyCall?.[1]).toMatch(/^\$2[aby]\$/);
+				// Unknown-user path MUST use a hash distinct from the real entry's
+				// hash — otherwise timingSafeEqual on the bcrypt result would still
+				// leak username existence on a single targeted user.
+				expect(dummyCall?.[1]).not.toBe(hash);
+			} finally {
+				compareSpy.mockRestore();
+			}
+		});
+
+		it("runs a bcrypt compare on the plain-text path to equalize timing", async () => {
+			const compareSpy = vi.spyOn(bcrypt, "compare").mockResolvedValue(false);
+			const repo = new InMemoryUserRepository(
+				new Map([["alice", { password: "secret123", id: "u1" }]]),
+			);
+			try {
+				const [knownPlain, unknownUser] = await Promise.all([
+					repo.authenticate("alice", "wrong"),
+					repo.authenticate("bob", "wrong"),
+				]);
+
+				expect(knownPlain).toBeNull();
+				expect(unknownUser).toBeNull();
+				// Both paths must call bcrypt.compare so that plain-text and
+				// unknown-user cases converge on the same cost. Without this,
+				// plain-text deployments leak username existence via timing.
+				expect(compareSpy).toHaveBeenCalledTimes(2);
+				for (const call of compareSpy.mock.calls) {
+					expect(call?.[1]).toMatch(/^\$2[aby]\$/);
+				}
+			} finally {
+				compareSpy.mockRestore();
+			}
 		});
 
 		it("supports bcrypt hashed passwords", async () => {

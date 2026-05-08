@@ -21,6 +21,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `MEMORY_RATE_LIMITER_MAX_BUCKETS`) and evicts expired or earliest-reset
   buckets when the cap is reached.
 
+### Security (Phase F — F12b user repository timing)
+
+- `InMemoryUserRepository.authenticate()` now performs a bcrypt comparison
+  on every authentication attempt — including unknown usernames and
+  plain-text password entries — equalizing timing across all paths so
+  username-enumeration signals are reduced regardless of whether deployments
+  use bcrypt-hashed or plain-text password entries.
+
 ## [0.5.2] — 2026-05-09
 
 ### Changed (auth.utils dependency bump, v0.5.2)
