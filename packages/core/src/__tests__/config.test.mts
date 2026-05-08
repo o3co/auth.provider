@@ -37,6 +37,8 @@ describe("provider config", () => {
 		expect(local.algorithm).toBe("HS256");
 		expect(local.kid).toBe("v0");
 		expect(config.oauth.oidcMode).toBe("oidc-required");
+		expect(config.session.name).toBe("__Host-auth.session");
+		expect(config.redisSessionStores?.keyPrefix).toBe("ss:");
 	});
 
 	it("fails validation when required fields are missing", () => {
@@ -57,7 +59,9 @@ describe("provider config", () => {
 				HTTP_PORT: "9090",
 				HTTP_TRUST_PROXY: "true",
 				SESSION_SECURE: "false",
+				SESSION_NAME: "auth.sid",
 				OAUTH_OIDC_MODE: "dual",
+				REDIS_SESSION_STORES_KEY_PREFIX: "tenant-a:ss:",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -65,7 +69,9 @@ describe("provider config", () => {
 		expect(config.http.port).toBe(9090);
 		expect(config.http.trustProxy).toBe(true);
 		expect(config.session.secure).toBe(false);
+		expect(config.session.name).toBe("auth.sid");
 		expect(config.oauth.oidcMode).toBe("dual");
+		expect(config.redisSessionStores?.keyPrefix).toBe("tenant-a:ss:");
 		// federations.google.enabled env-var coercion is covered by the
 		// HOCON application.conf wiring; schema-level boolean coercion for
 		// federation entries is tested in federations-schema.test.mts.

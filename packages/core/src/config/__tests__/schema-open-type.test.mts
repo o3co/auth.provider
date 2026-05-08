@@ -25,6 +25,7 @@ import { makeValidFullSections } from "#/testing/fixtures/valid-config.mjs";
 function validSession(overrides: Record<string, unknown> = {}) {
 	return {
 		secret: "s",
+		name: "__Host-auth.session",
 		maxAge: 3600000,
 		secure: true,
 		sameSite: "lax" as const,

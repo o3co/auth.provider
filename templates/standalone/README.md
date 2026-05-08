@@ -94,6 +94,7 @@ fail fast rather than silently falling back to defaults.
 | Variable | Default | Description |
 |---|---|---|
 | `SESSION_SECRET` | — | **Required.** Session signing secret |
+| `SESSION_NAME` | `__Host-auth.session` | Session cookie name. The default uses the `__Host-` prefix and therefore requires `SESSION_SECURE=true` and no `SESSION_DOMAIN`. |
 | `SESSION_MAX_AGE` | `3600000` | Session cookie max age in milliseconds |
 | `SESSION_SECURE` | `true` | Set `Secure` flag on session cookie |
 | `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`) |
@@ -101,6 +102,11 @@ fail fast rather than silently falling back to defaults.
 | `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory` |
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |
+
+If you set `SESSION_SECURE=false` for local HTTP development or set `SESSION_DOMAIN`
+for shared-domain cookies, also set `SESSION_NAME` to a non-`__Host-` value such as
+`auth.sid`. The server fails fast when a `__Host-` cookie name is combined with
+attributes that browsers reject for that prefix.
 
 ### Google Federation
 
@@ -135,6 +141,20 @@ fail fast rather than silently falling back to defaults.
 | `CLIENT_CODE_ENDPOINT_URI` | — | Redis connection URI for code storage |
 | `CLIENT_CODE_PASSWORD` | — | Redis password for code storage |
 | `CLIENT_CODE_DEFAULT_EXPIRES_IN` | `600` | Default authorization code lifetime in seconds |
+
+### Redis Namespacing
+
+For multi-tenant Redis clusters, set deployment-specific key prefixes so two
+auth.provider instances cannot collide in the same database:
+
+| Variable | Default | Description |
+|---|---|---|
+| `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | Outer prefix for user sessions, RP registry, session-family index, and session-federation index. |
+| `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | Prefix for refresh-token family records. |
+| `CLIENT_CODE_KEY_PREFIX` | `oauth:code:` | Prefix for OAuth authorization codes. |
+
+Use values that include the deployment name, for example `tenant-a:ss:`,
+`tenant-a:rtfam:`, and `tenant-a:code:`.
 
 ### Endpoints
 
@@ -184,6 +204,11 @@ make test
 ```
 
 The `docker-compose.yml` starts the auth server together with a Redis container. Configure environment variables in `.env`.
+
+The production image declares `EXPOSE 3000` and a Docker-native healthcheck
+against `/_healthcheck`. If you run the app on a different port, set
+`HTTP_PORT` and use an explicit port mapping such as `-p 8080:8080`; `EXPOSE`
+is image metadata and does not publish ports by itself.
 
 ## Adding Custom Modules
 

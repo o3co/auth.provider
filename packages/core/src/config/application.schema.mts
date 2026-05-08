@@ -277,6 +277,7 @@ const federationEntrySchema = z
 export const fullSectionsSchema = z.object({
 	session: z.object({
 		secret: z.string(),
+		name: z.string(),
 		maxAge: z.coerce.number(),
 		secure: z.boolean(),
 		sameSite: z.enum(["lax", "none", "strict"]),
@@ -395,6 +396,15 @@ export const fullSectionsSchema = z.object({
 	userSessionStores: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// MIN-3 (v0.5.3): preserve the bundled Redis user-session namespace
+	// override before `redisSessionStoresModule.configSchema` applies its
+	// own defaults. Without this top-level passthrough, AppConfigSchema would
+	// strip `redisSessionStores.keyPrefix` before the module sees it.
+	redisSessionStores: z
+		.object({
+			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 	// D-2 v2: module-internal config for `redisRefreshTokenFamilyStoreModule`.

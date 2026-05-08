@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { readFileSync } from "node:fs";
 import {
 	type AppConfig,
 	createApp,
@@ -29,6 +30,8 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
+
+const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false },
@@ -60,6 +63,7 @@ const config: AppConfig = {
 	},
 	session: {
 		secret: "test-session-secret",
+		name: "auth.sid",
 		maxAge: 3600000,
 		secure: false,
 		sameSite: "lax",
@@ -179,6 +183,21 @@ describe("standalone smoke test", () => {
 	afterEach(async () => {
 		await handleRef?.dispose();
 		handleRef = undefined;
+	});
+
+	it("Dockerfile declares runtime metadata and runs install/build steps as node", () => {
+		expect(dockerfile).toContain("EXPOSE 3000");
+		expect(dockerfile).toContain(
+			"HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3",
+		);
+		expect(dockerfile).toContain(
+			"CMD wget -q -O /dev/null http://localhost:3000/_healthcheck || exit 1",
+		);
+		expect(dockerfile).toMatch(/FROM node-base AS deps[\s\S]*USER node[\s\S]*RUN pnpm install/);
+		expect(dockerfile).toMatch(/FROM deps AS builder[\s\S]*USER node[\s\S]*RUN pnpm run build/);
+		expect(dockerfile).toMatch(
+			/FROM node-base AS runtime[\s\S]*USER node[\s\S]*RUN pnpm install --prod/,
+		);
 	});
 
 	it("GET /_healthcheck returns 200", async () => {

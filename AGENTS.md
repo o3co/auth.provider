@@ -19,6 +19,10 @@
 - The root `test` script runs `pnpm -r run test` **without** `--if-present` on purpose: if any workspace lacks `test`, CI fails loudly rather than silently skipping it. Do not add `--if-present` here — see issue #88 for the regression this prevents.
 - Coverage is a per-package concern. Only `packages/**` define `test:coverage`. The root `test:coverage` is filtered to `./packages/**` and keeps `--if-present` so that a future package without coverage wiring does not break CI.
 
+## Local Cleanup
+
+- The old DID grant package was deleted from git tracking and moved out of this repository. Developers with pre-deletion workspaces may still have untracked `packages/did/` build artifacts on disk; remove that directory locally before broad `git add` operations.
+
 ## Module Resolution
 
 Each package uses Node.js [subpath imports](https://nodejs.org/api/packages.html#subpath-imports) with a conditional `development` / `default` mapping:
