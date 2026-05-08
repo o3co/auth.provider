@@ -109,6 +109,30 @@ describe("registerBuiltinRateLimiters (memory)", () => {
 			vi.useRealTimers();
 		}
 	});
+
+	it("eviction makes progress even when bucket resetAt is non-finite (misconfigured windowSeconds)", async () => {
+		// Regression: a misconfigured spec with NaN windowSeconds produces
+		// NaN resetAt. evictEarliestResetBucket previously used `<` against
+		// POSITIVE_INFINITY, and `NaN < x` is false, so when every bucket
+		// had NaN resetAt no key was selected and the caller's
+		// `while (buckets.size >= maxBuckets)` loop pinned the event loop.
+		// This test would hang forever before the fix; vitest's default
+		// timeout makes the regression visible as a failure.
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		const limiter = await factory.create({
+			type: "memory",
+			defaultLimit: { limit: 1, windowSeconds: Number.NaN },
+			maxBuckets: 2,
+		});
+
+		// Fill: both buckets get resetAt = now + NaN*1000 = NaN.
+		await limiter.check("nan:A", {});
+		await limiter.check("nan:B", {});
+		// Trigger eviction: must return rather than spin-loop.
+		const result = await limiter.check("nan:C", {});
+		expect(result.allowed).toBe(true);
+	});
 });
 
 describe("memory rate limiter — per-key isolation", () => {

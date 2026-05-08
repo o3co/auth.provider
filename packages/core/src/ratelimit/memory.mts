@@ -50,12 +50,30 @@ function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 	let evictKey: string | undefined;
 	let earliestResetAt = Number.POSITIVE_INFINITY;
 	for (const [key, bucket] of buckets) {
+		// Non-finite resetAt (NaN / ±Infinity from a misconfigured
+		// windowSeconds) is highest priority for removal: drop it eagerly so
+		// the caller's `while (size >= max)` loop is guaranteed to make
+		// progress and cannot pin the event loop. Without this, NaN < x
+		// returns false for every comparison and evictKey stays undefined.
+		if (!Number.isFinite(bucket.resetAt)) {
+			buckets.delete(key);
+			return;
+		}
 		if (bucket.resetAt < earliestResetAt) {
 			evictKey = key;
 			earliestResetAt = bucket.resetAt;
 		}
 	}
-	if (evictKey !== undefined) buckets.delete(evictKey);
+	if (evictKey !== undefined) {
+		buckets.delete(evictKey);
+		return;
+	}
+	// Defensive fallback: should be unreachable once the non-finite drop
+	// above runs at least once per call, but keep eviction unconditionally
+	// progress-guaranteed by deleting the first map entry. Map iteration
+	// preserves insertion order, so this is the oldest bucket.
+	const firstKey = buckets.keys().next().value;
+	if (firstKey !== undefined) buckets.delete(firstKey);
 }
 
 export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): RateLimiterBase {
