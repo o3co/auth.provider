@@ -14,13 +14,19 @@
  * limitations under the License.
  */
 
-import type { AdapterBuilder, RegisteredRP, SessionRPRegistry } from "@o3co/auth-provider-core";
+import type {
+	AdapterBuilder,
+	Logger,
+	RegisteredRP,
+	SessionRPRegistry,
+} from "@o3co/auth-provider-core";
 import type { SessionRPRegistryClient } from "./clients.mjs";
 import { createRedisSidHash } from "./internal/redisSidHash.mjs";
 
 export interface RedisSessionRPRegistryOptions {
 	readonly client: SessionRPRegistryClient;
 	readonly keyPrefix: string;
+	readonly logger?: Logger;
 }
 
 /**
@@ -57,8 +63,32 @@ function serialize(rp: RegisteredRP): string {
 	return JSON.stringify(env);
 }
 
-function deserialize(json: string): RegisteredRP {
-	const env = JSON.parse(json) as RPEnvelope;
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function isValidRPEnvelope(env: unknown): env is RPEnvelope {
+	if (!isRecord(env)) return false;
+	return (
+		typeof env.clientId === "string" &&
+		typeof env.registeredAtMs === "number" &&
+		Number.isFinite(env.registeredAtMs)
+	);
+}
+
+function deserialize(json: string, logger?: Logger): RegisteredRP | null {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(json);
+	} catch {
+		logger?.warn({ json: json.slice(0, 100) }, "sessionRPRegistry_invalid_json");
+		return null;
+	}
+	if (!isValidRPEnvelope(parsed)) {
+		logger?.warn({ json: json.slice(0, 100) }, "sessionRPRegistry_invalid_envelope");
+		return null;
+	}
+	const env = parsed;
 	return {
 		clientId: env.clientId,
 		registeredAt: new Date(env.registeredAtMs),
@@ -98,6 +128,7 @@ export function createRedisSessionRPRegistry(
 	opts: RedisSessionRPRegistryOptions,
 ): SessionRPRegistry {
 	const hash = createRedisSidHash({ client: opts.client, keyPrefix: opts.keyPrefix });
+	const logger = opts.logger;
 	return {
 		kind: "redis",
 		async registerRP(sid, rp, expiresAt) {
@@ -105,7 +136,9 @@ export function createRedisSessionRPRegistry(
 		},
 		async listRPs(sid) {
 			const values = await hash.listValues(sid);
-			return values.map(deserialize);
+			return values
+				.map((value) => deserialize(value, logger))
+				.filter((rp): rp is RegisteredRP => rp !== null);
 		},
 		async removeBySid(sid) {
 			await hash.removeBySid(sid);

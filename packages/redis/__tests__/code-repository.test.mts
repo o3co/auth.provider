@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import Redis from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const KEY_PREFIX = "oauth:code:";
 
@@ -23,6 +25,7 @@ const store = new Map<string, string>();
 
 import type { CodeRepositoryClient } from "../src/clients.mjs";
 import { RedisCodeRepository } from "../src/code-repository.mjs";
+import { makeIoredisClients } from "../src/ioredis.mjs";
 
 // OR-9: the public `RedisCodeRepository` constructor accepts a typed
 // `CodeRepositoryClient` wrapper, not a node-redis client. The mock satisfies
@@ -353,5 +356,71 @@ describe("RedisCodeRepository", () => {
 			expect(found?.sid).toBe("sid-xyz");
 			expect(found?.nonce).toBe("nonce-abc");
 		});
+	});
+});
+
+const describeWithRedis = process.env.REDIS_TESTCONTAINERS === "true" ? describe : describe.skip;
+
+describeWithRedis("RedisCodeRepository with real Redis", () => {
+	let container: StartedTestContainer | undefined;
+	let raw: Redis | undefined;
+
+	beforeAll(async () => {
+		container = await new GenericContainer("redis:7.2-alpine").withExposedPorts(6379).start();
+		raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
+	}, 60_000);
+
+	afterAll(async () => {
+		if (raw) {
+			await raw.quit().catch(() => {
+				raw?.disconnect();
+			});
+		}
+		await container?.stop();
+	});
+
+	it("expires authorization codes according to the Redis PX TTL", async () => {
+		if (!raw) throw new Error("Redis test container did not start");
+		const keyPrefix = `td4:ttl:${Date.now()}:`;
+		const { codeRepositoryClient } = makeIoredisClients(raw);
+		const repo = new RedisCodeRepository(codeRepositoryClient, {
+			keyPrefix,
+			defaultExpiresIn: 1,
+		});
+
+		const created = await repo.createCode({
+			client_id: "test-client",
+			redirect_uri: "https://rp.example/cb",
+		});
+		const ttl = await raw.pttl(`${keyPrefix}${created.code}`);
+		expect(ttl).toBeGreaterThan(0);
+		expect(ttl).toBeLessThanOrEqual(1000);
+
+		await new Promise((resolve) => setTimeout(resolve, 1100));
+		expect(await repo.getByCode(created.code)).toBeNull();
+	});
+
+	it("round-trips sid, nonce, redirect_uri, grantedScope, and grantedAudience through Redis", async () => {
+		if (!raw) throw new Error("Redis test container did not start");
+		const keyPrefix = `td4:fields:${Date.now()}:`;
+		const { codeRepositoryClient } = makeIoredisClients(raw);
+		const repo = new RedisCodeRepository(codeRepositoryClient, { keyPrefix });
+
+		const created = await repo.createCode({
+			client_id: "client-real",
+			redirect_uri: "https://rp.example/callback",
+			sid: "sid-real",
+			nonce: "nonce-real",
+			grantedScope: ["openid", "profile"],
+			grantedAudience: ["https://api.example"],
+		});
+		const consumed = await repo.consumeByCode(created.code);
+
+		expect(consumed?.client_id).toBe("client-real");
+		expect(consumed?.redirect_uri).toBe("https://rp.example/callback");
+		expect(consumed?.sid).toBe("sid-real");
+		expect(consumed?.nonce).toBe("nonce-real");
+		expect(consumed?.grantedScope).toEqual(["openid", "profile"]);
+		expect(consumed?.grantedAudience).toEqual(["https://api.example"]);
 	});
 });
