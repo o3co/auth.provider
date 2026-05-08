@@ -1258,9 +1258,9 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		});
 	});
 
-	it("mints a token when all requested resources are in the policy-returned audience", async () => {
+	it("rejects resources that are only present in non-issued policy audience entries", async () => {
 		const policy: GrantPolicyHookBase = {
-			kind: "resource-ok",
+			kind: "resource-non-issued-aud",
 			async evaluate() {
 				return {
 					outcome: "allow",
@@ -1280,6 +1280,37 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				subject_token: token,
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				resource: ["https://api.example.com/users", "https://api.example.com/orders"],
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: expect.stringMatching(/requested_resources_not_in_audience/),
+		});
+	});
+
+	it("mints a token when requested resource equals the issued-token audience", async () => {
+		const policy: GrantPolicyHookBase = {
+			kind: "resource-ok",
+			async evaluate() {
+				return {
+					outcome: "allow",
+					grantedAudience: ["https://api.example.com/users"],
+				};
+			},
+		};
+		const g = buildGrant({ grantPolicy: policy });
+		const token = await signSelfIssuedAccessToken({
+			aud: ["https://api.example.com/users"],
+			family_id: "fam-1",
+		});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: "https://api.example.com/users",
 			}),
 		);
 		expect(result.status).toBe(200);

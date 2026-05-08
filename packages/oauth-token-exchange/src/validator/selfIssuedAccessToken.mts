@@ -117,6 +117,11 @@ export function createSelfIssuedAccessTokenValidator(
 				const revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 				if (revoked) return null;
 			}
+			const mayAct =
+				isRecord(payload.may_act) ||
+				(Array.isArray(payload.may_act) && payload.may_act.every(isRecord))
+					? payload.may_act
+					: undefined;
 
 			return {
 				sub: payload.sub,
@@ -129,9 +134,9 @@ export function createSelfIssuedAccessTokenValidator(
 				...(payload.act && typeof payload.act === "object" && !Array.isArray(payload.act)
 					? { act: payload.act as Record<string, unknown> }
 					: {}),
-				...(isRecord(payload.may_act) || Array.isArray(payload.may_act)
+				...(mayAct !== undefined
 					? {
-							may_act: payload.may_act as
+							may_act: mayAct as
 								| Readonly<Record<string, unknown>>
 								| readonly Readonly<Record<string, unknown>>[],
 						}

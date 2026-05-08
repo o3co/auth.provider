@@ -100,6 +100,18 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(result?.act).toEqual({ sub: "service-upstream" });
 	});
 
+	it("projects may_act only when every array entry is an object", async () => {
+		const valid = await signSelfIssuedAccessToken({ may_act: [{ sub: "svc-a" }] });
+		const validResult = await validator().validate(valid, { role: "subject" });
+		expect(validResult?.may_act).toEqual([{ sub: "svc-a" }]);
+
+		const mixed = await signSelfIssuedAccessToken({ may_act: [{ sub: "svc-a" }, "svc-b"] });
+		const mixedResult = await validator().validate(mixed, { role: "subject" });
+		expect(mixedResult).not.toBeNull();
+		expect(mixedResult?.claims.may_act).toEqual([{ sub: "svc-a" }, "svc-b"]);
+		expect(mixedResult?.may_act).toBeUndefined();
+	});
+
 	it("applies identical validation for role=actor (does not branch on role)", async () => {
 		const token = await signSelfIssuedAccessToken({});
 		const result = await validator().validate(token, { role: "actor" });

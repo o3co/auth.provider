@@ -612,17 +612,15 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			})();
 
 			if (requestedResource && requestedResource.length > 0) {
-				const tokenAudienceSet = new Set(
-					grantedAudience && grantedAudience.length > 0 ? grantedAudience : [audienceForToken],
-				);
 				const missingResources = requestedResource.filter(
-					(resource) => !tokenAudienceSet.has(resource),
+					(resource) => resource !== audienceForToken,
 				);
 				if (missingResources.length > 0) {
 					deps.logger?.warn(
 						{
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
+							audienceForToken,
 							missingResources,
 						},
 						"token_exchange_resource_not_in_audience",
