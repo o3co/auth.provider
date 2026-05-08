@@ -65,6 +65,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 			const authenticatedClientId = ctx.authenticatedClient.clientId;
+			const legacyCompatEnabled = config.oauth.refreshToken?.legacyTokenCompat !== false;
 
 			let tokenPayload: JWTPayload;
 			let typ: string | undefined;
@@ -101,7 +102,17 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// the central verifier's typ-skip would silently accept any AT lacking
 			// typ as a refresh token. v0.6+ flips legacyTypAccept=false at the
 			// verifier and removes this block.
-			const legacyType = (tokenPayload as Record<string, unknown>).type;
+			//
+			// AS-12 (v0.5.1): the legacy `payload.type === "refresh"` substitute
+			// is gated by `oauth.refreshToken.legacyTokenCompat`. When that flag
+			// is `false`, only `header.typ === "rt+jwt"` is accepted as a refresh
+			// marker. The strict-gate semantic (token MUST declare refresh via
+			// either marker) is preserved — AS-12 only narrows the *legacy*
+			// fallback path; it does NOT relax the requirement that some marker
+			// be present.
+			const legacyType = legacyCompatEnabled
+				? (tokenPayload as Record<string, unknown>).type
+				: undefined;
 			if (typ !== "rt+jwt" && legacyType !== "refresh") {
 				return {
 					result: {
@@ -135,7 +146,8 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			const subjectStr =
 				typeof tokenPayload.sub === "string"
 					? tokenPayload.sub
-					: typeof (claims.user as Record<string, unknown> | undefined)?.id === "string"
+					: legacyCompatEnabled &&
+							typeof (claims.user as Record<string, unknown> | undefined)?.id === "string"
 						? ((claims.user as Record<string, unknown>).id as string)
 						: undefined;
 			const scopeStr =
@@ -297,12 +309,11 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					audience: finalAudience,
 					subject: subjectStr ?? null,
 					// D-6: new token `azp` is the authenticated client. The legacy
-					// `claims.azp ?? claims.client.id` decoder was the only other
-					// code path that could populate this slot; both have been
-					// subsumed by the binding gate above (which proves the input
-					// token's azp/aud equalled `authenticatedClientId`), so reading
-					// from `ctx.authenticatedClient.clientId` is strictly equivalent
-					// and removes the body-spoofable surface.
+					// decoder path has been subsumed by the binding gate above
+					// (which proves the input token's azp/aud equalled
+					// `authenticatedClientId`), so reading from
+					// `ctx.authenticatedClient.clientId` is strictly equivalent and
+					// removes the body-spoofable surface.
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",

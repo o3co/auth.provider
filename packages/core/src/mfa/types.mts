@@ -19,6 +19,10 @@ import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 export interface MfaChallenge {
 	readonly id: string;
 	readonly kind: string;
+	/**
+	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+	 * for rationale.
+	 */
 	readonly expiresAt: Date;
 	readonly metadata?: Record<string, unknown>;
 }
@@ -110,6 +114,10 @@ export interface MfaPendingTransaction {
 	readonly subject: string;
 	readonly providerKind: string;
 	readonly challengeId: string;
+	/**
+	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+	 * for rationale.
+	 */
 	readonly expiresAt: Date;
 	readonly resumeState: MfaResumeState;
 }
