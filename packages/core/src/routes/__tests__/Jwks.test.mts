@@ -14,20 +14,23 @@
  * limitations under the License.
  */
 
+import type { Request, Response, Router } from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { createRouter } from "#/routes/Jwks.mjs";
 
+type RouteHandler = (req: Request, res: Response) => unknown | Promise<unknown>;
+
 function createMockExpress() {
-	const routes: Record<string, Function> = {};
+	const routes: Record<string, RouteHandler> = {};
 	const router = {
-		get(path: string, handler: Function) {
+		get(path: string, handler: RouteHandler) {
 			routes[path] = handler;
 			return router;
 		},
 	};
-	return { Router: () => router, routes };
+	return { Router: () => router as unknown as Router, routes };
 }
 
 function createMockRes() {
@@ -52,14 +55,15 @@ function createMockRes() {
 }
 
 describe("JWKS endpoint", () => {
-	it("returns 404 for HS256", () => {
+	it("returns an empty JWK set for HS256 without exposing shared secrets", async () => {
 		const ks = createSymmetricKeyStore("test-secret");
 		const express = createMockExpress();
-		createRouter(express as any, ks);
+		createRouter(express, ks);
 		const handler = express.routes["/.well-known/jwks.json"];
 		const res = createMockRes();
-		handler({}, res);
-		expect(res.getStatusCode()).toBe(404);
+		await handler({} as Request, res as unknown as Response);
+		expect(res.getStatusCode()).toBe(200);
+		expect(res.getBody()).toEqual({ keys: [] });
 	});
 
 	it("returns JWK set for ES256", async () => {
@@ -71,10 +75,10 @@ describe("JWKS endpoint", () => {
 			publicKeyPem: await exportSPKI(publicKey),
 		});
 		const express = createMockExpress();
-		createRouter(express as any, ks);
+		createRouter(express, ks);
 		const handler = express.routes["/.well-known/jwks.json"];
 		const res = createMockRes();
-		await handler({}, res);
+		await handler({} as Request, res as unknown as Response);
 		const body = res.getBody() as { keys: Array<Record<string, unknown>> };
 		expect(body.keys).toHaveLength(1);
 		expect(body.keys[0].kid).toBe("test-key");
@@ -101,9 +105,9 @@ describe("JWKS endpoint", () => {
 			],
 		});
 		const express = createMockExpress();
-		createRouter(express as any, ks);
+		createRouter(express, ks);
 		const res = createMockRes();
-		await express.routes["/.well-known/jwks.json"]({}, res);
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
 		const body = res.getBody() as { keys: Array<Record<string, unknown>> };
 		expect(body.keys).toHaveLength(2);
 		expect(body.keys.map((k) => k.kid)).toContain("current");
@@ -127,9 +131,9 @@ describe("JWKS endpoint", () => {
 			],
 		});
 		const express = createMockExpress();
-		createRouter(express as any, ks);
+		createRouter(express, ks);
 		const res = createMockRes();
-		await express.routes["/.well-known/jwks.json"]({}, res);
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
 		const body = res.getBody() as { keys: Array<Record<string, unknown>> };
 		expect(body.keys).toHaveLength(1);
 		expect(body.keys[0].kid).toBe("current");

@@ -57,7 +57,7 @@ export interface UserinfoRouterOptions {
 export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions): Router {
 	const router = express.Router();
 
-	router.get("/userinfo", async (req: Request, res: Response) => {
+	const handleUserinfo = async (req: Request, res: Response) => {
 		// RFC 6750 §5.3 + §6.1: bearer-authenticated responses MUST NOT be cached
 		// by intermediaries. Set this once at the top so it applies to every
 		// response path (200 success, 401 error).
@@ -156,7 +156,10 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			typeof payload.scope === "string" ? payload.scope.split(" ").filter(Boolean) : [];
 		const filtered = filterClaimsByScope(session.claims, scopes);
 		return res.status(200).json({ sub, ...filtered });
-	});
+	};
+
+	router.get("/userinfo", handleUserinfo);
+	router.post("/userinfo", handleUserinfo);
 
 	return router;
 }

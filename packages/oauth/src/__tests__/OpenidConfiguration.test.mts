@@ -14,18 +14,21 @@
  * limitations under the License.
  */
 
+import type { Request, Response, Router } from "express";
 import { describe, expect, it } from "vitest";
 import { createRouter } from "#/routes/OpenidConfiguration.mjs";
 
+type RouteHandler = (req: Request, res: Response) => unknown | Promise<unknown>;
+
 function createMockExpress() {
-	const routes: Record<string, Function> = {};
+	const routes: Record<string, RouteHandler> = {};
 	const router = {
-		get(path: string, handler: Function) {
+		get(path: string, handler: RouteHandler) {
 			routes[path] = handler;
 			return router;
 		},
 	};
-	return { Router: () => router, routes };
+	return { Router: () => router as unknown as Router, routes };
 }
 
 function createMockRes() {
@@ -55,10 +58,10 @@ async function callRoute(opts: {
 	logoutSupported?: boolean;
 }): Promise<Record<string, unknown>> {
 	const express = createMockExpress();
-	createRouter(express as any, opts);
+	createRouter(express, opts);
 	const handler = express.routes["/.well-known/openid-configuration"];
 	const res = createMockRes();
-	await handler({}, res);
+	await handler({} as Request, res as unknown as Response);
 	return res.getBody() as Record<string, unknown>;
 }
 
@@ -158,9 +161,9 @@ describe("GET /.well-known/openid-configuration", () => {
 		expect(body.token_endpoint).toBe("https://auth.example.com/oauth/token");
 	});
 
-	it("omits jwks_uri for HS256-only deployments (JWKS route returns 404 for symmetric keys)", async () => {
+	it("advertises jwks_uri for HS256-only deployments", async () => {
 		const body = await callRoute({ issuer: "https://auth.example.com", signingAlgs: ["HS256"] });
-		expect(body.jwks_uri).toBeUndefined();
+		expect(body.jwks_uri).toBe("https://auth.example.com/.well-known/jwks.json");
 	});
 
 	it("advertises jwks_uri when any asymmetric alg is configured (RS256 alongside HS256)", async () => {

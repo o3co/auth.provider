@@ -45,6 +45,7 @@ async function mintAT(extra: Record<string, unknown> = {}): Promise<string> {
 
 interface CallOptions {
 	token: string | null;
+	method?: "get" | "post";
 	userSessionStore?: Partial<UserSessionStore>;
 	refreshTokenFamilyRevocation?: Partial<RefreshTokenFamilyRevocation>;
 }
@@ -73,7 +74,10 @@ async function callUserinfo(opts: CallOptions) {
 		userSessionStore: opts.userSessionStore,
 		refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
 	});
-	const req = request(app).get("/oauth/userinfo");
+	const req =
+		opts.method === "post"
+			? request(app).post("/oauth/userinfo")
+			: request(app).get("/oauth/userinfo");
 	if (opts.token !== null) {
 		req.set("Authorization", `Bearer ${opts.token}`);
 	}
@@ -333,5 +337,45 @@ describe("GET /oauth/userinfo", () => {
 		expect(errRes.status).toBe(401);
 		expect(errRes.headers["cache-control"]).toBe("no-store");
 		expect(errRes.headers.pragma).toBe("no-cache");
+	});
+});
+
+describe("POST /oauth/userinfo", () => {
+	it("returns the same scope-filtered claims as GET for a valid Bearer access_token", async () => {
+		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid email" });
+
+		const res = await callUserinfo({
+			method: "post",
+			token,
+			userSessionStore: {
+				kind: "memory",
+				get: vi.fn().mockResolvedValue(baseSession),
+				create: vi.fn(),
+				delete: vi.fn(),
+			},
+			refreshTokenFamilyRevocation: {
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				revokeFamily: vi.fn(),
+			},
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({
+			sub: "u-1",
+			email: "alice@example.com",
+			email_verified: true,
+		});
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.headers.pragma).toBe("no-cache");
+	});
+
+	it("rejects missing Bearer tokens with the same error semantics as GET", async () => {
+		const res = await callUserinfo({ method: "post", token: null });
+
+		expect(res.status).toBe(401);
+		expect(res.headers["www-authenticate"]).toMatch(/^Bearer/);
+		expect(res.body.error).toBe("invalid_token");
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.headers.pragma).toBe("no-cache");
 	});
 });
