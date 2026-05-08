@@ -8,17 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed (SC residual batch — supply-chain hygiene, v0.5.2)
 
-- **`pnpm.onlyBuiltDependencies` allowlist added at the workspace root**
-  (root `package.json`, closes SC-4). pnpm 10 gates native build scripts
-  behind explicit operator approval; without the allowlist a fresh
-  `pnpm install` printed `Ignored build scripts: bcrypt` and skipped the
-  native binary compilation, causing `bcrypt.hash()` to throw
-  `MODULE_NOT_FOUND` at runtime in containers built without a prior
-  binary cache. The allowlist now contains `bcrypt` (the only direct
-  production dependency that requires native compilation). Operator
-  impact: a build-time C++ toolchain (Python plus a C++ compiler — the
-  standard Node.js native-addon stack) is required during `pnpm install`;
-  documented in the standalone template README.
+- **`pnpm.onlyBuiltDependencies` allowlist added at the workspace root
+  AND in `templates/standalone/package.json`** (closes SC-4). pnpm 10
+  gates native build scripts behind explicit operator approval; without
+  the allowlist a fresh `pnpm install` printed `Ignored build scripts:
+  bcrypt` and skipped the native binary compilation, which on platforms
+  without a matching prebuild would cause `bcrypt.hash()` to throw
+  `MODULE_NOT_FOUND` at runtime. Both `package.json` files allowlist
+  `bcrypt` (the only direct production dependency that may require
+  native compilation) — the workspace root entry covers monorepo
+  installs, and the standalone-template entry covers projects scaffolded
+  by `@o3co/create-auth-provider`, which install from their own
+  `package.json` and do not inherit the workspace root's allowlist.
+  Operator impact: when the install resolves to a prebuild (most
+  supported platforms), no extra toolchain is needed; on platforms with
+  no matching prebuild, the standard Node.js native-addon toolchain
+  (Python + C++ compiler) is required during `pnpm install`. The
+  standalone template README documents both the prebuild platform list
+  and the toolchain fallback.
 
 - **`templates/standalone` `redis` range bumped from `^5.10.0` to
   `^5.12.1`** (closes SC-5) to align with `packages/session`'s pin so
