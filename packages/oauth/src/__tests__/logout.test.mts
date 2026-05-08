@@ -55,6 +55,20 @@ async function mintIdToken(extra: Record<string, unknown> = {}): Promise<string>
 		.sign(secretKey);
 }
 
+async function mintOldIdToken(): Promise<string> {
+	const oldIat = Math.floor((Date.now() - 25 * 60 * 60 * 1000) / 1000);
+	return new SignJWT({
+		sub: "u-1",
+		aud: "client-1",
+		sid: "sid-1",
+	})
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
+		.setExpirationTime("1h")
+		.setIssuedAt(oldIat)
+		.setIssuer("https://auth.example.com")
+		.sign(secretKey);
+}
+
 /**
  * Mint an access token (typ: at+jwt) for use with POST /oauth/federation/:name/logout.
  * Includes sid, sub, and family_id by default.
@@ -208,6 +222,21 @@ async function postLogout(
 		Object.entries(body).filter(([, v]) => v !== undefined),
 	) as Record<string, string>;
 	return req.send(filteredBody);
+}
+
+function getLogout(app: ReturnType<typeof express>, query: Record<string, string | undefined>) {
+	const filteredQuery = Object.fromEntries(
+		Object.entries(query).filter(([, v]) => v !== undefined),
+	) as Record<string, string>;
+	return request(app).get("/oauth/logout").query(filteredQuery);
+}
+
+function expectLogoutConfirmation(res: Awaited<ReturnType<typeof getLogout>>) {
+	expect(res.status).toBe(200);
+	expect(res.headers["content-type"]).toMatch(/^text\/html/);
+	expect(res.text).toContain("<form");
+	expect(res.text).toContain('method="POST"');
+	expect(res.text).toContain('action="logout"');
 }
 
 describe("POST /oauth/logout", () => {
@@ -688,6 +717,80 @@ describe("POST /oauth/logout", () => {
 				consoleWarnSpy.mockRestore();
 			}
 		});
+	});
+});
+
+describe("GET /oauth/logout", () => {
+	it("logs out and redirects to a registered post_logout_redirect_uri with state", async () => {
+		const sessionStore = makeSessionStore();
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const fedTokenStore = makeFedTokenStore();
+		const app = buildApp({
+			sessionStore,
+			refreshFamilyRevocation,
+			fedTokenStore,
+			clientRepo: makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					tokenEndpointAuthMethod: "client_secret_basic",
+					allowedRedirectUris: ["https://example.test/cb"],
+					allowedScopes: ["openid"],
+					postLogoutRedirectUris: ["https://rp.example/logged-out"],
+				}),
+			}),
+		});
+		const token = await mintIdToken();
+
+		const res = await getLogout(app, {
+			id_token_hint: token,
+			post_logout_redirect_uri: "https://rp.example/logged-out",
+			state: "bye",
+		});
+
+		expect(res.status).toBe(303);
+		expect(res.headers.location).toBe("https://rp.example/logged-out?state=bye");
+		expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+		expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
+	});
+
+	it("renders confirmation HTML and does not log out when id_token_hint is missing", async () => {
+		const sessionStore = makeSessionStore();
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const app = buildApp({ sessionStore, refreshFamilyRevocation });
+
+		const res = await getLogout(app, {
+			post_logout_redirect_uri: "https://rp.example/logged-out",
+		});
+
+		expectLogoutConfirmation(res);
+		expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
+		expect(sessionStore.delete).not.toHaveBeenCalled();
+	});
+
+	it("renders confirmation HTML and does not log out when id_token_hint is invalid", async () => {
+		const sessionStore = makeSessionStore();
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const app = buildApp({ sessionStore, refreshFamilyRevocation });
+
+		const res = await getLogout(app, { id_token_hint: "not.a.valid.jwt" });
+
+		expectLogoutConfirmation(res);
+		expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
+		expect(sessionStore.delete).not.toHaveBeenCalled();
+	});
+
+	it("renders confirmation HTML and does not log out when id_token_hint iat is stale", async () => {
+		const sessionStore = makeSessionStore();
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const app = buildApp({ sessionStore, refreshFamilyRevocation });
+		const token = await mintOldIdToken();
+
+		const res = await getLogout(app, { id_token_hint: token });
+
+		expectLogoutConfirmation(res);
+		expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
+		expect(sessionStore.delete).not.toHaveBeenCalled();
 	});
 });
 

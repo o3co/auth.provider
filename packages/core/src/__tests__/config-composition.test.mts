@@ -40,6 +40,7 @@ const minimalCoreConfig = {
 			legacyRtPolicy: "reject",
 		},
 		grants: {},
+		oidcMode: "oidc-required",
 	},
 };
 
@@ -228,6 +229,7 @@ describe("AppConfigSchema backward compatibility", () => {
 					authorization_code: { enabled: true },
 					refresh_token: { enabled: true },
 				},
+				oidcMode: "oidc-required",
 			},
 			session: {
 				secret: "session-secret",

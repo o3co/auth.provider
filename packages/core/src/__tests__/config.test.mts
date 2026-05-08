@@ -36,6 +36,7 @@ describe("provider config", () => {
 		// is strict and supplies no defaults of its own (ADR 2026-04-30).
 		expect(local.algorithm).toBe("HS256");
 		expect(local.kid).toBe("v0");
+		expect(config.oauth.oidcMode).toBe("oidc-required");
 	});
 
 	it("fails validation when required fields are missing", () => {
@@ -56,6 +57,7 @@ describe("provider config", () => {
 				HTTP_PORT: "9090",
 				HTTP_TRUST_PROXY: "true",
 				SESSION_SECURE: "false",
+				OAUTH_OIDC_MODE: "dual",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -63,6 +65,7 @@ describe("provider config", () => {
 		expect(config.http.port).toBe(9090);
 		expect(config.http.trustProxy).toBe(true);
 		expect(config.session.secure).toBe(false);
+		expect(config.oauth.oidcMode).toBe("dual");
 		// federations.google.enabled env-var coercion is covered by the
 		// HOCON application.conf wiring; schema-level boolean coercion for
 		// federation entries is tested in federations-schema.test.mts.

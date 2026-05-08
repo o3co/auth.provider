@@ -23,6 +23,7 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHookBase,
 	GrantRegistry,
+	type Logger,
 	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
@@ -36,6 +37,7 @@ import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs
@@ -92,6 +94,7 @@ const authorizeConfig = {
 		jwt: { issuer: "https://auth.example" },
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
+		oidcMode: "oidc-required",
 	},
 	endpoints: {
 		login: { url: "/login" },
@@ -118,6 +121,7 @@ async function buildAuthorizeApp(opts: {
 	 * (the no-override path uses the `?? 256` fallback only).
 	 */
 	configOverride?: Partial<AppConfig>;
+	logger?: Logger;
 }) {
 	const app = express();
 	app.use(express.json());
@@ -169,6 +173,7 @@ async function buildAuthorizeApp(opts: {
 		clientRepository: authorizeClientRepo,
 		codeRepository: codeRepo,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+		logger: opts.logger,
 	});
 	app.use("/oauth", router);
 	return app;
@@ -573,6 +578,7 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			scope: "openid profile",
 			nonce: "nonce-xyz",
 		});
 
@@ -595,6 +601,7 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			scope: "openid profile",
 			// no nonce
 		});
 
@@ -602,6 +609,145 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 		expect(captured?.nonce).toBeUndefined();
 		// sid is still captured even without nonce
 		expect(captured?.sid).toBe("sid-1");
+	});
+});
+
+describe("IH-6: /authorize openid scope gate", () => {
+	it("rejects missing openid in oidc-required mode when issuer is configured", async () => {
+		const captureCode = vi.fn();
+		const logger = createMockLogger();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-oidc-required" },
+			captureCode,
+			logger,
+		});
+
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			state: "state-missing-openid",
+			scope: "profile",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.origin + location.pathname).toBe("https://example.test/cb");
+		expect(location.searchParams.get("error")).toBe("invalid_scope");
+		expect(location.searchParams.get("error_description")).toMatch(/openid scope is required/i);
+		expect(location.searchParams.get("state")).toBe("state-missing-openid");
+		expect(captureCode).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ clientId: "client-1", requestedScopes: ["profile"] },
+			"authorize_rejected_missing_openid_scope",
+		);
+	});
+
+	it("allows oidc-required requests that include openid", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-oidc-ok" },
+			captureCode: (p) => {
+				captured = p;
+			},
+		});
+
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			scope: "openid profile",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("code")).toBe("auth-code");
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.grantedScope).toEqual(["openid", "profile"]);
+	});
+
+	it("allows OAuth-only requests in dual mode", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-dual-oauth" },
+			captureCode: (p) => {
+				captured = p;
+			},
+			configOverride: {
+				oauth: {
+					oidcMode: "dual",
+				},
+			} as unknown as Partial<AppConfig>,
+		});
+
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			scope: "profile",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("code")).toBe("auth-code");
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.grantedScope).toEqual(["profile"]);
+	});
+
+	it("allows OIDC requests in dual mode", async () => {
+		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-dual-oidc" },
+			captureCode: (p) => {
+				captured = p;
+			},
+			configOverride: {
+				oauth: {
+					oidcMode: "dual",
+				},
+			} as unknown as Partial<AppConfig>,
+		});
+
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			scope: "openid profile",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("code")).toBe("auth-code");
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(captured?.grantedScope).toEqual(["openid", "profile"]);
+	});
+
+	it("rejects when requested scopes are all outside the client allowance", async () => {
+		const captureCode = vi.fn();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-scope-filter-empty" },
+			captureCode,
+			configOverride: {
+				oauth: {
+					oidcMode: "dual",
+				},
+			} as unknown as Partial<AppConfig>,
+		});
+
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			state: "state-outside-scope",
+			scope: "email",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBe("invalid_scope");
+		expect(location.searchParams.get("error_description")).toMatch(/no requested scopes/i);
+		expect(location.searchParams.get("state")).toBe("state-outside-scope");
+		expect(captureCode).not.toHaveBeenCalled();
 	});
 });
 
@@ -630,6 +776,7 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			scope: "openid profile",
 			nonce,
 		});
 
@@ -655,6 +802,7 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			scope: "openid profile",
 			nonce,
 		});
 
@@ -823,11 +971,13 @@ describe("D-1 / CR-2: /authorize binds identity to code record, not Express sess
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				scope: "openid profile",
 			}),
 			request(app).get("/oauth/authorize").query({
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				scope: "openid profile",
 			}),
 		]);
 
@@ -913,6 +1063,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 			client_id: "public-app",
 			redirect_uri: "https://spa.example.test/cb",
 			state: "state-abc",
+			scope: "openid profile",
 			// no code_challenge
 		});
 		expect(res.status).toBe(302);
@@ -932,6 +1083,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 			client_id: "public-app",
 			redirect_uri: "https://spa.example.test/cb",
 			state: "state-plain",
+			scope: "openid profile",
 			code_challenge: VALID_S256_CHALLENGE,
 			code_challenge_method: "plain",
 		});
@@ -954,6 +1106,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 			client_id: "public-app",
 			redirect_uri: "https://spa.example.test/cb",
 			state: "state-omit",
+			scope: "openid profile",
 			code_challenge: VALID_S256_CHALLENGE,
 			// no code_challenge_method → routes.mts treats absence as "plain"
 		});

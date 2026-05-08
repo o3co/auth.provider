@@ -679,6 +679,35 @@ export const createOAuthRouter = async (
 					requestedScopes.length > 0
 						? requestedScopes.filter((s) => allowedScopes.includes(s))
 						: allowedScopes;
+				const configuredIssuer = config.oauth.jwt.issuer;
+				const isActingAsOidcProvider =
+					typeof configuredIssuer === "string" && configuredIssuer.length > 0;
+				const oidcMode =
+					(config.oauth as { oidcMode?: "oidc-required" | "dual" }).oidcMode ?? "oidc-required";
+				if (
+					isActingAsOidcProvider &&
+					oidcMode === "oidc-required" &&
+					!requestedScopes.includes("openid")
+				) {
+					logger.warn(
+						{ clientId: client_id, requestedScopes },
+						"authorize_rejected_missing_openid_scope",
+					);
+					return redirectError(
+						redirect_uri,
+						"invalid_scope",
+						"openid scope is required when server is acting as an OIDC OP",
+						toStr(state),
+					);
+				}
+				if (allowedFilteredScopes.length === 0 && requestedScopes.length > 0) {
+					return redirectError(
+						redirect_uri,
+						"invalid_scope",
+						"no requested scopes are allowed for this client",
+						toStr(state),
+					);
+				}
 
 				// C-2: policy evaluation at /authorize (evaluate-once, persist on Code).
 				// The code exchange MUST NOT re-evaluate — it reads the narrowed values off
