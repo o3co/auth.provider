@@ -31,10 +31,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the lockfile. The `accepts(req).type([...])` API used at
   `packages/oauth/src/routes/logout.mts:581` is unchanged across the
   major bump (per upstream HISTORY.md the v2.0.0 changes are limited to
-  `mime-types@^3.0.0`, `negotiator@^1.0.0`, and `engines.node >= 18`,
-  which is already required by this package). `@types/accepts@^1.3.7` is
-  retained because workspace typecheck passes; it can be revisited if a
-  v2-compatible `@types/accepts` ships.
+  `mime-types@^3.0.0` and `negotiator@^1.0.0`; the effective Node 18
+  floor it carries is a transitive constraint from those deps, not a
+  manifest-level `engines.node` change on `accepts` itself). The package
+  already requires Node `>=18.19.0`. `@types/accepts@^1.3.7` is retained
+  because workspace typecheck passes and no `@types/accepts@^2` is
+  published on npm; it can be revisited if a v2-compatible types package
+  ships.
 
 - **Root `audit` script tightened from
   `pnpm audit --audit-level=high` to
