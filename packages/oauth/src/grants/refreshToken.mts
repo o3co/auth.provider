@@ -65,7 +65,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 			const authenticatedClientId = ctx.authenticatedClient.clientId;
-			const legacyCompatEnabled = config.oauth.refreshToken?.legacyTokenCompat !== false;
+			const legacyCompatEnabled = config.oauth.refreshToken.legacyTokenCompat !== false;
 
 			let tokenPayload: JWTPayload;
 			let typ: string | undefined;
@@ -113,6 +113,12 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			const legacyType = legacyCompatEnabled
 				? (tokenPayload as Record<string, unknown>).type
 				: undefined;
+			// Invariant — see RT-OC test: this gate keeps AT-as-RT confusion
+			// defended. A JWT with no `header.typ` AND no `payload.type` is
+			// rejected regardless of `legacyTokenCompat`, even when SF-1's
+			// `legacyTypAccept = true` allowed a typ-less token through the
+			// central verifier. Refactors that touch this condition MUST
+			// keep RT-OC green.
 			if (typ !== "rt+jwt" && legacyType !== "refresh") {
 				return {
 					result: {
@@ -309,11 +315,11 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					audience: finalAudience,
 					subject: subjectStr ?? null,
 					// D-6: new token `azp` is the authenticated client. The legacy
-					// decoder path has been subsumed by the binding gate above
-					// (which proves the input token's azp/aud equalled
-					// `authenticatedClientId`), so reading from
-					// `ctx.authenticatedClient.clientId` is strictly equivalent and
-					// removes the body-spoofable surface.
+					// `tokenAzp` resolution (`claims.azp ?? tokenAud`) has been
+					// subsumed by the binding gate above (which proves the input
+					// token's azp/aud equalled `authenticatedClientId`), so
+					// reading from `ctx.authenticatedClient.clientId` is strictly
+					// equivalent and removes the body-spoofable surface.
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
