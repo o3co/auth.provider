@@ -127,8 +127,8 @@ export interface MfaTransactionStore {
 	/**
 	 * Retrieve a pending transaction by id. Implementations MAY filter expired
 	 * transactions (return null when `expiresAt <= now`); core also rejects
-	 * expired transactions post-load as defense in depth. Either behavior is
-	 * acceptable.
+	 * expired transactions after retrieval as defense in depth. Either
+	 * behavior is acceptable.
 	 *
 	 * Renamed from `load` in v0.5.1 (AS-11) — see {@link MfaTransactionStore.set}.
 	 */

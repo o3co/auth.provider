@@ -90,4 +90,12 @@ describe("AS-3: redis FederationTokenStore.deleteBySession → removeBySid (BREA
 		expect(await store.get("sid-1", "github")).toBeNull();
 		expect(await store.get("sid-2", "google")).toEqual(tokens);
 	});
+
+	it("removeBySid is idempotent on absent sid (parity with in-memory adapter)", async () => {
+		const store = createRedisFederationTokenStore({
+			client: createFakeRedis(),
+			encryption: { mode: "required", key: encryptionKey },
+		});
+		await expect(store.removeBySid("nope")).resolves.toBeUndefined();
+	});
 });
