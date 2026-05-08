@@ -78,6 +78,37 @@ describe("registerBuiltinRateLimiters (memory)", () => {
 		expect(first.allowed).toBe(true);
 		expect(second.allowed).toBe(false);
 	});
+
+	it("memory sink bounds bucket growth by evicting a bucket when full", async () => {
+		vi.useFakeTimers();
+		try {
+			vi.setSystemTime(new Date("2026-05-09T00:00:00Z"));
+
+			const factory = createRateLimiterFactory();
+			registerBuiltinRateLimiters(factory);
+			const limiter = await factory.create({
+				type: "memory",
+				defaultLimit: { limit: 2, windowSeconds: 60 },
+				maxBuckets: 2,
+			});
+
+			await limiter.check("unknown:A", {});
+			vi.advanceTimersByTime(1);
+			await limiter.check("unknown:B", {});
+			vi.advanceTimersByTime(1);
+			await limiter.check("unknown:C", {});
+
+			const existingB = await limiter.check("unknown:B", {});
+			expect(existingB.allowed).toBe(true);
+			expect(existingB.remaining).toBe(0);
+
+			const recreatedA = await limiter.check("unknown:A", {});
+			expect(recreatedA.allowed).toBe(true);
+			expect(recreatedA.remaining).toBe(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });
 
 describe("memory rate limiter — per-key isolation", () => {

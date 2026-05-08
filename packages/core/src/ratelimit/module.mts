@@ -5,63 +5,13 @@
 
 import { z } from "zod";
 import { defineModule } from "../modules/index.mjs";
-import type { RateLimiterBase, RateLimitSpec } from "./types.mjs";
-
-interface BucketState {
-	count: number;
-	resetAt: number;
-}
+import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
+import type { RateLimitSpec } from "./types.mjs";
 
 const rateLimitSpecSchema = z.object({
 	limit: z.number().int().positive(),
 	windowSeconds: z.number().int().positive(),
 });
-
-function keyPrefix(key: string): string {
-	const colon = key.indexOf(":");
-	return colon === -1 ? key : key.slice(0, colon);
-}
-
-function createMemoryRateLimiter(
-	limits: Record<string, RateLimitSpec>,
-	defaultLimit: RateLimitSpec,
-): RateLimiterBase {
-	const buckets = new Map<string, BucketState>();
-	return {
-		kind: "memory",
-		async check(key) {
-			const now = Date.now();
-			const spec = limits[keyPrefix(key)] ?? defaultLimit;
-			const bucket = buckets.get(key);
-			if (!bucket || bucket.resetAt <= now) {
-				const fresh: BucketState = {
-					count: 1,
-					resetAt: now + spec.windowSeconds * 1000,
-				};
-				buckets.set(key, fresh);
-				return {
-					allowed: true,
-					remaining: spec.limit - 1,
-					resetAt: new Date(fresh.resetAt),
-				};
-			}
-			if (bucket.count >= spec.limit) {
-				return {
-					allowed: false,
-					remaining: 0,
-					resetAt: new Date(bucket.resetAt),
-					reason: `limit:${keyPrefix(key)}`,
-				};
-			}
-			bucket.count += 1;
-			return {
-				allowed: true,
-				remaining: spec.limit - bucket.count,
-				resetAt: new Date(bucket.resetAt),
-			};
-		},
-	};
-}
 
 /**
  * In-memory RateLimiter module. Matches the existing memory branch of
@@ -78,8 +28,17 @@ export const memoryRateLimiterModule = defineModule({
 			.object({
 				limits: z.record(z.string(), rateLimitSpecSchema).default({}),
 				defaultLimit: rateLimitSpecSchema.default({ limit: 60, windowSeconds: 60 }),
+				maxBuckets: z.coerce
+					.number()
+					.int()
+					.positive()
+					.default(DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS),
 			})
-			.default({ limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } }),
+			.default({
+				limits: {},
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
+			}),
 	}),
 	provides: {
 		rateLimiter: (deps) => {
@@ -88,10 +47,15 @@ export const memoryRateLimiterModule = defineModule({
 					memoryRateLimiter: {
 						limits: Record<string, RateLimitSpec>;
 						defaultLimit: RateLimitSpec;
+						maxBuckets?: number;
 					};
 				}
 			).memoryRateLimiter;
-			return createMemoryRateLimiter(cfg.limits, cfg.defaultLimit);
+			return createMemoryRateLimiter({
+				limits: cfg.limits,
+				defaultLimit: cfg.defaultLimit,
+				maxBuckets: cfg.maxBuckets,
+			});
 		},
 	},
 });

@@ -102,6 +102,32 @@ describe("provider config", () => {
 		const config = validate(raw, AppConfigSchema);
 		expect(config.repositories.code.type).toBe("memory");
 	});
+
+	it("loads memoryRateLimiter.maxBuckets default and env override", () => {
+		const path = new URL("../../config/application.conf", import.meta.url).pathname;
+		const base = validate(
+			parseFile(path, {
+				env: {
+					OAUTH_JWT_SECRET: "test-secret",
+					SESSION_SECRET: "test-session-secret",
+				},
+			}),
+			AppConfigSchema,
+		);
+		expect(base.memoryRateLimiter?.maxBuckets).toBe(10_000);
+
+		const overridden = validate(
+			parseFile(path, {
+				env: {
+					OAUTH_JWT_SECRET: "test-secret",
+					SESSION_SECRET: "test-session-secret",
+					MEMORY_RATE_LIMITER_MAX_BUCKETS: "123",
+				},
+			}),
+			AppConfigSchema,
+		);
+		expect(overridden.memoryRateLimiter?.maxBuckets).toBe(123);
+	});
 });
 
 describe("jwt config schema", () => {

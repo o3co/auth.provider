@@ -36,6 +36,11 @@ const rateLimitSchema = z.object({
 	limit: z.coerce.number(),
 });
 
+const rateLimitSpecSchema = z.object({
+	limit: z.coerce.number().int().positive(),
+	windowSeconds: z.coerce.number().int().positive(),
+});
+
 // IH-9: HS256 key rotation is symmetric — `previousSecrets` carries
 // shared secrets keyed by `kid`, distinct from the asymmetric
 // `previousKeys` shape (publicKey / publicKeyPath). The schema is split
@@ -364,6 +369,16 @@ export const fullSectionsSchema = z.object({
 	rateLimiter: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// SF-10 (v0.5.3): module-internal config for `memoryRateLimiterModule`.
+	// Declared here so AppConfigSchema preserves HOCON/env overrides before
+	// module schema validation applies its defaults. Defaults live in HOCON.
+	memoryRateLimiter: z
+		.object({
+			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
+			defaultLimit: rateLimitSpecSchema.optional(),
+			maxBuckets: z.coerce.number().int().positive().optional(),
 		})
 		.optional(),
 	// Wave 5d (OR-4): adapter switch for the four user-session stores

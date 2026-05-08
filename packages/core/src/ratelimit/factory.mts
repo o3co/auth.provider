@@ -15,6 +15,7 @@
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
+import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
 import type { RateLimiterBase, RateLimiterFactory, RateLimitSpec } from "./types.mjs";
 
 export function createRateLimiterFactory(): RateLimiterFactory {
@@ -25,6 +26,7 @@ interface MemoryRateLimiterConfig {
 	type: string;
 	limits?: Record<string, RateLimitSpec>;
 	defaultLimit?: RateLimitSpec;
+	maxBuckets?: number;
 }
 
 function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
@@ -39,11 +41,6 @@ function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
 		}
 	}
 	return result;
-}
-
-function keyPrefix(key: string): string {
-	const colon = key.indexOf(":");
-	return colon === -1 ? key : key.slice(0, colon);
 }
 
 /**
@@ -72,38 +69,13 @@ export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 			return { limit: 60, windowSeconds: 60 };
 		})();
 
-		interface BucketState {
-			count: number;
-			resetAt: number;
-		}
-		const buckets = new Map<string, BucketState>();
-
-		return {
-			kind: "memory",
-			async check(key) {
-				const now = Date.now();
-				const spec = limits[keyPrefix(key)] ?? defaultLimit;
-				const bucket = buckets.get(key);
-				if (!bucket || bucket.resetAt <= now) {
-					const fresh: BucketState = { count: 1, resetAt: now + spec.windowSeconds * 1000 };
-					buckets.set(key, fresh);
-					return { allowed: true, remaining: spec.limit - 1, resetAt: new Date(fresh.resetAt) };
-				}
-				if (bucket.count >= spec.limit) {
-					return {
-						allowed: false,
-						remaining: 0,
-						resetAt: new Date(bucket.resetAt),
-						reason: `limit:${keyPrefix(key)}`,
-					};
-				}
-				bucket.count += 1;
-				return {
-					allowed: true,
-					remaining: spec.limit - bucket.count,
-					resetAt: new Date(bucket.resetAt),
-				};
-			},
-		};
+		return createMemoryRateLimiter({
+			limits,
+			defaultLimit,
+			maxBuckets:
+				typeof config.maxBuckets === "number"
+					? config.maxBuckets
+					: DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
+		});
 	});
 }
