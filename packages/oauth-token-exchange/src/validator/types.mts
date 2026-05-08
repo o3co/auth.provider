@@ -21,6 +21,12 @@
  */
 export interface ExchangeTokenValidationContext {
 	readonly role: "subject" | "actor";
+	/**
+	 * Reserved for validators that need request-resource context in a future
+	 * contract. The built-in grant handler enforces resource/audience binding
+	 * after policy evaluation, so v0.5.x validators should not rely on this.
+	 */
+	readonly requestedResources?: readonly string[];
 }
 
 export interface ExchangeTokenValidator {
@@ -68,6 +74,9 @@ export interface ExchangeTokenValidator {
  *     self-issued access_tokens.
  *   - `act`: nested actor chain from a prior exchange. The grant handler
  *     preserves this when applicable (RFC 8693 §4.1).
+ *   - `may_act`: structured delegation constraint from the subject token. The
+ *     grant handler reads the raw `claims.may_act` value so validators can
+ *     preserve malformed claims for fail-closed handling.
  */
 export interface ValidatedToken {
 	readonly sub: string;
@@ -75,5 +84,8 @@ export interface ValidatedToken {
 	readonly aud?: string | readonly string[];
 	readonly familyId?: string;
 	readonly act?: Readonly<Record<string, unknown>>;
+	readonly may_act?:
+		| Readonly<Record<string, unknown>>
+		| readonly Readonly<Record<string, unknown>>[];
 	readonly claims: Readonly<Record<string, unknown>>;
 }

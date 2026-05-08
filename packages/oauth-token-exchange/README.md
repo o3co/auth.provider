@@ -107,9 +107,11 @@ const handle = await createApp({
 
 4. **Cross-client audience confusion defense.** When the `audience` request parameter is omitted, the handler inherits `subject_token.aud` only if it is in `client.allowedAudiences ∪ { client.clientId }`. Otherwise it falls back to `clientId`. This prevents a malicious client from exchanging a stolen token outside its intended audience just by omitting the audience parameter.
 
-5. **Policy hook widening is permitted by design.** The `GrantPolicyHook.evaluate()` result's `grantedScope` and `grantedAudience` override the handler's pre-narrowed values without re-verification. A first-party consumer policy CAN widen scope or audience if it wants to — this is the intentional escape hatch for operational needs (e.g., an admin flow that grants a superset). Consumers own the consequences of widening policies. If you want strict narrowing-only policies, write your `evaluate()` method defensively and never return `grantedScope`/`grantedAudience` that exceeds what you were given.
+5. **Policy hook widening is rejected by default.** The `GrantPolicyHook.evaluate()` result's `grantedScope` and `grantedAudience` are still allowed to override the request-derived values, but the handler re-checks them against the validated `subject_token` boundary before minting. Scope or audience widening returns `invalid_target` with `scope_widening_not_allowed` or `audience_widening_not_allowed`. Direct callers of `createTokenExchangeGrant()` can set the deprecated `allowPolicyWidening` migration escape hatch while replacing old widening policies; module wiring keeps the safe default.
 
-6. **Impersonation vs delegation.** An exchange without `actor_token` issues an impersonation token (no `act` claim). Deployments that require audit trails should add a `GrantPolicyHook` that rejects requests lacking `actor_token`:
+6. **Resource indicators must be represented in the issued audience.** When the request includes RFC 8707 `resource`, every requested resource must appear in the effective `grantedAudience` used for the exchange. A resource/audience mismatch returns `invalid_target` with `requested_resources_not_in_audience`.
+
+7. **Impersonation vs delegation.** An exchange without `actor_token` issues an impersonation token (no `act` claim). Deployments that require audit trails should add a `GrantPolicyHook` that rejects requests lacking `actor_token`:
 
    ```ts
    async evaluate(req) {
@@ -121,15 +123,19 @@ const handle = await createApp({
    }
    ```
 
-7. **Family cascade.** Issued access_tokens inherit the subject's `family_id` claim. Revoking the subject's family (e.g. on logout) automatically invalidates every token exchanged from it. This is the same mechanism auth.provider's introspect and userinfo endpoints use.
+8. **`may_act` is enforced when present.** If a subject token carries a `may_act` claim, the supplied `actor_token` must match one of its `{ sub?, iss? }` constraints. Malformed or non-matching `may_act` values fail closed with `may_act_violation`; subject tokens without `may_act` continue to use the existing policy-hook boundary.
 
-8. **Refresh / ID tokens are never issued.** Per RFC 8693 §4.2.2 the handler only returns an access_token. The response always carries `issued_token_type: "urn:ietf:params:oauth:token-type:access_token"`.
+9. **Actor chains are bounded.** `oauth.tokenExchange.maxActorChainDepth` defaults to `3` and can be overridden with `OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH`. When an `actor_token` would add to an already-full nested `act` chain, the handler rejects the request with `actor_chain_too_deep`.
 
-9. **Missing subject claim rejection.** Self-issued access_tokens without a `sub` claim (or with an empty-string `sub`) are rejected with `invalid_grant`. This prevents a silently-anonymous token from reaching downstream services.
+10. **Family cascade.** Issued access_tokens inherit the subject's `family_id` claim. Revoking the subject's family (e.g. on logout) automatically invalidates every token exchanged from it. This is the same mechanism auth.provider's introspect and userinfo endpoints use.
 
-10. **Validator contributions are immutable after boot.** The boot planner aggregates `tokenExchangeValidators` contributions, freezes the world during activation, and exposes only a read-only resolver to the grant handler. Post-boot mutation cannot replace the built-in validator at runtime.
+11. **Refresh / ID tokens are never issued.** Per RFC 8693 §4.2.2 the handler only returns an access_token. The response always carries `issued_token_type: "urn:ietf:params:oauth:token-type:access_token"`.
 
-11. **Confidential clients only (v0.5.0).** The handler requires `client_secret` and authenticates via `clientRepository.authenticate()`. Requests without a secret are rejected with `invalid_client` (401). The core `Client` type carries `clientSecret: string` as a required field and `PublicClient = Omit<Client, "clientSecret">`, so `findById()` alone cannot tell a "no secret configured" client from "secret omitted by caller" — accepting the unauthenticated path would let an attacker exchange a stolen `subject_token` under any client's allowlist. Public-client support is deferred until a `Client.public` flag (or equivalent) lands in core.
+12. **Missing subject claim rejection.** Self-issued access_tokens without a `sub` claim (or with an empty-string `sub`) are rejected with `invalid_grant`. This prevents a silently-anonymous token from reaching downstream services.
+
+13. **Validator contributions are immutable after boot.** The boot planner aggregates `tokenExchangeValidators` contributions, freezes the world during activation, and exposes only a read-only resolver to the grant handler. Post-boot mutation cannot replace the built-in validator at runtime.
+
+14. **Confidential clients only (v0.5.0).** The handler requires `client_secret` and authenticates via `clientRepository.authenticate()`. Requests without a secret are rejected with `invalid_client` (401). The core `Client` type carries `clientSecret: string` as a required field and `PublicClient = Omit<Client, "clientSecret">`, so `findById()` alone cannot tell a "no secret configured" client from "secret omitted by caller" — accepting the unauthenticated path would let an attacker exchange a stolen `subject_token` under any client's allowlist. Public-client support is deferred until a `Client.public` flag (or equivalent) lands in core.
 
 ## Registration pattern summary
 

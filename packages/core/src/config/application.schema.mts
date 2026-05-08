@@ -209,6 +209,14 @@ export const CoreConfigSchema = z.object({
 				maxLength: z.coerce.number().int().positive(),
 			})
 			.optional(),
+		// F10 (v0.5.3): bound RFC 8693 actor delegation chains so repeated
+		// token exchanges cannot grow unbounded nested `act` claims. Shape-only —
+		// defaults live in HOCON, not zod.
+		tokenExchange: z
+			.object({
+				maxActorChainDepth: z.coerce.number().int().positive(),
+			})
+			.optional(),
 	}),
 });
 

@@ -26,7 +26,7 @@ import type {
 	PublicClient,
 } from "@o3co/auth-provider-core";
 import { formatObject, generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
-import { buildActClaim } from "./act.mjs";
+import { buildActClaim, countActorChainDepth, matchesMayAct } from "./act.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 import type { ExchangeTokenValidator, ValidatedToken } from "./validator/types.mjs";
 
@@ -47,6 +47,11 @@ export interface ExchangeTokenValidatorResolver {
 export interface TokenExchangeDependencies extends GrantDependencies {
 	tokenExchangeValidatorResolver: ExchangeTokenValidatorResolver;
 	clientRepository: ClientRepository;
+	/**
+	 * Deprecated migration escape hatch. The default fail-closed behavior rejects
+	 * policy hook scope/audience outputs that exceed the validated subject token.
+	 */
+	allowPolicyWidening?: boolean;
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
@@ -380,6 +385,51 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
+			if (actorValidated) {
+				const subjectMayAct = subjectValidated.claims.may_act;
+				if (
+					subjectMayAct !== undefined &&
+					subjectMayAct !== null &&
+					!matchesMayAct(actorValidated, subjectMayAct)
+				) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							actor: actorValidated.sub,
+						},
+						"token_exchange_may_act_violation",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "may_act_violation: actor not authorized by subject token",
+						},
+					};
+				}
+
+				const maxActorChainDepth = getMaxActorChainDepth(deps);
+				const currentActorChainDepth = countActorChainDepth(subjectValidated.act);
+				if (currentActorChainDepth >= maxActorChainDepth) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							actor: actorValidated.sub,
+							currentActorChainDepth,
+							maxActorChainDepth,
+						},
+						"token_exchange_actor_chain_too_deep",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "actor_chain_too_deep: actor chain depth limit exceeded",
+						},
+					};
+				}
+			}
+
 			// Scope narrowing: requested scope ⊆ subject scope.
 			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
 			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
@@ -469,21 +519,61 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
-				// By design: policy hook output is trusted without re-verification against
-				// the subject's scope/audience. Widening is permitted because the hook is
-				// a first-party consumer-installed extension (spec §8.1 rule 4). If a
-				// consumer's policy accidentally widens scope, the token reflects that
-				// intent — detect via tests, not runtime checks.
 				if (decision.grantedScope) grantedScope = decision.grantedScope;
 				if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
+			}
+
+			if (!deps.allowPolicyWidening) {
+				const subjectScopeSet = new Set(subjectScope);
+				const widenedScopes = grantedScope?.filter((scope) => !subjectScopeSet.has(scope)) ?? [];
+				if (widenedScopes.length > 0) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+							widenedScopes,
+						},
+						"token_exchange_scope_widening_rejected",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `scope_widening_not_allowed: ${widenedScopes.join(" ")}`,
+						},
+					};
+				}
+
+				const subjectAudienceSet = new Set(
+					subjectAudienceBoundary(subjectValidated.aud, client.clientId),
+				);
+				const widenedAudiences =
+					grantedAudience?.filter((audience) => !subjectAudienceSet.has(audience)) ?? [];
+				if (widenedAudiences.length > 0) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+							widenedAudiences,
+						},
+						"token_exchange_audience_widening_rejected",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
+						},
+					};
+				}
 			}
 
 			// Audience derivation (spec §8.1 rule 2):
 			//   explicit narrowed audience  → use grantedAudience (first element).
 			//     Note: grantedAudience reflects either the allowlist-validated request
-			//     parameter OR a policy hook override. Policy overrides are NOT re-
-			//     validated against the client allowlist by design (spec §8.1 rule 4);
-			//     consumers with strict policies must enforce the boundary themselves.
+			//     parameter OR a policy hook override. Unless the deprecated
+			//     allowPolicyWidening escape hatch is set, policy overrides are
+			//     checked against the validated subject token boundary above.
 			//   omitted + subject single    → inherit subject.aud IFF in allowlist;
 			//                                   else fall back to clientId (prevents
 			//                                   cross-client audience confusion when a
@@ -520,6 +610,32 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 				return client.clientId;
 			})();
+
+			if (requestedResource && requestedResource.length > 0) {
+				const tokenAudienceSet = new Set(
+					grantedAudience && grantedAudience.length > 0 ? grantedAudience : [audienceForToken],
+				);
+				const missingResources = requestedResource.filter(
+					(resource) => !tokenAudienceSet.has(resource),
+				);
+				if (missingResources.length > 0) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+							missingResources,
+						},
+						"token_exchange_resource_not_in_audience",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `requested_resources_not_in_audience: ${missingResources.join(" ")}`,
+						},
+					};
+				}
+			}
 
 			const act = buildActClaim({
 				subject: subjectValidated,
@@ -570,6 +686,32 @@ function getExpiresIn(deps: TokenExchangeDependencies): number {
 	// for Token Exchange should wrap createTokenExchangeGrant() instead.
 	const top = (deps.config.oauth.accessToken as { expiresIn?: number } | undefined)?.expiresIn;
 	return typeof top === "number" && top > 0 ? top : 300;
+}
+
+function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
+	const tokenExchange = deps.config.oauth.tokenExchange as
+		| { maxActorChainDepth?: unknown }
+		| undefined;
+	const maxActorChainDepth = tokenExchange?.maxActorChainDepth;
+	return typeof maxActorChainDepth === "number" &&
+		Number.isInteger(maxActorChainDepth) &&
+		maxActorChainDepth > 0
+		? maxActorChainDepth
+		: 3;
+}
+
+function subjectAudienceBoundary(
+	audience: ValidatedToken["aud"],
+	clientId: string,
+): readonly string[] {
+	if (typeof audience === "string" && audience.length > 0) return [audience];
+	if (Array.isArray(audience)) {
+		const values = audience.filter(
+			(value): value is string => typeof value === "string" && value.length > 0,
+		);
+		return values.length > 0 ? values : [clientId];
+	}
+	return [clientId];
 }
 
 function normalizeArrayParam(value: unknown): string[] | null {

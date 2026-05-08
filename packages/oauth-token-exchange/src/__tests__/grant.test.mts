@@ -67,6 +67,7 @@ function buildGrant(
 		validatorRefreshStore?: ReturnType<typeof makeFamilyRevocation> | null;
 		config?: AppConfig;
 		grantPolicy?: GrantPolicyHookBase;
+		allowPolicyWidening?: boolean;
 	} = {},
 ) {
 	const registry = overrides.validatorRegistry ?? new ExchangeTokenValidatorRegistry();
@@ -99,6 +100,9 @@ function buildGrant(
 		// test scaffolding even though it is no longer publicly exported.
 		tokenExchangeValidatorResolver: registry,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
+		...(overrides.allowPolicyWidening !== undefined
+			? { allowPolicyWidening: overrides.allowPolicyWidening }
+			: {}),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 	});
 }
@@ -498,7 +502,10 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 				publicClient({ allowedAudiences: ["billing", "inventory"] }),
 			),
 		});
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const token = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			aud: ["billing", "inventory"],
+		});
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
@@ -509,6 +516,27 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 			}),
 		);
 		expect(result.status).toBe(200);
+	});
+
+	it("rejects audience that is client-allowed but outside the subject audience", async () => {
+		const g = buildGrant({
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["inventory"] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: "billing", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "inventory",
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: expect.stringMatching(/audience_widening_not_allowed/),
+		});
 	});
 
 	it("mints a token when audience is empty array (treated as no audience requested)", async () => {
@@ -578,6 +606,90 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		expect(result.status).toBe(200);
 		if (result.status !== 200) return;
 		expect(result.tokens.scope).toBe("read write");
+	});
+});
+
+describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
+	it("rejects when policy hook widens scope beyond subject scope by default", async () => {
+		const wideningPolicy: GrantPolicyHookBase = {
+			kind: "scope-widening",
+			async evaluate() {
+				return {
+					outcome: "allow",
+					grantedScope: ["read", "write"],
+				};
+			},
+		};
+		const g = buildGrant({ grantPolicy: wideningPolicy });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: expect.stringMatching(/scope_widening_not_allowed/),
+		});
+	});
+
+	it("rejects when policy hook widens audience beyond subject aud by default", async () => {
+		const wideningPolicy: GrantPolicyHookBase = {
+			kind: "audience-widening",
+			async evaluate() {
+				return {
+					outcome: "allow",
+					grantedAudience: ["billing", "inventory"],
+				};
+			},
+		};
+		const g = buildGrant({ grantPolicy: wideningPolicy });
+		const token = await signSelfIssuedAccessToken({
+			aud: "billing",
+			family_id: "fam-1",
+		});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: expect.stringMatching(/audience_widening_not_allowed/),
+		});
+	});
+
+	it("allows explicit policy widening only when allowPolicyWidening=true", async () => {
+		const wideningPolicy: GrantPolicyHookBase = {
+			kind: "widening-opt-in",
+			async evaluate() {
+				return {
+					outcome: "allow",
+					grantedScope: ["read", "write", "admin"],
+				};
+			},
+		};
+		const g = buildGrant({ grantPolicy: wideningPolicy, allowPolicyWidening: true });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		expect(result.tokens.scope).toBe("read write admin");
 	});
 });
 
@@ -833,6 +945,157 @@ describe("createTokenExchangeGrant — happy path", () => {
 		expect(payload.act).toEqual({ sub: "svc-b", act: { sub: "svc-upstream" } });
 	});
 
+	it("rejects actor delegation when subject may_act does not authorize actor.sub", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			may_act: [{ sub: "svc-allowed" }],
+		});
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-attacker" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/may_act_violation/),
+		});
+	});
+
+	it("accepts actor delegation when actor matches may_act sub and iss", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			may_act: [{ sub: "svc-a", iss: ISSUER }],
+		});
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a", iss: ISSUER });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.act).toEqual({ sub: "svc-a" });
+	});
+
+	it("rejects actor delegation when may_act iss does not match actor iss", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			may_act: [{ sub: "svc-a", iss: "https://trusted.example" }],
+		});
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a", iss: ISSUER });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/may_act_violation/),
+		});
+	});
+
+	it("rejects actor delegation when may_act is an empty actor list", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			may_act: [],
+		});
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/may_act_violation/),
+		});
+	});
+
+	it("rejects actor delegation fail-closed when may_act is malformed", async () => {
+		const g = buildGrant();
+		const subject = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			may_act: "svc-a",
+		});
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/may_act_violation/),
+		});
+	});
+
+	it("rejects actor delegation when adding actor would exceed maxActorChainDepth", async () => {
+		const g = buildGrant({
+			config: {
+				...mockConfig,
+				oauth: {
+					...mockConfig.oauth,
+					tokenExchange: { maxActorChainDepth: 2 },
+				},
+			} as unknown as AppConfig,
+		});
+		const subject = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			act: { sub: "svc-2", act: { sub: "svc-1" } },
+		});
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-3" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: subject,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: actor,
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: expect.stringMatching(/actor_chain_too_deep/),
+		});
+	});
+
 	it("inherits family_id from subject (cascade revoke)", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-xyz" });
@@ -873,7 +1136,11 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				publicClient({ allowedAudiences: ["billing", "inventory"] }),
 			),
 		});
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read write" });
+		const token = await signSelfIssuedAccessToken({
+			family_id: "fam-1",
+			scope: "read write",
+			aud: ["billing", "inventory"],
+		});
 		const { result } = await g.handle(
 			ctx({
 				client_id: "client-a",
@@ -911,11 +1178,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
 	});
 
-	it("documents that policy hook may widen scope beyond subject (by design — see spec §8.1 rule 4)", async () => {
-		// This test documents the intentional widening behavior. The built-in
-		// scope subset check (requested ⊆ subject) is NOT re-applied to policy
-		// hook output. Consumers who install a widening policy accept the
-		// consequences per spec §8.1.
+	it("documents that policy hook widening requires explicit allowPolicyWidening opt-in", async () => {
 		const wideningPolicy: GrantPolicyHookBase = {
 			kind: "widening",
 			async evaluate() {
@@ -925,7 +1188,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				};
 			},
 		};
-		const g = buildGrant({ grantPolicy: wideningPolicy });
+		const g = buildGrant({ grantPolicy: wideningPolicy, allowPolicyWidening: true });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read" });
 		const { result } = await g.handle(
 			ctx({
@@ -937,7 +1200,6 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		);
 		expect(result.status).toBe(200);
 		if (result.status !== 200) return;
-		// Policy successfully widened scope — this is the documented behavior.
 		expect(result.tokens.scope).toBe("read write admin");
 	});
 
@@ -947,11 +1209,14 @@ describe("createTokenExchangeGrant — policy hook", () => {
 			kind: "capture",
 			async evaluate(req) {
 				captured = req;
-				return { outcome: "allow" };
+				return { outcome: "allow", grantedAudience: ["https://api.example.com"] };
 			},
 		};
 		const g = buildGrant({ grantPolicy: capturing });
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+		const token = await signSelfIssuedAccessToken({
+			aud: ["https://api.example.com"],
+			family_id: "fam-1",
+		});
 		await g.handle(
 			ctx({
 				client_id: "client-a",
@@ -963,6 +1228,64 @@ describe("createTokenExchangeGrant — policy hook", () => {
 		);
 		expect(captured).not.toBeNull();
 		expect(captured?.resource).toEqual(["https://api.example.com"]);
+	});
+
+	it("rejects resource when it is missing from the issued-token audience", async () => {
+		const policy: GrantPolicyHookBase = {
+			kind: "resource-missing",
+			async evaluate() {
+				return { outcome: "allow", grantedAudience: ["https://other.example.com"] };
+			},
+		};
+		const g = buildGrant({ grantPolicy: policy });
+		const token = await signSelfIssuedAccessToken({
+			aud: ["https://api.example.com", "https://other.example.com"],
+			family_id: "fam-1",
+		});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: "https://api.example.com",
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: expect.stringMatching(/requested_resources_not_in_audience/),
+		});
+	});
+
+	it("mints a token when all requested resources are in the policy-returned audience", async () => {
+		const policy: GrantPolicyHookBase = {
+			kind: "resource-ok",
+			async evaluate() {
+				return {
+					outcome: "allow",
+					grantedAudience: ["https://api.example.com/users", "https://api.example.com/orders"],
+				};
+			},
+		};
+		const g = buildGrant({ grantPolicy: policy });
+		const token = await signSelfIssuedAccessToken({
+			aud: ["https://api.example.com/users", "https://api.example.com/orders"],
+			family_id: "fam-1",
+		});
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: ["https://api.example.com/users", "https://api.example.com/orders"],
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (result.status !== 200) return;
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("https://api.example.com/users");
 	});
 });
 
