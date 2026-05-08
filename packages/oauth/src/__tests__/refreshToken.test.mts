@@ -519,7 +519,9 @@ describe("createRefreshTokenGrant", () => {
 				expect(result.error).toBe("invalid_grant");
 				expect(result.errorDescription).toBe("invalid refresh_token");
 			});
+		});
 
+		describe("legacyTokenCompat: backward compat (regression)", () => {
 			it("RT-4 regression: legacy path still works when legacyTokenCompat is true", async () => {
 				const legacyToken = await new SignJWT({
 					type: "refresh",

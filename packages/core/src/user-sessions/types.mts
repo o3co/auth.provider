@@ -55,9 +55,10 @@ export interface RegisteredRP {
  * for A4 aggregates. Per A3 §5.1: low-level storage primitives (A3:
  * ChallengeStore, RefreshTokenFamilyStore, ReplaySeenSet) use epoch-ms
  * `number` to eliminate Date mutation surface. A4 higher-level aggregates use
- * `Date` for ergonomics at the application layer. Callers bridging A3/A4
- * convert at the boundary (e.g. `new Date(family.expiresAtMs)` in cascade-
- * logout). This is a deliberate two-tier design, not an inconsistency.
+ * `Date` for ergonomics at the application layer. Callers bridging A3 and A4
+ * convert explicitly at the boundary (`new Date(epochMs)` to lift, or
+ * `someDate.getTime()` to lower) so the two encodings never alias the same
+ * field. This is a deliberate two-tier design, not an inconsistency.
  */
 export interface UserSession {
 	readonly sid: string;
