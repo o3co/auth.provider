@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-05-09
+
+### Dependencies
+
+- **`@o3co/auth.utils` minimum version bumped from `^0.0.3` to
+  `^0.0.4`** in `templates/standalone/package.json`. The 0.0.4 release
+  rewrites `gracefulShutdown` so the cleanup callback is awaited
+  (`() => void | Promise<void>`) inside `server.close()` after in-flight
+  requests drain, plus an idempotent guard against repeated SIGTERM /
+  SIGINT delivery. The `templates/standalone/src/app.mts` call
+  `gracefulShutdown(server, () => handle.dispose())` was already passing
+  an async `dispose()` that the previous sync impl silently dropped;
+  with `auth.utils@0.0.4` the lifecycle drain in `auth.provider` v0.5.x
+  is properly awaited before the process exits. Cross-repo upstream
+  PR: o3co/auth.utils#7. No changes to consumer call sites in this
+  template are required.
+
 ### Changed (SC residual batch — supply-chain hygiene, v0.5.2)
 
 - **`pnpm.onlyBuiltDependencies` allowlist added at the workspace root
