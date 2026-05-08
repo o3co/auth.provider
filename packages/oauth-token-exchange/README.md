@@ -109,7 +109,7 @@ const handle = await createApp({
 
 5. **Policy hook widening is rejected by default.** The `GrantPolicyHook.evaluate()` result's `grantedScope` and `grantedAudience` are still allowed to override the request-derived values, but the handler re-checks them against the validated `subject_token` boundary before minting. Scope or audience widening returns `invalid_target` with `scope_widening_not_allowed` or `audience_widening_not_allowed`. Direct callers of `createTokenExchangeGrant()` can set the deprecated `allowPolicyWidening` migration escape hatch while replacing old widening policies; module wiring keeps the safe default.
 
-6. **Resource indicators must be represented in the issued audience.** When the request includes RFC 8707 `resource`, every requested resource must appear in the effective `grantedAudience` used for the exchange. A resource/audience mismatch returns `invalid_target` with `requested_resources_not_in_audience`.
+6. **Resource indicators must equal the issued-token audience.** When the request includes RFC 8707 `resource`, every requested resource must equal `audienceForToken` — the single value that will be minted into the issued token's `aud` claim (typically `grantedAudience[0]`). Multi-resource requests whose resources cannot all be represented in the single-valued `aud` are rejected with `invalid_target` / `requested_resources_not_in_audience`. This avoids issuing a token whose `aud` silently disagrees with the requested resource (RFC 8707 §3).
 
 7. **Impersonation vs delegation.** An exchange without `actor_token` issues an impersonation token (no `act` claim). Deployments that require audit trails should add a `GrantPolicyHook` that rejects requests lacking `actor_token`:
 
