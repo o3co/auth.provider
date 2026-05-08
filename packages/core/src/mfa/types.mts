@@ -119,7 +119,7 @@ export interface MfaTransactionStore {
 	 * Persist a pending MFA transaction.
 	 *
 	 * Renamed from `save` in v0.5.1 (AS-11) to align with map-like store
-	 * semantics ({@link UserSessionStore}, KeyStore). The old `save` name is
+	 * semantics ({@link UserSessionStore}, {@link KeyStore}). The old `save` name is
 	 * no longer accepted; the v0.5.1 hotfix policy explicitly permits this
 	 * rename for an interface that was new in v0.5.0.
 	 */

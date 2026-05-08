@@ -56,9 +56,10 @@ export interface FederationTokenStoreBase {
 	 * Remove all federation entries for a session. Idempotent.
 	 *
 	 * Verb-aligned with sibling session stores
-	 * ({@link UserSessionStore}, sessionRPRegistry, sessionFamilyIndex,
-	 * sessionFederationIndex) which all expose `removeBySid(sid)` for the
-	 * same "bulk-remove records scoped to a session id" responsibility.
+	 * ({@link UserSessionStore}, {@link SessionRPRegistry},
+	 * {@link SessionFamilyIndex}, {@link SessionFederationIndex}) which all
+	 * expose `removeBySid(sid)` for the same "bulk-remove records scoped to
+	 * a session id" responsibility.
 	 *
 	 * Renamed from `deleteBySession` in v0.5.1 (AS-3); the old name is no
 	 * longer accepted because `FederationTokenStoreBase` was new in v0.5.0
