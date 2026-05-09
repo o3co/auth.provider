@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.5.3] — 2026-05-09
+
 ### Security (Phase F — F10 Token Exchange hardening)
 
 - Token Exchange now rejects policy hook scope/audience widening by default,
@@ -61,6 +63,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `/_healthcheck`.
 - Added a developer cleanup note for stale untracked `packages/did/` artifacts
   left in local workspaces after the DID grant package was removed from git.
+
+### Fixed (Phase F — F13b residual test coverage + sessionRPRegistry hardening)
+
+- Added regression coverage: testcontainers integration for `RedisCodeRepository`
+  TTL / extended-field round-trip (TD-4), residual OAuth route + introspection-
+  cascade tests (TD-5 / TD-10), and unit tests for the `SessionRPRegistry`
+  envelope guard.
+- `RedisSessionRPRegistry` now validates JSON envelope shape (rejecting array
+  payloads + non-finite `registeredAtMs`) and logs corrupt records with the
+  structured `{ sid, reason, cause? }` shape used by the sibling
+  `UserSessionStore` adapter. The previous `{ json: ... }` snippet field is
+  dropped to avoid leaking sensitive payloads on log sinks. The Redis
+  adapter builder now forwards optional `logger` so the corrupt-envelope
+  warn path is reachable from the builder construction route.
 
 ## [0.5.2] — 2026-05-09
 
