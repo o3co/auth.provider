@@ -233,6 +233,7 @@ describe("AppConfigSchema backward compatibility", () => {
 			},
 			session: {
 				secret: "session-secret",
+				name: "__Host-auth.session",
 				maxAge: 3600000,
 				secure: true,
 				sameSite: "lax",

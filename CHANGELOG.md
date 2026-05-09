@@ -49,6 +49,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   without a valid hint renders a confirmation page instead of triggering
   logout.
 
+### Changed (Phase F — F13a cleanup/operational hardening)
+
+- Standalone session cookies now default to `SESSION_NAME=__Host-auth.session`,
+  with boot-time validation that `__Host-` names are only used with
+  `SESSION_SECURE=true` and no `SESSION_DOMAIN`.
+- Redis session-store key namespacing is documented and preserved through
+  config validation via `REDIS_SESSION_STORES_KEY_PREFIX`.
+- The standalone Dockerfile now runs install/build steps as the `node` user,
+  declares `EXPOSE 3000`, and includes a Docker-native healthcheck for
+  `/_healthcheck`.
+- Added a developer cleanup note for stale untracked `packages/did/` artifacts
+  left in local workspaces after the DID grant package was removed from git.
+
 ## [0.5.2] — 2026-05-09
 
 ### Changed (auth.utils dependency bump, v0.5.2)

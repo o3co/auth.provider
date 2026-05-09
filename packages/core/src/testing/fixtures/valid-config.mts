@@ -95,6 +95,7 @@ export function makeValidFullSections() {
 	return {
 		session: {
 			secret: "test-session-secret",
+			name: "__Host-auth.session",
 			maxAge: 3600000,
 			secure: true,
 			sameSite: "lax",

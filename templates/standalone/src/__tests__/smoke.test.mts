@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { readFileSync } from "node:fs";
 import {
 	type AppConfig,
 	createApp,
@@ -29,6 +30,8 @@ import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
+
+const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false },
@@ -60,6 +63,7 @@ const config: AppConfig = {
 	},
 	session: {
 		secret: "test-session-secret",
+		name: "auth.sid",
 		maxAge: 3600000,
 		secure: false,
 		sameSite: "lax",
@@ -179,6 +183,36 @@ describe("standalone smoke test", () => {
 	afterEach(async () => {
 		await handleRef?.dispose();
 		handleRef = undefined;
+	});
+
+	it("Dockerfile declares runtime metadata and runs install/build steps as node", () => {
+		// Default port is 3000 but the HEALTHCHECK and EXPOSE must read it
+		// from ${HTTP_PORT} so an operator overriding the env var keeps the
+		// app, EXPOSE metadata, and healthcheck in sync. Assert the ENV /
+		// EXPOSE / HEALTHCHECK structure rather than the literal port so the
+		// test is not brittle when operators or downstream forks change the
+		// default.
+		// The literal `${HTTP_PORT}` token from the Dockerfile is split across
+		// concatenations to sidestep biome's `noTemplateCurlyInString` rule
+		// (it cannot statically tell that this string is intentionally NOT
+		// a JS template placeholder — it is a Dockerfile env-substitution).
+		const HTTP_PORT_VAR = `$${"{"}HTTP_PORT}`;
+		expect(dockerfile).toContain("ENV HTTP_PORT=3000");
+		expect(dockerfile).toContain(`EXPOSE ${HTTP_PORT_VAR}`);
+		expect(dockerfile).toMatch(
+			/HEALTHCHECK\s+--interval=30s\s+--timeout=3s\s+--start-period=10s\s+--retries=3/,
+		);
+		// Match the literal `${HTTP_PORT}` token inside the HEALTHCHECK CMD.
+		// `[$]` (character class) sidesteps biome's `noTemplateCurlyInString`
+		// false-positive without changing what we actually accept.
+		expect(dockerfile).toMatch(
+			/CMD\s+wget\s+-q\s+-O\s+\/dev\/null\s+"http:\/\/localhost:[$]\{HTTP_PORT\}\/_healthcheck"\s+\|\|\s+exit\s+1/,
+		);
+		expect(dockerfile).toMatch(/FROM node-base AS deps[\s\S]*USER node[\s\S]*RUN pnpm install/);
+		expect(dockerfile).toMatch(/FROM deps AS builder[\s\S]*USER node[\s\S]*RUN pnpm run build/);
+		expect(dockerfile).toMatch(
+			/FROM node-base AS runtime[\s\S]*USER node[\s\S]*RUN pnpm install --prod/,
+		);
 	});
 
 	it("GET /_healthcheck returns 200", async () => {

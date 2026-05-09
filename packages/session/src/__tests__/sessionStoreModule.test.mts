@@ -10,12 +10,15 @@
 // covered by templates/standalone/src/__tests__/smoke.test.mts.
 
 import type { LifecycleRegistrar, Module } from "@o3co/auth-provider-core";
+import express from "express";
+import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { sessionStoreModule } from "../modules/sessionStoreModule.mjs";
 
 interface SessionLikeConfig {
 	session: {
 		secret: string;
+		name: string;
 		secure: boolean;
 		maxAge: number;
 		sameSite: "lax" | "strict" | "none";
@@ -27,6 +30,7 @@ interface SessionLikeConfig {
 const baseConfig: SessionLikeConfig = {
 	session: {
 		secret: "test-secret-at-least-32-chars-long!",
+		name: "test.sid",
 		secure: false,
 		maxAge: 3600_000,
 		sameSite: "lax",
@@ -100,5 +104,67 @@ describe("sessionStoreModule (D-5)", () => {
 		// configured to "redis".
 		expect(route.id).toBe("session-middleware");
 		expect(reg.calls).toHaveLength(0);
+	});
+
+	it("uses session.name as the express-session cookie name", async () => {
+		const m = sessionStoreModule as unknown as Module;
+		const factory = m.contributes?.routes?.[0];
+		if (typeof factory !== "function") throw new Error("not a factory");
+		const route = await factory({
+			config: {
+				session: {
+					...baseConfig.session,
+					name: "auth.sid",
+					secure: false,
+					domain: null,
+				},
+			} as never,
+			lifecycleRegistrar: undefined,
+		} as never);
+		const app = express();
+		app.use(route.handler);
+		app.post("/touch", (req, res) => {
+			(req.session as unknown as Record<string, unknown>).touched = true;
+			res.status(200).json({ ok: true });
+		});
+
+		const res = await request(app).post("/touch");
+
+		const cookie = res.headers["set-cookie"]?.[0] ?? "";
+		expect(cookie).toMatch(/^auth\.sid=/);
+	});
+
+	it("rejects __Host- session names when secure/domain constraints are violated", async () => {
+		const m = sessionStoreModule as unknown as Module;
+		const factory = m.contributes?.routes?.[0];
+		if (typeof factory !== "function") throw new Error("not a factory");
+
+		await expect(
+			factory({
+				config: {
+					session: {
+						...baseConfig.session,
+						name: "__Host-auth.session",
+						secure: false,
+						domain: null,
+					},
+				} as never,
+				lifecycleRegistrar: undefined,
+			} as never),
+		).rejects.toThrow(/__Host-/);
+
+		await expect(
+			factory({
+				config: {
+					session: {
+						...baseConfig.session,
+						name: "__Host-auth.session",
+						secure: true,
+						domain: "example.com",
+					},
+				} as never,
+				lifecycleRegistrar: undefined,
+			} as never),
+		).rejects.toThrow(/__Host-/);
 	});
 });

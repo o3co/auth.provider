@@ -59,11 +59,20 @@ export const sessionStoreModule = defineModule<"config", "lifecycleRegistrar">({
 				const factory = createSessionStoreFactory(ctx);
 				registerBuiltinSessionStores(factory);
 				const storageSlice = config.session.storage as { type: string } & Record<string, unknown>;
+				if (
+					config.session.name.startsWith("__Host-") &&
+					(config.session.secure !== true || config.session.domain !== null)
+				) {
+					throw new Error(
+						"session.name with __Host- prefix requires session.secure=true and session.domain=null",
+					);
+				}
 				const store = await factory.create({
 					type: storageSlice.type,
 					...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
 				});
 				const middleware = session({
+					name: config.session.name,
 					secret: config.session.secret,
 					resave: false,
 					saveUninitialized: false,

@@ -13,10 +13,16 @@ FROM node-base AS deps
 
 COPY package.json ./
 
+USER node
+
 RUN pnpm install
 
 #############################################
 FROM deps AS builder
+
+# USER node inherited from deps stage; repeated here to make the builder
+# hardening invariant obvious in Dockerfile reviews.
+USER node
 
 COPY tsconfig.json ./
 COPY config/ ./config/
@@ -31,13 +37,22 @@ ENV NODE_ENV=production
 
 COPY --from=deps /home/node/package.json /home/node/pnpm-lock.yaml ./
 
+USER node
+
 RUN pnpm install --prod \
  && pnpm store prune
 
 COPY --from=builder /home/node/dist/ ./dist/
 COPY --from=builder /home/node/config/ ./config/
 
-USER node
+ENV HTTP_PORT=3000
+EXPOSE ${HTTP_PORT}
+
+# Use the shell form so ${HTTP_PORT} expands at probe time. The HOCON
+# config reads `${?HTTP_PORT}` for `http.port`, so app.listen() and the
+# healthcheck stay in sync regardless of the operator's port choice.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null "http://localhost:${HTTP_PORT}/_healthcheck" || exit 1
 
 ENTRYPOINT ["tini", "--"]
 CMD ["node", "dist/app.mjs"]
@@ -52,7 +67,5 @@ CMD ["pnpm", "run", "test", "--", "--passWithNoTests"]
 
 #############################################
 FROM builder AS develop
-
-USER node
 
 CMD ["pnpm", "run", "debug"]
