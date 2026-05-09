@@ -121,6 +121,7 @@ async function buildAuthorizeApp(opts: {
 	 * (the no-override path uses the `?? 256` fallback only).
 	 */
 	configOverride?: Partial<AppConfig>;
+	clientRepo?: ClientRepository;
 	logger?: Logger;
 }) {
 	const app = express();
@@ -170,7 +171,7 @@ async function buildAuthorizeApp(opts: {
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
 		config: mergedConfig,
-		clientRepository: authorizeClientRepo,
+		clientRepository: opts.clientRepo ?? authorizeClientRepo,
 		codeRepository: codeRepo,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		logger: opts.logger,
@@ -638,7 +639,59 @@ describe("IH-6: /authorize openid scope gate", () => {
 		expect(location.searchParams.get("state")).toBe("state-missing-openid");
 		expect(captureCode).not.toHaveBeenCalled();
 		expect(logger.warn).toHaveBeenCalledWith(
-			{ clientId: "client-1", requestedScopes: ["profile"] },
+			{
+				clientId: "client-1",
+				requestedScopes: ["profile"],
+				allowedFilteredScopes: ["profile"],
+			},
+			"authorize_rejected_missing_openid_scope",
+		);
+	});
+
+	it("rejects when openid is requested but client allowlist filters it out (oidc-required bypass guard)", async () => {
+		// Regression: previously the gate only checked requestedScopes, so a
+		// client whose allowedScopes did not include `openid` would silently
+		// pass the gate even when the server is `oidc-required` and the
+		// request asked for openid — the request would then proceed as
+		// OAuth-only because allowedFilteredScopes drops openid.
+		const captureCode = vi.fn();
+		const logger = createMockLogger();
+		const restrictedClientRepo: ClientRepository = {
+			findById: async () => ({
+				clientId: "client-1",
+				allowedRedirectUris: ["https://example.test/cb"],
+				// openid is intentionally absent — emulates a non-OIDC client.
+				allowedScopes: ["profile"],
+			}),
+			authenticate: async () => null,
+		};
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-oidc-bypass" },
+			captureCode,
+			clientRepo: restrictedClientRepo,
+			logger,
+		});
+
+		const res = await request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: "client-1",
+			redirect_uri: "https://example.test/cb",
+			state: "state-bypass",
+			scope: "openid profile",
+		});
+
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location);
+		expect(location.searchParams.get("error")).toBe("invalid_scope");
+		expect(location.searchParams.get("error_description")).toMatch(/openid scope is required/i);
+		expect(location.searchParams.get("state")).toBe("state-bypass");
+		expect(captureCode).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				clientId: "client-1",
+				requestedScopes: ["openid", "profile"],
+				allowedFilteredScopes: ["profile"],
+			},
 			"authorize_rejected_missing_openid_scope",
 		);
 	});

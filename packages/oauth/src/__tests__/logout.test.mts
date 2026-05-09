@@ -236,7 +236,9 @@ function expectLogoutConfirmation(res: Awaited<ReturnType<typeof getLogout>>) {
 	expect(res.headers["content-type"]).toMatch(/^text\/html/);
 	expect(res.text).toContain("<form");
 	expect(res.text).toContain('method="POST"');
-	expect(res.text).toContain('action="logout"');
+	// action="" submits to the current URL — avoids the relative-URL trap
+	// where action="logout" on /oauth/logout/ resolves to /oauth/logout/logout.
+	expect(res.text).toContain('action=""');
 }
 
 describe("POST /oauth/logout", () => {
@@ -258,6 +260,30 @@ describe("POST /oauth/logout", () => {
 			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 			// cascadeLogout step 2: federation tokens cleared
 			expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
+		});
+
+		it("confirmed=1 form-submission shape (hint + confirmed + state) completes hint-based logout, not 400", async () => {
+			// Regression: the GET confirmation page submits a POST whose body
+			// includes `confirmed=1` plus the id_token_hint passed through as
+			// a hidden input. Previously the form did not include the hint,
+			// so the "Sign out" button always hit a 400 invalid_request. This
+			// asserts the same shape the form submits today reaches the
+			// hint-based logout path and returns 200.
+			const sessionStore = makeSessionStore();
+			const refreshFamilyRevocation = makeFamilyRevocation();
+			const app = buildApp({ sessionStore, refreshFamilyRevocation });
+			const token = await mintIdToken();
+
+			const res = await postLogout(app, {
+				id_token_hint: token,
+				confirmed: "1",
+				state: "round-trip",
+			});
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ logged_out: true });
+			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
+			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 		});
 	});
 
@@ -754,7 +780,10 @@ describe("GET /oauth/logout", () => {
 		expect(fedTokenStore.removeBySid).toHaveBeenCalledWith("sid-1");
 	});
 
-	it("renders confirmation HTML and does not log out when id_token_hint is missing", async () => {
+	it("returns 400 invalid_request when id_token_hint is missing (no hint to pass through)", async () => {
+		// With no id_token_hint, a confirmation page would render a "Sign out"
+		// button whose POST cannot satisfy the hint requirement, so reject
+		// directly rather than show a confirmation that always fails.
 		const sessionStore = makeSessionStore();
 		const refreshFamilyRevocation = makeFamilyRevocation();
 		const app = buildApp({ sessionStore, refreshFamilyRevocation });
@@ -763,7 +792,8 @@ describe("GET /oauth/logout", () => {
 			post_logout_redirect_uri: "https://rp.example/logged-out",
 		});
 
-		expectLogoutConfirmation(res);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_request");
 		expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
 		expect(sessionStore.delete).not.toHaveBeenCalled();
 	});
@@ -776,6 +806,11 @@ describe("GET /oauth/logout", () => {
 		const res = await getLogout(app, { id_token_hint: "not.a.valid.jwt" });
 
 		expectLogoutConfirmation(res);
+		// Confirmation page must propagate the original logout params as
+		// hidden inputs so the confirmed POST can reach the hint-based path
+		// (regression: previously the POST saw no hint and returned 400, so
+		// the "Sign out" button was permanently broken).
+		expect(res.text).toContain('name="id_token_hint"');
 		expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
 		expect(sessionStore.delete).not.toHaveBeenCalled();
 	});
@@ -786,11 +821,42 @@ describe("GET /oauth/logout", () => {
 		const app = buildApp({ sessionStore, refreshFamilyRevocation });
 		const token = await mintOldIdToken();
 
-		const res = await getLogout(app, { id_token_hint: token });
+		const res = await getLogout(app, {
+			id_token_hint: token,
+			post_logout_redirect_uri: "https://rp.example/logged-out",
+			state: "xyz",
+		});
 
 		expectLogoutConfirmation(res);
+		// All three params must round-trip into the form so a confirmed POST
+		// completes the standard hint-based logout (verification on POST has
+		// no staleness check, so the same hint will succeed there).
+		expect(res.text).toContain(`value="${token}"`);
+		expect(res.text).toContain('name="id_token_hint"');
+		expect(res.text).toContain('name="post_logout_redirect_uri"');
+		expect(res.text).toContain('value="https://rp.example/logged-out"');
+		expect(res.text).toContain('name="state"');
+		expect(res.text).toContain('value="xyz"');
 		expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
 		expect(sessionStore.delete).not.toHaveBeenCalled();
+	});
+
+	it("HTML-escapes hidden input values to prevent attribute injection", async () => {
+		// state may carry attacker-influenced characters in the worst case;
+		// the GET-confirm path echoes it into an HTML attribute so it must
+		// be escaped (regression: `"` would break out of the value attr).
+		const sessionStore = makeSessionStore();
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const app = buildApp({ sessionStore, refreshFamilyRevocation });
+
+		const res = await getLogout(app, {
+			id_token_hint: "not.a.valid.jwt",
+			state: 'evil"><script>alert(1)</script>',
+		});
+
+		expectLogoutConfirmation(res);
+		expect(res.text).not.toContain('"><script>');
+		expect(res.text).toContain("&quot;");
 	});
 });
 

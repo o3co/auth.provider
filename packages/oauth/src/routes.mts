@@ -687,10 +687,20 @@ export const createOAuthRouter = async (
 				if (
 					isActingAsOidcProvider &&
 					oidcMode === "oidc-required" &&
-					!requestedScopes.includes("openid")
+					// Two failure modes both undermine "OIDC required":
+					//   (a) the request itself omits openid;
+					//   (b) the request includes openid but the client allowlist
+					//       filters it out — without checking the filtered set
+					//       the request would silently proceed as OAuth-only
+					//       even though the server is configured oidc-required.
+					(!requestedScopes.includes("openid") || !allowedFilteredScopes.includes("openid"))
 				) {
 					logger.warn(
-						{ clientId: client_id, requestedScopes },
+						{
+							clientId: client_id,
+							requestedScopes,
+							allowedFilteredScopes,
+						},
 						"authorize_rejected_missing_openid_scope",
 					);
 					return redirectError(

@@ -40,6 +40,12 @@ const mockConfig = {
 		jwt: { issuer: "https://auth.example" },
 		accessToken: { expiresIn: 3600 },
 		refreshToken: { expiresIn: 86400 },
+		// These tests target audit / grantPolicy / rateLimit hooks at the
+		// authorize endpoint and do not request openid. oidcMode defaults to
+		// "oidc-required" with an issuer configured, which would reject every
+		// request as invalid_scope before the hook paths run. Opt out with
+		// dual mode so the hook behavior is the only variable under test.
+		oidcMode: "dual",
 	},
 	rateLimit: {
 		login: { windowMs: 60_000, limit: 100 },

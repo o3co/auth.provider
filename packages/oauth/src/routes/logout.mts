@@ -88,15 +88,46 @@ function extractLogoutParams(req: Request): {
 	};
 }
 
-function renderLogoutConfirmation(res: Response): Response {
+const HTML_ESCAPE: Record<string, string> = {
+	"&": "&amp;",
+	"<": "&lt;",
+	">": "&gt;",
+	'"': "&quot;",
+	"'": "&#39;",
+};
+
+function escapeHtml(s: string): string {
+	return s.replace(/[&<>"']/g, (c) => HTML_ESCAPE[c] ?? c);
+}
+
+function hiddenInput(name: string, value: string | undefined): string {
+	if (typeof value !== "string" || value.length === 0) return "";
+	return `    <input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />\n`;
+}
+
+function renderLogoutConfirmation(
+	res: Response,
+	params: {
+		idTokenHint?: string;
+		postLogoutRedirectUri?: string;
+		state?: string;
+	},
+): Response {
+	// Pass the original logout params through as hidden inputs so that the
+	// confirmed POST can complete the standard hint-based flow. Without this,
+	// the POST handler rejects with 400 invalid_request because id_token_hint
+	// is missing — the "Sign out" button would never actually log out.
+	// `action=""` posts to the current URL: this avoids a relative-URL trap
+	// when /oauth/logout is reached with a trailing slash (`/oauth/logout/`),
+	// where `action="logout"` would resolve to `/oauth/logout/logout`.
 	const html = `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Confirm Logout</title></head>
 <body>
   <h1>Sign out</h1>
   <p>Do you want to sign out from all applications?</p>
-  <form method="POST" action="logout">
-    <input type="hidden" name="confirmed" value="1" />
+  <form method="POST" action="">
+${hiddenInput("id_token_hint", params.idTokenHint)}${hiddenInput("post_logout_redirect_uri", params.postLogoutRedirectUri)}${hiddenInput("state", params.state)}    <input type="hidden" name="confirmed" value="1" />
     <button type="submit">Sign out</button>
   </form>
 </body>
@@ -424,9 +455,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		// Step 1: Verify id_token_hint.
 		if (typeof idTokenHint !== "string" || idTokenHint.length === 0) {
-			if (req.method === "GET") {
-				return renderLogoutConfirmation(res);
-			}
+			// No hint available — there is nothing to pass through to a
+			// confirmed POST, so the confirmation page would render a button
+			// that always fails the POST hint requirement. Reject directly.
 			return res.status(400).json({
 				error: "invalid_request",
 				error_description: "id_token_hint is required",
@@ -448,7 +479,11 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			payload = verified.payload as Record<string, unknown>;
 		} catch {
 			if (req.method === "GET") {
-				return renderLogoutConfirmation(res);
+				return renderLogoutConfirmation(res, {
+					idTokenHint,
+					postLogoutRedirectUri,
+					state,
+				});
 			}
 			return res.status(400).json({
 				error: "invalid_token",
@@ -460,7 +495,11 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			const iat = typeof payload.iat === "number" ? payload.iat : 0;
 			const maxAgeMs = 24 * 60 * 60 * 1000;
 			if (Date.now() - iat * 1000 > maxAgeMs) {
-				return renderLogoutConfirmation(res);
+				return renderLogoutConfirmation(res, {
+					idTokenHint,
+					postLogoutRedirectUri,
+					state,
+				});
 			}
 		}
 
