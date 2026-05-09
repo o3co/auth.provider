@@ -29,6 +29,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   username-enumeration signals are reduced regardless of whether deployments
   use bcrypt-hashed or plain-text password entries.
 
+### Fixed (Phase F — F11a OIDC discovery/UserInfo compliance)
+
+- OIDC discovery now always advertises `jwks_uri`, with symmetric HS256-only
+  deployments serving an empty JWK Set instead of a 404 so the advertised
+  endpoint remains dereferenceable without exposing shared secrets.
+- The OIDC UserInfo endpoint now accepts both GET and POST requests with the
+  same bearer-token validation, cache-control headers, session liveness checks,
+  and scope-filtered claim response.
+
 ## [0.5.2] — 2026-05-09
 
 ### Changed (auth.utils dependency bump, v0.5.2)

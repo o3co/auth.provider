@@ -39,11 +39,6 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 
 	router.get("/.well-known/openid-configuration", (_req: Request, res: Response) => {
 		const iss = opts.issuer.replace(/\/+$/, "");
-		// JWKS is not served for symmetric-only deployments (HS256): the
-		// public-key set is empty, so advertising jwks_uri would point
-		// consumers at a 404. Only include jwks_uri when at least one
-		// asymmetric alg is configured.
-		const hasAsymmetricAlg = opts.signingAlgs.some((alg) => alg !== "HS256");
 		return res.status(200).json({
 			// Return the normalized issuer so it matches the `iss` claim minted
 			// on tokens (both use trailing-slash-stripped form). Returning the
@@ -53,7 +48,7 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 			authorization_endpoint: `${iss}/oauth/authorize`,
 			token_endpoint: `${iss}/oauth/token`,
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
-			...(hasAsymmetricAlg ? { jwks_uri: `${iss}/.well-known/jwks.json` } : {}),
+			jwks_uri: `${iss}/.well-known/jwks.json`,
 			introspection_endpoint: `${iss}/oauth/introspect`,
 			// Logout discovery fields are only advertised when the logout router is mounted.
 			// opts.logoutSupported defaults to false (explicit opt-in); oauthModule sets it
