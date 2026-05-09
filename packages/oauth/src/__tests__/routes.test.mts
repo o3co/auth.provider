@@ -21,8 +21,14 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
+	type FederationTokenStoreBase,
 	type GrantHandler,
 	GrantRegistry,
+	type RefreshTokenFamilyRevocation,
+	type SessionFamilyIndex,
+	type SessionFederationIndex,
+	type SessionRPRegistry,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import express, { type Router } from "express";
 import request from "supertest";
@@ -88,6 +94,36 @@ const mockExpress = {
 	urlencoded: () => vi.fn(),
 };
 
+function createTrackingExpress() {
+	const calls: { get: unknown[][]; post: unknown[][]; use: unknown[][] } = {
+		get: [],
+		post: [],
+		use: [],
+	};
+	const expressLike = {
+		Router: () => {
+			const router = {
+				use: vi.fn((...args: unknown[]) => {
+					calls.use.push(args);
+					return router;
+				}),
+				get: vi.fn((...args: unknown[]) => {
+					calls.get.push(args);
+					return router;
+				}),
+				post: vi.fn((...args: unknown[]) => {
+					calls.post.push(args);
+					return router;
+				}),
+			} as unknown as Router;
+			return router;
+		},
+		json: () => vi.fn(),
+		urlencoded: () => vi.fn(),
+	};
+	return { calls, expressLike };
+}
+
 describe("createOAuthRouter", () => {
 	it("returns a router", async () => {
 		const result = await createOAuthRouter(mockExpress, {
@@ -137,6 +173,61 @@ describe("createOAuthRouter", () => {
 
 		// The second arg (index 1) is the rate-limit middleware — it must be a function
 		expect(typeof introspectCall[1]).toBe("function");
+	});
+
+	it("applies rate limit middleware to POST /token", async () => {
+		const { calls, expressLike } = createTrackingExpress();
+
+		await createOAuthRouter(expressLike, {
+			registry: new GrantRegistry(),
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			codeRepository: {} as CodeRepository,
+			keyStore: createSymmetricKeyStore("test-secret"),
+		});
+
+		const tokenCall = calls.post.find((args) => args[0] === "/token");
+		expect(tokenCall).toBeDefined();
+		if (!tokenCall) return;
+		expect(tokenCall.length).toBeGreaterThanOrEqual(4);
+		expect(typeof tokenCall[1]).toBe("function");
+	});
+
+	it("registers authorize and UserInfo GET/POST routes", async () => {
+		const { calls, expressLike } = createTrackingExpress();
+
+		await createOAuthRouter(expressLike, {
+			registry: new GrantRegistry(),
+			config: mockConfig,
+			clientRepository: {} as ClientRepository,
+			codeRepository: {} as CodeRepository,
+			keyStore: createSymmetricKeyStore("test-secret"),
+		});
+
+		expect(calls.get.some((args) => args[0] === "/authorize")).toBe(true);
+		expect(calls.get.some((args) => args[0] === "/userinfo")).toBe(true);
+		expect(calls.post.some((args) => args[0] === "/userinfo")).toBe(true);
+	});
+
+	it("registers GET /logout when logout dependencies are wired", async () => {
+		const { calls, expressLike } = createTrackingExpress();
+
+		await createOAuthRouter(expressLike, {
+			registry: new GrantRegistry(),
+			config: fullConfig,
+			clientRepository: {} as ClientRepository,
+			codeRepository: {} as CodeRepository,
+			keyStore: createSymmetricKeyStore("test-secret"),
+			userSessionStore: {} as UserSessionStore,
+			sessionRPRegistry: {} as SessionRPRegistry,
+			sessionFamilyIndex: {} as SessionFamilyIndex,
+			sessionFederationIndex: {} as SessionFederationIndex,
+			federationTokenStore: {} as FederationTokenStoreBase,
+			refreshTokenFamilyRevocation: {} as RefreshTokenFamilyRevocation,
+		});
+
+		expect(calls.get.some((args) => args[0] === "/logout")).toBe(true);
+		expect(calls.post.some((args) => args[0] === "/logout")).toBe(true);
 	});
 
 	// D-6 (v0.5.1) integration coverage: exercise the full /oauth/token pipeline

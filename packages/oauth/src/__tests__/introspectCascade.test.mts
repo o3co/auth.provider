@@ -335,6 +335,40 @@ describe("/introspect — SF-8: token_type + access-only enforcement", () => {
 		expect(res.body.active).toBe(true);
 		expect(res.body.client_id).toBe("client1");
 	});
+
+	it("TD-5: active access-token response carries RFC 7662 fields without leaking family_id", async () => {
+		const token = await makeAccessToken({
+			sub: "user-td5",
+			aud: "https://resource.example",
+			azp: "client-td5",
+			scope: "openid profile",
+			iat: 1_772_000_000,
+			jti: "jti-td5",
+			family_id: "family-internal",
+		});
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
+			revokeFamily: vi.fn(),
+			isFamilyRevoked: vi.fn().mockResolvedValue(false),
+		};
+		const app = await buildApp(refreshTokenFamilyRevocation);
+		const res = await introspect(app, token);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({
+			active: true,
+			iss: "https://auth.example",
+			aud: "https://resource.example",
+			sub: "user-td5",
+			azp: "client-td5",
+			client_id: "client-td5",
+			scope: "openid profile",
+			token_type: "Bearer",
+			jti: "jti-td5",
+			iat: 1_772_000_000,
+		});
+		expect(typeof res.body.exp).toBe("number");
+		expect(res.body.family_id).toBeUndefined();
+	});
 });
 
 // ---------------------------------------------------------------------------
