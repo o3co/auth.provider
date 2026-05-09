@@ -64,7 +64,14 @@ function serialize(rp: RegisteredRP): string {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null;
+	// Reject arrays explicitly: `typeof [] === "object"` and `[] !== null`,
+	// so without this guard a JSON payload like `["client-1", ...]` would
+	// pass isRecord and be probed as an envelope (the field accesses would
+	// return undefined and `isValidRPEnvelope` would reject, but only by
+	// accident). Match the userSessionStore envelope guard's explicit
+	// `!Array.isArray(...)` so the shape check fails closed at the same
+	// layer as its sibling adapter.
+	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isValidRPEnvelope(env: unknown): env is RPEnvelope {
@@ -76,16 +83,28 @@ function isValidRPEnvelope(env: unknown): env is RPEnvelope {
 	);
 }
 
-function deserialize(json: string, logger?: Logger): RegisteredRP | null {
+function deserialize(json: string, sid: string, logger?: Logger): RegisteredRP | null {
+	// Mirror the userSessionStore corrupt-envelope warn shape: object-first
+	// `{ sid, reason, cause? }` so `sid` and `reason` are reliably emitted
+	// as structured fields, and the parse error context is preserved as
+	// `cause`. The previous implementation logged a raw JSON snippet,
+	// which risked leaking sensitive data if a corrupt value happened to
+	// contain credentials — drop it entirely.
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(json);
-	} catch {
-		logger?.warn({ json: json.slice(0, 100) }, "sessionRPRegistry_invalid_json");
+	} catch (cause) {
+		logger?.warn(
+			{ sid, reason: "json_parse", cause },
+			"session_rp_registry_corrupt_envelope: JSON.parse failed",
+		);
 		return null;
 	}
 	if (!isValidRPEnvelope(parsed)) {
-		logger?.warn({ json: json.slice(0, 100) }, "sessionRPRegistry_invalid_envelope");
+		logger?.warn(
+			{ sid, reason: "shape_invalid" },
+			"session_rp_registry_corrupt_envelope: shape invalid",
+		);
 		return null;
 	}
 	const env = parsed;
@@ -137,7 +156,7 @@ export function createRedisSessionRPRegistry(
 		async listRPs(sid) {
 			const values = await hash.listValues(sid);
 			return values
-				.map((value) => deserialize(value, logger))
+				.map((value) => deserialize(value, sid, logger))
 				.filter((rp): rp is RegisteredRP => rp !== null);
 		},
 		async removeBySid(sid) {
@@ -156,15 +175,26 @@ export function createRedisSessionRPRegistry(
  *
  * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
  * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op.
+ * Redis op. Optional `logger` is forwarded to the adapter for the
+ * corrupt-envelope warn path emitted inside `listRPs()`; the
+ * fail-closed behavior (corrupt entries are dropped from the result)
+ * is independent of logger presence — when the logger is absent the
+ * warn is silently swallowed but the security gate still triggers. The
+ * spread idiom omits the field when the caller did not supply one
+ * (preserves "absent" semantics under `exactOptionalPropertyTypes`).
  */
 export const redisSessionRPRegistryBuilder: AdapterBuilder<SessionRPRegistry> = (config, _ctx) => {
-	const c = config as { client?: SessionRPRegistryClient; keyPrefix?: string };
+	const c = config as {
+		client?: SessionRPRegistryClient;
+		keyPrefix?: string;
+		logger?: Logger;
+	};
 	if (!c.client) {
 		throw new Error("redisSessionRPRegistryBuilder: 'client' option is required");
 	}
 	return createRedisSessionRPRegistry({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "ss:rp:",
+		...(c.logger !== undefined ? { logger: c.logger } : {}),
 	});
 };
