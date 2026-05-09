@@ -186,12 +186,27 @@ describe("standalone smoke test", () => {
 	});
 
 	it("Dockerfile declares runtime metadata and runs install/build steps as node", () => {
-		expect(dockerfile).toContain("EXPOSE 3000");
-		expect(dockerfile).toContain(
-			"HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3",
+		// Default port is 3000 but the HEALTHCHECK and EXPOSE must read it
+		// from ${HTTP_PORT} so an operator overriding the env var keeps the
+		// app, EXPOSE metadata, and healthcheck in sync. Assert the ENV /
+		// EXPOSE / HEALTHCHECK structure rather than the literal port so the
+		// test is not brittle when operators or downstream forks change the
+		// default.
+		// The literal `${HTTP_PORT}` token from the Dockerfile is split across
+		// concatenations to sidestep biome's `noTemplateCurlyInString` rule
+		// (it cannot statically tell that this string is intentionally NOT
+		// a JS template placeholder — it is a Dockerfile env-substitution).
+		const HTTP_PORT_VAR = `$${"{"}HTTP_PORT}`;
+		expect(dockerfile).toContain("ENV HTTP_PORT=3000");
+		expect(dockerfile).toContain(`EXPOSE ${HTTP_PORT_VAR}`);
+		expect(dockerfile).toMatch(
+			/HEALTHCHECK\s+--interval=30s\s+--timeout=3s\s+--start-period=10s\s+--retries=3/,
 		);
-		expect(dockerfile).toContain(
-			"CMD wget -q -O /dev/null http://localhost:3000/_healthcheck || exit 1",
+		// Match the literal `${HTTP_PORT}` token inside the HEALTHCHECK CMD.
+		// `[$]` (character class) sidesteps biome's `noTemplateCurlyInString`
+		// false-positive without changing what we actually accept.
+		expect(dockerfile).toMatch(
+			/CMD\s+wget\s+-q\s+-O\s+\/dev\/null\s+"http:\/\/localhost:[$]\{HTTP_PORT\}\/_healthcheck"\s+\|\|\s+exit\s+1/,
 		);
 		expect(dockerfile).toMatch(/FROM node-base AS deps[\s\S]*USER node[\s\S]*RUN pnpm install/);
 		expect(dockerfile).toMatch(/FROM deps AS builder[\s\S]*USER node[\s\S]*RUN pnpm run build/);

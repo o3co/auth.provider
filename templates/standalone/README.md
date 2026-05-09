@@ -205,10 +205,17 @@ make test
 
 The `docker-compose.yml` starts the auth server together with a Redis container. Configure environment variables in `.env`.
 
-The production image declares `EXPOSE 3000` and a Docker-native healthcheck
-against `/_healthcheck`. If you run the app on a different port, set
-`HTTP_PORT` and use an explicit port mapping such as `-p 8080:8080`; `EXPOSE`
-is image metadata and does not publish ports by itself.
+The production image sets `ENV HTTP_PORT=3000` and uses it for both `EXPOSE`
+and the Docker-native healthcheck against `/_healthcheck`. The HOCON config
+also reads `${?HTTP_PORT}` for `http.port`, so `app.listen()` and the
+healthcheck cannot drift apart. To run on a different port:
+
+```bash
+docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
+```
+
+`EXPOSE` is image metadata and does not publish ports by itself, so the
+explicit `-p` mapping is still required.
 
 ## Adding Custom Modules
 
