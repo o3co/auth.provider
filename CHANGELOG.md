@@ -38,6 +38,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   same bearer-token validation, cache-control headers, session liveness checks,
   and scope-filtered claim response.
 
+### Fixed (Phase F — F11b OIDC authorize/logout compliance)
+
+- `/oauth/authorize` now rejects requests that omit the `openid` scope when
+  `oauth.jwt.issuer` is configured and `oauth.oidcMode = "oidc-required"`
+  (default). Operators can set `OAUTH_OIDC_MODE=dual` to keep accepting
+  OAuth-only authorization requests on the same endpoint.
+- The OIDC `end_session_endpoint` now supports GET as well as POST. GET with
+  a valid fresh `id_token_hint` performs the existing logout cascade; GET
+  without a valid hint renders a confirmation page instead of triggering
+  logout.
+
 ## [0.5.2] — 2026-05-09
 
 ### Changed (auth.utils dependency bump, v0.5.2)

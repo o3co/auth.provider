@@ -679,6 +679,45 @@ export const createOAuthRouter = async (
 					requestedScopes.length > 0
 						? requestedScopes.filter((s) => allowedScopes.includes(s))
 						: allowedScopes;
+				const configuredIssuer = config.oauth.jwt.issuer;
+				const isActingAsOidcProvider =
+					typeof configuredIssuer === "string" && configuredIssuer.length > 0;
+				const oidcMode =
+					(config.oauth as { oidcMode?: "oidc-required" | "dual" }).oidcMode ?? "oidc-required";
+				if (
+					isActingAsOidcProvider &&
+					oidcMode === "oidc-required" &&
+					// Two failure modes both undermine "OIDC required":
+					//   (a) the request itself omits openid;
+					//   (b) the request includes openid but the client allowlist
+					//       filters it out — without checking the filtered set
+					//       the request would silently proceed as OAuth-only
+					//       even though the server is configured oidc-required.
+					(!requestedScopes.includes("openid") || !allowedFilteredScopes.includes("openid"))
+				) {
+					logger.warn(
+						{
+							clientId: client_id,
+							requestedScopes,
+							allowedFilteredScopes,
+						},
+						"authorize_rejected_missing_openid_scope",
+					);
+					return redirectError(
+						redirect_uri,
+						"invalid_scope",
+						"openid scope is required when server is acting as an OIDC OP",
+						toStr(state),
+					);
+				}
+				if (allowedFilteredScopes.length === 0 && requestedScopes.length > 0) {
+					return redirectError(
+						redirect_uri,
+						"invalid_scope",
+						"no requested scopes are allowed for this client",
+						toStr(state),
+					);
+				}
 
 				// C-2: policy evaluation at /authorize (evaluate-once, persist on Code).
 				// The code exchange MUST NOT re-evaluate — it reads the narrowed values off

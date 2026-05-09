@@ -51,6 +51,7 @@ const config: AppConfig = {
 			legacyRtPolicy: "reject" as const,
 		},
 		grants: {},
+		oidcMode: "oidc-required",
 		// OR-9: explicit memory adapter for the smoke test. The legacy
 		// `repositories.code.type` fallback would also pick memory here,
 		// but the explicit setting documents the intent and avoids

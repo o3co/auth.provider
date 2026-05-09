@@ -86,6 +86,7 @@ export function makeValidCoreConfig() {
 				legacyRtPolicy: "reject",
 			},
 			grants: {},
+			oidcMode: "oidc-required",
 		},
 	} satisfies CoreConfig;
 }

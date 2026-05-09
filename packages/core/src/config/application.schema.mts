@@ -188,6 +188,10 @@ export const CoreConfigSchema = z.object({
 			legacyTokenCompat: z.boolean().optional(),
 		}),
 		grants: z.object({}).passthrough(),
+		// IH-6 (v0.5.3): when acting as an OIDC OP, `/authorize` rejects
+		// requests that omit `openid` unless operators explicitly choose dual
+		// OAuth/OIDC mode. Shape-only; default lives in HOCON.
+		oidcMode: z.enum(["oidc-required", "dual"]),
 		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
 		// repository. Multi-replica deployments MUST set this to `"redis"`;
 		// the in-memory variant loses codes on restart and across replicas.

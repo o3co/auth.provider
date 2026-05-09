@@ -67,6 +67,75 @@ function supportsEndSession(
 	return typeof (provider as { endSession?: unknown }).endSession === "function";
 }
 
+function readLogoutParam(source: Record<string, unknown>, key: string): string | undefined {
+	const value = source[key];
+	return typeof value === "string" ? value : undefined;
+}
+
+function extractLogoutParams(req: Request): {
+	idTokenHint: string | undefined;
+	postLogoutRedirectUri: string | undefined;
+	state: string | undefined;
+} {
+	const source =
+		req.method === "GET"
+			? (req.query as Record<string, unknown>)
+			: ((req.body ?? {}) as Record<string, unknown>);
+	return {
+		idTokenHint: readLogoutParam(source, "id_token_hint"),
+		postLogoutRedirectUri: readLogoutParam(source, "post_logout_redirect_uri"),
+		state: readLogoutParam(source, "state"),
+	};
+}
+
+const HTML_ESCAPE: Record<string, string> = {
+	"&": "&amp;",
+	"<": "&lt;",
+	">": "&gt;",
+	'"': "&quot;",
+	"'": "&#39;",
+};
+
+function escapeHtml(s: string): string {
+	return s.replace(/[&<>"']/g, (c) => HTML_ESCAPE[c] ?? c);
+}
+
+function hiddenInput(name: string, value: string | undefined): string {
+	if (typeof value !== "string" || value.length === 0) return "";
+	return `    <input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />\n`;
+}
+
+function renderLogoutConfirmation(
+	res: Response,
+	params: {
+		idTokenHint?: string;
+		postLogoutRedirectUri?: string;
+		state?: string;
+	},
+): Response {
+	// Pass the original logout params through as hidden inputs so that the
+	// confirmed POST can complete the standard hint-based flow. Without this,
+	// the POST handler rejects with 400 invalid_request because id_token_hint
+	// is missing — the "Sign out" button would never actually log out.
+	// `action=""` posts to the current URL: this avoids a relative-URL trap
+	// when /oauth/logout is reached with a trailing slash (`/oauth/logout/`),
+	// where `action="logout"` would resolve to `/oauth/logout/logout`.
+	const html = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Confirm Logout</title></head>
+<body>
+  <h1>Sign out</h1>
+  <p>Do you want to sign out from all applications?</p>
+  <form method="POST" action="">
+${hiddenInput("id_token_hint", params.idTokenHint)}${hiddenInput("post_logout_redirect_uri", params.postLogoutRedirectUri)}${hiddenInput("state", params.state)}    <input type="hidden" name="confirmed" value="1" />
+    <button type="submit">Sign out</button>
+  </form>
+</body>
+</html>`;
+	res.setHeader("Content-Type", "text/html; charset=utf-8");
+	return res.status(200).send(html);
+}
+
 export interface LogoutRouterOptions {
 	keyStore: KeyStore;
 	/** Issuer URL of this auth provider — used for logout_token `iss` claim and iframe `iss` param. */
@@ -100,15 +169,16 @@ export interface LogoutRouterOptions {
 }
 
 /**
- * OIDC RP-Initiated Logout 1.0 — POST /oauth/logout
+ * OIDC RP-Initiated Logout 1.0 — GET/POST /oauth/logout
  *
- * Accepts application/x-www-form-urlencoded with:
+ * Accepts application/x-www-form-urlencoded POST body or GET query with:
  *   - id_token_hint (required)
  *   - post_logout_redirect_uri (optional)
  *   - state (optional)
  *
  * Flow:
- *   1. Verify id_token_hint via keyStore. Fail → 400 invalid_token.
+ *   1. Verify id_token_hint via keyStore. Fail → 400 invalid_token for POST,
+ *      confirmation HTML for GET.
  *   2. Extract `sid` and `aud` (= client_id). Missing sid → 400 invalid_request.
  *   3. Load session from userSessionStore. Missing → 200 JSON { logged_out: true } (no-op).
  *   4. Broadcast Back-Channel Logout to all registered RPs (best-effort).
@@ -376,244 +446,282 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		},
 	);
 
-	// POST /logout — mounted under /oauth → POST /oauth/logout
-	router.post(
-		"/logout",
-		express.urlencoded({ extended: false }),
-		async (req: Request, res: Response) => {
-			// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
-			res.setHeader("Cache-Control", "no-store");
-			res.setHeader("Pragma", "no-cache");
+	const handleLogout = async (req: Request, res: Response) => {
+		// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
+		res.setHeader("Cache-Control", "no-store");
+		res.setHeader("Pragma", "no-cache");
 
-			const {
-				id_token_hint: idTokenHint,
-				post_logout_redirect_uri: postLogoutRedirectUri,
-				state,
-			} = req.body as Record<string, string | undefined>;
+		const { idTokenHint, postLogoutRedirectUri, state } = extractLogoutParams(req);
 
-			// Step 1: Verify id_token_hint.
-			if (typeof idTokenHint !== "string" || idTokenHint.length === 0) {
-				return res.status(400).json({
-					error: "invalid_request",
-					error_description: "id_token_hint is required",
-				});
-			}
+		// Step 1: Verify id_token_hint.
+		if (typeof idTokenHint !== "string" || idTokenHint.length === 0) {
+			// No hint available — there is nothing to pass through to a
+			// confirmed POST, so the confirmation page would render a button
+			// that always fails the POST hint requirement. Reject directly.
+			return res.status(400).json({
+				error: "invalid_request",
+				error_description: "id_token_hint is required",
+			});
+		}
 
-			let payload: Record<string, unknown>;
-			try {
-				// SF-1: pin alg / iss / typ (=id+jwt) + signature. Audience is
-				// derived from the id_token's aud claim post-verification (the
-				// id_token was issued for a specific client); we can't pin aud
-				// before knowing the client, so the verifier records the gap.
-				const verified = await verifyJwt(idTokenHint, opts.keyStore, {
-					type: "id_token",
-					expectedIssuer: opts.issuer ?? "",
-					legacyTypAccept: opts.legacyTypAccept ?? true,
-					logger: opts.logger,
-				});
-				payload = verified.payload as Record<string, unknown>;
-			} catch {
-				return res.status(400).json({
-					error: "invalid_token",
-					error_description: "id_token_hint verification failed",
-				});
-			}
-
-			// Step 2: Extract sid and aud (client_id).
-			const sid = typeof payload.sid === "string" ? payload.sid : null;
-			const sub = typeof payload.sub === "string" ? payload.sub : null;
-			const rawAud = payload.aud;
-			const aud: string | null =
-				typeof rawAud === "string"
-					? rawAud
-					: Array.isArray(rawAud) && typeof rawAud[0] === "string"
-						? rawAud[0]
-						: null;
-
-			if (!sid) {
-				return res.status(400).json({
-					error: "invalid_request",
-					error_description: "id_token_hint missing sid claim",
-				});
-			}
-
-			// Step 3: Load session. Missing → defensive 200 no-op.
-			let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
-			try {
-				session = await opts.userSessionStore.get(sid);
-			} catch (err) {
-				const logger = opts.logger ?? console;
-				logger.warn("POST /oauth/logout: userSessionStore.get failed", err);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "session store unavailable",
-				});
-			}
-
-			if (!session) {
-				return res.status(200).json({ logged_out: true });
-			}
-
-			// A4 §6.2 Step 1 (route-level read for pre-cascade ops):
-			//   - rps: needed by broadcastBackchannelLogout (best-effort, before cascade)
-			//   - federations: needed for IdP endSession redirect (route handler step 5)
-			// familyIds is read internally by cascadeLogout per §6.2 Step 1.
-			let rps: Awaited<ReturnType<typeof opts.sessionRPRegistry.listRPs>>;
-			let federations: ReadonlyArray<string>;
-			try {
-				[rps, federations] = await Promise.all([
-					opts.sessionRPRegistry.listRPs(sid),
-					opts.sessionFederationIndex.listFederations(sid),
-				]);
-			} catch (err) {
-				const logger = opts.logger ?? console;
-				logger.warn("POST /oauth/logout: reverse-index read failed", err);
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "session store unavailable",
-				});
-			}
-
-			// Step 4: Broadcast Back-Channel Logout (best-effort — never throws).
-			if (sub) {
-				await broadcastBackchannelLogout({
-					rps,
-					issuer: opts.issuer,
-					sub,
-					sid,
-					keyStore: opts.keyStore,
-					fetchImpl: opts.fetchImpl,
-					logger: opts.logger,
-				});
-			}
-
-			// Step 5: Resolve IdP end-session URI for the FIRST federation (spec Open Issue #2).
-			// getFederationProviders() is called at request time so module init order does not matter.
-			let endSessionUri: string | undefined;
-			const firstFederation = federations[0];
-			if (firstFederation) {
-				const providers = opts.getFederationProviders();
-				const provider = providers?.get(firstFederation);
-				if (supportsEndSession(provider)) {
-					try {
-						let idTokenHintForIdP: string | undefined;
-						try {
-							const tokens = await opts.federationTokenStore.get(sid, firstFederation);
-							idTokenHintForIdP = tokens?.idToken ?? undefined;
-						} catch {
-							// Best-effort: if we can't get the federation token, proceed without idTokenHint
-						}
-						const result = await provider.endSession({
-							idTokenHint: idTokenHintForIdP,
-							postLogoutRedirectUri:
-								typeof postLogoutRedirectUri === "string" ? postLogoutRedirectUri : undefined,
-							state: typeof state === "string" ? state : undefined,
-						});
-						endSessionUri = result.url.toString();
-					} catch (err) {
-						// Best-effort: log and proceed without IdP redirect
-						const logger = opts.logger ?? console;
-						logger.warn(`POST /oauth/logout: federation ${firstFederation} endSession failed`, err);
-					}
-				}
-			}
-
-			// Step 6: Cascade logout.
-			const cascade = await cascadeLogout({
-				sid,
-				refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
-				federationTokenStore: opts.federationTokenStore,
-				userSessionStore: opts.userSessionStore,
-				sessionRPRegistry: opts.sessionRPRegistry,
-				sessionFamilyIndex: opts.sessionFamilyIndex,
-				sessionFederationIndex: opts.sessionFederationIndex,
+		let payload: Record<string, unknown>;
+		try {
+			// SF-1: pin alg / iss / typ (=id+jwt) + signature. Audience is
+			// derived from the id_token's aud claim post-verification (the
+			// id_token was issued for a specific client); we can't pin aud
+			// before knowing the client, so the verifier records the gap.
+			const verified = await verifyJwt(idTokenHint, opts.keyStore, {
+				type: "id_token",
+				expectedIssuer: opts.issuer ?? "",
+				legacyTypAccept: opts.legacyTypAccept ?? true,
 				logger: opts.logger,
 			});
+			payload = verified.payload as Record<string, unknown>;
+		} catch {
+			// Invalid signature / iss / typ. The POST verifier uses identical
+			// options, so a hint that fails GET verification will deterministically
+			// fail POST verification too — rendering a confirmation page with
+			// the same hint passed through hidden inputs would just produce a
+			// "Sign out" button that returns 400 invalid_token. Reject directly
+			// for GET as well as POST.
+			return res.status(400).json({
+				error: "invalid_token",
+				error_description: "id_token_hint verification failed",
+			});
+		}
 
-			if (cascade.outcome === "failed") {
-				emitAuditEvent(opts.auditSink, {
-					timestamp: new Date(),
-					type: "logout.cascade_failed",
-					subject: sub ?? undefined,
-					ip: req.ip,
-					userAgent: req.get("user-agent"),
-					details: { sid, step: cascade.step },
-				});
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "logout cascade failed",
+		// Step 2: Extract sid and aud (client_id).
+		const sid = typeof payload.sid === "string" ? payload.sid : null;
+		const sub = typeof payload.sub === "string" ? payload.sub : null;
+		const rawAud = payload.aud;
+		const aud: string | null =
+			typeof rawAud === "string"
+				? rawAud
+				: Array.isArray(rawAud) && typeof rawAud[0] === "string"
+					? rawAud[0]
+					: null;
+
+		if (req.method === "GET") {
+			const iat = typeof payload.iat === "number" ? payload.iat : 0;
+			const maxAgeMs = 24 * 60 * 60 * 1000;
+			if (Date.now() - iat * 1000 > maxAgeMs) {
+				// Validate post_logout_redirect_uri against the initiating
+				// client's allowlist BEFORE echoing it into the confirm page.
+				// Even though the post-cascade allowlist gate (line ~657) is
+				// what actually controls the redirect, an unvalidated URL
+				// reflected on the auth-provider origin's confirmation page
+				// weakens the invariant that attacker-controlled URIs never
+				// appear on this origin. Only allowlisted URIs round-trip.
+				let safePostLogoutRedirectUri: string | undefined;
+				if (typeof postLogoutRedirectUri === "string" && postLogoutRedirectUri.length > 0 && aud) {
+					try {
+						const client = await opts.clientRepository.findById(aud);
+						if (client?.postLogoutRedirectUris?.includes(postLogoutRedirectUri)) {
+							safePostLogoutRedirectUri = postLogoutRedirectUri;
+						}
+					} catch {
+						// Client repo throw → treat as unvalidated; drop from form.
+					}
+				}
+				return renderLogoutConfirmation(res, {
+					idTokenHint,
+					postLogoutRedirectUri: safePostLogoutRedirectUri,
+					state,
 				});
 			}
+		}
 
-			// Step 7: Select response.
+		if (!sid) {
+			return res.status(400).json({
+				error: "invalid_request",
+				error_description: "id_token_hint missing sid claim",
+			});
+		}
 
-			// Emit logout.success before all terminal success response paths.
-			// Placed here (after cascade, before response selection) so every
-			// success branch (HTML / IdP redirect / post-logout redirect / JSON)
-			// emits exactly once without duplicating the call.
+		// Step 3: Load session. Missing → defensive 200 no-op.
+		let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
+		try {
+			session = await opts.userSessionStore.get(sid);
+		} catch (err) {
+			const logger = opts.logger ?? console;
+			logger.warn(`${req.method} /oauth/logout: userSessionStore.get failed`, err);
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+		}
+
+		if (!session) {
+			return res.status(200).json({ logged_out: true });
+		}
+
+		// A4 §6.2 Step 1 (route-level read for pre-cascade ops):
+		//   - rps: needed by broadcastBackchannelLogout (best-effort, before cascade)
+		//   - federations: needed for IdP endSession redirect (route handler step 5)
+		// familyIds is read internally by cascadeLogout per §6.2 Step 1.
+		let rps: Awaited<ReturnType<typeof opts.sessionRPRegistry.listRPs>>;
+		let federations: ReadonlyArray<string>;
+		try {
+			[rps, federations] = await Promise.all([
+				opts.sessionRPRegistry.listRPs(sid),
+				opts.sessionFederationIndex.listFederations(sid),
+			]);
+		} catch (err) {
+			const logger = opts.logger ?? console;
+			logger.warn(`${req.method} /oauth/logout: reverse-index read failed`, err);
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+		}
+
+		// Step 4: Broadcast Back-Channel Logout (best-effort — never throws).
+		if (sub) {
+			await broadcastBackchannelLogout({
+				rps,
+				issuer: opts.issuer,
+				sub,
+				sid,
+				keyStore: opts.keyStore,
+				fetchImpl: opts.fetchImpl,
+				logger: opts.logger,
+			});
+		}
+
+		// Step 5: Resolve IdP end-session URI for the FIRST federation (spec Open Issue #2).
+		// getFederationProviders() is called at request time so module init order does not matter.
+		let endSessionUri: string | undefined;
+		const firstFederation = federations[0];
+		if (firstFederation) {
+			const providers = opts.getFederationProviders();
+			const provider = providers?.get(firstFederation);
+			if (supportsEndSession(provider)) {
+				try {
+					let idTokenHintForIdP: string | undefined;
+					try {
+						const tokens = await opts.federationTokenStore.get(sid, firstFederation);
+						idTokenHintForIdP = tokens?.idToken ?? undefined;
+					} catch {
+						// Best-effort: if we can't get the federation token, proceed without idTokenHint
+					}
+					const result = await provider.endSession({
+						idTokenHint: idTokenHintForIdP,
+						postLogoutRedirectUri:
+							typeof postLogoutRedirectUri === "string" ? postLogoutRedirectUri : undefined,
+						state: typeof state === "string" ? state : undefined,
+					});
+					endSessionUri = result.url.toString();
+				} catch (err) {
+					// Best-effort: log and proceed without IdP redirect
+					const logger = opts.logger ?? console;
+					logger.warn(
+						`${req.method} /oauth/logout: federation ${firstFederation} endSession failed`,
+						err,
+					);
+				}
+			}
+		}
+
+		// Step 6: Cascade logout.
+		const cascade = await cascadeLogout({
+			sid,
+			refreshTokenFamilyRevocation: opts.refreshTokenFamilyRevocation,
+			federationTokenStore: opts.federationTokenStore,
+			userSessionStore: opts.userSessionStore,
+			sessionRPRegistry: opts.sessionRPRegistry,
+			sessionFamilyIndex: opts.sessionFamilyIndex,
+			sessionFederationIndex: opts.sessionFederationIndex,
+			logger: opts.logger,
+		});
+
+		if (cascade.outcome === "failed") {
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
-				type: "logout.success",
+				type: "logout.cascade_failed",
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
-				details: { sid, federations },
+				details: { sid, step: cascade.step },
 			});
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "logout cascade failed",
+			});
+		}
 
-			// Validate post_logout_redirect_uri against the initiating client's allowlist ONCE.
-			// Both the HTML branch (7a) and the redirect branch (7c) use this validated value.
-			// Invalid or missing URIs become undefined — fall through to JSON fallback.
-			let validatedPostLogoutRedirectUri: string | undefined;
-			if (typeof postLogoutRedirectUri === "string" && postLogoutRedirectUri.length > 0 && aud) {
-				try {
-					const client = await opts.clientRepository.findById(aud);
-					if (client?.postLogoutRedirectUris?.includes(postLogoutRedirectUri)) {
-						validatedPostLogoutRedirectUri = postLogoutRedirectUri;
-					}
-				} catch {
-					// Client repo throw → treat as unvalidated; fall through to JSON
+		// Step 7: Select response.
+
+		// Emit logout.success before all terminal success response paths.
+		// Placed here (after cascade, before response selection) so every
+		// success branch (HTML / IdP redirect / post-logout redirect / JSON)
+		// emits exactly once without duplicating the call.
+		emitAuditEvent(opts.auditSink, {
+			timestamp: new Date(),
+			type: "logout.success",
+			subject: sub ?? undefined,
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+			details: { sid, federations },
+		});
+
+		// Validate post_logout_redirect_uri against the initiating client's allowlist ONCE.
+		// Both the HTML branch (7a) and the redirect branch (7c) use this validated value.
+		// Invalid or missing URIs become undefined — fall through to JSON fallback.
+		let validatedPostLogoutRedirectUri: string | undefined;
+		if (typeof postLogoutRedirectUri === "string" && postLogoutRedirectUri.length > 0 && aud) {
+			try {
+				const client = await opts.clientRepository.findById(aud);
+				if (client?.postLogoutRedirectUris?.includes(postLogoutRedirectUri)) {
+					validatedPostLogoutRedirectUri = postLogoutRedirectUri;
 				}
+			} catch {
+				// Client repo throw → treat as unvalidated; fall through to JSON
 			}
+		}
 
-			// 7a: Front-channel logout — if Accept: text/html AND any RP has a frontchannelLogoutUri.
-			// Use q-weighted negotiation: application/json is first so Accept: */* defaults to JSON.
-			// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
-			const negotiated = accepts(req).type(["application/json", "text/html"]);
-			const acceptsHtml = negotiated === "text/html";
-			const hasFrontchannel = rps.some(
-				(rp) => typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0,
-			);
-			if (acceptsHtml && hasFrontchannel) {
-				const html = renderFrontchannelLogoutHtml({
-					rps,
-					issuer: opts.issuer,
-					sid,
-					// Use the allowlist-validated URI — prevents open redirect via HTML branch.
-					postLogoutRedirectUri: validatedPostLogoutRedirectUri,
-					logger: opts.logger,
-				});
-				res.setHeader("Content-Type", "text/html; charset=utf-8");
-				return res.status(200).send(html);
+		// 7a: Front-channel logout — if Accept: text/html AND any RP has a frontchannelLogoutUri.
+		// Use q-weighted negotiation: application/json is first so Accept: */* defaults to JSON.
+		// Only when text/html explicitly outranks json (e.g. browser requests) do we serve HTML.
+		const negotiated = accepts(req).type(["application/json", "text/html"]);
+		const acceptsHtml = negotiated === "text/html";
+		const hasFrontchannel = rps.some(
+			(rp) => typeof rp.frontchannelLogoutUri === "string" && rp.frontchannelLogoutUri.length > 0,
+		);
+		if (acceptsHtml && hasFrontchannel) {
+			const html = renderFrontchannelLogoutHtml({
+				rps,
+				issuer: opts.issuer,
+				sid,
+				// Use the allowlist-validated URI — prevents open redirect via HTML branch.
+				postLogoutRedirectUri: validatedPostLogoutRedirectUri,
+				logger: opts.logger,
+			});
+			res.setHeader("Content-Type", "text/html; charset=utf-8");
+			return res.status(200).send(html);
+		}
+
+		// 7b: IdP end-session redirect.
+		if (endSessionUri) {
+			return res.redirect(303, endSessionUri);
+		}
+
+		// 7c: post_logout_redirect_uri — use the already-validated value (allowlist checked above).
+		if (validatedPostLogoutRedirectUri) {
+			const redirectUrl = new URL(validatedPostLogoutRedirectUri);
+			if (typeof state === "string" && state.length > 0) {
+				redirectUrl.searchParams.set("state", state);
 			}
+			return res.redirect(303, redirectUrl.toString());
+		}
 
-			// 7b: IdP end-session redirect.
-			if (endSessionUri) {
-				return res.redirect(303, endSessionUri);
-			}
+		// 7d: Default — JSON success.
+		return res.status(200).json({ logged_out: true });
+	};
 
-			// 7c: post_logout_redirect_uri — use the already-validated value (allowlist checked above).
-			if (validatedPostLogoutRedirectUri) {
-				const redirectUrl = new URL(validatedPostLogoutRedirectUri);
-				if (typeof state === "string" && state.length > 0) {
-					redirectUrl.searchParams.set("state", state);
-				}
-				return res.redirect(303, redirectUrl.toString());
-			}
-
-			// 7d: Default — JSON success.
-			return res.status(200).json({ logged_out: true });
-		},
-	);
+	// POST /logout — mounted under /oauth → POST /oauth/logout
+	router.post("/logout", express.urlencoded({ extended: false }), handleLogout);
+	// GET /logout — mounted under /oauth → GET /oauth/logout
+	router.get("/logout", handleLogout);
 
 	return router;
 }
