@@ -798,19 +798,20 @@ describe("GET /oauth/logout", () => {
 		expect(sessionStore.delete).not.toHaveBeenCalled();
 	});
 
-	it("renders confirmation HTML and does not log out when id_token_hint is invalid", async () => {
+	it("returns 400 invalid_token when id_token_hint signature is invalid (no confirm page)", async () => {
+		// Invalid-signature / iss / typ id_token_hint: the POST verifier uses
+		// identical options to GET, so passing the same hint through hidden
+		// inputs would render a "Sign out" button that the confirmed POST
+		// can only re-fail with 400 invalid_token. Reject directly for GET
+		// as well as POST.
 		const sessionStore = makeSessionStore();
 		const refreshFamilyRevocation = makeFamilyRevocation();
 		const app = buildApp({ sessionStore, refreshFamilyRevocation });
 
 		const res = await getLogout(app, { id_token_hint: "not.a.valid.jwt" });
 
-		expectLogoutConfirmation(res);
-		// Confirmation page must propagate the original logout params as
-		// hidden inputs so the confirmed POST can reach the hint-based path
-		// (regression: previously the POST saw no hint and returned 400, so
-		// the "Sign out" button was permanently broken).
-		expect(res.text).toContain('name="id_token_hint"');
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_token");
 		expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
 		expect(sessionStore.delete).not.toHaveBeenCalled();
 	});
@@ -818,7 +819,17 @@ describe("GET /oauth/logout", () => {
 	it("renders confirmation HTML and does not log out when id_token_hint iat is stale", async () => {
 		const sessionStore = makeSessionStore();
 		const refreshFamilyRevocation = makeFamilyRevocation();
-		const app = buildApp({ sessionStore, refreshFamilyRevocation });
+		// Allowlist the redirect URI we will pass — exercises the round-trip
+		// path and confirms the value reaches the hidden input.
+		const clientRepo = makeClientRepo({
+			findById: vi.fn().mockResolvedValue({
+				clientId: "client-1",
+				allowedRedirectUris: [],
+				allowedScopes: [],
+				postLogoutRedirectUris: ["https://rp.example/logged-out"],
+			}),
+		});
+		const app = buildApp({ sessionStore, refreshFamilyRevocation, clientRepo });
 		const token = await mintOldIdToken();
 
 		const res = await getLogout(app, {
@@ -841,6 +852,39 @@ describe("GET /oauth/logout", () => {
 		expect(sessionStore.delete).not.toHaveBeenCalled();
 	});
 
+	it("drops post_logout_redirect_uri from the stale-iat confirm page when not allowlisted", async () => {
+		// Even though the post-cascade allowlist gate prevents an actual
+		// redirect to an attacker URL, reflecting the URL into the confirm
+		// page on the auth-provider origin weakens the invariant. Only
+		// allowlisted URIs round-trip into the form.
+		const sessionStore = makeSessionStore();
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const clientRepo = makeClientRepo({
+			findById: vi.fn().mockResolvedValue({
+				clientId: "client-1",
+				allowedRedirectUris: [],
+				allowedScopes: [],
+				postLogoutRedirectUris: ["https://rp.example/logged-out"],
+			}),
+		});
+		const app = buildApp({ sessionStore, refreshFamilyRevocation, clientRepo });
+		const token = await mintOldIdToken();
+
+		const res = await getLogout(app, {
+			id_token_hint: token,
+			post_logout_redirect_uri: "https://attacker.example/steal",
+			state: "xyz",
+		});
+
+		expectLogoutConfirmation(res);
+		expect(res.text).not.toContain("attacker.example");
+		expect(res.text).not.toContain('name="post_logout_redirect_uri"');
+		// The hint and state must still round-trip — only the redirect URI
+		// is dropped.
+		expect(res.text).toContain('name="id_token_hint"');
+		expect(res.text).toContain('name="state"');
+	});
+
 	it("HTML-escapes hidden input values to prevent attribute injection", async () => {
 		// state may carry attacker-influenced characters in the worst case;
 		// the GET-confirm path echoes it into an HTML attribute so it must
@@ -848,15 +892,38 @@ describe("GET /oauth/logout", () => {
 		const sessionStore = makeSessionStore();
 		const refreshFamilyRevocation = makeFamilyRevocation();
 		const app = buildApp({ sessionStore, refreshFamilyRevocation });
+		const token = await mintOldIdToken();
 
 		const res = await getLogout(app, {
-			id_token_hint: "not.a.valid.jwt",
+			id_token_hint: token,
 			state: 'evil"><script>alert(1)</script>',
 		});
 
 		expectLogoutConfirmation(res);
 		expect(res.text).not.toContain('"><script>');
 		expect(res.text).toContain("&quot;");
+	});
+
+	it("HTML-escapes ampersands in hidden input values (& → &amp;)", async () => {
+		// Regression: the previous test only exercised the `"` escape via
+		// quoted-attribute injection. State values commonly contain `&` in
+		// query-encoded round-tripping, so the entity escape needs an
+		// independent regression guard.
+		const sessionStore = makeSessionStore();
+		const refreshFamilyRevocation = makeFamilyRevocation();
+		const app = buildApp({ sessionStore, refreshFamilyRevocation });
+		const token = await mintOldIdToken();
+
+		const res = await getLogout(app, {
+			id_token_hint: token,
+			state: "a&b=1",
+		});
+
+		expectLogoutConfirmation(res);
+		expect(res.text).toContain("a&amp;b=1");
+		// Raw `a&b=1` must NOT appear unescaped — a regex-bounded check
+		// avoids matching the escaped form's substring.
+		expect(res.text).not.toMatch(/value="a&b=1"/);
 	});
 });
 

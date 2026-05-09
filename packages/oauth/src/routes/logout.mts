@@ -478,29 +478,16 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			});
 			payload = verified.payload as Record<string, unknown>;
 		} catch {
-			if (req.method === "GET") {
-				return renderLogoutConfirmation(res, {
-					idTokenHint,
-					postLogoutRedirectUri,
-					state,
-				});
-			}
+			// Invalid signature / iss / typ. The POST verifier uses identical
+			// options, so a hint that fails GET verification will deterministically
+			// fail POST verification too — rendering a confirmation page with
+			// the same hint passed through hidden inputs would just produce a
+			// "Sign out" button that returns 400 invalid_token. Reject directly
+			// for GET as well as POST.
 			return res.status(400).json({
 				error: "invalid_token",
 				error_description: "id_token_hint verification failed",
 			});
-		}
-
-		if (req.method === "GET") {
-			const iat = typeof payload.iat === "number" ? payload.iat : 0;
-			const maxAgeMs = 24 * 60 * 60 * 1000;
-			if (Date.now() - iat * 1000 > maxAgeMs) {
-				return renderLogoutConfirmation(res, {
-					idTokenHint,
-					postLogoutRedirectUri,
-					state,
-				});
-			}
 		}
 
 		// Step 2: Extract sid and aud (client_id).
@@ -513,6 +500,36 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				: Array.isArray(rawAud) && typeof rawAud[0] === "string"
 					? rawAud[0]
 					: null;
+
+		if (req.method === "GET") {
+			const iat = typeof payload.iat === "number" ? payload.iat : 0;
+			const maxAgeMs = 24 * 60 * 60 * 1000;
+			if (Date.now() - iat * 1000 > maxAgeMs) {
+				// Validate post_logout_redirect_uri against the initiating
+				// client's allowlist BEFORE echoing it into the confirm page.
+				// Even though the post-cascade allowlist gate (line ~657) is
+				// what actually controls the redirect, an unvalidated URL
+				// reflected on the auth-provider origin's confirmation page
+				// weakens the invariant that attacker-controlled URIs never
+				// appear on this origin. Only allowlisted URIs round-trip.
+				let safePostLogoutRedirectUri: string | undefined;
+				if (typeof postLogoutRedirectUri === "string" && postLogoutRedirectUri.length > 0 && aud) {
+					try {
+						const client = await opts.clientRepository.findById(aud);
+						if (client?.postLogoutRedirectUris?.includes(postLogoutRedirectUri)) {
+							safePostLogoutRedirectUri = postLogoutRedirectUri;
+						}
+					} catch {
+						// Client repo throw → treat as unvalidated; drop from form.
+					}
+				}
+				return renderLogoutConfirmation(res, {
+					idTokenHint,
+					postLogoutRedirectUri: safePostLogoutRedirectUri,
+					state,
+				});
+			}
+		}
 
 		if (!sid) {
 			return res.status(400).json({
