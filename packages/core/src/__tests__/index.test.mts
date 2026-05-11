@@ -9,7 +9,6 @@ import {
 	createRepositoryFactories,
 	createSymmetricKeyStore,
 	formatObject,
-	GrantRegistry,
 	InMemoryClientRepository,
 	InMemoryCodeRepository,
 	InMemoryUserRepository,
@@ -24,11 +23,6 @@ describe("public API", () => {
 
 	it("exports AppConfigSchema", () => {
 		expect(AppConfigSchema).toBeDefined();
-	});
-
-	it("exports GrantRegistry class", () => {
-		expect(GrantRegistry).toBeDefined();
-		expect(typeof GrantRegistry).toBe("function");
 	});
 
 	it("exports InMemoryUserRepository class", () => {

@@ -23,13 +23,13 @@ import {
 	createSymmetricKeyStore,
 	type FederationTokenStoreBase,
 	type GrantHandler,
-	GrantRegistry,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
 	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express, { type Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";

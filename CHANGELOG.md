@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed (Phase G — M1 GrantRegistry public export, 1.0 GA)
+
+- **BREAKING**: Removed `GrantRegistry` and `GrantRegistryError` from
+  `@o3co/auth-provider-core`'s public exports (closes AS-8). Both were
+  deprecated as public re-exports in v0.5.1 per A2-γ §3.3; the classes
+  remain as internal implementation detail of the boot planner.
+  - Migration: consumer code that previously instantiated
+    `new GrantRegistry()` or caught `GrantRegistryError` should declare
+    grants on a module via `contributes.grants` instead. The boot planner
+    (`createApp`) handles register / replace / freeze internally and
+    propagates registration failures as `BootError` (A2-β) rather than
+    `GrantRegistryError`.
+  - Affected APIs (no longer importable from
+    `@o3co/auth-provider-core`): `GrantRegistry`, `GrantRegistryError`.
+
 ## [0.5.3] — 2026-05-09
 
 ### Security (Phase F — F10 Token Exchange hardening)

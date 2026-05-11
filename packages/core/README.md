@@ -41,7 +41,7 @@ Top-level fields:
 
 ### Grant System
 
-The grant system is the extension point for OAuth 2.0 grant types. Each grant type is implemented as a `GrantHandler` and registered via `GrantRegistry`.
+The grant system is the extension point for OAuth 2.0 grant types. Each grant type is implemented as a `GrantHandler` and declared on a module via `contributes.grants`; the boot planner instantiates and registers handlers internally.
 
 #### Interfaces and types
 
@@ -104,18 +104,13 @@ interface GrantModule {
 }
 ```
 
-#### GrantRegistry
+#### Grant registration
 
-```typescript
-class GrantRegistry {
-  register(grantType: string, handler: GrantHandler): void;
-  get(grantType: string): GrantHandler | undefined;
-  addModule(module: GrantModule, deps: GrantDependencies): void;
-  cleanup(): void;
-}
-```
+Grant handlers are wired into the boot planner via `contributes.grants` on a module's `defineModule` manifest (see A2-γ §3.3). The boot planner instantiates each `GrantFactory`, registers the resulting handler, and (after `addModule` for all modules) calls `freeze()` so post-boot mutation throws loudly.
 
-`addModule` instantiates all `GrantFactory` entries in the module and registers them. `cleanup()` is the legacy shutdown hook: it iterates registered grant handlers and invokes each handler's optional `cleanup()` method. New code should use `handle.dispose()` (returned by `createApp`) instead — `AppHandle.dispose()` runs per-component `lifecycle[K].cleanup` callbacks in reverse-topological order per A2-β §8.1. `GrantRegistry.cleanup()` is retained for backwards compatibility and will be removed in a future minor.
+Consumer code does NOT need to import or instantiate any registry class. Cleanup of grant handlers runs through the unified `handle.dispose()` returned by `createApp` — `AppHandle.dispose()` runs per-component `lifecycle[K].cleanup` callbacks in reverse-topological order per A2-β §8.1.
+
+> **Removed at 1.0 GA**: the `GrantRegistry` and `GrantRegistryError` classes (deprecated as public re-exports in v0.5.1 per AS-8) are no longer exported from `@o3co/auth-provider-core`. They remain as internal implementation detail of the boot planner. Existing consumers of the v0.4.x `new GrantRegistry()` pattern should migrate to module-based `contributes.grants` declarations.
 
 ### Token Utilities
 
