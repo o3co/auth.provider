@@ -9,7 +9,7 @@
 		"lint": "biome check packages/ templates/ create-app/",
 		"test": "pnpm -r run test",
 		"test:coverage": "pnpm -r --filter \"./packages/**\" --if-present run test:coverage",
-		"audit": "pnpm audit --prod --audit-level=moderate"
+		"audit": "pnpm audit --prod --audit-level=low"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.3.14",

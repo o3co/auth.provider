@@ -29,13 +29,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ hashFiles('**/package.json') }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
 
       - name: Set version from tag
         run: pnpm -r exec pnpm version "${GITHUB_REF#refs/tags/v}" --no-git-tag-version --no-commit-hooks
 
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run build
       - run: pnpm -r --if-present run typecheck
       - run: pnpm run test

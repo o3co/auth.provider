@@ -61,12 +61,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ steps.pnpm-store.outputs.path }}
-          key: pnpm-store-${{ hashFiles('**/package.json') }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: pnpm-store-
 
       - name: Install dependencies
         if: steps.version.outputs.skip == 'false'
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build packages
         if: steps.version.outputs.skip == 'false'
