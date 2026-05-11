@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed (Phase G — M5 `CodeRepository.getByCode` → `findByCode` rename, 1.0 GA)
+
+- **BREAKING**: `CodeRepository.getByCode(code)` renamed to
+  `findByCode(code)`. The signature (`Promise<Code | null>`) and
+  semantics (returns `null` when no record matches; never throws on
+  absence) are unchanged.
+- Rationale: aligns with the `findBy<Field>` repository-method
+  convention introduced in v0.5.1 — `findBy*` for optional lookups
+  (`null` on absence), `get(<id>)` for single-object stores, and
+  operation-specific names like `consumeByCode` (atomic single-use) for
+  non-lookup operations. `get*` idiomatically implies throw-on-missing,
+  which mismatches this method's nullable return. The v0.5.1 JSDoc
+  (AS-10) flagged this for renaming at 1.0 GA.
+- Migration: consumers implementing `CodeRepository` (custom storage
+  adapters) must rename their `getByCode` method to `findByCode`. The
+  in-memory adapter (`InMemoryCodeRepository`) and Redis adapter
+  (`@o3co/auth-provider-redis`) are updated by this release.
+- Affected APIs: `CodeRepository.getByCode` (removed) →
+  `CodeRepository.findByCode` (added). No transitional alias.
+
 ### Security (Phase G — M6 `legacyRtPolicy = "accept-with-warning"` removed, 1.0 GA)
 
 - **BREAKING**: The `accept-with-warning` value of

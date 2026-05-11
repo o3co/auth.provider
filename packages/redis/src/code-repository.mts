@@ -121,7 +121,7 @@ export class RedisCodeRepository implements CodeRepository {
 		return { code, ...payload };
 	}
 
-	async getByCode(code: string): Promise<Code | null> {
+	async findByCode(code: string): Promise<Code | null> {
 		const value = await this.client.get(this.keyPrefix + code);
 		return this.parseCodeValue(code, value);
 	}

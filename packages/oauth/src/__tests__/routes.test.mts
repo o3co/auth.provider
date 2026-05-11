@@ -78,7 +78,7 @@ const integrationCodeRepo: CodeRepository = {
 		client_id: TEST_CLIENT_ID,
 		redirect_uri: "https://rp.example/cb",
 	}),
-	getByCode: async () => null,
+	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
 };

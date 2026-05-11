@@ -74,7 +74,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 		};
 	}
 
-	async getByCode(code: string): Promise<Code | null> {
+	async findByCode(code: string): Promise<Code | null> {
 		const stored = this.codes.get(code);
 		if (!stored) return null;
 		if (Date.now() >= stored.expiresAt) {

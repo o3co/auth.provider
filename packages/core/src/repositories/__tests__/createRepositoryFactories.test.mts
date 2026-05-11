@@ -115,7 +115,7 @@ describe("createRepositoryFactories", () => {
 	});
 
 	describe("codeFactory", () => {
-		it("creates a code repository from memory config and supports createCode/getByCode", async () => {
+		it("creates a code repository from memory config and supports createCode/findByCode", async () => {
 			const { codeFactory } = createRepositoryFactories();
 			const repo = await codeFactory.create({ type: "memory" });
 			const code = await repo.createCode({
@@ -124,7 +124,7 @@ describe("createRepositoryFactories", () => {
 			});
 
 			expect(code.code).toBeDefined();
-			const fetched = await repo.getByCode(code.code);
+			const fetched = await repo.findByCode(code.code);
 			expect(fetched).not.toBeNull();
 			expect(fetched?.code).toBe(code.code);
 		});

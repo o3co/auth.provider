@@ -112,7 +112,7 @@ describe("RedisCodeRepository", () => {
 		});
 	});
 
-	describe("getByCode", () => {
+	describe("findByCode", () => {
 		it("returns stored code data", async () => {
 			const created = await repo.createCode({
 				...minimalParams,
@@ -120,7 +120,7 @@ describe("RedisCodeRepository", () => {
 				code_challenge_method: "S256",
 			});
 
-			const found = await repo.getByCode(created.code);
+			const found = await repo.findByCode(created.code);
 
 			expect(found).not.toBeNull();
 			expect(found?.code).toBe(created.code);
@@ -129,13 +129,13 @@ describe("RedisCodeRepository", () => {
 		});
 
 		it("returns null for unknown code", async () => {
-			const result = await repo.getByCode("nonexistent-code");
+			const result = await repo.findByCode("nonexistent-code");
 			expect(result).toBeNull();
 		});
 
 		it("returns null for corrupted data", async () => {
 			store.set(`${KEY_PREFIX}corrupted`, "not-valid-json{{{");
-			const result = await repo.getByCode("corrupted");
+			const result = await repo.findByCode("corrupted");
 			expect(result).toBeNull();
 		});
 
@@ -146,7 +146,7 @@ describe("RedisCodeRepository", () => {
 		// in /token never see `client_id: undefined` or `redirect_uri: undefined`.
 		it("treats pre-v0.5.1 records lacking client_id and redirect_uri as corrupt", async () => {
 			store.set(`${KEY_PREFIX}legacy-1`, JSON.stringify({ code_challenge: "x" }));
-			expect(await repo.getByCode("legacy-1")).toBeNull();
+			expect(await repo.findByCode("legacy-1")).toBeNull();
 		});
 
 		it("treats records with non-string client_id as corrupt", async () => {
@@ -154,12 +154,12 @@ describe("RedisCodeRepository", () => {
 				`${KEY_PREFIX}legacy-2`,
 				JSON.stringify({ client_id: 123, redirect_uri: "https://rp/cb" }),
 			);
-			expect(await repo.getByCode("legacy-2")).toBeNull();
+			expect(await repo.findByCode("legacy-2")).toBeNull();
 		});
 
 		it("treats records with missing redirect_uri as corrupt even if client_id is present", async () => {
 			store.set(`${KEY_PREFIX}legacy-3`, JSON.stringify({ client_id: "client-1" }));
-			expect(await repo.getByCode("legacy-3")).toBeNull();
+			expect(await repo.findByCode("legacy-3")).toBeNull();
 		});
 	});
 
@@ -343,14 +343,14 @@ describe("RedisCodeRepository", () => {
 			expect(parsed.grantedScope).toEqual(["openid"]);
 		});
 
-		it("getByCode also returns all extended fields", async () => {
+		it("findByCode also returns all extended fields", async () => {
 			const result = await repo.createCode({
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 				sid: "sid-xyz",
 				nonce: "nonce-abc",
 			});
-			const found = await repo.getByCode(result.code);
+			const found = await repo.findByCode(result.code);
 			expect(found?.client_id).toBe("client-abc");
 			expect(found?.redirect_uri).toBe("https://rp.example/cb");
 			expect(found?.sid).toBe("sid-xyz");
@@ -397,7 +397,7 @@ describeWithRedis("RedisCodeRepository with real Redis", () => {
 		expect(ttl).toBeLessThanOrEqual(1000);
 
 		await new Promise((resolve) => setTimeout(resolve, 1100));
-		expect(await repo.getByCode(created.code)).toBeNull();
+		expect(await repo.findByCode(created.code)).toBeNull();
 	});
 
 	it("round-trips sid, nonce, redirect_uri, grantedScope, and grantedAudience through Redis", async () => {

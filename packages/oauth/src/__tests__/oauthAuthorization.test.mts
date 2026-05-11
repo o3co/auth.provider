@@ -54,7 +54,7 @@ const fakeCodeRepository: CodeRepository = {
 		client_id: "client1",
 		redirect_uri: "https://rp.example/cb",
 	}),
-	getByCode: async () => null,
+	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
 };
@@ -149,7 +149,7 @@ async function buildAuthorizeApp(opts: {
 			// returned `Code` satisfies the new shape (client_id + redirect_uri).
 			return { code: "auth-code", client_id: params.client_id, redirect_uri: params.redirect_uri };
 		},
-		getByCode: async () => null,
+		findByCode: async () => null,
 		consumeByCode: async () => null,
 		removeByCode: async () => {},
 	};
@@ -403,7 +403,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			codeRepository: {
 				consumeByCode,
 				createCode: vi.fn(),
-				getByCode: vi.fn(),
+				findByCode: vi.fn(),
 				removeByCode: vi.fn(),
 			} as unknown as CodeRepository,
 			clientRepository: {
@@ -460,7 +460,7 @@ describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 			codeRepository: {
 				consumeByCode,
 				createCode: vi.fn(),
-				getByCode: vi.fn(),
+				findByCode: vi.fn(),
 				removeByCode: vi.fn(),
 			} as unknown as CodeRepository,
 			clientRepository: {
@@ -534,7 +534,7 @@ describe("createAuthorizationGrant — returns 400 for invalid code", () => {
 			codeRepository: {
 				consumeByCode,
 				createCode: vi.fn(),
-				getByCode: vi.fn(),
+				findByCode: vi.fn(),
 				removeByCode: vi.fn(),
 			} as unknown as CodeRepository,
 			clientRepository: {
@@ -1092,7 +1092,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 					redirect_uri: params.redirect_uri,
 				};
 			},
-			getByCode: async () => null,
+			findByCode: async () => null,
 			consumeByCode: async () => null,
 			removeByCode: async () => {},
 		};
