@@ -214,9 +214,9 @@ export type {
 	GrantHandlerResolver,
 	// AS-7 collision resolution (v0.5.1): the manifest's contributes-map
 	// placeholder previously named `GrantPolicyHook` was renamed to
-	// `GrantPolicyHookContribution`. The canonical `GrantPolicyHook` (alias
-	// of `GrantPolicyHook`) is now re-exported from `./policy/types.mjs`
-	// in the policy block below.
+	// `GrantPolicyHookContribution`. The canonical `GrantPolicyHook`
+	// interface lives in `./policy/types.mjs` and is re-exported from the
+	// policy block below.
 	GrantPolicyHookContribution,
 	// GrantPolicyHookFactory: excluded — name collides with legacy
 	// ./policy/types.mjs export at this boundary. Import from

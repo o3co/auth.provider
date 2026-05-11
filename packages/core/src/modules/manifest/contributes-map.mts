@@ -33,16 +33,15 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 // cycle).
 //
 //   GrantHandler                — packages/core/src/grants/types.mts:120 (concrete, AS-M1)
-//   AuditHook                   — AuditSink at packages/core/src/audit/types.mts (AS-M1, canonical alias of AuditSink)
-//   MfaFactor                   — MfaProvider at packages/core/src/mfa/types.mts (AS-M1, canonical alias of MfaProvider)
-//   GrantPolicyHookContribution — GrantPolicyHook at packages/core/src/policy/types.mts (AS-M1, canonical alias of GrantPolicyHook)
+//   AuditHook                   — AuditSink interface at packages/core/src/audit/types.mts (AS-M1)
+//   MfaFactor                   — MfaProvider interface at packages/core/src/mfa/types.mts (AS-M1)
+//   GrantPolicyHookContribution — GrantPolicyHook interface at packages/core/src/policy/types.mts (AS-M1, AS-7 collision rename)
 //   FederationProvider          — packages/session/src/federations/types.mts (Phase F deferred — circular import)
 //   ExchangeTokenValidator      — packages/oauth-token-exchange/src/validator/types.mts (Phase F deferred — circular import)
 //
-// Canonical names are used for the substitution RHS; the deprecated
-// `*Base` aliases are kept by `audit/types.mts`, `mfa/types.mts`, and
-// `policy/types.mts` for v0.5.1-era consumer back-compat (PR3 / AS-7) but
-// new code should reference the un-suffixed canonical names.
+// Canonical (no-suffix) interface names are used for the substitution
+// RHS. The v0.5.1-era `*Base` deprecation aliases were removed at 1.0 GA
+// (M2); references on this site are to the interfaces themselves.
 
 /**
  * Type produced by a `GrantFactory<Deps>` contribution. Substituted in
@@ -70,16 +69,14 @@ export type ExchangeTokenValidator = unknown;
 /**
  * Type produced by an `MfaFactorFactory<Deps>` contribution. Substituted
  * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
- * `MfaProvider` (alias of `MfaProvider`) from
- * `packages/core/src/mfa/types.mts`.
+ * `MfaProvider` interface from `packages/core/src/mfa/types.mts`.
  */
 export type MfaFactor = MfaProvider;
 
 /**
  * Type produced by an `AuditHookFactory<Deps>` contribution. Substituted
  * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
- * `AuditSink` (alias of `AuditSink`) from
- * `packages/core/src/audit/types.mts`.
+ * `AuditSink` interface from `packages/core/src/audit/types.mts`.
  */
 export type AuditHook = AuditSink;
 
@@ -87,11 +84,11 @@ export type AuditHook = AuditSink;
  * Type produced by a `GrantPolicyHookFactory<Deps>` contribution.
  *
  * Renamed from `GrantPolicyHook` in v0.5.1 (AS-7 collision resolution):
- * the canonical `GrantPolicyHook` now refers to the policy-package
- * interface (an alias of `GrantPolicyHook`). Substituted in v0.5.1
- * (AS-M1) from the `unknown` placeholder to that canonical
- * `GrantPolicyHook` interface — a contribution factory now produces a
- * concrete grant-policy-hook adapter rather than an opaque value.
+ * the canonical `GrantPolicyHook` name now refers to the policy-package
+ * interface at `packages/core/src/policy/types.mts`. Substituted in
+ * v0.5.1 (AS-M1) from the `unknown` placeholder to that canonical
+ * interface — a contribution factory now produces a concrete
+ * grant-policy-hook adapter rather than an opaque value.
  */
 export type GrantPolicyHookContribution = GrantPolicyHook;
 
