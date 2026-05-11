@@ -64,3 +64,29 @@ describe("oauth.refreshToken schema — removed-field preprocess (Phase G / M4)"
 		expect(issue?.message).toMatch(/v0\.5\.x or newer/);
 	});
 });
+
+describe("oauth.refreshToken schema — legacyRtPolicy enum tightening (Phase G / M6)", () => {
+	const validBase = {
+		expiresIn: 86400,
+		unknownFamilyPolicy: "reject" as const,
+	};
+
+	it("accepts legacyRtPolicy='reject' (the only remaining value)", () => {
+		const result = refreshTokenSchema.safeParse({ ...validBase, legacyRtPolicy: "reject" });
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects legacyRtPolicy='accept-with-warning' (removed at 1.0 GA)", () => {
+		const result = refreshTokenSchema.safeParse({
+			...validBase,
+			legacyRtPolicy: "accept-with-warning",
+		});
+		expect(result.success).toBe(false);
+		if (result.success) return;
+		const flagged = result.error.issues.some(
+			(issue) =>
+				issue.path.includes("legacyRtPolicy") || issue.message.includes("accept-with-warning"),
+		);
+		expect(flagged).toBe(true);
+	});
+});
