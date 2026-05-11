@@ -36,17 +36,20 @@ export interface CodeRepository {
 		sid?: string;
 	}): Promise<Code>;
 	/**
-	 * Retrieve a code record by the authorization code string.
+	 * Retrieve a code record by the authorization code string. Returns
+	 * `null` when no record matches — the method is fail-soft on absence,
+	 * matching the `findBy<Field>` convention used by
+	 * `ClientRepository.findById`.
 	 *
-	 * Naming note (AS-10): `getByCode` predates the v0.5.1 `findBy<Field>`
-	 * convention used by `ClientRepository.findById`. It is preserved at
-	 * v0.5.x for backward compatibility and will be normalized to
-	 * `findByCode` at 1.0 GA. New repository methods on this interface
-	 * SHOULD follow the `findBy<Field>` convention. Operation-specific
-	 * names like `consumeByCode` (atomic single-use) are NOT subject to
-	 * this convention.
+	 * Naming note (AS-10): renamed from `getByCode` to `findByCode` at 1.0
+	 * GA to align with the repository-method convention introduced in
+	 * v0.5.1: `findBy<Field>` for optional lookups (`null` on absence),
+	 * `get(<id>)` for single-object stores, and operation-specific names
+	 * like `consumeByCode` (atomic single-use) for non-lookup operations.
+	 * The v0.5.x `getByCode` name was deprecated via the JSDoc-only
+	 * documentation in v0.5.2 (AS-10).
 	 */
-	getByCode(code: string): Promise<Code | null>;
+	findByCode(code: string): Promise<Code | null>;
 	/**
 	 * Atomically retrieve and delete the code record. This is the sole
 	 * authenticity gate for authorization code exchange. Returns null when the

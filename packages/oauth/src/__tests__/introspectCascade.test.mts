@@ -60,7 +60,7 @@ const mockCodeRepository: CodeRepository = {
 		client_id: "client1",
 		redirect_uri: "https://rp.example/cb",
 	}),
-	getByCode: async () => null,
+	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
 };

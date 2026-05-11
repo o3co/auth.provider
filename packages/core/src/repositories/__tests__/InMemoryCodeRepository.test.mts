@@ -62,11 +62,11 @@ describe("InMemoryCodeRepository", () => {
 		});
 	});
 
-	describe("getByCode", () => {
+	describe("findByCode", () => {
 		it("returns stored code", async () => {
 			repo = new InMemoryCodeRepository();
 			const created = await repo.createCode({ ...minimalParams, code_challenge: "ch" });
-			const found = await repo.getByCode(created.code);
+			const found = await repo.findByCode(created.code);
 
 			expect(found).not.toBeNull();
 			expect(found?.code).toBe(created.code);
@@ -75,7 +75,7 @@ describe("InMemoryCodeRepository", () => {
 
 		it("returns null for unknown code", async () => {
 			repo = new InMemoryCodeRepository();
-			const found = await repo.getByCode("nonexistent");
+			const found = await repo.findByCode("nonexistent");
 
 			expect(found).toBeNull();
 		});
@@ -109,7 +109,7 @@ describe("InMemoryCodeRepository", () => {
 			const created = await repo.createCode(minimalParams);
 			await repo.removeByCode(created.code);
 
-			const found = await repo.getByCode(created.code);
+			const found = await repo.findByCode(created.code);
 			expect(found).toBeNull();
 		});
 
@@ -127,7 +127,7 @@ describe("InMemoryCodeRepository", () => {
 				grantedScope: ["read"],
 				grantedAudience: ["https://api.example"],
 			});
-			const found = await repo.getByCode(created.code);
+			const found = await repo.findByCode(created.code);
 			expect(found?.grantedScope).toEqual(["read"]);
 			expect(found?.grantedAudience).toEqual(["https://api.example"]);
 			repo.dispose();
@@ -141,7 +141,7 @@ describe("InMemoryCodeRepository", () => {
 
 			await new Promise((r) => setTimeout(r, 100));
 
-			const found = await repo.getByCode(created.code);
+			const found = await repo.findByCode(created.code);
 			expect(found).toBeNull();
 		});
 
@@ -151,7 +151,7 @@ describe("InMemoryCodeRepository", () => {
 
 			await new Promise((r) => setTimeout(r, 100));
 
-			const found = await repo.getByCode(created.code);
+			const found = await repo.findByCode(created.code);
 			expect(found).toBeNull();
 		});
 	});
@@ -184,13 +184,13 @@ describe("InMemoryCodeRepository", () => {
 			};
 		});
 
-		it("populated client_id and redirect_uri round-trip via getByCode", async () => {
+		it("populated client_id and redirect_uri round-trip via findByCode", async () => {
 			const repo = new InMemoryCodeRepository();
 			const created = await repo.createCode({
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 			});
-			const found = await repo.getByCode(created.code);
+			const found = await repo.findByCode(created.code);
 			expect(found?.client_id).toBe("client-abc");
 			expect(found?.redirect_uri).toBe("https://rp.example/cb");
 			repo.dispose();
@@ -198,7 +198,7 @@ describe("InMemoryCodeRepository", () => {
 	});
 
 	describe("TODO-F-3 extended fields (nonce / sid)", () => {
-		it("roundtrips nonce + sid + grantedScope via createCode → getByCode", async () => {
+		it("roundtrips nonce + sid + grantedScope via createCode → findByCode", async () => {
 			repo = new InMemoryCodeRepository();
 			const { code } = await repo.createCode({
 				...minimalParams,
@@ -209,7 +209,7 @@ describe("InMemoryCodeRepository", () => {
 				grantedScope: ["openid", "profile"],
 				expiresIn: 60,
 			});
-			const r = await repo.getByCode(code);
+			const r = await repo.findByCode(code);
 			expect(r?.nonce).toBe("n-abc");
 			expect(r?.sid).toBe("sid-123");
 			expect(r?.grantedScope).toEqual(["openid", "profile"]);
@@ -232,7 +232,7 @@ describe("InMemoryCodeRepository", () => {
 		it("createCode without nonce/sid leaves them undefined (backward compat)", async () => {
 			repo = new InMemoryCodeRepository();
 			const { code } = await repo.createCode(minimalParams);
-			const r = await repo.getByCode(code);
+			const r = await repo.findByCode(code);
 			expect(r?.nonce).toBeUndefined();
 			expect(r?.sid).toBeUndefined();
 		});

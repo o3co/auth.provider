@@ -260,7 +260,7 @@ interface CodeRepository {
     code_challenge_method?: string;
     expiresIn?: number;
   }): Promise<Code>;
-  getByCode(code: string): Promise<Code | null>;
+  findByCode(code: string): Promise<Code | null>;
   consumeByCode(code: string): Promise<Code | null>;
   removeByCode(code: string): Promise<void>;
 }

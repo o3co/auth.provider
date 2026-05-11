@@ -93,7 +93,7 @@ const mockCodeRepository: CodeRepository = {
 		client_id: "client1",
 		redirect_uri: "https://rp.example/cb",
 	}),
-	getByCode: async () => null,
+	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},
 };
@@ -456,7 +456,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 					client_id: "client1",
 					redirect_uri: "https://rp.example/cb",
 				}),
-				getByCode: async () => null,
+				findByCode: async () => null,
 				consumeByCode: async () => null,
 				removeByCode: async () => {},
 			};
@@ -522,7 +522,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 						grantedAudience: params.grantedAudience,
 					};
 				},
-				getByCode: async () => null,
+				findByCode: async () => null,
 				consumeByCode: async () => null,
 				removeByCode: async () => {},
 			};
@@ -747,7 +747,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			};
 			const codeRepo: CodeRepository = {
 				createCode: async () => persistedCode,
-				getByCode: async () => persistedCode,
+				findByCode: async () => persistedCode,
 				consumeByCode: async () => persistedCode,
 				removeByCode: async () => {},
 			};
