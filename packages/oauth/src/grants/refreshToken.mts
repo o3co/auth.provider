@@ -276,6 +276,33 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				}
 			}
 
+			// SF-6 / 1.0 GA (Phase G / M6): when rotation is wired, refresh
+			// tokens MUST carry both jti AND family_id. Fail-fast BEFORE
+			// `generateToken()` runs so (a) we don't burn keystore signatures
+			// on a request that is going to be rejected anyway, and (b) a
+			// transient keystore failure cannot mask the deterministic
+			// `invalid_grant / missing_jti_or_family_id` response. Pre-M6
+			// the gate sat after token mint because the `accept-with-warning`
+			// branch needed the minted tokens; with M6 removing that branch,
+			// rejection is unconditional and the gate is free to move.
+			if (deps.refreshTokenFamilyRotation && (previousJti === null || familyId === null)) {
+				logger?.warn(
+					{
+						clientId: authenticatedClientId,
+						hasJti: previousJti !== null,
+						hasFamilyId: familyId !== null,
+					},
+					"legacy_rt_rejected",
+				);
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "missing_jti_or_family_id",
+					},
+				};
+			}
+
 			// CP-15: empty string (e.g. requested=" ") normalizes to null so the
 			// token response omits scope rather than emitting `scope: ""`.
 			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
@@ -317,28 +344,14 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			);
 
 			if (deps.refreshTokenFamilyRotation) {
-				// SF-6 / 1.0 GA (Phase G / M6): when rotation is wired, refresh
-				// tokens MUST carry both jti AND family_id. Tokens lacking
-				// either bypass replay detection because the rotation block
-				// cannot match a previous jti or address a family record. The
-				// `accept-with-warning` migration-window opt-in was removed at
-				// 1.0 GA — rejection is now unconditional.
+				// SF-6 fail-fast above already returned for missing
+				// jti/family_id when rotation is wired. The check below
+				// documents that invariant, narrows for TS, and acts as
+				// defense-in-depth if a future refactor moves the gate.
 				if (previousJti === null || familyId === null) {
-					logger?.warn(
-						{
-							clientId: authenticatedClientId,
-							hasJti: previousJti !== null,
-							hasFamilyId: familyId !== null,
-						},
-						"legacy_rt_rejected",
+					throw new Error(
+						"invariant violation: SF-6 fail-fast must run before refresh-token rotation block",
 					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "missing_jti_or_family_id",
-						},
-					};
 				}
 				const newRefreshPayload = decodeJwtPayload(newRefreshToken.token);
 				const newJti = newRefreshPayload.jti as string | undefined;
