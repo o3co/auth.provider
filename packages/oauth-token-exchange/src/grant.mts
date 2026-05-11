@@ -47,11 +47,6 @@ export interface ExchangeTokenValidatorResolver {
 export interface TokenExchangeDependencies extends GrantDependencies {
 	tokenExchangeValidatorResolver: ExchangeTokenValidatorResolver;
 	clientRepository: ClientRepository;
-	/**
-	 * Deprecated migration escape hatch. The default fail-closed behavior rejects
-	 * policy hook scope/audience outputs that exceed the validated subject token.
-	 */
-	allowPolicyWidening?: boolean;
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
@@ -523,57 +518,54 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
 			}
 
-			if (!deps.allowPolicyWidening) {
-				const subjectScopeSet = new Set(subjectScope);
-				const widenedScopes = grantedScope?.filter((scope) => !subjectScopeSet.has(scope)) ?? [];
-				if (widenedScopes.length > 0) {
-					deps.logger?.warn(
-						{
-							subject: subjectValidated.sub,
-							clientId: client.clientId,
-							widenedScopes,
-						},
-						"token_exchange_scope_widening_rejected",
-					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_target",
-							errorDescription: `scope_widening_not_allowed: ${widenedScopes.join(" ")}`,
-						},
-					};
-				}
-
-				const subjectAudienceSet = new Set(
-					subjectAudienceBoundary(subjectValidated.aud, client.clientId),
+			const subjectScopeSet = new Set(subjectScope);
+			const widenedScopes = grantedScope?.filter((scope) => !subjectScopeSet.has(scope)) ?? [];
+			if (widenedScopes.length > 0) {
+				deps.logger?.warn(
+					{
+						subject: subjectValidated.sub,
+						clientId: client.clientId,
+						widenedScopes,
+					},
+					"token_exchange_scope_widening_rejected",
 				);
-				const widenedAudiences =
-					grantedAudience?.filter((audience) => !subjectAudienceSet.has(audience)) ?? [];
-				if (widenedAudiences.length > 0) {
-					deps.logger?.warn(
-						{
-							subject: subjectValidated.sub,
-							clientId: client.clientId,
-							widenedAudiences,
-						},
-						"token_exchange_audience_widening_rejected",
-					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_target",
-							errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
-						},
-					};
-				}
+				return {
+					result: {
+						status: 400,
+						error: "invalid_target",
+						errorDescription: `scope_widening_not_allowed: ${widenedScopes.join(" ")}`,
+					},
+				};
+			}
+
+			const subjectAudienceSet = new Set(
+				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
+			);
+			const widenedAudiences =
+				grantedAudience?.filter((audience) => !subjectAudienceSet.has(audience)) ?? [];
+			if (widenedAudiences.length > 0) {
+				deps.logger?.warn(
+					{
+						subject: subjectValidated.sub,
+						clientId: client.clientId,
+						widenedAudiences,
+					},
+					"token_exchange_audience_widening_rejected",
+				);
+				return {
+					result: {
+						status: 400,
+						error: "invalid_target",
+						errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
+					},
+				};
 			}
 
 			// Audience derivation (spec §8.1 rule 2):
 			//   explicit narrowed audience  → use grantedAudience (first element).
 			//     Note: grantedAudience reflects either the allowlist-validated request
-			//     parameter OR a policy hook override. Unless the deprecated
-			//     allowPolicyWidening escape hatch is set, policy overrides are
-			//     checked against the validated subject token boundary above.
+			//     parameter OR a policy hook override; policy overrides are always
+			//     re-checked against the validated subject token boundary above.
 			//   omitted + subject single    → inherit subject.aud IFF in allowlist;
 			//                                   else fall back to clientId (prevents
 			//                                   cross-client audience confusion when a

@@ -67,7 +67,6 @@ function buildGrant(
 		validatorRefreshStore?: ReturnType<typeof makeFamilyRevocation> | null;
 		config?: AppConfig;
 		grantPolicy?: GrantPolicyHook;
-		allowPolicyWidening?: boolean;
 	} = {},
 ) {
 	const registry = overrides.validatorRegistry ?? new ExchangeTokenValidatorRegistry();
@@ -100,9 +99,6 @@ function buildGrant(
 		// test scaffolding even though it is no longer publicly exported.
 		tokenExchangeValidatorResolver: registry,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
-		...(overrides.allowPolicyWidening !== undefined
-			? { allowPolicyWidening: overrides.allowPolicyWidening }
-			: {}),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 	});
 }
@@ -666,31 +662,6 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 			errorDescription: expect.stringMatching(/audience_widening_not_allowed/),
 		});
 	});
-
-	it("allows explicit policy widening only when allowPolicyWidening=true", async () => {
-		const wideningPolicy: GrantPolicyHook = {
-			kind: "widening-opt-in",
-			async evaluate() {
-				return {
-					outcome: "allow",
-					grantedScope: ["read", "write", "admin"],
-				};
-			},
-		};
-		const g = buildGrant({ grantPolicy: wideningPolicy, allowPolicyWidening: true });
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read" });
-		const { result } = await g.handle(
-			ctx({
-				client_id: "client-a",
-				client_secret: "any",
-				subject_token: token,
-				subject_token_type: ACCESS_TOKEN_TYPE,
-			}),
-		);
-		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read write admin");
-	});
 });
 
 describe("createTokenExchangeGrant — audience inheritance", () => {
@@ -1176,31 +1147,6 @@ describe("createTokenExchangeGrant — policy hook", () => {
 			}),
 		);
 		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
-	});
-
-	it("documents that policy hook widening requires explicit allowPolicyWidening opt-in", async () => {
-		const wideningPolicy: GrantPolicyHook = {
-			kind: "widening",
-			async evaluate() {
-				return {
-					outcome: "allow",
-					grantedScope: ["read", "write", "admin"], // wider than subject's "read"
-				};
-			},
-		};
-		const g = buildGrant({ grantPolicy: wideningPolicy, allowPolicyWidening: true });
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read" });
-		const { result } = await g.handle(
-			ctx({
-				client_id: "client-a",
-				client_secret: "any",
-				subject_token: token,
-				subject_token_type: ACCESS_TOKEN_TYPE,
-			}),
-		);
-		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
-		expect(result.tokens.scope).toBe("read write admin");
 	});
 
 	it("passes resource parameter through to the policy hook request", async () => {
