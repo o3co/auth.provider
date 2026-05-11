@@ -44,11 +44,13 @@ function emit(
 	msg: string | undefined,
 	args: unknown[],
 ): void {
+	// console.* IS the default Logger fallback here (this is the
+	// console-backed Logger implementation); biome's recommended preset
+	// in this repo does not enable `noConsole`, so no suppression is
+	// needed.
 	if (typeof obj === "string") {
-		// biome-ignore lint/suspicious/noConsole: this IS the default Logger fallback
 		console[method]({ ...bindings }, obj, ...(msg !== undefined ? [msg] : []), ...args);
 	} else {
-		// biome-ignore lint/suspicious/noConsole: this IS the default Logger fallback
 		console[method]({ ...bindings, ...obj }, ...(msg !== undefined ? [msg] : []), ...args);
 	}
 }

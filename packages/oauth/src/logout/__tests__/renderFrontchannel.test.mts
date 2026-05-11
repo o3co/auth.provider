@@ -1,4 +1,4 @@
-import { assert, describe, expect, it, vi } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
 import { renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
 

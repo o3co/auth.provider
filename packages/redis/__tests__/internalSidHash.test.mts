@@ -48,7 +48,7 @@ describe("createRedisSidHash", () => {
 		await h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), FUTURE());
 		const out = await h.listValues("sid-1");
 		expect(out).toHaveLength(1);
-		expect(JSON.parse(out[0]!)).toEqual({ x: 1 });
+		expect(JSON.parse(out[0] as string)).toEqual({ x: 1 });
 	});
 
 	it("setField with same id replaces value", async () => {
@@ -57,7 +57,7 @@ describe("createRedisSidHash", () => {
 		await h.setField("sid-1", "id-a", JSON.stringify({ x: 2 }), FUTURE());
 		const out = await h.listValues("sid-1");
 		expect(out).toHaveLength(1);
-		expect(JSON.parse(out[0]!)).toEqual({ x: 2 });
+		expect(JSON.parse(out[0] as string)).toEqual({ x: 2 });
 	});
 
 	it("setField after expiry no-ops (no zombie key)", async () => {

@@ -81,7 +81,7 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		expect(header.typ).toBe("at+jwt");
 
 		// Verify the JWT payload using the KeyStore's verification key
-		const verificationKey = await keyStore.getVerificationKey(header.kid!);
+		const verificationKey = await keyStore.getVerificationKey(header.kid as string);
 		const { payload } = await jwtVerify(token.token, verificationKey, {
 			issuer: "https://auth.example.com",
 			audience: "https://api.example.com",
@@ -145,7 +145,7 @@ describe("Integration: generateToken + asymmetric KeyStore", () => {
 		});
 
 		// Step 3: Verify old token still works with new KeyStore
-		const rotatedVerificationKey = await newKeyStore.getVerificationKey(oldHeader.kid!);
+		const rotatedVerificationKey = await newKeyStore.getVerificationKey(oldHeader.kid as string);
 		const { payload: rotatedPayload } = await jwtVerify(oldToken.token, rotatedVerificationKey);
 		expect(rotatedPayload.sub).toBe("user-456");
 		expect(rotatedPayload.role).toBe("viewer");

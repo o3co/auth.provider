@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { FederationTokenStore } from "../types.mjs";
 import { supportsLock } from "../types.mjs";
 
 describe("supportsLock type guard", () => {
@@ -32,7 +33,7 @@ describe("supportsLock type guard", () => {
 			update: async () => {},
 			removeBySid: async () => {},
 		};
-		expect(supportsLock(store as any)).toBe(false);
+		expect(supportsLock(store as FederationTokenStore)).toBe(false);
 	});
 
 	it("returns true for a store with acquireLock method", () => {
@@ -45,6 +46,6 @@ describe("supportsLock type guard", () => {
 			removeBySid: async () => {},
 			acquireLock: async () => ({ acquired: true as const, release: async () => {} }),
 		};
-		expect(supportsLock(store as any)).toBe(true);
+		expect(supportsLock(store as FederationTokenStore)).toBe(true);
 	});
 });

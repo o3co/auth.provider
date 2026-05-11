@@ -72,9 +72,11 @@ function deriveProviderCallbackUrls(
  * Replaces the v0.4.x `sessionModule(opts: SessionModuleOptions): Module`
  * factory. Caller surface:
  *
- *   sessionModule({ userRepository, federationProviderFactory? })
- *   → import { sessionModule } from "@o3co/auth-provider-session";
- *     // pass directly to the manifest list — no factory call
+ *   import { sessionModule } from "@o3co/auth-provider-session";
+ *   // pass directly to the manifest list — `sessionModule` is a
+ *   // pre-built `Module` value, not a factory; dependencies
+ *   // (`userRepository`, `userSessionStore`, etc.) flow in through
+ *   // sibling `defineModule(...)` modules that produce them.
  *
  * Two route contributions, both mounted at `/session` (intentional named-route
  * bundle per Codex Session 06 Q6):
