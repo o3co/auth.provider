@@ -39,8 +39,7 @@ describe("oauth.refreshToken schema — removed-field preprocess (Phase G / M4)"
 		if (result.success) return;
 		const flagged = result.error.issues.some(
 			(issue) =>
-				issue.path.includes("legacyTokenCompat") ||
-				issue.message.includes("legacyTokenCompat"),
+				issue.path.includes("legacyTokenCompat") || issue.message.includes("legacyTokenCompat"),
 		);
 		expect(flagged).toBe(true);
 	});

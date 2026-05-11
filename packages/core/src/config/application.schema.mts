@@ -120,7 +120,11 @@ const LEGACY_JWT_FIELDS = [
  * v0.5.x get a targeted error instead of having their flag silently
  * stripped by Zod's default `unknown-key strip` behavior.
  */
-const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{ name: string; removedIn: string; note: string }> = [
+const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
+	name: string;
+	removedIn: string;
+	note: string;
+}> = [
 	{
 		name: "legacyTokenCompat",
 		removedIn: "1.0 GA (Phase G / M4)",
