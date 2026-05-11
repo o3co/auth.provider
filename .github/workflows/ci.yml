@@ -34,6 +34,7 @@ jobs:
           restore-keys: pnpm-store-
 
       - run: pnpm install
+      - run: pnpm run audit
       - run: pnpm run lint
       - run: pnpm run build
       - name: Vendor leak guard
