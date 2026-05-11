@@ -119,9 +119,10 @@ export const createOAuthRouter = async (
 	// canonical issuer (or this router is constructed in a partial-config test
 	// fixture), the middleware falls back to the literal "oauth".
 	const issuerForRealm = (config as { oauth?: { jwt?: { issuer?: string } } }).oauth?.jwt?.issuer;
-	// SF-1: legacyTypAccept default is `true` for v0.5.x. Use the same
-	// defensive cast as `issuerForRealm` so partial-config test fixtures
-	// (no `oauth.jwt` block at all) don't throw at router construction.
+	// SF-1 / 1.0 GA (Phase G / S2): legacyTypAccept default is `false`
+	// (v0.5.x was `true`). Use the same defensive cast as `issuerForRealm`
+	// so partial-config test fixtures (no `oauth.jwt` block at all) don't
+	// throw at router construction.
 	const legacyTypAcceptOpt = (config as { oauth?: { jwt?: { legacyTypAccept?: boolean } } }).oauth
 		?.jwt?.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
@@ -338,7 +339,7 @@ export const createOAuthRouter = async (
 						await verifyJwt(bearerToken, keyStore, {
 							type: "access_token",
 							expectedIssuer: issuerForRealm ?? "",
-							legacyTypAccept: legacyTypAcceptOpt ?? true,
+							legacyTypAccept: legacyTypAcceptOpt ?? false,
 							logger,
 						});
 						return next();
@@ -377,7 +378,7 @@ export const createOAuthRouter = async (
 						type: "access_token",
 						expectedIssuer: issuerForRealm ?? "",
 						...(req.oauthClient ? { expectedAudience: req.oauthClient.clientId } : {}),
-						legacyTypAccept: legacyTypAcceptOpt ?? true,
+						legacyTypAccept: legacyTypAcceptOpt ?? false,
 						logger,
 					});
 					const { payload } = verified;

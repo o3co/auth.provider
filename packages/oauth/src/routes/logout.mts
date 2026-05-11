@@ -234,7 +234,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				const verified = await verifyJwt(token, opts.keyStore, {
 					type: "access_token",
 					expectedIssuer: opts.issuer ?? "",
-					legacyTypAccept: opts.legacyTypAccept ?? true,
+					legacyTypAccept: opts.legacyTypAccept ?? false,
 					logger: opts.logger,
 				});
 				payload = verified.payload as Record<string, unknown>;
@@ -473,7 +473,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			const verified = await verifyJwt(idTokenHint, opts.keyStore, {
 				type: "id_token",
 				expectedIssuer: opts.issuer ?? "",
-				legacyTypAccept: opts.legacyTypAccept ?? true,
+				legacyTypAccept: opts.legacyTypAccept ?? false,
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;

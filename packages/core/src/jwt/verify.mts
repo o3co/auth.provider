@@ -125,9 +125,14 @@ export interface JwtVerifyOptions {
 	 */
 	readonly logger?: Logger;
 	/**
-	 * v0.5.1 transition: when `true` (default), tokens whose `typ` header is
-	 * absent are accepted with a `jwt_verify_legacy_typ` warning. Set to
-	 * `false` in v0.6+ to enforce typ presence on all tokens.
+	 * SF-1 transition flag for the v0.4.x→v0.5.x typ-header rollout.
+	 *
+	 * The 1.0 GA default is `false`: tokens whose `typ` header is absent
+	 * are rejected. Operators with v0.4.x tokens still in circulation can
+	 * set this to `true` for their own bounded migration window — when
+	 * true, typ-less tokens are accepted and emit a
+	 * `jwt_verify_legacy_typ` warning. The v0.5.x default was `true`;
+	 * 1.0 GA flips it as part of Phase G S2.
 	 */
 	readonly legacyTypAccept?: boolean;
 }
@@ -195,7 +200,7 @@ export async function verifyJwt(
 		expectedTyp,
 		expectedAlgs,
 		logger,
-		legacyTypAccept = true,
+		legacyTypAccept = false,
 	} = options;
 
 	let header: ProtectedHeaderParameters;

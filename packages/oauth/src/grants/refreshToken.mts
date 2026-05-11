@@ -80,7 +80,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				const verified = await verifyJwt(refreshTokenValue, keyStore, {
 					type: "refresh_token",
 					expectedIssuer: issuer ?? "",
-					legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? true,
+					legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? false,
 					logger,
 				});
 				tokenPayload = verified.payload;
@@ -97,9 +97,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 
 			// Invariant — see RT-OC test: this gate keeps AT-as-RT confusion
 			// defended. A JWT with no `header.typ === "rt+jwt"` is rejected
-			// even when SF-1's `legacyTypAccept = true` allowed a typ-less
-			// token through the central verifier. Refactors that touch this
-			// condition MUST keep RT-OC green.
+			// even when SF-1's `legacyTypAccept = true` opt-in lets a typ-less
+			// token through the central verifier (1.0 GA flipped the default
+			// to false but operators can still opt back). Refactors that touch
+			// this condition MUST keep RT-OC green.
 			if (typ !== "rt+jwt") {
 				return {
 					result: {
