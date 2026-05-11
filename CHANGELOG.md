@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed (Phase G — M4 `legacyTokenCompat` migration flag, 1.0 GA)
+
+- **BREAKING**: Removed the `oauth.refreshToken.legacyTokenCompat` config
+  flag (HOCON `application.conf` + Zod schema in `application.schema.mts`)
+  and the `OAUTH_REFRESH_TOKEN_LEGACY_TOKEN_COMPAT` env-var override. The
+  flag was introduced in v0.5.2 (AS-12) with default `true` to accept
+  v0.4.x refresh-token shapes during the migration window. v0.5.x is now
+  out of the bounded window; 1.0 GA enforces the strict shape
+  unconditionally.
+  - Refresh-grant rejection gate now accepts **only** `header.typ ===
+    "rt+jwt"` as the refresh marker. Tokens carrying the legacy
+    `payload.type === "refresh"` substitute (no `rt+jwt` typ header) are
+    rejected with `invalid_grant` / `invalid refresh_token`.
+  - The legacy `claims.user.id` subject-fallback path is removed. Refresh
+    tokens MUST carry a top-level standard `sub` claim; tokens without
+    one are rejected with `invalid_grant` / `refresh token has no
+    subject`.
+  - AT-as-RT defense (RT-OC invariant) is preserved and now structurally
+    guaranteed by the single-marker requirement.
+  - Migration: operators must ensure all in-flight refresh tokens were
+    minted by v0.5.x or newer (which emit both `header.typ = "rt+jwt"`
+    and a top-level `sub`) before upgrading. v0.5.2 documented this
+    migration plan in its Migration note; 1.0 GA finalizes the cutover.
+  - Affected APIs/config (removed):
+    `oauth.refreshToken.legacyTokenCompat`,
+    `OAUTH_REFRESH_TOKEN_LEGACY_TOKEN_COMPAT`,
+    `RefreshTokenConfig.legacyTokenCompat` (Zod schema field).
+
 ### Removed (Phase G — M3 `allowPolicyWidening` migration flag, 1.0 GA)
 
 - **BREAKING**: Removed the `allowPolicyWidening?: boolean` field from
