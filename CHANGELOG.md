@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed (Phase G — M3 `allowPolicyWidening` migration flag, 1.0 GA)
+
+- **BREAKING**: Removed the `allowPolicyWidening?: boolean` field from
+  `TokenExchangeDependencies` (RFC 8693 Token Exchange grant). The
+  fail-closed boundary check that rejects policy hook scope/audience
+  outputs exceeding the validated `subject_token` boundary is now
+  unconditional. Introduced as a deprecated migration escape hatch in
+  v0.5.3 (F10 Token Exchange hardening), it shipped only with `@deprecated`
+  JSDoc and was never wired into module-based boot.
+  - Migration: callers of `createTokenExchangeGrant()` that still pass
+    `allowPolicyWidening: true` must update their `GrantPolicyHook`
+    implementations so that `grantedScope` ⊆ `subject_token.scope` and
+    `grantedAudience` ⊆ `subject_token.aud ∪ { client.clientId,
+    ...client.allowedAudiences }`. There is no opt-in to bypass this check
+    at 1.0 GA.
+  - Affected APIs:
+    `TokenExchangeDependencies.allowPolicyWidening` (removed).
+
 ### Removed (Phase G — M2 *Base interface aliases, 1.0 GA)
 
 - **BREAKING**: Removed the `*Base` suffix from the 5 extension-point
