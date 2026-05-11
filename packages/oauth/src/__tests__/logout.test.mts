@@ -16,11 +16,11 @@
 
 import { createSecretKey } from "node:crypto";
 import {
-	type AuditSinkBase,
+	type AuditSink,
 	type ClientRepository,
 	createSymmetricKeyStore,
 	type FederationProviderHandle,
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
@@ -150,7 +150,7 @@ function makeFamilyRevocation(
 	};
 }
 
-function makeFedTokenStore(override?: Partial<FederationTokenStoreBase>): FederationTokenStoreBase {
+function makeFedTokenStore(override?: Partial<FederationTokenStore>): FederationTokenStore {
 	return {
 		kind: "memory",
 		attach: vi.fn(),
@@ -176,14 +176,14 @@ interface BuildAppOpts {
 	sessionFamilyIndex?: SessionFamilyIndex;
 	sessionFederationIndex?: SessionFederationIndex;
 	refreshFamilyRevocation?: RefreshTokenFamilyRevocation;
-	fedTokenStore?: FederationTokenStoreBase;
+	fedTokenStore?: FederationTokenStore;
 	clientRepo?: ClientRepository;
 	/** Getter for federation providers — evaluated at request time. */
 	getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
 	/** Override fetch for broadcast testing. Defaults to a no-op stub. */
 	fetchImpl?: typeof fetch;
 	logger?: Logger;
-	auditSink?: AuditSinkBase;
+	auditSink?: AuditSink;
 }
 
 function buildApp(opts: BuildAppOpts = {}) {
@@ -1240,7 +1240,7 @@ describe("POST /oauth/federation/:name/logout", () => {
 describe("audit events", () => {
 	describe("federation.logout.idp_unreachable", () => {
 		it("emits when provider.endSession throws (orphan IdP session)", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -1269,7 +1269,7 @@ describe("audit events", () => {
 
 	describe("federation.logout.success", () => {
 		it("emits with redirected_to_idp: true when endSession succeeds (303 path)", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -1299,7 +1299,7 @@ describe("audit events", () => {
 		});
 
 		it("emits with redirected_to_idp: false when provider has no endSession (200 path)", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -1329,7 +1329,7 @@ describe("audit events", () => {
 
 	describe("logout.success", () => {
 		it("emits on POST /oauth/logout happy path", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -1350,7 +1350,7 @@ describe("audit events", () => {
 
 	describe("logout.cascade_failed", () => {
 		it("emits on 503 cascade failure", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};

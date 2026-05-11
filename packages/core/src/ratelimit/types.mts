@@ -32,11 +32,8 @@ export interface RateLimitDecision {
 
 /**
  * Adapter primitive for rate-limiting decisions.
- *
- * @deprecated Since v0.5.1. Use {@link RateLimiter} (no `Base` suffix). The
- * `*Base` form will be removed at 1.0 GA.
  */
-export interface RateLimiterBase {
+export interface RateLimiter {
 	readonly kind: string;
 	/**
 	 * Atomic check + increment. Key is endpoint-specific (e.g.,
@@ -45,14 +42,7 @@ export interface RateLimiterBase {
 	check(key: string, ctx: RateLimitContext): Promise<RateLimitDecision>;
 }
 
-/**
- * Canonical name (since v0.5.1) for the rate-limiter adapter primitive
- * interface. {@link RateLimiterBase} remains as a deprecated alias and will
- * be removed at 1.0 GA.
- */
-export type RateLimiter = RateLimiterBase;
-
-export type RateLimiterFactory = AdapterFactory<RateLimiterBase>;
+export type RateLimiterFactory = AdapterFactory<RateLimiter>;
 
 /**
  * Rate-limit spec, e.g., `{ limit: 10, windowSeconds: 60 }`. Consumed by
@@ -67,14 +57,14 @@ export interface RateLimitSpec {
 // ComponentMap declaration-merge (A2-α §6.1 — optional slot)
 //
 // Declared here so oauthModule can list "rateLimiter" in its `optional` array
-// and the DI graph types deps.rateLimiter as RateLimiterBase | undefined.
+// and the DI graph types deps.rateLimiter as RateLimiter | undefined.
 // The slot is optional: when absent, oauth routes degrade gracefully (no
 // rate-limiting applied, fail-open per createOAuthRouter semantics).
 // Phase 9 Task 4 augmentation.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		readonly rateLimiter?: RateLimiterBase;
+		readonly rateLimiter?: RateLimiter;
 	}
 }
 

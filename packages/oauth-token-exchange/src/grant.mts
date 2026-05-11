@@ -472,7 +472,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// Policy hook — existing GrantPolicyHookBase contract.
+			// Policy hook — existing GrantPolicyHook contract.
 			// grantedScope/grantedAudience start as the narrowed values from the
 			// request validation phase above; the policy hook may further override them.
 			let grantedScope: readonly string[] | undefined = requestedScope ?? subjectScope;

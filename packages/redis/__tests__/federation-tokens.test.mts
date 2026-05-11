@@ -4,7 +4,7 @@
  */
 
 import {
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type FederationTokens,
 	type SupportsLock,
 	supportsLock,
@@ -226,7 +226,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 			client: redis,
 			encryption: { mode: "allow-plaintext" },
 		});
-		const r = await (store as FederationTokenStoreBase & SupportsLock).acquireLock({
+		const r = await (store as FederationTokenStore & SupportsLock).acquireLock({
 			sid: "s",
 			federationName: "google",
 		});
@@ -247,7 +247,7 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 			accessToken: "at",
 			expiresAt: new Date(Date.now() + 3600_000),
 		});
-		const r = await (store as FederationTokenStoreBase & SupportsLock).acquireLock({
+		const r = await (store as FederationTokenStore & SupportsLock).acquireLock({
 			sid: "s",
 			federationName: "google",
 		});

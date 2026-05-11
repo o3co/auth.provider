@@ -252,7 +252,7 @@ describe("applyContributions — step 3: append order = input-array order", () =
 		// Spy collector that records which hook's `kind` was appended.
 		// Pre-AS-M1 the synthetic stubs used a `tag` field; after the
 		// AuditHook narrowing the stubs are real `AuditSink`s so we read
-		// from `kind` (the discriminant on `AuditSinkBase`).
+		// from `kind` (the discriminant on `AuditSink`).
 		const auditCollector: ListCollector<AuditSink> = {
 			kind: "list" as const,
 			append: (v: AuditSink) => {

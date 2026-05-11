@@ -15,10 +15,10 @@
  */
 
 import type {
-	AuditSinkBase,
+	AuditSink,
 	ClientRepository,
 	FederationProviderHandle,
-	FederationTokenStoreBase,
+	FederationTokenStore,
 	KeyStore,
 	Logger,
 	RefreshTokenFamilyRevocation,
@@ -144,7 +144,7 @@ export interface LogoutRouterOptions {
 	sessionRPRegistry: SessionRPRegistry;
 	sessionFamilyIndex: SessionFamilyIndex;
 	sessionFederationIndex: SessionFederationIndex;
-	federationTokenStore: FederationTokenStoreBase;
+	federationTokenStore: FederationTokenStore;
 	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	clientRepository: ClientRepository;
 	/**
@@ -159,7 +159,7 @@ export interface LogoutRouterOptions {
 	/** Structured logger shared with broadcastBackchannelLogout and cascadeLogout. */
 	logger?: Logger;
 	/** Audit sink for operator observability events. No-op when undefined. */
-	auditSink?: AuditSinkBase;
+	auditSink?: AuditSink;
 	/**
 	 * SF-1 (v0.5.1): when true (default), the central JWT verifier accepts
 	 * tokens whose `typ` header is absent and emits a deprecation warning.

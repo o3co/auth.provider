@@ -7,10 +7,10 @@ import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { createInMemoryFederationTokenStore } from "./adapters/memory.mjs";
-import type { FederationTokenStoreBase, FederationTokenStoreFactory } from "./types.mjs";
+import type { FederationTokenStore, FederationTokenStoreFactory } from "./types.mjs";
 
 export function createFederationTokenStoreFactory(): FederationTokenStoreFactory {
-	return createAdapterFactory<FederationTokenStoreBase>("FederationTokenStore");
+	return createAdapterFactory<FederationTokenStore>("FederationTokenStore");
 }
 
 /**

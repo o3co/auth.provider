@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Removed (Phase G — M2 *Base interface aliases, 1.0 GA)
+
+- **BREAKING**: Removed the `*Base` suffix from the 5 extension-point
+  interfaces (closes AS-7). The canonical names without the suffix were
+  added as type aliases in v0.5.1; both names coexisted with `@deprecated`
+  JSDoc on the `*Base` form. At 1.0 GA the canonical names ARE the
+  interfaces; the `*Base` aliases are removed.
+  - `AuditSinkBase` → `AuditSink`
+  - `FederationTokenStoreBase` → `FederationTokenStore`
+  - `MfaProviderBase` → `MfaProvider`
+  - `GrantPolicyHookBase` → `GrantPolicyHook`
+  - `RateLimiterBase` → `RateLimiter`
+  - Migration: search-and-replace `XxxBase` → `Xxx` across consumer
+    source. All five interfaces have stable structural shapes;
+    only the names change. `AdapterFactory<XxxBase>` becomes
+    `AdapterFactory<Xxx>`, declaration-merged `ComponentMap` slot types
+    use `Xxx`, and any extension implementation `class Foo implements
+    XxxBase` becomes `class Foo implements Xxx`.
+  - Coordination with AS-M1: the manifest's `contributes-map.mts` carried
+    a `GrantPolicyHook = unknown` placeholder that collided with the
+    canonical policy interface name. AS-M1 (v0.5.1) renamed the
+    placeholder to `GrantPolicyHookContribution`; M2 keeps that name and
+    drops the `GrantPolicyHookBase` form. `GrantPolicyHookFactory<Deps>`
+    in the manifest still produces a `GrantPolicyHookContribution`.
+
 ### Removed (Phase G — M1 GrantRegistry public export, 1.0 GA)
 
 - **BREAKING**: Removed `GrantRegistry` and `GrantRegistryError` from

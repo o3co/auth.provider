@@ -15,8 +15,8 @@
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { MfaProviderBase, MfaProviderFactory } from "./types.mjs";
+import type { MfaProvider, MfaProviderFactory } from "./types.mjs";
 
 export function createMfaProviderFactory(): MfaProviderFactory {
-	return createAdapterFactory<MfaProviderBase>("MfaProvider");
+	return createAdapterFactory<MfaProvider>("MfaProvider");
 }

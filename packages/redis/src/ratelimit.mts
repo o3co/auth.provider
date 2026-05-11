@@ -6,7 +6,7 @@
 import {
 	type AdapterBuilder,
 	defineModule,
-	type RateLimiterBase,
+	type RateLimiter,
 	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -46,11 +46,11 @@ interface CreateRedisRateLimiterOptions {
 
 /**
  * Redis-backed RateLimiter. Atomic INCR with TTL set on first hit. Consumer
- * passes their own redis client because RateLimiterBase has no dispose
+ * passes their own redis client because RateLimiter has no dispose
  * lifecycle hook — client lifetime lives in the composition root alongside
  * other redis users.
  */
-export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiterBase {
+export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
 	const limits = normalizeLimits(opts.limits);
 	const defaultLimit: RateLimitSpec = opts.defaultLimit ?? { limit: 60, windowSeconds: 60 };
 	const client = opts.client;
@@ -82,11 +82,11 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
  * AdapterFactory builder. Consumer wires:
  *   factory.register("redis", redisRateLimiterBuilder);
  */
-export const redisRateLimiterBuilder: AdapterBuilder<RateLimiterBase> = (config, _ctx) => {
+export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ctx) => {
 	const cfg = config as unknown as RedisRateLimiterConfig;
 	if (!cfg.client) {
 		throw new Error(
-			'Rate limiter "redis" requires config.client; the built-in limiter does not create its own redis client because RateLimiterBase has no disposal hook.',
+			'Rate limiter "redis" requires config.client; the built-in limiter does not create its own redis client because RateLimiter has no disposal hook.',
 		);
 	}
 	return createRedisRateLimiter({

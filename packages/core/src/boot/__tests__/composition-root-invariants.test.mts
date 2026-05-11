@@ -35,11 +35,11 @@
 
 import { describe, expect, it } from "vitest";
 import { createApp, defineModule } from "../../index.mjs";
-import type { GrantPolicyHookBase } from "../../policy/types.mjs";
+import type { GrantPolicyHook } from "../../policy/types.mjs";
 import { makeValidCoreConfig } from "../../testing/fixtures/valid-config.mjs";
 import { BootError } from "../types.mjs";
 
-const noopGrantPolicy: GrantPolicyHookBase = {
+const noopGrantPolicy: GrantPolicyHook = {
 	kind: "noop",
 	async evaluate() {
 		return { outcome: "allow" };

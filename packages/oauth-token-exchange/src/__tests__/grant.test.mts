@@ -19,7 +19,7 @@ import type {
 	ClientRepository,
 	GrantContext,
 	GrantPolicyContext,
-	GrantPolicyHookBase,
+	GrantPolicyHook,
 	GrantPolicyRequest,
 	PublicClient,
 } from "@o3co/auth-provider-core";
@@ -66,7 +66,7 @@ function buildGrant(
 		/** Store wired into the validator (defaults to same as refreshTokenFamilyRevocation). */
 		validatorRefreshStore?: ReturnType<typeof makeFamilyRevocation> | null;
 		config?: AppConfig;
-		grantPolicy?: GrantPolicyHookBase;
+		grantPolicy?: GrantPolicyHook;
 		allowPolicyWidening?: boolean;
 	} = {},
 ) {
@@ -611,7 +611,7 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 
 describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 	it("rejects when policy hook widens scope beyond subject scope by default", async () => {
-		const wideningPolicy: GrantPolicyHookBase = {
+		const wideningPolicy: GrantPolicyHook = {
 			kind: "scope-widening",
 			async evaluate() {
 				return {
@@ -638,7 +638,7 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 	});
 
 	it("rejects when policy hook widens audience beyond subject aud by default", async () => {
-		const wideningPolicy: GrantPolicyHookBase = {
+		const wideningPolicy: GrantPolicyHook = {
 			kind: "audience-widening",
 			async evaluate() {
 				return {
@@ -668,7 +668,7 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 	});
 
 	it("allows explicit policy widening only when allowPolicyWidening=true", async () => {
-		const wideningPolicy: GrantPolicyHookBase = {
+		const wideningPolicy: GrantPolicyHook = {
 			kind: "widening-opt-in",
 			async evaluate() {
 				return {
@@ -828,14 +828,14 @@ describe("createTokenExchangeGrant — audience inheritance", () => {
 	});
 });
 
-const denyPolicy: GrantPolicyHookBase = {
+const denyPolicy: GrantPolicyHook = {
 	kind: "deny-all",
 	async evaluate() {
 		return { outcome: "deny", error: "access_denied" };
 	},
 };
 
-const overridePolicy: GrantPolicyHookBase = {
+const overridePolicy: GrantPolicyHook = {
 	kind: "override",
 	async evaluate(_req: GrantPolicyRequest, _ctx: GrantPolicyContext) {
 		return {
@@ -1159,7 +1159,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 	});
 
 	it("returns temporarily_unavailable (503) when policy hook throws", async () => {
-		const throwing: GrantPolicyHookBase = {
+		const throwing: GrantPolicyHook = {
 			kind: "throw",
 			async evaluate() {
 				throw new Error("policy infrastructure down");
@@ -1179,7 +1179,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 	});
 
 	it("documents that policy hook widening requires explicit allowPolicyWidening opt-in", async () => {
-		const wideningPolicy: GrantPolicyHookBase = {
+		const wideningPolicy: GrantPolicyHook = {
 			kind: "widening",
 			async evaluate() {
 				return {
@@ -1205,7 +1205,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 
 	it("passes resource parameter through to the policy hook request", async () => {
 		let captured: GrantPolicyRequest | null = null;
-		const capturing: GrantPolicyHookBase = {
+		const capturing: GrantPolicyHook = {
 			kind: "capture",
 			async evaluate(req) {
 				captured = req;
@@ -1231,7 +1231,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 	});
 
 	it("rejects resource when it is missing from the issued-token audience", async () => {
-		const policy: GrantPolicyHookBase = {
+		const policy: GrantPolicyHook = {
 			kind: "resource-missing",
 			async evaluate() {
 				return { outcome: "allow", grantedAudience: ["https://other.example.com"] };
@@ -1259,7 +1259,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 	});
 
 	it("rejects resources that are only present in non-issued policy audience entries", async () => {
-		const policy: GrantPolicyHookBase = {
+		const policy: GrantPolicyHook = {
 			kind: "resource-non-issued-aud",
 			async evaluate() {
 				return {
@@ -1290,7 +1290,7 @@ describe("createTokenExchangeGrant — policy hook", () => {
 	});
 
 	it("mints a token when requested resource equals the issued-token audience", async () => {
-		const policy: GrantPolicyHookBase = {
+		const policy: GrantPolicyHook = {
 			kind: "resource-ok",
 			async evaluate() {
 				return {

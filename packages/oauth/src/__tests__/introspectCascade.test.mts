@@ -17,7 +17,7 @@
 import { createSecretKey } from "node:crypto";
 import {
 	type AuditEvent,
-	type AuditSinkBase,
+	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
@@ -75,7 +75,7 @@ async function makeAccessToken(overrides: Record<string, unknown> = {}): Promise
 
 async function buildApp(
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation,
-	auditSink?: AuditSinkBase,
+	auditSink?: AuditSink,
 ) {
 	const app = express();
 	app.set("trust proxy", 1);
@@ -166,7 +166,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 			isFamilyRevoked: vi.fn().mockRejectedValue(new Error("backend down")),
 		};
 		const events: AuditEvent[] = [];
-		const auditSink: AuditSinkBase = {
+		const auditSink: AuditSink = {
 			kind: "spy",
 			async record(event) {
 				events.push(event);
@@ -193,7 +193,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		};
 		const events: AuditEvent[] = [];
-		const auditSink: AuditSinkBase = {
+		const auditSink: AuditSink = {
 			kind: "spy",
 			async record(event) {
 				events.push(event);

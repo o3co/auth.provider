@@ -32,7 +32,7 @@ export {
 	registerBuiltinAuditSinks,
 } from "./audit/factory.mjs";
 // Audit
-export type { AuditEvent, AuditSink, AuditSinkBase, AuditSinkFactory } from "./audit/types.mjs";
+export type { AuditEvent, AuditSink, AuditSinkFactory } from "./audit/types.mjs";
 export type {
 	AppHandle,
 	BootErrorDetails,
@@ -95,7 +95,6 @@ export { memoryFederationTokenStoreModule } from "./federation-tokens/module.mjs
 export type {
 	AcquireLockOptions,
 	FederationTokenStore,
-	FederationTokenStoreBase,
 	FederationTokenStoreFactory,
 	FederationTokens,
 	LockResult,
@@ -184,7 +183,6 @@ export type {
 	MfaIssueContext,
 	MfaPendingTransaction,
 	MfaProvider,
-	MfaProviderBase,
 	MfaProviderFactory,
 	MfaResumeState,
 	MfaTransactionStore,
@@ -217,7 +215,7 @@ export type {
 	// AS-7 collision resolution (v0.5.1): the manifest's contributes-map
 	// placeholder previously named `GrantPolicyHook` was renamed to
 	// `GrantPolicyHookContribution`. The canonical `GrantPolicyHook` (alias
-	// of `GrantPolicyHookBase`) is now re-exported from `./policy/types.mjs`
+	// of `GrantPolicyHook`) is now re-exported from `./policy/types.mjs`
 	// in the policy block below.
 	GrantPolicyHookContribution,
 	// GrantPolicyHookFactory: excluded — name collides with legacy
@@ -246,7 +244,6 @@ export type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
 	GrantPolicyHook,
-	GrantPolicyHookBase,
 	GrantPolicyHookFactory,
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
@@ -261,7 +258,6 @@ export type {
 	RateLimitContext,
 	RateLimitDecision,
 	RateLimiter,
-	RateLimiterBase,
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";

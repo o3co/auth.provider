@@ -15,10 +15,10 @@
  */
 
 import type {
-	AuditSinkBase,
+	AuditSink,
 	ClientRepository,
 	FederationProviderHandle,
-	FederationTokenStoreBase,
+	FederationTokenStore,
 	KeyStore,
 	Logger,
 	RefreshTokenFamilyRevocation,
@@ -134,7 +134,7 @@ export interface FederationTokenRouterOptions {
 	refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
 	userSessionStore: UserSessionStore;
 	sessionFederationIndex: SessionFederationIndex;
-	federationTokenStore: FederationTokenStoreBase;
+	federationTokenStore: FederationTokenStore;
 	clientRepository: ClientRepository;
 	/**
 	 * Getter for the federation providers Map. Evaluated at request time (not at
@@ -143,7 +143,7 @@ export interface FederationTokenRouterOptions {
 	 */
 	getFederationProviders: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
 	/** Audit sink for operator observability events. No-op when undefined. */
-	auditSink?: AuditSinkBase;
+	auditSink?: AuditSink;
 	/** Structured logger. Defaults to console when undefined. */
 	logger?: Logger;
 	/**

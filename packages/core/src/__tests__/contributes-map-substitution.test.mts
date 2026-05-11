@@ -43,17 +43,17 @@ describe("AS-M1: same-package concrete substitutions in contributes-map", () => 
 		expect(true).toBe(true);
 	});
 
-	it("AuditHook is the canonical AuditSink (alias of AuditSinkBase)", () => {
+	it("AuditHook is the canonical AuditSink (alias of AuditSink)", () => {
 		expectTypeOf<AuditHook>().toEqualTypeOf<AuditSink>();
 		expect(true).toBe(true);
 	});
 
-	it("MfaFactor is the canonical MfaProvider (alias of MfaProviderBase)", () => {
+	it("MfaFactor is the canonical MfaProvider (alias of MfaProvider)", () => {
 		expectTypeOf<MfaFactor>().toEqualTypeOf<MfaProvider>();
 		expect(true).toBe(true);
 	});
 
-	it("GrantPolicyHookContribution is the canonical GrantPolicyHook (alias of GrantPolicyHookBase)", () => {
+	it("GrantPolicyHookContribution is the canonical GrantPolicyHook (alias of GrantPolicyHook)", () => {
 		// Replaces the `= unknown` pin asserted in `naming-aliases.test.mts`
 		// during AS-7 (PR3); that test's deliberate intent was that this
 		// assertion would fail when Phase 9 substitution lands and would be

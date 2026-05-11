@@ -17,14 +17,14 @@
 import { createSecretKey } from "node:crypto";
 import {
 	type AuditEvent,
-	type AuditSinkBase,
+	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
 	defineModule,
 	type FederationProviderHandle,
-	type FederationTokenStoreBase,
-	type RateLimiterBase,
+	type FederationTokenStore,
+	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
@@ -300,12 +300,12 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 	it("forwards rateLimiter and auditSink into oauth routes (rate limit returns 429)", async () => {
 		const SECRET = "test-secret-at-least-32-chars!!";
 
-		const rateLimiter: RateLimiterBase = {
+		const rateLimiter: RateLimiter = {
 			kind: "spy",
 			check: vi.fn().mockResolvedValue({ allowed: false, reason: "limit:token" }),
 		};
 		const events: AuditEvent[] = [];
-		const auditSink: AuditSinkBase = {
+		const auditSink: AuditSink = {
 			kind: "spy",
 			async record(event) {
 				events.push(event);
@@ -413,7 +413,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 			removeFederation: vi.fn(async () => {}),
 			removeBySid: vi.fn(async () => {}),
 		};
-		const fedTokenStore: FederationTokenStoreBase = {
+		const fedTokenStore: FederationTokenStore = {
 			kind: "memory",
 			attach: vi.fn(),
 			get: vi.fn().mockResolvedValue({ idToken: "id-token-hint" }),
@@ -562,7 +562,7 @@ describe("oauthModule — federation logout via typed deps", () => {
 			removeFederation: vi.fn(async () => {}),
 			removeBySid: vi.fn(async () => {}),
 		};
-		const fedTokenStore: FederationTokenStoreBase = {
+		const fedTokenStore: FederationTokenStore = {
 			kind: "memory",
 			attach: vi.fn(),
 			get: vi.fn(),

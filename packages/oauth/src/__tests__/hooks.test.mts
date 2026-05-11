@@ -17,14 +17,14 @@
 import {
 	type AppConfig,
 	type AuditEvent,
-	type AuditSinkBase,
+	type AuditSink,
 	type ClientRepository,
 	type Code,
 	type CodeRepository,
 	createSymmetricKeyStore,
-	type GrantPolicyHookBase,
+	type GrantPolicyHook,
 	type Logger,
-	type RateLimiterBase,
+	type RateLimiter,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -100,7 +100,7 @@ const mockCodeRepository: CodeRepository = {
 
 function createStubRateLimiter(
 	onCheck: (key: string) => { allowed: boolean; reason?: string; resetAt?: Date },
-): RateLimiterBase {
+): RateLimiter {
 	return {
 		kind: "stub",
 		async check(key) {
@@ -109,7 +109,7 @@ function createStubRateLimiter(
 	};
 }
 
-function createSpyAuditSink(): { sink: AuditSinkBase; events: AuditEvent[] } {
+function createSpyAuditSink(): { sink: AuditSink; events: AuditEvent[] } {
 	const events: AuditEvent[] = [];
 	return {
 		events,
@@ -123,8 +123,8 @@ function createSpyAuditSink(): { sink: AuditSinkBase; events: AuditEvent[] } {
 }
 
 async function buildApp(overrides: {
-	rateLimiter?: RateLimiterBase;
-	auditSink?: AuditSinkBase;
+	rateLimiter?: RateLimiter;
+	auditSink?: AuditSink;
 	logger?: Logger;
 	config?: AppConfig;
 }) {
@@ -250,7 +250,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				error: vi.fn(),
 			});
 
-			const brokenRateLimiter: RateLimiterBase = {
+			const brokenRateLimiter: RateLimiter = {
 				kind: "broken",
 				async check() {
 					throw new Error("redis down");
@@ -379,7 +379,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		it("normalized ip passed into check ctx matches key derivation (CP-10)", async () => {
 			let observedKey: string | undefined;
 			let observedCtxIp: string | undefined;
-			const rateLimiter: RateLimiterBase = {
+			const rateLimiter: RateLimiter = {
 				kind: "capture",
 				async check(key, ctx) {
 					observedKey = key;
@@ -485,7 +485,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 	describe("grantPolicy hook (C-2)", () => {
 		function buildAuthorizeApp(opts: {
-			grantPolicy?: GrantPolicyHookBase;
+			grantPolicy?: GrantPolicyHook;
 			captureCode?: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
 			allowedScopes?: string[];
 		}) {
@@ -537,7 +537,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 					captured = p;
 				},
 			});
-			const grantPolicy: GrantPolicyHookBase = {
+			const grantPolicy: GrantPolicyHook = {
 				kind: "spy",
 				async evaluate(request) {
 					expect(request.grantType).toBe("authorization_code");
@@ -575,7 +575,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 		it("redirects with error when grantPolicy denies at /authorize", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
-			const grantPolicy: GrantPolicyHookBase = {
+			const grantPolicy: GrantPolicyHook = {
 				kind: "deny",
 				async evaluate() {
 					return {
@@ -641,7 +641,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
 				allowedScopes: ["read"],
 			});
-			const grantPolicy: GrantPolicyHookBase = {
+			const grantPolicy: GrantPolicyHook = {
 				kind: "escalating",
 				async evaluate() {
 					// Policy attempts to grant a scope the client isn't allowed to request.
@@ -673,7 +673,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 		it("redirects temporarily_unavailable when grantPolicy throws at /authorize (CP-18)", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
-			const grantPolicy: GrantPolicyHookBase = {
+			const grantPolicy: GrantPolicyHook = {
 				kind: "throwing",
 				async evaluate() {
 					throw new Error("policy backend down");
@@ -708,7 +708,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 					captured = p;
 				},
 			});
-			const grantPolicy: GrantPolicyHookBase = {
+			const grantPolicy: GrantPolicyHook = {
 				kind: "empty",
 				async evaluate() {
 					return { outcome: "allow", grantedScope: [] };
@@ -792,7 +792,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		it("passes trusted config.oauth.jwt.issuer (not Host header) to grantPolicy (CP-11)", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
 			let observedIssuer: string | undefined;
-			const grantPolicy: GrantPolicyHookBase = {
+			const grantPolicy: GrantPolicyHook = {
 				kind: "spy",
 				async evaluate(_req, ctx) {
 					observedIssuer = ctx.issuer;

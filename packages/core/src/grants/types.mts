@@ -18,7 +18,7 @@ import type { z } from "zod";
 import type { CoreConfig } from "../config/application.schema.mjs";
 import type { KeyStore } from "../keys/KeyStore.mjs";
 import type { PathResolver } from "../modules/types.mjs";
-import type { GrantPolicyHookBase } from "../policy/types.mjs";
+import type { GrantPolicyHook } from "../policy/types.mjs";
 import type {
 	RefreshTokenFamilyRevocation,
 	RefreshTokenFamilyRotation,
@@ -128,7 +128,7 @@ export interface GrantDependencies {
 	pathResolver?: PathResolver;
 	refreshTokenFamilyRotation?: RefreshTokenFamilyRotation;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
-	grantPolicy?: GrantPolicyHookBase;
+	grantPolicy?: GrantPolicyHook;
 	userSessionStore?: UserSessionStore;
 	sessionRPRegistry?: SessionRPRegistry;
 	sessionFamilyIndex?: SessionFamilyIndex;

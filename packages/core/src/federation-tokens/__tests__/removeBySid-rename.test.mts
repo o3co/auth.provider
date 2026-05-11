@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { createInMemoryFederationTokenStore } from "../adapters/memory.mjs";
 
-describe("AS-3: FederationTokenStoreBase.deleteBySession → removeBySid (BREAKING rename)", () => {
+describe("AS-3: FederationTokenStore.deleteBySession → removeBySid (BREAKING rename)", () => {
 	it("in-memory store exposes removeBySid", () => {
 		const store = createInMemoryFederationTokenStore();
 		expect("removeBySid" in store).toBe(true);

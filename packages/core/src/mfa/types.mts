@@ -40,22 +40,12 @@ export interface MfaVerifyResult {
 
 /**
  * Adapter primitive for MFA challenge providers.
- *
- * @deprecated Since v0.5.1. Use {@link MfaProvider} (no `Base` suffix). The
- * `*Base` form will be removed at 1.0 GA.
  */
-export interface MfaProviderBase {
+export interface MfaProvider {
 	readonly kind: string;
 	issue(userId: string, ctx: MfaIssueContext): Promise<MfaChallenge | null>;
 	verify(challengeId: string, proof: unknown): Promise<MfaVerifyResult>;
 }
-
-/**
- * Canonical name (since v0.5.1) for the MFA-provider adapter primitive
- * interface. {@link MfaProviderBase} remains as a deprecated alias and will
- * be removed at 1.0 GA.
- */
-export type MfaProvider = MfaProviderBase;
 
 export interface EnrollResult {
 	readonly success: boolean;
@@ -72,20 +62,20 @@ export interface SupportsRevocation {
 }
 
 export function supportsEnrollment(
-	p: MfaProviderBase | undefined | null,
-): p is MfaProviderBase & SupportsEnrollment {
+	p: MfaProvider | undefined | null,
+): p is MfaProvider & SupportsEnrollment {
 	if (p == null) return false;
 	return typeof (p as { enroll?: unknown }).enroll === "function";
 }
 
 export function supportsRevocation(
-	p: MfaProviderBase | undefined | null,
-): p is MfaProviderBase & SupportsRevocation {
+	p: MfaProvider | undefined | null,
+): p is MfaProvider & SupportsRevocation {
 	if (p == null) return false;
 	return typeof (p as { revoke?: unknown }).revoke === "function";
 }
 
-export type MfaProviderFactory = AdapterFactory<MfaProviderBase>;
+export type MfaProviderFactory = AdapterFactory<MfaProvider>;
 
 export type MfaResumeState =
 	| {
@@ -145,5 +135,5 @@ export interface MfaTransactionStore {
 }
 
 export interface MfaCoordinator {
-	listEnrolled(userId: string): Promise<readonly MfaProviderBase[]>;
+	listEnrolled(userId: string): Promise<readonly MfaProvider[]>;
 }

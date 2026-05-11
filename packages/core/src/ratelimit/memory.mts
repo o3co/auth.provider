@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { RateLimiterBase, RateLimitSpec } from "./types.mjs";
+import type { RateLimiter, RateLimitSpec } from "./types.mjs";
 
 export const DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS = 10_000;
 
@@ -76,7 +76,7 @@ function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 	if (firstKey !== undefined) buckets.delete(firstKey);
 }
 
-export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): RateLimiterBase {
+export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): RateLimiter {
 	const buckets = new Map<string, BucketState>();
 	const maxBuckets = normalizeMaxBuckets(options.maxBuckets);
 

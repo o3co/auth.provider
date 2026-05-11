@@ -16,10 +16,10 @@
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
 import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
-import type { RateLimiterBase, RateLimiterFactory, RateLimitSpec } from "./types.mjs";
+import type { RateLimiter, RateLimiterFactory, RateLimitSpec } from "./types.mjs";
 
 export function createRateLimiterFactory(): RateLimiterFactory {
-	return createAdapterFactory<RateLimiterBase>("RateLimiter");
+	return createAdapterFactory<RateLimiter>("RateLimiter");
 }
 
 interface MemoryRateLimiterConfig {

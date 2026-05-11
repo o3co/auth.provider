@@ -18,7 +18,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
-	type GrantPolicyHookBase,
+	type GrantPolicyHook,
 	type Logger,
 	type RefreshTokenFamilyRotation,
 	type UserSessionStore,
@@ -1303,7 +1303,7 @@ describe("createRefreshTokenGrant", () => {
 	});
 
 	describe("refresh_token grant — grantPolicy hook", () => {
-		function createStubPolicy(evaluate: GrantPolicyHookBase["evaluate"]): GrantPolicyHookBase {
+		function createStubPolicy(evaluate: GrantPolicyHook["evaluate"]): GrantPolicyHook {
 			return { kind: "stub", evaluate };
 		}
 

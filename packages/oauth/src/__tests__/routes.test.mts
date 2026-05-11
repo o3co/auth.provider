@@ -17,11 +17,11 @@
 import {
 	type AppConfig,
 	type AuditEvent,
-	type AuditSinkBase,
+	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type GrantHandler,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
@@ -222,7 +222,7 @@ describe("createOAuthRouter", () => {
 			sessionRPRegistry: {} as SessionRPRegistry,
 			sessionFamilyIndex: {} as SessionFamilyIndex,
 			sessionFederationIndex: {} as SessionFederationIndex,
-			federationTokenStore: {} as FederationTokenStoreBase,
+			federationTokenStore: {} as FederationTokenStore,
 			refreshTokenFamilyRevocation: {} as RefreshTokenFamilyRevocation,
 		});
 
@@ -238,7 +238,7 @@ describe("createOAuthRouter", () => {
 		async function buildApp(opts: {
 			grantHandler: GrantHandler;
 			grantType: string;
-			auditSink?: AuditSinkBase;
+			auditSink?: AuditSink;
 		}) {
 			const app = express();
 			app.set("trust proxy", 1);
@@ -260,7 +260,7 @@ describe("createOAuthRouter", () => {
 
 		it("success path: returns 200 + tokens + Cache-Control no-store + audit", async () => {
 			const events: AuditEvent[] = [];
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "spy",
 				record: async (e) => {
 					events.push(e);
@@ -301,7 +301,7 @@ describe("createOAuthRouter", () => {
 			// challenge on auth failures would mislead callers into retrying with
 			// the wrong scheme.
 			const events: AuditEvent[] = [];
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "spy",
 				record: async (e) => {
 					events.push(e);
@@ -338,7 +338,7 @@ describe("createOAuthRouter", () => {
 		it("missing grant_type: returns 400 unsupported_grant_type + audit failure", async () => {
 			// Covers the early `if (typeof grant_type !== "string" ...)` branch.
 			const events: AuditEvent[] = [];
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "spy",
 				record: async (e) => {
 					events.push(e);

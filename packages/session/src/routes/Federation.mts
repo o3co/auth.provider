@@ -18,7 +18,7 @@ import {
 	type AppConfig,
 	consoleLogger,
 	errorEnvelope,
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type Logger,
 	type SessionFederationIndex,
 	type UserRepository,
@@ -78,7 +78,7 @@ export const createRouter = (
 		userRepository: UserRepository;
 		userSessionStore: UserSessionStore;
 		sessionFederationIndex: SessionFederationIndex;
-		federationTokenStore: FederationTokenStoreBase;
+		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
 		logger?: Logger;
 	},

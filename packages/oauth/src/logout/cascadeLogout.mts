@@ -14,7 +14,7 @@
  */
 
 import type {
-	FederationTokenStoreBase,
+	FederationTokenStore,
 	Logger,
 	RefreshTokenFamilyRevocation,
 	SessionFamilyIndex,
@@ -26,7 +26,7 @@ import type {
 export interface CascadeLogoutOptions {
 	readonly sid: string;
 	readonly refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation;
-	readonly federationTokenStore: FederationTokenStoreBase;
+	readonly federationTokenStore: FederationTokenStore;
 	readonly userSessionStore: UserSessionStore;
 	readonly sessionRPRegistry: SessionRPRegistry;
 	readonly sessionFamilyIndex: SessionFamilyIndex;
