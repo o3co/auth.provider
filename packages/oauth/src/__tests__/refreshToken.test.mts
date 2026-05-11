@@ -946,80 +946,6 @@ describe("createRefreshTokenGrant", () => {
 			);
 		});
 
-		it("SF-6 short-circuits null-familyId tokens before CC-2's null guard (defense-in-depth invariant)", async () => {
-			// CC-2 Codex Delta 3 originally asked for a RED test exercising the
-			// `familyId === null` hard-reject guard inside the unknown_family
-			// branch when `unknownFamilyPolicy = "accept"`. With SF-6's gate
-			// in place, that guard is structurally unreachable: when familyId
-			// is null the SF-6 gate fires FIRST and either rejects (default)
-			// or short-circuits to issuance with `accept-with-warning` —
-			// rotation never runs, so the unknown_family branch is never
-			// entered with null familyId.
-			//
-			// This test pins the invariant by:
-			//   1. Setting BOTH `unknownFamilyPolicy = "accept"` (so the
-			//      CC-2 branch would issue tokens if reached) AND
-			//      `legacyRtPolicy = "accept-with-warning"` (so SF-6 doesn't
-			//      hard-reject upstream).
-			//   2. Asserting the SF-6 audit log fires (proves the gate
-			//      caught the null familyId before rotation).
-			//   3. Asserting the rotation stub is NOT called (proves the
-			//      else-branch with the unknown_family case never runs).
-			//   4. Asserting tokens are issued (the surface behaviour, also
-			//      asserted indirectly by the audit log).
-			//
-			// If a future change reorders gates so rotation runs with
-			// familyId === null, the rotation stub `unknownFamilyRotation`
-			// would be invoked (assertion 3 would fail), at which point
-			// the CC-2 null guard inside the unknown_family case would
-			// kick in. Either failure mode catches a regression.
-			const warn = vi.fn();
-			const logger = makeStubLogger(warn);
-			const rotateSpy = vi.fn().mockResolvedValue({ outcome: "unknown_family" });
-			const rotation: RefreshTokenFamilyRotation = {
-				async register() {},
-				rotate: rotateSpy,
-			};
-			const config = {
-				...mockConfig,
-				oauth: {
-					...mockConfig.oauth,
-					refreshToken: {
-						...mockConfig.oauth.refreshToken,
-						unknownFamilyPolicy: "accept",
-						legacyRtPolicy: "accept-with-warning",
-					},
-				},
-			} as unknown as GrantDependencies["config"];
-			const deps: GrantDependencies = {
-				config,
-				keyStore: mockDeps.keyStore,
-				refreshTokenFamilyRotation: rotation,
-				logger,
-			};
-			// RT with no family_id claim — familyId resolves to null
-			const rt = await new SignJWT({ sub: "u1" })
-				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
-				.setIssuer("localhost")
-				.setAudience(DEFAULT_CLIENT_ID)
-				.setExpirationTime("24h")
-				.setJti("jti-no-fam")
-				.sign(secretKey);
-
-			const { result } = await createRefreshTokenGrant(deps).handle({
-				...baseCtx,
-				body: { refresh_token: rt },
-			});
-
-			expect(result.status).toBe(200);
-			// Pin the invariant: SF-6 fired and rotation was skipped.
-			expect(warn).toHaveBeenCalledWith(
-				expect.objectContaining({ hasFamilyId: false }),
-				"legacy_rt_accepted_no_replay_protection",
-			);
-			expect(rotateSpy).not.toHaveBeenCalled();
-		});
-
 		it("still handles replayed outcome correctly (RED 4 — orthogonality)", async () => {
 			const replayedRotation: RefreshTokenFamilyRotation = {
 				async register() {},
@@ -1114,52 +1040,6 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(400);
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.errorDescription).toBe("missing_jti_or_family_id");
-		});
-
-		it("accepts legacy RT in accept-with-warning mode and skips rotation (RED 3)", async () => {
-			const warn = vi.fn();
-			const logger = makeStubLogger(warn);
-			const rotateSpy = vi.fn().mockResolvedValue({ outcome: "rotated" });
-			const rotation: RefreshTokenFamilyRotation = {
-				async register() {},
-				rotate: rotateSpy,
-			};
-			const config = {
-				...mockConfig,
-				oauth: {
-					...mockConfig.oauth,
-					refreshToken: {
-						...mockConfig.oauth.refreshToken,
-						legacyRtPolicy: "accept-with-warning",
-					},
-				},
-			} as unknown as GrantDependencies["config"];
-			const deps: GrantDependencies = {
-				config,
-				keyStore: mockDeps.keyStore,
-				refreshTokenFamilyRotation: rotation,
-				logger,
-			};
-			// Legacy token with no jti
-			const rt = await new SignJWT({ sub: "u1", scope: "read", family_id: "fam-1" })
-				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
-				.setIssuer("localhost")
-				.setAudience(DEFAULT_CLIENT_ID)
-				.setExpirationTime("24h")
-				.sign(secretKey);
-
-			const { result } = await createRefreshTokenGrant(deps).handle({
-				...baseCtx,
-				body: { refresh_token: rt },
-			});
-
-			expect(result.status).toBe(200);
-			expect(warn).toHaveBeenCalledWith(
-				expect.objectContaining({ hasJti: false, hasFamilyId: true }),
-				"legacy_rt_accepted_no_replay_protection",
-			);
-			// SF-6 Codex Delta 3: rotation MUST be skipped in accept-with-warning
-			expect(rotateSpy).not.toHaveBeenCalled();
 		});
 
 		it("proceeds with normal rotation when RT has both jti and family_id (RED 4)", async () => {

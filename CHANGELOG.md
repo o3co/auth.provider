@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security (Phase G — M6 `legacyRtPolicy = "accept-with-warning"` removed, 1.0 GA)
+
+- **BREAKING**: The `accept-with-warning` value of
+  `oauth.refreshToken.legacyRtPolicy` was removed. Under SF-6, refresh
+  tokens lacking `jti` or `family_id` claims (when family rotation is
+  wired) are now **always** rejected with `invalid_grant` /
+  `missing_jti_or_family_id`. The migration-window opt-in that skipped
+  replay detection and emitted an audit log no longer exists.
+- Closes a `family_id`-absent acceptance window that allowed legacy
+  refresh tokens to bypass rotation entirely under operator opt-in.
+
+### Removed (Phase G — M6 `legacyRtPolicy = "accept-with-warning"` enum value, 1.0 GA)
+
+- **BREAKING**: `oauth.refreshToken.legacyRtPolicy` Zod schema tightened
+  from `z.enum(["reject", "accept-with-warning"])` to
+  `z.enum(["reject"])`. The `OAUTH_REFRESH_TOKEN_LEGACY_RT_POLICY`
+  env-var override line was also removed from `application.conf` — with
+  only one valid value, there is nothing to override.
+- Operators upgrading from v0.5.x who still set
+  `legacyRtPolicy = "accept-with-warning"` get a Zod
+  `invalid_enum_value` error pointing at the field, instead of having
+  the legacy path silently honored.
+- Migration: ensure all in-flight refresh tokens carry both `jti` and
+  `family_id` claims (true for tokens minted by v0.5.x or newer) before
+  upgrading. Remove any `legacyRtPolicy = "accept-with-warning"` line
+  from your HOCON. SF-6 (v0.5.1) documented this migration plan; 1.0
+  GA finalizes the cutover.
+- Affected APIs/config (removed): `accept-with-warning` enum value,
+  `OAUTH_REFRESH_TOKEN_LEGACY_RT_POLICY` env-var override, the
+  `legacy_rt_accepted_no_replay_protection` audit log event in
+  `packages/oauth/src/grants/refreshToken.mts` (the legacy branch
+  that emitted it is gone).
+
 ### Removed (Phase G — M4 `legacyTokenCompat` migration flag, 1.0 GA)
 
 - **BREAKING**: Removed the `oauth.refreshToken.legacyTokenCompat` config
