@@ -161,9 +161,12 @@ export interface LogoutRouterOptions {
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
 	/**
-	 * SF-1 (v0.5.1): when true (default), the central JWT verifier accepts
-	 * tokens whose `typ` header is absent and emits a deprecation warning.
-	 * Forwarded to `verifyJwt` for the bearer AT and id_token_hint paths.
+	 * SF-1 / 1.0 GA (Phase G / S2): when true, the central JWT verifier
+	 * accepts tokens whose `typ` header is absent and emits a
+	 * `jwt_verify_legacy_typ` deprecation warning. 1.0 GA default is
+	 * `false` (typ-less tokens rejected); `true` is an explicit
+	 * legacy-acceptance opt-in. The v0.5.x default was `true`. Forwarded
+	 * to `verifyJwt` for the bearer AT and id_token_hint paths.
 	 */
 	legacyTypAccept?: boolean;
 }
