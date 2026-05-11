@@ -98,7 +98,7 @@ export function createSelfIssuedAccessTokenValidator(
 				const verified = await verifyJwt(token, keyStore, {
 					type: "access_token",
 					expectedIssuer: issuer,
-					legacyTypAccept: legacyTypAccept ?? true,
+					legacyTypAccept: legacyTypAccept ?? false,
 					logger,
 				});
 				payload = verified.payload as Record<string, unknown>;

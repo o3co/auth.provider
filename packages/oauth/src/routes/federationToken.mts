@@ -203,7 +203,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			const verified = await verifyJwt(token, opts.keyStore, {
 				type: "access_token",
 				expectedIssuer: opts.issuer ?? "",
-				legacyTypAccept: opts.legacyTypAccept ?? true,
+				legacyTypAccept: opts.legacyTypAccept ?? false,
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;

@@ -6,6 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Security (Phase G — S2 `legacyTypAccept` default flipped `true → false`, 1.0 GA)
+
+- **BREAKING**: `oauth.jwt.legacyTypAccept` default flipped from `true`
+  (v0.5.x) to `false` (1.0 GA). The central JWT verifier now rejects
+  tokens whose `typ` header is absent **by default**. Previously,
+  typ-less tokens were accepted with a `jwt_verify_legacy_typ`
+  deprecation warning so v0.4.x tokens (issued before the
+  `at+jwt`/`rt+jwt`/`id+jwt` convention) kept verifying through the
+  v0.5.x migration window.
+- **Why this is a security tightening**: an absent `typ` header is a
+  hard signal of either operator misconfiguration or a downgrade attack
+  attempting to repurpose a non-JWT token as a JWT. Rejecting by default
+  closes the acceptance window operationally; the flag stays as an
+  explicit operator opt-in for deployments still completing their v0.4.x
+  rollover.
+- **Migration**: operators with v0.4.x tokens still in circulation can
+  set `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` (or `oauth.jwt.legacyTypAccept
+  = true` in HOCON) to opt back into legacy acceptance for their own
+  bounded migration window. The recommended path is to ensure all
+  in-flight tokens were minted by v0.5.x or newer (which emit
+  `header.typ` per type) before upgrading, then leave the new default
+  in place.
+- **Code-level default match**: every `?? true` fallback in routes,
+  grants, and validators is flipped to `?? false` so that partial-config
+  test fixtures and edge code paths behave consistently with HOCON.
+- Affected sites: `packages/core/config/application.conf`,
+  `templates/standalone/config/application.conf`,
+  `packages/core/src/jwt/verify.mts` (default arg + JSDoc), and the
+  `?? false` fallbacks in `packages/oauth-token-exchange/src/validator/selfIssuedAccessToken.mts`,
+  `packages/oauth/src/routes.mts`,
+  `packages/oauth/src/grants/refreshToken.mts`,
+  `packages/oauth/src/routes/{federationToken,logout,userinfo}.mts`.
+
 ### Changed (Phase G — M5 `CodeRepository.getByCode` → `findByCode` rename, 1.0 GA)
 
 - **BREAKING**: `CodeRepository.getByCode(code)` renamed to
