@@ -33,7 +33,7 @@ jobs:
           key: pnpm-store-${{ hashFiles('**/package.json') }}
           restore-keys: pnpm-store-
 
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run audit
       - run: pnpm run lint
       - run: pnpm run build
@@ -215,7 +215,7 @@ jobs:
           key: pnpm-store-${{ hashFiles('**/package.json') }}
           restore-keys: pnpm-store-
 
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm run build
 
       - name: Pack all @o3co/auth-provider-* packages
