@@ -31,8 +31,8 @@ describe("constantTimeStringEqual (SF-3 + MIN-4)", () => {
 		// helper still returns false when the difference is at the very end —
 		// rules out an early-return bug that would mask near-miss failures
 		// (the whole point of the timing-safe primitive).
-		const a = "a".repeat(42) + "x";
-		const b = "a".repeat(42) + "y";
+		const a = `${"a".repeat(42)}x`;
+		const b = `${"a".repeat(42)}y`;
 		expect(constantTimeStringEqual(a, b)).toBe(false);
 	});
 
