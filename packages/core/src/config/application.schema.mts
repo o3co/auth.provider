@@ -181,11 +181,6 @@ export const CoreConfigSchema = z.object({
 			// circulation. Per the v0.5.1 ADR the literal default lives in
 			// `application.conf`, not here.
 			legacyRtPolicy: z.enum(["reject", "accept-with-warning"]),
-			// AS-12 (v0.5.1): refresh-grant compatibility gate for v0.4.x
-			// token shapes (`payload.type = "refresh"` and `claims.user.id`
-			// subject fallback). Per the v0.5.1 ADR the literal default lives
-			// in `application.conf`, not here.
-			legacyTokenCompat: z.boolean().optional(),
 		}),
 		grants: z.object({}).passthrough(),
 		// IH-6 (v0.5.3): when acting as an OIDC OP, `/authorize` rejects

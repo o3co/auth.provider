@@ -72,19 +72,6 @@ const mockDeps: GrantDependencies = {
 	keyStore,
 };
 
-function configWithLegacyTokenCompat(legacyTokenCompat: boolean): GrantDependencies["config"] {
-	return {
-		...mockConfig,
-		oauth: {
-			...mockConfig.oauth,
-			refreshToken: {
-				...mockConfig.oauth.refreshToken,
-				legacyTokenCompat,
-			},
-		},
-	} as unknown as GrantDependencies["config"];
-}
-
 // D-6 (v0.5.1): every test that hits the binding gate must supply both an
 // `aud` (or `azp`) on the signed RT and a matching `authenticatedClient` on
 // the GrantContext. We default both to "client1" so existing tests continue
@@ -359,31 +346,7 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
-		it("accepts legacy tokens with type payload instead of typ header", async () => {
-			// Tokens issued before claims standardization use type: "refresh" in payload
-			// instead of typ: "rt+jwt" in the protected header.
-			const legacyToken = await new SignJWT({ type: "refresh", sub: "u1" })
-				.setProtectedHeader({ alg: "HS256", kid: "v0" })
-				.setIssuer("localhost")
-				.setAudience(DEFAULT_CLIENT_ID)
-				.setExpirationTime("24h")
-				.sign(secretKey);
-			const handler = createRefreshTokenGrant(mockDeps);
-			const ctx: GrantContext = {
-				body: { refresh_token: legacyToken },
-				session: {},
-				issuer: "localhost",
-				metadata: { ip: "127.0.0.1" },
-				authenticatedClient: DEFAULT_AUTH_CLIENT,
-			};
-
-			const { result } = await handler.handle(ctx);
-
-			expect(result.status).toBe(200);
-			expect("tokens" in result).toBe(true);
-		});
-
-		it("accepts legacy tokens without kid header", async () => {
+		it("accepts tokens without kid header (kid is optional)", async () => {
 			const legacyToken = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", typ: "rt+jwt" })
 				.setIssuer("localhost")
@@ -405,18 +368,15 @@ describe("createRefreshTokenGrant", () => {
 			expect("tokens" in result).toBe(true);
 		});
 
-		describe("legacyTokenCompat: false", () => {
-			it("RT-1: rejects payload.type refresh as a typ substitute", async () => {
+		describe("refresh-token strict gate (header.typ === rt+jwt required)", () => {
+			it("RT-1: rejects payload.type=refresh as a typ substitute", async () => {
 				const legacyToken = await new SignJWT({ type: "refresh", sub: "u1" })
 					.setProtectedHeader({ alg: "HS256", kid: "v0" })
 					.setIssuer("localhost")
 					.setAudience(DEFAULT_CLIENT_ID)
 					.setExpirationTime("24h")
 					.sign(secretKey);
-				const handler = createRefreshTokenGrant({
-					...mockDeps,
-					config: configWithLegacyTokenCompat(false),
-				});
+				const handler = createRefreshTokenGrant(mockDeps);
 
 				const { result } = await handler.handle({
 					body: { refresh_token: legacyToken },
@@ -434,10 +394,7 @@ describe("createRefreshTokenGrant", () => {
 
 			it("RT-2: accepts header.typ rt+jwt with standard claims", async () => {
 				const modernToken = await makeRefreshToken({ sub: "u1", azp: DEFAULT_CLIENT_ID });
-				const handler = createRefreshTokenGrant({
-					...mockDeps,
-					config: configWithLegacyTokenCompat(false),
-				});
+				const handler = createRefreshTokenGrant(mockDeps);
 
 				const { result } = await handler.handle({
 					body: { refresh_token: modernToken },
@@ -462,10 +419,7 @@ describe("createRefreshTokenGrant", () => {
 					.setAudience(DEFAULT_CLIENT_ID)
 					.setExpirationTime("24h")
 					.sign(secretKey);
-				const handler = createRefreshTokenGrant({
-					...mockDeps,
-					config: configWithLegacyTokenCompat(false),
-				});
+				const handler = createRefreshTokenGrant(mockDeps);
 
 				const { result } = await handler.handle({
 					body: { refresh_token: legacyClaimsToken },
@@ -481,16 +435,14 @@ describe("createRefreshTokenGrant", () => {
 				expect(result.errorDescription).toBe("refresh token has no subject");
 			});
 
-			it("RT-OC: typ-less JWT with no refresh marker is rejected even when legacyTypAccept=true (strict gate preserved)", async () => {
+			it("RT-OC: typ-less JWT is rejected even when legacyTypAccept=true (AT-as-RT defended)", async () => {
 				// SF-1's legacyTypAccept=true allows a typ-less JWT through the
-				// central verifier. AS-12's gate must STILL reject it because
-				// the token declares no refresh marker (neither header.typ nor
-				// payload.type === "refresh"). Without this guard, any AT or
-				// non-refresh JWT signed with the same key could pass as a
-				// refresh token — that is the AT-as-RT confusion vector the
-				// strict marker check defends against. legacyTokenCompat is
-				// orthogonal: flipping it neither relaxes nor tightens this
-				// "some marker required" property.
+				// central verifier. This grant-level gate must STILL reject it
+				// because the token declares no refresh marker (header.typ is
+				// the only accepted marker after M4). Without this guard, any
+				// AT or non-refresh JWT signed with the same key could pass as
+				// a refresh token — that is the AT-as-RT confusion vector the
+				// strict marker check defends against.
 				const typLessUnmarkedToken = await new SignJWT({
 					sub: "u1",
 					azp: DEFAULT_CLIENT_ID,
@@ -501,10 +453,7 @@ describe("createRefreshTokenGrant", () => {
 					.setAudience(DEFAULT_CLIENT_ID)
 					.setExpirationTime("24h")
 					.sign(secretKey);
-				const handler = createRefreshTokenGrant({
-					...mockDeps,
-					config: configWithLegacyTokenCompat(false),
-				});
+				const handler = createRefreshTokenGrant(mockDeps);
 
 				const { result } = await handler.handle({
 					body: { refresh_token: typLessUnmarkedToken },
@@ -518,61 +467,6 @@ describe("createRefreshTokenGrant", () => {
 				if (!("error" in result)) expect.fail("Expected error in result");
 				expect(result.error).toBe("invalid_grant");
 				expect(result.errorDescription).toBe("invalid refresh_token");
-			});
-		});
-
-		describe("legacyTokenCompat: backward compat (regression)", () => {
-			it("RT-4 regression: legacy path still works when legacyTokenCompat is true", async () => {
-				const legacyToken = await new SignJWT({
-					type: "refresh",
-					user: { id: "u1" },
-					scope: "read",
-				})
-					.setProtectedHeader({ alg: "HS256", kid: "v0" })
-					.setIssuer("localhost")
-					.setAudience(DEFAULT_CLIENT_ID)
-					.setExpirationTime("24h")
-					.sign(secretKey);
-				const handler = createRefreshTokenGrant({
-					...mockDeps,
-					config: configWithLegacyTokenCompat(true),
-				});
-
-				const { result } = await handler.handle({
-					body: { refresh_token: legacyToken },
-					session: {},
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: DEFAULT_AUTH_CLIENT,
-				});
-
-				expect(result.status).toBe(200);
-				expect("tokens" in result).toBe(true);
-			});
-
-			it("RT-5 regression: legacyTokenCompat defaults to true when unset", async () => {
-				const legacyToken = await new SignJWT({
-					type: "refresh",
-					user: { id: "u1" },
-					scope: "read",
-				})
-					.setProtectedHeader({ alg: "HS256", kid: "v0" })
-					.setIssuer("localhost")
-					.setAudience(DEFAULT_CLIENT_ID)
-					.setExpirationTime("24h")
-					.sign(secretKey);
-				const handler = createRefreshTokenGrant(mockDeps);
-
-				const { result } = await handler.handle({
-					body: { refresh_token: legacyToken },
-					session: {},
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: DEFAULT_AUTH_CLIENT,
-				});
-
-				expect(result.status).toBe(200);
-				expect("tokens" in result).toBe(true);
 			});
 		});
 
