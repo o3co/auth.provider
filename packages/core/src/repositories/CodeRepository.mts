@@ -43,7 +43,7 @@ export interface CodeRepository {
 	 *
 	 * Naming note (AS-10): renamed from `getByCode` to `findByCode` at 1.0
 	 * GA to align with the repository-method convention introduced in
-	 * v0.5.1: `findBy<Field>` for optional lookups (`null` on absence),
+	 * v0.5.2: `findBy<Field>` for optional lookups (`null` on absence),
 	 * `get(<id>)` for single-object stores, and operation-specific names
 	 * like `consumeByCode` (atomic single-use) for non-lookup operations.
 	 * The v0.5.x `getByCode` name was deprecated via the JSDoc-only
