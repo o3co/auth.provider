@@ -18,9 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Migration: callers of `createTokenExchangeGrant()` that still pass
     `allowPolicyWidening: true` must update their `GrantPolicyHook`
     implementations so that `grantedScope` ⊆ `subject_token.scope` and
-    `grantedAudience` ⊆ `subject_token.aud ∪ { client.clientId,
-    ...client.allowedAudiences }`. There is no opt-in to bypass this check
-    at 1.0 GA.
+    every entry of `grantedAudience` is contained in the subject token's
+    `aud` (when present), or equals `client.clientId` when the subject
+    token has no usable `aud`. `client.allowedAudiences` is **not** part
+    of the policy-output boundary — that allowlist is enforced earlier
+    on the `audience` request parameter, not on policy outputs. There is
+    no opt-in to bypass this check at 1.0 GA.
   - Affected APIs:
     `TokenExchangeDependencies.allowPolicyWidening` (removed).
 
