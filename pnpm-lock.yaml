@@ -79,7 +79,7 @@ importers:
         specifier: ^7.2.2
         version: 7.2.2
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/federation-github:
@@ -101,7 +101,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/federation-google:
@@ -126,7 +126,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/foundation:
@@ -147,7 +147,7 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/oauth:
@@ -190,7 +190,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/oauth-token-exchange:
@@ -212,7 +212,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/redis:
@@ -240,7 +240,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   packages/session:
@@ -283,7 +283,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
   templates/standalone:
@@ -356,7 +356,7 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
       vitest:
-        specifier: ^4.1.2
+        specifier: ^4.1.4
         version: 4.1.5(@types/node@25.6.2)(@vitest/coverage-v8@4.1.5)(msw@2.14.5(@types/node@25.6.2)(typescript@5.9.3))(vite@8.0.11(@types/node@25.6.2)(esbuild@0.27.7)(tsx@4.21.0)(yaml@2.8.4))
 
 packages:
