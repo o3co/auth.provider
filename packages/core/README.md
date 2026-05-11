@@ -559,23 +559,23 @@ Five extension points introduced in v0.4.0 (see
 
 #### MFA
 
-- `MfaProviderBase`, optional `SupportsEnrollment` / `SupportsRevocation` capabilities
+- `MfaProvider`, optional `SupportsEnrollment` / `SupportsRevocation` capabilities
 - Factory: `createMfaProviderFactory()`, type guards `supportsEnrollment()` / `supportsRevocation()`
 - Flow: `/oauth/authorize` + `/auth/federation/callback` consult `MfaCoordinator.listEnrolled(userId)`; on MFA required, transaction saved via `MfaTransactionStore`, user posts to `POST /auth/mfa/verify { transaction_id, proof }`, core dispatches via `providerKind`
 - No built-in providers in v0.4.0 — TOTP / WebAuthn / backup codes ship in later spec
 
 #### Audit
 
-- `AuditSinkBase.record(event)` fire-and-forget
+- `AuditSink.record(event)` fire-and-forget
 - Factory: `createAuditSinkFactory()`, built-in `"console"` via `registerBuiltinAuditSinks()`
 - Errors swallowed by core — audit failure never blocks auth flow
 
 #### Rate limiter
 
-- `RateLimiterBase.check(key, ctx)` atomic check + increment
+- `RateLimiter.check(key, ctx)` atomic check + increment
 - Factory: `createRateLimiterFactory()`, built-in `"memory"` and `"redis"` via `registerBuiltinRateLimiters()`
 - 429 + `Retry-After` emitted by core on denial
-- The built-in `"redis"` limiter requires `config.client` matching `{ incr(key): Promise<number>; expire(key, seconds): Promise<number> }`. Core does not depend on the `redis` package and does not create its own client (`RateLimiterBase` has no disposal hook — lifecycle stays with the consumer). Any redis-compatible client satisfying that shape works.
+- The built-in `"redis"` limiter requires `config.client` matching `{ incr(key): Promise<number>; expire(key, seconds): Promise<number> }`. Core does not depend on the `redis` package and does not create its own client (`RateLimiter` has no disposal hook — lifecycle stays with the consumer). Any redis-compatible client satisfying that shape works.
 
 #### RefreshTokenStore (RFC 6819 §5.2.2.3 replay detection)
 
@@ -585,7 +585,7 @@ Five extension points introduced in v0.4.0 (see
 
 #### GrantPolicyHook (scope / audience / token exchange policy)
 
-- `GrantPolicyHookBase.evaluate(request, ctx)` returns allow (with optional narrowing) or deny
+- `GrantPolicyHook.evaluate(request, ctx)` returns allow (with optional narrowing) or deny
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
 - Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
 

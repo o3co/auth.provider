@@ -21,7 +21,7 @@ import {
 	createSymmetricKeyStore,
 	defineModule,
 	type GrantDependencies,
-	type GrantPolicyHookBase,
+	type GrantPolicyHook,
 	type Logger,
 	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
@@ -438,7 +438,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 describe("createAuthorizationGrant — grantPolicy forwarding", () => {
 	it("calls grantPolicy.evaluate during refresh_token grant", async () => {
 		const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
-		const grantPolicy: GrantPolicyHookBase = {
+		const grantPolicy: GrantPolicyHook = {
 			kind: "spy",
 			evaluate: vi.fn().mockResolvedValue({ outcome: "allow" }),
 		};

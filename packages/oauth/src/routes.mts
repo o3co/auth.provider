@@ -16,22 +16,22 @@
 
 import {
 	type AppConfig,
-	type AuditSinkBase,
+	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
 	type FederationProviderHandle,
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	formatObject,
 	type GrantHandlerResolver,
-	type GrantPolicyHookBase,
+	type GrantPolicyHook,
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
 	type PublicClient,
-	type RateLimiterBase,
+	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
@@ -93,15 +93,15 @@ export const createOAuthRouter = async (
 		clientRepository: ClientRepository;
 		codeRepository: CodeRepository;
 		keyStore: KeyStore;
-		rateLimiter?: RateLimiterBase;
-		auditSink?: AuditSinkBase;
-		grantPolicy?: GrantPolicyHookBase;
+		rateLimiter?: RateLimiter;
+		auditSink?: AuditSink;
+		grantPolicy?: GrantPolicyHook;
 		refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 		userSessionStore?: UserSessionStore;
 		sessionRPRegistry?: SessionRPRegistry;
 		sessionFamilyIndex?: SessionFamilyIndex;
 		sessionFederationIndex?: SessionFederationIndex;
-		federationTokenStore?: FederationTokenStoreBase;
+		federationTokenStore?: FederationTokenStore;
 		/**
 		 * Lazy getter for the federation providers Map. Evaluated at request time so
 		 * module init order does not affect resolution — pass `() => context.federationProviders`

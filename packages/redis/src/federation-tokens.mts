@@ -6,7 +6,7 @@
 import {
 	type AdapterBuilder,
 	defineModule,
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type FederationTokens,
 	type SupportsLock,
 } from "@o3co/auth-provider-core";
@@ -102,7 +102,7 @@ interface Envelope {
 
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
-): FederationTokenStoreBase & SupportsLock {
+): FederationTokenStore & SupportsLock {
 	// OR-12: hard production guard MUST run before any encryption-key parsing
 	// so the same gate fires regardless of which entry point a consumer picks.
 	// `redisFederationTokenStoreBuilder` does its own pre-construction
@@ -250,7 +250,7 @@ export function createRedisFederationTokenStore(
  * base64 string). `mode = "allow-plaintext"` emits a startup warning and is
  * intended for dev/test only (per spec §5).
  */
-export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStoreBase> = (
+export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenStore> = (
 	config,
 	_ctx,
 ) => {

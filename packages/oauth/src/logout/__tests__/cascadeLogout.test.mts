@@ -1,5 +1,5 @@
 import type {
-	FederationTokenStoreBase,
+	FederationTokenStore,
 	RefreshTokenFamilyRevocation,
 	SessionFamilyIndex,
 	SessionFederationIndex,
@@ -24,7 +24,7 @@ function makeFamilyRevocation(
 	};
 }
 
-function makeFedStore(override?: Partial<FederationTokenStoreBase>): FederationTokenStoreBase {
+function makeFedStore(override?: Partial<FederationTokenStore>): FederationTokenStore {
 	return {
 		kind: "memory",
 		attach: vi.fn(),
@@ -33,7 +33,7 @@ function makeFedStore(override?: Partial<FederationTokenStoreBase>): FederationT
 		removeBySid: vi.fn().mockResolvedValue(undefined),
 		delete: vi.fn(),
 		...override,
-	} as unknown as FederationTokenStoreBase;
+	} as unknown as FederationTokenStore;
 }
 
 function makeUserSessionStore(override?: Partial<UserSessionStore>): UserSessionStore {

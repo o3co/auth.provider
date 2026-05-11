@@ -17,7 +17,7 @@
 import {
 	type AppConfig,
 	defineModule,
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type SessionFederationIndex,
 	type UserRepository,
 	type UserSessionStore,
@@ -57,7 +57,7 @@ const userSessionStoreModule = defineModule({
 	provides: { userSessionStore: () => makeUserSessionStore() },
 });
 
-function makeFederationTokenStore(): FederationTokenStoreBase {
+function makeFederationTokenStore(): FederationTokenStore {
 	return {
 		kind: "memory",
 		async attach() {},
@@ -67,7 +67,7 @@ function makeFederationTokenStore(): FederationTokenStoreBase {
 		async update() {},
 		async removeBySid() {},
 		async delete() {},
-	} as unknown as FederationTokenStoreBase;
+	} as unknown as FederationTokenStore;
 }
 
 const federationTokenStoreModule = defineModule({

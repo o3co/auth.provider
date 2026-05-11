@@ -33,7 +33,7 @@ describe("createMfaProviderFactory", () => {
 	});
 });
 
-describe("MfaProviderBase contract", () => {
+describe("MfaProvider contract", () => {
 	it("verify returns success/failureReason without throwing on invalid proof", async () => {
 		const provider = createTestMfaProvider({
 			kind: "totp",

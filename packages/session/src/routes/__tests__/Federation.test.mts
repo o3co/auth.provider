@@ -15,7 +15,7 @@
  */
 
 import type {
-	FederationTokenStoreBase,
+	FederationTokenStore,
 	SessionFederationIndex,
 	UserRepository,
 	UserSessionStore,
@@ -199,7 +199,7 @@ function makeSessionFederationIndex(
 	} as SessionFederationIndex;
 }
 
-function makeFederationTokenStore(): FederationTokenStoreBase & {
+function makeFederationTokenStore(): FederationTokenStore & {
 	attach: ReturnType<typeof vi.fn>;
 	delete: ReturnType<typeof vi.fn>;
 } {
@@ -245,7 +245,7 @@ function buildStatelessApp({
 	userRepository?: UserRepository;
 	userSessionStore?: UserSessionStore;
 	sessionFederationIndex?: SessionFederationIndex;
-	federationTokenStore?: FederationTokenStoreBase;
+	federationTokenStore?: FederationTokenStore;
 }) {
 	const store: SessionStore = new Map();
 	const app = makeSessionApp(store);
@@ -299,7 +299,7 @@ function buildCallbackApp({
 	userRepository?: UserRepository;
 	userSessionStore?: UserSessionStore;
 	sessionFederationIndex?: SessionFederationIndex;
-	federationTokenStore?: FederationTokenStoreBase;
+	federationTokenStore?: FederationTokenStore;
 	/** Optional middleware inserted AFTER session shim to intercept req.session.save. */
 	saveInterceptor?: express.RequestHandler;
 }): { app: express.Express; store: SessionStore } {

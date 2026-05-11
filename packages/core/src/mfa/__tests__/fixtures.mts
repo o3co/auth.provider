@@ -18,13 +18,13 @@
  * Internal-only test fixtures for MFA provider/coordinator/transaction store.
  * Not re-exported from the package root, not shipped in `dist` (tsconfig
  * excludes `__tests__/`). External provider authors should implement
- * `MfaProviderBase` directly per its TSDoc contract.
+ * `MfaProvider` directly per its TSDoc contract.
  */
 import type {
 	MfaChallenge,
 	MfaIssueContext,
 	MfaPendingTransaction,
-	MfaProviderBase,
+	MfaProvider,
 	MfaTransactionStore,
 	MfaVerifyResult,
 	SupportsEnrollment,
@@ -35,7 +35,7 @@ export function createTestMfaProvider(options: {
 	kind: string;
 	onIssue?: (userId: string, ctx: MfaIssueContext) => Promise<MfaChallenge | null>;
 	onVerify?: (challengeId: string, proof: unknown) => Promise<MfaVerifyResult>;
-}): MfaProviderBase {
+}): MfaProvider {
 	return {
 		kind: options.kind,
 		async issue(userId, ctx) {
@@ -62,7 +62,7 @@ export function createTestMfaProviderWithCapabilities(options: {
 		request: unknown,
 	) => Promise<{ success: boolean; enrollmentId?: string }>;
 	onRevoke?: (userId: string) => Promise<void>;
-}): MfaProviderBase & SupportsEnrollment & SupportsRevocation {
+}): MfaProvider & SupportsEnrollment & SupportsRevocation {
 	const base = createTestMfaProvider({ kind: options.kind });
 	return {
 		...base,

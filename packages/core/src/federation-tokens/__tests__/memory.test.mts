@@ -6,14 +6,14 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createInMemoryFederationTokenStore } from "../adapters/memory.mjs";
 import {
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type FederationTokens,
 	type SupportsLock,
 	supportsLock,
 } from "../types.mjs";
 
 describe("in-memory FederationTokenStore", () => {
-	let store: FederationTokenStoreBase;
+	let store: FederationTokenStore;
 	const tokens: FederationTokens = {
 		accessToken: "at",
 		refreshToken: "rt",
@@ -83,7 +83,7 @@ describe("in-memory FederationTokenStore", () => {
 	it("implements SupportsLock capability", async () => {
 		const s = createInMemoryFederationTokenStore();
 		expect(supportsLock(s)).toBe(true);
-		const r = await (s as FederationTokenStoreBase & SupportsLock).acquireLock({
+		const r = await (s as FederationTokenStore & SupportsLock).acquireLock({
 			sid: "s",
 			federationName: "google",
 		});

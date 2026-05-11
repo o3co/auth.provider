@@ -16,11 +16,11 @@
 
 import { createSecretKey } from "node:crypto";
 import {
-	type AuditSinkBase,
+	type AuditSink,
 	type ClientRepository,
 	createSymmetricKeyStore,
 	type FederationProviderHandle,
-	type FederationTokenStoreBase,
+	type FederationTokenStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SessionFederationIndex,
@@ -114,7 +114,7 @@ function makeFamilyRevocation(
 	};
 }
 
-function makeFedTokenStore(override?: Partial<FederationTokenStoreBase>): FederationTokenStoreBase {
+function makeFedTokenStore(override?: Partial<FederationTokenStore>): FederationTokenStore {
 	return {
 		kind: "memory",
 		attach: vi.fn(),
@@ -138,11 +138,11 @@ interface BuildAppOpts {
 	sessionStore?: UserSessionStore;
 	sessionFederationIndex?: SessionFederationIndex;
 	refreshFamilyRevocation?: RefreshTokenFamilyRevocation;
-	fedTokenStore?: FederationTokenStoreBase;
+	fedTokenStore?: FederationTokenStore;
 	clientRepo?: ClientRepository;
 	getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
 	logger?: Logger;
-	auditSink?: AuditSinkBase;
+	auditSink?: AuditSink;
 	refreshBufferMs?: number;
 }
 
@@ -365,7 +365,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("isFamilyRevoked returns true", () => {
 		it("returns 401 + emits federation.token.family_revoked audit event", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -442,7 +442,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("client.allowedAzpForFederationToken !== true", () => {
 		it("returns 403 forbidden + emits federation.token.forbidden audit event", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -576,7 +576,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("refresh: provider.refreshToken throws invalid_grant", () => {
 		it("returns 410 re_authentication_required + cleans up + emits audit event", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -644,7 +644,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("refresh: provider throws generic error", () => {
 		it("returns 500 refresh_failed + emits federation.token.refresh_failed audit event", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -806,7 +806,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("audit event: federation.token.success on happy path", () => {
 		it("emits with refreshed: false on valid non-expired token", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -825,7 +825,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 
 		it("emits with refreshed: true after successful provider refresh", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
@@ -1211,7 +1211,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 	describe("SF-13: structured error classification", () => {
 		// Helper: build a refresh-failure path with a custom error object the helper must classify.
-		function buildRefreshFailure(error: unknown, opts: { auditSink?: AuditSinkBase } = {}) {
+		function buildRefreshFailure(error: unknown, opts: { auditSink?: AuditSink } = {}) {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshFn = vi.fn().mockRejectedValue(error);
 			const refreshProvider: FederationProviderHandle & {
@@ -1355,7 +1355,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		// the audit details capture the message string; post-fix they capture the helper's
 		// classification reason ("unknown") so SIEM can group.
 		it("returns 500 refresh_failed and emits audit event with reason='unknown' for unrecognized errors", async () => {
-			const auditSink: AuditSinkBase = {
+			const auditSink: AuditSink = {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};

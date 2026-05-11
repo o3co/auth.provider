@@ -33,9 +33,9 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 // cycle).
 //
 //   GrantHandler                — packages/core/src/grants/types.mts:120 (concrete, AS-M1)
-//   AuditHook                   — AuditSink at packages/core/src/audit/types.mts (AS-M1, canonical alias of AuditSinkBase)
-//   MfaFactor                   — MfaProvider at packages/core/src/mfa/types.mts (AS-M1, canonical alias of MfaProviderBase)
-//   GrantPolicyHookContribution — GrantPolicyHook at packages/core/src/policy/types.mts (AS-M1, canonical alias of GrantPolicyHookBase)
+//   AuditHook                   — AuditSink at packages/core/src/audit/types.mts (AS-M1, canonical alias of AuditSink)
+//   MfaFactor                   — MfaProvider at packages/core/src/mfa/types.mts (AS-M1, canonical alias of MfaProvider)
+//   GrantPolicyHookContribution — GrantPolicyHook at packages/core/src/policy/types.mts (AS-M1, canonical alias of GrantPolicyHook)
 //   FederationProvider          — packages/session/src/federations/types.mts (Phase F deferred — circular import)
 //   ExchangeTokenValidator      — packages/oauth-token-exchange/src/validator/types.mts (Phase F deferred — circular import)
 //
@@ -70,7 +70,7 @@ export type ExchangeTokenValidator = unknown;
 /**
  * Type produced by an `MfaFactorFactory<Deps>` contribution. Substituted
  * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
- * `MfaProvider` (alias of `MfaProviderBase`) from
+ * `MfaProvider` (alias of `MfaProvider`) from
  * `packages/core/src/mfa/types.mts`.
  */
 export type MfaFactor = MfaProvider;
@@ -78,7 +78,7 @@ export type MfaFactor = MfaProvider;
 /**
  * Type produced by an `AuditHookFactory<Deps>` contribution. Substituted
  * in v0.5.1 (AS-M1) from the `unknown` placeholder to the canonical
- * `AuditSink` (alias of `AuditSinkBase`) from
+ * `AuditSink` (alias of `AuditSink`) from
  * `packages/core/src/audit/types.mts`.
  */
 export type AuditHook = AuditSink;
@@ -88,7 +88,7 @@ export type AuditHook = AuditSink;
  *
  * Renamed from `GrantPolicyHook` in v0.5.1 (AS-7 collision resolution):
  * the canonical `GrantPolicyHook` now refers to the policy-package
- * interface (an alias of `GrantPolicyHookBase`). Substituted in v0.5.1
+ * interface (an alias of `GrantPolicyHook`). Substituted in v0.5.1
  * (AS-M1) from the `unknown` placeholder to that canonical
  * `GrantPolicyHook` interface — a contribution factory now produces a
  * concrete grant-policy-hook adapter rather than an opaque value.

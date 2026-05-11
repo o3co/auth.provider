@@ -15,8 +15,8 @@
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { GrantPolicyHookBase, GrantPolicyHookFactory } from "./types.mjs";
+import type { GrantPolicyHook, GrantPolicyHookFactory } from "./types.mjs";
 
 export function createGrantPolicyHookFactory(): GrantPolicyHookFactory {
-	return createAdapterFactory<GrantPolicyHookBase>("GrantPolicyHook");
+	return createAdapterFactory<GrantPolicyHook>("GrantPolicyHook");
 }

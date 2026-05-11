@@ -32,11 +32,8 @@ export interface FederationTokens {
 
 /**
  * Adapter primitive for federation token storage.
- *
- * @deprecated Since v0.5.1. Use {@link FederationTokenStore} (no `Base` suffix). The
- * `*Base` form will be removed at 1.0 GA.
  */
-export interface FederationTokenStoreBase {
+export interface FederationTokenStore {
 	readonly kind: string;
 
 	/**
@@ -65,7 +62,7 @@ export interface FederationTokenStoreBase {
 	 * a session id" responsibility.
 	 *
 	 * Renamed from `deleteBySession` in v0.5.1 (AS-3); the old name is no
-	 * longer accepted because `FederationTokenStoreBase` was new in v0.5.0
+	 * longer accepted because `FederationTokenStore` was new in v0.5.0
 	 * and the v0.5.1 hotfix policy explicitly permits this rename for
 	 * interfaces that have had no external consumers.
 	 */
@@ -75,28 +72,21 @@ export interface FederationTokenStoreBase {
 	delete(sid: string, federationName: string): Promise<void>;
 }
 
-/**
- * Canonical name (since v0.5.1) for the federation token store adapter
- * primitive interface. {@link FederationTokenStoreBase} remains as a
- * deprecated alias and will be removed at 1.0 GA.
- */
-export type FederationTokenStore = FederationTokenStoreBase;
-
-export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStoreBase>;
+export type FederationTokenStoreFactory = AdapterFactory<FederationTokenStore>;
 
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge (A2-α §6.1 — optional slot)
 //
 // Declared here so oauthModule can list "federationTokenStore" in its
 // `optional` array and the DI graph types deps.federationTokenStore as
-// FederationTokenStoreBase | undefined.
+// FederationTokenStore | undefined.
 // The slot is optional: when absent, federation-token routes return 503
 // (no store available to retrieve / refresh upstream tokens).
 // Phase 9 Task 4 augmentation.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		readonly federationTokenStore?: FederationTokenStoreBase;
+		readonly federationTokenStore?: FederationTokenStore;
 	}
 }
 
@@ -154,12 +144,12 @@ export interface SupportsLock {
  * Returns `false` for `null` / `undefined` so consumers can call this directly on
  * results without an explicit existence check. When `store` is non-null, returns
  * `true` when `store.acquireLock` is a function. Inside a `true` branch, TypeScript
- * narrows `store` to `FederationTokenStoreBase & SupportsLock`, so
+ * narrows `store` to `FederationTokenStore & SupportsLock`, so
  * `store.acquireLock(...)` is callable without a cast.
  */
 export function supportsLock(
-	store: FederationTokenStoreBase | undefined | null,
-): store is FederationTokenStoreBase & SupportsLock {
+	store: FederationTokenStore | undefined | null,
+): store is FederationTokenStore & SupportsLock {
 	if (store == null) return false;
 	return typeof (store as { acquireLock?: unknown }).acquireLock === "function";
 }

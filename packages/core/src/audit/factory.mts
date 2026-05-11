@@ -15,10 +15,10 @@
  */
 
 import { createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import type { AuditEvent, AuditSinkBase, AuditSinkFactory } from "./types.mjs";
+import type { AuditEvent, AuditSink, AuditSinkFactory } from "./types.mjs";
 
 export function createAuditSinkFactory(): AuditSinkFactory {
-	return createAdapterFactory<AuditSinkBase>("AuditSink");
+	return createAdapterFactory<AuditSink>("AuditSink");
 }
 
 export function registerBuiltinAuditSinks(factory: AuditSinkFactory): void {
@@ -40,7 +40,7 @@ export function registerBuiltinAuditSinks(factory: AuditSinkFactory): void {
  * promise is observed only by the `.catch` handler below. Callers MAY
  * `await` this function for symmetry; doing so does not wait for the sink.
  */
-export function emitAuditEvent(sink: AuditSinkBase | undefined, event: AuditEvent): Promise<void> {
+export function emitAuditEvent(sink: AuditSink | undefined, event: AuditEvent): Promise<void> {
 	if (!sink) return Promise.resolve();
 	// Detach from the caller's promise chain; errors are intentionally
 	// swallowed per spec §2.2.

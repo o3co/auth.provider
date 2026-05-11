@@ -37,11 +37,8 @@ export interface AuditEvent {
 
 /**
  * Adapter primitive for audit-event sinks.
- *
- * @deprecated Since v0.5.1. Use {@link AuditSink} (no `Base` suffix). The
- * `*Base` form will be removed at 1.0 GA.
  */
-export interface AuditSinkBase {
+export interface AuditSink {
 	readonly kind: string;
 	/**
 	 * Fire-and-forget recording. Implementations MAY buffer or batch internally.
@@ -51,26 +48,19 @@ export interface AuditSinkBase {
 	record(event: AuditEvent): Promise<void>;
 }
 
-/**
- * Canonical name (since v0.5.1) for the audit-sink adapter primitive
- * interface. {@link AuditSinkBase} remains as a deprecated alias and will
- * be removed at 1.0 GA.
- */
-export type AuditSink = AuditSinkBase;
-
-export type AuditSinkFactory = AdapterFactory<AuditSinkBase>;
+export type AuditSinkFactory = AdapterFactory<AuditSink>;
 
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge (A2-α §6.1 — optional slot)
 //
 // Declared here so oauthModule can list "auditSink" in its `optional` array
-// and the DI graph types deps.auditSink as AuditSinkBase | undefined.
+// and the DI graph types deps.auditSink as AuditSink | undefined.
 // The slot is optional: when absent, oauth routes emit no audit events (the
 // emitAuditEvent helper is a no-op when sink is undefined).
 // Phase 9 Task 4 augmentation.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		readonly auditSink?: AuditSinkBase;
+		readonly auditSink?: AuditSink;
 	}
 }

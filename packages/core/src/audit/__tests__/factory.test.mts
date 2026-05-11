@@ -20,7 +20,7 @@ import {
 	emitAuditEvent,
 	registerBuiltinAuditSinks,
 } from "#/audit/factory.mjs";
-import type { AuditSinkBase } from "#/audit/types.mjs";
+import type { AuditSink } from "#/audit/types.mjs";
 
 describe("createAuditSinkFactory", () => {
 	it("creates an adapter factory and resolves registered sinks", async () => {
@@ -36,7 +36,7 @@ describe("createAuditSinkFactory", () => {
 
 describe("emitAuditEvent", () => {
 	it("swallows thrown errors from sink.record", async () => {
-		const throwingSink: AuditSinkBase = {
+		const throwingSink: AuditSink = {
 			kind: "boom",
 			async record() {
 				throw new Error("sink down");
@@ -62,7 +62,7 @@ describe("emitAuditEvent", () => {
 	it("does not block the caller on a slow sink (fire-and-forget)", async () => {
 		// Resolve-later promise — never settles during this test.
 		let release: (() => void) | undefined;
-		const slowSink: AuditSinkBase = {
+		const slowSink: AuditSink = {
 			kind: "slow",
 			async record() {
 				await new Promise<void>((resolve) => {
@@ -80,7 +80,7 @@ describe("emitAuditEvent", () => {
 	});
 
 	it("swallows rejections from detached sink.record without emitting unhandled-rejection", async () => {
-		const rejectingSink: AuditSinkBase = {
+		const rejectingSink: AuditSink = {
 			kind: "reject",
 			record() {
 				return Promise.reject(new Error("sink failed"));

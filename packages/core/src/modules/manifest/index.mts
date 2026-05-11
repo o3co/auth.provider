@@ -26,7 +26,7 @@ export type {
 	GrantFactory,
 	GrantHandler,
 	// AS-7 collision resolution (v0.5.1): renamed from `GrantPolicyHook`. The
-	// canonical `GrantPolicyHook` (an alias of `GrantPolicyHookBase`) now lives
+	// canonical `GrantPolicyHook` (an alias of `GrantPolicyHook`) now lives
 	// in `../policy/types.mts` and is exported from the package root.
 	GrantPolicyHookContribution,
 	GrantPolicyHookFactory,
