@@ -114,6 +114,23 @@ const LEGACY_JWT_FIELDS = [
 	"previousSecrets",
 ] as const;
 
+/**
+ * Fields removed from `oauth.refreshToken` at 1.0 GA. Detected on the raw
+ * input by the preprocess wrapper below so that operators upgrading from
+ * v0.5.x get a targeted error instead of having their flag silently
+ * stripped by Zod's default `unknown-key strip` behavior.
+ */
+const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{ name: string; removedIn: string; note: string }> = [
+	{
+		name: "legacyTokenCompat",
+		removedIn: "1.0 GA (Phase G / M4)",
+		note:
+			"v0.4.x refresh-token shape compat (payload.type, claims.user.id fallback) is no " +
+			"longer accepted. Ensure all in-flight refresh tokens were minted by v0.5.x or newer " +
+			"(header.typ = 'rt+jwt' and top-level sub) before upgrading.",
+	},
+];
+
 const jwtSchemaBase = z.object({
 	issuer: z.string().optional(),
 	signingKey: signingKeySchema,
@@ -150,6 +167,50 @@ const jwtSchema = z.preprocess((raw, ctx) => {
 	return raw;
 }, jwtSchemaBase);
 
+const refreshTokenSchemaBase = z.object({
+	expiresIn: z.coerce.number(),
+	// CC-2 (v0.5.1): policy for refresh tokens whose `family_id` does not
+	// match a known family record. `"reject"` is the safe default; the
+	// pre-fix behavior was implicit `"accept"` (silent fall-through to
+	// success). `"accept"` is intended only for time-bounded migration
+	// windows. Per the v0.5.1 ADR the literal default lives in
+	// `application.conf`, not here.
+	unknownFamilyPolicy: z.enum(["accept", "reject"]),
+	// SF-6 (v0.5.1): policy for refresh tokens lacking `jti` or
+	// `family_id` claims when family rotation is wired. `"reject"` is
+	// the safe default; `"accept-with-warning"` skips replay detection
+	// for the request and emits an audit log — intended only for time-
+	// bounded migration windows where v0.4.x tokens are still in
+	// circulation. Per the v0.5.1 ADR the literal default lives in
+	// `application.conf`, not here.
+	legacyRtPolicy: z.enum(["reject", "accept-with-warning"]),
+});
+
+/**
+ * Detects fields removed from `oauth.refreshToken` and emits a targeted
+ * Zod issue. Zod's default behavior strips unknown keys before
+ * superRefine runs, so without this preprocess wrapper an operator's
+ * stale config line (e.g. `legacyTokenCompat = true`) would be silently
+ * ignored on upgrade.
+ */
+const refreshTokenSchema = z.preprocess((raw, ctx) => {
+	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+		const rawObj = raw as Record<string, unknown>;
+		for (const removed of REMOVED_REFRESH_TOKEN_FIELDS) {
+			if (removed.name in rawObj) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message:
+						`oauth.refreshToken.${removed.name} was removed in ${removed.removedIn}. ` +
+						`${removed.note} Remove this field from your config.`,
+					path: [removed.name],
+				});
+			}
+		}
+	}
+	return raw;
+}, refreshTokenSchemaBase);
+
 /**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
@@ -164,24 +225,7 @@ export const CoreConfigSchema = z.object({
 		accessToken: z.object({
 			expiresIn: z.coerce.number(),
 		}),
-		refreshToken: z.object({
-			expiresIn: z.coerce.number(),
-			// CC-2 (v0.5.1): policy for refresh tokens whose `family_id` does not
-			// match a known family record. `"reject"` is the safe default; the
-			// pre-fix behavior was implicit `"accept"` (silent fall-through to
-			// success). `"accept"` is intended only for time-bounded migration
-			// windows. Per the v0.5.1 ADR the literal default lives in
-			// `application.conf`, not here.
-			unknownFamilyPolicy: z.enum(["accept", "reject"]),
-			// SF-6 (v0.5.1): policy for refresh tokens lacking `jti` or
-			// `family_id` claims when family rotation is wired. `"reject"` is
-			// the safe default; `"accept-with-warning"` skips replay detection
-			// for the request and emits an audit log — intended only for time-
-			// bounded migration windows where v0.4.x tokens are still in
-			// circulation. Per the v0.5.1 ADR the literal default lives in
-			// `application.conf`, not here.
-			legacyRtPolicy: z.enum(["reject", "accept-with-warning"]),
-		}),
+		refreshToken: refreshTokenSchema,
 		grants: z.object({}).passthrough(),
 		// IH-6 (v0.5.3): when acting as an OIDC OP, `/authorize` rejects
 		// requests that omit `openid` unless operators explicitly choose dual
