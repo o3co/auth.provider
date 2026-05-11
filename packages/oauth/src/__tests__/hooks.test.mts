@@ -23,10 +23,10 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type GrantPolicyHookBase,
-	GrantRegistry,
 	type Logger,
 	type RateLimiterBase,
 } from "@o3co/auth-provider-core";
+import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";

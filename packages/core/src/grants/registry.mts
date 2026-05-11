@@ -65,15 +65,13 @@ export class GrantRegistryError extends Error {
  * declarations. Phase 9 (A2-γ caller migration) internalises the registry
  * and removes it from the public API. Phase 3 establishes the contract.
  *
- * Public-export deprecation status (AS-8, v0.5.1): `GrantRegistry` is
- * deprecated only as a *public API symbol*. The `@deprecated` JSDoc tag
- * lives on the `export {}` site in `packages/core/src/index.mts` so
- * internal boot-planner usage of this class does not trip the IDE
- * deprecation diagnostic on every `new GrantRegistry()` call. External
- * consumers importing `GrantRegistry` / `GrantRegistryError` from
- * `@o3co/auth-provider-core` see the deprecation via the re-export. The
- * public re-export will be removed at 1.0 GA — migrate to module-based
- * `contributes.grants` declarations per A2-γ §3.3.
+ * Public-export removal status (AS-8, 1.0 GA): the public re-export of
+ * `GrantRegistry` / `GrantRegistryError` from `@o3co/auth-provider-core`
+ * was removed at 1.0 GA per A2-γ §3.3. Both classes remain as internal
+ * implementation detail of the boot planner; external consumers wire
+ * grants through module-based `contributes.grants` declarations.
+ *
+ * @internal
  */
 export class GrantRegistry {
 	private handlers = new Map<string, GrantHandler>();

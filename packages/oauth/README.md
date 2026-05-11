@@ -77,13 +77,13 @@ Registers the `"authorization_code"` and `"refresh_token"` grant types in the gr
 function createOAuthRouter(
   express: ExpressLike,
   options: {
-    registry: GrantRegistry;
+    registry: GrantHandlerResolver;
     config: AppConfig;
     clientRepository: ClientRepository;
     codeRepository: CodeRepository;
     keyStore: KeyStore;
   }
-): Promise<{ router: Router; registry: GrantRegistry }>;
+): Promise<{ router: Router; registry: GrantHandlerResolver }>;
 ```
 
 Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction. Client authentication at `/oauth/introspect` is handled by `createClientAuthMiddleware(clientRepository)` — no Passport dependency required.
@@ -315,4 +315,4 @@ If you extend or replace the middleware for custom client-auth schemes, import `
 ## See Also
 
 - [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes
-- [`@o3co/auth-provider-core`](../core/README.md) — shared types (`Module`, `GrantRegistry`, `ClientRepository`, `CodeRepository`, `KeyStore`)
+- [`@o3co/auth-provider-core`](../core/README.md) — shared types (`Module`, `GrantHandlerResolver`, `ClientRepository`, `CodeRepository`, `KeyStore`)

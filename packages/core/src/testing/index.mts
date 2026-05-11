@@ -32,6 +32,22 @@
  * major.
  */
 
+/**
+ * Internal `GrantRegistry` class re-exported through the `./testing`
+ * subpath for OAuth/integration tests that construct a registry directly
+ * (rather than through `createApp` + module-based `contributes.grants`).
+ *
+ * The public re-export from `@o3co/auth-provider-core` (the package root)
+ * was removed at 1.0 GA per AS-8 / A2-γ §3.3. Production code MUST NOT
+ * import these symbols — wire grants on a module's `defineModule`
+ * manifest and let the boot planner own the registry.
+ *
+ * This re-export exists solely so existing OAuth route tests that depend
+ * on direct registry construction can continue to compile without a
+ * mass-refactor to the module-based pattern. New tests SHOULD prefer the
+ * `createApp` / module-based wiring.
+ */
+export { GrantRegistry, GrantRegistryError } from "../grants/registry.mjs";
 export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
 export {
 	makeValidAppConfig,

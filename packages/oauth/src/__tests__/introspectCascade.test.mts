@@ -22,10 +22,9 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	defineModule,
-	GrantRegistry,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
-import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestApp, GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import { SignJWT } from "jose";
 import request from "supertest";

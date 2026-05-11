@@ -41,7 +41,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 
 ### グラントシステム
 
-グラントシステムは OAuth 2.0 グラントタイプの拡張ポイントです。各グラントタイプは `GrantHandler` として実装し、`GrantRegistry` に登録します。
+グラントシステムは OAuth 2.0 グラントタイプの拡張ポイントです。各グラントタイプは `GrantHandler` として実装し、モジュールの `contributes.grants` で宣言します。ハンドラーの実体化と登録は boot planner が内部で行います。
 
 #### インターフェースと型
 
@@ -104,18 +104,13 @@ interface GrantModule {
 }
 ```
 
-#### GrantRegistry
+#### グラントハンドラーの登録
 
-```typescript
-class GrantRegistry {
-  register(grantType: string, handler: GrantHandler): void;
-  get(grantType: string): GrantHandler | undefined;
-  addModule(module: GrantModule, deps: GrantDependencies): void;
-  cleanup(): void;
-}
-```
+グラントハンドラーは `defineModule` マニフェストの `contributes.grants` から boot planner に渡されます（A2-γ §3.3 参照）。Boot planner が各 `GrantFactory` を実体化し、ハンドラーを登録した後、全モジュール処理を終えてから `freeze()` を呼び出すため、boot 後の変異は loud に throw します。
 
-`addModule` はモジュール内のすべての `GrantFactory` を実行してハンドラーを登録します。`cleanup()` は legacy のシャットダウンフックで、登録された各 grant handler の `cleanup()` メソッド（存在する場合）を呼び出します。新規コードは `createApp` が返す `handle.dispose()` を使うこと — `AppHandle.dispose()` は A2-β §8.1 に従い、コンポーネント単位の `lifecycle[K].cleanup` コールバックを reverse-topological 順で実行します。`GrantRegistry.cleanup()` は backwards compatibility のため残してありますが、将来の minor で削除予定です。
+コンシューマコードはレジストリクラスを import / 実体化する必要はありません。グラントハンドラーのクリーンアップは `createApp` が返す `handle.dispose()` に統合されており、`AppHandle.dispose()` は A2-β §8.1 に従い、コンポーネント単位の `lifecycle[K].cleanup` コールバックを reverse-topological 順で実行します。
+
+> **1.0 GA で削除**: `GrantRegistry` / `GrantRegistryError` クラス（v0.5.1 で AS-8 に基づき public re-export として deprecated 済み）は `@o3co/auth-provider-core` から export されなくなりました。クラスは boot planner の internal 実装として残っています。v0.4.x の `new GrantRegistry()` パターンを使っていたコンシューマは、モジュールの `contributes.grants` 宣言に移行してください。
 
 ### トークンユーティリティ
 

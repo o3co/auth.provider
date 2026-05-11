@@ -22,14 +22,13 @@ import {
 	defineModule,
 	type GrantDependencies,
 	type GrantPolicyHookBase,
-	GrantRegistry,
 	type Logger,
 	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
+import { createTestApp, GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";

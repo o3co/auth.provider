@@ -25,8 +25,8 @@ import {
 	type FederationProviderHandle,
 	type FederationTokenStoreBase,
 	formatObject,
+	type GrantHandlerResolver,
 	type GrantPolicyHookBase,
-	type GrantRegistry,
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
@@ -88,7 +88,7 @@ export const createOAuthRouter = async (
 		getFederationProviders = () => undefined,
 		logger = consoleLogger,
 	}: {
-		registry: GrantRegistry;
+		registry: GrantHandlerResolver;
 		config: AppConfig;
 		clientRepository: ClientRepository;
 		codeRepository: CodeRepository;
@@ -110,7 +110,7 @@ export const createOAuthRouter = async (
 		getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
 		logger?: Logger;
 	},
-): Promise<{ router: Router; registry: GrantRegistry }> => {
+): Promise<{ router: Router; registry: GrantHandlerResolver }> => {
 	const router = express.Router();
 
 	// Construct once at router-creation time so the closure is not re-allocated per request.

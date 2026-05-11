@@ -19,7 +19,6 @@ import {
 	consoleLogger,
 	defineModule,
 	type FederationProviderHandle,
-	type GrantRegistry,
 	type Module,
 	type ProviderDeps,
 } from "@o3co/auth-provider-core";
@@ -99,8 +98,8 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 	// type level.
 	//
 	// createOAuthRouter retains its legacy explicit-deps signature
-	// (`registry: GrantRegistry`, `getFederationProviders: () => ...`). The
-	// route factory bridges typed `deps` to that shape per plan line 710 —
+	// (`registry: GrantHandlerResolver`, `getFederationProviders: () => ...`).
+	// The route factory bridges typed `deps` to that shape per plan line 710 —
 	// the router internals are NOT redesigned in this task.
 	//
 	// Explicit `defineModule<R, O>` generics: needed so contextual typing
@@ -146,11 +145,11 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 			routes: [
 				// oauth-endpoints — always contributed (Theme D: const shape).
 				async (deps) => {
-					// GrantHandlerResolver exposes `.get(grantType)`; routes.mts:171
-					// only consumes that single method, so structural compat is
-					// sufficient. The cast bridges the typed planner shape to the
-					// legacy registry param without redesigning createOAuthRouter.
-					const registry = deps.grantHandlerResolver as unknown as GrantRegistry;
+					// GrantHandlerResolver is what the synthetic key resolves to
+					// and what createOAuthRouter's `registry` param accepts —
+					// the type-level read-only projection that exposes
+					// `.get(grantType)`, which routes.mts only consumes.
+					const registry = deps.grantHandlerResolver;
 					const { router } = await createOAuthRouter(express, {
 						registry,
 						config: deps.config,

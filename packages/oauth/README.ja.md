@@ -77,13 +77,13 @@ grant レジストリに `"authorization_code"` および `"refresh_token"` gran
 function createOAuthRouter(
   express: ExpressLike,
   options: {
-    registry: GrantRegistry;
+    registry: GrantHandlerResolver;
     config: AppConfig;
     clientRepository: ClientRepository;
     codeRepository: CodeRepository;
     keyStore: KeyStore;
   }
-): Promise<{ router: Router; registry: GrantRegistry }>;
+): Promise<{ router: Router; registry: GrantHandlerResolver }>;
 ```
 
 低レベルのファクトリ関数。Express ルーターと設定済み grant レジストリを生成する。通常は `oauthModule` 内部で呼び出される。構築後のレジストリインスタンスに直接アクセスしたい場合に使用する。`/oauth/introspect` のクライアント認証は `createClientAuthMiddleware(clientRepository)` が担う — Passport 依存なし。
@@ -314,4 +314,4 @@ v0.4.0 ではこのパッケージから passport を削除した。`/oauth/intr
 ## 関連
 
 - [`@o3co/auth-provider-session`](../session/README.ja.md) — セッションログイン / フェデレーションルート
-- [`@o3co/auth-provider-core`](../core/README.ja.md) — 共有型定義 (`Module`、`GrantRegistry`、`ClientRepository`、`CodeRepository`、`KeyStore`)
+- [`@o3co/auth-provider-core`](../core/README.ja.md) — 共有型定義 (`Module`、`GrantHandlerResolver`、`ClientRepository`、`CodeRepository`、`KeyStore`)
