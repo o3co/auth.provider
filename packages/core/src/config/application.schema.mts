@@ -120,12 +120,12 @@ const LEGACY_JWT_FIELDS = [
  * targeted error instead of having their flag silently stripped by Zod's
  * default `unknown-key strip` behavior.
  *
- * The `removedIn` field carries the internal marker (e.g., `Phase G / M4`) so
- * the error message can point operators at the corresponding CHANGELOG entry.
- * Per docs/release-policy.md R5, the value MUST NOT pre-stamp a release tag
- * before that release is cut. At each release cut, R6 step 5 fills the
- * released tag into this field for entries that landed in the cut release;
- * before that, the marker alone is sufficient.
+ * The `removedIn` field carries the released tag plus internal phase marker
+ * (e.g., `v0.6.0 (Phase G / M4)`) so the operator-facing error message names
+ * the release that performed the removal and the CHANGELOG entry that
+ * documents it. Per docs/release-policy.md R5, the released-tag portion is
+ * filled in at release-cut time (R6 step 5) — entries added on HEAD between
+ * cuts use a neutral value like `"Phase G / M4"` until the next cut.
  */
 const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
 	name: string;
@@ -134,7 +134,7 @@ const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
 }> = [
 	{
 		name: "legacyTokenCompat",
-		removedIn: "Phase G / M4",
+		removedIn: "v0.6.0 (Phase G / M4)",
 		note:
 			"v0.4.x refresh-token shape compat (payload.type, claims.user.id fallback) is no " +
 			"longer accepted. Ensure all in-flight refresh tokens were minted by v0.5.x or newer " +
@@ -211,7 +211,7 @@ const refreshTokenSchema = z.preprocess((raw, ctx) => {
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					message:
-						`oauth.refreshToken.${removed.name} has been removed (${removed.removedIn}; see CHANGELOG). ` +
+						`oauth.refreshToken.${removed.name} was removed in ${removed.removedIn}; see CHANGELOG. ` +
 						`${removed.note} Remove this field from your config.`,
 					path: [removed.name],
 				});

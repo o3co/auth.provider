@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-12
+
+### "1.0 GA" planning-label retirement
+
+Pre-v0.6.0, the auth scope used "1.0 GA" as a planning anchor for a
+batch of breaking removals and renames across `auth.provider`. As
+release cuts diverged from plan, the label drifted: the v0.5.2 and
+v0.5.3 CHANGELOG entries below reference "removal at 1.0 GA" for
+changes that, in fact, **land in v0.6.0**. There is no
+separate "1.0 GA" release — v0.6.0 supersedes that framing.
+
+Concretely, the changes promised at "1.0 GA" in v0.5.x CHANGELOG
+entries are realized here:
+
+- `GrantRegistry` / `GrantRegistryError` public re-export removal (Phase G / M1)
+- `*Base` interface aliases removal (Phase G / M2)
+- `oauth.tokenExchange.allowPolicyWidening` flag removal (Phase G / M3)
+- `oauth.refreshToken.legacyTokenCompat` flag removal (Phase G / M4)
+- `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` enum value removal (Phase G / M6)
+- `CodeRepository.getByCode` → `findByCode` rename (Phase G / M5)
+- `oauth.jwt.legacyTypAccept` default `true → false` (Phase G / S2)
+
+For the reasoning behind the label retirement and the going-forward
+labeling discipline that prevents this from happening again, see
+[`docs/release-policy.md`](docs/release-policy.md).
+
 ### Security (Phase G — S2 `legacyTypAccept` default flipped `true → false`)
 
 - **BREAKING**: `oauth.jwt.legacyTypAccept` default flipped from `true`
@@ -55,7 +81,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Migration: consumers implementing `CodeRepository` (custom storage
   adapters) must rename their `getByCode` method to `findByCode`. The
   in-memory adapter (`InMemoryCodeRepository`) and Redis adapter
-  (`@o3co/auth-provider-redis`) are updated by this release.
+  (`@o3co/auth-provider-redis`) are updated by v0.6.0.
 - Affected APIs: `CodeRepository.getByCode` (removed) →
   `CodeRepository.findByCode` (added). No transitional alias.
 
@@ -99,7 +125,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and the `OAUTH_REFRESH_TOKEN_LEGACY_TOKEN_COMPAT` env-var override. The
   flag was introduced in v0.5.2 (AS-12) with default `true` to accept
   v0.4.x refresh-token shapes during the migration window. v0.5.x is now
-  out of the bounded window; this release enforces the strict shape
+  out of the bounded window; v0.6.0 enforces the strict shape
   unconditionally.
   - Refresh-grant rejection gate now accepts **only** `header.typ ===
     "rt+jwt"` as the refresh marker. Tokens carrying the legacy
@@ -114,7 +140,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Migration: operators must ensure all in-flight refresh tokens were
     minted by v0.5.x or newer (which emit both `header.typ = "rt+jwt"`
     and a top-level `sub`) before upgrading. v0.5.2 documented this
-    migration plan in its Migration note; this release finalizes the cutover.
+    migration plan in its Migration note; v0.6.0 finalizes the cutover.
   - Affected APIs/config (removed):
     `oauth.refreshToken.legacyTokenCompat`,
     `OAUTH_REFRESH_TOKEN_LEGACY_TOKEN_COMPAT`,
@@ -146,7 +172,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **BREAKING**: Removed the `*Base` suffix from the 5 extension-point
   interfaces (closes AS-7). The canonical names without the suffix were
   added as type aliases in v0.5.1; both names coexisted with `@deprecated`
-  JSDoc on the `*Base` form. In this release the canonical names ARE the
+  JSDoc on the `*Base` form. In v0.6.0 the canonical names ARE the
   interfaces; the `*Base` aliases are removed.
   - `AuditSinkBase` → `AuditSink`
   - `FederationTokenStoreBase` → `FederationTokenStore`
