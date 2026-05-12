@@ -177,6 +177,29 @@ describe("POST /oauth/revoke — access token path", () => {
 			.expect(200);
 		expect(logger.warn).toHaveBeenCalled();
 	});
+
+	it("fail-closed: AT with no client_id/azp/aud claim is NOT denylisted (Copilot review #2)", async () => {
+		// SECURITY: when ownership cannot be resolved from any of client_id /
+		// azp / aud claims, the previous logic let the denylist.add proceed
+		// (any authenticated client could revoke any AT). Fail-closed: treat
+		// missing-owner as ownership-failure and silent-200 without denylisting.
+		const noOwnerAt = await new SignJWT({
+			sub: "u1",
+			jti: "j-no-owner",
+			exp: Math.floor(Date.now() / 1000) + 3600,
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+			.setIssuer(ISSUER)
+			// no setAudience, no client_id claim, no azp claim
+			.sign(secretKey);
+		const res = await request(app)
+			.post("/oauth/revoke")
+			.auth(CLIENT_ID, CLIENT_SECRET)
+			.type("form")
+			.send({ token: noOwnerAt, token_type_hint: "access_token" });
+		expect(res.status).toBe(200);
+		expect(await denylist.has("j-no-owner")).toBe(false);
+	});
 });
 
 // ---------------------------------------------------------------------------

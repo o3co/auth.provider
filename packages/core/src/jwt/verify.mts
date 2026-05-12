@@ -427,15 +427,36 @@ export async function verifyJwt(
 	// ensures `reason: "revoked"` is never emitted for tokens that would already
 	// fail on structural grounds (expired, wrong typ, etc.) — keeping the audit
 	// signal crisp.
+	//
+	// Fail-closed on denylist backend errors: if `denylist.has` throws (e.g.
+	// Redis network failure), we cannot determine revocation state. Treating
+	// "unknown" as "active" would let revoked tokens through during outages;
+	// secure default is to reject with `reason: "revoked"` and emit an audit
+	// event capturing the underlying cause so operators can distinguish a true
+	// revocation from a backend outage in logs/metrics.
 	if (denylist !== undefined) {
 		const jti = typeof payload.jti === "string" ? payload.jti : undefined;
-		if (jti !== undefined && (await denylist.has(jti))) {
-			const err = new JwtVerificationError(
-				"revoked",
-				`JWT jti ${jti} is in the revocation denylist`,
-			);
-			emitRejection(logger, err, payload, header);
-			throw err;
+		if (jti !== undefined) {
+			let isRevoked: boolean;
+			try {
+				isRevoked = await denylist.has(jti);
+			} catch (cause) {
+				const causeMessage = cause instanceof Error ? cause.message : String(cause);
+				const err = new JwtVerificationError(
+					"revoked",
+					`denylist consult failed (fail-closed): ${causeMessage}`,
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+			if (isRevoked) {
+				const err = new JwtVerificationError(
+					"revoked",
+					`JWT jti ${jti} is in the revocation denylist`,
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
 		}
 	}
 

@@ -52,7 +52,9 @@ export interface RevokeRouterOptions {
  * - ALWAYS returns 200 for all other outcomes (RFC 7009 §2.2 no-info-leak).
  *
  * Refresh-token path:
- * - Verifies the RT signature / type / issuer via `verifyJwt`.
+ * - Verifies the RT signature / type / issuer via `verifyJwt` with
+ *   `ignoreExpiration: true` (revoking an expired RT is harmless idempotency
+ *   per RFC 7009 §2.1).
  * - Extracts `family_id` claim; if absent or verification fails → silent 200.
  * - Verifies client ownership via `azp` (falls back to `aud`).
  * - Calls `refreshTokenFamilyRevocation.revokeFamily(familyId)`.
@@ -60,8 +62,11 @@ export interface RevokeRouterOptions {
  *
  * Access-token path:
  * - Verifies AT signature / type / issuer with `ignoreExpiration: true`
- *   (the ONLY legitimate call site for this option — CI lint guardrail T7
- *   prevents drift to other sites).
+ *   (revoking an already-expired AT is also harmless).
+ *
+ * `ignoreExpiration: true` is allowed at both call sites within this file but
+ * NOWHERE else in the codebase — CI lint guardrail T7 enforces this scoping
+ * (see `.github/workflows/ci.yml` step `Restrict ignoreExpiration use-site`).
  * - Extracts `jti`, `exp`, `client_id` (or `azp` fallback) from payload.
  * - Verifies client ownership; mismatch → silent 200.
  * - When `accessTokenDenylist` slot is wired: calls `denylist.add(jti, exp * 1000)`.
@@ -163,11 +168,13 @@ async function tryRevokeRefreshToken(
 		const verified = await verifyJwt(token, opts.keyStore, {
 			type: "refresh_token",
 			expectedIssuer: opts.issuer,
-			// Do NOT ignore expiration for RTs — an expired RT cannot be "revoked"
-			// in a meaningful security sense (it is already invalid), but we do
-			// NOT return false here; revoking an expired-but-valid-sig RT is
-			// harmless idempotency and keeps the family revoked for cascade checks.
-			// `ignoreExpiration` is intentionally absent (only valid in AT path).
+			// Per RFC 7009 §2.1 + spec §4.4: revoke an already-expired RT
+			// is harmless idempotency — the family-revocation primitive is
+			// idempotent and keeps cascade checks correct. Without this flag,
+			// expired-but-valid-signature RTs would throw and bypass revocation.
+			// SECURITY GUARDRAIL (§4.5 S9): this is one of two legitimate sites
+			// for ignoreExpiration: true (along with the AT path below).
+			ignoreExpiration: true,
 		});
 		const claims = verified.payload as Record<string, unknown>;
 
@@ -254,11 +261,18 @@ async function tryRevokeAccessToken(
 					? rawAzp
 					: tokenAud;
 
-		if (tokenClientId !== undefined && tokenClientId !== requestingClientId) {
-			// Wrong owner — silent 200 (RFC 7009 §2.2 no-info-leak).
+		// Fail closed: when no owner claim (`client_id` / `azp` / `aud`) is
+		// resolvable, we cannot verify ownership → treat as ownership-failure
+		// (silent 200 per RFC 7009 §2.2). Matches the symmetric behavior of
+		// the RT path (tryRevokeRefreshToken treats undefined azp as mismatch).
+		if (tokenClientId === undefined || tokenClientId !== requestingClientId) {
 			opts.logger.debug(
-				{ scope: "oauth.revoke.access", expected: requestingClientId, got: tokenClientId },
-				"AT revoke skipped: client_id mismatch",
+				{
+					scope: "oauth.revoke.access",
+					expected: requestingClientId,
+					got: tokenClientId ?? "<missing>",
+				},
+				"AT revoke skipped: client_id mismatch or missing",
 			);
 			return;
 		}

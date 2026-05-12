@@ -118,4 +118,30 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 		});
 		expect(verified.payload.sub).toBe("u-1");
 	});
+
+	it("fail-closed: denylist.has() throwing causes JwtVerificationError reason=revoked (Copilot review #3)", async () => {
+		// SECURITY: if the denylist backend (e.g. Redis) is unavailable, we cannot
+		// determine revocation state. Failing open would accept revoked tokens during
+		// the outage; secure default is to reject with reason "revoked" + an audit
+		// event capturing the underlying cause for operator triage.
+		const throwingDenylist = {
+			kind: "throwing-test-stub",
+			add: async () => {},
+			has: async () => {
+				throw new Error("simulated denylist backend outage");
+			},
+		};
+		const { token } = await mintAccessToken();
+		await expect(
+			verifyJwt(token, testKeyStore(), {
+				type: "access_token",
+				expectedIssuer: TEST_ISSUER,
+				expectedAudience: TEST_AUDIENCE,
+				denylist: throwingDenylist,
+			}),
+		).rejects.toMatchObject({
+			reason: "revoked",
+			message: expect.stringContaining("denylist consult failed"),
+		});
+	});
 });
