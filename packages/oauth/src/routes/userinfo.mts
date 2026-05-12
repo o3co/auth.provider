@@ -15,6 +15,7 @@
  */
 
 import {
+	type AccessTokenDenylist,
 	filterClaimsByScope,
 	type KeyStore,
 	type Logger,
@@ -34,6 +35,8 @@ export interface UserinfoRouterOptions {
 	keyStore: KeyStore;
 	userSessionStore?: UserSessionStore;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
+	/** Wave 1 — RFC 7009: when wired, verifyJwt consults the denylist so revoked ATs respond 401. */
+	accessTokenDenylist?: AccessTokenDenylist;
 	/** Configured issuer — pinned by the SF-1 central verifier. */
 	issuer?: string;
 	/**
@@ -86,10 +89,13 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		// records the gap via `jwt_verify_aud_skipped`.
 		let payload: Record<string, unknown>;
 		try {
+			// Wave 1 (C4): denylist consulted so revoked ATs respond 401 invalid_token
+			// rather than serving claims. When denylist is absent, behaviour is unchanged.
 			const verified = await verifyJwt(token, opts.keyStore, {
 				type: "access_token",
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
+				...(opts.accessTokenDenylist ? { denylist: opts.accessTokenDenylist } : {}),
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;

@@ -341,10 +341,13 @@ export const createOAuthRouter = async (
 						// established (introspectClientAuthMw is skipped on this fall-
 						// through path), so audience pinning is deferred. alg / iss /
 						// typ + signature are still pinned by the central verifier.
+						// Wave 1 (C4): denylist consulted so revoked ATs cannot serve
+						// as their own introspection credential.
 						await verifyJwt(bearerToken, keyStore, {
 							type: "access_token",
 							expectedIssuer: issuerForRealm ?? "",
 							legacyTypAccept: legacyTypAcceptOpt ?? false,
+							...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
 							logger,
 						});
 						return next();
@@ -379,11 +382,13 @@ export const createOAuthRouter = async (
 					// has identified them; for the bearer-self-intro fall-through path
 					// the identity is unknown and the verifier records the gap via
 					// `jwt_verify_aud_skipped`.
+					// Wave 1 (C4): denylist consulted so revoked ATs report active:false.
 					const verified = await verifyJwt(token, keyStore, {
 						type: "access_token",
 						expectedIssuer: issuerForRealm ?? "",
 						...(req.oauthClient ? { expectedAudience: req.oauthClient.clientId } : {}),
 						legacyTypAccept: legacyTypAcceptOpt ?? false,
+						...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
 						logger,
 					});
 					const { payload } = verified;
@@ -884,6 +889,7 @@ export const createOAuthRouter = async (
 			keyStore,
 			userSessionStore,
 			refreshTokenFamilyRevocation,
+			accessTokenDenylist,
 			issuer: issuerForRealm,
 			legacyTypAccept: legacyTypAcceptOpt,
 			logger,
@@ -960,6 +966,7 @@ export const createOAuthRouter = async (
 				federationTokenStore: federationTokenStore!,
 				clientRepository,
 				getFederationProviders,
+				accessTokenDenylist,
 				auditSink,
 				logger,
 				issuer: issuerForRealm,

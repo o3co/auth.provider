@@ -15,6 +15,7 @@
  */
 
 import type {
+	AccessTokenDenylist,
 	AuditSink,
 	ClientRepository,
 	FederationProviderHandle,
@@ -136,6 +137,8 @@ export interface FederationTokenRouterOptions {
 	sessionFederationIndex: SessionFederationIndex;
 	federationTokenStore: FederationTokenStore;
 	clientRepository: ClientRepository;
+	/** Wave 1 — RFC 7009: when wired, verifyJwt consults the denylist so revoked ATs respond 401. */
+	accessTokenDenylist?: AccessTokenDenylist;
 	/**
 	 * Getter for the federation providers Map. Evaluated at request time (not at
 	 * router construction time) so module init order does not matter.
@@ -202,12 +205,14 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		// the central verifier. Audience is deferred — bearer-as-credential
 		// route, calling-client identity is not separately authenticated; the
 		// verifier records the gap via `jwt_verify_aud_skipped`.
+		// Wave 1 (C4): denylist consulted so revoked ATs respond 401 invalid_token.
 		let payload: Record<string, unknown>;
 		try {
 			const verified = await verifyJwt(token, opts.keyStore, {
 				type: "access_token",
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
+				...(opts.accessTokenDenylist ? { denylist: opts.accessTokenDenylist } : {}),
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;
