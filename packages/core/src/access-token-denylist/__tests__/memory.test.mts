@@ -13,13 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMemoryAccessTokenDenylist } from "../memory.mjs";
 
 describe("createMemoryAccessTokenDenylist", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-05-12T00:00:00Z"));
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	it("kind is 'memory'", () => {
@@ -42,10 +46,18 @@ describe("createMemoryAccessTokenDenylist", () => {
 		expect(await store.has("jti-1")).toBe(false);
 	});
 
-	it("add is idempotent on same jti", async () => {
+	it("add overwrites expiresAtMs on same jti (last-write wins)", async () => {
 		const store = createMemoryAccessTokenDenylist();
-		await store.add("jti-2", Date.now() + 1000);
-		await store.add("jti-2", Date.now() + 2000);
-		expect(await store.has("jti-2")).toBe(true);
+		const t0 = Date.now();
+		await store.add("jti-2", t0 + 1000); // first call: expires at t0+1000
+		await store.add("jti-2", t0 + 2000); // second call: expires at t0+2000
+
+		// advance past first expiry but before second
+		vi.setSystemTime(new Date(t0 + 1500));
+		expect(await store.has("jti-2")).toBe(true); // proves second won
+
+		// advance past second expiry
+		vi.setSystemTime(new Date(t0 + 2500));
+		expect(await store.has("jti-2")).toBe(false);
 	});
 });
