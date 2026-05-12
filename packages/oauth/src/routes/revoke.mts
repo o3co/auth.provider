@@ -43,8 +43,8 @@ export interface RevokeRouterOptions {
  * Creates an Express router handling `POST /revoke` per RFC 7009.
  *
  * Behavior summary:
- * - Requires client authentication (confidential clients only; public clients
- *   rejected per RFC 7009 §2.1 — see `allowPublicClients: false` default).
+ * - Requires client authentication (both confidential and public clients per RFC 7009 §2.1;
+ *   public clients identify via `client_id` form param only — `allowPublicClients: true`).
  * - Accepts `token` + optional `token_type_hint` form params.
  * - Returns 400 `invalid_request` when `token` is absent.
  * - Returns 400 `unsupported_token_type` when `token_type_hint` is present
@@ -75,9 +75,10 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 		issuer: opts.issuer,
 		logger: opts.logger,
 		// RFC 7009 §2.1: public clients may revoke their own tokens.
-		// Wave 1 default: reject public clients (matches spec §4.4 Wave 1 note).
-		// Revisit when dogfood surface requires it.
-		allowPublicClients: false,
+		// Wave 1 dogfood (yoshi SPA + Mobile) uses public-client flows — enabling here
+		// is required for the dogfood to work. Ownership check (token's client_id claim
+		// vs req.oauthClient.clientId) applies equally to confidential and public clients.
+		allowPublicClients: true,
 	});
 
 	router.post("/revoke", clientAuth, async (req, res) => {
@@ -108,22 +109,32 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 			return;
 		}
 
-		// Per RFC 7009 §2.1: try the type matching the hint first; on failure or
-		// when no hint is given, try the other type. "try" here means "attempt to
-		// interpret the token as that type; on any failure silently move on".
-		const tryRefreshFirst = token_type_hint !== "access_token";
-		const tryAccessFirst = token_type_hint === "access_token";
-
-		if (tryRefreshFirst) {
-			const revoked = await tryRevokeRefreshToken(token, client.clientId, opts);
-			if (revoked) {
-				res.status(200).end();
-				return;
-			}
-		}
-
-		if (tryAccessFirst || token_type_hint === undefined) {
+		// RFC 7009 §2.1 cross-type search:
+		// - Try the type matching the hint first (or RT-first when no hint is given).
+		// - If the first attempt fails to locate/revoke the token, MUST extend the
+		//   search to the other type (§2.1: "If the server is unable to locate the
+		//   token using the given hint, it MUST extend its search across all of its
+		//   supported token types.").
+		// "Fails to locate" = tryRevoke* returns false (wrong type / unverifiable).
+		// RFC 7009 §2.2: always 200 regardless of outcome.
+		if (token_type_hint === "access_token") {
+			// Hint says AT — try AT first; if not found, fall back to RT.
 			await tryRevokeAccessToken(token, client.clientId, opts);
+			// AT path always resolves (never returns a "found" bool); unconditional
+			// cross-type fallback would double-revoke on success. Per spec the AT
+			// path is self-contained — if `jti` was added to the denylist that IS
+			// the revocation. But if the token didn't parse as an AT, we should try RT.
+			// tryRevokeAccessToken swallows all errors, so we always fall through here;
+			// attempting RT is harmless (silent 200 on mismatch). This covers the case
+			// where the caller passed hint=access_token with an actual RT.
+			await tryRevokeRefreshToken(token, client.clientId, opts);
+		} else {
+			// hint=refresh_token or no hint — try RT first.
+			const revoked = await tryRevokeRefreshToken(token, client.clientId, opts);
+			if (!revoked) {
+				// RT path failed to locate/revoke — extend search to AT per §2.1.
+				await tryRevokeAccessToken(token, client.clientId, opts);
+			}
 		}
 
 		// RFC 7009 §2.2: always 200 regardless of whether the token existed.
