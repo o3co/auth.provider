@@ -60,7 +60,7 @@ describe("oauth.refreshToken schema — removed-field preprocess (Phase G / M4)"
 		expect(result.success).toBe(false);
 		if (result.success) return;
 		const issue = result.error.issues.find((i) => i.message.includes("legacyTokenCompat"));
-		expect(issue?.message).toMatch(/has been removed/);
+		expect(issue?.message).toMatch(/was removed in v0\.6\.0/);
 		expect(issue?.message).toMatch(/Phase G \/ M4/);
 		expect(issue?.message).toMatch(/v0\.5\.x or newer/);
 	});
