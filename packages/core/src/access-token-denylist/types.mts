@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
-
 /**
  * Tracks revoked access-token jtis. Optional ComponentMap slot; when present,
  * verifyJwt consults `has(jti)` and `/oauth/revoke` AT path calls `add(jti, expiresAtMs)`.
@@ -28,8 +26,6 @@ export interface AccessTokenDenylist {
 	add(jti: string, expiresAtMs: number): Promise<void>;
 	has(jti: string): Promise<boolean>;
 }
-
-export type AccessTokenDenylistFactory = AdapterFactory<AccessTokenDenylist>;
 
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge

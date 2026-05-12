@@ -4,7 +4,8 @@
  */
 import { describe, expectTypeOf, it } from "vitest";
 import type { AdapterFactory } from "../../adapters/AdapterFactory.mjs";
-import type { AccessTokenDenylist, AccessTokenDenylistFactory } from "../types.mjs";
+import type { AccessTokenDenylistFactory } from "../factory.mjs";
+import type { AccessTokenDenylist } from "../types.mjs";
 
 describe("AccessTokenDenylist types", () => {
 	it("declares the contract operations", () => {
