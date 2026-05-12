@@ -37,9 +37,9 @@ export interface UserinfoRouterOptions {
 	/** Configured issuer — pinned by the SF-1 central verifier. */
 	issuer?: string;
 	/**
-	 * SF-1 / v0.6.0 (Phase G / S2): when true, accept tokens whose `typ`
+	 * SF-1 / Phase G / S2: when true, accept tokens whose `typ`
 	 * header is absent (a `jwt_verify_legacy_typ` deprecation warning is
-	 * emitted). v0.6.0 default is `false` (typ-less tokens rejected);
+	 * emitted). the default is `false` (typ-less tokens rejected);
 	 * `true` is an explicit legacy-acceptance opt-in for deployments
 	 * still completing their v0.4.x rollover. The v0.5.x default was
 	 * `true`.

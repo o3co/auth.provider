@@ -31,8 +31,10 @@ export interface ClientRepository {
 	 * a public projection without authentication. Single-object stores
 	 * (e.g. `UserSessionStore`) use `get(<id>)` instead. Operation-specific
 	 * names like `consumeByCode` denote atomic single-use semantics; they
-	 * are NOT subject to the `findBy` convention. The convention will be
-	 * enforced at v0.6.0 via a documented contributor guide and lint rule.
+	 * are NOT subject to the `findBy` convention. The convention is
+	 * currently enforced by code review on PRs that add or rename
+	 * repository methods; a lint rule and contributor-guide section may
+	 * follow once the convention has settled across all repositories.
 	 */
 	findById(clientId: string): Promise<PublicClient | null>;
 	/**

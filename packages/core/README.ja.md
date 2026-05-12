@@ -110,7 +110,7 @@ interface GrantModule {
 
 コンシューマコードはレジストリクラスを import / 実体化する必要はありません。グラントハンドラーのクリーンアップは `createApp` が返す `handle.dispose()` に統合されており、`AppHandle.dispose()` は A2-β §8.1 に従い、コンポーネント単位の `lifecycle[K].cleanup` コールバックを reverse-topological 順で実行します。
 
-> **v0.6.0 で削除**: `GrantRegistry` / `GrantRegistryError` クラス（v0.5.1 で AS-8 に基づき public re-export として deprecated 済み）は `@o3co/auth-provider-core` から export されなくなりました。クラスは boot planner の internal 実装として残っています。v0.4.x の `new GrantRegistry()` パターンを使っていたコンシューマは、モジュールの `contributes.grants` 宣言に移行してください。
+> **削除済み**: `GrantRegistry` / `GrantRegistryError` クラス（v0.5.1 で AS-8 に基づき public re-export として deprecated 済み）は `@o3co/auth-provider-core` から export されなくなりました。クラスは boot planner の internal 実装として残っています。v0.4.x の `new GrantRegistry()` パターンを使っていたコンシューマは、モジュールの `contributes.grants` 宣言に移行してください。削除を行ったリリースは CHANGELOG を参照。
 
 ### トークンユーティリティ
 
