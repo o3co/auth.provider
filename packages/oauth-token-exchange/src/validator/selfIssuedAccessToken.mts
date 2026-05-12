@@ -37,9 +37,9 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	issuer: string;
 	/**
-	 * SF-1 / v0.6.0 (Phase G / S2): when true, the central JWT verifier
+	 * SF-1 / Phase G / S2: when true, the central JWT verifier
 	 * accepts tokens whose `typ` header is absent and emits a
-	 * `jwt_verify_legacy_typ` deprecation warning. v0.6.0 default is
+	 * `jwt_verify_legacy_typ` deprecation warning. the default is
 	 * `false` (typ-less tokens rejected); `true` is an explicit
 	 * legacy-acceptance opt-in. The v0.5.x default was `true`.
 	 */

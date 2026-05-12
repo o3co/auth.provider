@@ -40,7 +40,7 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 //   ExchangeTokenValidator      — packages/oauth-token-exchange/src/validator/types.mts (Phase F deferred — circular import)
 //
 // Canonical (no-suffix) interface names are used for the substitution
-// RHS. The v0.5.1-era `*Base` deprecation aliases were removed at v0.6.0
+// RHS. The v0.5.1-era `*Base` deprecation aliases were removed
 // (M2); references on this site are to the interfaces themselves.
 
 /**

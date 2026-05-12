@@ -127,12 +127,11 @@ export interface JwtVerifyOptions {
 	/**
 	 * SF-1 transition flag for the v0.4.x→v0.5.x typ-header rollout.
 	 *
-	 * The v0.6.0 default is `false`: tokens whose `typ` header is absent
-	 * are rejected. Operators with v0.4.x tokens still in circulation can
-	 * set this to `true` for their own bounded migration window — when
-	 * true, typ-less tokens are accepted and emit a
-	 * `jwt_verify_legacy_typ` warning. The v0.5.x default was `true`;
-	 * v0.6.0 flips it as part of Phase G S2.
+	 * The default is `false`: tokens whose `typ` header is absent are
+	 * rejected. Operators with v0.4.x tokens still in circulation can set
+	 * this to `true` for their own bounded migration window — when true,
+	 * typ-less tokens are accepted and emit a `jwt_verify_legacy_typ`
+	 * warning. The v0.5.x default was `true`; Phase G S2 flips it.
 	 */
 	readonly legacyTypAccept?: boolean;
 }
