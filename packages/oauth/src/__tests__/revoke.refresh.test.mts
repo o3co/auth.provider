@@ -175,6 +175,31 @@ describe("POST /oauth/revoke — refresh token path", () => {
 		expect(res.status).toBe(200);
 		expect(revocations).toEqual([]);
 	});
+
+	it("revokes an already-expired RT (Copilot review #1: ignoreExpiration idempotency)", async () => {
+		// RFC 7009 §2.1: revoking an expired-but-valid-signature RT is harmless
+		// idempotency — the family-revocation primitive is idempotent and keeps
+		// cascade checks correct. Without ignoreExpiration the verify would throw
+		// and the family would never be revoked.
+		const pastExp = Math.floor(Date.now() / 1000) - 3600;
+		const rt = await new SignJWT({
+			sub: "u1",
+			family_id: "fam-expired",
+			azp: CLIENT_ID,
+			exp: pastExp,
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer(ISSUER)
+			.setAudience(CLIENT_ID)
+			.sign(secretKey);
+		const res = await request(app)
+			.post("/oauth/revoke")
+			.auth(CLIENT_ID, CLIENT_SECRET)
+			.type("form")
+			.send({ token: rt, token_type_hint: "refresh_token" });
+		expect(res.status).toBe(200);
+		expect(revocations).toContain("fam-expired");
+	});
 });
 
 // ---------------------------------------------------------------------------
