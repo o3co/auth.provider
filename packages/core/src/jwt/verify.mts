@@ -327,8 +327,16 @@ export async function verifyJwt(
 	// ignoreExpiration: when true, pass a currentDate set to 1 second before
 	// the token's own exp so jose's exp check always passes. We decode the
 	// payload (unauthenticated, signature checked in the jwtVerify call below)
-	// purely to read the numeric exp claim. This does NOT affect nbf validation —
-	// currentDate is set to a past moment, so nbf-in-future would still reject.
+	// purely to read the numeric exp claim.
+	//
+	// CAVEAT: this also shifts the reference for nbf validation — jose checks
+	// `nbf > currentDate + tolerance` against the same currentDate. A token
+	// with nbf set close to exp (legal but unusual) could be wrongly rejected
+	// with reason "not_yet_valid" when ignoreExpiration is true. This is
+	// acceptable for the /oauth/revoke AT path because issued access tokens
+	// always have iat ≈ nbf ≪ exp. iat-future check (post-signature, below)
+	// uses Date.now() directly and is unaffected.
+	//
 	// SECURITY GUARDRAIL: use only in the /oauth/revoke AT path (§4.5).
 	let ignoreExpirationCurrentDate: Date | undefined;
 	if (ignoreExpiration) {
