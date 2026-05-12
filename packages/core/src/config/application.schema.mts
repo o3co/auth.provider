@@ -115,7 +115,7 @@ const LEGACY_JWT_FIELDS = [
 ] as const;
 
 /**
- * Fields removed from `oauth.refreshToken` at 1.0 GA. Detected on the raw
+ * Fields removed from `oauth.refreshToken` at v0.6.0. Detected on the raw
  * input by the preprocess wrapper below so that operators upgrading from
  * v0.5.x get a targeted error instead of having their flag silently
  * stripped by Zod's default `unknown-key strip` behavior.
@@ -127,7 +127,7 @@ const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
 }> = [
 	{
 		name: "legacyTokenCompat",
-		removedIn: "1.0 GA (Phase G / M4)",
+		removedIn: "v0.6.0 (Phase G / M4)",
 		note:
 			"v0.4.x refresh-token shape compat (payload.type, claims.user.id fallback) is no " +
 			"longer accepted. Ensure all in-flight refresh tokens were minted by v0.5.x or newer " +
@@ -180,10 +180,10 @@ const refreshTokenSchemaBase = z.object({
 	// windows. Per the v0.5.1 ADR the literal default lives in
 	// `application.conf`, not here.
 	unknownFamilyPolicy: z.enum(["accept", "reject"]),
-	// SF-6 (v0.5.1) / 1.0 GA (Phase G / M6): policy for refresh tokens
+	// SF-6 (v0.5.1) / v0.6.0 (Phase G / M6): policy for refresh tokens
 	// lacking `jti` or `family_id` claims when family rotation is wired.
 	// The `"accept-with-warning"` migration-window value was removed at
-	// 1.0 GA; only `"reject"` remains. Operators upgrading from v0.5.x
+	// v0.6.0; only `"reject"` remains. Operators upgrading from v0.5.x
 	// who still set `accept-with-warning` get a Zod
 	// `invalid_enum_value` error pointing at this field.
 	legacyRtPolicy: z.enum(["reject"]),

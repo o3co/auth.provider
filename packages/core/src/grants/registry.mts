@@ -65,9 +65,9 @@ export class GrantRegistryError extends Error {
  * declarations. Phase 9 (A2-γ caller migration) internalises the registry
  * and removes it from the public API. Phase 3 establishes the contract.
  *
- * Public-export removal status (AS-8, 1.0 GA): the public re-export of
+ * Public-export removal status (AS-8, v0.6.0): the public re-export of
  * `GrantRegistry` / `GrantRegistryError` from `@o3co/auth-provider-core`
- * was removed at 1.0 GA per A2-γ §3.3. Both classes remain as internal
+ * was removed at v0.6.0 per A2-γ §3.3. Both classes remain as internal
  * implementation detail of the boot planner; external consumers wire
  * grants through module-based `contributes.grants` declarations.
  *

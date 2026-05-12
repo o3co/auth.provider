@@ -119,7 +119,7 @@ export const createOAuthRouter = async (
 	// canonical issuer (or this router is constructed in a partial-config test
 	// fixture), the middleware falls back to the literal "oauth".
 	const issuerForRealm = (config as { oauth?: { jwt?: { issuer?: string } } }).oauth?.jwt?.issuer;
-	// SF-1 / 1.0 GA (Phase G / S2): legacyTypAccept default is `false`
+	// SF-1 / v0.6.0 (Phase G / S2): legacyTypAccept default is `false`
 	// (v0.5.x was `true`). Use the same defensive cast as `issuerForRealm`
 	// so partial-config test fixtures (no `oauth.jwt` block at all) don't
 	// throw at router construction.

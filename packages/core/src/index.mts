@@ -116,7 +116,7 @@ export {
 // Grant types and interfaces.
 //
 // `GrantRegistry` and `GrantRegistryError` (deprecated public re-exports
-// in v0.5.1 per AS-8) were removed at 1.0 GA per A2-γ §3.3. The classes
+// in v0.5.1 per AS-8) were removed at v0.6.0 per A2-γ §3.3. The classes
 // remain as internal implementation detail of the boot planner; consumer
 // code wires grants via module-based `contributes.grants` declarations
 // instead.

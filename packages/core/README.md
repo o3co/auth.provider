@@ -110,7 +110,7 @@ Grant handlers are wired into the boot planner via `contributes.grants` on a mod
 
 Consumer code does NOT need to import or instantiate any registry class. Cleanup of grant handlers runs through the unified `handle.dispose()` returned by `createApp` — `AppHandle.dispose()` runs per-component `lifecycle[K].cleanup` callbacks in reverse-topological order per A2-β §8.1.
 
-> **Removed at 1.0 GA**: the `GrantRegistry` and `GrantRegistryError` classes (deprecated as public re-exports in v0.5.1 per AS-8) are no longer exported from `@o3co/auth-provider-core`. They remain as internal implementation detail of the boot planner. Existing consumers of the v0.4.x `new GrantRegistry()` pattern should migrate to module-based `contributes.grants` declarations.
+> **Removed at v0.6.0**: the `GrantRegistry` and `GrantRegistryError` classes (deprecated as public re-exports in v0.5.1 per AS-8) are no longer exported from `@o3co/auth-provider-core`. They remain as internal implementation detail of the boot planner. Existing consumers of the v0.4.x `new GrantRegistry()` pattern should migrate to module-based `contributes.grants` declarations.
 
 ### Token Utilities
 
