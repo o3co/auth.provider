@@ -15,6 +15,7 @@
  */
 
 import {
+	type AccessTokenDenylist,
 	type AppConfig,
 	type AuditSink,
 	type ClientRepository,
@@ -44,6 +45,7 @@ import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
 import { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
+import { createRevokeRouter } from "./routes/revoke.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
 
 // Session data type augmentation
@@ -80,6 +82,7 @@ export const createOAuthRouter = async (
 		auditSink,
 		grantPolicy,
 		refreshTokenFamilyRevocation,
+		accessTokenDenylist,
 		userSessionStore,
 		sessionRPRegistry,
 		sessionFamilyIndex,
@@ -97,6 +100,8 @@ export const createOAuthRouter = async (
 		auditSink?: AuditSink;
 		grantPolicy?: GrantPolicyHook;
 		refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
+		/** Wave 1 — RFC 7009 access-token revocation. Optional: when absent, AT revocation is a warn-logged no-op. */
+		accessTokenDenylist?: AccessTokenDenylist;
 		userSessionStore?: UserSessionStore;
 		sessionRPRegistry?: SessionRPRegistry;
 		sessionFamilyIndex?: SessionFamilyIndex;
@@ -962,6 +967,20 @@ export const createOAuthRouter = async (
 			}),
 		);
 	}
+
+	// RFC 7009 — Token Revocation endpoint.
+	// Always mounted. `accessTokenDenylist` is optional: when absent, AT
+	// revocation is a warn-logged no-op (RT revocation is unaffected).
+	router.use(
+		createRevokeRouter(express, {
+			clientRepository,
+			keyStore,
+			refreshTokenFamilyRevocation,
+			accessTokenDenylist,
+			logger,
+			issuer: issuerForRealm ?? "",
+		}),
+	);
 
 	return { router, registry };
 };
