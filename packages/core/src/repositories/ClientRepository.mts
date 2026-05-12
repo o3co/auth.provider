@@ -32,7 +32,7 @@ export interface ClientRepository {
 	 * (e.g. `UserSessionStore`) use `get(<id>)` instead. Operation-specific
 	 * names like `consumeByCode` denote atomic single-use semantics; they
 	 * are NOT subject to the `findBy` convention. The convention will be
-	 * enforced at 1.0 GA via a documented contributor guide and lint rule.
+	 * enforced at v0.6.0 via a documented contributor guide and lint rule.
 	 */
 	findById(clientId: string): Promise<PublicClient | null>;
 	/**

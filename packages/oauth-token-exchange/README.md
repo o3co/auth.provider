@@ -147,7 +147,7 @@ const handle = await createApp({
 
 - `saml1` / `saml2` subject token types
 - Token type conversion (access ↔ id, access → refresh): returns `unsupported_token_type`
-- DPoP-bound token minting (planned for 1.0 GA)
+- DPoP-bound token minting (not implemented; release timing pending feature inventory)
 - Built-in external JWT validator (consumer-implement; planned as a separate package post-0.5)
 
 ## Breaking changes (v0.5.0)

@@ -38,7 +38,7 @@
  * (rather than through `createApp` + module-based `contributes.grants`).
  *
  * The public re-export from `@o3co/auth-provider-core` (the package root)
- * was removed at 1.0 GA per AS-8 / A2-γ §3.3. Production code MUST NOT
+ * was removed at v0.6.0 per AS-8 / A2-γ §3.3. Production code MUST NOT
  * import these symbols — wire grants on a module's `defineModule`
  * manifest and let the boot planner own the registry.
  *

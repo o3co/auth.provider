@@ -6,10 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Security (Phase G — S2 `legacyTypAccept` default flipped `true → false`, 1.0 GA)
+### Security (Phase G — S2 `legacyTypAccept` default flipped `true → false`, v0.6.0)
 
 - **BREAKING**: `oauth.jwt.legacyTypAccept` default flipped from `true`
-  (v0.5.x) to `false` (1.0 GA). The central JWT verifier now rejects
+  (v0.5.x) to `false` (v0.6.0). The central JWT verifier now rejects
   tokens whose `typ` header is absent **by default**. Previously,
   typ-less tokens were accepted with a `jwt_verify_legacy_typ`
   deprecation warning so v0.4.x tokens (issued before the
@@ -39,7 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `packages/oauth/src/grants/refreshToken.mts`,
   `packages/oauth/src/routes/{federationToken,logout,userinfo}.mts`.
 
-### Changed (Phase G — M5 `CodeRepository.getByCode` → `findByCode` rename, 1.0 GA)
+### Changed (Phase G — M5 `CodeRepository.getByCode` → `findByCode` rename, v0.6.0)
 
 - **BREAKING**: `CodeRepository.getByCode(code)` renamed to
   `findByCode(code)`. The signature (`Promise<Code | null>`) and
@@ -51,7 +51,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   operation-specific names like `consumeByCode` (atomic single-use) for
   non-lookup operations. `get*` idiomatically implies throw-on-missing,
   which mismatches this method's nullable return. The v0.5.2 JSDoc
-  (AS-10) flagged this for renaming at 1.0 GA.
+  (AS-10) flagged this for renaming at v0.6.0.
 - Migration: consumers implementing `CodeRepository` (custom storage
   adapters) must rename their `getByCode` method to `findByCode`. The
   in-memory adapter (`InMemoryCodeRepository`) and Redis adapter
@@ -59,7 +59,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Affected APIs: `CodeRepository.getByCode` (removed) →
   `CodeRepository.findByCode` (added). No transitional alias.
 
-### Security (Phase G — M6 `legacyRtPolicy = "accept-with-warning"` removed, 1.0 GA)
+### Security (Phase G — M6 `legacyRtPolicy = "accept-with-warning"` removed, v0.6.0)
 
 - **BREAKING**: The `accept-with-warning` value of
   `oauth.refreshToken.legacyRtPolicy` was removed. Under SF-6, refresh
@@ -70,7 +70,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Closes a `family_id`-absent acceptance window that allowed legacy
   refresh tokens to bypass rotation entirely under operator opt-in.
 
-### Removed (Phase G — M6 `legacyRtPolicy = "accept-with-warning"` enum value, 1.0 GA)
+### Removed (Phase G — M6 `legacyRtPolicy = "accept-with-warning"` enum value, v0.6.0)
 
 - **BREAKING**: `oauth.refreshToken.legacyRtPolicy` Zod schema tightened
   from `z.enum(["reject", "accept-with-warning"])` to
@@ -92,14 +92,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `packages/oauth/src/grants/refreshToken.mts` (the legacy branch
   that emitted it is gone).
 
-### Removed (Phase G — M4 `legacyTokenCompat` migration flag, 1.0 GA)
+### Removed (Phase G — M4 `legacyTokenCompat` migration flag, v0.6.0)
 
 - **BREAKING**: Removed the `oauth.refreshToken.legacyTokenCompat` config
   flag (HOCON `application.conf` + Zod schema in `application.schema.mts`)
   and the `OAUTH_REFRESH_TOKEN_LEGACY_TOKEN_COMPAT` env-var override. The
   flag was introduced in v0.5.2 (AS-12) with default `true` to accept
   v0.4.x refresh-token shapes during the migration window. v0.5.x is now
-  out of the bounded window; 1.0 GA enforces the strict shape
+  out of the bounded window; v0.6.0 enforces the strict shape
   unconditionally.
   - Refresh-grant rejection gate now accepts **only** `header.typ ===
     "rt+jwt"` as the refresh marker. Tokens carrying the legacy
@@ -114,13 +114,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - Migration: operators must ensure all in-flight refresh tokens were
     minted by v0.5.x or newer (which emit both `header.typ = "rt+jwt"`
     and a top-level `sub`) before upgrading. v0.5.2 documented this
-    migration plan in its Migration note; 1.0 GA finalizes the cutover.
+    migration plan in its Migration note; v0.6.0 finalizes the cutover.
   - Affected APIs/config (removed):
     `oauth.refreshToken.legacyTokenCompat`,
     `OAUTH_REFRESH_TOKEN_LEGACY_TOKEN_COMPAT`,
     `RefreshTokenConfig.legacyTokenCompat` (Zod schema field).
 
-### Removed (Phase G — M3 `allowPolicyWidening` migration flag, 1.0 GA)
+### Removed (Phase G — M3 `allowPolicyWidening` migration flag, v0.6.0)
 
 - **BREAKING**: Removed the `allowPolicyWidening?: boolean` field from
   `TokenExchangeDependencies` (RFC 8693 Token Exchange grant). The
@@ -137,16 +137,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     token has no usable `aud`. `client.allowedAudiences` is **not** part
     of the policy-output boundary — that allowlist is enforced earlier
     on the `audience` request parameter, not on policy outputs. There is
-    no opt-in to bypass this check at 1.0 GA.
+    no opt-in to bypass this check at v0.6.0.
   - Affected APIs:
     `TokenExchangeDependencies.allowPolicyWidening` (removed).
 
-### Removed (Phase G — M2 *Base interface aliases, 1.0 GA)
+### Removed (Phase G — M2 *Base interface aliases, v0.6.0)
 
 - **BREAKING**: Removed the `*Base` suffix from the 5 extension-point
   interfaces (closes AS-7). The canonical names without the suffix were
   added as type aliases in v0.5.1; both names coexisted with `@deprecated`
-  JSDoc on the `*Base` form. At 1.0 GA the canonical names ARE the
+  JSDoc on the `*Base` form. At v0.6.0 the canonical names ARE the
   interfaces; the `*Base` aliases are removed.
   - `AuditSinkBase` → `AuditSink`
   - `FederationTokenStoreBase` → `FederationTokenStore`
@@ -166,7 +166,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
     drops the `GrantPolicyHookBase` form. `GrantPolicyHookFactory<Deps>`
     in the manifest still produces a `GrantPolicyHookContribution`.
 
-### Removed (Phase G — M1 GrantRegistry public export, 1.0 GA)
+### Removed (Phase G — M1 GrantRegistry public export, v0.6.0)
 
 - **BREAKING**: Removed `GrantRegistry` and `GrantRegistryError` from
   `@o3co/auth-provider-core`'s public exports (closes AS-8). Both were

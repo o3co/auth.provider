@@ -60,7 +60,7 @@ describe("oauth.refreshToken schema — removed-field preprocess (Phase G / M4)"
 		expect(result.success).toBe(false);
 		if (result.success) return;
 		const issue = result.error.issues.find((i) => i.message.includes("legacyTokenCompat"));
-		expect(issue?.message).toMatch(/1\.0 GA/);
+		expect(issue?.message).toMatch(/v0\.6\.0/);
 		expect(issue?.message).toMatch(/v0\.5\.x or newer/);
 	});
 });
@@ -76,7 +76,7 @@ describe("oauth.refreshToken schema — legacyRtPolicy enum tightening (Phase G 
 		expect(result.success).toBe(true);
 	});
 
-	it("rejects legacyRtPolicy='accept-with-warning' (removed at 1.0 GA)", () => {
+	it("rejects legacyRtPolicy='accept-with-warning' (removed at v0.6.0)", () => {
 		const result = refreshTokenSchema.safeParse({
 			...validBase,
 			legacyRtPolicy: "accept-with-warning",

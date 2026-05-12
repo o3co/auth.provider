@@ -98,7 +98,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// Invariant — see RT-OC test: this gate keeps AT-as-RT confusion
 			// defended. A JWT with no `header.typ === "rt+jwt"` is rejected
 			// even when SF-1's `legacyTypAccept = true` opt-in lets a typ-less
-			// token through the central verifier (1.0 GA flipped the default
+			// token through the central verifier (v0.6.0 flipped the default
 			// to false but operators can still opt back). Refactors that touch
 			// this condition MUST keep RT-OC green.
 			if (typ !== "rt+jwt") {
@@ -277,7 +277,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				}
 			}
 
-			// SF-6 / 1.0 GA (Phase G / M6): when rotation is wired, refresh
+			// SF-6 / v0.6.0 (Phase G / M6): when rotation is wired, refresh
 			// tokens MUST carry both jti AND family_id. Fail-fast BEFORE
 			// `generateToken()` runs so (a) we don't burn keystore signatures
 			// on a request that is going to be rejected anyway, and (b) a

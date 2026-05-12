@@ -56,7 +56,7 @@ export type GrantPolicyDecision =
  * AS-7 collision resolution renamed that placeholder to
  * `GrantPolicyHookContribution`, freeing this name for the canonical
  * interface; the `*Base` deprecation alias previously exposed alongside
- * was removed at 1.0 GA.
+ * was removed at v0.6.0.
  */
 export interface GrantPolicyHook {
 	readonly kind: string;
