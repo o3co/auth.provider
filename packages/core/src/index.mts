@@ -401,6 +401,19 @@ export type {
 	RefreshTokenFamilyUpdateResult,
 } from "./refresh-token-family/types.mjs";
 
+// ===========================================================================
+// Wave 1 — AccessTokenDenylist (RFC 7009 §2.1 access-token revocation)
+// ===========================================================================
+
+export {
+	type AccessTokenDenylistFactory,
+	createAccessTokenDenylistFactory,
+	registerBuiltinAccessTokenDenylists,
+} from "./access-token-denylist/factory.mjs";
+export { createMemoryAccessTokenDenylist } from "./access-token-denylist/memory.mjs";
+export { memoryAccessTokenDenylistModule } from "./access-token-denylist/module.mjs";
+export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
+
 // SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
 // root because `packages/core/package.json#exports` does not register a
 // `./security/*` subpath — Codex Delta 1 confirmed the subpath approach
