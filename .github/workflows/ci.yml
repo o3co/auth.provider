@@ -154,6 +154,31 @@ jobs:
             exit 1
           fi
           echo "OK: no cross-project references in PR commit messages"
+      - name: Restrict ignoreExpiration use-site (Wave 1 spec §4.5 S9 security guardrail)
+        run: |
+          set -euo pipefail
+          # Per spec §4.5: ignoreExpiration: true MUST appear at exactly ONE
+          # call site — the /oauth/revoke AT path (packages/oauth/src/routes/revoke.mts).
+          # Any other production code passing ignoreExpiration: true bypasses
+          # token-lifetime enforcement and is a security regression.
+          #
+          # Exclusions:
+          #   src/routes/revoke  — the sole legitimate call site (added in T8)
+          #   __tests__          — test files legitimately exercise the option
+          #   comment lines      — JSDoc / inline comments referencing the option
+          #                        by name are documentation, not call sites
+          OFFENDERS=$(grep -rn "ignoreExpiration:[[:space:]]*true" packages/ \
+            --include="*.mts" --include="*.ts" \
+            | grep -v "src/routes/revoke" \
+            | grep -v "__tests__" \
+            | grep -vE ":[[:space:]]*(//|\*|/\*)" \
+            || true)
+          if [ -n "$OFFENDERS" ]; then
+            echo "::error::ignoreExpiration: true found outside the /oauth/revoke AT path:"
+            echo "$OFFENDERS"
+            exit 1
+          fi
+          echo "OK: no ignoreExpiration: true call sites outside revoke handler or tests"
       - run: pnpm -r --if-present run typecheck
       - run: pnpm run test
       - run: pnpm run test:coverage
