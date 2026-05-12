@@ -14,12 +14,14 @@
  * limitations under the License.
  */
 import {
+	decodeJwt,
 	decodeProtectedHeader,
 	type JWTPayload as JoseJWTPayload,
 	errors as joseErrors,
 	jwtVerify,
 	type ProtectedHeaderParameters,
 } from "jose";
+import type { AccessTokenDenylist } from "../access-token-denylist/types.mjs";
 import { ExpiredKidError, type KeyStore } from "../keys/KeyStore.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 
@@ -49,7 +51,11 @@ export type JwtVerificationReason =
 	// operator-rotation signal (the previous key's expiresAt has passed), an
 	// unknown kid is an attacker-fabricated header signal. SIEM filters can
 	// page differently on each.
-	| "kid_expired";
+	| "kid_expired"
+	// Wave 1 (§4.5): token present in the AccessTokenDenylist (i.e. explicitly
+	// revoked via RFC 7009). Distinct from `expired` so SIEM filters can tell
+	// natural expiry apart from an operator-initiated revocation event.
+	| "revoked";
 
 /**
  * Thrown by {@link verifyJwt} on any verification failure. The `reason` field
@@ -134,6 +140,20 @@ export interface JwtVerifyOptions {
 	 * warning. The v0.5.x default was `true`; Phase G S2 flips it.
 	 */
 	readonly legacyTypAccept?: boolean;
+	/**
+	 * Wave 1 (§4.5): when present, verifyJwt calls `denylist.has(jti)` after
+	 * signature/expiry/type checks and throws with reason "revoked" if true.
+	 * Omitting this option (the default) preserves current behavior.
+	 */
+	readonly denylist?: AccessTokenDenylist;
+	/**
+	 * Wave 1 (§4.5): SECURITY GUARDRAIL — set true ONLY in the /oauth/revoke
+	 * AT path. Spreading this flag to other call sites bypasses token-lifetime
+	 * enforcement. CI lint must restrict `ignoreExpiration: true` to revoke handler.
+	 *
+	 * Default: `false` (exp check runs as normal).
+	 */
+	readonly ignoreExpiration?: boolean;
 }
 
 export interface VerifiedJwt {
@@ -200,6 +220,8 @@ export async function verifyJwt(
 		expectedAlgs,
 		logger,
 		legacyTypAccept = false,
+		denylist,
+		ignoreExpiration = false,
 	} = options;
 
 	let header: ProtectedHeaderParameters;
@@ -302,6 +324,26 @@ export async function verifyJwt(
 		warnAuditGapOnce(logger, "iss", type, {}, "jwt_verify_iss_skipped");
 	}
 
+	// ignoreExpiration: when true, pass a currentDate set to 1 second before
+	// the token's own exp so jose's exp check always passes. We decode the
+	// payload (unauthenticated, signature checked in the jwtVerify call below)
+	// purely to read the numeric exp claim. This does NOT affect nbf validation —
+	// currentDate is set to a past moment, so nbf-in-future would still reject.
+	// SECURITY GUARDRAIL: use only in the /oauth/revoke AT path (§4.5).
+	let ignoreExpirationCurrentDate: Date | undefined;
+	if (ignoreExpiration) {
+		try {
+			const rawPayload = decodeJwt(jwt);
+			if (typeof rawPayload.exp === "number") {
+				// Set currentDate to exp - 1s so exp check passes exactly.
+				ignoreExpirationCurrentDate = new Date((rawPayload.exp - 1) * 1000);
+			}
+		} catch {
+			// If decodeJwt fails, fall through — jwtVerify will reject the JWT
+			// anyway (malformed), so skipping exp-bypass is safe.
+		}
+	}
+
 	let payload: JoseJWTPayload;
 	try {
 		const result = await jwtVerify(jwt, verificationKey, {
@@ -309,6 +351,9 @@ export async function verifyJwt(
 			...(skipIssuer ? {} : { issuer: expectedIssuer }),
 			...(audienceForJose !== undefined ? { audience: audienceForJose } : {}),
 			clockTolerance: clockSkewSeconds,
+			...(ignoreExpirationCurrentDate !== undefined
+				? { currentDate: ignoreExpirationCurrentDate }
+				: {}),
 		});
 		payload = result.payload;
 	} catch (cause) {
@@ -367,6 +412,23 @@ export async function verifyJwt(
 		const err = new JwtVerificationError("nonce", `JWT nonce mismatch (expected ${expectedNonce})`);
 		emitRejection(logger, err, payload, header);
 		throw err;
+	}
+
+	// Wave 1 (§4.5): denylist check — runs after all signature/expiry/type checks
+	// so revocation is only consulted for otherwise-valid tokens. This ordering
+	// ensures `reason: "revoked"` is never emitted for tokens that would already
+	// fail on structural grounds (expired, wrong typ, etc.) — keeping the audit
+	// signal crisp.
+	if (denylist !== undefined) {
+		const jti = typeof payload.jti === "string" ? payload.jti : undefined;
+		if (jti !== undefined && (await denylist.has(jti))) {
+			const err = new JwtVerificationError(
+				"revoked",
+				`JWT jti ${jti} is in the revocation denylist`,
+			);
+			emitRejection(logger, err, payload, header);
+			throw err;
+		}
 	}
 
 	return { payload, header, type };
