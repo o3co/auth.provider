@@ -17,6 +17,7 @@
 import { createSecretKey } from "node:crypto";
 import {
 	type ClientRepository,
+	createMemoryAccessTokenDenylist,
 	createSymmetricKeyStore,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
@@ -173,5 +174,74 @@ describe("POST /oauth/revoke — refresh token path", () => {
 			.send({ token: "garbage.token.here", token_type_hint: "refresh_token" });
 		expect(res.status).toBe(200);
 		expect(revocations).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// C1: RFC 7009 §2.1 cross-type fallback — hint=refresh_token with actual AT
+// ---------------------------------------------------------------------------
+
+async function mintAccessTokenForCrossType(opts: {
+	jti: string;
+	clientId: string;
+}): Promise<string> {
+	const exp = Math.floor(Date.now() / 1000) + 3600;
+	return new SignJWT({
+		sub: "u1",
+		scope: "read",
+		client_id: opts.clientId,
+		jti: opts.jti,
+		exp,
+	})
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+		.setIssuer(ISSUER)
+		.setAudience(opts.clientId)
+		.sign(createSecretKey(Buffer.from(SECRET)));
+}
+
+describe("POST /oauth/revoke — C1: cross-type fallback (hint=refresh_token + AT-shaped token)", () => {
+	let crossDenylist: ReturnType<typeof createMemoryAccessTokenDenylist>;
+	let crossRevocations: string[];
+	let crossRevocation: RefreshTokenFamilyRevocation;
+	let crossApp: express.Express;
+
+	beforeEach(() => {
+		crossRevocations = [];
+		crossRevocation = {
+			revokeFamily: vi.fn(async (id: string) => {
+				crossRevocations.push(id);
+			}),
+			isFamilyRevoked: vi.fn(async () => false),
+		};
+		crossDenylist = createMemoryAccessTokenDenylist();
+
+		const router = createRevokeRouter(express, {
+			clientRepository,
+			keyStore,
+			refreshTokenFamilyRevocation: crossRevocation,
+			accessTokenDenylist: crossDenylist,
+			logger: createMockLogger(),
+			issuer: ISSUER,
+		});
+		crossApp = express();
+		crossApp.use("/oauth", router);
+	});
+
+	it("RFC 7009 §2.1: hint=refresh_token with actual AT — AT is still denylisted (cross-type fallback)", async () => {
+		// Client passes hint=refresh_token but the token is actually an access_token.
+		// Per RFC 7009 §2.1 the server MUST extend the search; the AT path should run.
+		const at = await mintAccessTokenForCrossType({ jti: "cross-jti-1", clientId: CLIENT_ID });
+
+		const res = await request(crossApp)
+			.post("/oauth/revoke")
+			.auth(CLIENT_ID, CLIENT_SECRET)
+			.type("form")
+			.send({ token: at, token_type_hint: "refresh_token" });
+
+		expect(res.status).toBe(200);
+		// Cross-type fallback: AT must be denylisted even though hint said RT
+		expect(await crossDenylist.has("cross-jti-1")).toBe(true);
+		// RT family must NOT have been "revoked" for the AT
+		expect(crossRevocations).toEqual([]);
 	});
 });
