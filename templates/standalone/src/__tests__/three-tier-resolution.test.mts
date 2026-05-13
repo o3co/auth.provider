@@ -95,4 +95,23 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		const config = buildResolvedConfig("development");
 		expect(grants(config).client_credentials?.enabled).toBe(false);
 	});
+
+	it("reference.conf default for oauth.resourceIndicator.enabled is false", () => {
+		// reference.conf must ship the literal `false` anchor so that the
+		// schema coercion (coerceBooleanFromEnv) can produce a boolean value.
+		// Without the HOCON block the field resolves to undefined.
+		const config = buildResolvedConfig("development");
+		expect(config.oauth.resourceIndicator?.enabled).toBe(false);
+	});
+
+	it("env var OAUTH_RESOURCE_INDICATOR_ENABLED=true reaches resolved config and coerces to boolean true", () => {
+		// HOCON env-substitution returns a string. The reference.conf anchor
+		// (`enabled = ${?OAUTH_RESOURCE_INDICATOR_ENABLED}`) lets the env var
+		// reach the resolved layer; the schema's coerceBooleanFromEnv turns
+		// "true" → true so `=== true` guards in grant handlers work correctly.
+		const config = buildResolvedConfig("development", {
+			OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
+		});
+		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
+	});
 });
