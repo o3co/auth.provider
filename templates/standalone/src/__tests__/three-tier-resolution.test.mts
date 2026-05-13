@@ -60,7 +60,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(config.oauth.tokenExchange?.maxActorChainDepth).toBe(3);
 	});
 
-	it("env var can disable a template-enabled grant (Codex High 1 precedence fix)", () => {
+	it("env var at template layer can disable a template-enabled grant (precedence: env-override line must be repeated)", () => {
 		// Template enables authorization_code via application.conf. The env-override
 		// line is repeated at the template layer alongside `enabled = true`,
 		// so OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED=false reaches the resolved value.
