@@ -42,6 +42,13 @@ import type {
  * - `endpoints.client` and `endpoints.authCallback` are omitted because
  *   the schema marks them `.optional()`. Callers exercising those
  *   endpoints' behaviour should add the missing fields per-test.
+ * - `oauth.grants` explicitly enables `session`, `authorization_code`, and
+ *   `refresh_token` (the three standalone template defaults). These must be
+ *   set to `enabled: true` because `oauthAuthorizationModule` uses strict
+ *   `=== true` opt-in semantics (Phase 3 reference.conf migration). Note
+ *   that `client_credentials` is deliberately omitted — the factory mirrors
+ *   the standalone template defaults, where client_credentials remains off
+ *   unless the deployment explicitly enables M2M.
  *
  * If you need fixture values that match production defaults, parse
  * `reference.conf` directly via the test harness.
@@ -85,7 +92,14 @@ export function makeValidCoreConfig() {
 				unknownFamilyPolicy: "reject",
 				legacyRtPolicy: "reject",
 			},
-			grants: {},
+			grants: {
+				session: { enabled: true },
+				authorization_code: { enabled: true, pkce: { requireS256: false } },
+				refresh_token: { enabled: true },
+				// client_credentials: deliberately omitted -- factory mirrors the
+				// standalone template defaults, where client_credentials remains
+				// off unless the deployment explicitly enables M2M.
+			},
 			oidcMode: "oidc-required",
 		},
 	} satisfies CoreConfig;
