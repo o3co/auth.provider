@@ -300,9 +300,8 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 		// HOCON env-var substitution (`enabled = ${?OAUTH_GRANTS_X_ENABLED}`)
 		// resolves the env value as a string — there is no schema coercion
 		// to boolean on the `grants` passthrough sub-tree. Under the strict
-		// `=== true` check, a resolved `enabled: "false"` correctly evaluates
-		// to not-enabled. This locks the env-disable invariant against any
-		// future schema coercion that would silently change the semantics.
+		// opt-in check, a resolved `enabled: "false"` correctly evaluates
+		// to not-enabled.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -315,6 +314,48 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 		};
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.authorization_code).toBeUndefined();
+	});
+
+	it("registers a grant when enabled is the string 'true' (HOCON env-substitution outcome)", () => {
+		// Mirror of the env-disable test for the env-enable path. An operator
+		// setting `OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED=true` produces a
+		// resolved `enabled: "true"` (string) on the passthrough `grants`
+		// sub-tree. The opt-in check accepts both boolean `true` and string
+		// `"true"` so the documented env-enable pattern actually works.
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: {
+					...base.oauth.grants,
+					client_credentials: { enabled: "true" as unknown as boolean },
+				},
+			},
+		};
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.client_credentials).toBeDefined();
+	});
+
+	it("does NOT register a grant for unrelated truthy strings like 'yes' / '1'", () => {
+		// Strictness check: only the canonical forms (boolean `true`,
+		// string `"true"`) opt in. Other truthy values do not — this
+		// keeps misconfigurations loud rather than silently enabling
+		// something via, e.g., a copy-paste from a different bool encoding.
+		const base = makeValidAppConfig();
+		for (const value of ["yes", "1", "TRUE", "True", 1] as unknown[]) {
+			const config = {
+				...base,
+				oauth: {
+					...base.oauth,
+					grants: {
+						client_credentials: { enabled: value as boolean },
+					} as Record<string, unknown>,
+				},
+			};
+			const module = oauthAuthorizationModule({ config });
+			expect(module.contributes?.grants?.client_credentials).toBeUndefined();
+		}
 	});
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into

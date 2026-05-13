@@ -156,7 +156,14 @@ export class GrantRegistry {
 			const grantConfig = (
 				effectiveDeps.config.oauth.grants as Record<string, { enabled?: boolean }>
 			)[name];
-			return grantConfig?.enabled !== false;
+			// Strict opt-in: matches the secure-default discipline applied at
+			// `oauthAuthorizationModule` / `oauthSessionModule`. Accepts boolean
+			// `true` and the string `"true"` (HOCON env-var substitution
+			// outcome — the `grants` sub-tree has no schema coercion). All
+			// other values, including absent / undefined / boolean `false` /
+			// string `"false"` / unrelated truthy strings, are not-enabled.
+			const enabled = grantConfig?.enabled;
+			return enabled === true || (enabled as unknown) === "true";
 		};
 
 		// Pre-check phase: validate registry is not frozen and no enabled

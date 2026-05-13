@@ -22,15 +22,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`rateLimit.failMode` library default flipped from `"open"` to `"closed"`.** Secure-by-default
   load shedding: when the rate-limiter backend errors, requests are rejected rather than passed
   through. Deployments that prefer fail-open override in their own `application.conf`.
-- **`oauthAuthorizationModule` grant registration is now strict opt-in** (`grantsCfg.X?.enabled === true`
-  instead of `!== false`). This restores correct env-disable behavior: under the previous check,
-  the string `"false"` produced by HOCON env-var substitution was silently treated as enabled.
+- **`oauthAuthorizationModule` and `oauthSessionModule` grant registration is now strict opt-in.**
+  Each grant is registered only when `oauth.grants.<name>.enabled` is explicitly truthy (boolean
+  `true` or the string `"true"` produced by HOCON env-var substitution). All other values — absent,
+  `false`, the string `"false"`, or unrelated truthy strings like `"yes"` / `"1"` — are treated as
+  not-enabled. This restores correct env-disable behavior (under the previous check, `"false"` was
+  silently treated as enabled) and keeps env-enable working via the documented
+  `OAUTH_GRANTS_*_ENABLED=true` operator pattern. `GrantRegistry.addModule` (the internal
+  legacy-init path) follows the same rule for symmetry.
 
 ### Migration notes
 
 - Consumers running the standalone template inherit the new default-off baseline automatically
   through the `withFallback` chain. If your `application.conf` already opts in to `session` /
   `authorization_code` / `refresh_token`, no change is needed.
+- **`oauthSessionModule` silent behavior change**: previously the session grant was registered
+  unless `oauth.grants.session.enabled === false`. Custom composition roots that omitted
+  `oauth.grants.session` entirely (or shape-only without `enabled`) silently lose the session
+  grant on upgrade. Add `oauth.grants.session = { enabled = true }` to your `application.conf`,
+  or set `OAUTH_GRANTS_SESSION_ENABLED=true`. The standalone template ships this opt-in
+  explicitly, so standalone deployments are unaffected.
 - If you wrote a custom composition root (not the standalone template), add the library
   reference as the bottom-of-stack fallback:
   `parseFile(env).withFallback(parseFile(application)).withFallback(parseFile(libraryRef))`,

@@ -78,7 +78,13 @@ describe("GrantRegistry.addModule", () => {
 		expect(registry.get("session")).toBeUndefined();
 	});
 
-	it("registers grants with no config entry (treated as enabled)", () => {
+	it("does NOT register grants with no config entry (strict opt-in semantics)", () => {
+		// Aligned with oauthAuthorizationModule / oauthSessionModule: a grant
+		// is registered only when its `enabled` value is explicitly truthy
+		// (boolean `true` or the string `"true"` from HOCON env substitution).
+		// Absent config entries are treated as not-enabled — this prevents
+		// a future composition root that addModule-routes a custom grant
+		// from accidentally enabling it via the omit-means-on legacy default.
 		const registry = new GrantRegistry();
 		const module: GrantModule = {
 			grants: {
@@ -86,6 +92,27 @@ describe("GrantRegistry.addModule", () => {
 			},
 		};
 		const deps = makeDeps({}); // no session entry at all
+
+		registry.addModule(module, deps);
+
+		expect(registry.get("session")).toBeUndefined();
+	});
+
+	it("registers grants when enabled is the string 'true' (HOCON env-substitution outcome)", () => {
+		// `oauth.grants` is a passthrough sub-tree — HOCON env vars resolve
+		// as strings. The opt-in check accepts both boolean `true` and string
+		// `"true"` so the documented `OAUTH_GRANTS_X_ENABLED=true` operator
+		// pattern works through the addModule path as well as the
+		// contributes.grants path.
+		const registry = new GrantRegistry();
+		const module: GrantModule = {
+			grants: {
+				session: makeFactory("session"),
+			},
+		};
+		const deps = makeDeps({
+			session: { enabled: "true" as unknown as boolean },
+		});
 
 		registry.addModule(module, deps);
 
