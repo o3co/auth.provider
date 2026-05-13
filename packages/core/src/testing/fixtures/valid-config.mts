@@ -45,10 +45,13 @@ import type {
  * - `oauth.grants` explicitly enables `session`, `authorization_code`, and
  *   `refresh_token` (the three standalone template defaults). These must be
  *   set to `enabled: true` because `oauthAuthorizationModule` uses strict
- *   `=== true` opt-in semantics (Phase 3 reference.conf migration). Note
- *   that `client_credentials` is deliberately omitted — the factory mirrors
- *   the standalone template defaults, where client_credentials remains off
- *   unless the deployment explicitly enables M2M.
+ *   `=== true` opt-in semantics — `enabled` absent or non-boolean is treated
+ *   as not-enabled. Note that `client_credentials` is deliberately omitted —
+ *   the factory mirrors the standalone template defaults, where
+ *   client_credentials remains off unless the deployment explicitly enables
+ *   M2M. The `pkce: { requireS256: false }` sub-object on `authorization_code`
+ *   is illustrative of real-config shape; the `grants` schema is
+ *   `passthrough` so the value is not enforced.
  *
  * If you need fixture values that match production defaults, parse
  * `reference.conf` directly via the test harness.

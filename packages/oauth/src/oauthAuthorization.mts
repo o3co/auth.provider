@@ -50,24 +50,25 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// signatures to consume `ProviderDeps<R, O>` directly is out of scope.
 	// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape; see comment above.
 	const grants: Record<string, (deps: any) => GrantHandler> = {};
-	// Phase 3 (reference.conf): grant registration is opt-in via explicit
-	// `enabled = true`. reference.conf sets `enabled = false` for all built-ins
-	// as a secure baseline; each deployment's application.conf (or env override)
-	// must flip individual grants to `enabled = true` to activate them.
-	// This replaces the old `!== false` permissive default, which silently
-	// registered grants whenever the key was absent or undefined.
+	// Per the secure-default opt-in discipline: a grant is registered only
+	// when `enabled` is the boolean `true`. Absent keys and non-boolean values
+	// (e.g. the string `"false"` produced by HOCON env substitution) are
+	// treated as not-enabled. Library reference.conf sets `enabled = false`
+	// as the secure baseline; each deployment's application.conf (or env
+	// override) must explicitly flip individual grants to activate them.
 	if (grantsCfg.authorization_code?.enabled === true) {
 		grants.authorization_code = (deps) => createAuthorizationGrant(deps);
 	}
 	if (grantsCfg.refresh_token?.enabled === true) {
 		grants.refresh_token = (deps) => createRefreshTokenGrant(deps);
 	}
-	// Wave 1 §3.5 / Phase 3: client_credentials follows the same opt-in semantics.
+	// Wave 1 §3.5: client_credentials follows the same opt-in semantics.
 	// Per-client `AuthenticatedClient.allowedGrantTypes` (§3.4.1 deny-by-absence)
-	// is the authoritative access gate; the server-wide flag exists for operational
-	// symmetry with the other built-ins (kill-switch on CVE, scope minimization
-	// for deployments that never use M2M). Set `oauth.grants.client_credentials.enabled = true`
-	// in application.conf to activate M2M.
+	// is the authoritative access gate; the server-wide flag exists for
+	// operational symmetry with the other built-ins (kill-switch on CVE,
+	// scope minimization for deployments that never use M2M). Set
+	// `oauth.grants.client_credentials.enabled = true` in application.conf
+	// (or via `OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED=true`) to activate M2M.
 	if (grantsCfg.client_credentials?.enabled === true) {
 		grants.client_credentials = (deps) => createClientCredentialsGrant(deps);
 	}

@@ -284,11 +284,9 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 			...base,
 			oauth: {
 				...base.oauth,
-				// Empty grants override — simulates a config where the factory
-				// baseline isn't applied. This was the legacy default state and
-				// would silently register every built-in grant under !== false.
-				// After Phase 3's === true flip, omitted enabled key means
-				// "not registered".
+				// Empty grants override — simulates a config where no built-in
+				// is opted in. Under the strict `=== true` check, absent
+				// `enabled` keys mean "not registered".
 				grants: {} as Record<string, unknown>,
 			},
 		};
@@ -296,6 +294,27 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 		expect(module.contributes?.grants?.authorization_code).toBeUndefined();
 		expect(module.contributes?.grants?.refresh_token).toBeUndefined();
 		expect(module.contributes?.grants?.client_credentials).toBeUndefined();
+	});
+
+	it("does NOT register a grant when enabled is the string 'false' (HOCON env-substitution outcome)", () => {
+		// HOCON env-var substitution (`enabled = ${?OAUTH_GRANTS_X_ENABLED}`)
+		// resolves the env value as a string — there is no schema coercion
+		// to boolean on the `grants` passthrough sub-tree. Under the strict
+		// `=== true` check, a resolved `enabled: "false"` correctly evaluates
+		// to not-enabled. This locks the env-disable invariant against any
+		// future schema coercion that would silently change the semantics.
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: {
+					authorization_code: { enabled: "false" as unknown as boolean },
+				} as Record<string, unknown>,
+			},
+		};
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.authorization_code).toBeUndefined();
 	});
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
