@@ -44,13 +44,22 @@ function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {})
 	);
 }
 
+// `oauth.grants` is declared as `z.object({}).passthrough()` in the schema,
+// so the inferred TS type is `{}` per entry and accessing `.enabled` doesn't
+// compile under `tsc --strict`. Tests assert against the resolved runtime
+// shape (string from env substitution, boolean from literal), so the cast
+// is intentional and well-bounded.
+type GrantEntry = { enabled?: unknown };
+const grants = (config: AppConfig) =>
+	(config.oauth.grants as unknown as Record<string, GrantEntry | undefined>) ?? {};
+
 describe("three-tier HOCON resolution (env → application.conf → reference.conf)", () => {
 	it("template application.conf wins over reference.conf for grant.enabled", () => {
 		const config = buildResolvedConfig("development");
 		// Template's application.conf sets authorization_code.enabled = true.
 		// This test asserts the resolved value — it remains true whether
 		// reference.conf says false (current secure-default) or true (legacy).
-		expect(config.oauth.grants.authorization_code?.enabled).toBe(true);
+		expect(grants(config).authorization_code?.enabled).toBe(true);
 	});
 
 	it("reference.conf default reaches resolved config when template omits the key", () => {
@@ -73,7 +82,7 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		const config = buildResolvedConfig("development", {
 			OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "false",
 		});
-		expect(config.oauth.grants.authorization_code?.enabled).toBe("false");
+		expect(grants(config).authorization_code?.enabled).toBe("false");
 	});
 
 	it("reference.conf default for rateLimit.failMode is 'closed'", () => {
@@ -84,6 +93,6 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 	it("reference.conf default for client_credentials.enabled is false", () => {
 		// Template doesn't enable client_credentials. Reference default propagates.
 		const config = buildResolvedConfig("development");
-		expect(config.oauth.grants.client_credentials?.enabled).toBe(false);
+		expect(grants(config).client_credentials?.enabled).toBe(false);
 	});
 });
