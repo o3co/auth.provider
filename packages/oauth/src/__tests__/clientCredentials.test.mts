@@ -365,3 +365,73 @@ describe("createClientCredentialsGrant — grantPolicy audience validation (Code
 		expect(payload.aud).toBe("https://api.example");
 	});
 });
+
+describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Round 2 P1)", () => {
+	const depsWithPolicy = (
+		evaluate: (input: Record<string, unknown>) => Promise<{
+			outcome: "allow" | "deny";
+			grantedScope?: string[];
+			grantedAudience?: string[] | undefined;
+			error?: string;
+			errorDescription?: string;
+		}>,
+	): GrantDependencies => ({
+		...baseDeps,
+		config: {
+			oauth: {
+				...baseDeps.config.oauth,
+				resourceIndicator: { enabled: true },
+			},
+		} as unknown as GrantDependencies["config"],
+		grantPolicy: {
+			evaluate: evaluate as unknown as GrantDependencies["grantPolicy"],
+		} as unknown as GrantDependencies["grantPolicy"],
+	});
+
+	it("returns 400 when policy grantedScope is outside the requested (effectiveScopes) set even if within allowedScopes (Codex Round 2 P1-1)", async () => {
+		// Client allowedScopes: ["read", "write"]. Request narrows to scope=read.
+		// effectiveScopes becomes ["read"]. Policy returns grantedScope: ["write"].
+		// write ∈ allowedScopes but NOT ∈ effectiveScopes (the requested set).
+		// Ceiling must be effectiveScopes, not client.allowedScopes.
+		const client = makeClient({ allowedScopes: ["read", "write"] });
+		const handler = createClientCredentialsGrant(
+			depsWithPolicy(async () => ({
+				outcome: "allow",
+				grantedScope: ["write"],
+				grantedAudience: undefined,
+			})),
+		);
+
+		const { result } = await handler.handle(
+			makeCtx(client, { grant_type: "client_credentials", scope: "read", resource: "https://rs1" }),
+		);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+		expect("errorDescription" in result && result.errorDescription).toContain("write");
+	});
+
+	it("honors empty grantedScope: [] from policy as 'strip all scopes' (Codex Round 2 P1-2)", async () => {
+		// Policy explicitly returns grantedScope: [] — intent is "allow the grant
+		// but issue no scopes". The empty array must be applied (effectiveScopes = [])
+		// so the token has no scope claim, not the pre-policy effectiveScopes.
+		const client = makeClient({ allowedScopes: ["read"] });
+		const handler = createClientCredentialsGrant(
+			depsWithPolicy(async () => ({
+				outcome: "allow",
+				grantedScope: [],
+				grantedAudience: undefined,
+			})),
+		);
+
+		const { result } = await handler.handle(
+			makeCtx(client, { grant_type: "client_credentials", scope: "read", resource: "https://rs1" }),
+		);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+		// After policy strip, scope claim should be absent or empty string.
+		expect(payload.scope ?? "").toBe("");
+	});
+});

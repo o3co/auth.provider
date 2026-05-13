@@ -136,29 +136,32 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 						},
 					};
 				}
-				if (decision.grantedScope) {
+				if (decision.grantedScope !== undefined) {
 					// CP-18: fail-closed. Re-validate the policy's returned scopes
-					// against client.allowedScopes — a buggy or compromised policy
-					// could return expanded scopes (e.g. 'admin' for a client
-					// allowed only 'read'). Mirrors the pattern in refreshToken.mts
-					// (CP-15) where grantedScope is checked against the original
-					// token's scope set.
-					const allowedSet = client.allowedScopes ?? [];
-					const exceeded = decision.grantedScope.filter((s) => !allowedSet.includes(s));
+					// against effectiveScopes (the already-narrowed request set, after
+					// client allowlist has been applied) — not against client.allowedScopes.
+					// A buggy/compromised policy returning a scope that was not in the
+					// request (e.g. 'write' for a request narrowed to 'read') is scope
+					// expansion and must be rejected, even if that scope is in
+					// client.allowedScopes. Mirrors refreshToken.mts CP-15 exactly:
+					// ceiling is the post-narrowing effective scope, not the full ceiling.
+					const requestedSet = new Set(effectiveScopes);
+					const exceeded = decision.grantedScope.filter((s) => !requestedSet.has(s));
 					if (exceeded.length > 0) {
 						return {
 							result: {
 								status: 400,
 								error: "invalid_scope",
-								errorDescription: `policy returned scopes exceeding client allowedScopes: ${exceeded.join(" ")}`,
+								errorDescription: `policy returned scopes exceeding requested scope: ${exceeded.join(" ")}`,
 							},
 						};
 					}
-					// CP-15 mirror: empty array → keep effectiveScopes unchanged
-					// (no narrowing signal) rather than wiping to empty.
-					if (decision.grantedScope.length > 0) {
-						effectiveScopes = decision.grantedScope;
-					}
+					// CP-15 mirror: assign unconditionally when policy returned the
+					// field — including empty array (policy intent: strip all scopes).
+					// Matches refreshToken.mts behavior: presence (even []) overrides
+					// effectiveScopes; the scope claim emission at line ~186 handles
+					// empty → null naturally (effectiveScopes.length > 0 check).
+					effectiveScopes = decision.grantedScope;
 				}
 				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
 					// Fail-closed audience validation: policy may only narrow to
