@@ -49,6 +49,20 @@ export interface Client {
 	 * clientId is allowed as audience. Not used outside Token Exchange.
 	 */
 	readonly allowedAudiences?: readonly string[];
+	/**
+	 * Grant types this client is explicitly permitted to use.
+	 *
+	 * Per Wave 1 §3.4.1: absent (undefined) means DENY for `client_credentials`
+	 * specifically, while leaving other grants (authorization_code, refresh_token)
+	 * unaffected. An empty array also denies all grant types. Only an array
+	 * containing the grant type string grants access.
+	 *
+	 * Existing clients that omit this field continue to work with
+	 * authorization_code and refresh_token; the deny-by-absence rule applies
+	 * exclusively to client_credentials to prevent accidental machine-to-machine
+	 * access on legacy registrations.
+	 */
+	readonly allowedGrantTypes?: readonly string[];
 	// NEW (TODO-F-5): Logout metadata.
 	readonly postLogoutRedirectUris?: readonly string[];
 	readonly backchannelLogoutUri?: string;

@@ -271,6 +271,9 @@ export const createOAuthRouter = async (
 						? {
 								clientId: req.oauthClient.clientId,
 								tokenEndpointAuthMethod: req.oauthClient.tokenEndpointAuthMethod,
+								allowedScopes: req.oauthClient.allowedScopes,
+								allowedGrantTypes: req.oauthClient.allowedGrantTypes,
+								allowedAudiences: req.oauthClient.allowedAudiences,
 							}
 						: null,
 				};

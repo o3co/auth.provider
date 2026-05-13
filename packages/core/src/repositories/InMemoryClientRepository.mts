@@ -137,6 +137,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
 			allowedAudiences: entry.allowedAudiences,
+			...(entry.allowedGrantTypes !== undefined && {
+				allowedGrantTypes: entry.allowedGrantTypes,
+			}),
 			...(entry.postLogoutRedirectUris !== undefined && {
 				postLogoutRedirectUris: entry.postLogoutRedirectUris,
 			}),
@@ -186,6 +189,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
 			allowedAudiences: entry.allowedAudiences,
+			...(entry.allowedGrantTypes !== undefined && {
+				allowedGrantTypes: entry.allowedGrantTypes,
+			}),
 			...(entry.postLogoutRedirectUris !== undefined && {
 				postLogoutRedirectUris: entry.postLogoutRedirectUris,
 			}),
