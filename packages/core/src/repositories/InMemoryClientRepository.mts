@@ -83,6 +83,10 @@ export const ClientEntrySchema = z
 		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
 		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
 		allowedAzpForFederationToken: z.boolean().optional().default(false),
+		// Wave 1 §3.4.1: per-client grant type allowlist. Absent means no restriction on
+		// existing grants (authorization_code, refresh_token). client_credentials is gated
+		// by deny-by-absence — see createClientCredentialsGrant handler (Task 12).
+		allowedGrantTypes: z.array(z.string()).optional(),
 	})
 	.strict()
 	.superRefine((data, ctx) => {
