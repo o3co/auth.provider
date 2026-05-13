@@ -153,17 +153,21 @@ export class GrantRegistry {
 			: deps;
 
 		const isEnabled = (name: string): boolean => {
+			// `oauth.grants` is `z.object({}).passthrough()` — values arrive
+			// unvalidated. `enabled` can be boolean (literal) OR string
+			// (HOCON env substitution). Type as `unknown` so the runtime
+			// reality matches the local cast and the strict opt-in check
+			// below needs no escape-hatch cast.
 			const grantConfig = (
-				effectiveDeps.config.oauth.grants as Record<string, { enabled?: boolean }>
+				effectiveDeps.config.oauth.grants as Record<string, { enabled?: unknown }>
 			)[name];
 			// Strict opt-in: matches the secure-default discipline applied at
 			// `oauthAuthorizationModule` / `oauthSessionModule`. Accepts boolean
-			// `true` and the string `"true"` (HOCON env-var substitution
-			// outcome — the `grants` sub-tree has no schema coercion). All
-			// other values, including absent / undefined / boolean `false` /
-			// string `"false"` / unrelated truthy strings, are not-enabled.
+			// `true` and the string `"true"`; everything else (absent /
+			// undefined / boolean `false` / string `"false"` / unrelated
+			// truthy strings) is not-enabled.
 			const enabled = grantConfig?.enabled;
-			return enabled === true || (enabled as unknown) === "true";
+			return enabled === true || enabled === "true";
 		};
 
 		// Pre-check phase: validate registry is not frozen and no enabled

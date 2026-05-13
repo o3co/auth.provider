@@ -56,7 +56,13 @@ function isExplicitlyEnabled(value: unknown): boolean {
  * mutation of ctx), Theme E (structural conditional via factory body).
  */
 export const oauthAuthorizationModule = (params: { config: AppConfig }): Module => {
-	const grantsCfg = params.config.oauth.grants as Record<string, { enabled?: boolean }>;
+	// `oauth.grants` is `z.object({}).passthrough()` in the schema — values
+	// arrive unvalidated. The `enabled` field can be the boolean `true` /
+	// `false` (HOCON literal) OR the string `"true"` / `"false"` (HOCON env
+	// substitution outcome). Typing `enabled` as `unknown` keeps the local
+	// cast honest with runtime reality; `isExplicitlyEnabled` below performs
+	// the strict opt-in narrowing.
+	const grantsCfg = params.config.oauth.grants as Record<string, { enabled?: unknown }>;
 
 	// Per plan Task 3 line 586: type the local grants record as
 	// `Record<string, (deps: any) => GrantHandler>` and let `defineModule`

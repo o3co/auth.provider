@@ -50,7 +50,13 @@ function isExplicitlyEnabled(value: unknown): boolean {
  * module. A2-α §7.5 permits a module with no `contributes` map.
  */
 export const oauthSessionModule = (params: { config: AppConfig }): Module => {
-	const grantConfig = (params.config.oauth.grants as Record<string, { enabled?: boolean }>).session;
+	// `oauth.grants` is `z.object({}).passthrough()` in the schema — values
+	// arrive unvalidated. The `enabled` field can be the boolean `true` /
+	// `false` (HOCON literal) OR the string `"true"` / `"false"` (HOCON env
+	// substitution outcome). Typing `enabled` as `unknown` keeps the local
+	// cast honest with runtime reality; `isExplicitlyEnabled` performs the
+	// strict opt-in narrowing.
+	const grantConfig = (params.config.oauth.grants as Record<string, { enabled?: unknown }>).session;
 	if (!isExplicitlyEnabled(grantConfig?.enabled)) {
 		return defineModule({ name: "oauth-session" });
 	}

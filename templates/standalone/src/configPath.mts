@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,17 +23,32 @@ export interface ResolvedConfigPaths {
 	readonly envConfPath: string;
 }
 
+const REFERENCE_CONF_SUBPATH = "@o3co/auth-provider-core/reference.conf";
+
 /**
  * Returns the absolute path to the shipped `reference.conf` inside
  * `@o3co/auth-provider-core`. This file is the bottom layer of the
  * 3-tier HOCON precedence chain (reference.conf → application.conf → {env}.conf).
  *
- * Uses `import.meta.resolve` (Node.js Stability 1.2 RC) to resolve the
- * `./reference.conf` package export without depending on the filesystem
- * layout of `node_modules`.
+ * Primary path: `import.meta.resolve` (Node.js Stability 1.2 RC, unflagged
+ * since Node 18.19.0 / 20.6.0 — the engine floor of every package in this
+ * scope). Fallback: `createRequire(import.meta.url).resolve(...)`. The
+ * fallback covers two edge cases:
+ *
+ * 1. A future Node release deprecates or alters the sync form of
+ *    `import.meta.resolve` (still labelled Stability 1.2 RC per Node docs).
+ * 2. An exotic runtime / loader where `import.meta.resolve` is not
+ *    available but CommonJS-style resolution still is.
+ *
+ * Both APIs read the same `exports` map in `@o3co/auth-provider-core`'s
+ * `package.json`, so the resolved path is identical.
  */
 export function resolveLibraryReferenceConfPath(): string {
-	return fileURLToPath(import.meta.resolve("@o3co/auth-provider-core/reference.conf"));
+	try {
+		return fileURLToPath(import.meta.resolve(REFERENCE_CONF_SUBPATH));
+	} catch {
+		return createRequire(import.meta.url).resolve(REFERENCE_CONF_SUBPATH);
+	}
 }
 
 export function resolveConfigPaths(configDirPath: string, env: string): ResolvedConfigPaths {

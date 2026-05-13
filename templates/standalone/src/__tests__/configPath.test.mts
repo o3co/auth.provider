@@ -15,6 +15,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 
@@ -54,7 +55,9 @@ describe("resolveLibraryReferenceConfPath", () => {
 	it("returns an absolute path ending in reference.conf", () => {
 		const path = resolveLibraryReferenceConfPath();
 		expect(path.endsWith("reference.conf")).toBe(true);
-		expect(path.startsWith("/")).toBe(true); // absolute
+		// Use `isAbsolute` rather than `startsWith("/")` so the assertion
+		// holds on Windows (e.g. `C:\...`) as well as POSIX paths.
+		expect(isAbsolute(path)).toBe(true);
 	});
 
 	it("points to a file that exists on disk", () => {
