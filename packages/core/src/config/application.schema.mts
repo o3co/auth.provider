@@ -222,6 +222,33 @@ const refreshTokenSchema = z.preprocess((raw, ctx) => {
 }, refreshTokenSchemaBase);
 
 /**
+ * Env-var-safe boolean coercion for `enabled` fields.
+ *
+ * z.coerce.boolean() calls JavaScript's Boolean(value), so any non-empty string
+ * (including "false", "no", "0") coerces to true. This is unsafe for env-var
+ * overrides where operators set e.g. OAUTH_RESOURCE_INDICATOR_ENABLED=false.
+ *
+ * This preprocess explicitly maps the common string representations:
+ *   "true" | "1"        → true
+ *   "false" | "0" | ""  → false
+ *   boolean             → pass-through unchanged
+ *   other values        → forwarded to z.boolean() which rejects with a type error
+ *
+ * Used by:
+ *  - federation `enabled` fields (fullSectionsSchema)
+ *  - oauth.resourceIndicator.enabled (Wave 1 §5.3 / RFC 8707)
+ */
+const coerceBooleanFromEnv = z.preprocess((val) => {
+	if (typeof val === "boolean") return val;
+	if (typeof val === "string") {
+		const normalized = val.trim().toLowerCase();
+		if (normalized === "true" || normalized === "1") return true;
+		if (normalized === "false" || normalized === "0" || normalized === "") return false;
+	}
+	return val; // zod rejects with a type error for other values
+}, z.boolean());
+
+/**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
  */
@@ -275,6 +302,18 @@ export const CoreConfigSchema = z.object({
 				maxActorChainDepth: z.coerce.number().int().positive(),
 			})
 			.optional(),
+		// Wave 1 §5.3 (v0.6.x): opt-in gate for RFC 8707 Resource Indicator
+		// enforcement. `enabled = false` in reference.conf ensures the feature
+		// is off by default; operators set `enabled = true` (or
+		// `OAUTH_RESOURCE_INDICATOR_ENABLED=true`) to activate. Shape-only per
+		// ADR 2026-04-30 — no `.default()` here; default lives in reference.conf
+		// (added in Task 18). `coerceBooleanFromEnv` handles the HOCON
+		// env-substitution string → boolean coercion established by PR #171.
+		resourceIndicator: z
+			.object({
+				enabled: coerceBooleanFromEnv,
+			})
+			.optional(),
 	}),
 });
 
@@ -292,29 +331,6 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	}
 	return schema;
 }
-
-/**
- * Env-var-safe boolean coercion for federation `enabled` fields.
- *
- * z.coerce.boolean() calls JavaScript's Boolean(value), so any non-empty string
- * (including "false", "no", "0") coerces to true. This is unsafe for env-var
- * overrides where operators set FEDERATIONS_*_ENABLED=false to disable a federation.
- *
- * This preprocess explicitly maps the common string representations:
- *   "true" | "1"        → true
- *   "false" | "0" | ""  → false
- *   boolean             → pass-through unchanged
- *   other values        → forwarded to z.boolean() which rejects with a type error
- */
-const coerceBooleanFromEnv = z.preprocess((val) => {
-	if (typeof val === "boolean") return val;
-	if (typeof val === "string") {
-		const normalized = val.trim().toLowerCase();
-		if (normalized === "true" || normalized === "1") return true;
-		if (normalized === "false" || normalized === "0" || normalized === "") return false;
-	}
-	return val; // zod rejects with a type error for other values
-}, z.boolean());
 
 const federationEntrySchema = z
 	.object({
