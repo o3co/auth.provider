@@ -32,13 +32,14 @@ const testEnv = {
 	SESSION_SECRET: "test-session-secret-three-tier",
 };
 
-function buildResolvedConfig(env: string): AppConfig {
+function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): AppConfig {
 	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, env);
 	const libraryReferencePath = resolveLibraryReferenceConfPath();
+	const resolvedEnv = { ...testEnv, ...extraEnv };
 	return validate(
-		parseFile(envConfPath, { env: testEnv })
-			.withFallback(parseFile(applicationConfPath, { env: testEnv }))
-			.withFallback(parseFile(libraryReferencePath, { env: testEnv })),
+		parseFile(envConfPath, { env: resolvedEnv })
+			.withFallback(parseFile(applicationConfPath, { env: resolvedEnv }))
+			.withFallback(parseFile(libraryReferencePath, { env: resolvedEnv })),
 		AppConfigSchema,
 	);
 }
@@ -46,8 +47,9 @@ function buildResolvedConfig(env: string): AppConfig {
 describe("three-tier HOCON resolution (env → application.conf → reference.conf)", () => {
 	it("template application.conf wins over reference.conf for grant.enabled", () => {
 		const config = buildResolvedConfig("development");
-		// Template sets authorization_code.enabled = true; this works
-		// regardless of what reference.conf says (in Phase 1, both say true).
+		// Template's application.conf sets authorization_code.enabled = true.
+		// This test asserts the resolved value — it remains true whether
+		// reference.conf says false (current secure-default) or true (legacy).
 		expect(config.oauth.grants.authorization_code?.enabled).toBe(true);
 	});
 
@@ -56,5 +58,32 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		// tokenExchange.maxActorChainDepth is library-owned in both layers
 		// (template doesn't override it). Verifies precedence falls through.
 		expect(config.oauth.tokenExchange?.maxActorChainDepth).toBe(3);
+	});
+
+	it("env var can disable a template-enabled grant (Codex High 1 precedence fix)", () => {
+		// Template enables authorization_code via application.conf. The env-override
+		// line is repeated at the template layer alongside `enabled = true`,
+		// so OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED=false reaches the resolved value.
+		// Without the repeated env line, the substitution at reference.conf is
+		// shadowed by the template's literal `true`.
+		// Note: ts.hocon substitutes env vars as strings; the schema (passthrough)
+		// preserves the string. The assertion checks the string form so that
+		// the precedence invariant is testable now; a future schema-coercion PR
+		// (separate from this one) will make this resolve to boolean false.
+		const config = buildResolvedConfig("development", {
+			OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "false",
+		});
+		expect(config.oauth.grants.authorization_code?.enabled).toBe("false");
+	});
+
+	it("reference.conf default for rateLimit.failMode is 'closed'", () => {
+		const config = buildResolvedConfig("development");
+		expect(config.rateLimit?.failMode).toBe("closed");
+	});
+
+	it("reference.conf default for client_credentials.enabled is false", () => {
+		// Template doesn't enable client_credentials. Reference default propagates.
+		const config = buildResolvedConfig("development");
+		expect(config.oauth.grants.client_credentials?.enabled).toBe(false);
 	});
 });
