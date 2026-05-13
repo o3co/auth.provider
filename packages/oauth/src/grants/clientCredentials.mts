@@ -79,8 +79,12 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			}
 			const effectiveScopes = scopeOutcome.scopes;
 
-			const issuer = ctx.issuer ?? "";
-			const audience = client.allowedAudiences?.[0] ?? issuer;
+			// Pass `ctx.issuer` through untouched: `generateToken` omits the
+			// `iss` claim when it is null/undefined, matching the sibling
+			// authorization_code / refresh_token grants. Coercing undefined to
+			// `""` would emit a malformed `iss: ""` JWT.
+			const issuer = ctx.issuer;
+			const audience = client.allowedAudiences?.[0] ?? issuer ?? null;
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
 			const accessToken = await generateToken(
@@ -120,13 +124,37 @@ function resolveScope(
 	client: AuthenticatedClient,
 ):
 	| { scopes: readonly string[] }
-	| { status: 400; error: "invalid_scope"; errorDescription: string } {
+	| {
+			status: 400;
+			error: "invalid_scope" | "invalid_request";
+			errorDescription: string;
+	  } {
 	const allowed = client.allowedScopes ?? [];
 	const requestedRaw = ctx.body.scope;
-	if (typeof requestedRaw !== "string" || requestedRaw.trim() === "") {
+	if (requestedRaw === undefined) {
 		return { scopes: allowed };
 	}
-	const requested = requestedRaw.split(/\s+/).filter(Boolean);
+	// RFC 6749 §3.3: `scope` MUST be a single space-delimited string when
+	// present. A non-string value (e.g. an array materialized by Express'
+	// urlencoded body-parser from repeated `scope=a&scope=b` form keys) is
+	// malformed — silently defaulting to the client's full `allowedScopes`
+	// would grant a broader scope than the caller submitted.
+	if (typeof requestedRaw !== "string") {
+		return {
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "scope must be a space-delimited string",
+		};
+	}
+	if (requestedRaw.trim() === "") {
+		return { scopes: allowed };
+	}
+	// RFC 6749 §3.3 ABNF: scope-token delimiter is a single SP (0x20).
+	// Match sibling grants (`refreshToken.mts`, `routes.mts`) on the literal
+	// `" "` split rather than `\s+` so tab/newline-delimited scope strings
+	// from non-conformant clients fail the subset check loudly instead of
+	// being silently re-tokenized.
+	const requested = requestedRaw.split(" ").filter(Boolean);
 	const disallowed = requested.filter((s) => !allowed.includes(s));
 	if (disallowed.length > 0) {
 		return {

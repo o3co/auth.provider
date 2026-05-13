@@ -44,9 +44,15 @@ export interface Client {
 	readonly allowedRedirectUris: readonly string[];
 	readonly allowedScopes: readonly string[];
 	/**
-	 * Audience URIs that this client may request in Token Exchange (RFC 8693)
-	 * `audience` parameter. Empty or undefined means only the client's own
-	 * clientId is allowed as audience. Not used outside Token Exchange.
+	 * Audience URIs this client may receive tokens for.
+	 *
+	 * Consumers:
+	 * - Token Exchange (RFC 8693) `audience` parameter selection — when this
+	 *   list is empty or undefined, only the client's own `clientId` is
+	 *   accepted as an audience target.
+	 * - `client_credentials` grant default `aud` claim — selects the first
+	 *   entry (`allowedAudiences[0]`); when absent, falls back to the issuer
+	 *   (and ultimately omits `aud` when no issuer is configured).
 	 */
 	readonly allowedAudiences?: readonly string[];
 	/**

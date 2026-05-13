@@ -351,6 +351,89 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
+	describe("allowedGrantTypes field round-trip (Wave 1 §3.4.1)", () => {
+		it("findById omits allowedGrantTypes when the entry has none", async () => {
+			// Preserve the undefined-vs-empty distinction: when the operator did
+			// not configure the field, the resolved PublicClient must surface
+			// `allowedGrantTypes === undefined` so deny-by-absence-for-cc applies.
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"cc-client-a",
+						{
+							tokenEndpointAuthMethod: "client_secret_basic",
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("cc-client-a");
+			expect(client?.allowedGrantTypes).toBeUndefined();
+		});
+
+		it("findById preserves a configured allowedGrantTypes list", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"cc-client-b",
+						{
+							tokenEndpointAuthMethod: "client_secret_basic",
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							allowedGrantTypes: ["client_credentials", "refresh_token"],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("cc-client-b");
+			expect(client?.allowedGrantTypes).toEqual(["client_credentials", "refresh_token"]);
+		});
+
+		it("authenticate() propagates allowedGrantTypes on the auth path", async () => {
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"cc-client-c",
+						{
+							tokenEndpointAuthMethod: "client_secret_basic",
+							clientSecret: "correct-horse-battery-staple",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							allowedGrantTypes: ["client_credentials"],
+						},
+					],
+				]),
+			);
+			const client = await repo.authenticate("cc-client-c", "correct-horse-battery-staple");
+			expect(client?.allowedGrantTypes).toEqual(["client_credentials"]);
+		});
+
+		it("findById preserves an empty allowedGrantTypes list (deny-all signal)", async () => {
+			// `[]` is semantically distinct from `undefined`: it explicitly denies
+			// all grants for this client. The repository must NOT collapse it to
+			// undefined.
+			const repo = new InMemoryClientRepository(
+				new Map([
+					[
+						"cc-client-d",
+						{
+							tokenEndpointAuthMethod: "client_secret_basic",
+							clientSecret: "s",
+							allowedRedirectUris: [],
+							allowedScopes: [],
+							allowedGrantTypes: [],
+						},
+					],
+				]),
+			);
+			const client = await repo.findById("cc-client-d");
+			expect(client?.allowedGrantTypes).toEqual([]);
+		});
+	});
+
 	describe("authenticate", () => {
 		it("returns client with correct plain text secret", async () => {
 			const repo = new InMemoryClientRepository(

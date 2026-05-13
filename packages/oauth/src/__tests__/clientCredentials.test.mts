@@ -161,6 +161,26 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect("errorDescription" in result && result.errorDescription).toContain("admin:all");
 	});
 
+	it("returns 400 invalid_request when scope is a non-string value (Codex review #1)", async () => {
+		// Express urlencoded body-parser materializes repeated `scope=a&scope=b`
+		// form parameters into arrays. RFC 6749 §3.3 requires a single space-
+		// delimited string. Silently defaulting to the client's full allowedScopes
+		// (the pre-fix behavior) would grant broader scope than the caller submitted.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedScopes: ["read:foo", "write:foo"] });
+
+		const { result } = await handler.handle(
+			makeCtx(client, {
+				grant_type: "client_credentials",
+				scope: ["read:foo", "write:foo"] as unknown as string,
+			}),
+		);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect("errorDescription" in result && result.errorDescription).toContain("string");
+	});
+
 	it("uses allowedAudiences[0] as the aud claim when present", async () => {
 		const handler = createClientCredentialsGrant(baseDeps);
 		const client = makeClient({ allowedAudiences: ["https://api.example"] });
@@ -183,5 +203,31 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		if (!("tokens" in result)) throw new Error("expected tokens in result");
 		const payload = decodeJwt(result.tokens.access_token);
 		expect(payload.aud).toBe("https://test.example");
+	});
+
+	it("omits iss and aud claims when ctx.issuer is undefined (Claude review C1)", async () => {
+		// Coercing ctx.issuer to "" (the pre-fix behavior) would emit a malformed
+		// `iss: ""` claim — generateToken treats empty string as present because
+		// the guard is `issuer != null` (not falsy). Sibling grants
+		// (authorization_code, refresh_token) pass ctx.issuer through directly so
+		// undefined → claim omitted; this grant must match that contract.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedAudiences: undefined });
+
+		const { result } = await handler.handle({
+			body: { grant_type: "client_credentials" },
+			session: {},
+			issuer: undefined,
+			metadata: {},
+			authenticatedClient: client,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.iss).toBeUndefined();
+		// aud also omitted because allowedAudiences[0] is undefined and issuer
+		// is undefined → falls through to null → generateToken drops the claim.
+		expect(payload.aud).toBeUndefined();
 	});
 });
