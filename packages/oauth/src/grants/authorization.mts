@@ -30,7 +30,6 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
-import { extractResourceParam } from "./_resourceIndicator.mjs";
 import { resolvePkceSupportedMethods } from "./pkce.mjs";
 
 export const createAuthorizationGrant = (
@@ -339,51 +338,6 @@ export const createAuthorizationGrant = (
 
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
-
-			// RFC 8707: supplementary resource-indicator policy check at the token
-			// endpoint (separate from the scope-narrowing policy evaluated once at
-			// /authorize per C-2 / D-1 design). Only runs when grantPolicy is wired
-			// AND the resource indicator feature is explicitly opted in
-			// (oauth.resourceIndicator.enabled === true). Flag-off (the default)
-			// skips this block entirely — preserving pre-existing semantics for all
-			// deployments that wire grantPolicy without enabling RFC 8707.
-			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
-			if (deps.grantPolicy && resourceIndicatorEnabled) {
-				const resource = extractResourceParam(body as Record<string, unknown>);
-				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
-				try {
-					decision = await deps.grantPolicy.evaluate(
-						{
-							grantType: "authorization_code",
-							clientId: authenticatedClientId,
-							subject: userId,
-							requestedScope:
-								grantedScopes && grantedScopes.length > 0 ? [...grantedScopes] : undefined,
-							// RFC 8707: resource is null when body has no `resource` param;
-							// undefined passed to policy signals "no resource requested".
-							resource: resource ?? undefined,
-						},
-						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
-					);
-				} catch {
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "policy evaluation unavailable",
-						},
-					};
-				}
-				if (decision.outcome === "deny") {
-					return {
-						result: {
-							status: 400,
-							error: decision.error,
-							errorDescription: decision.errorDescription,
-						},
-					};
-				}
-			}
 
 			// Initial rt+jwt opens a new refresh-token family for replay detection
 			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same

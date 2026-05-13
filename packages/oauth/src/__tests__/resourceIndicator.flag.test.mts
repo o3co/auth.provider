@@ -15,12 +15,21 @@
  */
 
 /**
- * RFC 8707 opt-in plumbing — flag-off / flag-on tests for the 3 grant handlers
+ * RFC 8707 opt-in plumbing — flag-off / flag-on tests for the grant handlers
  * that carry `extractResourceParam` wiring (T18). Token-exchange is excluded
  * per spec §5.2.
  *
- * Each describe block has 3 grants × 3 tests = 9 tests, plus a regression note
- * confirming token-exchange is untouched.
+ * Wave 1 partial coverage:
+ * - refresh_token: resource indicator plumbed (flag-on forwards body.resource)
+ * - client_credentials: resource indicator plumbed (flag-on forwards body.resource)
+ * - authorization_code: intentionally DEFERRED to Wave 2.
+ *   At the token endpoint, scope is already locked by the authorization-endpoint
+ *   policy (C-2 / D-1 evaluate-once-at-authorize). Applying resource-aware
+ *   narrowing at the token endpoint would require a Wave 2 design that respects
+ *   that invariant. body.resource is currently ignored for authorization_code.
+ *   Tests below lock in this "never invokes policy at auth_code token endpoint"
+ *   invariant explicitly so a future refactor cannot accidentally reintroduce
+ *   the T18 partial that Codex Round 3 flagged as P1 (over-scoped tokens).
  */
 
 import { createSecretKey } from "node:crypto";
@@ -349,32 +358,31 @@ describe("RFC 8707 resource indicator — flag on", () => {
 		expect(capturedResource).toEqual(["https://r1", "https://r2"]);
 	});
 
-	it("authorization_code: grantPolicy.evaluate sees resource: [string] when body.resource is string", async () => {
-		let capturedResource: unknown = "NOT_CALLED";
-		const policy = makeStubPolicy(async (req) => {
-			capturedResource = req.resource;
-			return { outcome: "allow" };
-		});
+	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body.resource is string (Wave 2 deferred)", async () => {
+		// body.resource is intentionally ignored for authorization_code at the
+		// token endpoint. Scope is already locked at /authorize (C-2 / D-1).
+		// Applying resource-aware narrowing here would violate evaluate-once-at-authorize.
+		// This test locks in the deferral: a future refactor must not silently
+		// reintroduce the T18 invocation without a Wave 2 redesign review.
+		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
+		const policy = makeStubPolicy(seenPolicy);
 		const deps = makeAuthzDeps({ grantPolicy: policy }, true);
 		const handler = createAuthorizationGrant(deps);
 
 		await handler.handle(makeAuthzCtx({ resource: "https://rs1" }));
 
-		expect(capturedResource).toEqual(["https://rs1"]);
+		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 
-	it("authorization_code: grantPolicy.evaluate sees resource: array when body.resource is array", async () => {
-		let capturedResource: unknown = "NOT_CALLED";
-		const policy = makeStubPolicy(async (req) => {
-			capturedResource = req.resource;
-			return { outcome: "allow" };
-		});
+	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body.resource is array (Wave 2 deferred)", async () => {
+		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
+		const policy = makeStubPolicy(seenPolicy);
 		const deps = makeAuthzDeps({ grantPolicy: policy }, true);
 		const handler = createAuthorizationGrant(deps);
 
 		await handler.handle(makeAuthzCtx({ resource: ["https://r1", "https://r2"] }));
 
-		expect(capturedResource).toEqual(["https://r1", "https://r2"]);
+		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 
 	it("client_credentials: grantPolicy.evaluate sees resource: [string] when body.resource is string", async () => {
@@ -405,10 +413,10 @@ describe("RFC 8707 resource indicator — flag on", () => {
 		expect(capturedResource).toEqual(["https://r1", "https://r2"]);
 	});
 
-	it("authorization_code: grantPolicy.evaluate IS called with resource: undefined when flag is on but body has no resource", async () => {
-		// Operator opted in → policy gate runs even without a resource param.
-		// This locks in the "feature on, client omitted resource" case so a future
-		// refactor cannot accidentally treat it as flag-off.
+	it("authorization_code: grantPolicy.evaluate is NOT called even when flag is on and body has no resource (Wave 2 deferred)", async () => {
+		// Invariant: authorization_code NEVER invokes grantPolicy.evaluate at the
+		// token endpoint regardless of flag state or body.resource presence.
+		// body.resource is silently ignored. This is the Wave 2 deferral invariant.
 		const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
 		const policy = makeStubPolicy(seenPolicy);
 		const deps = makeAuthzDeps({ grantPolicy: policy }, true);
@@ -416,8 +424,7 @@ describe("RFC 8707 resource indicator — flag on", () => {
 
 		await handler.handle(makeAuthzCtx({})); // no body.resource
 
-		expect(seenPolicy).toHaveBeenCalledOnce();
-		expect(seenPolicy.mock.calls[0][0].resource).toBeUndefined();
+		expect(seenPolicy).not.toHaveBeenCalled();
 	});
 
 	it("client_credentials: grantPolicy.evaluate IS called with resource: undefined when flag is on but body has no resource", async () => {
@@ -432,4 +439,46 @@ describe("RFC 8707 resource indicator — flag on", () => {
 		expect(seenPolicy).toHaveBeenCalledOnce();
 		expect(seenPolicy.mock.calls[0][0].resource).toBeUndefined();
 	});
+});
+
+// ---------------------------------------------------------------------------
+// Invariant: authorization_code NEVER invokes grantPolicy at token endpoint
+// ---------------------------------------------------------------------------
+// Wave 2 deferral lock. This describe block exists as a single explicit
+// statement of the invariant so that any future PR touching authorization.mts
+// must consciously delete or modify this test — making the deferral decision
+// visible in code review, not just in comments.
+// ---------------------------------------------------------------------------
+
+describe("RFC 8707 authorization_code — token-endpoint policy invariant (Wave 2 deferred)", () => {
+	const flagStates: Array<{ label: string; enabled: boolean | undefined }> = [
+		{ label: "flag absent", enabled: undefined },
+		{ label: "flag explicit false", enabled: false },
+		{ label: "flag explicit true", enabled: true },
+	];
+
+	const resourceStates: Array<{ label: string; resource?: string | string[] }> = [
+		{ label: "no body.resource" },
+		{ label: "body.resource string", resource: "https://rs1.example" },
+		{ label: "body.resource array", resource: ["https://r1.example", "https://r2.example"] },
+	];
+
+	for (const flagState of flagStates) {
+		for (const resourceState of resourceStates) {
+			it(`grantPolicy.evaluate is NOT called: ${flagState.label}, ${resourceState.label}`, async () => {
+				const seenPolicy = vi.fn().mockResolvedValue({ outcome: "allow" });
+				const policy = makeStubPolicy(seenPolicy);
+				const deps = makeAuthzDeps({ grantPolicy: policy }, flagState.enabled);
+				const handler = createAuthorizationGrant(deps);
+
+				const bodyOverrides: Record<string, unknown> = {};
+				if (resourceState.resource !== undefined) {
+					bodyOverrides.resource = resourceState.resource;
+				}
+				await handler.handle(makeAuthzCtx(bodyOverrides));
+
+				expect(seenPolicy).not.toHaveBeenCalled();
+			});
+		}
+	}
 });
