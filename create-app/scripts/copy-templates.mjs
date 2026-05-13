@@ -8,6 +8,16 @@ const dest = resolve(__dirname, "../templates/standalone");
 
 const EXCLUDED_DIRS = new Set(["node_modules", "dist"]);
 
+// NOTE: `reference.conf` is intentionally NOT copied here. It lives in
+// `packages/core/config/reference.conf` and is shipped to consumers via the
+// `@o3co/auth-provider-core` package's `exports` field (`./reference.conf`
+// subpath export, files: ["config", ...]). Consumers and the standalone
+// composition root resolve it at boot via
+// `import.meta.resolve("@o3co/auth-provider-core/reference.conf")`.
+// The template's `config/` directory contains only consumer-facing files
+// (`application.conf`, `development.conf`, `production.conf`) — the
+// per-deployment delta layer, not the library baseline.
+
 // Mirrors `shouldCopyTemplateEntry` in src/internal/template-filter.mts: only
 // segments INSIDE `src` are checked against EXCLUDED_DIRS, not the absolute
 // install-prefix path above it. Without this, running the prebuild script with
