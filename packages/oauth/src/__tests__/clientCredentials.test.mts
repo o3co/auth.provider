@@ -231,3 +231,137 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect(payload.aud).toBeUndefined();
 	});
 });
+
+describe("createClientCredentialsGrant — grantPolicy scope validation (CP-18 fail-closed)", () => {
+	const depsWithPolicy = (
+		evaluate: (input: Record<string, unknown>) => Promise<{
+			outcome: "allow" | "deny";
+			grantedScope?: string[];
+			grantedAudience?: string[];
+			error?: string;
+			errorDescription?: string;
+		}>,
+	): GrantDependencies => ({
+		...baseDeps,
+		config: {
+			oauth: {
+				...baseDeps.config.oauth,
+				resourceIndicator: { enabled: true },
+			},
+		} as unknown as GrantDependencies["config"],
+		grantPolicy: {
+			evaluate: evaluate as unknown as GrantDependencies["grantPolicy"],
+		} as unknown as GrantDependencies["grantPolicy"],
+	});
+
+	it("accepts policy grantedScope that is a subset of allowedScopes and mints with narrowed scope", async () => {
+		// Policy narrows read:foo + write:foo → read:foo only. Handler must accept.
+		const client = makeClient({ allowedScopes: ["read:foo", "write:foo"] });
+		const handler = createClientCredentialsGrant(
+			depsWithPolicy(async () => ({ outcome: "allow", grantedScope: ["read:foo"] })),
+		);
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+		expect(payload.scope).toBe("read:foo");
+	});
+
+	it("rejects policy grantedScope that exceeds allowedScopes with 400 invalid_scope (CP-18)", async () => {
+		// Policy returns 'admin' which is NOT in client.allowedScopes → fail-closed.
+		const client = makeClient({ allowedScopes: ["read:foo"] });
+		const handler = createClientCredentialsGrant(
+			depsWithPolicy(async () => ({
+				outcome: "allow",
+				grantedScope: ["read:foo", "admin"],
+			})),
+		);
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+		expect("errorDescription" in result && result.errorDescription).toContain("admin");
+	});
+});
+
+describe("createClientCredentialsGrant — grantPolicy audience validation (Codex P2-3)", () => {
+	const depsWithAudiencePolicy = (
+		evaluate: (input: Record<string, unknown>) => Promise<{
+			outcome: "allow" | "deny";
+			grantedScope?: string[];
+			grantedAudience?: string[];
+			error?: string;
+			errorDescription?: string;
+		}>,
+	): GrantDependencies => ({
+		...baseDeps,
+		config: {
+			oauth: {
+				...baseDeps.config.oauth,
+				resourceIndicator: { enabled: true },
+			},
+		} as unknown as GrantDependencies["config"],
+		grantPolicy: {
+			evaluate: evaluate as unknown as GrantDependencies["grantPolicy"],
+		} as unknown as GrantDependencies["grantPolicy"],
+	});
+
+	it("uses policy grantedAudience when it is within allowedAudiences (subset check)", async () => {
+		// Client allows ["https://rs1", "https://rs2"]; policy narrows to
+		// ["https://rs2"]. Token aud must be https://rs2 (not allowedAudiences[0]).
+		const client = makeClient({
+			allowedAudiences: ["https://rs1", "https://rs2"],
+		});
+		const handler = createClientCredentialsGrant(
+			depsWithAudiencePolicy(async () => ({
+				outcome: "allow",
+				grantedAudience: ["https://rs2"],
+			})),
+		);
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("https://rs2");
+	});
+
+	it("rejects policy grantedAudience outside allowedAudiences with 400 invalid_request", async () => {
+		// Policy returns an audience not in client.allowedAudiences → fail-closed.
+		const client = makeClient({ allowedAudiences: ["https://rs1"] });
+		const handler = createClientCredentialsGrant(
+			depsWithAudiencePolicy(async () => ({
+				outcome: "allow",
+				grantedAudience: ["https://other.example"],
+			})),
+		);
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect("errorDescription" in result && result.errorDescription).toContain(
+			"https://other.example",
+		);
+	});
+
+	it("falls back to allowedAudiences[0] when policy returns no grantedAudience", async () => {
+		// Policy omits grantedAudience (outcome: allow, no audience field).
+		// Existing fallback behavior (allowedAudiences[0]) must be preserved.
+		const client = makeClient({ allowedAudiences: ["https://api.example"] });
+		const handler = createClientCredentialsGrant(
+			depsWithAudiencePolicy(async () => ({ outcome: "allow" })),
+		);
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token);
+		expect(payload.aud).toBe("https://api.example");
+	});
+});

@@ -86,6 +86,11 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			// `""` would emit a malformed `iss: ""` JWT.
 			const issuer = ctx.issuer;
 
+			// Audience from policy evaluation (Fix #3): set inside the
+			// grantPolicy block when decision.grantedAudience is valid.
+			// null means "no policy override — use the existing fallback".
+			let policyGrantedAudience: string | null = null;
+
 			// RFC 8707: resource-indicator policy check. Only runs when grantPolicy
 			// is wired AND oauth.resourceIndicator.enabled === true. Flag-off
 			// (the default) skips this block entirely — preserving pre-existing
@@ -132,11 +137,52 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 					};
 				}
 				if (decision.grantedScope) {
-					effectiveScopes = decision.grantedScope;
+					// CP-18: fail-closed. Re-validate the policy's returned scopes
+					// against client.allowedScopes — a buggy or compromised policy
+					// could return expanded scopes (e.g. 'admin' for a client
+					// allowed only 'read'). Mirrors the pattern in refreshToken.mts
+					// (CP-15) where grantedScope is checked against the original
+					// token's scope set.
+					const allowedSet = client.allowedScopes ?? [];
+					const exceeded = decision.grantedScope.filter((s) => !allowedSet.includes(s));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_scope",
+								errorDescription: `policy returned scopes exceeding client allowedScopes: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// CP-15 mirror: empty array → keep effectiveScopes unchanged
+					// (no narrowing signal) rather than wiping to empty.
+					if (decision.grantedScope.length > 0) {
+						effectiveScopes = decision.grantedScope;
+					}
+				}
+				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
+					// Fail-closed audience validation: policy may only narrow to
+					// audiences already in client.allowedAudiences. An out-of-bounds
+					// audience from a buggy/compromised policy would mint a token
+					// accepted by a resource server the client is not authorized for.
+					const allowedAudSet = new Set(client.allowedAudiences ?? []);
+					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_request",
+								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// Use the policy-narrowed audience (flatten to first, matching
+					// the refresh_token and authorization_code grant patterns).
+					policyGrantedAudience = decision.grantedAudience[0];
 				}
 			}
 
-			const audience = client.allowedAudiences?.[0] ?? issuer ?? null;
+			const audience = policyGrantedAudience ?? client.allowedAudiences?.[0] ?? issuer ?? null;
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
 			const accessToken = await generateToken(
