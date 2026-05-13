@@ -1232,6 +1232,81 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 
+	describe("refresh_token grant — grantPolicy audience validation (Codex Round 4 P2)", () => {
+		function createStubPolicy(evaluate: GrantPolicyHook["evaluate"]): GrantPolicyHook {
+			return { kind: "stub", evaluate };
+		}
+
+		function depsWithAudiencePolicy(evaluate: GrantPolicyHook["evaluate"]): GrantDependencies {
+			return {
+				...mockDeps,
+				config: {
+					oauth: {
+						...mockDeps.config.oauth,
+						resourceIndicator: { enabled: true },
+					},
+				} as unknown as GrantDependencies["config"],
+				grantPolicy: createStubPolicy(evaluate),
+				// allowedAudiences lives on the authenticatedClient in the ctx — set per-test.
+			};
+		}
+
+		it("rejects policy grantedAudience outside client.allowedAudiences with 400 invalid_request (Test A)", async () => {
+			// Policy returns an audience not in client.allowedAudiences → fail-closed.
+			const token = await makeRefreshToken({ scope: "read" });
+			const deps = depsWithAudiencePolicy(async () => ({
+				outcome: "allow",
+				grantedAudience: ["https://other.example"],
+			}));
+			const handler = createRefreshTokenGrant(deps);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: {
+					...DEFAULT_AUTH_CLIENT,
+					allowedAudiences: ["https://api.example"],
+				},
+			});
+
+			expect(result.status).toBe(400);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("invalid_request");
+			expect(result.errorDescription).toContain("https://other.example");
+		});
+
+		it("uses policy grantedAudience when within client.allowedAudiences (Test B)", async () => {
+			// Policy narrows to ["https://api.example"] ∈ allowedAudiences → 200, token aud is https://api.example.
+			const token = await makeRefreshToken({ scope: "read" });
+			const deps = depsWithAudiencePolicy(async () => ({
+				outcome: "allow",
+				grantedAudience: ["https://api.example"],
+			}));
+			const handler = createRefreshTokenGrant(deps);
+
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: {
+					...DEFAULT_AUTH_CLIENT,
+					allowedAudiences: ["https://api.example", "https://other.example"],
+				},
+			});
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			const parts = result.tokens.access_token.split(".");
+			const payload = JSON.parse(
+				Buffer.from(parts[1] ?? "", "base64url").toString("utf-8"),
+			) as Record<string, unknown>;
+			expect(payload.aud).toBe("https://api.example");
+		});
+	});
+
 	describe("sid claim propagation and userSessionStore integration (TODO-F-3 task 4)", () => {
 		function decodeTokenPayload(token: string): Record<string, unknown> {
 			const parts = token.split(".");

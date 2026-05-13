@@ -23,6 +23,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
+import { extractResourceParam } from "./_resourceIndicator.mjs";
 
 const GRANT_TYPE = "client_credentials";
 
@@ -77,14 +78,114 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			if ("error" in scopeOutcome) {
 				return { result: scopeOutcome };
 			}
-			const effectiveScopes = scopeOutcome.scopes;
+			let effectiveScopes = scopeOutcome.scopes;
 
 			// Pass `ctx.issuer` through untouched: `generateToken` omits the
 			// `iss` claim when it is null/undefined, matching the sibling
 			// authorization_code / refresh_token grants. Coercing undefined to
 			// `""` would emit a malformed `iss: ""` JWT.
 			const issuer = ctx.issuer;
-			const audience = client.allowedAudiences?.[0] ?? issuer ?? null;
+
+			// Audience from policy evaluation (Fix #3): set inside the
+			// grantPolicy block when decision.grantedAudience is valid.
+			// null means "no policy override — use the existing fallback".
+			let policyGrantedAudience: string | null = null;
+
+			// RFC 8707: resource-indicator policy check. Only runs when grantPolicy
+			// is wired AND oauth.resourceIndicator.enabled === true. Flag-off
+			// (the default) skips this block entirely — preserving pre-existing
+			// semantics for deployments that wire grantPolicy without RFC 8707.
+			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+			if (deps.grantPolicy && resourceIndicatorEnabled) {
+				// CP-18 pattern: fail-closed on policy throw — same rationale
+				// as the refresh_token path. Policy is a security boundary;
+				// failing open would effectively grant the pre-policy scope
+				// ceiling.
+				const resource = extractResourceParam(ctx.body as Record<string, unknown>);
+				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
+				try {
+					decision = await deps.grantPolicy.evaluate(
+						{
+							grantType: GRANT_TYPE,
+							clientId: client.clientId,
+							// RFC 6749 §4.4: client_credentials has no end-user;
+							// subject is the client itself.
+							subject: client.clientId,
+							requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
+							// RFC 8707: resource is null when body has no `resource` param;
+							// undefined passed to policy signals "no resource requested".
+							resource: resource ?? undefined,
+						},
+						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "policy evaluation unavailable",
+						},
+					};
+				}
+				if (decision.outcome === "deny") {
+					return {
+						result: {
+							status: 400,
+							error: decision.error,
+							errorDescription: decision.errorDescription,
+						},
+					};
+				}
+				if (decision.grantedScope !== undefined) {
+					// CP-18: fail-closed. Re-validate the policy's returned scopes
+					// against effectiveScopes (the already-narrowed request set, after
+					// client allowlist has been applied) — not against client.allowedScopes.
+					// A buggy/compromised policy returning a scope that was not in the
+					// request (e.g. 'write' for a request narrowed to 'read') is scope
+					// expansion and must be rejected, even if that scope is in
+					// client.allowedScopes. Mirrors refreshToken.mts CP-15 exactly:
+					// ceiling is the post-narrowing effective scope, not the full ceiling.
+					const requestedSet = new Set(effectiveScopes);
+					const exceeded = decision.grantedScope.filter((s) => !requestedSet.has(s));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_scope",
+								errorDescription: `policy returned scopes exceeding requested scope: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// CP-15 mirror: assign unconditionally when policy returned the
+					// field — including empty array (policy intent: strip all scopes).
+					// Matches refreshToken.mts behavior: presence (even []) overrides
+					// effectiveScopes; the scope claim emission at line ~186 handles
+					// empty → null naturally (effectiveScopes.length > 0 check).
+					effectiveScopes = decision.grantedScope;
+				}
+				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
+					// Fail-closed audience validation: policy may only narrow to
+					// audiences already in client.allowedAudiences. An out-of-bounds
+					// audience from a buggy/compromised policy would mint a token
+					// accepted by a resource server the client is not authorized for.
+					const allowedAudSet = new Set(client.allowedAudiences ?? []);
+					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_request",
+								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// Use the policy-narrowed audience (flatten to first, matching
+					// the refresh_token and authorization_code grant patterns).
+					policyGrantedAudience = decision.grantedAudience[0];
+				}
+			}
+
+			const audience = policyGrantedAudience ?? client.allowedAudiences?.[0] ?? issuer ?? null;
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
 			const accessToken = await generateToken(
