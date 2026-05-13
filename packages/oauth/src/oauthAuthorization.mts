@@ -20,6 +20,7 @@ import {
 	type Module,
 } from "@o3co/auth-provider-core";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";
+import { createClientCredentialsGrant } from "./grants/clientCredentials.mjs";
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
 /**
@@ -55,6 +56,11 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	if (grantsCfg.refresh_token?.enabled !== false) {
 		grants.refresh_token = (deps) => createRefreshTokenGrant(deps);
 	}
+	// Wave 1 §3.5: client_credentials is built-in unconditionally. Per-client
+	// AuthenticatedClient.allowedGrantTypes provides the access gate (§3.4.1
+	// deny-by-absence-only-for-client_credentials), so a server-wide enable
+	// flag would be redundant defense.
+	grants.client_credentials = (deps) => createClientCredentialsGrant(deps);
 
 	// Intentionally no `configSchema`: this module reads only slices already
 	// declared in `CoreConfigSchema` (`oauth.grants.{authorization_code,refresh_token}.enabled`,

@@ -202,6 +202,23 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 		expect(module.contributes?.grants?.refresh_token).toBeDefined();
 	});
 
+	it("contributes client_credentials grant unconditionally (Wave 1 §3.5)", () => {
+		// Built-in: deny-by-absence on per-client allowedGrantTypes is the gate,
+		// not a server-wide enable flag.
+		const config = makeValidAppConfig();
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.client_credentials).toBeDefined();
+	});
+
+	it("registers exactly the expected grant types (R8 snapshot)", () => {
+		// Drift guard: an accidental addition or removal of a built-in grant
+		// surfaces here before it ships in a release.
+		const config = makeValidAppConfig();
+		const module = oauthAuthorizationModule({ config });
+		const keys = Object.keys(module.contributes?.grants ?? {}).sort();
+		expect(keys).toEqual(["authorization_code", "client_credentials", "refresh_token"]);
+	});
+
 	it("omits authorization_code grant when config says enabled=false", () => {
 		const base = makeValidAppConfig();
 		const config = {
@@ -248,7 +265,7 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 // ---------------------------------------------------------------------------
 
 describe("oauthAuthorizationModule — createTestApp integration", () => {
-	it("registers authorization_code and refresh_token grants at boot", async () => {
+	it("registers authorization_code, refresh_token, and client_credentials grants at boot", async () => {
 		const config = makeValidAppConfig();
 		const handle = await createTestApp({
 			modules: [
@@ -261,6 +278,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 		});
 		expect(handle.inspect.grants.has("authorization_code")).toBe(true);
 		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		expect(handle.inspect.grants.has("client_credentials")).toBe(true);
 		await handle.dispose();
 	});
 
@@ -288,6 +306,9 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 		});
 		expect(handle.inspect.grants.has("authorization_code")).toBe(false);
 		expect(handle.inspect.grants.has("refresh_token")).toBe(true);
+		// client_credentials is built-in unconditionally (Wave 1 §3.5) — it
+		// stays registered regardless of the authorization_code enable flag.
+		expect(handle.inspect.grants.has("client_credentials")).toBe(true);
 		await handle.dispose();
 	});
 });
