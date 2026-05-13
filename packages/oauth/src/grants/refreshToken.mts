@@ -244,9 +244,27 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					finalScope = decision.grantedScope.length > 0 ? decision.grantedScope.join(" ") : null;
 				}
 				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
-					// generateToken carries a single `aud` claim; policy may narrow
-					// to multiple audiences, but we flatten to the first one here.
-					// Multi-audience tokens are out of scope for this grant path.
+					// Fail-closed audience validation: policy may only narrow to
+					// audiences already in client.allowedAudiences. An out-of-bounds
+					// audience from a buggy/compromised policy would mint a token
+					// accepted by a resource server the client is not authorized for.
+					// Mirrors clientCredentials.mts exactly (same ceiling, error code,
+					// message phrasing). Activated by T18 wiring resource into this
+					// path; pre-T18 grantPolicy paths that returned no grantedAudience
+					// are byte-equivalent (this block only runs on non-empty arrays).
+					const allowedAudSet = new Set(ctx.authenticatedClient.allowedAudiences ?? []);
+					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_request",
+								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// Flatten to first entry (multi-audience tokens are out of scope
+					// for this grant path — matches cc and authorization_code patterns).
 					finalAudience = decision.grantedAudience[0];
 				}
 			}
