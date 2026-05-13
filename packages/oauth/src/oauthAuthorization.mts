@@ -24,6 +24,22 @@ import { createClientCredentialsGrant } from "./grants/clientCredentials.mjs";
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
 /**
+ * Returns true if `value` is an explicit opt-in to enable a feature.
+ *
+ * HOCON's `passthrough` sub-trees (e.g. `oauth.grants.*`) do not coerce
+ * env-var substitution strings to booleans. A resolved `enabled` value can
+ * therefore be the string `"true"` (from `OAUTH_GRANTS_X_ENABLED=true`) or
+ * the boolean `true` (from an `application.conf` literal). This helper
+ * accepts both forms and rejects everything else — including the string
+ * `"false"` (env-disable), the boolean `false`, absent / undefined, and
+ * unrelated truthy strings like `"yes"` / `"1"` — so the opt-in remains
+ * strict while staying operationally usable via env vars.
+ */
+function isExplicitlyEnabled(value: unknown): boolean {
+	return value === true || value === "true";
+}
+
+/**
  * Declarative manifest for the authorization_code and refresh_token grants.
  *
  * Per A2-γ §3.2.2 + Amendment 4 (§1.1.4): the v0.4.x
@@ -40,7 +56,13 @@ import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
  * mutation of ctx), Theme E (structural conditional via factory body).
  */
 export const oauthAuthorizationModule = (params: { config: AppConfig }): Module => {
-	const grantsCfg = params.config.oauth.grants as Record<string, { enabled?: boolean }>;
+	// `oauth.grants` is `z.object({}).passthrough()` in the schema — values
+	// arrive unvalidated. The `enabled` field can be the boolean `true` /
+	// `false` (HOCON literal) OR the string `"true"` / `"false"` (HOCON env
+	// substitution outcome). Typing `enabled` as `unknown` keeps the local
+	// cast honest with runtime reality; `isExplicitlyEnabled` below performs
+	// the strict opt-in narrowing.
+	const grantsCfg = params.config.oauth.grants as Record<string, { enabled?: unknown }>;
 
 	// Per plan Task 3 line 586: type the local grants record as
 	// `Record<string, (deps: any) => GrantHandler>` and let `defineModule`
@@ -50,19 +72,26 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// signatures to consume `ProviderDeps<R, O>` directly is out of scope.
 	// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape; see comment above.
 	const grants: Record<string, (deps: any) => GrantHandler> = {};
-	if (grantsCfg.authorization_code?.enabled !== false) {
+	// Per the secure-default opt-in discipline: a grant is registered only
+	// when `enabled` is explicitly truthy (boolean `true` or the string `"true"`
+	// from HOCON env-var substitution — see `isExplicitlyEnabled` above).
+	// Library reference.conf sets `enabled = false` as the secure baseline;
+	// each deployment's application.conf (or env override) must explicitly
+	// flip individual grants to activate them.
+	if (isExplicitlyEnabled(grantsCfg.authorization_code?.enabled)) {
 		grants.authorization_code = (deps) => createAuthorizationGrant(deps);
 	}
-	if (grantsCfg.refresh_token?.enabled !== false) {
+	if (isExplicitlyEnabled(grantsCfg.refresh_token?.enabled)) {
 		grants.refresh_token = (deps) => createRefreshTokenGrant(deps);
 	}
-	// Wave 1 §3.5: built-in, default-enabled (see `oauth.grants.client_credentials.enabled`
-	// in `packages/core/config/application.conf`). Per-client
-	// `AuthenticatedClient.allowedGrantTypes` is the authoritative access gate
-	// (§3.4.1 deny-by-absence); the server-wide flag exists for operational
-	// symmetry with the other built-ins (kill-switch on CVE, scope minimization
-	// for deployments that never use M2M).
-	if (grantsCfg.client_credentials?.enabled !== false) {
+	// Wave 1 §3.5: client_credentials follows the same opt-in semantics.
+	// Per-client `AuthenticatedClient.allowedGrantTypes` (§3.4.1 deny-by-absence)
+	// is the authoritative access gate; the server-wide flag exists for
+	// operational symmetry with the other built-ins (kill-switch on CVE,
+	// scope minimization for deployments that never use M2M). Set
+	// `oauth.grants.client_credentials.enabled = true` in application.conf
+	// (or via `OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED=true`) to activate M2M.
+	if (isExplicitlyEnabled(grantsCfg.client_credentials?.enabled)) {
 		grants.client_credentials = (deps) => createClientCredentialsGrant(deps);
 	}
 

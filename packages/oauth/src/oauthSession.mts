@@ -17,6 +17,22 @@ import { type AppConfig, defineModule, type Module } from "@o3co/auth-provider-c
 import { createSessionGrant } from "./grants/session.mjs";
 
 /**
+ * Returns true if `value` is an explicit opt-in to enable a feature.
+ *
+ * HOCON's `passthrough` sub-trees (e.g. `oauth.grants.*`) do not coerce
+ * env-var substitution strings to booleans. A resolved `enabled` value can
+ * therefore be the string `"true"` (from `OAUTH_GRANTS_SESSION_ENABLED=true`)
+ * or the boolean `true` (from an `application.conf` literal). This helper
+ * accepts both forms and rejects everything else — including the string
+ * `"false"`, the boolean `false`, absent / undefined, and unrelated truthy
+ * strings like `"yes"` / `"1"`. Mirrors the same helper in
+ * `oauthAuthorization.mts`; both modules apply the same opt-in semantics.
+ */
+function isExplicitlyEnabled(value: unknown): boolean {
+	return value === true || value === "true";
+}
+
+/**
  * Declarative manifest for the session grant.
  *
  * Per A2-γ §3.2.3: the v0.4.x `oauthSessionModule({ clientRepository })` factory
@@ -27,12 +43,21 @@ import { createSessionGrant } from "./grants/session.mjs";
  * Caller surface: `oauthSessionModule({ clientRepository })` → `oauthSessionModule({ config })`.
  * `clientRepository` and `keyStore` now flow through `requires` from the DI graph.
  *
- * When `config.oauth.grants.session.enabled === false`, the factory returns a no-op module
- * that contributes nothing. A2-α §7.5 permits a module with no `contributes` map.
+ * Per the secure-default opt-in discipline (matches `oauthAuthorizationModule`):
+ * the session grant registers only when `config.oauth.grants.session.enabled`
+ * is explicitly truthy (boolean `true` or string `"true"`). Absent keys and
+ * other values are treated as not-enabled and the factory returns a no-op
+ * module. A2-α §7.5 permits a module with no `contributes` map.
  */
 export const oauthSessionModule = (params: { config: AppConfig }): Module => {
-	const grantConfig = (params.config.oauth.grants as Record<string, { enabled?: boolean }>).session;
-	if (grantConfig?.enabled === false) {
+	// `oauth.grants` is `z.object({}).passthrough()` in the schema — values
+	// arrive unvalidated. The `enabled` field can be the boolean `true` /
+	// `false` (HOCON literal) OR the string `"true"` / `"false"` (HOCON env
+	// substitution outcome). Typing `enabled` as `unknown` keeps the local
+	// cast honest with runtime reality; `isExplicitlyEnabled` performs the
+	// strict opt-in narrowing.
+	const grantConfig = (params.config.oauth.grants as Record<string, { enabled?: unknown }>).session;
+	if (!isExplicitlyEnabled(grantConfig?.enabled)) {
 		return defineModule({ name: "oauth-session" });
 	}
 	// Intentionally no `configSchema`: this module reads only slices already

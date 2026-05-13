@@ -28,7 +28,7 @@ import type {
  *
  * These factories return the smallest object shape that passes schema
  * validation; they intentionally diverge from `packages/core/config/
- * application.conf` for test ergonomics. The deliberate divergences are:
+ * reference.conf` for test ergonomics. The deliberate divergences are:
  *
  * - `session.storage.type` is `"memory"` (hocon defaults to `"redis"`).
  * - `federations` is `{}` (hocon ships a built-in `federations.google`
@@ -42,12 +42,22 @@ import type {
  * - `endpoints.client` and `endpoints.authCallback` are omitted because
  *   the schema marks them `.optional()`. Callers exercising those
  *   endpoints' behaviour should add the missing fields per-test.
+ * - `oauth.grants` explicitly enables `session`, `authorization_code`, and
+ *   `refresh_token` (the three standalone template defaults). These must be
+ *   set to `enabled: true` because `oauthAuthorizationModule` uses strict
+ *   `=== true` opt-in semantics — `enabled` absent or non-boolean is treated
+ *   as not-enabled. Note that `client_credentials` is deliberately omitted —
+ *   the factory mirrors the standalone template defaults, where
+ *   client_credentials remains off unless the deployment explicitly enables
+ *   M2M. The `pkce: { requireS256: false }` sub-object on `authorization_code`
+ *   is illustrative of real-config shape; the `grants` schema is
+ *   `passthrough` so the value is not enforced.
  *
  * If you need fixture values that match production defaults, parse
- * `application.conf` directly via the test harness.
+ * `reference.conf` directly via the test harness.
  *
  * Background: per ADR 2026-04-30 (schema-strict defaults from hocon),
- * defaults live exclusively in `application.conf`. Tests that previously
+ * defaults live exclusively in `reference.conf`. Tests that previously
  * relied on schema-side `.default(X)` to populate bare `{}` inputs must
  * now supply explicit values; these factories provide the canonical
  * minimal shape so each call site does not re-invent it.
@@ -85,7 +95,14 @@ export function makeValidCoreConfig() {
 				unknownFamilyPolicy: "reject",
 				legacyRtPolicy: "reject",
 			},
-			grants: {},
+			grants: {
+				session: { enabled: true },
+				authorization_code: { enabled: true, pkce: { requireS256: false } },
+				refresh_token: { enabled: true },
+				// client_credentials: deliberately omitted -- factory mirrors the
+				// standalone template defaults, where client_credentials remains
+				// off unless the deployment explicitly enables M2M.
+			},
 			oidcMode: "oidc-required",
 		},
 	} satisfies CoreConfig;

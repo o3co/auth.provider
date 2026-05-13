@@ -60,7 +60,7 @@ describe("oauthSessionModule", () => {
 		expect(module.name).toBe("oauth-session");
 	});
 
-	it("registers the session grant when config.oauth.grants.session.enabled is not false", async () => {
+	it("registers the session grant when config.oauth.grants.session.enabled is explicitly true", async () => {
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -85,6 +85,56 @@ describe("oauthSessionModule", () => {
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(false);
+		await handle.dispose();
+	});
+
+	it("contributes no grant when config.oauth.grants.session is the string 'false' (HOCON env-substitution outcome)", async () => {
+		// Mirrors the corresponding oauthAuthorization test: HOCON env-var
+		// substitution resolves env values as strings (no schema coercion on
+		// the `grants` passthrough sub-tree). Under the strict opt-in check,
+		// a resolved `enabled: "false"` correctly evaluates to not-enabled,
+		// restoring the env-disable invariant.
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: {
+					...base.oauth.grants,
+					session: { enabled: "false" as unknown as boolean },
+				},
+			},
+		};
+		const handle = await createTestApp({
+			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		expect(handle.inspect.grants.has("session")).toBe(false);
+		await handle.dispose();
+	});
+
+	it("registers the session grant when config.oauth.grants.session.enabled is the string 'true' (env-enable)", async () => {
+		// An operator setting `OAUTH_GRANTS_SESSION_ENABLED=true` produces a
+		// resolved `enabled: "true"` (string) on the passthrough `grants`
+		// sub-tree. The opt-in check accepts both boolean `true` and string
+		// `"true"` so the documented env-enable pattern works at runtime,
+		// matching the CHANGELOG's operator-facing guidance.
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: {
+					...base.oauth.grants,
+					session: { enabled: "true" as unknown as boolean },
+				},
+			},
+		};
+		const handle = await createTestApp({
+			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		expect(handle.inspect.grants.has("session")).toBe(true);
 		await handle.dispose();
 	});
 

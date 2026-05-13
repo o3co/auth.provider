@@ -23,16 +23,24 @@ import helmet from "helmet";
 
 import logger from "#/logger.mjs";
 import { buildModules } from "./buildModules.mjs";
-import { resolveConfigPaths } from "./configPath.mjs";
+import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
 // ENV = CONFIG_ENV || NODE_ENV || "development"; missing {ENV}.conf is fatal.
+//
+// 3-tier HOCON precedence (highest → lowest):
+//   1. {env}.conf         — environment-specific overrides (e.g. production.conf)
+//   2. application.conf   — template-level consumer delta
+//   3. reference.conf     — library defaults shipped in @o3co/auth-provider-core
 const env = process.env.CONFIG_ENV || process.env.NODE_ENV || "development";
 const configDir = new URL("../config/", import.meta.url);
 const configDirPath = fileURLToPath(configDir);
 const { applicationConfPath, envConfPath } = resolveConfigPaths(configDirPath, env);
+const libraryReferencePath = resolveLibraryReferenceConfPath();
 const config: AppConfig = validate(
-	parseFile(envConfPath).withFallback(parseFile(applicationConfPath)),
+	parseFile(envConfPath)
+		.withFallback(parseFile(applicationConfPath))
+		.withFallback(parseFile(libraryReferencePath)),
 	AppConfigSchema,
 );
 

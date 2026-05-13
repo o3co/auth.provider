@@ -27,7 +27,7 @@ const federationsSchema = fullSectionsSchema.shape.federations;
  * Per ADR 2026-04-30: schema is a pure type contract; defaults live in
  * hocon. AppConfigSchema.parse rejects bare `{}` inputs, so the fixture
  * supplies a minimal schema-valid baseline (intentionally diverges from
- * application.conf — see makeValidAppConfig docstring). Per-test
+ * reference.conf — see makeValidAppConfig docstring). Per-test
  * overrides target only the field-under-test (e.g. add `federations`
  * for federation-specific assertions).
  */

@@ -15,8 +15,8 @@ function makeFactory() {
 }
 
 describe("provider config", () => {
-	it("loads and validates application.conf with required env vars", () => {
-		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+	it("loads and validates reference.conf with required env vars", () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
@@ -32,7 +32,7 @@ describe("provider config", () => {
 		expect(local).toBeDefined();
 		expect(local.secret).toBe("test-secret");
 
-		// algorithm and kid come from hocon (`application.conf`); the schema
+		// algorithm and kid come from hocon (`reference.conf`); the schema
 		// is strict and supplies no defaults of its own (ADR 2026-04-30).
 		expect(local.algorithm).toBe("HS256");
 		expect(local.kid).toBe("v0");
@@ -42,14 +42,14 @@ describe("provider config", () => {
 	});
 
 	it("fails validation when required fields are missing", () => {
-		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {},
 		});
 		expect(() => validate(raw, AppConfigSchema)).toThrow();
 	});
 
 	it("overrides defaults with env vars", () => {
-		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
@@ -73,12 +73,12 @@ describe("provider config", () => {
 		expect(config.oauth.oidcMode).toBe("dual");
 		expect(config.redisSessionStores?.keyPrefix).toBe("tenant-a:ss:");
 		// federations.google.enabled env-var coercion is covered by the
-		// HOCON application.conf wiring; schema-level boolean coercion for
+		// HOCON reference.conf wiring; schema-level boolean coercion for
 		// federation entries is tested in federations-schema.test.mts.
 	});
 
-	it("repositories.client.type is yaml when application.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+	it("repositories.client.type is yaml when reference.conf is loaded with no override", () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
@@ -90,8 +90,8 @@ describe("provider config", () => {
 		expect(config.repositories.client.type).toBe("yaml");
 	});
 
-	it("repositories.user.type is yaml when application.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+	it("repositories.user.type is yaml when reference.conf is loaded with no override", () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
@@ -101,8 +101,8 @@ describe("provider config", () => {
 		expect(config.repositories.user.type).toBe("yaml");
 	});
 
-	it("repositories.code.type is memory when application.conf is loaded with no override", () => {
-		const raw = parseFile(new URL("../../config/application.conf", import.meta.url).pathname, {
+	it("repositories.code.type is memory when reference.conf is loaded with no override", () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				SESSION_SECRET: "test-session-secret",
@@ -113,7 +113,7 @@ describe("provider config", () => {
 	});
 
 	it("loads memoryRateLimiter.maxBuckets default and env override", () => {
-		const path = new URL("../../config/application.conf", import.meta.url).pathname;
+		const path = new URL("../../config/reference.conf", import.meta.url).pathname;
 		const base = validate(
 			parseFile(path, {
 				env: {
@@ -143,7 +143,7 @@ describe("jwt config schema", () => {
 	// Schema-level acceptance tests — verify the nested signingKey shape is
 	// accepted. Per ADR 2026-04-30 the schema is a pure type contract:
 	// algorithm/kid are required at the schema boundary, and hocon
-	// (`packages/core/config/application.conf`) supplies the runtime
+	// (`packages/core/config/reference.conf`) supplies the runtime
 	// defaults that production callers rely on. IH-9: the schema is a
 	// discriminated union on `algorithm`, so a bare local sub-section
 	// fails the discriminator check before per-branch field validation.

@@ -78,7 +78,7 @@ function makeStubListCollector<V = unknown>() {
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
 // hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
 // fixture supplies a minimal schema-valid baseline (intentionally
-// diverges from application.conf — see makeValidCoreConfig docstring).
+// diverges from reference.conf — see makeValidCoreConfig docstring).
 const minBootstrap = {
 	config: makeValidCoreConfig() as never,
 	pathResolver: (s: string) => s,

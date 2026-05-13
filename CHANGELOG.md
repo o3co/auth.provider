@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`@o3co/auth-provider-core` now ships `reference.conf` as a declarative defaults layer.**
+  The package exposes `./reference.conf` via the `exports` field; the standalone composition
+  root (`templates/standalone/src/app.mts`) chains it as the bottom-of-stack HOCON fallback.
+  Consumers writing their own composition root should follow the same 3-tier
+  `parseFile(env).withFallback(parseFile(application)).withFallback(parseFile(reference))`
+  pattern. See ADR `packages/core/docs/adr/2026-05-13-reference-conf-shipping.md`.
+- **All built-in OAuth grants now default `enabled = false` at the library layer.** The
+  standalone template enables `session`, `authorization_code`, and `refresh_token` explicitly
+  in its `application.conf`. `client_credentials` remains off by default — deployments needing
+  M2M credentials opt in per the `feedback_secure_default_opt_in` discipline
+  (`enabled = true` in `application.conf` or `OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED=true`).
+- **`rateLimit.failMode` library default flipped from `"open"` to `"closed"`.** Secure-by-default
+  load shedding: when the rate-limiter backend errors, requests are rejected rather than passed
+  through. Deployments that prefer fail-open override in their own `application.conf`.
+- **`oauthAuthorizationModule` and `oauthSessionModule` grant registration is now strict opt-in.**
+  Each grant is registered only when `oauth.grants.<name>.enabled` is explicitly truthy (boolean
+  `true` or the string `"true"` produced by HOCON env-var substitution). All other values — absent,
+  `false`, the string `"false"`, or unrelated truthy strings like `"yes"` / `"1"` — are treated as
+  not-enabled. This restores correct env-disable behavior (under the previous check, `"false"` was
+  silently treated as enabled) and keeps env-enable working via the documented
+  `OAUTH_GRANTS_*_ENABLED=true` operator pattern. `GrantRegistry.addModule` (the internal
+  legacy-init path) follows the same rule for symmetry.
+
+### Migration notes
+
+- Consumers running the standalone template inherit the new default-off baseline automatically
+  through the `withFallback` chain. If your `application.conf` already opts in to `session` /
+  `authorization_code` / `refresh_token`, no change is needed.
+- **`oauthSessionModule` silent behavior change**: previously the session grant was registered
+  unless `oauth.grants.session.enabled === false`. Custom composition roots that omitted
+  `oauth.grants.session` entirely (or shape-only without `enabled`) silently lose the session
+  grant on upgrade. Add `oauth.grants.session = { enabled = true }` to your `application.conf`,
+  or set `OAUTH_GRANTS_SESSION_ENABLED=true`. The standalone template ships this opt-in
+  explicitly, so standalone deployments are unaffected.
+- If you wrote a custom composition root (not the standalone template), add the library
+  reference as the bottom-of-stack fallback:
+  `parseFile(env).withFallback(parseFile(application)).withFallback(parseFile(libraryRef))`,
+  where `libraryRef = fileURLToPath(import.meta.resolve("@o3co/auth-provider-core/reference.conf"))`.
+- `packages/core/config/application.conf` has been renamed to `reference.conf`. Custom tooling
+  or scripts that read that path need to be updated.
+
 ## [0.6.0] - 2026-05-12
 
 ### "1.0 GA" planning-label retirement
@@ -1555,7 +1598,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   `makeIoredisClients` from the production `@o3co/auth-provider-redis`
   surface.
 
-### Added (Phase 10)
+### Added (Phase 10 — Redis adapter relocation, v0.5.2)
 
 - **`memoryFederationTokenStoreModule`** in `@o3co/auth-provider-core` —
   declarative module wrapper for the in-memory FederationTokenStore
@@ -1594,7 +1637,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
   any wrapper implementation. Replaces the deleted
   `adapters.redis-client.contract.mts` super-type contract.
 
-### Added
+### Added (Phase 1-9 — Module System Redesign, v0.5.2)
 
 - `@o3co/auth-provider-core/testing` subpath. Exposes the
   `makeValidCoreConfig` / `makeValidFullSections` / `makeValidAppConfig`
@@ -1642,14 +1685,14 @@ MUST send `client_id` in the body and (at `/authorize`) include
 - `validateRedirect` and `resolveCallbackRedirect` exports from `@o3co/auth-provider-session` for provider package implementations. (`codeChallenge` was already exported since v0.4.0.)
 - `@o3co/create-auth-provider` scoped scaffolder package. Replaces the unscoped `create-o3co-auth-provider` so the scaffolder lives under the `@o3co` npm org alongside the runtime packages. Consumers should switch to `npx @o3co/create-auth-provider my-auth-app`. The old `create-o3co-auth-provider` package on npm is deprecated.
 
-### Changed
+### Changed (Phase 1-9 — Module System Redesign, v0.5.2)
 
 - **Breaking**: `sessionModule` is now a const Module value rather than a factory function. Callers `import { sessionModule } from "@o3co/auth-provider-session"` and add it directly to the manifest list passed to `createApp({ modules: [...] })` — no factory call. Per-federation modules (e.g. `googleFederationModule`, `githubFederationModule`) are added alongside.
 - **Breaking**: Google and GitHub federation providers are no longer bundled in `@o3co/auth-provider-session`. Consumers install the per-federation packages and add their const Modules (`googleFederationModule` / `githubFederationModule`) to the manifest, plus a small config-bridge module that supplies the typed `googleFederationConfig` / `githubFederationConfig` ComponentMap slot from `config.federations.<name>` via `extractFederationSection`.
 - `templates/standalone` registers `@o3co/auth-provider-federation-google` explicitly for the default Google federation config.
 - Scaffolder CLI renamed from `create-o3co-auth-provider` to `@o3co/create-auth-provider` (scoped). The `bin` entry is now `create-auth-provider`.
 
-### Removed
+### Removed (Phase 1-9 — Module System Redesign, v0.5.2)
 
 - **Breaking**: The Route 1 federation factory surface is fully removed (issue #98). `createFederationProviderFactory()`, the `FederationProviderFactory` type, `registerGoogleFederation()`, `registerGithubFederation()`, `narrowGoogleConfig()`, `narrowGithubConfig()`, and `sessionModule({ federationProviderFactory })` are all deleted. Custom federations now extend via per-federation `defineModule(...)` (see `@o3co/auth-provider-federation-google` for the reference pattern).
 - **Breaking**: `registerBuiltinFederations`, `createGoogleProvider`, and `createGithubProvider` are removed from `@o3co/auth-provider-session`.
@@ -1804,7 +1847,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
 
 ## [0.4.1] - 2026-04-22
 
-### Added
+### Added (v0.4.1)
 
 - `create-o3co-auth-provider` CLI scaffolder is now published to npm. Consumers can run `npx create-o3co-auth-provider my-auth-app` to generate a new `auth.provider` project from the standalone template. The package was previously built but held back (`private: true`) from npm publish; this release removes that flag and adds `description` + `repository` metadata.
 
@@ -1814,7 +1857,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
 
 ## [0.4.0] - 2026-04-22
 
-### Added
+### Added (v0.4.0)
 
 - `SupportsLogout` optional capability interface (`EndSessionRequest`, `EndSessionResult`, `SupportsLogout`) and `supportsLogout(provider)` type guard helper in `@o3co/auth-provider-session`. Detects providers whose IdP exposes an OIDC RP-Initiated Logout endpoint. `supportsLogout` accepts `FederationProvider | undefined | null` so it can be called directly on `Map.get(name)` lookups; returns `false` on nullish input. Built-in `google` / `github` providers do not implement this capability.
 - `FederationProvider` pure-function interface for upstream OAuth 2 / OIDC identity providers: `buildAuthorizationUrl`, `exchangeCode`, `validateRedirect`, `resolveCallbackRedirect`. Replaces passport-middleware-shaped `setupPassportStrategy` (see Removed).
@@ -1847,7 +1890,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
 - `family_id` claim added to all `rt+jwt` tokens (always emitted, for future-compatible rotation tracking).
 - `grantedScope` / `grantedAudience` fields added to `Code` records (policy-narrowed values persisted at `/oauth/authorize` for later use at `/oauth/token`).
 
-### Changed
+### Changed (v0.4.0 — Federation interface + session store redesign)
 
 - **Breaking**: Federation interface rewritten as a vendor-agnostic pure-function shape. `FederationProviderBase` is renamed back to `FederationProvider` (v0.3.x → interim `FederationProviderBase` → v0.4.0 `FederationProvider`), and the `setupPassportStrategy(passport, ctx)` method is replaced by `buildAuthorizationUrl({ redirectUri, state, codeVerifier })` + `exchangeCode({ code, codeVerifier, redirectUri })`. State (CSRF `state`) and PKCE `codeVerifier` are managed by the session route layer; providers never allocate them.
 - **Breaking**: `FederationProfile.id` → `sub` (OIDC claim naming). `FederationProfile.expiresIn: number` → `expiresAt: Date | null` (required). `null` means the upstream provider issues no finite expiry (e.g. GitHub OAuth Apps classic tokens); consumers MUST reuse without refresh. The route layer no longer invents a fallback expiry.
@@ -1864,7 +1907,7 @@ MUST send `client_id` in the body and (at `/authorize`) include
 - `/oauth/authorize` runs `grantPolicy.evaluate()` once at code issuance and persists narrowed values on the Code record. `/oauth/token` (authorization_code) honors persisted values without re-evaluating. Other grants evaluate at the token endpoint.
 - `/oauth/token`, `/oauth/introspect`, `/oauth/authorize` now consult optional `rateLimiter` (returning 429 + `Retry-After` on denial) and emit audit events to the optional `auditSink` for success/failure transitions.
 
-### Removed
+### Removed (v0.4.0 — Passport.js exit + federation redesign)
 
 - **Breaking**: `passport`, `passport-local`, `passport-google-oauth20`, `passport-github2`, `passport-oauth2`, `passport-oauth2-client-password`, `passport-http`, and all `@types/passport*` are removed as direct runtime dependencies from `@o3co/auth-provider-session`, `@o3co/auth-provider-oauth`, and `templates/standalone`. Built-in Google/GitHub providers are re-implemented on top of `openid-client` v6 (panva, OpenID Foundation Certified RP); vendor types stay inside each adapter and do not leak into the public `.d.mts` surface.
 - **Breaking**: `createPassport()`, `SetupPassportContext`, and the `_createPassport` internal hook removed from `@o3co/auth-provider-session`. State (CSRF) and PKCE are managed by the route layer; providers are pure functions.
