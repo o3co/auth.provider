@@ -26,6 +26,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
+import { extractResourceParam } from "./_resourceIndicator.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore, logger } = deps;
@@ -181,6 +182,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				// the narrowed decision would have been. Failing open would
 				// effectively grant the pre-policy scope ceiling, which is
 				// exactly what policy exists to prevent.
+				const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+				const resource = resourceIndicatorEnabled
+					? extractResourceParam(body as Record<string, unknown>)
+					: null;
 				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
 				try {
 					decision = await deps.grantPolicy.evaluate(
@@ -194,6 +199,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 								? [...new Set(requestedScope.split(" ").filter(Boolean))]
 								: undefined,
 							originalScope: scopeStr ? scopeStr.split(" ") : undefined,
+							// RFC 8707: populated only when oauth.resourceIndicator.enabled
+							// is true; undefined otherwise (flag-off preserves pre-existing
+							// semantics and token-exchange's independent resource contract).
+							resource: resource ?? undefined,
 						},
 						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
 					);

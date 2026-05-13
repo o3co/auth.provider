@@ -30,6 +30,7 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
+import { extractResourceParam } from "./_resourceIndicator.mjs";
 import { resolvePkceSupportedMethods } from "./pkce.mjs";
 
 export const createAuthorizationGrant = (
@@ -338,6 +339,52 @@ export const createAuthorizationGrant = (
 
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
+
+			// RFC 8707: supplementary resource-indicator policy check at the token
+			// endpoint (separate from the scope-narrowing policy evaluated once at
+			// /authorize per C-2 / D-1 design). Only runs when grantPolicy is wired
+			// AND the resource indicator feature is opted in. Flag-off (default)
+			// leaves resource: undefined so the policy sees no resource constraint —
+			// preserving pre-existing behaviour for all existing deployments.
+			if (deps.grantPolicy) {
+				const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+				const resource = resourceIndicatorEnabled
+					? extractResourceParam(body as Record<string, unknown>)
+					: null;
+				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
+				try {
+					decision = await deps.grantPolicy.evaluate(
+						{
+							grantType: "authorization_code",
+							clientId: authenticatedClientId,
+							subject: userId,
+							requestedScope:
+								grantedScopes && grantedScopes.length > 0 ? [...grantedScopes] : undefined,
+							// RFC 8707: populated only when oauth.resourceIndicator.enabled
+							// is true; undefined otherwise.
+							resource: resource ?? undefined,
+						},
+						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "policy evaluation unavailable",
+						},
+					};
+				}
+				if (decision.outcome === "deny") {
+					return {
+						result: {
+							status: 400,
+							error: decision.error,
+							errorDescription: decision.errorDescription,
+						},
+					};
+				}
+			}
 
 			// Initial rt+jwt opens a new refresh-token family for replay detection
 			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same

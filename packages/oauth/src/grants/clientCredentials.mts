@@ -23,6 +23,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
+import { extractResourceParam } from "./_resourceIndicator.mjs";
 
 const GRANT_TYPE = "client_credentials";
 
@@ -77,13 +78,64 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			if ("error" in scopeOutcome) {
 				return { result: scopeOutcome };
 			}
-			const effectiveScopes = scopeOutcome.scopes;
+			let effectiveScopes = scopeOutcome.scopes;
 
 			// Pass `ctx.issuer` through untouched: `generateToken` omits the
 			// `iss` claim when it is null/undefined, matching the sibling
 			// authorization_code / refresh_token grants. Coercing undefined to
 			// `""` would emit a malformed `iss: ""` JWT.
 			const issuer = ctx.issuer;
+
+			if (deps.grantPolicy) {
+				// RFC 8707: resolve resource indicator (opt-in, default off).
+				const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+				const resource = resourceIndicatorEnabled
+					? extractResourceParam(ctx.body as Record<string, unknown>)
+					: null;
+				// CP-18 pattern: fail-closed on policy throw — same rationale
+				// as the refresh_token path. Policy is a security boundary;
+				// failing open would effectively grant the pre-policy scope
+				// ceiling.
+				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
+				try {
+					decision = await deps.grantPolicy.evaluate(
+						{
+							grantType: GRANT_TYPE,
+							clientId: client.clientId,
+							// RFC 6749 §4.4: client_credentials has no end-user;
+							// subject is the client itself.
+							subject: client.clientId,
+							requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
+							// RFC 8707: populated only when oauth.resourceIndicator.enabled
+							// is true; undefined otherwise (flag-off preserves pre-existing
+							// semantics).
+							resource: resource ?? undefined,
+						},
+						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "policy evaluation unavailable",
+						},
+					};
+				}
+				if (decision.outcome === "deny") {
+					return {
+						result: {
+							status: 400,
+							error: decision.error,
+							errorDescription: decision.errorDescription,
+						},
+					};
+				}
+				if (decision.grantedScope) {
+					effectiveScopes = decision.grantedScope;
+				}
+			}
+
 			const audience = client.allowedAudiences?.[0] ?? issuer ?? null;
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
