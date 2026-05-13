@@ -29,8 +29,8 @@ const GRANT_TYPE = "client_credentials";
 /**
  * `client_credentials` grant per RFC 6749 §4.4 + Wave 1 §3.
  *
- * Public-client clients (`tokenEndpointAuthMethod === "none"`) are rejected
- * (§3.4): RFC 6749 §4.4 limits the grant to confidential clients. Per-client
+ * Public clients (`tokenEndpointAuthMethod === "none"`) are rejected (§3.4):
+ * RFC 6749 §4.4 limits the grant to confidential clients. Per-client
  * gating is via `AuthenticatedClient.allowedGrantTypes`: an absent or empty
  * list denies the grant (§3.4.1 deny-by-absence-only-for-`client_credentials`).
  *
@@ -48,7 +48,7 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 					result: {
 						status: 401,
 						error: "invalid_client",
-						errorDescription: "client authentication is required",
+						errorDescription: "Client authentication is required",
 					},
 				};
 			}

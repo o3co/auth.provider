@@ -58,15 +58,19 @@ export interface Client {
 	/**
 	 * Grant types this client is explicitly permitted to use.
 	 *
-	 * Per Wave 1 §3.4.1: absent (undefined) means DENY for `client_credentials`
-	 * specifically, while leaving other grants (authorization_code, refresh_token)
-	 * unaffected. An empty array also denies all grant types. Only an array
-	 * containing the grant type string grants access.
+	 * Consumed only by grant handlers that opt in to this gate. As of
+	 * Wave 1, only `client_credentials` consults the field:
 	 *
-	 * Existing clients that omit this field continue to work with
-	 * authorization_code and refresh_token; the deny-by-absence rule applies
-	 * exclusively to client_credentials to prevent accidental machine-to-machine
-	 * access on legacy registrations.
+	 * - `undefined` (absent) → the grant is denied. Existing clients that
+	 *   omit this field cannot redeem `client_credentials`, preventing
+	 *   accidental machine-to-machine access on legacy registrations.
+	 * - `[]` (empty) → the grant is also denied (no grant_type can match
+	 *   an empty allowlist).
+	 * - non-empty array → the grant is allowed iff its `grant_type` string
+	 *   appears in the list.
+	 *
+	 * Other grants (`authorization_code`, `refresh_token`) ignore this
+	 * field; they continue to work for clients with or without it.
 	 */
 	readonly allowedGrantTypes?: readonly string[];
 	// NEW (TODO-F-5): Logout metadata.
