@@ -46,6 +46,27 @@ import type {
 export interface AuthenticatedClient {
 	readonly clientId: string;
 	readonly tokenEndpointAuthMethod: TokenEndpointAuthMethod;
+	/**
+	 * Per-client allowed scope ceiling. Grant handlers that issue tokens
+	 * directly from the client record (e.g., `client_credentials`, which has
+	 * no upstream RT/code carrying a scope claim) compare requested scopes
+	 * against this list and emit `invalid_scope` on disjoint sets.
+	 */
+	readonly allowedScopes?: readonly string[];
+	/**
+	 * Per-client grant-type gate. Currently consumed only by
+	 * `client_credentials` (deny-by-absence semantics on the absent / empty
+	 * field). `authorization_code` / `refresh_token` continue to ignore this
+	 * field for backward compatibility with clients registered before the
+	 * field existed.
+	 */
+	readonly allowedGrantTypes?: readonly string[];
+	/**
+	 * Audience values this client may receive tokens for. Grants that issue
+	 * tokens directly from the client record select the first entry as the
+	 * default `aud`; absence falls back to the issuer.
+	 */
+	readonly allowedAudiences?: readonly string[];
 }
 
 /**

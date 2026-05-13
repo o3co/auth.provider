@@ -44,11 +44,35 @@ export interface Client {
 	readonly allowedRedirectUris: readonly string[];
 	readonly allowedScopes: readonly string[];
 	/**
-	 * Audience URIs that this client may request in Token Exchange (RFC 8693)
-	 * `audience` parameter. Empty or undefined means only the client's own
-	 * clientId is allowed as audience. Not used outside Token Exchange.
+	 * Audience URIs this client may receive tokens for.
+	 *
+	 * Consumers:
+	 * - Token Exchange (RFC 8693) `audience` parameter selection — when this
+	 *   list is empty or undefined, only the client's own `clientId` is
+	 *   accepted as an audience target.
+	 * - `client_credentials` grant default `aud` claim — selects the first
+	 *   entry (`allowedAudiences[0]`); when absent, falls back to the issuer
+	 *   (and ultimately omits `aud` when no issuer is configured).
 	 */
 	readonly allowedAudiences?: readonly string[];
+	/**
+	 * Grant types this client is explicitly permitted to use.
+	 *
+	 * Consumed only by grant handlers that opt in to this gate. As of
+	 * Wave 1, only `client_credentials` consults the field:
+	 *
+	 * - `undefined` (absent) → the grant is denied. Existing clients that
+	 *   omit this field cannot redeem `client_credentials`, preventing
+	 *   accidental machine-to-machine access on legacy registrations.
+	 * - `[]` (empty) → the grant is also denied (no grant_type can match
+	 *   an empty allowlist).
+	 * - non-empty array → the grant is allowed iff its `grant_type` string
+	 *   appears in the list.
+	 *
+	 * Other grants (`authorization_code`, `refresh_token`) ignore this
+	 * field; they continue to work for clients with or without it.
+	 */
+	readonly allowedGrantTypes?: readonly string[];
 	// NEW (TODO-F-5): Logout metadata.
 	readonly postLogoutRedirectUris?: readonly string[];
 	readonly backchannelLogoutUri?: string;

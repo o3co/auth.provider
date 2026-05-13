@@ -66,6 +66,10 @@ export const ClientEntrySchema = z
 		allowedRedirectUris: z.array(z.string()).default([]),
 		allowedScopes: z.array(z.string()).default([]),
 		allowedAudiences: z.array(z.string()).default([]),
+		// Wave 1 §3.4.1: per-client grant type allowlist. Absent means no restriction on
+		// existing grants (authorization_code, refresh_token). client_credentials is gated
+		// by deny-by-absence — see createClientCredentialsGrant handler.
+		allowedGrantTypes: z.array(z.string()).optional(),
 		// NEW (TODO-F-5): Logout metadata.
 		// Use httpUrlSchema (not z.string().url()) for fields that end up in iframe src
 		// or redirect targets — rejects javascript:, data:, file: to prevent XSS.
@@ -133,6 +137,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
 			allowedAudiences: entry.allowedAudiences,
+			...(entry.allowedGrantTypes !== undefined && {
+				allowedGrantTypes: entry.allowedGrantTypes,
+			}),
 			...(entry.postLogoutRedirectUris !== undefined && {
 				postLogoutRedirectUris: entry.postLogoutRedirectUris,
 			}),
@@ -182,6 +189,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
 			allowedAudiences: entry.allowedAudiences,
+			...(entry.allowedGrantTypes !== undefined && {
+				allowedGrantTypes: entry.allowedGrantTypes,
+			}),
 			...(entry.postLogoutRedirectUris !== undefined && {
 				postLogoutRedirectUris: entry.postLogoutRedirectUris,
 			}),
