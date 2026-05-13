@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **RFC 8707 Resource Indicator opt-in plumbing (`oauth.resourceIndicator.enabled`, default `false`)** (Wave 1 §5 — Stage 1).
+  When opted in, `body.resource` (string or array of strings) is forwarded to the
+  `GrantPolicyHook.evaluate(...)` request for `client_credentials` and `refresh_token`
+  grants. The policy hook may use the parameter to narrow `grantedScope` or
+  `grantedAudience`; both grants now also fail-closed on policy-returned scope or
+  audience that is not a subset of the request / `client.allowedAudiences`
+  respectively. The library does NOT itself enforce RFC 8707 §2 resource-to-audience
+  binding at this stage — that is **Stage 2 (Wave 2)** scope (per spec §5.6). When
+  `oauth.resourceIndicator.enabled` is absent or `false`, the entire path is a no-op
+  and consumer behavior is byte-equivalent to v0.6.0.
+  - **`authorization_code` deferred to Wave 2**: at the token endpoint, scope is
+    already locked by the authorization-endpoint policy (C-2 / D-1 evaluate-once-at-`/authorize`).
+    Plumbing resource into the auth_code grant requires a Wave 2 design that
+    respects this invariant; for Wave 1 the auth_code token endpoint silently
+    ignores `body.resource`. Token-exchange retains its independent RFC 8693 + 8707
+    enforcement (§5.2 non-goal, unchanged).
+
 ### Changed
 
 - **`@o3co/auth-provider-core` now ships `reference.conf` as a declarative defaults layer.**
