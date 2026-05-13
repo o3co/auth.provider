@@ -27,12 +27,16 @@ import { createSessionGrant } from "./grants/session.mjs";
  * Caller surface: `oauthSessionModule({ clientRepository })` → `oauthSessionModule({ config })`.
  * `clientRepository` and `keyStore` now flow through `requires` from the DI graph.
  *
- * When `config.oauth.grants.session.enabled === false`, the factory returns a no-op module
- * that contributes nothing. A2-α §7.5 permits a module with no `contributes` map.
+ * Per the secure-default opt-in discipline (matches `oauthAuthorizationModule`):
+ * the session grant registers only when `config.oauth.grants.session.enabled`
+ * is the boolean `true`. Absent keys and non-boolean values (e.g. the string
+ * `"false"` from HOCON env substitution) are treated as not-enabled and the
+ * factory returns a no-op module. A2-α §7.5 permits a module with no
+ * `contributes` map.
  */
 export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 	const grantConfig = (params.config.oauth.grants as Record<string, { enabled?: boolean }>).session;
-	if (grantConfig?.enabled === false) {
+	if (grantConfig?.enabled !== true) {
 		return defineModule({ name: "oauth-session" });
 	}
 	// Intentionally no `configSchema`: this module reads only slices already
