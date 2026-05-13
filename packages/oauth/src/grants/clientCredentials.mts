@@ -86,16 +86,17 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			// `""` would emit a malformed `iss: ""` JWT.
 			const issuer = ctx.issuer;
 
-			if (deps.grantPolicy) {
-				// RFC 8707: resolve resource indicator (opt-in, default off).
-				const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
-				const resource = resourceIndicatorEnabled
-					? extractResourceParam(ctx.body as Record<string, unknown>)
-					: null;
+			// RFC 8707: resource-indicator policy check. Only runs when grantPolicy
+			// is wired AND oauth.resourceIndicator.enabled === true. Flag-off
+			// (the default) skips this block entirely — preserving pre-existing
+			// semantics for deployments that wire grantPolicy without RFC 8707.
+			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+			if (deps.grantPolicy && resourceIndicatorEnabled) {
 				// CP-18 pattern: fail-closed on policy throw — same rationale
 				// as the refresh_token path. Policy is a security boundary;
 				// failing open would effectively grant the pre-policy scope
 				// ceiling.
+				const resource = extractResourceParam(ctx.body as Record<string, unknown>);
 				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
 				try {
 					decision = await deps.grantPolicy.evaluate(
@@ -106,9 +107,8 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 							// subject is the client itself.
 							subject: client.clientId,
 							requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
-							// RFC 8707: populated only when oauth.resourceIndicator.enabled
-							// is true; undefined otherwise (flag-off preserves pre-existing
-							// semantics).
+							// RFC 8707: resource is null when body has no `resource` param;
+							// undefined passed to policy signals "no resource requested".
 							resource: resource ?? undefined,
 						},
 						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },

@@ -343,14 +343,13 @@ export const createAuthorizationGrant = (
 			// RFC 8707: supplementary resource-indicator policy check at the token
 			// endpoint (separate from the scope-narrowing policy evaluated once at
 			// /authorize per C-2 / D-1 design). Only runs when grantPolicy is wired
-			// AND the resource indicator feature is opted in. Flag-off (default)
-			// leaves resource: undefined so the policy sees no resource constraint —
-			// preserving pre-existing behaviour for all existing deployments.
-			if (deps.grantPolicy) {
-				const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
-				const resource = resourceIndicatorEnabled
-					? extractResourceParam(body as Record<string, unknown>)
-					: null;
+			// AND the resource indicator feature is explicitly opted in
+			// (oauth.resourceIndicator.enabled === true). Flag-off (the default)
+			// skips this block entirely — preserving pre-existing semantics for all
+			// deployments that wire grantPolicy without enabling RFC 8707.
+			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+			if (deps.grantPolicy && resourceIndicatorEnabled) {
+				const resource = extractResourceParam(body as Record<string, unknown>);
 				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
 				try {
 					decision = await deps.grantPolicy.evaluate(
@@ -360,8 +359,8 @@ export const createAuthorizationGrant = (
 							subject: userId,
 							requestedScope:
 								grantedScopes && grantedScopes.length > 0 ? [...grantedScopes] : undefined,
-							// RFC 8707: populated only when oauth.resourceIndicator.enabled
-							// is true; undefined otherwise.
+							// RFC 8707: resource is null when body has no `resource` param;
+							// undefined passed to policy signals "no resource requested".
 							resource: resource ?? undefined,
 						},
 						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
