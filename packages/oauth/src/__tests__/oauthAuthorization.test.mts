@@ -202,12 +202,28 @@ describe("oauthAuthorizationModule — manifest shape", () => {
 		expect(module.contributes?.grants?.refresh_token).toBeDefined();
 	});
 
-	it("contributes client_credentials grant unconditionally (Wave 1 §3.5)", () => {
-		// Built-in: deny-by-absence on per-client allowedGrantTypes is the gate,
-		// not a server-wide enable flag.
+	it("contributes client_credentials grant when enabled (default)", () => {
+		// Built-in, default-enabled via application.conf:
+		//   `oauth.grants.client_credentials.enabled = true`.
+		// Per-client AuthenticatedClient.allowedGrantTypes (§3.4.1 deny-by-absence)
+		// is the authoritative access gate; the server-wide flag exists for
+		// symmetric operational control with authorization_code / refresh_token.
 		const config = makeValidAppConfig();
 		const module = oauthAuthorizationModule({ config });
 		expect(module.contributes?.grants?.client_credentials).toBeDefined();
+	});
+
+	it("omits client_credentials grant when config says enabled=false", () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: { ...base.oauth.grants, client_credentials: { enabled: false } },
+			},
+		};
+		const module = oauthAuthorizationModule({ config });
+		expect(module.contributes?.grants?.client_credentials).toBeUndefined();
 	});
 
 	it("registers exactly the expected grant types (R8 snapshot)", () => {
