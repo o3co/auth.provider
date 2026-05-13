@@ -21,10 +21,12 @@
 		"./testing": {
 			"types": "./dist/testing/index.d.mts",
 			"import": "./dist/testing/index.mjs"
-		}
+		},
+		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
 		"dist",
+		"config",
 		"README.md",
 		"LICENSE"
 	],

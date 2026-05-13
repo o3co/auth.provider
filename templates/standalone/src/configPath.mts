@@ -15,10 +15,24 @@
  */
 
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface ResolvedConfigPaths {
 	readonly applicationConfPath: string;
 	readonly envConfPath: string;
+}
+
+/**
+ * Returns the absolute path to the shipped `reference.conf` inside
+ * `@o3co/auth-provider-core`. This file is the bottom layer of the
+ * 3-tier HOCON precedence chain (reference.conf → application.conf → {env}.conf).
+ *
+ * Uses `import.meta.resolve` (Node.js Stability 1.2 RC) to resolve the
+ * `./reference.conf` package export without depending on the filesystem
+ * layout of `node_modules`.
+ */
+export function resolveLibraryReferenceConfPath(): string {
+	return fileURLToPath(import.meta.resolve("@o3co/auth-provider-core/reference.conf"));
 }
 
 export function resolveConfigPaths(configDirPath: string, env: string): ResolvedConfigPaths {

@@ -18,7 +18,7 @@
  *
  * Schemas in this file describe the SHAPE that is required to be present at
  * the boundary, not the value that is "reasonable to default to." Defaults
- * live in a single place — `packages/core/config/application.conf` — and
+ * live in a single place — `packages/core/config/reference.conf` — and
  * `${?ENV_VAR}` substitutions in that file are the only override surface.
  *
  * Consequence: schema parse rejects bare `{}` inputs. Tests that need a
@@ -26,7 +26,7 @@
  * built-in hocon, or (b) supply a minimal schema-valid baseline (e.g.
  * the `makeValidCoreConfig` factory exposed via the
  * `@o3co/auth-provider-core/testing` subpath, which intentionally
- * diverges from `application.conf` for test ergonomics). See
+ * diverges from `reference.conf` for test ergonomics). See
  * ADR 2026-04-30.
  */
 import { z } from "zod";
@@ -148,7 +148,7 @@ const jwtSchemaBase = z.object({
 	// SF-1 (v0.5.1): when true (default in HOCON), the central JWT verifier
 	// accepts tokens whose `typ` header is absent and emits a deprecation
 	// warning. v0.6+ should set this to false and reject typ-less tokens.
-	// Per the v0.5.1 ADR the literal default lives in `application.conf`.
+	// Per the v0.5.1 ADR the literal default lives in `reference.conf`.
 	legacyTypAccept: z.boolean().optional(),
 });
 
@@ -185,7 +185,7 @@ const refreshTokenSchemaBase = z.object({
 	// pre-fix behavior was implicit `"accept"` (silent fall-through to
 	// success). `"accept"` is intended only for time-bounded migration
 	// windows. Per the v0.5.1 ADR the literal default lives in
-	// `application.conf`, not here.
+	// `reference.conf`, not here.
 	unknownFamilyPolicy: z.enum(["accept", "reject"]),
 	// SF-6 (v0.5.1) / Phase G / M6: policy for refresh tokens lacking
 	// `jti` or `family_id` claims when family rotation is wired. The
@@ -400,7 +400,7 @@ export const fullSectionsSchema = z.object({
 		allowedOrigins: z.array(z.string()),
 	}),
 	// D-2 v2: connection-config for the standalone refresh-token-family
-	// client. Defaults live in HOCON (`application.conf`) per ADR — no
+	// client. Defaults live in HOCON (`reference.conf`) per ADR — no
 	// `.default()` here. Module-internal config (`keyPrefix`, `casRetryLimit`)
 	// is declared on a SEPARATE top-level key below so AppConfigSchema does
 	// not strip it before the boot-time module schema sees it.
@@ -419,7 +419,7 @@ export const fullSectionsSchema = z.object({
 	// SEPARATE rate-limit system from `rateLimit.login.windowMs` (which
 	// governs session-route bruteforce protection via express-rate-limit
 	// in `packages/session/src/routes/Session.mts`). See `RateLimitSpec`
-	// JSDoc + `application.conf` comments for the IH-18 split rationale.
+	// JSDoc + `reference.conf` comments for the IH-18 split rationale.
 	rateLimiter: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
@@ -462,7 +462,7 @@ export const fullSectionsSchema = z.object({
 	// (`REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` / `..._CAS_RETRY_LIMIT`) before
 	// the module's `configSchema` runs at boot time. Without this declaration
 	// Zod strips the unknown top-level key and the env-var overrides silently
-	// no-op. The actual defaults still live in `application.conf`; this entry
+	// no-op. The actual defaults still live in `reference.conf`; this entry
 	// is presence-only (both fields optional). The duplicate-source-of-truth
 	// concern is intentional: the module's `configSchema` enforces shape +
 	// defaults, this schema only ensures the keys survive validation.
@@ -478,7 +478,7 @@ export const fullSectionsSchema = z.object({
 	// (`CLIENT_CODE_KEY_PREFIX` / `CLIENT_CODE_DEFAULT_EXPIRES_IN`) before
 	// the module's `configSchema` runs at boot time. Same gotcha as D-2 v2's
 	// `redisRefreshTokenFamilyStore` block above. Defaults stay in
-	// `application.conf`; this entry is presence-only (both fields optional).
+	// `reference.conf`; this entry is presence-only (both fields optional).
 	redisCodeRepository: z
 		.object({
 			keyPrefix: z.string().optional(),

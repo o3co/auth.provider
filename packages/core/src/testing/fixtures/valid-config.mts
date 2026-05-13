@@ -28,7 +28,7 @@ import type {
  *
  * These factories return the smallest object shape that passes schema
  * validation; they intentionally diverge from `packages/core/config/
- * application.conf` for test ergonomics. The deliberate divergences are:
+ * reference.conf` for test ergonomics. The deliberate divergences are:
  *
  * - `session.storage.type` is `"memory"` (hocon defaults to `"redis"`).
  * - `federations` is `{}` (hocon ships a built-in `federations.google`
@@ -44,10 +44,10 @@ import type {
  *   endpoints' behaviour should add the missing fields per-test.
  *
  * If you need fixture values that match production defaults, parse
- * `application.conf` directly via the test harness.
+ * `reference.conf` directly via the test harness.
  *
  * Background: per ADR 2026-04-30 (schema-strict defaults from hocon),
- * defaults live exclusively in `application.conf`. Tests that previously
+ * defaults live exclusively in `reference.conf`. Tests that previously
  * relied on schema-side `.default(X)` to populate bare `{}` inputs must
  * now supply explicit values; these factories provide the canonical
  * minimal shape so each call site does not re-invent it.
