@@ -39,17 +39,23 @@
  *   - `keyStore`               — JWT signing; consumed by generateToken inside
  *                                the grant handler.
  *
- * `grantPolicy` is declared as OPTIONAL in this module (same as oauthModule /
- * oauthAuthorizationModule). When wired by the consumer, the boot planner
- * injects it into `deps`; when absent, `deps.grantPolicy` is `undefined`.
- * The grant invokes `grantPolicy.evaluate` UNCONDITIONALLY whenever it is
- * wired (rt-style), mirroring `refresh_token`. `oauth.resourceIndicator.enabled`
- * gates ONLY whether `body.resource` is forwarded to the policy; it does NOT
- * gate whether the policy runs. Without `grantPolicy` wired, the grant issues
- * whatever scope the caller requests — operators MUST wire `grantPolicy` to
- * bound scope (CP-18 fail-closed once wired).
+ * `grantPolicy` is declared as OPTIONAL **in the dependency type signature** so
+ * the manifest can be wired into compositions where other (non-webauthn) modules
+ * may run without policy. But the **grant factory enforces it at boot time**:
+ * if `webauthnModule` is wired without a `grantPolicy` slot, the factory throws
+ * a clear error (Wave 1 post-merge audit H-2 fail-fast). Unlike `client_credentials`
+ * (which falls back to `client.allowedScopes`) and `authorization_code` (narrowed
+ * at /authorize), the webauthn grant has NO library-side scope ceiling — the
+ * passkey is the authentication event, not a scope authorization. Without
+ * `grantPolicy`, an attacker can request any scope and receive it verbatim.
  *
- * Cross-refs: Plan T31 / spec §2.4.1 / PR #172 C1 security fix / Codex Round 3 P1
+ * When wired, the grant invokes `grantPolicy.evaluate` UNCONDITIONALLY (rt-style),
+ * mirroring `refresh_token`. `oauth.resourceIndicator.enabled` gates ONLY whether
+ * `body.resource` is forwarded to the policy; it does NOT gate whether the policy
+ * runs.
+ *
+ * Cross-refs: Plan T31 / spec §2.4.1 / PR #172 C1 security fix / Codex Round 3 P1 /
+ *             Wave 1 post-merge audit H-2
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
@@ -102,8 +108,25 @@ export const webauthnModule = defineModule<
 	],
 	contributes: {
 		grants: {
-			[WEBAUTHN_GRANT_TYPE]: (deps) =>
-				createWebAuthnGrant({
+			[WEBAUTHN_GRANT_TYPE]: (deps) => {
+				// Wave 1 post-merge audit H-2: fail-fast at boot if grantPolicy is
+				// not wired. The webauthn grant has no library-side scope ceiling
+				// (no client → no client.allowedScopes); grantPolicy is the sole
+				// scope gate. Booting without it silently accepts unbounded scope.
+				if (!deps.grantPolicy) {
+					throw new Error(
+						"webauthn grant requires `grantPolicy` to be wired. " +
+							"Unlike client_credentials (client.allowedScopes ceiling) and " +
+							"authorization_code (narrowed at /authorize), the webauthn grant " +
+							"has no library-side scope ceiling — without grantPolicy the grant " +
+							"issues whatever scope the caller requests. Wire a GrantPolicyHook " +
+							"via @o3co/auth-provider-policy or your own implementation. If you " +
+							"intentionally accept unbounded scope (NOT recommended for " +
+							"production), wire a no-op policy returning { outcome: 'permit' }. " +
+							"See packages/webauthn/README.md SECURITY — scope authorization.",
+					);
+				}
+				return createWebAuthnGrant({
 					config: deps.config,
 					keyStore: deps.keyStore,
 					webauthnCredentialStore: deps.webauthnCredentialStore,
@@ -116,7 +139,8 @@ export const webauthnModule = defineModule<
 						// Cross-refs: Codex Round 2 P1-1
 						userVerification: deps.webauthnConfig.userVerification,
 					},
-				}),
+				});
+			},
 		},
 		routes: [
 			// POST /oauth/webauthn/registration/options
