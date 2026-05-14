@@ -16,4 +16,6 @@
 
 // @o3co/auth-provider-webauthn
 // Wave 1 — Passkey-native primary-login first slice.
-export {}; // populated in subsequent tasks
+export { type WebAuthnConfig, webauthnConfigSchema } from "./config.mjs";
+export { WEBAUTHN_GRANT_TYPE } from "./grant.mjs";
+export { webauthnModule } from "./module.mjs";
