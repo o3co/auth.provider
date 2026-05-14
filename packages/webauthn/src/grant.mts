@@ -271,9 +271,11 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// resourceIndicator flag gates only the resource field.
 			// CP-18 fail-closed — same rationale as clientCredentials.mts.
 			//
-			// Documented gap (intended Wave 1 behavior): when grantPolicy is NOT wired
-			// AND the caller requests scope, the scope is issued as-is (no library-side
-			// ceiling). Deployments wanting scope authorization MUST wire grantPolicy.
+			// H-2 invariant: webauthnModule's grant factory throws at boot when
+			// grantPolicy is unwired, so the `deps.grantPolicy` check below is
+			// effectively always true under the module wiring. Tests that drive
+			// createWebAuthnGrant directly may still pass deps without grantPolicy;
+			// the check keeps the unit-test surface usable.
 			// ------------------------------------------------------------------
 			const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
 

@@ -76,4 +76,49 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 			}).success,
 		).toBe(false);
 	});
+
+	// Wave 1 post-merge audit M-1 + follow-up review I2:
+	// URL-parse-based origin gate must reject textual-prefix bypasses.
+	describe("origin secure-context gate (M-1 / I2)", () => {
+		const okBase = {
+			rpId: "x",
+			rpName: "x",
+			attestationPreference: "none" as const,
+			userVerification: "preferred" as const,
+			challengeTtlMs: 120_000,
+		};
+		const accepts = [
+			"https://example.com",
+			"https://app.example.com:8443",
+			"http://localhost",
+			"http://localhost:3000",
+			"http://127.0.0.1",
+			"http://127.0.0.1:8080",
+			"http://[::1]",
+			"http://[::1]:9000",
+		];
+		const rejects = [
+			"http://example.com", // non-loopback http
+			"file:///etc/passwd",
+			"javascript:alert(1)",
+			"https://*.example.com", // wildcard
+			"http://127.0.0.1.evil.com", // hostname-prefix bypass
+			"http://127.0.0.1@evil.com", // userinfo bypass (loopback in user)
+			"http://[::1]@evil.com", // userinfo bypass (ipv6 in user)
+			"https://user:pass@example.com", // userinfo present
+			"http://localhost@evil.com", // userinfo bypass (loopback hostname in user)
+		];
+
+		for (const origin of accepts) {
+			it(`accepts ${origin}`, () => {
+				expect(webauthnConfigSchema.safeParse({ ...okBase, origin: [origin] }).success).toBe(true);
+			});
+		}
+
+		for (const origin of rejects) {
+			it(`rejects ${origin}`, () => {
+				expect(webauthnConfigSchema.safeParse({ ...okBase, origin: [origin] }).success).toBe(false);
+			});
+		}
+	});
 });
