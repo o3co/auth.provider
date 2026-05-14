@@ -131,10 +131,6 @@ const happyPathModules = [
 // Tests
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe("webauthnModule boot integration (Wave 1 T31)", () => {
 	it("boots successfully when webauthnConfig is provided and materialises the webauthn grant", async () => {
 		const handle = await createApp({
@@ -269,8 +265,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 			oauth: {
 				...(coreConfig as unknown as Record<string, unknown>).oauth,
 				jwt: {
-					...((coreConfig as unknown as Record<string, Record<string, unknown>>).oauth?.jwt ??
-						{}),
+					...((coreConfig as unknown as Record<string, Record<string, unknown>>).oauth?.jwt ?? {}),
 					issuer: "https://example.com",
 				},
 				resourceIndicator: { enabled: true },
@@ -301,9 +296,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		const grantHandlerResolver = (handle.components as Record<string, unknown>)
 			.grantHandlerResolver as GrantHandlerResolver | undefined;
 		expect(grantHandlerResolver).toBeDefined();
-		const grantHandler = grantHandlerResolver?.get(WEBAUTHN_GRANT_TYPE) as
-			| GrantHandler
-			| undefined;
+		const grantHandler = grantHandlerResolver?.get(WEBAUTHN_GRANT_TYPE) as GrantHandler | undefined;
 		expect(grantHandler).toBeDefined();
 		if (!grantHandler) throw new Error("no grant handler");
 
