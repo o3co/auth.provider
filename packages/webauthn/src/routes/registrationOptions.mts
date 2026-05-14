@@ -80,6 +80,23 @@ export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps):
 		// userId is always taken from the authenticated session — request body cannot
 		// override (prevents victim-targeted enrollment per spec §2.4).
 		const { userId } = subject;
+
+		// Wave 1 post-merge audit M-2: enforce WebAuthn §5.4.3 user-handle constraints
+		// at the boundary. WebAuthn mandates a 1..64-byte opaque user-handle; longer
+		// values are rejected by authenticators at runtime, and consumer misuse
+		// (e.g. passing `req.user.email` here) syncs PII to the authenticator. The
+		// interface JSDoc already documents this MUST, but the library now enforces
+		// it so misconfigurations fail loudly with a 500 (consumer bug, not a 400).
+		const userIdByteLength = new TextEncoder().encode(userId).length;
+		if (userIdByteLength < 1 || userIdByteLength > 64) {
+			res.status(500).json({
+				error: "server_error",
+				error_description:
+					"webauthnSubject.userId must be 1-64 bytes per WebAuthn §5.4.3 (opaque user-handle)",
+			});
+			return;
+		}
+
 		const userName = subject.userName ?? userId;
 		const userDisplayName = subject.userDisplayName ?? userName;
 

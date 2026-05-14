@@ -349,6 +349,14 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					// Fail-closed audience validation: when a client is present, policy may
 					// only narrow to audiences already in client.allowedAudiences. When no
 					// client is authenticated there is no allowedAudiences ceiling — skip.
+					//
+					// TRUST ASYMMETRY (Wave 1 post-merge audit M-4): in client-less mode,
+					// `grantPolicy` is the SOLE audience authority — policy can mint a token
+					// for ANY audience it returns, with no library-side ceiling. This is
+					// acceptable per spec §5.6 Stage 1 staging (Stage 2 will add library-layer
+					// audience-binding enforcement per RFC 8707 — issue #173). Operators wiring
+					// webauthn without client-auth MUST therefore trust `grantPolicy` end-to-end
+					// for audience authorization.
 					const client = ctx.authenticatedClient;
 					if (client) {
 						const allowedAudSet = new Set(client.allowedAudiences ?? []);
@@ -380,18 +388,23 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
-			const accessToken = await generateToken(
-				{},
-				{
-					expiresIn: config.oauth.accessToken.expiresIn,
-					keyStore,
-					issuer,
-					audience,
-					subject: credential.userId,
-					scope: scopeClaim,
-					tokenType: "at+jwt",
-				},
-			);
+			// Mint client_id + authorizedParty when client authenticated so the AT is
+			// revocable via /oauth/revoke (Wave 1 post-merge security audit H-1: the
+			// revoke endpoint resolves the token's client via `client_id ?? azp ?? aud`
+			// and requires it match the revoking client. Empty data + non-clientId aud
+			// silently caused revoke 200 + no denylist insertion).
+			// Unauthenticated client mode (passkey IS the auth event) remains unrevocable
+			// by /oauth/revoke per RFC 7009 — documented as a known limitation.
+			const accessToken = await generateToken(client ? { client_id: client.clientId } : {}, {
+				expiresIn: config.oauth.accessToken.expiresIn,
+				keyStore,
+				issuer,
+				audience,
+				subject: credential.userId,
+				...(client ? { authorizedParty: client.clientId } : {}),
+				scope: scopeClaim,
+				tokenType: "at+jwt",
+			});
 
 			return {
 				result: {

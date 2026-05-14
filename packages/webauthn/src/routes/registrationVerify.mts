@@ -124,6 +124,20 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		// override (prevents victim-targeted enrollment per spec §2.4).
 		const { userId } = subject;
 
+		// Wave 1 post-merge audit M-2: enforce WebAuthn §5.4.3 user-handle constraints
+		// (1..64 bytes opaque). Defense-in-depth: registrationOptions enforces the same
+		// invariant, but if a consumer skips that step (custom verify flow), this gate
+		// still catches the misconfig.
+		const userIdByteLength = new TextEncoder().encode(userId).length;
+		if (userIdByteLength < 1 || userIdByteLength > 64) {
+			res.status(500).json({
+				error: "server_error",
+				error_description:
+					"webauthnSubject.userId must be 1-64 bytes per WebAuthn §5.4.3 (opaque user-handle)",
+			});
+			return;
+		}
+
 		// Validate request body (nickname + response shape; userId in body is ignored).
 		const parsed = bodySchema.safeParse(req.body);
 		if (!parsed.success) {

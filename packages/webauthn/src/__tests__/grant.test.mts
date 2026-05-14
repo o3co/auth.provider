@@ -396,6 +396,49 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 		expect(payload.sub).toBe(USER_ID);
 	});
 
+	// Post-merge audit H-1: when client authenticated, the AT carries client_id +
+	// azp so /oauth/revoke can resolve ownership (otherwise revoke silently no-ops
+	// per PR #165 fail-closed ownership check).
+	it("H-1 regression: when ctx.authenticatedClient is set, AT carries client_id + azp claims (revocable)", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const deps = makeBaseDeps(store);
+		const handler = createWebAuthnGrant(deps);
+		const client = {
+			clientId: "test-client-id",
+			allowedGrantTypes: [WEBAUTHN_GRANT_TYPE],
+			allowedScopes: [],
+			allowedAudiences: [],
+		} as unknown as NonNullable<GrantContext["authenticatedClient"]>;
+
+		const ctx = makeCtx({ assertion: makeAssertionResponse() }, client);
+		const { result } = await handler.handle(ctx);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		const payload = decodeJwtPayload(result.tokens.access_token) as Record<string, unknown>;
+		expect(payload.client_id).toBe("test-client-id");
+		expect(payload.azp).toBe("test-client-id");
+	});
+
+	it("H-1 regression: when ctx.authenticatedClient is null, AT has NO client_id / azp (documented unrevocable mode)", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const deps = makeBaseDeps(store);
+		const handler = createWebAuthnGrant(deps);
+		const { result } = await handler.handle(makeCtx({ assertion: makeAssertionResponse() }));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		const payload = decodeJwtPayload(result.tokens.access_token) as Record<string, unknown>;
+		expect(payload.client_id).toBeUndefined();
+		expect(payload.azp).toBeUndefined();
+	});
+
 	it("updates the stored signCount after successful verification", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential({ signCount: 5 }));

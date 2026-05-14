@@ -52,8 +52,39 @@ export const webauthnConfigSchema = z.object({
 	 * Allowed HTTPS origin(s) for registration / authentication ceremonies.
 	 * At least one entry required. Multiple entries support sub-domain or
 	 * multi-app deployments sharing a single RP ID.
+	 *
+	 * Each origin MUST be a literal origin (scheme + host + optional port) —
+	 * `https://example.com`, `https://app.example.com`, `http://localhost:3000`.
+	 * Wildcards are NOT allowed: SimpleWebAuthn does exact-string-match against
+	 * the authenticator's clientDataJSON, so `https://*.example.com` accepts at
+	 * parse time but breaks every ceremony at runtime. Non-https schemes other
+	 * than `http://localhost` are rejected because passkeys are not transmittable
+	 * over insecure schemes (W3C WebAuthn §5.1.3 + browser policy).
+	 *
+	 * Cross-refs: Wave 1 post-merge audit M-1.
 	 */
-	origin: z.array(z.string().url()).min(1),
+	origin: z
+		.array(
+			z
+				.string()
+				.url()
+				.refine((u) => !u.includes("*"), {
+					message: "origin must not contain wildcards — SimpleWebAuthn does exact-match only",
+				})
+				.refine(
+					(u) =>
+						u.startsWith("https://") ||
+						u === "http://localhost" ||
+						u.startsWith("http://localhost:") ||
+						u.startsWith("http://127.0.0.1") ||
+						u.startsWith("http://[::1]"),
+					{
+						message:
+							"origin must be https:// or http://localhost / http://127.0.0.1 / http://[::1] (W3C WebAuthn secure-origin policy)",
+					},
+				),
+		)
+		.min(1),
 	/**
 	 * Challenge time-to-live in milliseconds.
 	 * Reference default (S11): 120_000 ms — mobile-network safe baseline.

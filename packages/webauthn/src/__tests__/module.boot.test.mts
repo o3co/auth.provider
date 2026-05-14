@@ -61,7 +61,15 @@ import { webauthnModule } from "../module.mjs";
 // Shared boot components
 // ---------------------------------------------------------------------------
 
-const coreConfig = makeValidCoreConfig();
+const coreConfig = {
+	...makeValidCoreConfig(),
+	oauth: {
+		...makeValidCoreConfig().oauth,
+		// CP-20 invariant: a non-empty issuer is required when grantPolicy is wired.
+		// makeValidCoreConfig() omits it; we set it here for the H-2-mandated policy wiring.
+		jwt: { ...makeValidCoreConfig().oauth.jwt, issuer: "https://test.example" },
+	},
+};
 
 /** Minimal bootstrap: config + pathResolver + keyStore. */
 const minBoot = {
@@ -91,6 +99,19 @@ const webauthnConfigModule = defineModule({
 	name: "test:webauthn-config-bootstrap",
 	provides: {
 		webauthnConfig: () => stubWebAuthnConfig,
+	},
+});
+
+/** Bootstrap module: provides a permit-all GrantPolicy. Required by webauthnModule's
+ * H-2 fail-fast invariant. Test fixtures wire this; production deployments wire a
+ * real GrantPolicyHook from @o3co/auth-provider-policy. */
+const noopGrantPolicyModule = defineModule({
+	name: "test:webauthn-noop-grant-policy",
+	provides: {
+		grantPolicy: (): GrantPolicyHook => ({
+			kind: "test-noop",
+			evaluate: async () => ({ outcome: "allow" }) as const,
+		}),
 	},
 });
 
@@ -126,6 +147,7 @@ const happyPathModules = [
 	memoryReplaySeenSetModule,
 	defaultChallengeCeremonyModule,
 	memoryWebAuthnCredentialStoreModule,
+	noopGrantPolicyModule,
 	activatorModule,
 ];
 
@@ -203,6 +225,38 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 			reason: "missing-required-component",
 			details: { missingKey: "webauthnConfig" },
 		} satisfies Partial<InstanceType<typeof BootError>>);
+	});
+
+	/**
+	 * H-2 regression — webauthn grant requires grantPolicy at boot.
+	 *
+	 * Wave 1 post-merge security audit found that the webauthn grant has no
+	 * library-side scope ceiling (unlike client_credentials which falls back to
+	 * `client.allowedScopes`). Without grantPolicy wired, the grant issues
+	 * whatever scope the caller requests. README documents "MUST wire grantPolicy"
+	 * but nothing enforced it; this test asserts the new fail-fast at boot.
+	 *
+	 * Cross-refs: post-merge security audit H-2 / [[feedback_pre_merge_final_audit_gate]]
+	 */
+	it("H-2 fail-fast: boot throws when webauthnModule wired without grantPolicy", async () => {
+		// All deps present EXCEPT grantPolicy.
+		const modulesWithoutPolicy = [
+			webauthnModule,
+			webauthnConfigModule,
+			keyStoreModule,
+			memoryChallengeStoreModule,
+			memoryReplaySeenSetModule,
+			defaultChallengeCeremonyModule,
+			memoryWebAuthnCredentialStoreModule,
+			activatorModule,
+		];
+
+		await expect(
+			createApp({
+				modules: modulesWithoutPolicy,
+				bootstrapComponents: minBoot,
+			}),
+		).rejects.toThrow(/webauthn grant requires `grantPolicy`/);
 	});
 
 	/**

@@ -78,15 +78,19 @@ await store.registerCredential({ userId: opaqueUserId, /* ... */ });
 
 The bootstrap module's `webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
 
+The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userId` (WebAuthn §5.4.3 user-handle constraint). Requests with a userId outside this range fail with 500 `server_error` — this is a consumer-misconfiguration check, not a runtime user error.
+
 ## SECURITY — scope authorization
 
 The webauthn grant has **no library-side `allowedScopes` ceiling**. Client credentials and authorization code grants bind issued scope to `client.allowedScopes` at the handler level; webauthn cannot, because the passkey is the authentication event, not a scope authorization token.
 
 `grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy, per Stage 1 RFC 8707 plumbing). This mirrors the `refresh_token` grant pattern.
 
-Deployments wanting scope authorization **MUST wire `grantPolicy`**. Without it, the grant issues whatever scope the caller requests.
+**`grantPolicy` is REQUIRED at boot.** As of the Wave 1 post-merge security fix, wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "permit" }` — making the choice visible in the composition root.
 
-When `grantPolicy` is not wired and scope is requested, the token is issued as-is. This is intentional Wave 1 behavior and is documented here; a future Wave may introduce a configurable deny-by-default for unwired scope.
+## SECURITY — token revocation limitations
+
+Webauthn access tokens are revocable via `POST /oauth/revoke` ONLY when the grant was invoked with an authenticated client. Without client auth, the AT carries no `client_id` / `azp` claim — the revoke endpoint's ownership check (`client_id ?? azp ?? aud` must match the revoking client) cannot match, and the request returns 200 with no denylist insertion (RFC 7009 fail-closed). Operators relying on AT revocation MUST require client auth on the webauthn grant path (e.g. wire `clientAuthMw` before the grant handler).
 
 ## SECURITY — registration authorization strength
 
