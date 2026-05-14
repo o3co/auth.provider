@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-This release ships **Wave 1** of the auth-provider passkey-native auth toolkit roadmap: a new `@o3co/auth-provider-webauthn` package, the `client_credentials` grant, RFC 7009 Token Revocation, RFC 8707 Stage 1 resource-indicator plumbing, and the library `reference.conf` shipping pattern.
+## [0.7.0] - 2026-05-15
+
+v0.7.0 ships **Wave 1** of the auth-provider passkey-native auth toolkit roadmap: a new `@o3co/auth-provider-webauthn` package, the `client_credentials` grant, RFC 7009 Token Revocation, RFC 8707 Stage 1 resource-indicator plumbing, and the library `reference.conf` shipping pattern.
 
 ### Added
 
