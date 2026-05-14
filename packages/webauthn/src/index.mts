@@ -19,3 +19,6 @@
 export { type WebAuthnConfig, webauthnConfigSchema } from "./config.mjs";
 export { WEBAUTHN_GRANT_TYPE } from "./grant.mjs";
 export { webauthnModule } from "./module.mjs";
+// WebAuthnSubject + Express Request augmentation — consumers importing this
+// package gain the augmentation automatically via declaration merging.
+export type { WebAuthnSubject } from "./request.mjs";

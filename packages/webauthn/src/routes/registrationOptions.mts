@@ -42,40 +42,10 @@ import type { Request, RequestHandler, Response } from "express";
 import type { WebAuthnConfig } from "../config.mjs";
 import { generateRegistrationOptionsForUser } from "../internal/options.mjs";
 
-// ---------------------------------------------------------------------------
-// Express namespace augmentation
-// ---------------------------------------------------------------------------
-//
-// `req.webauthnSubject` is set by upstream session / bearer auth middleware
-// before any webauthn route is reached. This follows the same declaration-merge
-// pattern as `req.oauthClient` in packages/oauth/src/middleware/clientAuth.mts.
-// Uses the global Express namespace which is the stable augmentation target for
-// Express v4 and v5.
-
-/**
- * Authenticated subject required by WebAuthn routes.
- *
- * Set by upstream auth middleware (session cookie or Bearer token) before
- * any webauthn route is reached. Absent when the request has not been
- * authenticated.
- */
-export interface WebAuthnSubject {
-	readonly userId: string;
-	readonly userName?: string;
-	readonly userDisplayName?: string;
-}
-
-declare global {
-	namespace Express {
-		interface Request {
-			/**
-			 * The authenticated WebAuthn subject, set by upstream session / bearer
-			 * middleware. Absent when the request has not been authenticated.
-			 */
-			webauthnSubject?: WebAuthnSubject;
-		}
-	}
-}
+// WebAuthnSubject type + Express Request augmentation live in request.mts and
+// are barrel-exported. Re-export here so importers of this internal file still
+// see the type without a second hop.
+export type { WebAuthnSubject } from "../request.mjs";
 
 // ---------------------------------------------------------------------------
 // Handler deps
