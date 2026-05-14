@@ -32,11 +32,12 @@
  *   - Optional userId body field: if provided, allowCredentials is populated from
  *     the credential store; if absent, the discoverable-credentials flow is used
  *     (empty allowCredentials → authenticator prompts the user to pick a passkey).
- *   - Existence-leak mitigation: when userId is provided but has no registered
- *     credentials, the response is identical to the discoverable-flow response —
- *     no 404 or "user not found" is returned. This prevents timing-based user
- *     enumeration (attacker cannot distinguish "user exists, no passkeys" from
- *     "user does not exist").
+ *   - Existence-leak mitigation: same 200 status regardless of whether userId
+ *     maps to a real user or no user at all — no 404 or error-shape leak.
+ *     Note: when userId IS provided AND has credentials, the allowCredentials
+ *     array is non-empty, so the response shape differs from the no-credentials
+ *     case. Full enumeration resistance requires the discoverable flow (omit
+ *     userId) or consumer rate-limiting (S10/S15).
  *
  * NOT barrel-exported from the package index — internal to the webauthn module
  * until Task 31 wires the router.
@@ -101,10 +102,12 @@ export function createAuthenticationOptionsHandler(
 		const { userId } = parsed.data;
 
 		// Resolve allowCredentials from the credential store when userId is given.
-		// Existence-leak mitigation: respond identically whether userId maps to a
-		// real user with credentials or not — no 404, no "user not found" error.
-		// An attacker cannot distinguish "user exists, no passkeys" from "user does
-		// not exist" via this endpoint's response shape or timing.
+		// Existence-leak mitigation: same 200 and no error-shape leak regardless
+		// of whether userId maps to a real user or not.
+		// Limitation: when userId IS provided AND has credentials, allowCredentials
+		// is non-empty — distinguishable from the no-credentials case by shape.
+		// Full enumeration resistance: use discoverable flow (omit userId) or apply
+		// rate-limiting (S10/S15) at the module-wiring layer.
 		const allowCredentials =
 			userId !== undefined ? await deps.credentialStore.listByUserId(userId) : [];
 
