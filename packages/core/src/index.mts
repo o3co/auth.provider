@@ -419,3 +419,14 @@ export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
 // `./security/*` subpath — Codex Delta 1 confirmed the subpath approach
 // would fail at runtime under Node's exports gating.
 export { constantTimeStringEqual } from "./security/timingSafe.mjs";
+
+// ===========================================================================
+// Wave 1 — WebAuthnCredential + WebAuthnCredentialStore (spec §2.3.1)
+// ===========================================================================
+
+export type {
+	AuthenticatorTransport,
+	WebAuthnCredential,
+	WebAuthnCredentialStore,
+	WebAuthnCredentialStoreFactory,
+} from "./webauthn-credentials/types.mjs";

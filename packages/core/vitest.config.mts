@@ -25,6 +25,8 @@ export default defineConfig({
 				"src/__tests__/naming-aliases.test.mts",
 				// AS-M1 contributes-map concrete-type substitution assertions.
 				"src/__tests__/contributes-map-substitution.test.mts",
+				// Wave 1 §2.3.1 — WebAuthnCredential + WebAuthnCredentialStore type contract.
+				"src/webauthn-credentials/__tests__/types.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},
