@@ -156,6 +156,7 @@ describe("scaffold", () => {
 			"@o3co/auth-provider-oauth-token-exchange": "../packages/oauth-token-exchange/package.json",
 			"@o3co/auth-provider-redis": "../packages/redis/package.json",
 			"@o3co/auth-provider-session": "../packages/session/package.json",
+			"@o3co/auth-provider-webauthn": "../packages/webauthn/package.json",
 		};
 
 		for (const [name, pkgPath] of Object.entries(expectedPackages)) {
