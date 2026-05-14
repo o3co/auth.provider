@@ -39,14 +39,13 @@
  *   - `keyStore`               — JWT signing; consumed by generateToken inside
  *                                the grant handler.
  *
- * grantPolicy is intentionally absent from `requires`. Per the grant's CP-18
- * fail-closed pattern: grantPolicy is an OPTIONAL dep read directly from
- * GrantDependencies by createWebAuthnGrant — the gate `if (deps.grantPolicy &&
- * resourceIndicatorEnabled)` handles absent policy without a default wrapper.
- * The module therefore does not declare it — the grant factory accesses it
- * via GrantDependencies which already marks it optional.
+ * `grantPolicy` is declared as OPTIONAL in this module (same as oauthModule /
+ * oauthAuthorizationModule). When wired by the consumer, the boot planner
+ * injects it into `deps`; when absent, `deps.grantPolicy` is `undefined`.
+ * The grant's gate `if (deps.grantPolicy && resourceIndicatorEnabled)` handles
+ * both cases without a default wrapper (CP-18 fail-closed pattern).
  *
- * Cross-refs: Plan T31 / spec §2.4.1
+ * Cross-refs: Plan T31 / spec §2.4.1 / PR #172 C1 security fix
  */
 
 import { defineModule } from "@o3co/auth-provider-core";
@@ -83,7 +82,7 @@ export const webauthnModule = defineModule<
 	| "challengeCeremony"
 	| "config"
 	| "keyStore",
-	never
+	"grantPolicy"
 >({
 	name: "webauthn",
 	requires: [
@@ -94,6 +93,9 @@ export const webauthnModule = defineModule<
 		"config",
 		"keyStore",
 	],
+	optional: [
+		"grantPolicy", // CP-18: gates the webauthn grant when resourceIndicator.enabled; absent = allow-all
+	],
 	contributes: {
 		grants: {
 			[WEBAUTHN_GRANT_TYPE]: (deps) =>
@@ -102,6 +104,7 @@ export const webauthnModule = defineModule<
 					keyStore: deps.keyStore,
 					webauthnCredentialStore: deps.webauthnCredentialStore,
 					challengeCeremony: deps.challengeCeremony,
+					grantPolicy: deps.grantPolicy,
 					webauthnConfig: {
 						rpId: deps.webauthnConfig.rpId,
 						origin: deps.webauthnConfig.origin,
