@@ -116,8 +116,14 @@ export const webauthnModule = defineModule<
 		},
 		routes: [
 			// POST /oauth/webauthn/registration/options
+			// express.json() is installed at router level, not at the host app level —
+			// createApp installs no global JSON parser (each contributed router installs
+			// its own, per the oauthModule routes.mts:215-216 pattern).
+			// 100kb limit: realistic WebAuthn blobs are under 10KB; 100kb caps DoS.
+			// Cross-refs: Codex Round 4 P1
 			(deps) => {
 				const router = express.Router();
+				router.use(express.json({ limit: "100kb" }));
 				router.post(
 					"/",
 					createRegistrationOptionsHandler({
@@ -133,8 +139,10 @@ export const webauthnModule = defineModule<
 				};
 			},
 			// POST /oauth/webauthn/registration/verify
+			// express.json() at router level — same rationale as registration/options above.
 			(deps) => {
 				const router = express.Router();
+				router.use(express.json({ limit: "100kb" }));
 				router.post(
 					"/",
 					createRegistrationVerifyHandler({
@@ -151,8 +159,10 @@ export const webauthnModule = defineModule<
 			},
 			// POST /oauth/webauthn/authentication/options
 			// Rate-limit is composed externally — no rateLimiter arg on handler (T29 / S10/S15).
+			// express.json() at router level — same rationale as above.
 			(deps) => {
 				const router = express.Router();
+				router.use(express.json({ limit: "100kb" }));
 				router.post(
 					"/",
 					createAuthenticationOptionsHandler({

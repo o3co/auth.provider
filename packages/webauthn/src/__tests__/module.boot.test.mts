@@ -50,6 +50,8 @@ import {
 	memoryWebAuthnCredentialStoreModule,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import express from "express";
+import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import type { WebAuthnConfig } from "../config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
@@ -375,6 +377,111 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 
 		// evaluateSpy NOT called here because credential lookup fails first.
 		// The unit-level policy-gate invocation tests live in grant.test.mts.
+
+		await handle.dispose();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// P1 body-parser integration (Codex Round 4 P1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Regression test for the missing body parser on webauthn contributed routes.
+ *
+ * The `createApp` boot pipeline mounts contributed routes via `handle.router`.
+ * If the contributed router does NOT install `express.json()` before its POST
+ * handler, then `req.body` is `undefined` in production (createApp installs no
+ * global JSON parser — each contributed router installs its own, per the OAuth
+ * routes pattern in routes.mts:215-216).
+ *
+ * The test mounts `handle.router` on a bare express app (no global JSON parser)
+ * and POSTs JSON to the authentication/options endpoint. Without the fix, zod
+ * parses `undefined` body and returns `invalid_request` (400). With the fix,
+ * the router's own parser runs first and `req.body` is populated, so the handler
+ * proceeds past body validation and returns 200 with challenge options.
+ *
+ * authentication/options is chosen because it is the only webauthn POST route
+ * that is unauthenticated (no req.webauthnSubject required), making the test
+ * self-contained without needing a session middleware stub in the app.
+ *
+ * Cross-refs: Codex Round 4 P1
+ */
+describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
+	it("POST /oauth/webauthn/authentication/options parses JSON body via router-level parser (no global parser on host app)", async () => {
+		const handle = await createApp({
+			modules: happyPathModules,
+			bootstrapComponents: minBoot,
+		});
+
+		// Mount handle.router on a bare app — NO global express.json() installed.
+		// This replicates the real production scenario where the consumer's
+		// composition root does `app.use(handle.router)` without a global JSON parser.
+		const app = express();
+		app.use(handle.router);
+
+		// POST JSON body — the router-level parser in the contributed route must
+		// parse it. Without the fix, req.body === undefined and zod returns 400
+		// invalid_request. With the fix, the handler proceeds and returns 200.
+		const res = await supertest(app)
+			.post("/oauth/webauthn/authentication/options")
+			.set("Content-Type", "application/json")
+			.send(JSON.stringify({}));
+
+		// authentication/options returns 200 with challenge options when body is parsed.
+		// If body parser is missing, zod.safeParse(undefined) falls back to `{}` via
+		// `req.body ?? {}` — but registration/verify does NOT use `?? {}`, so that
+		// endpoint would 400. Assert 200 here to confirm the parser runs end-to-end.
+		expect(res.status).toBe(200);
+		expect(res.body).toHaveProperty("challenge");
+
+		await handle.dispose();
+	});
+
+	it("POST /oauth/webauthn/registration/verify returns non-401 body-parse error when JSON body is sent without global parser (router must own the parser)", async () => {
+		const handle = await createApp({
+			modules: happyPathModules,
+			bootstrapComponents: minBoot,
+		});
+
+		// Bare app — no global JSON parser.
+		const app = express();
+		// Inject webauthnSubject upstream so the 401 gate passes.
+		app.use((req, _res, next) => {
+			req.webauthnSubject = { userId: "test-user" };
+			next();
+		});
+		app.use(handle.router);
+
+		// POST a valid-shape JSON body. Without fix: req.body === undefined →
+		// bodySchema.safeParse(undefined) fails → 400 invalid_request (body-related).
+		// With fix: body is parsed → handler proceeds past body validation →
+		// fails at challenge_invalid (no challenge was issued) — still 400, but
+		// with error: "challenge_invalid", NOT "invalid_request".
+		const clientDataJSON = Buffer.from(
+			JSON.stringify({ type: "webauthn.create", challenge: "not-issued", origin: "https://example.com" }),
+		).toString("base64url");
+
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/verify")
+			.set("Content-Type", "application/json")
+			.send(
+				JSON.stringify({
+					response: {
+						id: "cred-id",
+						rawId: "cred-id",
+						response: { clientDataJSON, attestationObject: "stub" },
+						clientExtensionResults: {},
+						type: "public-key",
+					},
+				}),
+			);
+
+		// With fix: handler parses body, challenge lookup fails → 400 challenge_invalid.
+		// Without fix: req.body === undefined → 400 invalid_request (body parse failure).
+		// The discriminator: body.error must be "challenge_invalid", not "invalid_request".
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("challenge_invalid");
 
 		await handle.dispose();
 	});
