@@ -1,0 +1,60 @@
+{
+	"name": "@o3co/auth-provider-webauthn",
+	"description": "WebAuthn first slice for @o3co/auth-provider — primary-login passkeys, AS-scope only.",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=18.19.0"
+	},
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"CHANGELOG.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/webauthn"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@simplewebauthn/server": "13.1.1",
+		"zod": "^4.3.6"
+	},
+	"peerDependencies": {
+		"express": "^5.0.0"
+	},
+	"devDependencies": {
+		"@types/express": "^5.0.6",
+		"@types/supertest": "^7.2.0",
+		"express": "^5.2.1",
+		"supertest": "^7.2.2",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.6",
+		"@vitest/coverage-v8": "^4.1.6"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
