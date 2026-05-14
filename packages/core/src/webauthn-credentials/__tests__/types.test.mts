@@ -22,7 +22,7 @@ import type {
 
 describe("WebAuthnCredentialStore types (spec §2.3.1)", () => {
 	it("declares the contract operations", () => {
-		expectTypeOf<WebAuthnCredentialStore["put"]>().toEqualTypeOf<
+		expectTypeOf<WebAuthnCredentialStore["registerCredential"]>().toEqualTypeOf<
 			(record: WebAuthnCredential) => Promise<void>
 		>();
 		expectTypeOf<WebAuthnCredentialStore["findByCredentialId"]>().toEqualTypeOf<

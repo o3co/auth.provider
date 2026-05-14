@@ -13,15 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { WebAuthnCredentialStorageError } from "./errors.mjs";
 import type { WebAuthnCredential, WebAuthnCredentialStore } from "./types.mjs";
 
 /**
  * In-process Map-backed WebAuthnCredentialStore.
  *
- * `updateSignCount` is an atomic compare-and-set (CAS) under single-threaded
- * async runtime — no concurrent Map mutation is possible between the read and
- * write. Production deployments requiring multi-process or distributed
- * deployments should use a real backing store (e.g. a Redis adapter).
+ * Atomicity argument (single-process, single-event-loop):
+ *   - `registerCredential`: the Map.has check and Map.set are SYNCHRONOUS —
+ *     no `await` between them. Node's microtask queue cannot interleave
+ *     non-async work, so concurrent callers do not race.
+ *   - `updateSignCount` is an atomic compare-and-set (CAS) under the same
+ *     guarantee.
+ *   - Production deployments requiring multi-process or distributed
+ *     deployments should use a real backing store (e.g. a Redis adapter).
  *
  * `remove` is idempotent: deleting a non-existent credentialId is a no-op.
  */
@@ -30,7 +35,12 @@ export function createMemoryWebAuthnCredentialStore(): WebAuthnCredentialStore {
 
 	return {
 		kind: "memory",
-		async put(record) {
+		async registerCredential(record) {
+			// Check FIRST before any mutation so a failed insert leaves zero
+			// state changes (atomicity guarantee).
+			if (byCredentialId.has(record.credentialId)) {
+				throw new WebAuthnCredentialStorageError({ reason: "duplicate-credential" });
+			}
 			byCredentialId.set(record.credentialId, record);
 		},
 		async findByCredentialId(credentialId) {

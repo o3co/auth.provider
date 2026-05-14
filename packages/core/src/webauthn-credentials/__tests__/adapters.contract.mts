@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { beforeEach, describe, expect, it } from "vitest";
+import { WebAuthnCredentialStorageError } from "../errors.mjs";
 import type { WebAuthnCredentialStore } from "../types.mjs";
 
 export interface WebAuthnCredentialStoreContractFactory {
@@ -34,7 +35,9 @@ export function runWebAuthnCredentialStoreContract(
 	name: string,
 	factory: WebAuthnCredentialStoreContractFactory,
 ): void {
-	const sample = (overrides: Partial<Parameters<WebAuthnCredentialStore["put"]>[0]> = {}) => ({
+	const sample = (
+		overrides: Partial<Parameters<WebAuthnCredentialStore["registerCredential"]>[0]> = {},
+	) => ({
 		userId: "u-opaque-1",
 		credentialId: "cid-1",
 		publicKey: new Uint8Array([1, 2, 3]),
@@ -60,22 +63,54 @@ export function runWebAuthnCredentialStoreContract(
 			expect(await store.findByCredentialId("missing")).toBeNull();
 		});
 
-		it("put then findByCredentialId", async () => {
-			await store.put(sample());
+		it("registerCredential then findByCredentialId", async () => {
+			await store.registerCredential(sample());
 			const found = await store.findByCredentialId("cid-1");
 			expect(found?.userId).toBe("u-opaque-1");
 		});
 
 		it("listByUserId returns all credentials for a user", async () => {
-			await store.put(sample());
-			await store.put(sample({ credentialId: "cid-2" }));
-			await store.put(sample({ userId: "u-2", credentialId: "cid-3" }));
+			await store.registerCredential(sample());
+			await store.registerCredential(sample({ credentialId: "cid-2" }));
+			await store.registerCredential(sample({ userId: "u-2", credentialId: "cid-3" }));
 			const got = await store.listByUserId("u-opaque-1");
 			expect(got.map((c) => c.credentialId).sort()).toEqual(["cid-1", "cid-2"]);
 		});
 
+		it("registerCredential throws WebAuthnCredentialStorageError(duplicate-credential) on collision", async () => {
+			await store.registerCredential(sample());
+			let caught: unknown;
+			try {
+				await store.registerCredential(
+					sample({ publicKey: new Uint8Array([9, 9, 9]), userId: "u-attacker" }),
+				);
+			} catch (err) {
+				caught = err;
+			}
+			expect(caught).toBeInstanceOf(WebAuthnCredentialStorageError);
+			expect((caught as WebAuthnCredentialStorageError).reason).toBe("duplicate-credential");
+		});
+
+		it("failed registerCredential preserves existing record unchanged (atomicity)", async () => {
+			await store.registerCredential(sample());
+			try {
+				await store.registerCredential(
+					sample({ publicKey: new Uint8Array([9, 9, 9]), userId: "u-attacker" }),
+				);
+			} catch {
+				// expected
+			}
+			const found = await store.findByCredentialId("cid-1");
+			expect(found?.userId).toBe("u-opaque-1");
+			expect(Array.from(found?.publicKey ?? [])).toEqual([1, 2, 3]);
+			// byUserId index for the original owner still has exactly this record;
+			// the attacker's userId index must NOT have leaked an entry.
+			expect((await store.listByUserId("u-opaque-1")).length).toBe(1);
+			expect((await store.listByUserId("u-attacker")).length).toBe(0);
+		});
+
 		it("updateSignCount returns true on CAS match, increments", async () => {
-			await store.put(sample({ signCount: 5 }));
+			await store.registerCredential(sample({ signCount: 5 }));
 			const ok = await store.updateSignCount("cid-1", {
 				expectedCurrentSignCount: 5,
 				newSignCount: 6,
@@ -87,7 +122,7 @@ export function runWebAuthnCredentialStoreContract(
 		});
 
 		it("updateSignCount returns false on CAS mismatch (concurrent assertion race)", async () => {
-			await store.put(sample({ signCount: 5 }));
+			await store.registerCredential(sample({ signCount: 5 }));
 			const ok = await store.updateSignCount("cid-1", {
 				expectedCurrentSignCount: 4,
 				newSignCount: 5,
@@ -99,7 +134,7 @@ export function runWebAuthnCredentialStoreContract(
 		});
 
 		it("remove deletes the record", async () => {
-			await store.put(sample());
+			await store.registerCredential(sample());
 			await store.remove("cid-1");
 			expect(await store.findByCredentialId("cid-1")).toBeNull();
 		});

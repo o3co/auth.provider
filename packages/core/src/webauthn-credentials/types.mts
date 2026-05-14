@@ -46,12 +46,27 @@ export interface WebAuthnCredential {
  * Implementations MUST be safe to call concurrently. The {@link updateSignCount}
  * method is the critical path — it MUST be an atomic compare-and-set (CAS) to
  * prevent replay-window races between concurrent verify calls.
+ *
+ * Throws {@link WebAuthnCredentialStorageError} with the appropriate `reason`
+ * discriminator on domain-level failures (see {@link registerCredential}).
  */
 export interface WebAuthnCredentialStore {
 	readonly kind: string;
 
-	/** Upsert a credential record. */
-	put(record: WebAuthnCredential): Promise<void>;
+	/**
+	 * Atomically insert a new credential record.
+	 *
+	 * MUST throw `WebAuthnCredentialStorageError({ reason: "duplicate-credential" })`
+	 * if a record with the same `credentialId` already exists. The existing
+	 * record MUST be preserved unchanged — no partial mutation on failure.
+	 *
+	 * Concurrency contract: N concurrent calls with the same `credentialId`
+	 * MUST result in exactly one success and N-1 throws of
+	 * `WebAuthnCredentialStorageError({ reason: "duplicate-credential" })`.
+	 *
+	 * Per spec §2.3.1 + Codex Round 5 P2 (TOCTOU fix).
+	 */
+	registerCredential(record: WebAuthnCredential): Promise<void>;
 
 	/** Look up a credential by its credentialId. Returns null when not found. */
 	findByCredentialId(credentialId: string): Promise<WebAuthnCredential | null>;

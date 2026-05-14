@@ -425,6 +425,10 @@ export { constantTimeStringEqual } from "./security/timingSafe.mjs";
 // ===========================================================================
 
 export {
+	WebAuthnCredentialStorageError,
+	type WebAuthnCredentialStorageErrorReason,
+} from "./webauthn-credentials/errors.mjs";
+export {
 	createWebAuthnCredentialStoreFactory,
 	registerBuiltinWebAuthnCredentialStores,
 	type WebAuthnCredentialStoreFactory,
