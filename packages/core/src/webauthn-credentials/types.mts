@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
-
 /**
  * Subset of W3C WebAuthn AuthenticatorTransport values supported by this
  * implementation. Maps to the CTAP/WebAuthn transport identifiers
@@ -83,12 +81,6 @@ export interface WebAuthnCredentialStore {
 	/** Remove a credential by its credentialId. No-op if not found. */
 	remove(credentialId: string): Promise<void>;
 }
-
-/**
- * Domain-specific AdapterFactory alias for WebAuthnCredentialStore.
- * Follows the same pattern as AccessTokenDenylistFactory / ChallengeStoreFactory.
- */
-export type WebAuthnCredentialStoreFactory = AdapterFactory<WebAuthnCredentialStore>;
 
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge
