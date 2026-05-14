@@ -349,3 +349,111 @@ describe("verifyWebAuthnAssertion (spec §2.5 + §2.4 sign-count)", () => {
 		expect(result).toEqual({ ok: false, reason: "signature_invalid" });
 	});
 });
+
+// ---------------------------------------------------------------------------
+// S7 multi-origin pass-through + rejection (spec §spec S7)
+// ---------------------------------------------------------------------------
+
+describe("S7 multi-origin: expectedOrigins array forwarding", () => {
+	it("verifyWebAuthnAttestation forwards multi-element expectedOrigins to SimpleWebAuthn intact", async () => {
+		// Verify the helper passes the full array — the mock captures args so we
+		// can assert every element arrived.
+		mockVerifyRegistration.mockResolvedValueOnce({
+			verified: true,
+			registrationInfo: {
+				fmt: "none",
+				aaguid: "00000000-0000-0000-0000-000000000000",
+				credential: {
+					id: "dGVzdC1jcmVkZW50aWFsLWlk",
+					publicKey: STUB_PUBLIC_KEY,
+					counter: 0,
+					transports: [],
+				},
+				credentialType: "public-key",
+				attestationObject: new Uint8Array([]),
+				userVerified: false,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				origin: "https://a.example",
+				rpID: "example",
+			},
+		});
+
+		const origins = ["https://a.example", "https://b.example"];
+		await verifyWebAuthnAttestation({
+			response: STUB_REGISTRATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example",
+			expectedOrigins: origins,
+		});
+
+		expect(mockVerifyRegistration).toHaveBeenCalledOnce();
+		const [callArgs] = mockVerifyRegistration.mock.calls[0];
+		// The helper must forward ALL elements of the array — not just [0].
+		expect((callArgs as { expectedOrigin: string[] }).expectedOrigin).toEqual(origins);
+	});
+
+	it("verifyWebAuthnAttestation returns origin_mismatch when origin is not in multi-element expectedOrigins", async () => {
+		mockVerifyRegistration.mockRejectedValueOnce(
+			new Error(
+				'Unexpected registration response origin "https://evil.example", expected one of: https://a.example, https://b.example',
+			),
+		);
+
+		const result = await verifyWebAuthnAttestation({
+			response: STUB_REGISTRATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example",
+			expectedOrigins: ["https://a.example", "https://b.example"],
+		});
+
+		expect(result).toEqual({ ok: false, reason: "origin_mismatch" });
+	});
+
+	it("verifyWebAuthnAssertion forwards multi-element expectedOrigins to SimpleWebAuthn intact", async () => {
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: {
+				newCounter: 6,
+				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
+				userVerified: false,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				authenticatorExtensionResults: undefined,
+				origin: "https://a.example",
+				rpID: "example",
+			},
+		});
+
+		const origins = ["https://a.example", "https://b.example"];
+		await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example",
+			expectedOrigins: origins,
+		});
+
+		expect(mockVerifyAuthentication).toHaveBeenCalledOnce();
+		const [callArgs] = mockVerifyAuthentication.mock.calls[0];
+		expect((callArgs as { expectedOrigin: string[] }).expectedOrigin).toEqual(origins);
+	});
+
+	it("verifyWebAuthnAssertion returns origin_mismatch when origin is not in multi-element expectedOrigins", async () => {
+		mockVerifyAuthentication.mockRejectedValueOnce(
+			new Error(
+				'Unexpected authentication response origin "https://evil.example", expected one of: https://a.example, https://b.example',
+			),
+		);
+
+		const result = await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example",
+			expectedOrigins: ["https://a.example", "https://b.example"],
+		});
+
+		expect(result).toEqual({ ok: false, reason: "origin_mismatch" });
+	});
+});
