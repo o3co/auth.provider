@@ -211,8 +211,32 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 			return;
 		}
 
-		// §2.4: Compose the WebAuthnCredential. userId from session; createdAt server time.
+		// §2.4 / WebAuthn §5.1.3 / Codex Round 4 P2: Reject duplicate credential IDs
+		// before put. WebAuthnCredentialStore.put has upsert semantics — calling it
+		// unconditionally on a colliding credentialId would silently overwrite the
+		// existing record and lock out the prior owner.
+		//
+		// Defense-in-depth: WebAuthn §5.1.3 specifies credential IDs as globally
+		// unique by attacker-resistant random generation, but the AS must not trust
+		// authenticator-supplied uniqueness. A malicious authenticator can return a
+		// credential ID that matches a victim's existing credential; a storage edge
+		// case or user re-enrolling without deleting first also produces the same
+		// collision.
+		//
+		// Same-user re-roll requires explicit deletion of the prior credential first
+		// (no silent re-upsert). Returns 400 (not 409) per OAuth-style endpoint
+		// convention — all validation errors use 400 in this codebase.
 		const { material } = verification;
+		const existing = await deps.credentialStore.findByCredentialId(material.credentialId);
+		if (existing) {
+			res.status(400).json({
+				error: "credential_id_conflict",
+				error_description: "credential ID already registered",
+			});
+			return;
+		}
+
+		// §2.4: Compose the WebAuthnCredential. userId from session; createdAt server time.
 		await deps.credentialStore.put({
 			userId,
 			credentialId: material.credentialId,

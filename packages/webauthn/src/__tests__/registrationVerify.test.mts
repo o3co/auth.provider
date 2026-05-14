@@ -351,4 +351,105 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 		expect(stored?.userId).toBe("alice");
 		expect(stored?.userId).not.toBe("victim");
 	});
+
+	// -------------------------------------------------------------------------
+	// Test 10: Duplicate credential ID — different user (Codex Round 4 P2)
+	// -------------------------------------------------------------------------
+	it("400 credential_id_conflict when credential ID already registered to a different user (Codex Round 4 P2)", async () => {
+		// A colliding credential ID — distinct from STUB_MATERIAL.credentialId to
+		// keep this test fully isolated from other tests.
+		const COLLISION_CRED_ID = "Q09MTElTSU9OX0NSRURfSUQ";
+
+		const deps = makeDeps();
+
+		// Pre-seed credential under "alice".
+		await deps.credentialStore.put({
+			userId: "alice",
+			credentialId: COLLISION_CRED_ID,
+			publicKey: new Uint8Array([1, 2, 3]),
+			signCount: 0,
+			backedUp: false,
+			createdAt: new Date(),
+		});
+
+		// verifyWebAuthnAttestation returns the same credentialId (malicious or
+		// storage-collision scenario).
+		mockVerifyAttestation.mockResolvedValueOnce({
+			ok: true,
+			material: {
+				credentialId: COLLISION_CRED_ID,
+				publicKey: new Uint8Array([4, 5, 6]),
+				signCount: 0,
+				transports: [],
+				backedUp: false,
+			},
+		});
+
+		// Issue a challenge for "bob" so ceremony passes.
+		const challengeValue = await issueChallenge(deps.challengeStore, "bob", "bob-challenge");
+
+		// Attempt registration as "bob" with a credential ID already owned by "alice".
+		const { app } = buildApp({ userId: "bob" }, deps);
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/verify")
+			.send({ response: makeStubResponse(challengeValue) });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("credential_id_conflict");
+		expect(res.body.error_description).toBeTruthy();
+
+		// alice's credential must be unchanged — not overwritten by bob.
+		const aliceCred = await deps.credentialStore.findByCredentialId(COLLISION_CRED_ID);
+		expect(aliceCred?.userId).toBe("alice");
+		expect(aliceCred?.publicKey).toEqual(new Uint8Array([1, 2, 3]));
+	});
+
+	// -------------------------------------------------------------------------
+	// Test 11: Duplicate credential ID — same user re-registering (Codex Round 4 P2)
+	// -------------------------------------------------------------------------
+	it("400 credential_id_conflict when same user attempts to re-register the same credential ID (no silent re-upsert)", async () => {
+		// Wave 1 strict policy: no silent re-upsert, not even same-user.
+		// Re-roll requires explicit deletion (DELETE /credentials/{id}) first.
+		const SAME_USER_CRED_ID = "U0FNRV9VU0VSX0NSRUQ";
+
+		const deps = makeDeps();
+
+		// Pre-seed credential under "alice".
+		await deps.credentialStore.put({
+			userId: "alice",
+			credentialId: SAME_USER_CRED_ID,
+			publicKey: new Uint8Array([10, 20, 30]),
+			signCount: 5,
+			backedUp: false,
+			createdAt: new Date(),
+		});
+
+		// Alice tries to re-register the same credential (e.g., wipe + re-enroll
+		// without first deleting the old record).
+		mockVerifyAttestation.mockResolvedValueOnce({
+			ok: true,
+			material: {
+				credentialId: SAME_USER_CRED_ID,
+				publicKey: new Uint8Array([11, 22, 33]),
+				signCount: 0,
+				transports: [],
+				backedUp: false,
+			},
+		});
+
+		const challengeValue = await issueChallenge(deps.challengeStore, "alice", "alice-reroll-challenge");
+
+		const { app } = buildApp({ userId: "alice" }, deps);
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/verify")
+			.send({ response: makeStubResponse(challengeValue) });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("credential_id_conflict");
+
+		// Original credential must be unchanged — no silent overwrite.
+		const cred = await deps.credentialStore.findByCredentialId(SAME_USER_CRED_ID);
+		expect(cred?.signCount).toBe(5);
+		expect(cred?.publicKey).toEqual(new Uint8Array([10, 20, 30]));
+	});
 });
