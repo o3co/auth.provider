@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+// PARITY: keep in sync with packages/oauth/src/grants/_resourceIndicator.mts
+// Consolidation candidate for Wave 2 — see issue #173 follow-up.
+
 /**
  * File-internal helper for extracting the RFC 8707 `resource` parameter from
  * a grant request body. Internal to the webauthn grant — NOT exported from
@@ -25,8 +28,8 @@
  * The helper is 5 lines of pure logic; the duplication cost is lower than
  * introducing a cross-package private import.
  *
- * TODO(Wave 2): evaluate consolidating into @o3co/auth-provider-core so both
- * oauth and webauthn packages can share without private imports.
+ * Wave 2 consolidation candidate: move into @o3co/auth-provider-core so both
+ * oauth and webauthn packages can share without private imports (issue #173).
  *
  * No comma-splitting is performed: RFC 8707 §5.4 treats each `resource`
  * value as a URI and URIs may legally contain commas, so splitting would
