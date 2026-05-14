@@ -104,7 +104,11 @@ export const webauthnModule = defineModule<
 		"keyStore",
 	],
 	optional: [
-		"grantPolicy", // CP-18: gates the webauthn grant when resourceIndicator.enabled; absent = allow-all
+		// grantPolicy is REQUIRED by the webauthn grant (H-2 fail-fast in the
+		// factory below). Declared `optional` here only so the manifest is
+		// composable with non-webauthn modules that don't need policy — the
+		// factory throws at boot when this slot is unwired.
+		"grantPolicy",
 	],
 	contributes: {
 		grants: {
@@ -122,7 +126,7 @@ export const webauthnModule = defineModule<
 							"issues whatever scope the caller requests. Wire a GrantPolicyHook " +
 							"via @o3co/auth-provider-policy or your own implementation. If you " +
 							"intentionally accept unbounded scope (NOT recommended for " +
-							"production), wire a no-op policy returning { outcome: 'permit' }. " +
+							"production), wire a no-op policy returning { outcome: 'allow' }. " +
 							"See packages/webauthn/README.md SECURITY — scope authorization.",
 					);
 				}

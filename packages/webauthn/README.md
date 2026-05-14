@@ -86,7 +86,7 @@ The webauthn grant has **no library-side `allowedScopes` ceiling**. Client crede
 
 `grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy, per Stage 1 RFC 8707 plumbing). This mirrors the `refresh_token` grant pattern.
 
-**`grantPolicy` is REQUIRED at boot.** As of the Wave 1 post-merge security fix, wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "permit" }` — making the choice visible in the composition root.
+**`grantPolicy` is REQUIRED at boot.** As of the Wave 1 post-merge security fix, wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "allow" }` — making the choice visible in the composition root.
 
 ## SECURITY — token revocation limitations
 

@@ -55,6 +55,8 @@ export const webauthnConfigSchema = z.object({
 	 *
 	 * Each origin MUST be a literal origin (scheme + host + optional port) —
 	 * `https://example.com`, `https://app.example.com`, `http://localhost:3000`.
+	 * MUST NOT include a trailing slash (`https://example.com/` will never match
+	 * the browser-sent clientDataJSON origin, which is the literal-origin form).
 	 * Wildcards are NOT allowed: SimpleWebAuthn does exact-string-match against
 	 * the authenticator's clientDataJSON, so `https://*.example.com` accepts at
 	 * parse time but breaks every ceremony at runtime. Non-https schemes other
@@ -72,15 +74,35 @@ export const webauthnConfigSchema = z.object({
 					message: "origin must not contain wildcards — SimpleWebAuthn does exact-match only",
 				})
 				.refine(
-					(u) =>
-						u.startsWith("https://") ||
-						u === "http://localhost" ||
-						u.startsWith("http://localhost:") ||
-						u.startsWith("http://127.0.0.1") ||
-						u.startsWith("http://[::1]"),
+					(u) => {
+						// URL-parse-based check (not string-prefix) so attacker-prefix
+						// bypasses like `http://127.0.0.1.evil.com`, `http://127.0.0.1@evil.com`,
+						// `http://[::1]@evil.com` are rejected. The .url() validator above
+						// guarantees parseability.
+						let parsed: URL;
+						try {
+							parsed = new URL(u);
+						} catch {
+							return false;
+						}
+						// Reject userinfo (`user@host`) regardless of scheme — origins must
+						// not carry credentials.
+						if (parsed.username !== "" || parsed.password !== "") return false;
+						if (parsed.protocol === "https:") return true;
+						if (parsed.protocol === "http:") {
+							// W3C WebAuthn / browser secure-context policy allows http only
+							// for loopback. Hostname comparison is exact-match.
+							return (
+								parsed.hostname === "localhost" ||
+								parsed.hostname === "127.0.0.1" ||
+								parsed.hostname === "[::1]"
+							);
+						}
+						return false;
+					},
 					{
 						message:
-							"origin must be https:// or http://localhost / http://127.0.0.1 / http://[::1] (W3C WebAuthn secure-origin policy)",
+							"origin must be https:// or http:// loopback (localhost / 127.0.0.1 / [::1]) with no userinfo (W3C WebAuthn secure-origin policy)",
 					},
 				),
 		)
