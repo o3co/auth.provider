@@ -424,9 +424,15 @@ export { constantTimeStringEqual } from "./security/timingSafe.mjs";
 // Wave 1 — WebAuthnCredential + WebAuthnCredentialStore (spec §2.3.1)
 // ===========================================================================
 
+export {
+	createWebAuthnCredentialStoreFactory,
+	registerBuiltinWebAuthnCredentialStores,
+	type WebAuthnCredentialStoreFactory,
+} from "./webauthn-credentials/factory.mjs";
+export { createMemoryWebAuthnCredentialStore } from "./webauthn-credentials/memory.mjs";
+export { memoryWebAuthnCredentialStoreModule } from "./webauthn-credentials/module.mjs";
 export type {
 	AuthenticatorTransport,
 	WebAuthnCredential,
 	WebAuthnCredentialStore,
-	WebAuthnCredentialStoreFactory,
 } from "./webauthn-credentials/types.mjs";

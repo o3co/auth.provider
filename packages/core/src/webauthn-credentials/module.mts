@@ -13,9 +13,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { createMemoryWebAuthnCredentialStore } from "../memory.mjs";
-import { runWebAuthnCredentialStoreContract } from "./adapters.contract.mjs";
+import { defineModule } from "../modules/manifest/index.mjs";
+import { createMemoryWebAuthnCredentialStore } from "./memory.mjs";
 
-runWebAuthnCredentialStoreContract("memory", {
-	create: () => createMemoryWebAuthnCredentialStore(),
+/**
+ * Built-in module that provides the in-process memory WebAuthnCredentialStore.
+ * Test + dev only — no persistence across restarts. Ships in
+ * @o3co/auth-provider-core.
+ */
+export const memoryWebAuthnCredentialStoreModule = defineModule({
+	name: "core-webauthn-credential-store-memory",
+	provides: {
+		webauthnCredentialStore: () => createMemoryWebAuthnCredentialStore(),
+	},
 });
