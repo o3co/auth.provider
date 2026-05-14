@@ -183,7 +183,7 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		} catch {
 			res
 				.status(400)
-				.json({ error: "invalid_request", details: "response.clientDataJSON invalid" });
+				.json({ error: "invalid_request", details: "response.response.clientDataJSON invalid" });
 			return;
 		}
 

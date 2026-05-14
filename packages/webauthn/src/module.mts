@@ -42,10 +42,14 @@
  * `grantPolicy` is declared as OPTIONAL in this module (same as oauthModule /
  * oauthAuthorizationModule). When wired by the consumer, the boot planner
  * injects it into `deps`; when absent, `deps.grantPolicy` is `undefined`.
- * The grant's gate `if (deps.grantPolicy && resourceIndicatorEnabled)` handles
- * both cases without a default wrapper (CP-18 fail-closed pattern).
+ * The grant invokes `grantPolicy.evaluate` UNCONDITIONALLY whenever it is
+ * wired (rt-style), mirroring `refresh_token`. `oauth.resourceIndicator.enabled`
+ * gates ONLY whether `body.resource` is forwarded to the policy; it does NOT
+ * gate whether the policy runs. Without `grantPolicy` wired, the grant issues
+ * whatever scope the caller requests — operators MUST wire `grantPolicy` to
+ * bound scope (CP-18 fail-closed once wired).
  *
- * Cross-refs: Plan T31 / spec §2.4.1 / PR #172 C1 security fix
+ * Cross-refs: Plan T31 / spec §2.4.1 / PR #172 C1 security fix / Codex Round 3 P1
  */
 
 import { defineModule } from "@o3co/auth-provider-core";

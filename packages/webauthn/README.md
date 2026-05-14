@@ -52,7 +52,7 @@ const app = await createApp({
 });
 ```
 
-The library does **not** ship `webauthnConfig` defaults in HOCON; consumers parse + provide via the bootstrap module per the schema-strict discipline (ADR `packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md`). The schema reports useful errors if a deployment forgets `rpId` / `rpName` / `origin`.
+The library ships safe defaults for `attestationPreference`, `userVerification`, and `challengeTtlMs` in `config/reference.conf` (resolved via composition-root `withFallback` chain per PR #171 discipline). Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR `packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md`).
 
 ## First-credential bootstrap (dogfood)
 
@@ -69,11 +69,11 @@ For consumer-driven account flows (signup forms, magic-link, etc.) the consumer 
 
 ## SECURITY — `userId` opacity
 
-`WebAuthnCredential.userId` is presented to the authenticator as the WebAuthn `user.id` (WebAuthn §5.4.3). It MUST be opaque — no email, no username, no PII. Authenticators persist it and may sync across devices. If your `UserRepository` keys by email or username, map to an opaque handle before calling `webauthnCredentialStore.put(...)`:
+`WebAuthnCredential.userId` is presented to the authenticator as the WebAuthn `user.id` (WebAuthn §5.4.3). It MUST be opaque — no email, no username, no PII. Authenticators persist it and may sync across devices. If your `UserRepository` keys by email or username, map to an opaque handle before calling `webauthnCredentialStore.registerCredential(...)`:
 
 ```ts
 const opaqueUserId = await deriveOpaqueHandle(realUserId);
-await store.put({ userId: opaqueUserId, /* ... */ });
+await store.registerCredential({ userId: opaqueUserId, /* ... */ });
 ```
 
 The bootstrap module's `webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
