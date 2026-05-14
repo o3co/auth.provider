@@ -11,10 +11,12 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
-		}
+		},
+		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [
 		"dist",
+		"config",
 		"README.md",
 		"CHANGELOG.md",
 		"LICENSE"
