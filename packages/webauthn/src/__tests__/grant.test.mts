@@ -442,6 +442,7 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 				{
 					clientId: "my-app",
 					tokenEndpointAuthMethod: "none",
+					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE], // P1-2: must include grant type
 					allowedAudiences: ["https://rs.example"],
 				},
 			),
@@ -651,13 +652,14 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 
 		const handler = createWebAuthnGrant(deps);
 		const assertion = makeAssertionResponse();
-		// Provide an authenticated client with allowedAudiences
+		// Provide an authenticated client with allowedAudiences (and grant type — P1-2)
 		const { result } = await handler.handle(
 			makeCtx(
 				{ assertion, resource: "https://rs1" },
 				{
 					clientId: "app",
 					tokenEndpointAuthMethod: "none",
+					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE], // P1-2: must include grant type
 					allowedAudiences: ["https://rs1.example"],
 				},
 			),
@@ -668,5 +670,108 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 		expect("errorDescription" in result && result.errorDescription).toContain(
 			"https://rogue.example",
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Codex Round 2 P1-2: allowedGrantTypes enforcement for authenticated clients
+// ---------------------------------------------------------------------------
+
+describe("createWebAuthnGrant — allowedGrantTypes enforcement (Codex Round 2 P1-2)", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it("returns 400 unauthorized_client when authenticated client lacks WEBAUTHN_GRANT_TYPE in allowedGrantTypes", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const deps = makeBaseDeps(store);
+		const handler = createWebAuthnGrant(deps);
+
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(
+			makeCtx(
+				{ assertion },
+				{
+					clientId: "my-app",
+					tokenEndpointAuthMethod: "none",
+					allowedGrantTypes: ["authorization_code"], // no webauthn
+					allowedAudiences: ["https://rs.example"],
+				},
+			),
+		);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("unauthorized_client");
+	});
+
+	it("returns 400 unauthorized_client when authenticated client has empty allowedGrantTypes", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const deps = makeBaseDeps(store);
+		const handler = createWebAuthnGrant(deps);
+
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(
+			makeCtx(
+				{ assertion },
+				{
+					clientId: "my-app",
+					tokenEndpointAuthMethod: "none",
+					allowedGrantTypes: [], // empty list → deny-by-absence
+					allowedAudiences: ["https://rs.example"],
+				},
+			),
+		);
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("unauthorized_client");
+	});
+
+	it("allows null authenticatedClient — no allowedGrantTypes check when no client is authenticated", async () => {
+		// passkey IS the auth event; no client bound = skip the check
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const deps = makeBaseDeps(store);
+		const handler = createWebAuthnGrant(deps);
+
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(makeCtx({ assertion }, null));
+
+		// Should succeed despite no client (null = no check)
+		expect(result.status).toBe(200);
+	});
+
+	it("allows authenticated client with WEBAUTHN_GRANT_TYPE in allowedGrantTypes", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const deps = makeBaseDeps(store);
+		const handler = createWebAuthnGrant(deps);
+
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(
+			makeCtx(
+				{ assertion },
+				{
+					clientId: "my-app",
+					tokenEndpointAuthMethod: "none",
+					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE],
+					allowedAudiences: ["https://rs.example"],
+				},
+			),
+		);
+
+		// Should succeed
+		expect(result.status).toBe(200);
 	});
 });
