@@ -89,6 +89,15 @@ export interface WebAuthnGrantDeps extends GrantDependencies {
 	readonly webauthnConfig: {
 		readonly rpId: string;
 		readonly origin: readonly string[];
+		/**
+		 * WebAuthn UserVerificationRequirement (W3C §5.8.6).
+		 *
+		 * Threaded through to verifyWebAuthnAssertion so SimpleWebAuthn enforces
+		 * the UV flag when the deployment sets userVerification = "required".
+		 *
+		 * Cross-refs: Codex Round 2 P1-1 / spec §2.5
+		 */
+		readonly userVerification: "required" | "preferred" | "discouraged";
 	};
 }
 
@@ -167,6 +176,8 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				expectedChallenge: challengeValue,
 				expectedRpId: deps.webauthnConfig.rpId,
 				expectedOrigins: deps.webauthnConfig.origin,
+				// Thread configured UV through to SimpleWebAuthn (Codex Round 2 P1-1).
+				userVerification: deps.webauthnConfig.userVerification,
 			});
 			if (!verificationResult.ok) {
 				return {

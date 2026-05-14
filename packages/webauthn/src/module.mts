@@ -108,6 +108,9 @@ export const webauthnModule = defineModule<
 					webauthnConfig: {
 						rpId: deps.webauthnConfig.rpId,
 						origin: deps.webauthnConfig.origin,
+						// Forward userVerification so the grant enforces it via SimpleWebAuthn.
+						// Cross-refs: Codex Round 2 P1-1
+						userVerification: deps.webauthnConfig.userVerification,
 					},
 				}),
 		},

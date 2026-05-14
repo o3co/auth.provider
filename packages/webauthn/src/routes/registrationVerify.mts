@@ -194,12 +194,16 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		}
 
 		// §2.4 §S7: Verify the attestation with multi-origin support.
+		// Pass userVerification from config so SimpleWebAuthn enforces the UV flag
+		// when the deployment sets userVerification = "required".
+		// Cross-refs: Codex Round 2 P1-1 / spec §2.5
 		const verification = await verifyWebAuthnAttestation({
 			// biome-ignore lint/suspicious/noExplicitAny: RegistrationResponseJSON passthrough — validated by SimpleWebAuthn internally
 			response: response as any,
 			expectedChallenge: challengeValue,
 			expectedRpId: deps.config.rpId,
 			expectedOrigins: deps.config.origin,
+			userVerification: deps.config.userVerification,
 		});
 
 		if (!verification.ok) {

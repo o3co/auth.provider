@@ -112,7 +112,7 @@ function makeBaseDeps(
 ): GrantDependencies & {
 	webauthnCredentialStore: ReturnType<typeof createMemoryWebAuthnCredentialStore>;
 	challengeCeremony: ChallengeCeremony;
-	webauthnConfig: { rpId: string; origin: string[] };
+	webauthnConfig: { rpId: string; origin: string[]; userVerification: "required" | "preferred" | "discouraged" };
 } {
 	return {
 		config: {
@@ -128,6 +128,7 @@ function makeBaseDeps(
 		webauthnConfig: {
 			rpId: "test.example",
 			origin: ["https://test.example"],
+			userVerification: "preferred" as const,
 		},
 	} as ReturnType<typeof makeBaseDeps>;
 }

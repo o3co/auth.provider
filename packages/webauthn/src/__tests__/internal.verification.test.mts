@@ -457,3 +457,141 @@ describe("S7 multi-origin: expectedOrigins array forwarding", () => {
 		expect(result).toEqual({ ok: false, reason: "origin_mismatch" });
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Codex Round 2 P1-1: userVerification enforcement
+// ---------------------------------------------------------------------------
+
+describe("Codex Round 2 P1-1: userVerification enforcement", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	it("passes requireUserVerification=true to SimpleWebAuthn when userVerification='required' (attestation)", async () => {
+		mockVerifyRegistration.mockResolvedValueOnce({
+			verified: true,
+			registrationInfo: {
+				fmt: "none",
+				aaguid: "00000000-0000-0000-0000-000000000000",
+				credential: {
+					id: "dGVzdC1jcmVkZW50aWFsLWlk",
+					publicKey: STUB_PUBLIC_KEY,
+					counter: 0,
+					transports: [],
+				},
+				credentialType: "public-key",
+				attestationObject: new Uint8Array([]),
+				userVerified: true,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+
+		await verifyWebAuthnAttestation({
+			response: STUB_REGISTRATION_RESPONSE,
+			expectedChallenge: "c",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+			userVerification: "required",
+		});
+
+		expect(mockVerifyRegistration).toHaveBeenCalledOnce();
+		const [callArgs] = mockVerifyRegistration.mock.calls[0];
+		expect((callArgs as Record<string, unknown>).requireUserVerification).toBe(true);
+	});
+
+	it("passes requireUserVerification=false to SimpleWebAuthn when userVerification='preferred' (attestation)", async () => {
+		mockVerifyRegistration.mockResolvedValueOnce({
+			verified: true,
+			registrationInfo: {
+				fmt: "none",
+				aaguid: "00000000-0000-0000-0000-000000000000",
+				credential: {
+					id: "dGVzdC1jcmVkZW50aWFsLWlk",
+					publicKey: STUB_PUBLIC_KEY,
+					counter: 0,
+					transports: [],
+				},
+				credentialType: "public-key",
+				attestationObject: new Uint8Array([]),
+				userVerified: false,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+
+		await verifyWebAuthnAttestation({
+			response: STUB_REGISTRATION_RESPONSE,
+			expectedChallenge: "c",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+			userVerification: "preferred",
+		});
+
+		expect(mockVerifyRegistration).toHaveBeenCalledOnce();
+		const [callArgs] = mockVerifyRegistration.mock.calls[0];
+		expect((callArgs as Record<string, unknown>).requireUserVerification).toBe(false);
+	});
+
+	it("passes requireUserVerification=true to SimpleWebAuthn when userVerification='required' (assertion)", async () => {
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: {
+				newCounter: 6,
+				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
+				userVerified: true,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				authenticatorExtensionResults: undefined,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+
+		await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "c",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+			userVerification: "required",
+		});
+
+		expect(mockVerifyAuthentication).toHaveBeenCalledOnce();
+		const [callArgs] = mockVerifyAuthentication.mock.calls[0];
+		expect((callArgs as Record<string, unknown>).requireUserVerification).toBe(true);
+	});
+
+	it("passes requireUserVerification=false to SimpleWebAuthn when userVerification='preferred' (assertion)", async () => {
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: {
+				newCounter: 6,
+				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
+				userVerified: false,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				authenticatorExtensionResults: undefined,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+
+		await verifyWebAuthnAssertion({
+			credential: makeStoredCredential(5),
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "c",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+			userVerification: "preferred",
+		});
+
+		expect(mockVerifyAuthentication).toHaveBeenCalledOnce();
+		const [callArgs] = mockVerifyAuthentication.mock.calls[0];
+		expect((callArgs as Record<string, unknown>).requireUserVerification).toBe(false);
+	});
+});
