@@ -437,7 +437,11 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 			},
 		});
 
-		const challengeValue = await issueChallenge(deps.challengeStore, "alice", "alice-reroll-challenge");
+		const challengeValue = await issueChallenge(
+			deps.challengeStore,
+			"alice",
+			"alice-reroll-challenge",
+		);
 
 		const { app } = buildApp({ userId: "alice" }, deps);
 		const res = await supertest(app)

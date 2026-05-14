@@ -459,7 +459,11 @@ describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 		// fails at challenge_invalid (no challenge was issued) — still 400, but
 		// with error: "challenge_invalid", NOT "invalid_request".
 		const clientDataJSON = Buffer.from(
-			JSON.stringify({ type: "webauthn.create", challenge: "not-issued", origin: "https://example.com" }),
+			JSON.stringify({
+				type: "webauthn.create",
+				challenge: "not-issued",
+				origin: "https://example.com",
+			}),
 		).toString("base64url");
 
 		const res = await supertest(app)
