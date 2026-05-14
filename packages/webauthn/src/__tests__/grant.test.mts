@@ -460,13 +460,17 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// RFC 8707 resource indicator (flag gating)
+// RFC 8707 resource indicator (flag gating) — Codex Round 3 P1 semantics
+//
+// Post-fix contract (rt-style):
+//   - grantPolicy IS called unconditionally when wired (regardless of resourceIndicator flag)
+//   - resourceIndicator flag gates ONLY whether body.resource is forwarded to policy
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("flag-off: body.resource present but policy sees resource: undefined", async () => {
+	it("flag-off: policy IS called when wired, but resource is NOT forwarded (Codex Round 3 P1 regression)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.put(makeCredential());
 
@@ -495,12 +499,16 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 			makeCtx({ assertion, resource: "https://rs1.example" }),
 		);
 
-		// Policy should NOT be called because resourceIndicator is off
-		expect(evaluateSpy).not.toHaveBeenCalled();
+		// Policy MUST be called even when resourceIndicator is off (rt-style gate).
+		// Webauthn has no client.allowedScopes ceiling — policy is the ONLY scope-bounding gate.
+		expect(evaluateSpy).toHaveBeenCalledOnce();
+		// resource MUST be undefined (not forwarded) when flag is off (Stage 1 contract preserved).
+		const [req] = evaluateSpy.mock.calls[0];
+		expect(req.resource).toBeUndefined();
 		expect(result.status).toBe(200);
 	});
 
-	it("flag-on: body.resource is forwarded to policy", async () => {
+	it("flag-on: body.resource is forwarded to policy (unchanged)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.put(makeCredential());
 
@@ -533,6 +541,147 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		const [req] = evaluateSpy.mock.calls[0];
 		expect(req.resource).toEqual(["https://rs1.example"]);
 		expect(result.status).toBe(200);
+	});
+
+	// ---- Codex Round 3 P1 new regression tests ----
+
+	it("P1-R1: policy is called when wired even with resourceIndicator.enabled false (Codex Round 3 P1)", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
+		const handler = createWebAuthnGrant({
+			...makeBaseDeps(store),
+			config: {
+				oauth: {
+					jwt: { issuer: "https://test.example" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					resourceIndicator: { enabled: false },
+				},
+			} as unknown as GrantDependencies["config"],
+			grantPolicy: {
+				kind: "test",
+				evaluate: policySpy,
+			} as unknown as GrantDependencies["grantPolicy"],
+		});
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(makeCtx({ assertion }));
+
+		expect(policySpy).toHaveBeenCalled();
+		expect(result.status).toBe(200);
+	});
+
+	it("P1-R2: policy can deny when resourceIndicator.enabled is false (security regression)", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const policySpy = vi.fn().mockResolvedValue({
+			outcome: "deny",
+			error: "invalid_scope",
+			errorDescription: "admin scope not allowed",
+		});
+		const handler = createWebAuthnGrant({
+			...makeBaseDeps(store),
+			config: {
+				oauth: {
+					jwt: { issuer: "https://test.example" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					resourceIndicator: { enabled: false },
+				},
+			} as unknown as GrantDependencies["config"],
+			grantPolicy: {
+				kind: "test",
+				evaluate: policySpy,
+			} as unknown as GrantDependencies["grantPolicy"],
+		});
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(makeCtx({ assertion, scope: "admin" }));
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("P1-R3: policy request has resource: undefined when flag off, even though policy IS called (Stage 1 contract)", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
+		const handler = createWebAuthnGrant({
+			...makeBaseDeps(store),
+			config: {
+				oauth: {
+					jwt: { issuer: "https://test.example" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					resourceIndicator: { enabled: false },
+				},
+			} as unknown as GrantDependencies["config"],
+			grantPolicy: {
+				kind: "test",
+				evaluate: policySpy,
+			} as unknown as GrantDependencies["grantPolicy"],
+		});
+		const assertion = makeAssertionResponse();
+		await handler.handle(makeCtx({ assertion, resource: "https://rs1" }));
+
+		expect(policySpy).toHaveBeenCalledWith(
+			expect.objectContaining({ resource: undefined }),
+			expect.any(Object),
+		);
+	});
+
+	it("P1-R4: policy request has resource: [...] when flag on — regression check (unchanged)", async () => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
+		const handler = createWebAuthnGrant({
+			...makeBaseDeps(store),
+			config: {
+				oauth: {
+					jwt: { issuer: "https://test.example" },
+					accessToken: { expiresIn: 3600 },
+					refreshToken: { expiresIn: 86400 },
+					resourceIndicator: { enabled: true },
+				},
+			} as unknown as GrantDependencies["config"],
+			grantPolicy: {
+				kind: "test",
+				evaluate: policySpy,
+			} as unknown as GrantDependencies["grantPolicy"],
+		});
+		const assertion = makeAssertionResponse();
+		await handler.handle(makeCtx({ assertion, resource: "https://rs1" }));
+
+		expect(policySpy).toHaveBeenCalledWith(
+			expect.objectContaining({ resource: ["https://rs1"] }),
+			expect.any(Object),
+		);
+	});
+
+	it("P1-R5: issues token with requested scope when grantPolicy is not wired (documented gap)", async () => {
+		// No policy ceiling — scope is issued as-is. README documents that deployments
+		// wanting scope authorization MUST wire grantPolicy (webauthn has no
+		// client.allowedScopes ceiling — the assertion is the auth event, not scope authz).
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.put(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const deps = makeBaseDeps(store); // no grantPolicy wired
+		const handler = createWebAuthnGrant(deps);
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(makeCtx({ assertion, scope: "admin" }));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwtPayload(result.tokens.access_token) as Record<string, unknown>;
+		expect(payload.scope).toBe("admin");
 	});
 });
 

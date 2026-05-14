@@ -27,8 +27,15 @@
  *   5. Verify assertion via verifyWebAuthnAssertion. ok=false → 400 invalid_grant.
  *   6. Atomic CAS sign-count update via credentialStore.updateSignCount.
  *      Returns false → 400 invalid_grant (concurrent race / clone attack).
- *   7. Optional grantPolicy gate (only when deps.grantPolicy AND
- *      oauth.resourceIndicator.enabled === true — cc-style gate, CP-18 fail-closed).
+ *   7. Optional grantPolicy gate — rt-style: called unconditionally when deps.grantPolicy
+ *      is wired (Codex Round 3 P1). The resourceIndicator flag gates ONLY whether
+ *      body.resource is forwarded in the request payload (Stage 1 plumbing contract).
+ *      CP-18 fail-closed — policy throw → 503 temporarily_unavailable.
+ *
+ *      SECURITY: webauthn grant has no client.allowedScopes ceiling (the passkey is
+ *      the auth event, not scope authorization). Policy is the ONLY scope-bounding gate.
+ *      Deployments wanting scope authorization MUST wire grantPolicy.
+ *
  *   8. Issue access token. No refresh token (Wave 1 first slice, spec §2.4).
  *
  * Audience derivation:
@@ -46,7 +53,7 @@
  * because the webauthn package does not depend on @o3co/auth-provider-oauth and that
  * helper is explicitly NOT barrel-exported. Consolidation candidate for Wave 2.
  *
- * Cross-refs: Plan T30 / spec §2.4 / PR #172 W1P3 patterns
+ * Cross-refs: Plan T30 / spec §2.4 / PR #172 W1P3 patterns / Codex Round 3 P1
  */
 
 import {
@@ -246,16 +253,38 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			let effectiveScopes = scopeOutcome.scopes;
 
 			// ------------------------------------------------------------------
-			// Step 7: Optional grantPolicy gate (cc-style: only when BOTH
-			// grantPolicy is wired AND resourceIndicator.enabled === true).
+			// Step 7: Optional grantPolicy gate — rt-style (Codex Round 3 P1).
+			//
+			// Policy is invoked unconditionally when deps.grantPolicy is wired,
+			// regardless of oauth.resourceIndicator.enabled. The resourceIndicator
+			// flag gates ONLY whether body.resource is forwarded in the payload
+			// (Stage 1 RFC 8707 plumbing contract from PR #172).
+			//
+			// SECURITY rationale: webauthn grant has no client.allowedScopes ceiling
+			// (the passkey is the auth event, not scope authorization). Policy is the
+			// ONLY scope-bounding gate. Gating the policy call on resourceIndicator
+			// (the prior cc-style gate) would silently skip scope enforcement for all
+			// deployments that left resourceIndicator at its default (false), allowing
+			// any caller with a valid assertion to mint a token with any requested scope.
+			//
+			// Mirrors refreshToken.mts: unconditional policy call when wired;
+			// resourceIndicator flag gates only the resource field.
 			// CP-18 fail-closed — same rationale as clientCredentials.mts.
+			//
+			// Documented gap (intended Wave 1 behavior): when grantPolicy is NOT wired
+			// AND the caller requests scope, the scope is issued as-is (no library-side
+			// ceiling). Deployments wanting scope authorization MUST wire grantPolicy.
 			// ------------------------------------------------------------------
 			const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
 
 			let policyGrantedAudience: string | null = null;
 
-			if (deps.grantPolicy && resourceIndicatorEnabled) {
-				const resource = extractResourceParam(body as Record<string, unknown>);
+			if (deps.grantPolicy) {
+				// Resource is forwarded only when the flag is on (PR #172 Stage 1 plumbing).
+				// Policy invocation itself is unconditional when wired.
+				const resource = resourceIndicatorEnabled
+					? extractResourceParam(body as Record<string, unknown>)
+					: null;
 				const client = ctx.authenticatedClient;
 
 				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;

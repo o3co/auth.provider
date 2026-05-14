@@ -78,6 +78,16 @@ await store.put({ userId: opaqueUserId, /* ... */ });
 
 The bootstrap module's `webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
 
+## SECURITY — scope authorization
+
+The webauthn grant has **no library-side `allowedScopes` ceiling**. Client credentials and authorization code grants bind issued scope to `client.allowedScopes` at the handler level; webauthn cannot, because the passkey is the authentication event, not a scope authorization token.
+
+`grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy, per Stage 1 RFC 8707 plumbing). This mirrors the `refresh_token` grant pattern.
+
+Deployments wanting scope authorization **MUST wire `grantPolicy`**. Without it, the grant issues whatever scope the caller requests.
+
+When `grantPolicy` is not wired and scope is requested, the token is issued as-is. This is intentional Wave 1 behavior and is documented here; a future Wave may introduce a configurable deny-by-default for unwired scope.
+
 ## SECURITY — registration authorization strength
 
 The registration endpoints accept any authenticated subject. Deployments SHOULD enforce step-up reauthentication (NIST SP 800-63B): require recent `auth_time` OR MFA OR fresh federation login before allowing registration. The bare endpoint does not enforce this — wire your `grantPolicy` hook or an upstream Express middleware to gate registration to high-assurance sessions.
