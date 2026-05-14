@@ -229,7 +229,9 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 		//
 		// Same-user re-roll requires explicit deletion of the prior credential first
 		// (no silent re-upsert). Returns 400 (not 409) per OAuth-style endpoint
-		// convention — all validation errors use 400 in this codebase.
+		// convention — validation errors use 400 in this codebase. Any non-duplicate
+		// adapter error (e.g. transient Redis ECONNRESET) is rethrown to Express 5's
+		// default async error handler → 500, never silently swallowed.
 		const { material } = verification;
 		try {
 			await deps.credentialStore.registerCredential({

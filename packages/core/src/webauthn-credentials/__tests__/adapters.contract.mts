@@ -109,6 +109,30 @@ export function runWebAuthnCredentialStoreContract(
 			expect((await store.listByUserId("u-attacker")).length).toBe(0);
 		});
 
+		// Mirrors the registerFamily concurrent contract at
+		// refresh-token-family/__tests__/adapters.contract.mts:170. The interface
+		// JSDoc promises "N concurrent calls MUST result in exactly one success
+		// and N-1 throws" — this test falsifies adapters that implement non-atomic
+		// upsert (e.g. SQL INSERT without UNIQUE constraint, Redis SET without NX).
+		it("concurrent registerCredential for same credentialId: exactly one success, N-1 duplicate-credential", async () => {
+			const N = 50;
+			const settled = await Promise.allSettled(
+				Array.from({ length: N }, (_, i) => store.registerCredential(sample({ userId: `u-${i}` }))),
+			);
+			const successes = settled.filter((s) => s.status === "fulfilled").length;
+			const dupes = settled.filter(
+				(s) =>
+					s.status === "rejected" &&
+					s.reason instanceof WebAuthnCredentialStorageError &&
+					s.reason.reason === "duplicate-credential",
+			).length;
+			expect(successes).toBe(1);
+			expect(dupes).toBe(N - 1);
+			// Exactly one credential record persisted under cid-1.
+			const found = await store.findByCredentialId("cid-1");
+			expect(found).not.toBeNull();
+		});
+
 		it("updateSignCount returns true on CAS match, increments", async () => {
 			await store.registerCredential(sample({ signCount: 5 }));
 			const ok = await store.updateSignCount("cid-1", {

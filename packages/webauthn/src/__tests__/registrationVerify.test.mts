@@ -311,7 +311,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 
 		const deps = makeDeps();
 		const challengeValue = await issueChallenge(deps.challengeStore, "alice");
-		const putSpy = vi.spyOn(deps.credentialStore, "registerCredential");
+		const registerSpy = vi.spyOn(deps.credentialStore, "registerCredential");
 
 		const { app } = buildApp({ userId: "alice" }, deps);
 
@@ -322,7 +322,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 
 		expect(res.status).toBe(200);
 		// Nickname stored in the credential record
-		const [stored] = putSpy.mock.calls[0] ?? [];
+		const [stored] = registerSpy.mock.calls[0] ?? [];
 		expect(stored?.nickname).toBe(maxNickname);
 	});
 
@@ -335,7 +335,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 		const deps = makeDeps();
 		// Challenge issued for "alice" (the session user)
 		const challengeValue = await issueChallenge(deps.challengeStore, "alice");
-		const putSpy = vi.spyOn(deps.credentialStore, "registerCredential");
+		const registerSpy = vi.spyOn(deps.credentialStore, "registerCredential");
 
 		// Authenticated as "alice"
 		const { app } = buildApp({ userId: "alice" }, deps);
@@ -347,7 +347,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 
 		expect(res.status).toBe(200);
 		// Credential stored with userId from session, not body
-		const [stored] = putSpy.mock.calls[0] ?? [];
+		const [stored] = registerSpy.mock.calls[0] ?? [];
 		expect(stored?.userId).toBe("alice");
 		expect(stored?.userId).not.toBe("victim");
 	});
@@ -455,5 +455,32 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 		const cred = await deps.credentialStore.findByCredentialId(SAME_USER_CRED_ID);
 		expect(cred?.signCount).toBe(5);
 		expect(cred?.publicKey).toEqual(new Uint8Array([10, 20, 30]));
+	});
+
+	// -------------------------------------------------------------------------
+	// Test 12: Non-duplicate adapter error rethrows (Round 6 M3 regression guard)
+	// -------------------------------------------------------------------------
+	it("500 (not silent 200) when registerCredential throws a non-duplicate adapter error", async () => {
+		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });
+
+		const deps = makeDeps();
+		const challengeValue = await issueChallenge(deps.challengeStore, "alice");
+
+		// Simulate a transient backing-store failure (Redis ECONNRESET, SQL timeout, etc.)
+		// The route MUST NOT swallow this; it must rethrow → Express default error
+		// handler → 500. A future refactor that catches-all-and-200s is the regression
+		// this test guards.
+		vi.spyOn(deps.credentialStore, "registerCredential").mockRejectedValueOnce(
+			new Error("transient backing store failure"),
+		);
+
+		const { app } = buildApp({ userId: "alice" }, deps);
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/verify")
+			.send({ response: makeStubResponse(challengeValue) });
+
+		expect(res.status).toBe(500);
+		// MUST NOT return the success body.
+		expect(res.body.credentialId).toBeUndefined();
 	});
 });
