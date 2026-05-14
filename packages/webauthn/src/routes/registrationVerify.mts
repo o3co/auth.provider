@@ -41,7 +41,11 @@
  * Cross-refs: Plan T28 / spec §2.4 / S7 multi-origin
  */
 
-import type { ChallengeCeremony, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
+import {
+	type ChallengeCeremony,
+	WebAuthnCredentialStorageError,
+	type WebAuthnCredentialStore,
+} from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import type { WebAuthnConfig } from "../config.mjs";
@@ -211,42 +215,43 @@ export function createRegistrationVerifyHandler(deps: RegistrationVerifyDeps): R
 			return;
 		}
 
-		// §2.4 / WebAuthn §5.1.3 / Codex Round 4 P2: Reject duplicate credential IDs
-		// before put. WebAuthnCredentialStore.put has upsert semantics — calling it
-		// unconditionally on a colliding credentialId would silently overwrite the
-		// existing record and lock out the prior owner.
+		// §2.4 / WebAuthn §5.1.3 / Codex Round 5 P2: atomic insert via registerCredential.
+		// The store contract guarantees N concurrent inserts of the same credentialId
+		// result in exactly one success and N-1 throws — no TOCTOU window between a
+		// find check and a write.
 		//
-		// Defense-in-depth: WebAuthn §5.1.3 specifies credential IDs as globally
-		// unique by attacker-resistant random generation, but the AS must not trust
-		// authenticator-supplied uniqueness. A malicious authenticator can return a
-		// credential ID that matches a victim's existing credential; a storage edge
-		// case or user re-enrolling without deleting first also produces the same
-		// collision.
+		// Defense-in-depth: WebAuthn §5.1.3 specifies credential IDs as globally unique
+		// by attacker-resistant random generation, but the AS must not trust
+		// authenticator-supplied uniqueness. A malicious authenticator returning a
+		// credentialId matching a victim's existing record, a storage edge case, or a
+		// user re-enrolling without deletion all produce the same collision; the store
+		// rejects all of them atomically.
 		//
 		// Same-user re-roll requires explicit deletion of the prior credential first
 		// (no silent re-upsert). Returns 400 (not 409) per OAuth-style endpoint
 		// convention — all validation errors use 400 in this codebase.
 		const { material } = verification;
-		const existing = await deps.credentialStore.findByCredentialId(material.credentialId);
-		if (existing) {
-			res.status(400).json({
-				error: "credential_id_conflict",
-				error_description: "credential ID already registered",
+		try {
+			await deps.credentialStore.registerCredential({
+				userId,
+				credentialId: material.credentialId,
+				publicKey: material.publicKey,
+				signCount: material.signCount,
+				transports: material.transports,
+				backedUp: material.backedUp,
+				createdAt: new Date(),
+				...(nickname !== undefined ? { nickname } : {}),
 			});
-			return;
+		} catch (err) {
+			if (err instanceof WebAuthnCredentialStorageError && err.reason === "duplicate-credential") {
+				res.status(400).json({
+					error: "credential_id_conflict",
+					error_description: "credential ID already registered",
+				});
+				return;
+			}
+			throw err;
 		}
-
-		// §2.4: Compose the WebAuthnCredential. userId from session; createdAt server time.
-		await deps.credentialStore.put({
-			userId,
-			credentialId: material.credentialId,
-			publicKey: material.publicKey,
-			signCount: material.signCount,
-			transports: material.transports,
-			backedUp: material.backedUp,
-			createdAt: new Date(),
-			...(nickname !== undefined ? { nickname } : {}),
-		});
 
 		res.status(200).json({
 			credentialId: material.credentialId,

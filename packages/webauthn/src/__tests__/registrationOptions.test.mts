@@ -147,8 +147,8 @@ describe("POST /oauth/webauthn/registration/options (spec §2.4)", () => {
 		const credentialStore = createMemoryWebAuthnCredentialStore();
 		const cred1 = makeCredential({ credentialId: "Y3JlZC0x", userId: "alice" });
 		const cred2 = makeCredential({ credentialId: "Y3JlZC0y", userId: "alice" });
-		await credentialStore.put(cred1);
-		await credentialStore.put(cred2);
+		await credentialStore.registerCredential(cred1);
+		await credentialStore.registerCredential(cred2);
 
 		const { app } = buildApp(
 			{ userId: "alice", userName: "alice@example.com", userDisplayName: "Alice" },

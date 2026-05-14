@@ -257,7 +257,7 @@ describe("createWebAuthnGrant — challenge ceremony", () => {
 
 	it("returns 400 invalid_grant when challenge outcome is 'replayed'", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		// Assertion verification succeeds (ceremony checked before verify call, so
 		// this path should not even reach verify — but mock to avoid stray failures)
@@ -275,7 +275,7 @@ describe("createWebAuthnGrant — challenge ceremony", () => {
 
 	it("returns 400 invalid_grant when challenge outcome is 'unknown'", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -299,7 +299,7 @@ describe("createWebAuthnGrant — assertion verification", () => {
 
 	it("returns 400 invalid_grant when assertion verification fails (signature_invalid)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: false, reason: "signature_invalid" });
 
@@ -316,7 +316,7 @@ describe("createWebAuthnGrant — assertion verification", () => {
 
 	it("returns 400 invalid_grant when assertion verification fails (sign_count_regression)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: false, reason: "sign_count_regression" });
 
@@ -343,7 +343,7 @@ describe("createWebAuthnGrant — CAS sign-count update", () => {
 
 	it("returns 400 invalid_grant when updateSignCount returns false (concurrent race)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential({ signCount: 5 }));
+		await store.registerCredential(makeCredential({ signCount: 5 }));
 
 		// Simulate another request winning the CAS by stubbing updateSignCount to
 		// always return false (lost race / stored signCount already advanced).
@@ -374,7 +374,7 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 
 	it("issues access_token with sub=credential.userId and no refresh_token", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -398,7 +398,7 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 
 	it("updates the stored signCount after successful verification", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential({ signCount: 5 }));
+		await store.registerCredential(makeCredential({ signCount: 5 }));
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -414,7 +414,7 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 
 	it("uses issuer as aud when no authenticated client is present", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -432,7 +432,7 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 
 	it("uses client.allowedAudiences[0] when an authenticated client is present", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -472,7 +472,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 
 	it("flag-off: policy IS called when wired, but resource is NOT forwarded (Codex Round 3 P1 regression)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -510,7 +510,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 
 	it("flag-on: body.resource is forwarded to policy (unchanged)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -547,7 +547,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 
 	it("P1-R1: policy is called when wired even with resourceIndicator.enabled false (Codex Round 3 P1)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
@@ -575,7 +575,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 
 	it("P1-R2: policy can deny when resourceIndicator.enabled is false (security regression)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const policySpy = vi.fn().mockResolvedValue({
@@ -607,7 +607,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 
 	it("P1-R3: policy request has resource: undefined when flag off, even though policy IS called (Stage 1 contract)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
@@ -637,7 +637,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 
 	it("P1-R4: policy request has resource: [...] when flag on — regression check (unchanged)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const policySpy = vi.fn().mockResolvedValue({ outcome: "allow" });
@@ -670,7 +670,7 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		// wanting scope authorization MUST wire grantPolicy (webauthn has no
 		// client.allowedScopes ceiling — the assertion is the auth event, not scope authz).
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const deps = makeBaseDeps(store); // no grantPolicy wired
@@ -728,7 +728,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 			error: "access_denied",
 			errorDescription: "policy denied",
 		}));
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const handler = createWebAuthnGrant(deps);
@@ -743,7 +743,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 		const { store, deps } = makeDepsWith(async () => {
 			throw new Error("policy service down");
 		});
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const handler = createWebAuthnGrant(deps);
@@ -760,7 +760,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 			outcome: "allow",
 			grantedScope: ["write"],
 		}));
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const handler = createWebAuthnGrant(deps);
@@ -779,7 +779,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 			outcome: "allow",
 			grantedScope: [],
 		}));
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const handler = createWebAuthnGrant(deps);
@@ -800,7 +800,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 			outcome: "allow",
 			grantedAudience: ["https://rogue.example"],
 		}));
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const handler = createWebAuthnGrant(deps);
@@ -835,7 +835,7 @@ describe("createWebAuthnGrant — allowedGrantTypes enforcement (Codex Round 2 P
 
 	it("returns 400 unauthorized_client when authenticated client lacks WEBAUTHN_GRANT_TYPE in allowedGrantTypes", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -861,7 +861,7 @@ describe("createWebAuthnGrant — allowedGrantTypes enforcement (Codex Round 2 P
 
 	it("returns 400 unauthorized_client when authenticated client has empty allowedGrantTypes", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -888,7 +888,7 @@ describe("createWebAuthnGrant — allowedGrantTypes enforcement (Codex Round 2 P
 	it("allows null authenticatedClient — no allowedGrantTypes check when no client is authenticated", async () => {
 		// passkey IS the auth event; no client bound = skip the check
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
@@ -904,7 +904,7 @@ describe("createWebAuthnGrant — allowedGrantTypes enforcement (Codex Round 2 P
 
 	it("allows authenticated client with WEBAUTHN_GRANT_TYPE in allowedGrantTypes", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.put(makeCredential());
+		await store.registerCredential(makeCredential());
 
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 

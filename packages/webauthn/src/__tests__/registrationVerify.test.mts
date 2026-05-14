@@ -168,12 +168,12 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	// -------------------------------------------------------------------------
 	// Test 2: Success path — 200 with credentialId/transports/backedUp
 	// -------------------------------------------------------------------------
-	it("200 on success: credentialStore.put called with full credential; response has credentialId/transports/backedUp", async () => {
+	it("200 on success: credentialStore.registerCredential called with full credential; response has credentialId/transports/backedUp", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });
 
 		const deps = makeDeps();
 		const challengeValue = await issueChallenge(deps.challengeStore, "alice");
-		const putSpy = vi.spyOn(deps.credentialStore, "put");
+		const registerSpy = vi.spyOn(deps.credentialStore, "registerCredential");
 
 		const { app } = buildApp({ userId: "alice" }, deps);
 
@@ -190,9 +190,9 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 			backedUp: STUB_MATERIAL.backedUp,
 		});
 
-		// credentialStore.put called once with full WebAuthnCredential
-		expect(putSpy).toHaveBeenCalledOnce();
-		const [stored] = putSpy.mock.calls[0] ?? [];
+		// credentialStore.registerCredential called once with full WebAuthnCredential
+		expect(registerSpy).toHaveBeenCalledOnce();
+		const [stored] = registerSpy.mock.calls[0] ?? [];
 		expect(stored).toMatchObject({
 			userId: "alice",
 			credentialId: STUB_MATERIAL.credentialId,
@@ -311,7 +311,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 
 		const deps = makeDeps();
 		const challengeValue = await issueChallenge(deps.challengeStore, "alice");
-		const putSpy = vi.spyOn(deps.credentialStore, "put");
+		const putSpy = vi.spyOn(deps.credentialStore, "registerCredential");
 
 		const { app } = buildApp({ userId: "alice" }, deps);
 
@@ -335,7 +335,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 		const deps = makeDeps();
 		// Challenge issued for "alice" (the session user)
 		const challengeValue = await issueChallenge(deps.challengeStore, "alice");
-		const putSpy = vi.spyOn(deps.credentialStore, "put");
+		const putSpy = vi.spyOn(deps.credentialStore, "registerCredential");
 
 		// Authenticated as "alice"
 		const { app } = buildApp({ userId: "alice" }, deps);
@@ -363,7 +363,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 		const deps = makeDeps();
 
 		// Pre-seed credential under "alice".
-		await deps.credentialStore.put({
+		await deps.credentialStore.registerCredential({
 			userId: "alice",
 			credentialId: COLLISION_CRED_ID,
 			publicKey: new Uint8Array([1, 2, 3]),
@@ -415,7 +415,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 		const deps = makeDeps();
 
 		// Pre-seed credential under "alice".
-		await deps.credentialStore.put({
+		await deps.credentialStore.registerCredential({
 			userId: "alice",
 			credentialId: SAME_USER_CRED_ID,
 			publicKey: new Uint8Array([10, 20, 30]),

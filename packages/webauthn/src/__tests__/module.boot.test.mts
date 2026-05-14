@@ -304,7 +304,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 
 		// Seed the credential store with a real credential so the lookup passes.
 		const credentialStore = createMemoryWebAuthnCredentialStore();
-		await credentialStore.put({
+		await credentialStore.registerCredential({
 			userId: "user-for-policy-test",
 			credentialId: CREDENTIAL_ID,
 			publicKey: new Uint8Array(64),
