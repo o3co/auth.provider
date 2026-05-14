@@ -112,7 +112,11 @@ function makeBaseDeps(
 ): GrantDependencies & {
 	webauthnCredentialStore: ReturnType<typeof createMemoryWebAuthnCredentialStore>;
 	challengeCeremony: ChallengeCeremony;
-	webauthnConfig: { rpId: string; origin: string[]; userVerification: "required" | "preferred" | "discouraged" };
+	webauthnConfig: {
+		rpId: string;
+		origin: string[];
+		userVerification: "required" | "preferred" | "discouraged";
+	};
 } {
 	return {
 		config: {
