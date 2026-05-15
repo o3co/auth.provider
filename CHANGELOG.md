@@ -64,6 +64,13 @@ v0.7.0 ships **Wave 1** of the auth-provider passkey-native auth toolkit roadmap
   silently treated as enabled) and keeps env-enable working via the documented
   `OAUTH_GRANTS_*_ENABLED=true` operator pattern. `GrantRegistry.addModule` (the internal
   legacy-init path) follows the same rule for symmetry.
+- **Deprecation warning text generalization (R5/R6 hygiene).** The runtime deprecation
+  warnings emitted by `redisCodeRepositoryBuilder` (`@o3co/auth-provider-redis`) and the
+  standalone template's `buildModules` legacy `repositories.code.type = "redis"` path no
+  longer name a specific removal version. Operators now see "see CHANGELOG for the removal
+  version" instead of the stale "will be removed in v0.6" forward-promise (carried over
+  from before v0.6.0 cut). Aligns with [`docs/release-policy.md`](docs/release-policy.md)
+  R5 (operator-facing message strings use released version names only).
 
 ### Security
 

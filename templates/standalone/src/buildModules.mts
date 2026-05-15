@@ -108,7 +108,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	} else if (legacyCodeType === "redis") {
 		console.warn(
 			'[buildModules] `repositories.code.type = "redis"` is deprecated; use ' +
-				'`oauth.code.adapter = "redis"` instead (will be removed in v0.6).',
+				'`oauth.code.adapter = "redis"` instead — see CHANGELOG for the removal version.',
 		);
 		codeRepositoryAdapter = "redis";
 	} else {
