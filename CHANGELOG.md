@@ -69,8 +69,13 @@ v0.7.0 ships **Wave 1** of the auth-provider passkey-native auth toolkit roadmap
   standalone template's `buildModules` legacy `repositories.code.type = "redis"` path no
   longer name a specific removal version. Operators now see "see CHANGELOG for the removal
   version" instead of the stale "will be removed in v0.6" forward-promise (carried over
-  from before v0.6.0 cut). Aligns with [`docs/release-policy.md`](docs/release-policy.md)
-  R5 (operator-facing message strings use released version names only).
+  from before v0.6.0 cut). The matching `@deprecated` JSDoc on `redisCodeRepositoryBuilder`
+  and the inline R-9 comment in `buildModules` are similarly cleaned — these are
+  consumer-visible via IDE hover tooltips and `tsserver` deprecated-symbol warnings, so
+  R6 step 4 (JSDoc / code comments) covers them. Aligns with
+  [`docs/release-policy.md`](docs/release-policy.md) R3 (`@deprecated since X` only,
+  not `removed in Y`), R5 (operator-facing message strings use released version names
+  only), and R6 step 4 (release-cut audit of JSDoc / code-comment forward-version refs).
 
 ### Security
 

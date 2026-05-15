@@ -189,7 +189,8 @@ export class RedisCodeRepository implements CodeRepository {
  * @deprecated since v0.5.1 (OR-9). Use `redisCodeRepositoryModule` (DI module
  * pattern) instead. The builder now expects `{ client, keyPrefix?,
  * defaultExpiresIn? }` (the same shape the module passes internally) — the
- * pre-v0.5.1 `{ endpointUri }` shape is no longer supported. Removed in v0.6.
+ * pre-v0.5.1 `{ endpointUri }` shape is no longer supported. See CHANGELOG
+ * for the removal version.
  *
  * Migration: stop calling `factory.register("redis", redisCodeRepositoryBuilder)`;
  * instead include `redisCodeRepositoryModule` in the manifest and provide the
