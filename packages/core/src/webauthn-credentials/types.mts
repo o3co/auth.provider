@@ -31,6 +31,13 @@ export type AuthenticatorTransport = "ble" | "hybrid" | "internal" | "nfc" | "us
 export interface WebAuthnCredential {
 	readonly userId: string;
 	readonly credentialId: string;
+	/**
+	 * Authenticator public key in COSE format. **Logically immutable** —
+	 * callers MUST NOT mutate the returned bytes; doing so corrupts the
+	 * store's view of the credential. (Project-wide convention: `Uint8Array`
+	 * record fields are treated as readonly even though TypeScript has no
+	 * `ReadonlyUint8Array` type.)
+	 */
 	readonly publicKey: Uint8Array;
 	readonly signCount: number;
 	readonly transports?: ReadonlyArray<AuthenticatorTransport>;

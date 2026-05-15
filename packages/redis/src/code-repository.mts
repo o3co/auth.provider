@@ -209,7 +209,7 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
 		);
 	}
 	consoleLogger.warn(
-		"redisCodeRepositoryBuilder is deprecated; use redisCodeRepositoryModule (will be removed in v0.6).",
+		"redisCodeRepositoryBuilder is deprecated; use redisCodeRepositoryModule — see CHANGELOG for the removal version.",
 	);
 	return new RedisCodeRepository(c.client, {
 		keyPrefix: c.keyPrefix,
