@@ -97,9 +97,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 
 	// OR-9: effective code-repo adapter. `oauth.code.adapter` is the
 	// authoritative switch; the legacy `repositories.code.type = "redis"`
-	// path is honored for one release with a deprecation warn so existing
-	// operators relying on `CLIENT_CODE_TYPE=redis` env-var overrides keep
-	// working until they migrate. Removed in v0.6.
+	// path is honored with a deprecation warn so existing operators
+	// relying on `CLIENT_CODE_TYPE=redis` env-var overrides keep working
+	// until they migrate. See CHANGELOG for the removal version.
 	const oauthCodeAdapter = config.oauth?.code?.adapter;
 	const legacyCodeType = (config.repositories?.code as { type?: string } | undefined)?.type;
 	let codeRepositoryAdapter: "memory" | "redis";
