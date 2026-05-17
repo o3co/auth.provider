@@ -223,8 +223,8 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
  *
  * Static composition path. `redisCodeRepositoryBuilder` is still exported
  * but deprecated — operators wiring redis codes should switch to this
- * module + provide `codeRepositoryClient` from `makeIoredisClients()`.
- * Removal target is tracked in CHANGELOG.
+ * module + provide `codeRepositoryClient` from `makeIoredisClients()` —
+ * see CHANGELOG for the removal version.
  *
  * configSchema: top-level key `redisCodeRepository` (module-namespaced per
  * master roadmap §3.5). No `.default()` per ADR — defaults live in
