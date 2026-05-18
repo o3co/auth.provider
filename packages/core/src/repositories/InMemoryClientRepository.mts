@@ -87,6 +87,14 @@ export const ClientEntrySchema = z
 		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
 		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
 		allowedAzpForFederationToken: z.boolean().optional().default(false),
+		// Wave 2 §4.8: per-client sender-constraint requirement.
+		senderConstrained: z
+			.object({
+				required: z.boolean(),
+				methods: z.array(z.string()).readonly(),
+			})
+			.readonly()
+			.optional(),
 	})
 	.strict()
 	.superRefine((data, ctx) => {
@@ -152,6 +160,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+			...(entry.senderConstrained !== undefined && {
+				senderConstrained: entry.senderConstrained,
+			}),
 		};
 	}
 
@@ -204,6 +215,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+			...(entry.senderConstrained !== undefined && {
+				senderConstrained: entry.senderConstrained,
+			}),
 		};
 	}
 }

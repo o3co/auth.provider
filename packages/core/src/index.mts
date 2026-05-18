@@ -114,6 +114,7 @@ export {
 	type GenerateLogoutTokenOptions,
 	generateLogoutToken,
 } from "./grants/logoutToken.mjs";
+export type { SenderConstraint } from "./grants/senderConstraint.mjs";
 // Grant types and interfaces.
 //
 // `GrantRegistry` and `GrantRegistryError` (deprecated public re-exports

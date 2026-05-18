@@ -34,6 +34,7 @@ import {
 	type PublicClient,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
+	type SenderConstraint,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
 	type SessionRPRegistry,
@@ -276,9 +277,39 @@ export const createOAuthRouter = async (
 								allowedScopes: req.oauthClient.allowedScopes,
 								allowedGrantTypes: req.oauthClient.allowedGrantTypes,
 								allowedAudiences: req.oauthClient.allowedAudiences,
+								senderConstrained: req.oauthClient.senderConstrained,
 							}
 						: null,
 				};
+				// Shared grant-dispatch senderConstrained enforcement (Wave 2
+				// Token-binding Cluster spec §4.8 step 2). This runs once for
+				// every grant_type before the concrete handler, so custom
+				// grants registered via GrantFactory inherit the check for
+				// free. No-op when the client did not opt into a sender
+				// constraint — zero behavior change for v0.7.x consumers.
+				const sc: SenderConstraint | undefined = ctx.authenticatedClient?.senderConstrained;
+				if (sc?.required) {
+					if (ctx.tokenBinding === undefined) {
+						return res
+							.status(401)
+							.json(
+								errorEnvelope(
+									"invalid_client",
+									"sender-constrained binding required, none provided",
+								),
+							);
+					}
+					if (!sc.methods.includes(ctx.tokenBinding.kind)) {
+						return res
+							.status(400)
+							.json(
+								errorEnvelope(
+									"unauthorized_client",
+									`client not allowed to use kind=${ctx.tokenBinding.kind}`,
+								),
+							);
+					}
+				}
 				const { result, sessionMutation } = await handler.handle(ctx);
 
 				if (sessionMutation?.clear) {
