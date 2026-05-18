@@ -15,6 +15,7 @@
  */
 import { randomUUID } from "node:crypto";
 import type { JWTPayload, KeyStore } from "../keys/KeyStore.mjs";
+import type { Confirmation } from "./confirmation.mjs";
 
 export const formatObject = <T extends object>(data: T): Partial<T> => {
 	return Object.fromEntries(
@@ -30,6 +31,13 @@ export interface Token {
 	tokenType?: "at+jwt" | "rt+jwt";
 	audience?: string;
 	issuer?: string;
+	/**
+	 * Echo of `GenerateTokenOptions.confirmation` when set. Read-only
+	 * informational field for callers (e.g. audit log); does NOT drive
+	 * claim emission — that is `GenerateTokenOptions.confirmation`'s job.
+	 * See Wave 2 Token-binding Cluster spec §4.4.
+	 */
+	readonly confirmation?: Confirmation;
 }
 
 export interface IntermediateToken {
@@ -47,14 +55,22 @@ export interface TokenResponse {
 	id_token?: string;
 }
 
-export const generateTokenResponse = ({
-	accessToken,
-	refreshToken = undefined,
-	idToken = undefined,
-}: IntermediateToken): TokenResponse => {
+export interface GenerateTokenResponseOptions {
+	/**
+	 * Wire-level token_type for the response envelope. Defaults to "Bearer".
+	 * Set to "DPoP" when the issued access token has a DPoP confirmation
+	 * (RFC 9449 §5). mTLS-bound tokens keep "Bearer" per RFC 8705 §3.
+	 */
+	readonly tokenType?: "Bearer" | "DPoP";
+}
+
+export const generateTokenResponse = (
+	{ accessToken, refreshToken = undefined, idToken = undefined }: IntermediateToken,
+	options?: GenerateTokenResponseOptions,
+): TokenResponse => {
 	return {
 		access_token: accessToken.token,
-		token_type: "Bearer",
+		token_type: options?.tokenType ?? "Bearer",
 		...formatObject({
 			scope: accessToken.scope,
 			refresh_token: refreshToken ? refreshToken.token : null,
@@ -73,6 +89,12 @@ export interface GenerateTokenOptions {
 	authorizedParty?: string | null;
 	scope?: string | null;
 	tokenType?: "at+jwt" | "rt+jwt";
+	/**
+	 * RFC 7800 confirmation claim to emit as the `cnf` JWT claim. When
+	 * absent, no `cnf` claim is emitted — the issued token is unbound
+	 * (Bearer semantics).
+	 */
+	confirmation?: Confirmation;
 }
 
 export const generateToken = async (
@@ -86,6 +108,7 @@ export const generateToken = async (
 		authorizedParty = null,
 		scope = null,
 		tokenType = undefined,
+		confirmation = undefined,
 	}: GenerateTokenOptions,
 ): Promise<Token> => {
 	const now = Math.floor(Date.now() / 1000);
@@ -99,6 +122,7 @@ export const generateToken = async (
 		...(issuer != null ? { iss: issuer } : {}),
 		...(audience != null ? { aud: audience } : {}),
 		...(subject != null ? { sub: subject } : {}),
+		...(confirmation ? { cnf: confirmation } : {}),
 	};
 
 	const token = await keyStore.sign({
@@ -114,6 +138,8 @@ export const generateToken = async (
 	if (subject !== null && subject !== undefined) result.subject = subject;
 	if (scope !== null && scope !== undefined) result.scope = scope;
 	if (tokenType !== undefined) result.tokenType = tokenType;
+	if (confirmation !== undefined)
+		(result as { confirmation?: Confirmation }).confirmation = confirmation;
 
 	return result;
 };

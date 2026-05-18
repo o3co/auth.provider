@@ -125,6 +125,7 @@ export {
 export {
 	formatObject,
 	type GenerateTokenOptions,
+	type GenerateTokenResponseOptions,
 	generateToken,
 	generateTokenResponse,
 	type Token,
