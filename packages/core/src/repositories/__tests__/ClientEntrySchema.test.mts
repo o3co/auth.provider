@@ -60,3 +60,57 @@ describe("ClientEntrySchema — allowedGrantTypes field (Wave 1 §3.4.1)", () =>
 		expect(result.success).toBe(false);
 	});
 });
+
+describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
+	it("accepts absent senderConstrained (clients that have not opted in)", () => {
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+		});
+		expect(result.success).toBe(true);
+		if (result.success) expect(result.data.senderConstrained).toBeUndefined();
+	});
+
+	it("accepts valid senderConstrained with required + non-empty methods", () => {
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			senderConstrained: { required: true, methods: ["dpop", "mtls"] },
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("accepts senderConstrained.required:false with empty methods (advisory)", () => {
+		// required:false → methods is advisory, empty is fine.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			senderConstrained: { required: false, methods: [] },
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects required:true with empty methods (would reject every binding at runtime)", () => {
+		// Fail-at-boot: a config that would reject every request is almost
+		// certainly operator error and should surface at load time, not
+		// silently fail-closed at every /token request.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			senderConstrained: { required: true, methods: [] },
+		});
+		expect(result.success).toBe(false);
+	});
+
+	it("rejects empty-string entries in methods (typo / silent-match guard)", () => {
+		// An empty kind string would match a future `TokenBindingMechanism`
+		// with `kind: ""` — a typo or refactor artifact — silently. Force
+		// non-empty entries at schema time.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			senderConstrained: { required: true, methods: ["dpop", ""] },
+		});
+		expect(result.success).toBe(false);
+	});
+});

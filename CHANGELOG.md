@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (Wave 2 Token-binding Cluster — Phase 1c)
+
+- **`SenderConstraint = { required: boolean; methods: readonly string[] }`** in `@o3co/auth-provider-core`. Method-agnostic per-client requirement; handles DPoP + mTLS + future binding mechanisms symmetrically (replaces the originally-considered per-grant `dpopRequired` field).
+- **3-layer propagation:** `Client.senderConstrained` → `PublicClient.senderConstrained` (auto via `Omit<Client, "clientSecret">`) → `AuthenticatedClient.senderConstrained` (via the `/token` route projection). `ClientEntrySchema` accepts the new optional field at config-load time so registered clients round-trip persist → load → projection cleanly.
+- **Shared grant-dispatch enforcement on `/token`** (spec §4.8 step 2). Clients that set `senderConstrained.required = true` must present a binding whose `kind` is in `senderConstrained.methods`. Two-step reject — no binding → `invalid_client` (401); wrong kind → `unauthorized_client` (400) — runs once per request *before* the concrete grant handler. Custom grants registered via `GrantFactory` inherit the enforcement for free, with no per-grant code. Both reject paths emit `token.issued.failure` audit events with structured `details.reason` so operators can monitor sender-constraint misconfigurations / probe attempts.
+
+**Phase 1 of Wave 2 Token-binding Cluster (skeleton) is now complete.** Phase 2 will ship `@o3co/auth-provider-dpop` (RFC 9449); Phase 3 will ship the mTLS support (RFC 8705). Both plug into this skeleton as `TokenBindingMechanism` implementations registered via `tokenBindingMw`.
+
 ### Added (Wave 2 Token-binding Cluster — Phase 1b)
 
 - **`tokenBindingMw` middleware factory in `@o3co/auth-provider-core`.** Validates presented binding material via a pluggable set of `TokenBindingMechanism` implementations and resolves a single `TokenBinding` per the configured `DispatchPolicy`. The result is written to `req.tokenBinding` (ambient `Express.Request` augmentation shipped alongside) and copied into `GrantContext.tokenBinding` by the `/token` route. With no mechanisms registered (Phase 1b default), behavior is identical to v0.7.x — zero behavior change for any consumer that has not opted into the cluster.

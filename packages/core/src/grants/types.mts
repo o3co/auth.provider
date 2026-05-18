@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import type { z } from "zod";
-
 import type { CoreConfig } from "../config/application.schema.mjs";
 import type { KeyStore } from "../keys/KeyStore.mjs";
 import type { PathResolver } from "../modules/types.mjs";
@@ -30,6 +29,7 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
+import type { SenderConstraint } from "./senderConstraint.mjs";
 import type { TokenBinding } from "./tokenBinding.mjs";
 
 /**
@@ -68,6 +68,13 @@ export interface AuthenticatedClient {
 	 * default `aud`; absence falls back to the issuer.
 	 */
 	readonly allowedAudiences?: readonly string[];
+	/**
+	 * Per-client sender-constraint requirement. The `/token` route
+	 * propagates this from `req.oauthClient`; the shared grant-dispatch
+	 * path enforces the binding-method rules in spec §4.8 step 2 before
+	 * invoking the concrete grant handler.
+	 */
+	readonly senderConstrained?: SenderConstraint;
 }
 
 /**

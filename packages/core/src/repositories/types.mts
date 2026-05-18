@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import type { SenderConstraint } from "../grants/senderConstraint.mjs";
 
 /**
  * RFC 6749 §2.3 / RFC 7591 §2 client authentication method at the token endpoint.
@@ -95,6 +96,13 @@ export interface Client {
 	 * OAuth client registration that only needs auth.
 	 */
 	readonly allowedAzpForFederationToken?: boolean;
+	/**
+	 * Sender-constraint requirement for this client. See Wave 2 Token-
+	 * binding Cluster spec §4.8. Surfaces through `PublicClient` (via
+	 * `Omit`) and `AuthenticatedClient` (via the `/token` route's
+	 * projection).
+	 */
+	readonly senderConstrained?: SenderConstraint;
 }
 
 export interface User {
