@@ -143,7 +143,12 @@ export const normalizeHtu = (raw: string): string => {
 		decodedPath === "" ? "/" : removeDotSegments(decodedPath, originalHadTrailingSlash);
 
 	// Reconstruct the canonical URL string without using url.toString()
-	// to avoid WHATWG URL applying its own re-encoding to our decoded characters.
+	// to avoid WHATWG URL applying its own re-encoding to our decoded
+	// characters. WHATWG `url.hostname` keeps IPv6 brackets verbatim
+	// (e.g. `[::1]` for `http://[::1]/` per the URL Standard host
+	// serializer), so the IP-literal form survives reconstruction
+	// unchanged — confirmed by the IPv6 regression test in
+	// `__tests__/htu-normalize.test.mts`.
 	const portPart = url.port ? `:${url.port}` : "";
 	return `${url.protocol}//${url.hostname}${portPart}${normalizedPath}`;
 };

@@ -414,6 +414,28 @@ describe("createDPoPMechanism", () => {
 		});
 	});
 
+	// Narrow the replay-store catch so RangeError (programming/config bug)
+	// is NOT misclassified as `replay_store_unavailable` (availability
+	// fault). Operator triage signal must distinguish "fix the ttl config"
+	// from "check Redis health".
+	it("lets RangeError from replay store propagate (programmer/config bug, not transport)", async () => {
+		const rangingStore = {
+			seen: async (_jti: string, _jkt: string, ttlSeconds: number) => {
+				if (ttlSeconds <= 0) {
+					throw new RangeError(`ttlSeconds must be positive (got ${ttlSeconds})`);
+				}
+				return false;
+			},
+		};
+		const rangingMechanism = createDPoPMechanism({
+			replayStore: rangingStore,
+			replayTtlSeconds: -1, // forces RangeError at the store layer
+		});
+		const { proof } = await mintProof();
+		// RangeError must surface as RangeError, NOT wrapped as DPoPError.
+		await expect(rangingMechanism.extract(makeReq(proof) as Request)).rejects.toThrow(RangeError);
+	});
+
 	// I-2: pin that replay-store transport faults surface as the dedicated
 	// `replay_store_unavailable` audit signal — not a raw Error that would
 	// otherwise propagate up to `tokenBindingMw` and lose operator triage.

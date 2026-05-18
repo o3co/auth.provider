@@ -225,11 +225,20 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			try {
 				alreadySeen = await replayStore.seen(proof.claims.jti, jkt, replayTtlSeconds);
 			} catch (err) {
-				// DPoPError (e.g. RangeError-shaped programming bugs that
-				// arrive here as DPoPError after a future refactor) should
-				// propagate as-is; everything else is a transport / availability
-				// fault and gets the dedicated reason code.
+				// Narrow the catch so only TRANSPORT / availability faults
+				// surface as `replay_store_unavailable`. Programming-contract
+				// violations propagate as-is:
+				//   - DPoPError: a future refactor might shape replay-store
+				//     errors directly as DPoPError; preserve that classification.
+				//   - RangeError: `DPoPReplayStore.seen`'s interface JSDoc says
+				//     implementations SHOULD throw `RangeError` on non-positive
+				//     `ttlSeconds`. That is a programmer / config bug, NOT an
+				//     availability fault — misclassifying it as
+				//     `replay_store_unavailable` would mislead operator triage
+				//     into checking Redis health when the actual fix is the
+				//     ttl config.
 				if (err instanceof DPoPError) throw err;
+				if (err instanceof RangeError) throw err;
 				logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_unavailable");
 				throw new DPoPError(
 					"replay_store_unavailable",

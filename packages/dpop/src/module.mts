@@ -59,7 +59,7 @@ import { createDPoPMechanism } from "./verifier.mjs";
  * deployments wire the Redis-backed implementation via:
  *
  * ```ts
- * import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis";
+ * import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis/dpop";
  * // ... in your composition module's `provides`:
  * dpopReplayStore: (deps) => createRedisDPoPReplayStore(deps.redisClient)
  * ```

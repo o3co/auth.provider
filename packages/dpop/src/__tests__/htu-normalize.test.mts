@@ -78,6 +78,17 @@ describe("normalizeHtu — RFC 3986 §6.2.2 conformant", () => {
 		expect(normalizeHtu("https://as/Token/Endpoint")).toBe("https://as/Token/Endpoint");
 	});
 
+	// RFC 3986 §3.2.2: IPv6 literal hosts must remain bracketed in the URI.
+	// WHATWG `url.hostname` keeps the brackets verbatim per the URL Standard
+	// host serializer (e.g. `[::1]` for `http://[::1]/`), so the canonical
+	// reconstruction in normalizeHtu — which embeds `url.hostname` directly
+	// — already produces a valid IP-literal URI. This test pins that
+	// contract so a future refactor cannot regress the IPv6 surface.
+	it("preserves IPv6 brackets on the canonical reconstruction", () => {
+		expect(normalizeHtu("http://[::1]/token")).toBe("http://[::1]/token");
+		expect(normalizeHtu("http://[2001:db8::1]:8080/token")).toBe("http://[2001:db8::1]:8080/token");
+	});
+
 	// RFC 9449 §4 — userinfo has no meaning at the token endpoint. Without
 	// rejection, the canonical reconstruction drops `username` / `password`
 	// and a proof for `https://attacker:pwn@as.example/...` would silently
