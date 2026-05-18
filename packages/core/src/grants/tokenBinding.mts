@@ -22,7 +22,9 @@ import type { Confirmation } from "./confirmation.mjs";
  * Extension boundary: downstream MAY add a new `kind` and evidence
  * fields by extending this interface; the `confirmation` claim itself
  * MUST be one of the variants in `Confirmation` (RFC 7800 / IANA
- * registry domain).
+ * registry domain). Adding a new confirmation variant (e.g. RFC 9421
+ * `jwk` confirmation) is a core semver-minor change, not a
+ * downstream-only extension.
  */
 export interface TokenBinding {
 	readonly kind: string;
