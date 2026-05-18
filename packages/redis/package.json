@@ -12,6 +12,10 @@
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
 		},
+		"./dpop": {
+			"import": "./dist/dpop-replay-store.mjs",
+			"types": "./dist/dpop-replay-store.d.mts"
+		},
 		"./ioredis": {
 			"import": "./dist/ioredis.mjs",
 			"types": "./dist/ioredis.d.mts"
@@ -45,10 +49,14 @@
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "^0.0.0",
+		"@o3co/auth-provider-dpop": "^0.0.0",
 		"ioredis": "^5.4.1",
 		"redis": "^5.10.0"
 	},
 	"peerDependenciesMeta": {
+		"@o3co/auth-provider-dpop": {
+			"optional": true
+		},
 		"ioredis": {
 			"optional": true
 		},
@@ -58,6 +66,7 @@
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-dpop": "workspace:*",
 		"@vitest/coverage-v8": "^4.1.6",
 		"ioredis": "^5.4.1",
 		"redis": "^5.10.0",
