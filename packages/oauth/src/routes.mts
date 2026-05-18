@@ -289,7 +289,11 @@ export const createOAuthRouter = async (
 				// constraint — zero behavior change for v0.7.x consumers.
 				const sc: SenderConstraint | undefined = ctx.authenticatedClient?.senderConstrained;
 				if (sc?.required) {
-					if (ctx.tokenBinding === undefined) {
+					// Use truthy check (not `=== undefined`) so a custom downstream
+					// middleware that sets `req.tokenBinding = null` cannot bypass
+					// the constraint. The type contract is `tokenBinding?:
+					// TokenBinding` so this is purely defensive at the JS layer.
+					if (!ctx.tokenBinding) {
 						await emitAuditEvent(auditSink, {
 							timestamp: new Date(),
 							type: "token.issued.failure",
@@ -304,6 +308,7 @@ export const createOAuthRouter = async (
 						});
 						return res
 							.status(401)
+							.set("WWW-Authenticate", `Basic realm="${issuer}"`)
 							.json(
 								errorEnvelope(
 									"invalid_client",

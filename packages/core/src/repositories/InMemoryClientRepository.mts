@@ -88,10 +88,15 @@ export const ClientEntrySchema = z
 		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
 		allowedAzpForFederationToken: z.boolean().optional().default(false),
 		// Wave 2 §4.8: per-client sender-constraint requirement.
+		// `methods` is `string().min(1)` so accidental empty kinds (typos
+		// or trailing-comma artifacts) cannot silently match a future
+		// mechanism with `kind: ""`. `superRefine` below rejects the
+		// degenerate `required:true + methods:[]` combo at boot rather
+		// than letting it fail-closed at every request.
 		senderConstrained: z
 			.object({
 				required: z.boolean(),
-				methods: z.array(z.string()).readonly(),
+				methods: z.array(z.string().min(1)).readonly(),
 			})
 			.readonly()
 			.optional(),
@@ -119,6 +124,17 @@ export const ClientEntrySchema = z
 				code: z.ZodIssueCode.custom,
 				message: 'clientSecret must not be set when tokenEndpointAuthMethod is "none"',
 				path: ["clientSecret"],
+			});
+		}
+		// Wave 2 §4.8: `required: true` with an empty `methods` list
+		// would reject every binding at runtime and is almost certainly
+		// operator error. Fail at boot instead so misconfiguration is
+		// surfaced immediately.
+		if (data.senderConstrained?.required === true && data.senderConstrained.methods.length === 0) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: "senderConstrained.methods must contain at least one kind when required is true",
+				path: ["senderConstrained", "methods"],
 			});
 		}
 	});

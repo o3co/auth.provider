@@ -271,20 +271,14 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 		expect(handler.captured.invoked).toBe(true);
 	});
 
-	it("rejects unauthorized_client when methods is empty and required, regardless of presented kind", async () => {
-		// Degenerate config: required + methods:[] forbids every kind.
-		// Reachable via the schema (no minLength on methods). The behavior
-		// is deterministic — every binding fails [].includes(kind) — and
-		// this test pins it so a future "default-allow-on-empty" refactor
-		// would have to revisit the rule explicitly.
-		const sc: SenderConstraint = { required: true, methods: [] };
+	it("emits WWW-Authenticate: Basic on the invalid_client 401 (RFC 7235 §3.1 conformance)", async () => {
+		// Sibling invalid_client 401s in clientAuthMw set this header; the
+		// new sender-constraint reject must too, for consistency and so
+		// RFC-conformant Basic clients see the expected challenge.
+		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
 		const repo = makeInMemoryRepo(sc);
 		const handler = capturingHandler();
-		const app = await buildApp(handler, {
-			clientRepo: repo,
-			mountMw: true,
-			mechanisms: [dpopMechanism],
-		});
+		const app = await buildApp(handler, { clientRepo: repo, mountMw: false });
 
 		const res = await request(app)
 			.post("/oauth/token")
@@ -292,8 +286,50 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 			.type("form")
 			.send({ grant_type: "client_credentials" });
 
-		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("unauthorized_client");
+		expect(res.status).toBe(401);
+		expect(res.headers["www-authenticate"]).toBe(`Basic realm="${ISSUER}"`);
+	});
+
+	it("rejects invalid_client when req.tokenBinding is null (defensive against custom middleware)", async () => {
+		// The type contract is `req.tokenBinding?: TokenBinding`, so a custom
+		// middleware setting `null` would be a type violation. But at the JS
+		// layer the enforcement uses `!ctx.tokenBinding` (truthy check) so
+		// even a runtime `null` is treated as "no binding" rather than
+		// silently bypassing the reject path. This test pins the defensive
+		// semantic.
+		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
+		const repo = makeInMemoryRepo(sc);
+		const handler = capturingHandler();
+		const app = express();
+		app.set("trust proxy", 1);
+		app.use(express.json());
+		app.use(express.urlencoded({ extended: false }));
+		// Middleware that simulates a misbehaving downstream wiring: assigns
+		// null instead of omitting the field.
+		app.use((req, _res, next) => {
+			(req as unknown as { tokenBinding: TokenBinding | null }).tokenBinding = null;
+			next();
+		});
+		const keyStore = createSymmetricKeyStore(SECRET);
+		const registry = new GrantRegistry();
+		registry.register("client_credentials", handler);
+		const { router } = await createOAuthRouter(express, {
+			registry,
+			config: fullConfig,
+			clientRepository: repo,
+			codeRepository: codeRepoStub,
+			keyStore,
+		});
+		app.use("/oauth", router);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
 		expect(handler.captured.invoked).toBe(false);
 	});
 
