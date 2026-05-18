@@ -131,6 +131,65 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
+			// Wave 2 Phase 2 §9.2: refresh-time DPoP binding matrix (RFC 9449
+			// §5 + Codex Round 1 Important #1). RT carries `cnf.jkt` only
+			// when issued to a public client with proof; confidential-client
+			// RTs are always plain (no `cnf`). Five rows, evaluated BEFORE
+			// any further work so the rejection short-circuits ahead of
+			// policy evaluation, store I/O, and `generateToken` keystore
+			// signatures:
+			//
+			//   RT cnf.jkt | proof JKT       | Outcome
+			//   no         | no              | issue plain Bearer (legacy)
+			//   no         | yes             | issue DPoP-bound AT (opt-in upgrade)
+			//   yes        | no              | reject invalid_grant
+			//   yes        | yes, differs    | reject invalid_grant (multi-key attack)
+			//   yes        | yes, equal      | issue DPoP-bound AT + bound RT (rotation preserves)
+			//
+			// Error code is `invalid_grant` (RFC 6749 §5.2) — at refresh
+			// time the RT IS the grant; a missing/mismatched proof means
+			// the grant cannot be used. RFC 9449 §5 does not pin a specific
+			// OAuth error code for this branch; `invalid_grant` is more
+			// caller-actionable than `invalid_dpop_proof` (the proof itself
+			// is well-formed; the grant is what cannot be honored).
+			const cnfClaim = (tokenPayload as { cnf?: unknown }).cnf;
+			const rtCnfJkt =
+				typeof cnfClaim === "object" &&
+				cnfClaim !== null &&
+				"jkt" in cnfClaim &&
+				typeof (cnfClaim as { jkt: unknown }).jkt === "string"
+					? (cnfClaim as { jkt: string }).jkt
+					: undefined;
+			const proofConfirmation = ctx.tokenBinding?.confirmation;
+			const proofJkt =
+				proofConfirmation && "jkt" in proofConfirmation ? proofConfirmation.jkt : undefined;
+			if (rtCnfJkt !== undefined) {
+				if (proofJkt === undefined) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "refresh_token requires a DPoP proof",
+						},
+					};
+				}
+				// Plain `!==` is acceptable here: the JKT is a SHA-256
+				// thumbprint of a *public* key (RFC 7638) — not a secret. A
+				// timing-side-channel cannot leak material an attacker
+				// could not already derive from the public key they
+				// presented. Mirrors PKCE which uses constantTimeStringEqual
+				// only because the code_verifier IS secret.
+				if (proofJkt !== rtCnfJkt) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "DPoP proof does not match refresh_token binding",
+						},
+					};
+				}
+			}
+
 			const subjectStr = typeof tokenPayload.sub === "string" ? tokenPayload.sub : undefined;
 			const scopeStr =
 				typeof claims.scope === "string"
@@ -335,6 +394,17 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// token response omits scope rather than emitting `scope: ""`.
 			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
 
+			// Wave 2 Phase 2 §9.2: new tokens inherit the request-time
+			// binding. AT is bound whenever a confirmation is present (rows
+			// 2 and 5 of the matrix). New RT is bound only for **public
+			// clients** with confirmation present — mirroring §9.1's auth_code
+			// RT rule (confidential client RTs continue plain because the
+			// secret already authenticates the refresh exchange). The
+			// wire-level `token_type` is "DPoP" only for the DPoP kind.
+			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
+			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
+			const bindNewRefreshToken = proofConfirmation !== undefined && isPublicClient;
+
 			const newAccessToken = await generateToken(
 				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
 				{
@@ -352,6 +422,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					...(proofConfirmation ? { confirmation: proofConfirmation } : {}),
 				},
 			);
 
@@ -368,6 +439,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
+					...(bindNewRefreshToken ? { confirmation: proofConfirmation } : {}),
 				},
 			);
 
@@ -534,10 +606,13 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({
-						accessToken: newAccessToken,
-						refreshToken: newRefreshToken,
-					}),
+					tokens: generateTokenResponse(
+						{
+							accessToken: newAccessToken,
+							refreshToken: newRefreshToken,
+						},
+						{ tokenType },
+					),
 				},
 			};
 		},

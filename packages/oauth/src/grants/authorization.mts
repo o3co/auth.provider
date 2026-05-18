@@ -361,6 +361,21 @@ export const createAuthorizationGrant = (
 			// consumers can't distinguish from "scope claim omitted").
 			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
 
+			// Wave 2 Phase 2 §9.1: propagate the token-binding confirmation
+			// (RFC 7800 `cnf`) into the issued tokens. AT is bound whenever
+			// the request carried a binding. RT binding is restricted to
+			// **public clients** (`tokenEndpointAuthMethod === "none"`): for
+			// confidential clients the client secret already authenticates
+			// the refresh exchange, so RT-key-binding adds no security and
+			// would force the client to retain the DPoP key across the
+			// lifetime of the refresh token. Per spec §9.1 + RFC 9449 §5.
+			// The wire-level `token_type` is "DPoP" only for the DPoP kind
+			// (mTLS keeps "Bearer" per RFC 8705 §3).
+			const confirmation = ctx.tokenBinding?.confirmation;
+			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
+			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
+			const bindRefreshToken = confirmation !== undefined && isPublicClient;
+
 			// TODO-F-3: both access_token and refresh_token carry family_id and, when
 			// sid is present, the sid claim so introspect (Task 5) and refresh (Task 4)
 			// can propagate them without re-reading the session store on every request.
@@ -377,6 +392,7 @@ export const createAuthorizationGrant = (
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					...(confirmation ? { confirmation } : {}),
 				},
 			);
 			const refreshToken = await generateToken(
@@ -391,6 +407,7 @@ export const createAuthorizationGrant = (
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
+					...(bindRefreshToken ? { confirmation } : {}),
 				},
 			);
 
@@ -592,7 +609,7 @@ export const createAuthorizationGrant = (
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }),
+					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }, { tokenType }),
 				},
 				sessionMutation: {
 					// D-1: /authorize no longer writes session.code* in v0.5.1.

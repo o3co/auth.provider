@@ -188,6 +188,16 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			const audience = policyGrantedAudience ?? client.allowedAudiences?.[0] ?? issuer ?? null;
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
+			// Wave 2 Phase 2 §9.1: propagate the token-binding confirmation
+			// (RFC 7800 `cnf`) into the issued AT. Mechanism-agnostic copy —
+			// DPoP supplies `{ jkt }`, mTLS supplies `{ "x5t#S256" }`. The
+			// wire-level `token_type` is "DPoP" only for the DPoP kind
+			// (RFC 9449 §5); mTLS keeps "Bearer" per RFC 8705 §3. RFC 6749
+			// §4.4.3 says client_credentials does not issue a refresh token,
+			// so no RT-binding branch is needed here.
+			const confirmation = ctx.tokenBinding?.confirmation;
+			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
+
 			const accessToken = await generateToken(
 				{
 					client_id: client.clientId,
@@ -201,13 +211,14 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 					authorizedParty: client.clientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					...(confirmation ? { confirmation } : {}),
 				},
 			);
 
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken }),
+					tokens: generateTokenResponse({ accessToken }, { tokenType }),
 				},
 			};
 		},
