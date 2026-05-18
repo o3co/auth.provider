@@ -22,6 +22,10 @@
 			"types": "./dist/testing/index.d.mts",
 			"import": "./dist/testing/index.mjs"
 		},
+		"./middleware/express.mjs": {
+			"import": "./dist/middleware/express.mjs",
+			"types": "./dist/middleware/express.d.mts"
+		},
 		"./reference.conf": "./config/reference.conf"
 	},
 	"files": [

@@ -97,6 +97,47 @@ describe("tokenBindingMw", () => {
 		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_dpop_proof" }));
 	});
 
+	it("hard-fails (no downgrade) when an earlier mechanism succeeded and a later one throws", async () => {
+		// Pins spec §3.6 no-downgrade rule under mixed success/failure:
+		// a successful explicit mechanism must NOT survive a subsequent
+		// mechanism's invalid material — the entire request is rejected
+		// rather than silently downgraded to the partial binding.
+		const err = Object.assign(new Error("bad cert"), { code: "invalid_mtls_cert" });
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(fakeDPoP), mtlsMechanism(err)],
+			dispatchPolicy: "intent-explicit",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+		expect(next).not.toHaveBeenCalled();
+		expect(req.tokenBinding).toBeUndefined();
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_mtls_cert" }));
+	});
+
+	it("hard-fails (no downgrade) when an earlier ambient mechanism throws before a later explicit could succeed", async () => {
+		// Pins spec §3.6 from the opposite direction: an earlier failure
+		// short-circuits — the middleware never reaches the later (would-
+		// succeed) mechanism. The downstream observable is identical to
+		// the "later throws" case but the implementation invariant is the
+		// for-loop's early return.
+		const err = Object.assign(new Error("bad cert"), { code: "invalid_mtls_cert" });
+		const mw = tokenBindingMw({
+			mechanisms: [mtlsMechanism(err), dpopMechanism(fakeDPoP)],
+			dispatchPolicy: "intent-explicit",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+		expect(next).not.toHaveBeenCalled();
+		expect(req.tokenBinding).toBeUndefined();
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_mtls_cert" }));
+	});
+
 	it("falls back to invalid_<kind>_proof when the thrown error code is not snake_case OAuth-shaped", async () => {
 		// Pins the safety guard against forwarding non-OAuth error codes
 		// (e.g. Node system errors like ECONNREFUSED) into the public
