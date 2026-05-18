@@ -16,6 +16,7 @@
 
 import { decodeJwt, decodeProtectedHeader } from "jose";
 import { describe, expect, it } from "vitest";
+import type { Confirmation } from "#/grants/confirmation.mjs";
 import { generateToken, generateTokenResponse } from "#/grants/token.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
@@ -249,5 +250,90 @@ describe("generateTokenResponse with id_token", () => {
 	it("omits id_token when not provided (backward compat)", () => {
 		const resp = generateTokenResponse({ accessToken: { token: "at", expiresIn: 3600 } });
 		expect(resp.id_token).toBeUndefined();
+	});
+});
+
+describe("generateToken cnf claim emission", () => {
+	it("does NOT emit cnf when confirmation is absent", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const token = await generateToken({}, { keyStore });
+		const payload = decodeJwt(token.token);
+		expect(payload).not.toHaveProperty("cnf");
+	});
+
+	it("emits cnf matching confirmation when present (jkt variant)", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const confirmation: Confirmation = { jkt: "abc123" };
+		const token = await generateToken({}, { keyStore, confirmation });
+		const payload = decodeJwt(token.token);
+		expect(payload.cnf).toEqual({ jkt: "abc123" });
+	});
+
+	it("emits cnf matching confirmation when present (x5t#S256 variant)", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const confirmation: Confirmation = { "x5t#S256": "def456" };
+		const token = await generateToken({}, { keyStore, confirmation });
+		const payload = decodeJwt(token.token);
+		expect(payload.cnf).toEqual({ "x5t#S256": "def456" });
+	});
+
+	it("echoes confirmation on the returned Token", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const confirmation: Confirmation = { jkt: "abc123" };
+		const token = await generateToken({}, { keyStore, confirmation });
+		expect(token.confirmation).toEqual({ jkt: "abc123" });
+	});
+});
+
+describe("generateTokenResponse tokenType option", () => {
+	it("returns Bearer by default", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const accessToken = await generateToken({}, { keyStore });
+		const response = generateTokenResponse({ accessToken });
+		expect(response.token_type).toBe("Bearer");
+	});
+
+	it("returns DPoP when tokenType option is DPoP", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
+		const response = generateTokenResponse({ accessToken }, { tokenType: "DPoP" });
+		expect(response.token_type).toBe("DPoP");
+	});
+
+	it("returns Bearer when tokenType option is explicitly Bearer", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const accessToken = await generateToken({}, { keyStore });
+		const response = generateTokenResponse({ accessToken }, { tokenType: "Bearer" });
+		expect(response.token_type).toBe("Bearer");
+	});
+
+	it("DPoP tokenType coexists with refreshToken in response", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
+		const refreshToken = await generateToken({}, { keyStore });
+		const response = generateTokenResponse({ accessToken, refreshToken }, { tokenType: "DPoP" });
+		expect(response.token_type).toBe("DPoP");
+		expect(response.refresh_token).toBe(refreshToken.token);
+	});
+});
+
+describe("generateToken cnf coexists with other claims", () => {
+	it("emits cnf alongside sub, scope, exp without interference", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const token = await generateToken(
+			{},
+			{
+				keyStore,
+				subject: "u1",
+				scope: "read",
+				expiresIn: 600,
+				confirmation: { jkt: "abc123" },
+			},
+		);
+		const payload = decodeJwt(token.token);
+		expect(payload.sub).toBe("u1");
+		expect(payload.scope).toBe("read");
+		expect(payload.exp).toBeDefined();
+		expect(payload.cnf).toEqual({ jkt: "abc123" });
 	});
 });

@@ -102,6 +102,7 @@ export type {
 } from "./federation-tokens/types.mjs";
 export { supportsLock } from "./federation-tokens/types.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
+export type { Confirmation } from "./grants/confirmation.mjs";
 // id_token generation (OIDC Core §2)
 export {
 	type GenerateIdTokenOptions,
@@ -124,11 +125,13 @@ export {
 export {
 	formatObject,
 	type GenerateTokenOptions,
+	type GenerateTokenResponseOptions,
 	generateToken,
 	generateTokenResponse,
 	type Token,
 	type TokenResponse,
 } from "./grants/token.mjs";
+export type { TokenBinding } from "./grants/tokenBinding.mjs";
 export type {
 	AuthenticatedClient,
 	GrantContext,

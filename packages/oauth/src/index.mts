@@ -34,3 +34,4 @@ export { oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";
 export { oauthSessionModule } from "./oauthSession.mjs";
 export { createOAuthRouter } from "./routes.mjs";
+export { extractConfirmation, type IntrospectResponse } from "./types/introspect.mjs";
