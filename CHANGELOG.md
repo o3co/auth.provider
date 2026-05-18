@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (Wave 2 Token-binding Cluster — Phase 1a)
+
+- **`TokenBinding` base interface + `Confirmation` union in `@o3co/auth-provider-core`.** Cross-cutting types for the Wave 2 Token-binding Cluster (DPoP + mTLS in Phases 2/3). `TokenBinding` is an extensible base shape (`{ kind: string; confirmation: Confirmation }`) — mechanism packages and downstream users extend it with their own evidence fields. `Confirmation` is a narrow readonly union (`{ jkt } | { "x5t#S256" }`) covering the RFC 7800 / IANA-registry-domain claim variants this library ships in Stage 1; adding a new variant is a core semver-minor change.
+- **`GrantContext.tokenBinding?: TokenBinding`** optional readonly field. Populated by `tokenBindingMw` (Phase 1b) before grant dispatch; `undefined` when no binding mechanism is enabled.
+- **`GenerateTokenOptions.confirmation`** drives the JWT `cnf` claim. When set, `generateToken` emits `cnf` matching the provided `Confirmation`; when absent, claims are byte-identical to v0.7.x. `Token.confirmation` echoes the value back to callers for audit purposes.
+- **`generateTokenResponse(tokens, { tokenType?: "Bearer" | "DPoP" })`** — second optional parameter for the wire-level `token_type`. Defaults to `"Bearer"`, matching existing behavior. The function body was refactored to spread construction so the new `readonly Token.confirmation` field can be set at construction without a cast.
+- **`IntrospectResponse` interface + `extractConfirmation` helper in `@o3co/auth-provider-oauth`.** The introspect endpoint's inline JSON shape is now typed and re-exported from the package barrel for consumers (e.g. `auth.proxy` validation layer). The endpoint also reports `token_type: "DPoP"` when the introspected token carries a `cnf.jkt` claim per RFC 9449 §5 (mTLS bindings keep `"Bearer"` per RFC 8705 §3) and mirrors any valid `cnf` claim per RFC 7662 §2.2. `extractConfirmation(unknown): Confirmation | undefined` validates that cnf member values are non-empty strings (rejects malformed `{ jkt: 123 }`, `{ jkt: "" }`, etc.) before they reach the wire response.
+
+Zero behavior change for any v0.7.x consumer that does not opt into the Wave 2 cluster (every existing consumer): `tokenBinding` stays `undefined`, no `cnf` claim is emitted, and the introspect endpoint produces byte-identical responses for tokens that lack `cnf`. See [the Wave 2 Token-binding Cluster spec](./.claude/superpowers/specs/2026-05-18-wave-2-token-binding-cluster-spec.md) for the full design (note: spec is internal — link kept for the in-repo reader).
+
 ## [0.7.0] - 2026-05-15
 
 v0.7.0 ships **Wave 1** of the auth-provider passkey-native auth toolkit roadmap: a new `@o3co/auth-provider-webauthn` package, the `client_credentials` grant, RFC 7009 Token Revocation, RFC 8707 Stage 1 resource-indicator plumbing, and the library `reference.conf` shipping pattern.
