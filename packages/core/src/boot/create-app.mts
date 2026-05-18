@@ -75,8 +75,8 @@ import { validateManifests } from "./validate-manifests.mjs";
  *   6. assembleApp — mount routes, build AppHandle.
  *
  * Built-in contribution kinds (grants, tokenExchangeValidators, federations,
- * mfaFactors, auditHooks, routes, grantPolicyHooks) are seeded by
- * `mergeWithBuiltins`; consumer-supplied kinds overlay on top.
+ * mfaFactors, auditHooks, routes, grantPolicyHooks, grantMiddleware) are
+ * seeded by `mergeWithBuiltins`; consumer-supplied kinds overlay on top.
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
  * `ComponentMap` so downstream stages receive a well-typed config/pathResolver.
@@ -180,7 +180,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
  *   cross-package import. Same cleanup opportunity: if the registry is moved
  *   into core, switch to registry-backed form.
  * - federations, mfaFactors: Map-backed `NameKeyedCollector`.
- * - auditHooks, grantPolicyHooks: identity-dedup `ListCollector`.
+ * - auditHooks, grantPolicyHooks, grantMiddleware: identity-dedup `ListCollector`.
  * - routes: declaration-indexed `RouteCollector`.
  *
  * @internal
@@ -199,6 +199,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),
+		grantMiddleware: makeIdentityDedupListCollector<import("express").RequestHandler | null>(),
 	};
 	// Consumer keys override built-ins; unknown consumer kinds pass through.
 	return { ...builtin, ...(consumer ?? {}) } as ContributionCollectorMap;

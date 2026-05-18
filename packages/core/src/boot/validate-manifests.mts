@@ -157,6 +157,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"auditHooks",
 	"routes",
 	"grantPolicyHooks",
+	"grantMiddleware",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1112,14 +1113,15 @@ function checkSameModuleContributeOverride(modules: readonly NormalisedModule[])
  * Dispatches on `collector.kind === "list" | "list-routes"` so consumer-
  * defined list-shaped kinds are also caught. Mirrors the Task 6 fixup
  * applied in apply-contributions.mts (commit 4d03cc0b). The built-in
- * list-shaped kinds (routes, auditHooks, grantPolicyHooks) match by
- * collector identity; consumer-defined kinds with list-shaped collectors
- * match the same way.
+ * list-shaped kinds (routes, auditHooks, grantPolicyHooks, grantMiddleware)
+ * match by collector identity; consumer-defined kinds with list-shaped
+ * collectors match the same way.
  *
- * The `details.kind` literal is typed as the v0.5.0 built-in union
- * `"routes" | "auditHooks" | "grantPolicyHooks"` per spec §6.1
- * `ListShapedOverrideDetails`; a consumer-defined kind name is widened
- * via cast since the Details type does not yet model consumer extensions.
+ * The `details.kind` literal is typed as the built-in union
+ * `"routes" | "auditHooks" | "grantPolicyHooks" | "grantMiddleware"` per
+ * spec §6.1 `ListShapedOverrideDetails`; a consumer-defined kind name is
+ * widened via cast since the Details type does not yet model consumer
+ * extensions.
  *
  * Per A2-β §5.1 step 11.
  * @internal
@@ -1141,7 +1143,7 @@ function checkListShapedOverrides(
 				stage: "validateManifests",
 				details: {
 					reason: "list-shaped-override-not-allowed",
-					kind: kind as "routes" | "auditHooks" | "grantPolicyHooks",
+					kind: kind as "routes" | "auditHooks" | "grantPolicyHooks" | "grantMiddleware",
 					module: m.name,
 				},
 			});

@@ -27,7 +27,7 @@
 
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import type { Express, Router } from "express";
+import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import type {
@@ -35,6 +35,7 @@ import type {
 	CleanupRecord,
 	CollectedRouteContribution,
 	FrozenWorld,
+	ListCollector,
 	OrderedRouteContribution,
 } from "./types.mjs";
 import { BootError } from "./types.mjs";
@@ -529,6 +530,24 @@ export function assembleApp(
 	}
 
 	const router: Router = RouterCtor();
+
+	// Mount `grantMiddleware` contributions on `/token` BEFORE the route loop.
+	// Express runs middleware in mount order, so these handlers fire before the
+	// OAuth /token route handler that the routes loop installs below. Factories
+	// that returned `null` (disabled-by-config path) are still appended to the
+	// collector for stable identity but skipped here.
+	//
+	// Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
+	const grantMwCollector = frozen.registries.get("grantMiddleware") as
+		| ListCollector<RequestHandler | null>
+		| undefined;
+	if (grantMwCollector !== undefined) {
+		for (const mw of grantMwCollector.values()) {
+			if (mw !== null) {
+				router.use("/token", mw);
+			}
+		}
+	}
 
 	// Mount each route contribution in mount-index order.
 	for (const orderedRoute of ordered) {
