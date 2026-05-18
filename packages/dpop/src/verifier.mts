@@ -17,22 +17,24 @@
 /**
  * DPoP proof verifier — `createDPoPMechanism` factory.
  *
- * Implements the RFC 9449 §6 validation sequence (13 steps) for the
+ * Implements the RFC 9449 §6 validation sequence (15 steps) for the
  * token endpoint. Step ordering follows the spec's taxonomy:
  *
  *   Step 1:  DPoP header presence check  (null when absent)
  *   Step 2:  Single header value         (throw on comma)
- *   Steps 3-9: parseProof (structural + JWK + claims + jkt)
+ *   Steps 3–9, 13: parseProof (structural + JWK + claims + jkt thumbprint)
  *   Step 5:  alg whitelist               (after parseProof, uses proof.alg)
  *   Step 8:  Signature verification      (importJWK + jwtVerify)
  *   Step 10: htm match
  *   Step 11: htu match (both sides normalized)
  *   Step 12: iat window
- *   Step 14: Replay check (atomic seen)
+ *   Step 14: Replay check (atomic seen) — wrapped so transport faults
+ *            surface as `replay_store_unavailable` audit signal rather
+ *            than leaking raw Redis errors through `tokenBindingMw`.
  *   Step 15: Return TokenBinding
  *
- * The verifier relies on `parseProof` (Sub-PR 2a) for steps 3–9 and reuses
- * the `jkt` already computed there (no re-derive at step 13).
+ * The verifier relies on `parseProof` (Sub-PR 2a) for steps 3–9 + 13 and
+ * reuses the `jkt` already computed there (no re-derive in this layer).
  *
  * Per Wave 2 Phase 2 spec §6 + §8 factory contract.
  */
@@ -199,7 +201,27 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			const { jkt } = proof;
 
 			// Step 14 (spec §6): Replay check — atomic (jti, jkt) pair seen/mark.
-			const alreadySeen = await replayStore.seen(proof.claims.jti, jkt, replayTtlSeconds);
+			// Wrap so that transport faults (Redis ECONNREFUSED, etc.) surface
+			// as the distinct `replay_store_unavailable` audit signal rather
+			// than leaking a raw infrastructure error through `tokenBindingMw`
+			// — operators triaging audit events need to distinguish "client
+			// sent garbage" from "replay store is down" even when both map to
+			// the same RFC 9449 §7 wire code `invalid_dpop_proof`.
+			let alreadySeen: boolean;
+			try {
+				alreadySeen = await replayStore.seen(proof.claims.jti, jkt, replayTtlSeconds);
+			} catch (err) {
+				// DPoPError (e.g. RangeError-shaped programming bugs that
+				// arrive here as DPoPError after a future refactor) should
+				// propagate as-is; everything else is a transport / availability
+				// fault and gets the dedicated reason code.
+				if (err instanceof DPoPError) throw err;
+				logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_unavailable");
+				throw new DPoPError(
+					"replay_store_unavailable",
+					"DPoP replay store is unavailable; cannot determine replay status",
+				);
+			}
 			if (alreadySeen) {
 				throw new DPoPError(
 					"replay_detected",

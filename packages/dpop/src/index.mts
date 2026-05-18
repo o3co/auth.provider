@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 export { DPoPError, type DPoPErrorCode, type DPoPReasonCode } from "./errors.mjs";
-export { normalizeHtu } from "./htu-normalize.mjs";
+// `normalizeHtu` intentionally NOT exported per spec §7 — internal utility
+// only. The verifier consumes it via relative import. Promoting it to the
+// public surface would commit the package to maintaining its exact shape
+// (semver lock); the spec keeps it deliberately tight.
 export { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
 export { dpopConfigSchema, dpopModule } from "./module.mjs";
 export type { DPoPProof, DPoPProofClaims } from "./proof.mjs";

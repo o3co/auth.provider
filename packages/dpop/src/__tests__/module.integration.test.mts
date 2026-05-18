@@ -44,6 +44,7 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { dpopModule } from "#/module.mjs";
+import type { DPoPReplayStore } from "#/replay-store.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
 
 // ---------------------------------------------------------------------------
@@ -243,6 +244,110 @@ describe("dpopModule — integration via createApp", () => {
 		expect(res.body).toMatchObject({ error: "invalid_dpop_proof" });
 
 		await handle.dispose();
+	});
+
+	it("when enabled: consumer-wired dpopReplayStore is passed through to the mechanism (ComponentMap slot contract)", async () => {
+		// Spy store: records each (jti, jkt) call so we can confirm the
+		// composition root's store reached the mechanism — not the
+		// in-memory fallback. The whole reason `dpopReplayStore` is a
+		// ComponentMap slot is so production deployments can substitute
+		// a Redis-backed adapter without forking core or dpop.
+		const calls: { jti: string; jkt: string; ttlSeconds: number }[] = [];
+		const consumerStore: DPoPReplayStore = {
+			seen: async (jti, jkt, ttlSeconds) => {
+				calls.push({ jti, jkt, ttlSeconds });
+				return false;
+			},
+		};
+
+		const boot = {
+			...makeBoot(true),
+			// Wire the slot via bootstrapComponents. Cast required because
+			// the ambient `declare module` augmentation that adds
+			// `dpopReplayStore` to ComponentMap only loads when @o3co/auth-
+			// provider-dpop is in scope; the test imports it, but
+			// BootstrapMap's structural typing here is satisfied via cast.
+			dpopReplayStore: consumerStore,
+		} as never as BootstrapMap;
+		const { proof, jkt } = await mintProof();
+
+		const observerModule = defineModule({
+			name: "observer",
+			requires: [],
+			optional: [],
+			contributes: {
+				routes: [
+					() => {
+						const router = Router();
+						router.use(express.json());
+						router.post("/token", (_req, res) => {
+							res.status(200).json({ ok: true });
+						});
+						return { id: "test-token", mountPath: "/oauth", handler: router };
+					},
+				],
+			},
+		});
+
+		const handle = await createApp({
+			modules: [dpopModule, observerModule],
+			bootstrapComponents: boot,
+		});
+
+		const app = express();
+		app.use(express.json());
+		app.use(handle.router);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("DPoP", proof)
+			.set("Host", "as.example")
+			.send({});
+
+		expect(res.status).toBe(200);
+		// The consumer store recorded exactly one (jti, jkt) call — proving
+		// the slot was forwarded to the mechanism and the in-memory
+		// fallback was NOT used.
+		expect(calls).toHaveLength(1);
+		expect(calls[0]?.jkt).toBe(jkt);
+		expect(calls[0]?.ttlSeconds).toBe(300);
+
+		await handle.dispose();
+	});
+
+	it("when enabled with replay-store=redis but slot unset: createApp fails fast (no silent in-memory fallback)", async () => {
+		// Multi-replica deployments rely on Redis for cross-process
+		// replay protection. A silent fallback to memory would let the
+		// same (jti, jkt) be accepted by another replica — replay
+		// protection bypassed. The module's factory throws at boot when
+		// the config asks for redis but the slot is unwired.
+		const boot = {
+			config: {
+				...makeValidCoreConfig(),
+				oauth: {
+					...makeValidCoreConfig().oauth,
+					dpop: {
+						enabled: true,
+						"iat-window-seconds": 60,
+						"alg-whitelist": ["ES256"],
+						"replay-store": "redis", // ← contract: slot MUST be wired
+						"replay-store-ttl-seconds": 300,
+					},
+					tokenBinding: {
+						"dispatch-policy": "intent-explicit",
+					},
+				},
+			} as never,
+			pathResolver: (s: string) => s,
+			// NOTE: dpopReplayStore intentionally NOT wired.
+		} satisfies Record<string, unknown> as BootstrapMap;
+
+		await expect(
+			createApp({
+				modules: [dpopModule],
+				bootstrapComponents: boot,
+			}),
+		).rejects.toThrow(/replay-store = "redis" requires the `dpopReplayStore` ComponentMap slot/);
 	});
 
 	it("when enabled: absent DPoP header leaves req.tokenBinding unset (mechanism returns null)", async () => {

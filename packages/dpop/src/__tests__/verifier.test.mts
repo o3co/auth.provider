@@ -347,4 +347,72 @@ describe("createDPoPMechanism", () => {
 		expect(mechanism.kind).toBe("dpop");
 		expect(mechanism.intentExplicit).toBe(true);
 	});
+
+	// -------------------------------------------------------------------------
+	// Coverage gap follow-ups from /multi-agent-review (Sub-PR 2b round 1)
+	// -------------------------------------------------------------------------
+
+	// I-4: pin whitelist case-sensitivity. RFC 9449 §4.3 + JOSE treat `alg`
+	// as case-sensitive. An operator misconfiguring HOCON with lowercase
+	// (`alg-whitelist = ["es256"]`) would otherwise silently reject every
+	// valid ES256 proof — or worse, a lowercased entry might be assumed
+	// equivalent to an uppercased proof when it is not.
+	it("whitelist comparison is case-sensitive — lowercase whitelist entry does not match uppercase alg", async () => {
+		const { proof } = await mintProof({ alg: "ES256" });
+		const lowerCaseMechanism = createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			algWhitelist: ["es256"], // operator typo: lowercase
+		});
+		await expect(lowerCaseMechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
+			reason: "alg_not_allowed",
+		});
+	});
+
+	// I-5: pin that parseProof's private_jwk screen (Sub-PR 2a step 7)
+	// propagates through the verifier intact. Without this regression
+	// test, a refactor of the verifier's parseProof call site could
+	// accidentally swallow the parser-layer error.
+	it("propagates private_jwk error from parseProof (step 7 / Sub-PR 2a)", async () => {
+		const { publicKey, privateKey } = await generateKeyPair("ES256", { extractable: true });
+		const pubJwk = await exportJWK(publicKey);
+		const legitProof = await new SignJWT({
+			htm: "POST",
+			htu: "https://as.example/token",
+			iat: Math.floor(Date.now() / 1000),
+			jti: crypto.randomUUID(),
+		})
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: pubJwk })
+			.sign(privateKey);
+		const [_h, payload, sig] = legitProof.split(".");
+		// Surgically inject a private-key field (`d`) so the JWK passes
+		// parseProof's structural shape but fails its private-field screen.
+		const headerObj = {
+			typ: "dpop+jwt",
+			alg: "ES256",
+			jwk: { ...pubJwk, d: "REDACTED" },
+		};
+		const fakeHeader = Buffer.from(JSON.stringify(headerObj)).toString("base64url");
+		const crafted = `${fakeHeader}.${payload}.${sig}`;
+		await expect(mechanism.extract(makeReq(crafted) as Request)).rejects.toMatchObject({
+			reason: "private_jwk",
+			code: "invalid_dpop_proof",
+		});
+	});
+
+	// I-2: pin that replay-store transport faults surface as the dedicated
+	// `replay_store_unavailable` audit signal — not a raw Error that would
+	// otherwise propagate up to `tokenBindingMw` and lose operator triage.
+	it("wraps replay store transport errors as replay_store_unavailable (audit signal distinct from client-garbage)", async () => {
+		const failingStore = {
+			seen: async () => {
+				throw new Error("ECONNREFUSED — Redis down");
+			},
+		};
+		const failingMechanism = createDPoPMechanism({ replayStore: failingStore });
+		const { proof } = await mintProof();
+		await expect(failingMechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
+			reason: "replay_store_unavailable",
+			code: "invalid_dpop_proof",
+		});
+	});
 });

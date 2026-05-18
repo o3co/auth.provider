@@ -159,14 +159,28 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 							enabled: boolean;
 							"iat-window-seconds": number;
 							"alg-whitelist": readonly string[];
+							"replay-store": "memory" | "redis";
 							"replay-store-ttl-seconds": number;
 						};
-						tokenBinding?: {
-							"dispatch-policy"?: "intent-explicit" | "strict-mutual-exclusion";
+						tokenBinding: {
+							"dispatch-policy": "intent-explicit" | "strict-mutual-exclusion";
 						};
 					};
 				};
 
+				// `replay-store = "redis"` is a load-bearing contract for
+				// multi-replica deployments: per-process in-memory state would
+				// silently accept the same (jti, jkt) on a second replica → replay
+				// protection bypassed. Fail boot loudly when config promises redis
+				// but the composition root forgot to wire `dpopReplayStore`. The
+				// reverse asymmetry (config says "memory" + slot wired) is fine:
+				// the wired slot wins because it expresses a stronger guarantee.
+				const replayStoreBackend = typedConfig.oauth.dpop["replay-store"];
+				if (replayStoreBackend === "redis" && deps.dpopReplayStore === undefined) {
+					throw new Error(
+						'dpopModule: config.oauth.dpop.replay-store = "redis" requires the `dpopReplayStore` ComponentMap slot to be wired (e.g. via `createRedisDPoPReplayStore` from `@o3co/auth-provider-redis/dpop`). Configuring "redis" without the slot would silently fall back to a per-process in-memory store and bypass cross-replica replay protection.',
+					);
+				}
 				const replayStore: DPoPReplayStore = deps.dpopReplayStore ?? createMemoryDPoPReplayStore();
 
 				return tokenBindingMw({
@@ -179,7 +193,9 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 							logger: deps.logger,
 						}),
 					],
-					dispatchPolicy: typedConfig.oauth.tokenBinding?.["dispatch-policy"] ?? "intent-explicit",
+					// dispatchPolicy is guaranteed by dpopConfigSchema (default
+					// "intent-explicit"); no nullish-coalesce needed.
+					dispatchPolicy: typedConfig.oauth.tokenBinding["dispatch-policy"],
 					logger: deps.logger,
 				});
 			},
