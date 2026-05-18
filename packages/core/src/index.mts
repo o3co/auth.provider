@@ -195,6 +195,13 @@ export type {
 	SupportsRevocation,
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
+// Middleware — tokenBindingMw factory + plugin surface (Wave 2 Token-binding Cluster §4.7)
+export {
+	type DispatchPolicy,
+	type TokenBindingMechanism,
+	type TokenBindingMiddlewareOptions,
+	tokenBindingMw,
+} from "./middleware/tokenBinding.mjs";
 // Module system — v0.5.0 manifest types. The v0.4.x `LegacyModule` /
 // `ModuleContext` interfaces were deleted in Phase 9 (A2-γ caller migration);
 // authoring code uses `Module` and `defineModule()` from

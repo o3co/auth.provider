@@ -268,6 +268,7 @@ export const createOAuthRouter = async (
 					metadata: { ip: req.ip },
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
+					tokenBinding: req.tokenBinding,
 					authenticatedClient: req.oauthClient
 						? {
 								clientId: req.oauthClient.clientId,

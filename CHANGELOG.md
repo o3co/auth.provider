@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added (Wave 2 Token-binding Cluster — Phase 1b)
+
+- **`tokenBindingMw` middleware factory in `@o3co/auth-provider-core`.** Validates presented binding material via a pluggable set of `TokenBindingMechanism` implementations and resolves a single `TokenBinding` per the configured `DispatchPolicy`. The result is written to `req.tokenBinding` (ambient `Express.Request` augmentation shipped alongside) and copied into `GrantContext.tokenBinding` by the `/token` route. With no mechanisms registered (Phase 1b default), behavior is identical to v0.7.x — zero behavior change for any consumer that has not opted into the cluster.
+- **`DispatchPolicy` enum** — `"intent-explicit"` (DPoP-class explicit wins over mTLS-class ambient when both succeed; ≥2 explicit succeeding → 400 `invalid_request`, per spec §3.5) and `"strict-mutual-exclusion"` (any 2+ succeeding mechanisms → 400 `invalid_request`, for high-security profiles). Closed union by design — adding a new strategy is a core semver-minor change; downstream consumers that need a different rule today compose a thin wrapper around `tokenBindingMw` post-dispatch.
+- **`TokenBindingMechanism` plugin interface** — downstream packages register custom binding methods by implementing this interface and passing it to `tokenBindingMw`. Mechanism-thrown errors with snake_case OAuth-shaped `code` field are forwarded to the public `error` response; non-OAuth-shaped codes (e.g. Node `ECONNREFUSED`) fall back to `invalid_<kind>_proof` so infrastructure topology does not leak through the public envelope.
+- **Ambient `Express.Request.tokenBinding?: TokenBinding` augmentation** shipped from `@o3co/auth-provider-core/middleware/express.mjs` (transitive import via the middleware module — no extra wiring needed).
+
 ### Added (Wave 2 Token-binding Cluster — Phase 1a)
 
 - **`TokenBinding` base interface + `Confirmation` union in `@o3co/auth-provider-core`.** Cross-cutting types for the Wave 2 Token-binding Cluster (DPoP + mTLS in Phases 2/3). `TokenBinding` is an extensible base shape (`{ kind: string; confirmation: Confirmation }`) — mechanism packages and downstream users extend it with their own evidence fields. `Confirmation` is a narrow readonly union (`{ jkt } | { "x5t#S256" }`) covering the RFC 7800 / IANA-registry-domain claim variants this library ships in Stage 1; adding a new variant is a core semver-minor change.
