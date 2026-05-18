@@ -15,6 +15,7 @@
  */
 import { decodeJwt, decodeProtectedHeader, type JWK } from "jose";
 import { DPoPError } from "./errors.mjs";
+import { computeJkt } from "./thumbprint.mjs";
 
 export interface DPoPProofClaims {
 	readonly htm: string;
@@ -23,15 +24,25 @@ export interface DPoPProofClaims {
 	readonly jti: string;
 }
 
-export interface DPoPProofHeader {
-	readonly typ: string;
-	readonly alg: string;
-	readonly jwk: JWK;
-}
-
+/**
+ * Result of structural DPoP proof parsing. Layout matches Wave 2 Phase 2
+ * spec §5.3 — flat fields, with the proof-key JWK and its RFC 7638 SHA-256
+ * thumbprint (`jkt`) computed at parse time so downstream consumers (the
+ * verifier in 2b, the grant-side cnf claim in 2c) can route on the binding
+ * identity without re-deriving the thumbprint.
+ *
+ * Signature verification is the verifier's responsibility (Sub-PR 2b) —
+ * `parseProof` only validates JOSE shape and claim presence.
+ */
 export interface DPoPProof {
-	readonly header: DPoPProofHeader;
+	/** Proof-of-possession public key from the JOSE protected header. */
+	readonly jwk: JWK;
+	/** JOSE `alg` header value (whitelist enforcement is in the verifier). */
+	readonly alg: string;
+	/** RFC 7638 SHA-256 thumbprint of `jwk` — the value used in `cnf.jkt`. */
+	readonly jkt: string;
 	readonly claims: DPoPProofClaims;
+	/** Original raw JWT — needed for signature verification in 2b. */
 	readonly raw: string;
 }
 
@@ -47,11 +58,12 @@ export interface DPoPProof {
  *   Step 5: alg present (whitelist check is in verifier)
  *   Step 6: jwk present in header
  *   Step 7: jwk is public-only (no private material)
+ *   Step 8: jkt computed via RFC 7638 SHA-256 thumbprint
  *   Step 9: required claims present + correct types
  *
  * Per Wave 2 Phase 2 spec §6 + design principle §3.2 (total-order validation).
  */
-export const parseProof = (raw: string): DPoPProof => {
+export const parseProof = async (raw: string): Promise<DPoPProof> => {
 	// Step 3 (spec §6): JWT shape — must be exactly 3 dot-separated parts
 	if (typeof raw !== "string" || raw.split(".").length !== 3) {
 		throw new DPoPError("malformed_proof", "DPoP header is not a JWT");
@@ -69,7 +81,8 @@ export const parseProof = (raw: string): DPoPProof => {
 		throw new DPoPError("typ_mismatch", `expected typ=dpop+jwt, got ${String(header.typ)}`);
 	}
 
-	// alg must be present as a non-empty string (whitelist enforcement is in verifier)
+	// Step 5 (spec §6): alg must be present as a non-empty string
+	// (whitelist enforcement is in the verifier).
 	if (typeof header.alg !== "string" || header.alg.length === 0) {
 		throw new DPoPError("malformed_proof", "missing or non-string alg");
 	}
@@ -112,8 +125,13 @@ export const parseProof = (raw: string): DPoPProof => {
 		throw new DPoPError("missing_claim", "invalid claim types");
 	}
 
+	// Step 8 (spec §6): RFC 7638 SHA-256 thumbprint over the validated JWK
+	const jkt = await computeJkt(jwk as JWK);
+
 	return {
-		header: { typ: header.typ, alg: header.alg, jwk: jwk as JWK },
+		jwk: jwk as JWK,
+		alg: header.alg,
+		jkt,
 		claims: {
 			htm: claims.htm,
 			htu: claims.htu,

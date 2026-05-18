@@ -13,12 +13,10 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
-		},
-		"./reference.conf": "./src/reference.conf"
+		}
 	},
 	"files": [
 		"dist",
-		"src/reference.conf",
 		"README.md",
 		"LICENSE"
 	],
@@ -44,9 +42,6 @@
 		"express": "^5.0.0"
 	},
 	"peerDependenciesMeta": {
-		"@o3co/auth-provider-core": {
-			"optional": true
-		},
 		"express": {
 			"optional": true
 		}

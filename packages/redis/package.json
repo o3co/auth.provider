@@ -12,6 +12,10 @@
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
 		},
+		"./dpop": {
+			"import": "./dist/dpop-replay-store.mjs",
+			"types": "./dist/dpop-replay-store.d.mts"
+		},
 		"./ioredis": {
 			"import": "./dist/ioredis.mjs",
 			"types": "./dist/ioredis.d.mts"

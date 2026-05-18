@@ -36,11 +36,14 @@ beforeAll(async () => {
 });
 
 describe("parseProof — structural validation only (no signature check)", () => {
-	it("parses a well-formed DPoP proof and returns DPoPProof", () => {
-		const proof = parseProof(validProof);
-		expect(proof.header.typ).toBe("dpop+jwt");
-		expect(proof.header.alg).toBe("ES256");
-		expect(proof.header.jwk).toMatchObject({ kty: "EC", crv: "P-256" });
+	it("parses a well-formed DPoP proof and returns DPoPProof (flat layout per spec §5.3)", async () => {
+		const proof = await parseProof(validProof);
+		expect(proof.alg).toBe("ES256");
+		expect(proof.jwk).toMatchObject({ kty: "EC", crv: "P-256" });
+		// jkt is the RFC 7638 SHA-256 thumbprint over the proof JWK — non-empty
+		// base64url string, deterministic for the same key.
+		expect(typeof proof.jkt).toBe("string");
+		expect(proof.jkt.length).toBeGreaterThan(0);
 		expect(proof.claims.htm).toBe("POST");
 		expect(proof.claims.htu).toBe("https://as.example/token");
 		expect(typeof proof.claims.iat).toBe("number");
@@ -49,41 +52,29 @@ describe("parseProof — structural validation only (no signature check)", () =>
 	});
 
 	// Step 3: JWT shape (3 parts)
-	it("throws malformed_proof for non-string input", () => {
-		expect(() => parseProof(123 as unknown as string)).toThrow(DPoPError);
-		try {
-			parseProof(123 as unknown as string);
-		} catch (e) {
-			expect(e).toBeInstanceOf(DPoPError);
-			expect((e as DPoPError).reason).toBe("malformed_proof");
-		}
+	it("throws malformed_proof for non-string input", async () => {
+		await expect(parseProof(123 as unknown as string)).rejects.toMatchObject({
+			constructor: DPoPError,
+			reason: "malformed_proof",
+		});
 	});
 
-	it("throws malformed_proof for a non-JWT string (too few parts)", () => {
-		expect(() => parseProof("not.ajwt")).toThrow(DPoPError);
-		try {
-			parseProof("not.ajwt");
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("malformed_proof");
-		}
+	it("throws malformed_proof for a non-JWT string (too few parts)", async () => {
+		await expect(parseProof("not.ajwt")).rejects.toMatchObject({
+			reason: "malformed_proof",
+		});
 	});
 
-	it("throws malformed_proof for a non-JWT string (too many parts)", () => {
-		expect(() => parseProof("a.b.c.d")).toThrow(DPoPError);
-		try {
-			parseProof("a.b.c.d");
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("malformed_proof");
-		}
+	it("throws malformed_proof for a non-JWT string (too many parts)", async () => {
+		await expect(parseProof("a.b.c.d")).rejects.toMatchObject({
+			reason: "malformed_proof",
+		});
 	});
 
-	it("throws malformed_proof for unparseable header", () => {
-		expect(() => parseProof("!!!.aaa.bbb")).toThrow(DPoPError);
-		try {
-			parseProof("!!!.aaa.bbb");
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("malformed_proof");
-		}
+	it("throws malformed_proof for unparseable header", async () => {
+		await expect(parseProof("!!!.aaa.bbb")).rejects.toMatchObject({
+			reason: "malformed_proof",
+		});
 	});
 
 	// Step 4: typ must be dpop+jwt
@@ -93,12 +84,7 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti: "x" })
 			.setProtectedHeader({ typ: "JWT", alg: "ES256", jwk })
 			.sign(privateKey);
-		expect(() => parseProof(jwt)).toThrow(DPoPError);
-		try {
-			parseProof(jwt);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("typ_mismatch");
-		}
+		await expect(parseProof(jwt)).rejects.toMatchObject({ reason: "typ_mismatch" });
 	});
 
 	it("throws typ_mismatch when typ is missing", async () => {
@@ -107,12 +93,23 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti: "x" })
 			.setProtectedHeader({ alg: "ES256", jwk } as Parameters<SignJWT["setProtectedHeader"]>[0])
 			.sign(privateKey);
-		expect(() => parseProof(jwt)).toThrow(DPoPError);
-		try {
-			parseProof(jwt);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("typ_mismatch");
-		}
+		await expect(parseProof(jwt)).rejects.toMatchObject({ reason: "typ_mismatch" });
+	});
+
+	// Step 5: alg must be present and non-empty string
+	it("throws malformed_proof when alg is missing from header", async () => {
+		const { privateKey, publicKey } = await generateKeyPair("ES256");
+		const jwk = await exportJWK(publicKey);
+		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti: "x" })
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+			.sign(privateKey);
+		const [hdrB64, payload, sig] = jwt.split(".");
+		expect(hdrB64).toBeDefined();
+		const hdrObj = JSON.parse(Buffer.from(hdrB64 as string, "base64url").toString());
+		delete hdrObj.alg;
+		const newHdr = Buffer.from(JSON.stringify(hdrObj)).toString("base64url");
+		const crafted = `${newHdr}.${payload}.${sig}`;
+		await expect(parseProof(crafted)).rejects.toMatchObject({ reason: "malformed_proof" });
 	});
 
 	// Step 6: jwk must be present
@@ -121,34 +118,44 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti: "x" })
 			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256" })
 			.sign(privateKey);
-		expect(() => parseProof(jwt)).toThrow(DPoPError);
-		try {
-			parseProof(jwt);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("missing_jwk");
-		}
+		await expect(parseProof(jwt)).rejects.toMatchObject({ reason: "missing_jwk" });
 	});
 
-	// Step 7: JWK must not carry private material
-	it("throws private_jwk when JWK contains 'd' field", async () => {
+	// Step 7: JWK must not carry private material — parameterized for the 7 fields
+	// the parser checks (d, p, q, dp, dq, qi, k).
+	it.each([
+		"d",
+		"p",
+		"q",
+		"dp",
+		"dq",
+		"qi",
+		"k",
+	])("throws private_jwk when JWK contains '%s' field", async (field) => {
 		const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
-		const fullJwk = await exportJWK(privateKey); // contains 'd'
-		// Build a valid proof, then surgically inject the private JWK into the header.
 		const pubJwk = await exportJWK(publicKey);
-		const legitProof = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti: "y" })
+		const legitProof = await new SignJWT({
+			htm: "POST",
+			htu: "https://as/token",
+			iat: 1,
+			jti: "y",
+		})
 			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: pubJwk })
 			.sign(privateKey);
-		// Manually reconstruct with private jwk in header
 		const [_hdr, payload, sig] = legitProof.split(".");
-		const headerObj = { typ: "dpop+jwt", alg: "ES256", jwk: fullJwk };
+		// Surgically inject the private-key field into an otherwise-public JWK
+		// so each iteration exercises exactly one private field.
+		const headerObj = {
+			typ: "dpop+jwt",
+			alg: "ES256",
+			jwk: { ...pubJwk, [field]: "REDACTED" },
+		};
 		const fakeHeader = Buffer.from(JSON.stringify(headerObj)).toString("base64url");
 		const crafted = `${fakeHeader}.${payload}.${sig}`;
-		expect(() => parseProof(crafted)).toThrow(DPoPError);
-		try {
-			parseProof(crafted);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("private_jwk");
-		}
+		await expect(parseProof(crafted)).rejects.toMatchObject({
+			reason: "private_jwk",
+			message: expect.stringContaining(field),
+		});
 	});
 
 	// Step 9: required claims
@@ -158,12 +165,7 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		const jwt = await new SignJWT({ htu: "https://as/token", iat: 1, jti: "x" })
 			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
 			.sign(privateKey);
-		expect(() => parseProof(jwt)).toThrow(DPoPError);
-		try {
-			parseProof(jwt);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("missing_claim");
-		}
+		await expect(parseProof(jwt)).rejects.toMatchObject({ reason: "missing_claim" });
 	});
 
 	it("throws missing_claim when htu is absent", async () => {
@@ -172,33 +174,22 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		const jwt = await new SignJWT({ htm: "POST", iat: 1, jti: "x" })
 			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
 			.sign(privateKey);
-		expect(() => parseProof(jwt)).toThrow(DPoPError);
-		try {
-			parseProof(jwt);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("missing_claim");
-		}
+		await expect(parseProof(jwt)).rejects.toMatchObject({ reason: "missing_claim" });
 	});
 
 	it("throws missing_claim when iat is absent", async () => {
 		const { privateKey, publicKey } = await generateKeyPair("ES256");
 		const jwk = await exportJWK(publicKey);
-		// SignJWT adds iat by default; avoid using setIssuedAt
 		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", jti: "x" })
 			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
 			.sign(privateKey);
-		// Manually strip iat by reconstructing
 		const [hdr, payloadB64, sig] = jwt.split(".");
-		const payloadObj = JSON.parse(Buffer.from(payloadB64, "base64url").toString());
+		expect(payloadB64).toBeDefined();
+		const payloadObj = JSON.parse(Buffer.from(payloadB64 as string, "base64url").toString());
 		delete payloadObj.iat;
 		const newPayload = Buffer.from(JSON.stringify(payloadObj)).toString("base64url");
 		const crafted = `${hdr}.${newPayload}.${sig}`;
-		expect(() => parseProof(crafted)).toThrow(DPoPError);
-		try {
-			parseProof(crafted);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("missing_claim");
-		}
+		await expect(parseProof(crafted)).rejects.toMatchObject({ reason: "missing_claim" });
 	});
 
 	it("throws missing_claim when jti is absent", async () => {
@@ -207,39 +198,38 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1 })
 			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
 			.sign(privateKey);
-		expect(() => parseProof(jwt)).toThrow(DPoPError);
-		try {
-			parseProof(jwt);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("missing_claim");
-		}
+		await expect(parseProof(jwt)).rejects.toMatchObject({ reason: "missing_claim" });
 	});
 
-	it("throws missing_claim when iat is not a number", async () => {
+	// Step 9 continued: claim type mismatch — covers each of htm/htu/iat/jti.
+	it.each([
+		{ field: "htm", value: 1 },
+		{ field: "htu", value: 1 },
+		{ field: "iat", value: "not-a-number" },
+		{ field: "jti", value: 1 },
+	])("throws missing_claim when $field has wrong type", async ({ field, value }) => {
 		const { privateKey, publicKey } = await generateKeyPair("ES256");
 		const jwk = await exportJWK(publicKey);
-		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", jti: "x" })
+		const jwt = await new SignJWT({
+			htm: "POST",
+			htu: "https://as/token",
+			iat: 1,
+			jti: "x",
+		})
 			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
 			.sign(privateKey);
-		// Inject string iat
 		const [hdr, payloadB64, sig] = jwt.split(".");
-		const payloadObj = JSON.parse(Buffer.from(payloadB64, "base64url").toString());
-		payloadObj.iat = "not-a-number";
+		expect(payloadB64).toBeDefined();
+		const payloadObj = JSON.parse(Buffer.from(payloadB64 as string, "base64url").toString());
+		payloadObj[field] = value;
 		const newPayload = Buffer.from(JSON.stringify(payloadObj)).toString("base64url");
 		const crafted = `${hdr}.${newPayload}.${sig}`;
-		expect(() => parseProof(crafted)).toThrow(DPoPError);
-		try {
-			parseProof(crafted);
-		} catch (e) {
-			expect((e as DPoPError).reason).toBe("missing_claim");
-		}
+		await expect(parseProof(crafted)).rejects.toMatchObject({ reason: "missing_claim" });
 	});
 
-	it("code is always invalid_dpop_proof for all thrown DPoPErrors", () => {
-		try {
-			parseProof("a.b.c.d");
-		} catch (e) {
-			expect((e as DPoPError).code).toBe("invalid_dpop_proof");
-		}
+	it("code is always invalid_dpop_proof for all thrown DPoPErrors", async () => {
+		await expect(parseProof("a.b.c.d")).rejects.toMatchObject({
+			code: "invalid_dpop_proof",
+		});
 	});
 });

@@ -13,9 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export { DPoPError, type DPoPReasonCode } from "./errors.mjs";
+export { DPoPError, type DPoPErrorCode, type DPoPReasonCode } from "./errors.mjs";
 export { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
-export type { DPoPProof, DPoPProofClaims, DPoPProofHeader } from "./proof.mjs";
+export type { DPoPProof, DPoPProofClaims } from "./proof.mjs";
 export { parseProof } from "./proof.mjs";
 export type { DPoPReplayStore } from "./replay-store.mjs";
 export { computeJkt } from "./thumbprint.mjs";

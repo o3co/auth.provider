@@ -29,6 +29,11 @@ export const createMemoryDPoPReplayStore = (
 
 	return {
 		async seen(jti, jkt, ttlSeconds) {
+			if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+				throw new RangeError(
+					`DPoPReplayStore.seen: ttlSeconds must be a positive finite number (got ${String(ttlSeconds)})`,
+				);
+			}
 			const key = `${jkt}:${jti}`;
 			const nowMs = now();
 			const existing = seen.get(key);

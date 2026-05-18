@@ -59,3 +59,12 @@ export class DPoPError extends Error {
 		if (detail !== undefined) this.detail = detail;
 	}
 }
+
+/**
+ * The wire-level OAuth error code emitted by Phase 2 DPoP failures.
+ * Always `"invalid_dpop_proof"` per RFC 9449 §7 — the only token-endpoint
+ * error code Phase 2 uses. The alias is exported per spec §5.1 so consumers
+ * can name the wire-side surface explicitly when constructing wire-level
+ * error envelopes.
+ */
+export type DPoPErrorCode = DPoPError["code"];
