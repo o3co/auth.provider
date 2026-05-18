@@ -161,9 +161,17 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * List-shaped — multiple modules may contribute. Composition order is
 	 * module-registration order. Within one middleware factory the
 	 * `DispatchPolicy` configured on `tokenBindingMw` decides which
-	 * mechanism wins. Across multiple `grantMiddleware` contributions, the
-	 * first one to set `req.tokenBinding` wins — later contributors run
-	 * after and observe the field already populated.
+	 * mechanism wins.
+	 *
+	 * Cross-contribution composition is plain Express middleware ordering
+	 * — `tokenBindingMw` unconditionally assigns `req.tokenBinding` when it
+	 * resolves a binding (no guard against an already-populated field), so
+	 * a later `grantMiddleware` contribution that resolves a binding will
+	 * **overwrite** the earlier one. Modules that need deterministic
+	 * dispatch across competing mechanisms should compose them into a
+	 * single `tokenBindingMw` call (where `DispatchPolicy` arbitrates)
+	 * rather than register each mechanism as its own `grantMiddleware`
+	 * factory.
 	 */
 	readonly grantMiddleware?: readonly GrantMiddlewareFactory<Deps>[];
 }
