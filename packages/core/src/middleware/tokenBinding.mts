@@ -12,6 +12,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
 import type { Request, RequestHandler } from "express";
+import { errorEnvelope } from "../errors/envelope.mjs";
 import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 
@@ -33,11 +34,34 @@ export interface TokenBindingMechanism {
 	/**
 	 * Return a `TokenBinding` of this mechanism's kind, `null` when the
 	 * intent signal is absent, or throw a structured error when the signal
-	 * is present but the proof / cert is invalid.
+	 * is present but the proof / cert is invalid. The thrown value MAY
+	 * carry a `code: string` field matching `/^[a-z][a-z0-9_]*$/` — that
+	 * code is forwarded as the OAuth `error` field of the 400 response.
+	 * Errors without a snake_case `code` fall back to
+	 * `invalid_<kind>_proof` so infrastructure-layer codes (e.g. Node
+	 * `ECONNREFUSED`) do not leak through the public error envelope.
 	 */
 	extract(req: Request): Promise<TokenBinding | null>;
 }
 
+/**
+ * How `tokenBindingMw` resolves a single `TokenBinding` when multiple
+ * registered mechanisms succeed on the same request.
+ *
+ * `"intent-explicit"` (default): explicit-intent mechanisms (DPoP) win
+ * over ambient-intent mechanisms (mTLS); ≥2 explicit mechanisms
+ * succeeding → 400 `invalid_request`. See spec §3.5.
+ *
+ * `"strict-mutual-exclusion"`: any 2+ succeeding mechanisms → 400
+ * `invalid_request`. Used by deployments that want a hard mutex.
+ *
+ * Closed union by design — the spec went through 8 rounds of review
+ * (FCoT-verified, Codex-confirmed) and intentionally bounds dispatch to
+ * these two strategies as the canonical resolution policies. Adding a
+ * new strategy is a core semver-minor change. Downstream consumers who
+ * need a different resolution rule today should compose a thin wrapper
+ * around `tokenBindingMw` that observes `req.tokenBinding` post-dispatch.
+ */
 export type DispatchPolicy = "intent-explicit" | "strict-mutual-exclusion";
 
 export interface TokenBindingMiddlewareOptions {
@@ -51,11 +75,14 @@ interface MechanismResult {
 	readonly binding: TokenBinding;
 }
 
-const isLikelyDPoPProofError = (err: unknown): boolean =>
+const OAUTH_ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+const hasOAuthErrorCode = (err: unknown): err is { code: string } =>
 	typeof err === "object" &&
 	err !== null &&
 	"code" in err &&
-	typeof (err as { code: unknown }).code === "string";
+	typeof (err as { code: unknown }).code === "string" &&
+	OAUTH_ERROR_CODE_PATTERN.test((err as { code: string }).code);
 
 export const tokenBindingMw = ({
 	mechanisms,
@@ -70,14 +97,11 @@ export const tokenBindingMw = ({
 			try {
 				binding = await mechanism.extract(req);
 			} catch (err) {
-				const code = isLikelyDPoPProofError(err)
-					? (err as { code: string }).code
-					: `invalid_${mechanism.kind}_proof`;
+				const code = hasOAuthErrorCode(err) ? err.code : `invalid_${mechanism.kind}_proof`;
 				logger?.warn({ mechanism: mechanism.kind, code }, "token_binding_proof_invalid");
-				res.status(400).json({
-					error: code,
-					error_description: `${mechanism.kind} mechanism rejected the presented material`,
-				});
+				res
+					.status(400)
+					.json(errorEnvelope(code, `${mechanism.kind} mechanism rejected the presented material`));
 				return;
 			}
 			if (binding !== null) {
@@ -86,7 +110,8 @@ export const tokenBindingMw = ({
 		}
 
 		// Step 2 — resolve binding by dispatch policy.
-		if (successes.length === 0) {
+		const [firstSuccess] = successes;
+		if (!firstSuccess) {
 			next();
 			return;
 		}
@@ -94,13 +119,17 @@ export const tokenBindingMw = ({
 		if (dispatchPolicy === "strict-mutual-exclusion") {
 			if (successes.length > 1) {
 				const kinds = successes.map((s) => s.mechanism.kind).join(", ");
-				res.status(400).json({
-					error: "invalid_request",
-					error_description: `multiple token-binding mechanisms succeeded (${kinds}); strict-mutual-exclusion forbids any overlap`,
-				});
+				res
+					.status(400)
+					.json(
+						errorEnvelope(
+							"invalid_request",
+							`multiple token-binding mechanisms succeeded (${kinds}); strict-mutual-exclusion forbids any overlap`,
+						),
+					);
 				return;
 			}
-			req.tokenBinding = successes[0]?.binding;
+			req.tokenBinding = firstSuccess.binding;
 			next();
 			return;
 		}
@@ -109,22 +138,29 @@ export const tokenBindingMw = ({
 		const explicit = successes.filter((s) => s.mechanism.intentExplicit);
 		if (explicit.length >= 2) {
 			const kinds = explicit.map((s) => s.mechanism.kind).join(", ");
-			res.status(400).json({
-				error: "invalid_request",
-				error_description: `multiple explicit-intent token-binding mechanisms succeeded (${kinds})`,
-			});
+			res
+				.status(400)
+				.json(
+					errorEnvelope(
+						"invalid_request",
+						`multiple explicit-intent token-binding mechanisms succeeded (${kinds})`,
+					),
+				);
 			return;
 		}
-		if (explicit.length === 1) {
-			req.tokenBinding = explicit[0]?.binding;
+		const [firstExplicit] = explicit;
+		if (firstExplicit) {
+			req.tokenBinding = firstExplicit.binding;
 			next();
 			return;
 		}
 		// All successes are ambient. Stage 1 has exactly one ambient
-		// mechanism (mTLS), so successes.length is at most 1 here in
-		// Stage 1. The first-wins rule is structurally unique; Stage 2+
-		// must revisit if a second ambient mechanism is added.
-		req.tokenBinding = successes[0]?.binding;
+		// mechanism (mTLS), so `successes.length` is provably 1 here
+		// (and `firstSuccess` is its single element). Stage 2+ adding a
+		// second ambient mechanism must revisit this first-wins rule —
+		// a corresponding test for multi-ambient is intentionally
+		// deferred until that second mechanism exists.
+		req.tokenBinding = firstSuccess.binding;
 		next();
 	};
 };

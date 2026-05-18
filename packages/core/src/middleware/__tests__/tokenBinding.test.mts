@@ -82,7 +82,7 @@ describe("tokenBindingMw", () => {
 		expect(req.tokenBinding).toBeUndefined();
 	});
 
-	it("emits 400 invalid_dpop_proof when a mechanism throws", async () => {
+	it("emits 400 invalid_dpop_proof when a mechanism throws with a snake_case code", async () => {
 		const err = Object.assign(new Error("bad sig"), { code: "invalid_dpop_proof" });
 		const mw = tokenBindingMw({
 			mechanisms: [dpopMechanism(err)],
@@ -94,6 +94,25 @@ describe("tokenBindingMw", () => {
 		await mw(req, res, next);
 		expect(next).not.toHaveBeenCalled();
 		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_dpop_proof" }));
+	});
+
+	it("falls back to invalid_<kind>_proof when the thrown error code is not snake_case OAuth-shaped", async () => {
+		// Pins the safety guard against forwarding non-OAuth error codes
+		// (e.g. Node system errors like ECONNREFUSED) into the public
+		// `error` field. Without this guard, a transport-layer failure
+		// inside `extract` would leak the system code to the client.
+		const err = Object.assign(new Error("network down"), { code: "ECONNREFUSED" });
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(err)],
+			dispatchPolicy: "intent-explicit",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_dpop_proof" }));
 	});
 
 	it("intent-explicit: DPoP wins over ambient mTLS when both succeed", async () => {
@@ -141,6 +160,22 @@ describe("tokenBindingMw", () => {
 		expect(req.tokenBinding).toEqual(fakeMtls);
 	});
 
+	it("strict-mutual-exclusion: single succeeding mechanism assigns binding and calls next()", async () => {
+		// Happy-path coverage for the strict-mutex branch — guards against
+		// a regression that turns the policy into a hard-reject for ALL
+		// requests instead of just multi-success requests.
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(fakeDPoP)],
+			dispatchPolicy: "strict-mutual-exclusion",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+		expect(next).toHaveBeenCalledOnce();
+		expect(req.tokenBinding).toEqual(fakeDPoP);
+	});
+
 	it("strict-mutual-exclusion: rejects when any 2+ mechanisms succeed", async () => {
 		const mw = tokenBindingMw({
 			mechanisms: [dpopMechanism(fakeDPoP), mtlsMechanism(fakeMtls)],
@@ -152,5 +187,6 @@ describe("tokenBindingMw", () => {
 		await mw(req, res, next);
 		expect(next).not.toHaveBeenCalled();
 		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_request" }));
 	});
 });
