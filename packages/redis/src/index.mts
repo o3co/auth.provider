@@ -61,6 +61,16 @@ export {
 	redisCodeRepositoryModule,
 } from "./code-repository.mjs";
 // ---------------------------------------------------------------------------
+// DPoP replay store adapter (Wave 2 Phase 2 Sub-PR 2a).
+// Requires @o3co/auth-provider-dpop peer — consumers that do not use DPoP
+// need not install it. Exported separately so tree-shakers can elide it.
+// ---------------------------------------------------------------------------
+export {
+	createRedisDPoPReplayStore,
+	type DPoPReplayStoreClient,
+	type RedisDPoPReplayStoreOptions,
+} from "./dpop-replay-store.mjs";
+// ---------------------------------------------------------------------------
 // FederationTokenStore (Phase 10 Q1+Q5).
 // Adapter relocated from core; module pattern added for declarative wiring
 // parity with other v0.5.0 redis adapters.

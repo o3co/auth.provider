@@ -1,0 +1,66 @@
+{
+	"name": "@o3co/auth-provider-dpop",
+	"version": "0.0.0",
+	"description": "DPoP (RFC 9449) sender-constrained access token support for @o3co/auth-provider",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=18.19.0"
+	},
+	"type": "module",
+	"main": "./dist/index.mjs",
+	"types": "./dist/index.d.mts",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		},
+		"./reference.conf": "./src/reference.conf"
+	},
+	"files": [
+		"dist",
+		"src/reference.conf",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/dpop"
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"express": "^5.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@o3co/auth-provider-core": {
+			"optional": true
+		},
+		"express": {
+			"optional": true
+		}
+	},
+	"dependencies": {
+		"jose": "^6.2.2"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@vitest/coverage-v8": "^4.1.6",
+		"typescript": "^5.9.3",
+		"vitest": "^4.1.6"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

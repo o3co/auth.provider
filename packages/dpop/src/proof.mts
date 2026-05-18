@@ -1,0 +1,125 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { decodeJwt, decodeProtectedHeader, type JWK } from "jose";
+import { DPoPError } from "./errors.mjs";
+
+export interface DPoPProofClaims {
+	readonly htm: string;
+	readonly htu: string;
+	readonly iat: number;
+	readonly jti: string;
+}
+
+export interface DPoPProofHeader {
+	readonly typ: string;
+	readonly alg: string;
+	readonly jwk: JWK;
+}
+
+export interface DPoPProof {
+	readonly header: DPoPProofHeader;
+	readonly claims: DPoPProofClaims;
+	readonly raw: string;
+}
+
+/**
+ * Parse a raw DPoP header value into a structured `DPoPProof`. Throws
+ * `DPoPError` for malformed input — does NOT verify the signature or
+ * validate semantic claims (htm, htu, iat). Those happen in the
+ * verifier (T2.5 / Sub-PR 2b).
+ *
+ * Validation order follows spec §6 step ordering for useful error messages:
+ *   Step 3: JWT shape (3 parts)
+ *   Step 4: typ = dpop+jwt
+ *   Step 5: alg present (whitelist check is in verifier)
+ *   Step 6: jwk present in header
+ *   Step 7: jwk is public-only (no private material)
+ *   Step 9: required claims present + correct types
+ *
+ * Per Wave 2 Phase 2 spec §6 + design principle §3.2 (total-order validation).
+ */
+export const parseProof = (raw: string): DPoPProof => {
+	// Step 3 (spec §6): JWT shape — must be exactly 3 dot-separated parts
+	if (typeof raw !== "string" || raw.split(".").length !== 3) {
+		throw new DPoPError("malformed_proof", "DPoP header is not a JWT");
+	}
+
+	let header: { typ?: unknown; alg?: unknown; jwk?: unknown };
+	try {
+		header = decodeProtectedHeader(raw);
+	} catch {
+		throw new DPoPError("malformed_proof", "DPoP header is not parseable");
+	}
+
+	// Step 4 (spec §6): typ must be exactly "dpop+jwt"
+	if (header.typ !== "dpop+jwt") {
+		throw new DPoPError("typ_mismatch", `expected typ=dpop+jwt, got ${String(header.typ)}`);
+	}
+
+	// alg must be present as a non-empty string (whitelist enforcement is in verifier)
+	if (typeof header.alg !== "string" || header.alg.length === 0) {
+		throw new DPoPError("malformed_proof", "missing or non-string alg");
+	}
+
+	// Step 6 (spec §6): jwk must be present in the protected header
+	if (!header.jwk || typeof header.jwk !== "object") {
+		throw new DPoPError("missing_jwk", "JOSE header has no jwk");
+	}
+
+	// Step 7 (spec §6): JWK must carry public key material only
+	const jwk = header.jwk as Record<string, unknown>;
+	const privateKeyFields = ["d", "p", "q", "dp", "dq", "qi", "k"];
+	for (const field of privateKeyFields) {
+		if (field in jwk) {
+			throw new DPoPError("private_jwk", `JWK carries private material: ${field}`);
+		}
+	}
+
+	let claims: Record<string, unknown>;
+	try {
+		claims = decodeJwt(raw) as Record<string, unknown>;
+	} catch {
+		throw new DPoPError("malformed_proof", "DPoP body is not parseable");
+	}
+
+	// Step 9 (spec §6): required claims must be present
+	for (const claim of ["htm", "htu", "iat", "jti"] as const) {
+		if (!(claim in claims)) {
+			throw new DPoPError("missing_claim", `missing required claim: ${claim}`);
+		}
+	}
+
+	// Step 9 continued: claim type validation
+	if (
+		typeof claims.htm !== "string" ||
+		typeof claims.htu !== "string" ||
+		typeof claims.iat !== "number" ||
+		typeof claims.jti !== "string"
+	) {
+		throw new DPoPError("missing_claim", "invalid claim types");
+	}
+
+	return {
+		header: { typ: header.typ, alg: header.alg, jwk: jwk as JWK },
+		claims: {
+			htm: claims.htm,
+			htu: claims.htu,
+			iat: claims.iat,
+			jti: claims.jti,
+		},
+		raw,
+	};
+};
