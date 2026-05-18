@@ -1,0 +1,188 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * DPoP module manifest — wires `createDPoPMechanism` into the grant
+ * middleware contribution slot (Wave 2 Token-binding Cluster spec §4.7 /
+ * Phase 2 DPoP spec §11.2).
+ *
+ * Contributions:
+ *   - `grantMiddleware[0]` — `tokenBindingMw` wrapping the DPoP mechanism.
+ *     Returns `null` (skip) when `config.oauth.dpop.enabled === false`.
+ *
+ * DI requires:
+ *   - `config` — reads `config.oauth.dpop` + `config.oauth.tokenBinding`.
+ *
+ * DI optional:
+ *   - `logger`           — forwarded to `tokenBindingMw` + `createDPoPMechanism`.
+ *   - `dpopReplayStore`  — consumer-wired Redis adapter for production.
+ *                          Falls back to in-memory store when absent (dev/test only).
+ *
+ * The `dpopReplayStore` optional slot is declared here via ComponentMap
+ * augmentation so consumers (e.g. `@o3co/auth-provider-redis`) can provide
+ * a Redis-backed implementation without modifying this package.
+ *
+ * Secure-default-opt-in: `oauth.dpop.enabled = false` in reference.conf.
+ * Operators must explicitly set `enabled = true` to activate DPoP.
+ *
+ * Per Wave 2 Phase 2 spec §10 (config) + §11.2 (module) + feedback_secure_default_opt_in.md.
+ */
+
+// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below
+import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
+import { defineModule, tokenBindingMw } from "@o3co/auth-provider-core";
+import { z } from "zod";
+import { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
+import type { DPoPReplayStore } from "./replay-store.mjs";
+import { createDPoPMechanism } from "./verifier.mjs";
+
+// ---------------------------------------------------------------------------
+// ComponentMap augmentation — dpopReplayStore slot
+// ---------------------------------------------------------------------------
+
+/**
+ * Optional ComponentMap slot for the DPoP replay store. When absent,
+ * `dpopModule` falls back to the in-memory adapter (dev/test only). Production
+ * deployments wire the Redis-backed implementation via:
+ *
+ * ```ts
+ * import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis";
+ * // ... in your composition module's `provides`:
+ * dpopReplayStore: (deps) => createRedisDPoPReplayStore(deps.redisClient)
+ * ```
+ *
+ * Pattern mirrors `webauthnCredentialStore` in core + `accessTokenDenylist`.
+ * Per Wave 2 Phase 2 spec §11.2.
+ */
+declare module "@o3co/auth-provider-core" {
+	interface ComponentMap {
+		/** Optional DPoP replay store. Defaults to in-memory when absent. */
+		readonly dpopReplayStore?: DPoPReplayStore;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Config schema
+// ---------------------------------------------------------------------------
+
+/**
+ * Zod schema for the `oauth.dpop` config slice.
+ *
+ * Keys use kebab-case to match the HOCON reference.conf keys exactly.
+ * HOCON preserves key names verbatim; TypeScript accesses them via
+ * bracket notation: `config.oauth.dpop["iat-window-seconds"]`.
+ *
+ * Per Wave 2 Phase 2 spec §10.
+ */
+export const dpopConfigSchema = z.object({
+	oauth: z.object({
+		tokenBinding: z
+			.object({
+				"dispatch-policy": z
+					.enum(["intent-explicit", "strict-mutual-exclusion"])
+					.default("intent-explicit"),
+			})
+			.default(() => ({ "dispatch-policy": "intent-explicit" as const })),
+		dpop: z
+			.object({
+				/** When false (default), dpopModule contributes null — no DPoP middleware mounted. */
+				enabled: z.boolean().default(false),
+				/** Acceptance window for the iat claim in seconds. Default: 60. */
+				"iat-window-seconds": z.number().int().positive().default(60),
+				/** JOSE algorithm allowlist. Default: ES256, ES384, EdDSA, RS256. */
+				"alg-whitelist": z.array(z.string()).default(["ES256", "ES384", "EdDSA", "RS256"]),
+				/** Replay store backend selector. "memory" is dev/test only. */
+				"replay-store": z.enum(["memory", "redis"]).default("memory"),
+				/** TTL for replay entries in seconds. Default: 300. */
+				"replay-store-ttl-seconds": z.number().int().positive().default(300),
+			})
+			.default(() => ({
+				enabled: false,
+				"iat-window-seconds": 60,
+				"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
+				"replay-store": "memory" as const,
+				"replay-store-ttl-seconds": 300,
+			})),
+	}),
+});
+
+// ---------------------------------------------------------------------------
+// Module manifest
+// ---------------------------------------------------------------------------
+
+/**
+ * Declarative manifest for the DPoP package.
+ *
+ * When `config.oauth.dpop.enabled` is `false` (the secure default), the
+ * `grantMiddleware` factory returns `null` and the boot planner skips it —
+ * no DPoP middleware is mounted. When `enabled` is `true`, a
+ * `tokenBindingMw` wrapping the DPoP mechanism is mounted BEFORE grant
+ * dispatch at `/oauth/token`.
+ *
+ * The `dpopReplayStore` optional slot is backed by `createMemoryDPoPReplayStore`
+ * when absent. Production deployments provide a Redis-backed implementation
+ * by wiring the `dpopReplayStore` slot via their composition root.
+ *
+ * Per Wave 2 Phase 2 spec §11.2.
+ */
+export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
+	name: "dpop",
+	configSchema: dpopConfigSchema,
+	requires: ["config"],
+	optional: ["logger", "dpopReplayStore"],
+	contributes: {
+		grantMiddleware: [
+			(deps) => {
+				const dpopConfig = (deps.config as { oauth?: { dpop?: { enabled?: unknown } } }).oauth
+					?.dpop;
+				if (!dpopConfig || dpopConfig.enabled !== true) {
+					// Disabled by config — no middleware mounted.
+					return null;
+				}
+
+				const typedConfig = deps.config as unknown as {
+					oauth: {
+						dpop: {
+							enabled: boolean;
+							"iat-window-seconds": number;
+							"alg-whitelist": readonly string[];
+							"replay-store-ttl-seconds": number;
+						};
+						tokenBinding?: {
+							"dispatch-policy"?: "intent-explicit" | "strict-mutual-exclusion";
+						};
+					};
+				};
+
+				const replayStore: DPoPReplayStore = deps.dpopReplayStore ?? createMemoryDPoPReplayStore();
+
+				return tokenBindingMw({
+					mechanisms: [
+						createDPoPMechanism({
+							replayStore,
+							iatWindowSeconds: typedConfig.oauth.dpop["iat-window-seconds"],
+							algWhitelist: typedConfig.oauth.dpop["alg-whitelist"],
+							replayTtlSeconds: typedConfig.oauth.dpop["replay-store-ttl-seconds"],
+							logger: deps.logger,
+						}),
+					],
+					dispatchPolicy: typedConfig.oauth.tokenBinding?.["dispatch-policy"] ?? "intent-explicit",
+					logger: deps.logger,
+				});
+			},
+		],
+	},
+});
