@@ -230,12 +230,14 @@ describe("parseProof — structural validation only (no signature check)", () =>
 	});
 
 	// Step 9 continued: claim type mismatch — covers each of htm/htu/iat/jti.
+	// Wrong-type claims are reported as `malformed_proof` (structural error),
+	// distinct from `missing_claim` (claim absent) — operator audit triage.
 	it.each([
 		{ field: "htm", value: 1 },
 		{ field: "htu", value: 1 },
 		{ field: "iat", value: "not-a-number" },
 		{ field: "jti", value: 1 },
-	])("throws missing_claim when $field has wrong type", async ({ field, value }) => {
+	])("throws malformed_proof when $field has wrong type", async ({ field, value }) => {
 		const { privateKey, publicKey } = await generateKeyPair("ES256");
 		const jwk = await exportJWK(publicKey);
 		const jwt = await new SignJWT({
@@ -252,7 +254,7 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		payloadObj[field] = value;
 		const newPayload = Buffer.from(JSON.stringify(payloadObj)).toString("base64url");
 		const crafted = `${hdr}.${newPayload}.${sig}`;
-		await expect(parseProof(crafted)).rejects.toMatchObject({ reason: "missing_claim" });
+		await expect(parseProof(crafted)).rejects.toMatchObject({ reason: "malformed_proof" });
 	});
 
 	it("code is always invalid_dpop_proof for all thrown DPoPErrors", async () => {

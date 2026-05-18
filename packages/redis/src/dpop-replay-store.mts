@@ -47,6 +47,15 @@ export const createRedisDPoPReplayStore = (
 	const prefix = options.keyPrefix ?? "dpop:replay:";
 	return {
 		async seen(jti, jkt, ttlSeconds) {
+			// Mirror the memory adapter's RangeError guard so the
+			// `DPoPReplayStore.seen` interface contract holds uniformly across
+			// shipped adapters (replay-store.mts JSDoc: implementations SHOULD
+			// throw on non-positive / non-finite ttlSeconds).
+			if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
+				throw new RangeError(
+					`DPoPReplayStore.seen: ttlSeconds must be a positive finite number (got ${String(ttlSeconds)})`,
+				);
+			}
 			const key = `${prefix}${jkt}:${jti}`;
 			// SET key value NX PX ttlMillis — atomic check-and-set
 			const result = await options.client.set(key, "1", "PX", ttlSeconds * 1000, "NX");

@@ -52,14 +52,21 @@ export interface DPoPProof {
  * validate semantic claims (htm, htu, iat). Those happen in the
  * verifier (T2.5 / Sub-PR 2b).
  *
- * Validation order follows spec §6 step ordering for useful error messages:
+ * Validation order follows spec §6 with one performance-driven deviation:
  *   Step 3: JWT shape (3 parts)
  *   Step 4: typ = dpop+jwt
  *   Step 5: alg present (whitelist check is in verifier)
  *   Step 6: jwk present in header
- *   Step 7: jwk is public-only (no private material)
- *   Step 8: jkt computed via RFC 7638 SHA-256 thumbprint
- *   Step 9: required claims present + correct types
+ *   Step 7: jwk is public-only (no private material — name-screened)
+ *   Step 9: required claims present + correct types       ← runs BEFORE step 8
+ *   Step 8: jkt computed via RFC 7638 SHA-256 thumbprint  ← runs LAST
+ *
+ * Step 8 is moved AFTER step 9 because `computeJkt` is the only cryptographic
+ * operation in the parser (canonical JSON serialization + SHA-256). Cheap
+ * structural / type checks run first so a proof with missing claims rejects
+ * without burning the thumbprint cost. The spec authorizes this ordering —
+ * §6's step numbering is the validation taxonomy, not a literal execution
+ * sequence, since steps 7 and 9 don't depend on the jkt value.
  *
  * Per Wave 2 Phase 2 spec §6 + design principle §3.2 (total-order validation).
  */
@@ -115,14 +122,17 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 		}
 	}
 
-	// Step 9 continued: claim type validation
+	// Step 9 continued: claim type validation.
+	// Wrong-type claims are a STRUCTURAL error (`malformed_proof`), distinct
+	// from the `missing_claim` branch above — operator audit triage needs to
+	// distinguish "client omitted htm" from "client sent iat as a string".
 	if (
 		typeof claims.htm !== "string" ||
 		typeof claims.htu !== "string" ||
 		typeof claims.iat !== "number" ||
 		typeof claims.jti !== "string"
 	) {
-		throw new DPoPError("missing_claim", "invalid claim types");
+		throw new DPoPError("malformed_proof", "invalid claim types");
 	}
 
 	// Step 8 (spec §6): RFC 7638 SHA-256 thumbprint over the validated JWK.
