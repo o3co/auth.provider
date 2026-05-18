@@ -20,6 +20,7 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	type Confirmation,
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
@@ -47,6 +48,7 @@ import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
+import type { IntrospectResponse } from "./types/introspect.mjs";
 
 // Session data type augmentation
 //
@@ -444,27 +446,33 @@ export const createOAuthRouter = async (
 					const rawClientId = claims.client_id;
 					const clientId = typeof rawClientId === "string" ? rawClientId : azp;
 					const scope = typeof claims.scope === "string" ? claims.scope : undefined;
-					// SF-8 (RFC 7662 §2.2): `token_type` is the OAuth 2.0 token-type
-					// identifier registry value (`Bearer` per RFC 6750 §6.1.1), NOT
-					// the JOSE `typ` header value (`at+jwt`). Hardcode the literal —
-					// the SF-1 verifier with `type: "access_token"` already enforces
-					// `typ: "at+jwt"` upstream, so any token reaching this point
-					// has been confirmed as a Bearer access token.
-					return res.status(200).json(
-						formatObject({
-							active: true,
-							exp,
-							iat,
-							iss,
-							aud,
-							sub,
-							azp,
-							client_id: clientId,
-							scope,
-							token_type: "Bearer",
-							jti: typeof jti === "string" ? jti : undefined,
-						}),
-					);
+					// SF-8 + Wave 2: token_type follows the bound-token's confirmation.
+					// DPoP-bound tokens (cnf.jkt present) return "DPoP" per RFC 9449 §5;
+					// mTLS-bound tokens keep "Bearer" per RFC 8705 §3 (cnf.x5t#S256 does
+					// not change the wire-level token type). Bearer tokens have no cnf
+					// and return "Bearer".
+					const cnfRaw = claims.cnf;
+					const cnf =
+						cnfRaw && typeof cnfRaw === "object" && !Array.isArray(cnfRaw)
+							? (cnfRaw as Confirmation)
+							: undefined;
+					const tokenType: "Bearer" | "DPoP" =
+						cnf && "jkt" in cnf && typeof cnf.jkt === "string" ? "DPoP" : "Bearer";
+					const response: IntrospectResponse = {
+						active: true,
+						exp,
+						iat,
+						iss,
+						aud,
+						sub,
+						azp,
+						client_id: clientId,
+						scope,
+						token_type: tokenType,
+						jti: typeof jti === "string" ? jti : undefined,
+						cnf,
+					};
+					return res.status(200).json(formatObject(response));
 				} catch (cause) {
 					// SF-8: same non-access-token signal as the bearer path above.
 					// `active: false` is required by RFC 7662 §2.2 regardless of
