@@ -30,6 +30,7 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "../user-sessions/types.mjs";
+import type { TokenBinding } from "./tokenBinding.mjs";
 
 /**
  * The client identity established by RFC 6749 §2.3 token-endpoint
@@ -113,6 +114,16 @@ export interface GrantContext {
 	 * client identity SHOULD reject `null` with `invalid_client` 401.
 	 */
 	readonly authenticatedClient: AuthenticatedClient | null;
+	/**
+	 * Sender-binding established by `tokenBindingMw` before grant dispatch.
+	 * `undefined` when no binding mechanism is enabled, when the request
+	 * did not carry the required proof / cert, or when the grant is
+	 * invoked outside the standard `/token` route. Grant handlers that
+	 * issue tokens propagate `tokenBinding.confirmation` into
+	 * `GenerateTokenOptions.confirmation`. See Wave 2 Token-binding Cluster
+	 * spec §4.1.
+	 */
+	readonly tokenBinding?: TokenBinding;
 }
 
 export interface GrantSuccess {
