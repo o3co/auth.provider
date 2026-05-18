@@ -35,6 +35,7 @@ export type DPoPReasonCode =
 	| "htu_mismatch"
 	| "iat_out_of_window"
 	| "replay_detected"
+	| "replay_store_unavailable"
 	| "multiple_headers";
 
 /**
