@@ -51,8 +51,8 @@ export type {
 // CodeRepository (Phase 10 Q4 / OR-9 Wave 5d).
 // Relocated from @o3co/auth-provider-foundation. v0.5.1 OR-9 added the module
 // pattern + migrated to ioredis-typed `CodeRepositoryClient`; the legacy
-// builder is retained one release cycle as deprecated and now requires the
-// new `{ client, keyPrefix?, defaultExpiresIn? }` shape.
+// builder is retained as deprecated and now requires the new
+// `{ client, keyPrefix?, defaultExpiresIn? }` shape.
 // ---------------------------------------------------------------------------
 export {
 	RedisCodeRepository,
