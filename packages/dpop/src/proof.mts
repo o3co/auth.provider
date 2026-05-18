@@ -125,8 +125,18 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 		throw new DPoPError("missing_claim", "invalid claim types");
 	}
 
-	// Step 8 (spec §6): RFC 7638 SHA-256 thumbprint over the validated JWK
-	const jkt = await computeJkt(jwk as JWK);
+	// Step 8 (spec §6): RFC 7638 SHA-256 thumbprint over the validated JWK.
+	// `computeJkt` delegates to jose's `calculateJwkThumbprint`, which throws
+	// `JWKInvalid` for malformed JWK shapes (e.g. EC key missing `crv`/`x`/`y`,
+	// RSA missing `n`/`e`). Step 7 only screens for private-material *field
+	// names* — shape validity is jose's job. Wrap any jose error so the
+	// package's documented `DPoPError` contract holds at the boundary.
+	let jkt: string;
+	try {
+		jkt = await computeJkt(jwk as JWK);
+	} catch (err) {
+		throw new DPoPError("malformed_proof", `invalid JWK: ${(err as Error).message}`);
+	}
 
 	return {
 		jwk: jwk as JWK,

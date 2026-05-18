@@ -158,6 +158,34 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		});
 	});
 
+	// Step 8: invalid JWK shape (passes private-field name screen, fails
+	// jose's structural validation in `calculateJwkThumbprint`). Without
+	// the try/catch wrapper in `parseProof`, jose's raw `JWKInvalid` would
+	// leak out and break the documented `DPoPError` contract.
+	it("throws malformed_proof when JWK is structurally invalid (EC missing crv)", async () => {
+		const { privateKey, publicKey } = await generateKeyPair("ES256");
+		const pubJwk = await exportJWK(publicKey);
+		const legitProof = await new SignJWT({
+			htm: "POST",
+			htu: "https://as/token",
+			iat: 1,
+			jti: "z",
+		})
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: pubJwk })
+			.sign(privateKey);
+		const [_hdr, payload, sig] = legitProof.split(".");
+		// Drop `crv` so the JWK is structurally invalid for an EC key but
+		// still passes the public/private-field-name screen.
+		const { crv: _crv, ...badJwk } = pubJwk as Record<string, unknown> & { crv?: unknown };
+		const headerObj = { typ: "dpop+jwt", alg: "ES256", jwk: badJwk };
+		const fakeHeader = Buffer.from(JSON.stringify(headerObj)).toString("base64url");
+		const crafted = `${fakeHeader}.${payload}.${sig}`;
+		await expect(parseProof(crafted)).rejects.toMatchObject({
+			constructor: DPoPError,
+			reason: "malformed_proof",
+		});
+	});
+
 	// Step 9: required claims
 	it("throws missing_claim when htm is absent", async () => {
 		const { privateKey, publicKey } = await generateKeyPair("ES256");
