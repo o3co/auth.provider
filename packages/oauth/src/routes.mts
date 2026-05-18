@@ -20,7 +20,6 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
-	type Confirmation,
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
@@ -48,7 +47,7 @@ import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
-import type { IntrospectResponse } from "./types/introspect.mjs";
+import { extractConfirmation, type IntrospectResponse } from "./types/introspect.mjs";
 
 // Session data type augmentation
 //
@@ -450,14 +449,11 @@ export const createOAuthRouter = async (
 					// DPoP-bound tokens (cnf.jkt present) return "DPoP" per RFC 9449 §5;
 					// mTLS-bound tokens keep "Bearer" per RFC 8705 §3 (cnf.x5t#S256 does
 					// not change the wire-level token type). Bearer tokens have no cnf
-					// and return "Bearer".
-					const cnfRaw = claims.cnf;
-					const cnf =
-						cnfRaw && typeof cnfRaw === "object" && !Array.isArray(cnfRaw)
-							? (cnfRaw as Confirmation)
-							: undefined;
-					const tokenType: "Bearer" | "DPoP" =
-						cnf && "jkt" in cnf && typeof cnf.jkt === "string" ? "DPoP" : "Bearer";
+					// and return "Bearer". `extractConfirmation` validates member types
+					// (rejects empty-string thumbprints, non-string variants); see
+					// types/introspect.mts.
+					const cnf = extractConfirmation(claims.cnf);
+					const tokenType: "Bearer" | "DPoP" = cnf && "jkt" in cnf ? "DPoP" : "Bearer";
 					const response: IntrospectResponse = {
 						active: true,
 						exp,
