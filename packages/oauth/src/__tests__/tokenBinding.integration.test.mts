@@ -149,8 +149,9 @@ const dpopMechanism: TokenBindingMechanism = {
 
 describe("/oauth/token — req.tokenBinding → ctx.tokenBinding bridge", () => {
 	it("copies the middleware-resolved binding into ctx.tokenBinding", async () => {
-		// Confirms routes.mts:265 wires `tokenBinding: req.tokenBinding`. A
-		// regression in that one-line spread would silently drop the binding
+		// Confirms the /token route's ctx construction wires
+		// `tokenBinding: req.tokenBinding`. A regression in that one-line
+		// spread would silently drop the binding
 		// and downstream grant handlers would issue Bearer tokens instead of
 		// sender-constrained ones — a security regression that the
 		// middleware-only unit tests cannot detect.
@@ -189,7 +190,7 @@ describe("/oauth/token — req.tokenBinding → ctx.tokenBinding bridge", () => 
 	it("leaves ctx.tokenBinding undefined when tokenBindingMw is mounted with no mechanisms", async () => {
 		// Pins the no-op path of tokenBindingMw: an empty registry should be
 		// indistinguishable from the not-mounted case so consumers can wire
-		// the middleware as a unconditional step in their pipeline.
+		// the middleware as an unconditional step in their pipeline.
 		const handler = capturingHandler();
 		const app = await buildApp(handler, { mountMw: true, mechanisms: [] });
 
