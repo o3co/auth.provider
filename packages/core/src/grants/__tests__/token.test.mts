@@ -306,4 +306,34 @@ describe("generateTokenResponse tokenType option", () => {
 		const response = generateTokenResponse({ accessToken }, { tokenType: "Bearer" });
 		expect(response.token_type).toBe("Bearer");
 	});
+
+	it("DPoP tokenType coexists with refreshToken in response", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const accessToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
+		const refreshToken = await generateToken({}, { keyStore });
+		const response = generateTokenResponse({ accessToken, refreshToken }, { tokenType: "DPoP" });
+		expect(response.token_type).toBe("DPoP");
+		expect(response.refresh_token).toBe(refreshToken.token);
+	});
+});
+
+describe("generateToken cnf coexists with other claims", () => {
+	it("emits cnf alongside sub, scope, exp without interference", async () => {
+		const keyStore = createSymmetricKeyStore("x".repeat(32));
+		const token = await generateToken(
+			{},
+			{
+				keyStore,
+				subject: "u1",
+				scope: "read",
+				expiresIn: 600,
+				confirmation: { jkt: "abc123" },
+			},
+		);
+		const payload = decodeJwt(token.token);
+		expect(payload.sub).toBe("u1");
+		expect(payload.scope).toBe("read");
+		expect(payload.exp).toBeDefined();
+		expect(payload.cnf).toEqual({ jkt: "abc123" });
+	});
 });

@@ -35,7 +35,8 @@ export interface Token {
 	 * Echo of `GenerateTokenOptions.confirmation` when set. Read-only
 	 * informational field for callers (e.g. audit log); does NOT drive
 	 * claim emission — that is `GenerateTokenOptions.confirmation`'s job.
-	 * See Wave 2 Token-binding Cluster spec §4.4.
+	 * See RFC 7800 §3 for the `cnf` claim structure and Wave 2
+	 * Token-binding Cluster spec §4.4 for the field's role here.
 	 */
 	readonly confirmation?: Confirmation;
 }
@@ -130,16 +131,19 @@ export const generateToken = async (
 		...(tokenType ? { header: { typ: tokenType } } : {}),
 	});
 
-	const result: Token = { token };
-
-	if (expiresIn !== undefined) result.expiresIn = expiresIn;
-	if (audience !== null && audience !== undefined) result.audience = audience;
-	if (issuer !== null && issuer !== undefined) result.issuer = issuer;
-	if (subject !== null && subject !== undefined) result.subject = subject;
-	if (scope !== null && scope !== undefined) result.scope = scope;
-	if (tokenType !== undefined) result.tokenType = tokenType;
-	if (confirmation !== undefined)
-		(result as { confirmation?: Confirmation }).confirmation = confirmation;
-
-	return result;
+	// Construct Token via spread so `readonly` fields (currently
+	// `confirmation`) can be assigned at construction without a cast.
+	// Spec §4.4 marks `Token.confirmation` readonly for caller-side
+	// immutability; building the record in one expression honors that
+	// contract without diverging from the existing per-field guards.
+	return {
+		token,
+		...(expiresIn !== undefined ? { expiresIn } : {}),
+		...(audience !== null && audience !== undefined ? { audience } : {}),
+		...(issuer !== null && issuer !== undefined ? { issuer } : {}),
+		...(subject !== null && subject !== undefined ? { subject } : {}),
+		...(scope !== null && scope !== undefined ? { scope } : {}),
+		...(tokenType !== undefined ? { tokenType } : {}),
+		...(confirmation !== undefined ? { confirmation } : {}),
+	};
 };
