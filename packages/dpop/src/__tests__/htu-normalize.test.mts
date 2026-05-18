@@ -77,4 +77,16 @@ describe("normalizeHtu — RFC 3986 §6.2.2 conformant", () => {
 	it("preserves path case (RFC 3986 §6.2.2.1: scheme-dependent; preserve for http/s)", () => {
 		expect(normalizeHtu("https://as/Token/Endpoint")).toBe("https://as/Token/Endpoint");
 	});
+
+	// RFC 9449 §4 — userinfo has no meaning at the token endpoint. Without
+	// rejection, the canonical reconstruction drops `username` / `password`
+	// and a proof for `https://attacker:pwn@as.example/...` would silently
+	// equality-match the server-built URL → htu binding weakened.
+	it("throws when URL contains userinfo (username only)", () => {
+		expect(() => normalizeHtu("https://attacker@as.example/token")).toThrow(/userinfo/);
+	});
+
+	it("throws when URL contains userinfo (username + password)", () => {
+		expect(() => normalizeHtu("https://attacker:pwn@as.example/token")).toThrow(/userinfo/);
+	});
 });

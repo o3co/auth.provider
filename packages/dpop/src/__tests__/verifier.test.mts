@@ -399,6 +399,21 @@ describe("createDPoPMechanism", () => {
 		});
 	});
 
+	// I-(round-2): pin that an `htu` containing userinfo is rejected as
+	// `malformed_proof` rather than being silently normalized away (RFC 9449
+	// §4 — userinfo has no meaning at the token endpoint). Without this
+	// guard, a proof for `https://attacker:pwn@as.example/...` would
+	// equality-match the server-built `https://as.example/...` after the
+	// canonical reconstruction drops the credentials.
+	it("rejects htu containing userinfo as malformed_proof (RFC 9449 §4)", async () => {
+		const { proof } = await mintProof({ htu: "https://attacker:pwn@as.example/token" });
+		await expect(mechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
+			reason: "malformed_proof",
+			code: "invalid_dpop_proof",
+			message: expect.stringContaining("userinfo"),
+		});
+	});
+
 	// I-2: pin that replay-store transport faults surface as the dedicated
 	// `replay_store_unavailable` audit signal — not a raw Error that would
 	// otherwise propagate up to `tokenBindingMw` and lose operator triage.

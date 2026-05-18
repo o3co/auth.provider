@@ -173,8 +173,22 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			}
 
 			// Step 11 (spec §6): HTTP URI match — both sides normalized per §7.
-			const expectedHtu = normalizeHtu(buildRequestUrl(req));
-			const presentedHtu = normalizeHtu(proof.claims.htu);
+			// `normalizeHtu` throws when either URL contains userinfo (the
+			// reconstruction drops `username`/`password`, which would otherwise
+			// let `https://attacker:pwn@as.example/...` equality-match the
+			// server-built URL after canonicalization). Wrap so the contract
+			// stays inside `DPoPError`.
+			let expectedHtu: string;
+			let presentedHtu: string;
+			try {
+				expectedHtu = normalizeHtu(buildRequestUrl(req));
+				presentedHtu = normalizeHtu(proof.claims.htu);
+			} catch (err) {
+				throw new DPoPError(
+					"malformed_proof",
+					`DPoP htu canonicalization failed: ${(err as Error).message}`,
+				);
+			}
 			if (expectedHtu !== presentedHtu) {
 				throw new DPoPError("htu_mismatch", "DPoP proof htu does not match request URI", {
 					expected: expectedHtu,

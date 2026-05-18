@@ -98,6 +98,18 @@ const removeDotSegments = (path: string, originalHadTrailingSlash: boolean): str
  */
 export const normalizeHtu = (raw: string): string => {
 	const url = new URL(raw);
+	// Reject userinfo: WHATWG URL preserves `username`/`password` but the
+	// canonical reconstruction below drops them, so without this check a
+	// proof carrying `https://attacker:pwn@as.example/oauth/token` would
+	// normalize to `https://as.example/oauth/token` and equality-match the
+	// server-built URL — weakening the htu binding check. RFC 9449 §4
+	// gives userinfo no meaning at the token endpoint; reject loudly so
+	// the verifier surfaces a `malformed_proof` audit signal.
+	if (url.username !== "" || url.password !== "") {
+		throw new Error(
+			`normalizeHtu: htu must not contain userinfo (got "${url.username}:***" prefix)`,
+		);
+	}
 	// Strip query and fragment (rules from spec §7 / RFC 3986 §6.2.2).
 	url.search = "";
 	url.hash = "";
