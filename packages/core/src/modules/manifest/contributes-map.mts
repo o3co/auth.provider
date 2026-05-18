@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { RequestHandler } from "express";
 import type { AuditSink } from "../../audit/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
 import type { MfaProvider } from "../../mfa/types.mjs";
@@ -102,6 +103,19 @@ export type AuditHookFactory<Deps> = (deps: Deps) => AuditHook;
 export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContribution;
 
 /**
+ * Factory type for the `grantMiddleware` contribution kind.
+ *
+ * Returns an Express `RequestHandler` to mount on the OAuth token endpoint
+ * (`/oauth/token` with the bundled `oauthModule`) BEFORE grant dispatch, or
+ * `null` when the mechanism is disabled by config (e.g.
+ * `oauth.dpop.enabled = false`). Null-returning factories are skipped at
+ * composition time — they are never mounted.
+ *
+ * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
+ */
+export type GrantMiddlewareFactory<Deps> = (deps: Deps) => RequestHandler | null;
+
+/**
  * Declaration-merged map of contribution kinds.
  *
  * Per A2-α §4.1 the v0.5.0 baseline declares 7 kinds. A5 (Phase 7) adds
@@ -111,9 +125,9 @@ export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContri
  * Per A2-α §4.5 collision policy:
  * - Name-keyed (`grants`, `federations`, `tokenExchangeValidators`,
  *   `mfaFactors`): throw on duplicate at boot (enforced in Phase 4 / A2-β).
- * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`): allow
- *   duplicates; routes additionally throw on duplicate `id` /
- *   undecorated-mountPath collisions.
+ * - List-shaped (`auditHooks`, `routes`, `grantPolicyHooks`,
+ *   `grantMiddleware`): allow duplicates; routes additionally throw on
+ *   duplicate `id` / undecorated-mountPath collisions.
  *
  * Per A2-α §4.2 every contribution factory shares the declaring module's
  * top-level `requires` / `optional` typed Deps object — there is no
@@ -133,4 +147,31 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	readonly auditHooks?: readonly AuditHookFactory<Deps>[];
 	readonly routes?: readonly RouteContributionEntry<Deps>[];
 	readonly grantPolicyHooks?: readonly GrantPolicyHookFactory<Deps>[];
+	/**
+	 * Express middleware mounted on the OAuth token endpoint (`/oauth/token`
+	 * with the bundled `oauthModule`) BEFORE grant dispatch (Wave 2
+	 * Token-binding Cluster spec §4.7 — added in Phase 1 retro for the
+	 * tokenBindingMw composition surface).
+	 *
+	 * Use cases: token-binding middleware (DPoP, mTLS), custom rate-
+	 * limiters, request body pre-processing. Factories that return `null`
+	 * are skipped at composition time (typical when a mechanism is
+	 * disabled by config).
+	 *
+	 * List-shaped — multiple modules may contribute. Composition order is
+	 * module-registration order. Within one middleware factory the
+	 * `DispatchPolicy` configured on `tokenBindingMw` decides which
+	 * mechanism wins.
+	 *
+	 * Cross-contribution composition is plain Express middleware ordering
+	 * — `tokenBindingMw` unconditionally assigns `req.tokenBinding` when it
+	 * resolves a binding (no guard against an already-populated field), so
+	 * a later `grantMiddleware` contribution that resolves a binding will
+	 * **overwrite** the earlier one. Modules that need deterministic
+	 * dispatch across competing mechanisms should compose them into a
+	 * single `tokenBindingMw` call (where `DispatchPolicy` arbitrates)
+	 * rather than register each mechanism as its own `grantMiddleware`
+	 * factory.
+	 */
+	readonly grantMiddleware?: readonly GrantMiddlewareFactory<Deps>[];
 }

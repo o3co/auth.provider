@@ -25,6 +25,7 @@ export type {
 	FederationProvider,
 	GrantFactory,
 	GrantHandler,
+	GrantMiddlewareFactory,
 	// AS-7 collision resolution (v0.5.1): renamed from `GrantPolicyHook`. The
 	// canonical `GrantPolicyHook` interface lives in `../policy/types.mts`
 	// and is exported from the package root.

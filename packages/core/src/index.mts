@@ -223,6 +223,7 @@ export type {
 	// ./grants/types.mjs exports at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
 	GrantHandlerResolver,
+	GrantMiddlewareFactory,
 	// AS-7 collision resolution (v0.5.1): the manifest's contributes-map
 	// placeholder previously named `GrantPolicyHook` was renamed to
 	// `GrantPolicyHookContribution`. The canonical `GrantPolicyHook`

@@ -28,7 +28,7 @@
  */
 
 import type { Server as HttpServer } from "node:http";
-import type { Router } from "express";
+import type { RequestHandler, Router } from "express";
 import type { z } from "zod";
 import type { LifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { AppConfig } from "../config/application.schema.mjs";
@@ -101,6 +101,7 @@ export type ContributionKind =
 	| "auditHooks"
 	| "routes"
 	| "grantPolicyHooks"
+	| "grantMiddleware"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -422,6 +423,17 @@ export interface ContributionCollectorMap {
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
+	/**
+	 * Collector for `grantMiddleware` contributions. Each entry is a
+	 * `RequestHandler | null` returned by a `GrantMiddlewareFactory`. Null
+	 * entries (disabled-by-config path) are filtered at consumption time in
+	 * `assembleApp` — they are appended to the collector for value-identity
+	 * dedup with sibling contributions but skipped when mounting on the
+	 * OAuth token endpoint (`/oauth/token` with the bundled `oauthModule`).
+	 *
+	 * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
+	 */
+	readonly grantMiddleware?: ListCollector<RequestHandler | null>;
 }
 
 /**
@@ -740,7 +752,7 @@ export interface ContributeAndOverrideSameKeyDetails {
 /** Per A2-β §6.1. */
 export interface ListShapedOverrideDetails {
 	readonly reason: "list-shaped-override-not-allowed";
-	readonly kind: "routes" | "auditHooks" | "grantPolicyHooks";
+	readonly kind: "routes" | "auditHooks" | "grantPolicyHooks" | "grantMiddleware";
 	readonly module: string;
 }
 
