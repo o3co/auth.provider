@@ -427,8 +427,9 @@ export interface ContributionCollectorMap {
 	 * Collector for `grantMiddleware` contributions. Each entry is a
 	 * `RequestHandler | null` returned by a `GrantMiddlewareFactory`. Null
 	 * entries (disabled-by-config path) are filtered at consumption time in
-	 * `assembleApp` — they are appended to the collector so factory identity
-	 * is preserved but skipped when mounting on `/token`.
+	 * `assembleApp` — they are appended to the collector for value-identity
+	 * dedup with sibling contributions but skipped when mounting on the
+	 * OAuth token endpoint (`/oauth/token` with the bundled `oauthModule`).
 	 *
 	 * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
 	 */

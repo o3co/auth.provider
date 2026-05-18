@@ -29,7 +29,7 @@
  * Per A2-β §6.2 / §6.4 / §9.
  */
 
-import type { Router } from "express";
+import type { RequestHandler, Router } from "express";
 import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
 import type {
@@ -199,7 +199,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),
-		grantMiddleware: makeIdentityDedupListCollector<import("express").RequestHandler | null>(),
+		grantMiddleware: makeIdentityDedupListCollector<RequestHandler | null>(),
 	};
 	// Consumer keys override built-ins; unknown consumer kinds pass through.
 	return { ...builtin, ...(consumer ?? {}) } as ContributionCollectorMap;

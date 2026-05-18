@@ -86,7 +86,7 @@ function normaliseModule(m: Module): NormalisedModule {
 	const contributesEntries: ContributionEntry[] = [];
 	for (const [kind, kindMap] of Object.entries(m.contributes ?? {})) {
 		if (Array.isArray(kindMap)) {
-			// List-shaped kinds: auditHooks, routes, grantPolicyHooks
+			// List-shaped kinds: auditHooks, routes, grantPolicyHooks, grantMiddleware
 			for (const factory of kindMap) {
 				contributesEntries.push({
 					kind: kind as ContributionKind,

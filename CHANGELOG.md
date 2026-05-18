@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added (Wave 2 Token-binding Cluster — Phase 1 retro)
 
-- **`ContributesMap.grantMiddleware` contribution kind in `@o3co/auth-provider-core`.** Modules may now contribute Express middleware that mounts on `/token` BEFORE grant dispatch — the declarative composition surface for `tokenBindingMw` (Phase 1) and the DPoP / mTLS mechanism packages (Phase 2 / 3). Factories that return `null` (disabled-by-config path — e.g. `oauth.dpop.enabled = false`) are skipped at mount time so the kind doubles as the on/off switch. Existing modules see zero behavior change (the field is optional and no shipped module contributes it yet). Mirrors the session package's A5 Phase 7 augmentation of `federationRedirectPolicies`.
+- **`ContributesMap.grantMiddleware` contribution kind in `@o3co/auth-provider-core`.** Modules may now contribute Express middleware that mounts on the OAuth token endpoint (`/oauth/token` with the bundled `oauthModule`) BEFORE grant dispatch — the declarative composition surface for `tokenBindingMw` (Phase 1) and the DPoP / mTLS mechanism packages (Phase 2 / 3). Factories that return `null` (disabled-by-config path — e.g. `oauth.dpop.enabled = false`) are skipped at mount time so the kind doubles as the on/off switch. Existing modules see zero behavior change (the field is optional and no shipped module contributes it yet). Mirrors the session package's A5 Phase 7 augmentation of `federationRedirectPolicies`.
 
 ### Added (Wave 2 Token-binding Cluster — Phase 1c)
 

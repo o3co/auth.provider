@@ -105,8 +105,9 @@ export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContri
 /**
  * Factory type for the `grantMiddleware` contribution kind.
  *
- * Returns an Express `RequestHandler` to mount on `/token` BEFORE grant
- * dispatch, or `null` when the mechanism is disabled by config (e.g.
+ * Returns an Express `RequestHandler` to mount on the OAuth token endpoint
+ * (`/oauth/token` with the bundled `oauthModule`) BEFORE grant dispatch, or
+ * `null` when the mechanism is disabled by config (e.g.
  * `oauth.dpop.enabled = false`). Null-returning factories are skipped at
  * composition time — they are never mounted.
  *
@@ -147,7 +148,8 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	readonly routes?: readonly RouteContributionEntry<Deps>[];
 	readonly grantPolicyHooks?: readonly GrantPolicyHookFactory<Deps>[];
 	/**
-	 * Express middleware mounted on `/token` BEFORE grant dispatch (Wave 2
+	 * Express middleware mounted on the OAuth token endpoint (`/oauth/token`
+	 * with the bundled `oauthModule`) BEFORE grant dispatch (Wave 2
 	 * Token-binding Cluster spec §4.7 — added in Phase 1 retro for the
 	 * tokenBindingMw composition surface).
 	 *
@@ -157,10 +159,11 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * disabled by config).
 	 *
 	 * List-shaped — multiple modules may contribute. Composition order is
-	 * module-registration order. The first contributor to write to
-	 * `req.tokenBinding` wins per Phase 1 §4.7's first-success semantics
-	 * (within one mw factory the dispatchPolicy applies; across factories
-	 * the order is the module-registration order).
+	 * module-registration order. Within one middleware factory the
+	 * `DispatchPolicy` configured on `tokenBindingMw` decides which
+	 * mechanism wins. Across multiple `grantMiddleware` contributions, the
+	 * first one to set `req.tokenBinding` wins — later contributors run
+	 * after and observe the field already populated.
 	 */
 	readonly grantMiddleware?: readonly GrantMiddlewareFactory<Deps>[];
 }

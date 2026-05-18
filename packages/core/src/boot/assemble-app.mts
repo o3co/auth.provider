@@ -531,20 +531,26 @@ export function assembleApp(
 
 	const router: Router = RouterCtor();
 
-	// Mount `grantMiddleware` contributions on `/token` BEFORE the route loop.
-	// Express runs middleware in mount order, so these handlers fire before the
-	// OAuth /token route handler that the routes loop installs below. Factories
-	// that returned `null` (disabled-by-config path) are still appended to the
-	// collector for stable identity but skipped here.
+	// Mount `grantMiddleware` contributions on `/oauth/token` BEFORE the route
+	// loop. The bundled `oauthModule` contributes its sub-router at mountPath
+	// `/oauth` (packages/oauth/src/module.mts), so the external grant-dispatch
+	// URL is `/oauth/token`. Express runs middleware in mount order, so these
+	// handlers fire before the OAuth `/token` route handler the routes loop
+	// installs below. Null returns (disabled-by-config path) are skipped here;
+	// the collector still records them for value-identity dedup with other
+	// contributions.
 	//
-	// Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
+	// NOTE: this mount path is coupled to the bundled `oauthModule`'s
+	// mountPath. A downstream that re-mounts the OAuth router at a different
+	// path must also wrap or replace this composition step. Per Wave 2
+	// Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
 	const grantMwCollector = frozen.registries.get("grantMiddleware") as
 		| ListCollector<RequestHandler | null>
 		| undefined;
 	if (grantMwCollector !== undefined) {
 		for (const mw of grantMwCollector.values()) {
 			if (mw !== null) {
-				router.use("/token", mw);
+				router.use("/oauth/token", mw);
 			}
 		}
 	}
