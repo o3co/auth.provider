@@ -290,6 +290,18 @@ export const createOAuthRouter = async (
 				const sc: SenderConstraint | undefined = ctx.authenticatedClient?.senderConstrained;
 				if (sc?.required) {
 					if (ctx.tokenBinding === undefined) {
+						await emitAuditEvent(auditSink, {
+							timestamp: new Date(),
+							type: "token.issued.failure",
+							clientId: req.oauthClient?.clientId,
+							ip: req.ip,
+							userAgent: req.get("user-agent"),
+							details: {
+								reason: "sender_constraint_no_binding",
+								grant_type,
+								required_methods: sc.methods,
+							},
+						});
 						return res
 							.status(401)
 							.json(
@@ -300,6 +312,19 @@ export const createOAuthRouter = async (
 							);
 					}
 					if (!sc.methods.includes(ctx.tokenBinding.kind)) {
+						await emitAuditEvent(auditSink, {
+							timestamp: new Date(),
+							type: "token.issued.failure",
+							clientId: req.oauthClient?.clientId,
+							ip: req.ip,
+							userAgent: req.get("user-agent"),
+							details: {
+								reason: "sender_constraint_kind_mismatch",
+								grant_type,
+								presented_kind: ctx.tokenBinding.kind,
+								required_methods: sc.methods,
+							},
+						});
 						return res
 							.status(400)
 							.json(

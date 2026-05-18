@@ -271,6 +271,56 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 		expect(handler.captured.invoked).toBe(true);
 	});
 
+	it("rejects unauthorized_client when methods is empty and required, regardless of presented kind", async () => {
+		// Degenerate config: required + methods:[] forbids every kind.
+		// Reachable via the schema (no minLength on methods). The behavior
+		// is deterministic — every binding fails [].includes(kind) — and
+		// this test pins it so a future "default-allow-on-empty" refactor
+		// would have to revisit the rule explicitly.
+		const sc: SenderConstraint = { required: true, methods: [] };
+		const repo = makeInMemoryRepo(sc);
+		const handler = capturingHandler();
+		const app = await buildApp(handler, {
+			clientRepo: repo,
+			mountMw: true,
+			mechanisms: [dpopMechanism],
+		});
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+		expect(handler.captured.invoked).toBe(false);
+	});
+
+	it("is advisory when required:false (binding kind mismatch does NOT reject)", async () => {
+		// Spec §4.8: required:false means methods is purely advisory —
+		// the grant succeeds regardless of binding presence or kind. Pins
+		// the no-reject path so the JSDoc's "advisory" contract has a
+		// regression guard.
+		const sc: SenderConstraint = { required: false, methods: ["mtls"] };
+		const repo = makeInMemoryRepo(sc);
+		const handler = capturingHandler();
+		const app = await buildApp(handler, {
+			clientRepo: repo,
+			mountMw: true,
+			mechanisms: [dpopMechanism], // kind=dpop, mismatch with methods=["mtls"]
+		});
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+
+		expect(res.status).toBe(200);
+		expect(handler.captured.invoked).toBe(true);
+	});
+
 	it("is a no-op when senderConstrained is absent on the client", async () => {
 		// No senderConstrained → any request passes regardless of binding state
 		const repo = makeInMemoryRepo(undefined);
