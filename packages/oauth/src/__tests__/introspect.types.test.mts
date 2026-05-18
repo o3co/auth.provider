@@ -108,4 +108,19 @@ describe("extractConfirmation", () => {
 		// matching the intent-explicit dispatch policy (spec §3.5).
 		expect(extractConfirmation({ jkt: "abc", "x5t#S256": "def" })).toEqual({ jkt: "abc" });
 	});
+
+	it("falls through to x5t#S256 when jkt is empty-string", () => {
+		// jkt fails its non-empty guard, so the function continues to
+		// the x5t check rather than returning undefined immediately.
+		// Pins the documented fall-through behavior.
+		expect(extractConfirmation({ jkt: "", "x5t#S256": "def" })).toEqual({
+			"x5t#S256": "def",
+		});
+	});
+
+	it("falls through to x5t#S256 when jkt is non-string", () => {
+		expect(extractConfirmation({ jkt: 123, "x5t#S256": "def" })).toEqual({
+			"x5t#S256": "def",
+		});
+	});
 });
