@@ -24,7 +24,11 @@ import type { X509Certificate } from "node:crypto";
  *   2. Chain walk hop-by-hop, with fingerprint cycle detection.
  *   3. Per-intermediate validity window.
  *   4. Per-intermediate `basicConstraints.CA === true` (RFC 5280 §4.2.1.9).
- *   5. Trust-anchor match via `current.checkIssued(anchor)` + anchor validity.
+ *   5. Per-hop **pair check**: `checkIssued` (DN / AKID / SKID match) AND
+ *      `isSignedBy` (cryptographic signature). Applied at both intermediate
+ *      hops and the terminal trust anchor — see `isSignedBy`'s JSDoc for why
+ *      both are required.
+ *   6. Trust-anchor validity window.
  *
  * The narrow mode is sufficient for the common single-private-CA M2M
  * deployment shape (RFC 8705 §2.1). Operators needing full path validation
@@ -103,6 +107,12 @@ export const validateCertChain = (
 
 	// Step 2: chain walk. Track fingerprints to detect cycles — a malicious
 	// chain could otherwise loop forever or exhaust stack.
+	//
+	// Per-hop cost is up to 4 .find() scans over the (trustedCas) and
+	// (intermediates) arrays — verified-pair lookup + DN-only fallback for
+	// the audit-signal distinction. Realistic deployments have <5 hops and
+	// <20 anchors so the O(N²) shape is trivially fine; merging the two
+	// scans would obscure the audit-reason branching and is not worth it.
 	let current = leaf;
 	const seen = new Set<string>();
 	// Walk depth is bounded by `intermediates.length + 1` (one terminal hop to

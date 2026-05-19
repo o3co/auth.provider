@@ -17,7 +17,7 @@ import { X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { validateCertChain } from "#/pki.mjs";
 
 /**
@@ -89,29 +89,68 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 		}
 	});
 
-	it("rejects a forged leaf with matching issuer DN but a different signing key (Copilot Critical regression)", () => {
+	it("rejects a forged leaf with matching issuer DN but a different signing key (e2e fixture-based, weak coverage)", () => {
 		// Adversarial: attackerLeaf was signed by attacker-root.pem, but its
 		// issuer DN matches the LEGITIMATE root's subject DN (`CN=Test Root CA`).
-		// `X509Certificate.checkIssued()` (backed by OpenSSL X509_check_issued)
-		// performs DN + AKID/SKID + CA-bit checks but does NOT verify the
-		// cryptographic signature. Without the explicit `verify(publicKey)`
-		// step in pki.mts, this forge would be accepted as "issued by the
-		// trusted root", letting any attacker who controls any private key
-		// produce a valid mTLS binding once they label a cert with the right
-		// issuer DN.
 		//
-		// Contract: validateCertChain MUST reject the forge, AND the rejection
-		// reason MUST distinguish "signature failed" from "no DN match" so
-		// audit logs surface the attack signal clearly.
+		// **Coverage caveat (verified empirically 2026-05-19):** OpenSSL's
+		// X509_check_issued backing Node's `checkIssued` compares the subject's
+		// AKID.authorityCertSerialNumber against the candidate issuer's serial
+		// number. openssl x509 auto-injects an AKID populated with the SIGNING
+		// CA's serial (attacker-root's, not the legit root's), so this fixture's
+		// `attackerLeaf.checkIssued(legitRoot)` returns false WITHOUT touching
+		// the new isSignedBy step. The chain falls through to "no path to trust
+		// anchor".
+		//
+		// This is a documentary / end-to-end regression test — it proves the
+		// forge is rejected, but does NOT pin the isSignedBy branch (the test
+		// would still pass if isSignedBy were removed). The strict contract
+		// pins are the two spy-based tests below.
 		const result = validateCertChain(attackerLeaf, [], [root], NOW);
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
-			// One of two outcomes is acceptable: (a) Node's checkIssued
-			// already rejects via AKID/SKID side-effect (→ "no path…"), or
-			// (b) checkIssued passes but our explicit verify fails (→
-			// "signature verification failed"). Either way, the chain MUST
-			// NOT validate.
 			expect(result.step).toMatch(/signature verification failed|no path to trust anchor/);
+		}
+	});
+
+	it("rejects with 'trust anchor matched by DN but signature verification failed' when checkIssued passes but verify fails", () => {
+		// Strict pin for the new audit branch (Copilot Round 2 Critical fix).
+		// Forces the exact code path: checkIssued returns true (DN/AKID/SKID
+		// matched by adversary), but signature verification returns false (the
+		// real attack vector — adversary cannot mint a valid signature without
+		// the trust anchor's private key).
+		//
+		// Without this test, the isSignedBy step in pki.mts could be silently
+		// removed and the e2e fixture test above would still pass (because
+		// Node's checkIssued rejects on AKID serial mismatch before isSignedBy
+		// is reached).
+		const subject = loadCert("attacker-leaf.pem");
+		const anchor = loadCert("root.pem");
+		vi.spyOn(subject, "checkIssued").mockReturnValue(true);
+		vi.spyOn(subject, "verify").mockReturnValue(false);
+
+		const result = validateCertChain(subject, [], [anchor], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("trust anchor matched by DN but signature verification failed");
+		}
+	});
+
+	it("rejects with 'intermediate matched by DN but signature verification failed' when an intermediate's signature fails", () => {
+		// Strict pin for the parallel intermediate-hop audit branch. Same shape
+		// as the trust-anchor test, but with the failure occurring at the
+		// intermediate-find step rather than the anchor-find step.
+		const subject = loadCert("attacker-leaf.pem");
+		const fakeInt = loadCert("intermediate.pem");
+		const anchor = loadCert("root.pem"); // never reached
+		// Only the intermediate matches by DN; the anchor does not.
+		vi.spyOn(subject, "checkIssued").mockImplementation((c) => c === fakeInt);
+		vi.spyOn(subject, "verify").mockReturnValue(false);
+
+		const result = validateCertChain(subject, [fakeInt], [anchor], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("intermediate matched by DN but signature verification failed");
 		}
 	});
 
