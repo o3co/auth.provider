@@ -33,7 +33,7 @@ HwYDVR0jBBgwFoAUQey1RDkeBYfD/xuliPfC0Qv0WEowDwYDVR0TAQH/BAUwAwEB
 hXs25+0CIQDITvqroFES8r+bSdPCJGaQMVxps8L823m1axWCE+eUvA==
 -----END CERTIFICATE-----`;
 
-const TEST_CERT_DER = new X509Certificate(TEST_CERT_PEM).raw as unknown as Uint8Array;
+const TEST_CERT_DER: Uint8Array = new X509Certificate(TEST_CERT_PEM).raw;
 
 describe("derToPem", () => {
 	it("wraps DER bytes in correct BEGIN/END CERTIFICATE markers", () => {

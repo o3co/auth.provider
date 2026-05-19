@@ -76,6 +76,41 @@ describe("parseEnvoyXfccHeader", () => {
 		expect(result.certPem).toContain("-----BEGIN CERTIFICATE-----");
 		expect(result.certPem).toContain("-----END CERTIFICATE-----");
 	});
+
+	it("strips enclosing double-quotes from Cert= value (Envoy 1.18+ quoted-string form)", () => {
+		// Codex Round 1 Important #2 / Claude Minor #2 convergence: Envoy may
+		// quote field values whose payloads contain structural characters.
+		const xfcc = `By="spiffe://cluster.local/sa/server";Hash=abc;Cert="${ENCODED_CERT}"`;
+		const result = parseEnvoyXfccHeader(xfcc);
+		expect(result.certPem).toBe(TEST_CERT_PEM);
+	});
+
+	it("rejects mismatched leading-only quote on Cert= field", () => {
+		const xfcc = `Cert="${ENCODED_CERT}`; // missing trailing quote
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("mismatched quoting");
+	});
+
+	it("rejects an XFCC header that exceeds the raw size cap", () => {
+		// Defense-in-depth size cap (Codex Round 1 Important #1).
+		const oversize = `Cert=${"x".repeat(20 * 1024)}`;
+		expect(() => parseEnvoyXfccHeader(oversize)).toThrow("size cap");
+	});
+
+	it("normalizes invalid percent-encoding into a plain Error (not URIError)", () => {
+		// safeDecodeURIComponent wrapper (Codex Round 1 Important #3).
+		// `%C3` is a partial UTF-8 multi-byte sequence — looks URL-encoded
+		// (matches the isUrlEncoded regex), but decodeURIComponent throws
+		// URIError mid-decode. The wrapper MUST rethrow as a plain Error.
+		const xfcc = "Cert=%C3-truncated";
+		expect(() => parseEnvoyXfccHeader(xfcc)).toThrow("invalid percent-encoding");
+		// MUST be a plain Error, never a URIError — verify by class name.
+		try {
+			parseEnvoyXfccHeader(xfcc);
+		} catch (err) {
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).constructor.name).toBe("Error");
+		}
+	});
 });
 
 describe("parsePlainPemHeader", () => {
@@ -103,5 +138,26 @@ describe("parsePlainPemHeader", () => {
 
 	it("throws when the header value is empty", () => {
 		expect(() => parsePlainPemHeader("")).toThrow();
+	});
+
+	it("rejects a plain-PEM header that exceeds the raw size cap", () => {
+		// Defense-in-depth size cap (Codex Round 1 Important #1).
+		const oversize = `-----BEGIN CERTIFICATE-----\n${"A".repeat(20 * 1024)}\n-----END CERTIFICATE-----`;
+		expect(() => parsePlainPemHeader(oversize)).toThrow("size cap");
+	});
+
+	it("normalizes invalid percent-encoding into a plain Error (not URIError)", () => {
+		// safeDecodeURIComponent wrapper (Codex Round 1 Important #3).
+		// `%C3` is a partial UTF-8 multi-byte sequence — matches isUrlEncoded
+		// so triggers decode, but decodeURIComponent throws URIError. The
+		// wrapper MUST rethrow as a plain Error.
+		const value = "%C3-truncated";
+		expect(() => parsePlainPemHeader(value)).toThrow("invalid percent-encoding");
+		try {
+			parsePlainPemHeader(value);
+		} catch (err) {
+			expect(err).toBeInstanceOf(Error);
+			expect((err as Error).constructor.name).toBe("Error");
+		}
 	});
 });

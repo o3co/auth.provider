@@ -32,7 +32,9 @@ HwYDVR0jBBgwFoAUQey1RDkeBYfD/xuliPfC0Qv0WEowDwYDVR0TAQH/BAUwAwEB
 hXs25+0CIQDITvqroFES8r+bSdPCJGaQMVxps8L823m1axWCE+eUvA==
 -----END CERTIFICATE-----`;
 
-const TEST_CERT_DER = new X509Certificate(TEST_CERT_PEM).raw as unknown as Uint8Array;
+// X509Certificate.raw returns Buffer; Buffer extends Uint8Array, so this widens
+// cleanly without the previous redundant `as unknown as Uint8Array` cast.
+const TEST_CERT_DER: Uint8Array = new X509Certificate(TEST_CERT_PEM).raw;
 
 describe("parseDerToCertificate", () => {
 	it("populates all four parsed fields from a valid DER certificate", () => {
@@ -48,17 +50,35 @@ describe("parseDerToCertificate", () => {
 		expect(cert.parsed.notAfter.length).toBeGreaterThan(0);
 	});
 
-	it("preserves the input DER bytes as the der field (same reference)", () => {
+	it("copies the input DER bytes into the der field (defensive — not same reference)", () => {
+		// Codex Round 1 Important #4: `readonly der: Uint8Array` only protects
+		// property assignment, not byte mutation. parseDerToCertificate copies
+		// the bytes so a caller mutating the input buffer after parse cannot
+		// tamper with the thumbprint source.
 		const cert = parseDerToCertificate(TEST_CERT_DER);
-		// The `der` field must be the same reference — no copy (for thumbprinting efficiency).
-		expect(cert.der).toBe(TEST_CERT_DER);
+		// Different reference (defensive copy)
+		expect(cert.der).not.toBe(TEST_CERT_DER);
+		// But same content (byte-equal)
+		expect(cert.der.length).toBe(TEST_CERT_DER.length);
+		expect(Array.from(cert.der)).toEqual(Array.from(TEST_CERT_DER));
 	});
 
-	it("attaches the chain when provided and omits the chain property when not provided", () => {
+	it("input buffer mutation does NOT affect the stored DER (defensive copy verification)", () => {
+		// Adversarial scenario: caller modifies their original buffer after parse.
+		const mutableInput = new Uint8Array(TEST_CERT_DER);
+		const cert = parseDerToCertificate(mutableInput);
+		const originalFirstByte = cert.der[0];
+		mutableInput[0] = 0xff; // tamper with caller's buffer
+		expect(cert.der[0]).toBe(originalFirstByte); // stored bytes unaffected
+	});
+
+	it("attaches the chain when provided (defensive-copied) and omits chain property when not provided", () => {
 		const fakeDer = new Uint8Array([0x30, 0x01]);
 		const certWithChain = parseDerToCertificate(TEST_CERT_DER, [fakeDer]);
 		expect(certWithChain.chain).toHaveLength(1);
-		expect(certWithChain.chain?.[0]).toBe(fakeDer);
+		// Chain entries are also defensively copied per Codex Important #4.
+		expect(certWithChain.chain?.[0]).not.toBe(fakeDer);
+		expect(Array.from(certWithChain.chain?.[0] ?? [])).toEqual([0x30, 0x01]);
 
 		const certWithoutChain = parseDerToCertificate(TEST_CERT_DER);
 		expect(certWithoutChain.chain).toBeUndefined();

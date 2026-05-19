@@ -70,9 +70,18 @@ export const parseDerToCertificate = (
 	// the correct MtlsReasonCode context.
 	const x509 = new X509Certificate(der);
 
+	// Defense-in-depth: copy DER bytes on construction so a downstream
+	// caller holding a reference to the input buffer cannot tamper with the
+	// thumbprint source after parse (Codex Round 1 Important #4). The
+	// `readonly` modifier on the type only protects the property *assignment*,
+	// not the underlying byte mutation. Realistic cert size is 1-3KB; one
+	// allocation per parse is a free defensive lock-down.
+	const derCopy = new Uint8Array(der);
+	const chainCopy = chain !== undefined ? chain.map((entry) => new Uint8Array(entry)) : undefined;
+
 	return {
-		der,
-		...(chain !== undefined ? { chain } : {}),
+		der: derCopy,
+		...(chainCopy !== undefined ? { chain: chainCopy } : {}),
 		parsed: {
 			subject: x509.subject,
 			issuer: x509.issuer,
