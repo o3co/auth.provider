@@ -96,6 +96,16 @@ describe("parseEnvoyXfccHeader", () => {
 		expect(() => parseEnvoyXfccHeader(oversize)).toThrow("size cap");
 	});
 
+	it("measures the raw size cap in UTF-8 bytes, not UTF-16 code units (multi-byte cannot bypass)", () => {
+		// Copilot review Round 2 Important #1: an attacker who emits non-ASCII
+		// characters could bypass a cap measured in `value.length` (UTF-16 code
+		// units) because multi-byte UTF-8 chars take fewer code units than bytes.
+		// Each "あ" is 1 UTF-16 code unit but 3 UTF-8 bytes; 6KB code units = 18KB
+		// UTF-8 bytes, which exceeds the 16KB raw cap.
+		const multibyte = `Cert=${"あ".repeat(6 * 1024)}`;
+		expect(() => parseEnvoyXfccHeader(multibyte)).toThrow("size cap");
+	});
+
 	it("normalizes invalid percent-encoding into a plain Error (not URIError)", () => {
 		// safeDecodeURIComponent wrapper (Codex Round 1 Important #3).
 		// `%C3` is a partial UTF-8 multi-byte sequence — looks URL-encoded
@@ -144,6 +154,20 @@ describe("parsePlainPemHeader", () => {
 		// Defense-in-depth size cap (Codex Round 1 Important #1).
 		const oversize = `-----BEGIN CERTIFICATE-----\n${"A".repeat(20 * 1024)}\n-----END CERTIFICATE-----`;
 		expect(() => parsePlainPemHeader(oversize)).toThrow("size cap");
+	});
+
+	it("applies the raw size cap BEFORE trim/empty check (parity with parseEnvoyXfccHeader)", () => {
+		// Copilot review Round 2 Minor #2: don't do trim work on oversize input.
+		// A whitespace-only value larger than the raw cap must be rejected by the
+		// size check, not the empty check.
+		const oversizeWhitespace = " ".repeat(20 * 1024);
+		expect(() => parsePlainPemHeader(oversizeWhitespace)).toThrow("size cap");
+	});
+
+	it("measures the raw size cap in UTF-8 bytes, not UTF-16 code units (multi-byte cannot bypass)", () => {
+		// Copilot review Round 2 Important #1: see parallel envoy test.
+		const multibyte = "あ".repeat(6 * 1024); // 6KB UTF-16 code units = 18KB UTF-8 bytes
+		expect(() => parsePlainPemHeader(multibyte)).toThrow("size cap");
 	});
 
 	it("normalizes invalid percent-encoding into a plain Error (not URIError)", () => {

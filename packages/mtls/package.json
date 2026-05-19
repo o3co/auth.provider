@@ -46,9 +46,6 @@
 			"optional": true
 		}
 	},
-	"dependencies": {
-		"zod": "^4.3.6"
-	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@types/express": "^5.0.6",

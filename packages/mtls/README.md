@@ -2,7 +2,7 @@
 
 mTLS (RFC 8705) sender-constrained access token support for `@o3co/auth-provider`.
 
-> **Status:** Phase 3 in progress. Sub-PR 3a ships the package skeleton + dialect parsers + thumbprint + cert type. The mechanism factory, module wiring, and grant integration land in Sub-PR 3b / 3c. The package is NOT yet usable end-to-end; see `CHANGELOG.md` for the current contributions.
+> **Status:** Phase 3 in progress. Sub-PR 3a ships the package skeleton + dialect parsers + thumbprint + cert type. The mechanism factory, module wiring, and grant integration land in Sub-PR 3b / 3c. The package is NOT yet usable end-to-end.
 
 ## Overview
 

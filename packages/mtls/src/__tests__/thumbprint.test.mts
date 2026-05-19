@@ -57,9 +57,11 @@ describe("computeCertThumbprint — RFC 8705 §3.1 DER SHA-256 thumbprint", () =
 	});
 
 	it("output length is 43 characters (SHA-256 base64url without padding)", () => {
-		// SHA-256 produces 32 bytes → 256 bits → ceil(256/6) = 43 base64url chars
-		// (no trailing = because 32 * 8 = 256 is divisible by 6 with 2 bits left,
-		// yielding 43 full base64url characters and 0 padding characters).
+		// SHA-256 produces 32 bytes = 256 bits. Base64 encodes in 6-bit groups,
+		// so 256 / 6 = 42 full chars + 4 leftover bits → 43 chars total (the
+		// 43rd char encodes those 4 bits with 2 zero-padding bits). Standard
+		// base64 would then pad to 44 chars with one trailing `=`; base64url
+		// without padding drops the `=`, yielding 43 chars.
 		const thumbprint = computeCertThumbprint(TEST_CERT_DER);
 		expect(thumbprint.length).toBe(43);
 	});

@@ -42,10 +42,13 @@
 export type CertHeaderDialect = "envoy" | "plain-pem";
 
 /**
- * Maximum permitted raw header value size in bytes (UTF-16 code units, which
- * for ASCII PEM bodies is 1:1 with bytes). Defense-in-depth against DoS via
- * oversize XFCC headers from a misbehaving or malicious upstream (Codex review
- * Round 1 Important #1, PR for Sub-PR 3a).
+ * Maximum permitted raw header value size in UTF-8 bytes. Defense-in-depth
+ * against DoS via oversize XFCC headers from a misbehaving or malicious
+ * upstream (Codex review Round 1 Important #1, PR for Sub-PR 3a).
+ *
+ * Measured against `Buffer.byteLength(value, "utf8")` rather than `value.length`
+ * (UTF-16 code units), so non-ASCII payloads cannot bypass the cap by
+ * representing more bytes per character than the JS string length suggests.
  *
  * Realistic XFCC values are well under 10KB for a single cert + chain (≈3KB
  * per typical RSA-2048 cert). 16KB caps the upper realistic envelope plus
@@ -139,9 +142,12 @@ const unquoteXfccField = (raw: string, fieldName: string): string => {
  */
 export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 	// Defense-in-depth size cap before any string ops (Codex Round 1 Important #1).
-	if (value.length > MAX_RAW_HEADER_BYTES) {
+	// Measure UTF-8 bytes, not JS string length (UTF-16 code units), so multi-byte
+	// characters cannot bypass the cap (Copilot review Round 2 Important #1).
+	const rawByteLen = Buffer.byteLength(value, "utf8");
+	if (rawByteLen > MAX_RAW_HEADER_BYTES) {
 		throw new Error(
-			`XFCC header value exceeds size cap (${value.length} > ${MAX_RAW_HEADER_BYTES} bytes)`,
+			`XFCC header value exceeds size cap (${rawByteLen} > ${MAX_RAW_HEADER_BYTES} bytes)`,
 		);
 	}
 
@@ -178,9 +184,10 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 	// Envoy 1.18+ may also wrap structural-character values in quoted-strings —
 	// unquoteXfccField handles `Cert="..."` and the standard `\"`/`\\` escapes.
 	const certPem = safeDecodeURIComponent(unquoteXfccField(rawCert, "Cert"), "Cert");
-	if (certPem.length > MAX_DECODED_PAYLOAD_BYTES) {
+	const certByteLen = Buffer.byteLength(certPem, "utf8");
+	if (certByteLen > MAX_DECODED_PAYLOAD_BYTES) {
 		throw new Error(
-			`XFCC Cert= decoded payload exceeds size cap (${certPem.length} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
+			`XFCC Cert= decoded payload exceeds size cap (${certByteLen} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
 		);
 	}
 
@@ -189,10 +196,13 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
 		rawChain !== undefined
 			? safeDecodeURIComponent(unquoteXfccField(rawChain, "Chain"), "Chain")
 			: undefined;
-	if (chainPem !== undefined && chainPem.length > MAX_DECODED_PAYLOAD_BYTES) {
-		throw new Error(
-			`XFCC Chain= decoded payload exceeds size cap (${chainPem.length} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
-		);
+	if (chainPem !== undefined) {
+		const chainByteLen = Buffer.byteLength(chainPem, "utf8");
+		if (chainByteLen > MAX_DECODED_PAYLOAD_BYTES) {
+			throw new Error(
+				`XFCC Chain= decoded payload exceeds size cap (${chainByteLen} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
+			);
+		}
 	}
 
 	return { certPem, ...(chainPem !== undefined ? { chainPem } : {}) };
@@ -215,15 +225,19 @@ export const parseEnvoyXfccHeader = (value: string): ParsedCertHeader => {
  * Per Wave 2 Phase 3 spec §6.2 + OQ1 §14.1.
  */
 export const parsePlainPemHeader = (value: string): ParsedCertHeader => {
-	if (!value || value.trim().length === 0) {
-		throw new Error("plain-pem header value is empty");
+	// Defense-in-depth size cap BEFORE any string-shaping work (trim/decode),
+	// so a malicious oversize header is rejected without doing the expensive
+	// work first (Copilot review Round 2 Minor #2 — parity with parseEnvoyXfccHeader).
+	// Measure UTF-8 bytes, not JS string length (Copilot Round 2 Important #1).
+	const rawByteLen = Buffer.byteLength(value, "utf8");
+	if (rawByteLen > MAX_RAW_HEADER_BYTES) {
+		throw new Error(
+			`plain-pem header value exceeds size cap (${rawByteLen} > ${MAX_RAW_HEADER_BYTES} bytes)`,
+		);
 	}
 
-	// Defense-in-depth size cap (Codex Round 1 Important #1).
-	if (value.length > MAX_RAW_HEADER_BYTES) {
-		throw new Error(
-			`plain-pem header value exceeds size cap (${value.length} > ${MAX_RAW_HEADER_BYTES} bytes)`,
-		);
+	if (!value || value.trim().length === 0) {
+		throw new Error("plain-pem header value is empty");
 	}
 
 	// URL-decode if the value contains percent-encoded sequences.
@@ -232,9 +246,10 @@ export const parsePlainPemHeader = (value: string): ParsedCertHeader => {
 	// safeDecodeURIComponent normalizes URIError → plain Error so the
 	// extractor wraps it consistently (Codex Round 1 Important #3).
 	const decoded = isUrlEncoded(value) ? safeDecodeURIComponent(value, "plain-pem value") : value;
-	if (decoded.length > MAX_DECODED_PAYLOAD_BYTES) {
+	const decodedByteLen = Buffer.byteLength(decoded, "utf8");
+	if (decodedByteLen > MAX_DECODED_PAYLOAD_BYTES) {
 		throw new Error(
-			`plain-pem decoded payload exceeds size cap (${decoded.length} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
+			`plain-pem decoded payload exceeds size cap (${decodedByteLen} > ${MAX_DECODED_PAYLOAD_BYTES} bytes)`,
 		);
 	}
 
