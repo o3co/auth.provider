@@ -28,8 +28,9 @@
  *   - `oauth.mtls.enabled = true` + a well-formed cert in the configured
  *     header → `req.tokenBinding` populated with `kind: "mtls"` and
  *     `confirmation.x5t#S256` matching the pre-computed thumbprint.
- *   - Malformed header → HTTP 400 with `error: "malformed_header"` (the
- *     MtlsError `reason` is forwarded as the OAuth error code).
+ *   - Malformed header → HTTP 400 with `error: "invalid_certificate"` (the
+ *     hardcoded MtlsError.code; the `reason` field is internal-audit only,
+ *     mirrors DPoP's `invalid_dpop_proof` discipline per spec §3.4).
  *   - Boot-time fail-loud: `mode = "pki"` + empty `trusted-cas` → throw.
  *   - Boot-time fail-loud: `mode = "pki"` + `source = "tls-layer"` → throw.
  *

@@ -272,6 +272,35 @@ describe("createMtlsMechanism — boot-time validation", () => {
 			}),
 		).not.toThrow();
 	});
+
+	it("resolves `file:<path>` trustedCas entries from disk at boot (spec §7.1)", async () => {
+		// Operator-friendly form documented in reference.conf — file paths are
+		// read synchronously at module construction. Use the committed root.pem
+		// fixture as the source.
+		const fileRef = `file:${join(fixturesDir, "root.pem")}`;
+		const mech = createMtlsMechanism({
+			source: "header",
+			certHeaderDialect: "envoy",
+			mode: "pki",
+			trustedCas: [fileRef],
+		});
+		// If the file was loaded successfully, PKI mode now has a usable trust
+		// anchor and the well-formed chain should validate end-to-end.
+		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		const result = await mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request);
+		expect(result?.kind).toBe("mtls");
+		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
+	});
+
+	it("throws at construction when `file:<path>` cannot be read", () => {
+		expect(() =>
+			createMtlsMechanism({
+				source: "header",
+				mode: "pki",
+				trustedCas: ["file:/nonexistent/path/to/ca.pem"],
+			}),
+		).toThrow(/failed to read file/);
+	});
 });
 
 describe("MtlsError exposure", () => {

@@ -33,9 +33,9 @@
  */
 
 import { X509Certificate } from "node:crypto";
+import { readFileSync } from "node:fs";
 import type { Logger, TokenBindingMechanism } from "@o3co/auth-provider-core";
 import type { Request } from "express";
-import { parseDerToCertificate } from "./certificate.mjs";
 import { MtlsError } from "./errors.mjs";
 import { type CertHeaderDialect, parseEnvoyXfccHeader, parsePlainPemHeader } from "./headers.mjs";
 import { pemToDer } from "./pem.mjs";
@@ -131,11 +131,15 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 		}
 	}
 
-	// Pre-parse trusted CAs once (PKI mode only).
+	// Pre-parse trusted CAs once at construction (PKI mode only). Each entry
+	// is either a literal PEM block or a `file:<path>` reference resolved
+	// synchronously at boot — the latter mirrors the operator-friendly form
+	// documented in reference.conf and spec §7.1.
 	const trustedCaCerts: readonly X509Certificate[] =
 		mode === "pki"
 			? // biome-ignore lint/style/noNonNullAssertion: boot-time check above guarantees defined when mode === "pki"
-				options.trustedCas!.map((pem, index) => {
+				options.trustedCas!.map((entry, index) => {
+					const pem = resolveTrustedCaEntry(entry, index);
 					try {
 						return new X509Certificate(pem);
 					} catch (err) {
@@ -189,7 +193,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 					);
 				}
 				const peer = socket.getPeerCertificate();
-				if (!peer || !peer.raw || peer.raw.length === 0) {
+				if (!peer?.raw || peer.raw.length === 0) {
 					// Ambient — no client cert presented at TLS layer.
 					return null;
 				}
@@ -207,12 +211,12 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			// biome-ignore lint/style/noNonNullAssertion: leafDer is set in both branches above
 			const der = leafDer!;
 
-			// Parse to X509Certificate for validity + chain steps. parseDerToCertificate
-			// throws plain Error on malformed DER — wrap to MtlsError.
+			// Parse to X509Certificate for validity + chain steps. `new X509Certificate(der)`
+			// throws DOMException / Error on malformed DER — wrap to MtlsError so the
+			// audit pipeline gets the structured reason.
 			let x509: X509Certificate;
 			let chainCerts: readonly X509Certificate[] = [];
 			try {
-				parseDerToCertificate(der); // exercises the same parse path + defensive copy
 				x509 = new X509Certificate(der);
 			} catch (err) {
 				throw new MtlsError("cert_decode_failed", `DER parse failed: ${(err as Error).message}`);
@@ -279,12 +283,42 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 // ---------------------------------------------------------------------------
 
 /**
+ * Resolve a single `trustedCas` entry into a PEM string. Supports two forms:
+ *
+ *   - Literal PEM block (starts with `-----BEGIN CERTIFICATE-----`) — passed
+ *     through verbatim.
+ *   - `file:<path>` — the file at `<path>` is read synchronously at boot
+ *     and its contents returned. The path is taken as-is (absolute or
+ *     relative to the auth-provider process's cwd); operators are expected
+ *     to provide absolute paths via reference.conf or env-substituted HOCON.
+ *
+ * Sync I/O is appropriate here because it runs once at module construction
+ * (boot time), before any request is served. A file-read failure throws a
+ * plain Error with the entry index for operator debugging.
+ *
+ * Per Wave 2 Phase 3 spec §7.1.
+ */
+const resolveTrustedCaEntry = (entry: string, index: number): string => {
+	if (entry.startsWith("file:")) {
+		const path = entry.slice("file:".length);
+		try {
+			return readFileSync(path, "utf8");
+		} catch (err) {
+			throw new Error(
+				`createMtlsMechanism: trustedCas[${index}] = "${entry}": failed to read file at ${path}: ${(err as Error).message}`,
+			);
+		}
+	}
+	return entry;
+};
+
+/**
  * Split a possibly-multi-PEM string into individual PEM blocks. Used for
  * XFCC Chain= which may concatenate multiple intermediate certs.
  *
- * Returns an empty array for empty input. Preserves block ordering — Envoy's
- * Chain= lists intermediates in leaf-first order (closest to leaf first, root
- * CA-signed last), matching the order `validateCertChain` walks.
+ * Returns an empty array for empty input. Block ordering is preserved
+ * (informational only — `validateCertChain` is order-independent via
+ * `find()` lookup, so callers are not required to present leaf-first).
  */
 const splitPemBlocks = (multiPem: string): readonly string[] => {
 	const BEGIN = "-----BEGIN CERTIFICATE-----";

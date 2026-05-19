@@ -13,14 +13,13 @@ This package plugs into the existing `tokenBindingMw` from `@o3co/auth-provider-
 ## Quick start
 
 ```ts
-// composition root
+// composition root — enable ONE binding-mechanism module per Phase 3 deployment
+// (see "Known Limitations" below for the cross-mechanism dispatch caveat).
 import { mtlsModule } from "@o3co/auth-provider-mtls";
-import { dpopModule } from "@o3co/auth-provider-dpop"; // optional, can run alongside
 
 await createApp({
   modules: [
     /* ... existing modules ... */
-    dpopModule,
     mtlsModule,
   ],
   bootstrapComponents: { config, /* logger ... */ },
@@ -43,6 +42,16 @@ oauth.mtls {
 ```hocon
 oauth.tokenBinding.dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
 ```
+
+## Known Limitations (Phase 3)
+
+### Cross-mechanism dispatch (single binding mechanism per deployment)
+
+Phase 3 ships `dpopModule` and `mtlsModule` as independent grant-middleware contributors. **Deploying both simultaneously does NOT route through a single `dispatch-policy` arbitrator** — each module registers its own `tokenBindingMw` instance, the two run sequentially, and whichever runs **later** silently overwrites `req.tokenBinding`. The `intent-explicit` and `strict-mutual-exclusion` dispatch policies cannot arbitrate across module boundaries.
+
+**Practical guidance for Phase 3:** enable **one** binding-mechanism module per deployment — either `dpopModule` or `mtlsModule`, not both. The single-mechanism deployment works correctly under either dispatch policy.
+
+A follow-up Phase 3 sub-PR will refactor the contribution surface so multiple mechanisms compose into a single `tokenBindingMw` instance and the dispatch policy applies across them. Until then, multi-mechanism configurations are unsupported.
 
 ## Source modes
 
@@ -117,6 +126,27 @@ The narrow mode does **not** check:
 - **CRL / OCSP revocation** (RFC 5280 §6.3 + RFC 6960). Rely on short cert lifetimes and key rotation instead.
 - **Path length constraints** (RFC 5280 §4.2.1.9 `pathLenConstraint`).
 - **Algorithm policy** (RFC 5280 §4.1.1.2 + §6.1.4). Falls through to Node's underlying signature verification, which honors the OS / OpenSSL configuration.
+
+### Trusted-CA entries (literal PEM or `file:` path)
+
+Each entry in `trusted-cas` is either:
+
+- **Literal PEM** — paste the `-----BEGIN CERTIFICATE-----` block directly into HOCON via triple-quoted string.
+- **`file:<path>`** — the file at `<path>` is read synchronously at boot. Use absolute paths or rely on HOCON env-substitution for portability.
+
+```hocon
+oauth.mtls {
+  mode = "pki"
+  trusted-cas = [
+    "file:/etc/auth-provider/ca/private-root.pem",
+    """-----BEGIN CERTIFICATE-----
+    MIID...
+    -----END CERTIFICATE-----"""
+  ]
+}
+```
+
+A missing file or unparseable PEM aborts boot with an index-prefixed error message — operators see exactly which entry failed.
 
 ### When to disable PKI mode
 
