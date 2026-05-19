@@ -13,10 +13,12 @@
 		".": {
 			"import": "./dist/index.mjs",
 			"types": "./dist/index.d.mts"
-		}
+		},
+		"./reference.conf": "./src/reference.conf"
 	},
 	"files": [
 		"dist",
+		"src/reference.conf",
 		"README.md",
 		"LICENSE"
 	],
@@ -45,6 +47,9 @@
 		"express": {
 			"optional": true
 		}
+	},
+	"dependencies": {
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
