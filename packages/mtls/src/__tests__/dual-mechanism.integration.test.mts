@@ -34,7 +34,7 @@
  * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
  */
 
-import { X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -212,8 +212,7 @@ describe("dpopModule + mtlsModule — cross-mechanism dispatch (refactor §6.4)"
 		app.use(express.json());
 		app.use(handle.router);
 
-		const expectedThumbprint = require("node:crypto")
-			.createHash("sha256")
+		const expectedThumbprint = createHash("sha256")
 			.update(new X509Certificate(LEAF_PEM).raw)
 			.digest("base64url")
 			.replace(/=+$/, "");
