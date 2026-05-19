@@ -29,6 +29,12 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
+import type { Logger } from "../logging/Logger.mjs";
+import {
+	type DispatchPolicy,
+	type TokenBindingMechanism,
+	tokenBindingMw,
+} from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import type {
 	AppHandle,
@@ -531,14 +537,46 @@ export function assembleApp(
 
 	const router: Router = RouterCtor();
 
-	// Mount `grantMiddleware` contributions on `/oauth/token` BEFORE the route
-	// loop. The bundled `oauthModule` contributes its sub-router at mountPath
-	// `/oauth` (packages/oauth/src/module.mts), so the external grant-dispatch
-	// URL is `/oauth/token`. Express runs middleware in mount order, so these
-	// handlers fire before the OAuth `/token` route handler the routes loop
-	// installs below. Null returns (disabled-by-config path) are skipped here;
-	// the collector still records them for value-identity dedup with other
-	// contributions.
+	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
+	// collector and mount it on `/oauth/token` BEFORE any other grant
+	// middleware. Multiple mechanism modules (DPoP, mTLS, ...) contribute
+	// raw mechanisms; core composes them into one middleware so the
+	// configured `DispatchPolicy` (`intent-explicit` / `strict-mutual-
+	// exclusion`) arbitrates across modules. See the cross-mechanism
+	// dispatch refactor spec at
+	// `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+	//
+	// Null entries (disabled-by-config) are filtered. When no mechanisms
+	// are contributed, no middleware is synthesized.
+	const mechanismCollector = frozen.registries.get("tokenBindingMechanisms") as
+		| ListCollector<TokenBindingMechanism | null>
+		| undefined;
+	if (mechanismCollector !== undefined) {
+		const mechanisms: TokenBindingMechanism[] = [];
+		for (const m of mechanismCollector.values()) {
+			if (m !== null) mechanisms.push(m);
+		}
+		if (mechanisms.length > 0) {
+			const config = (frozen.components as Record<string, unknown>).config as
+				| { oauth?: { tokenBinding?: { "dispatch-policy"?: unknown } } }
+				| undefined;
+			const rawPolicy = config?.oauth?.tokenBinding?.["dispatch-policy"];
+			const dispatchPolicy: DispatchPolicy =
+				rawPolicy === "strict-mutual-exclusion" ? "strict-mutual-exclusion" : "intent-explicit";
+			const logger = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
+			const composed = tokenBindingMw({ mechanisms, dispatchPolicy, logger });
+			router.use("/oauth/token", composed);
+		}
+	}
+
+	// Mount `grantMiddleware` contributions on `/oauth/token` AFTER the
+	// synthesized tokenBindingMw above. The bundled `oauthModule` contributes
+	// its sub-router at mountPath `/oauth` (packages/oauth/src/module.mts),
+	// so the external grant-dispatch URL is `/oauth/token`. Express runs
+	// middleware in mount order, so these handlers fire before the OAuth
+	// `/token` route handler the routes loop installs below. Null returns
+	// (disabled-by-config path) are skipped here; the collector still
+	// records them for value-identity dedup with other contributions.
 	//
 	// NOTE: this mount path is coupled to the bundled `oauthModule`'s
 	// mountPath. A downstream that re-mounts the OAuth router at a different

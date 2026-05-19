@@ -18,6 +18,7 @@ import type { RequestHandler } from "express";
 import type { AuditSink } from "../../audit/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
 import type { MfaProvider } from "../../mfa/types.mjs";
+import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { ProviderDeps } from "./provider.mjs";
 import type { RouteContributionEntry } from "./route-contribution.mjs";
@@ -116,6 +117,27 @@ export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContri
 export type GrantMiddlewareFactory<Deps> = (deps: Deps) => RequestHandler | null;
 
 /**
+ * Factory type for the `tokenBindingMechanisms` contribution kind.
+ *
+ * Returns a `TokenBindingMechanism` to be composed into the single
+ * `tokenBindingMw` instance mounted by core on the OAuth token endpoint,
+ * or `null` when the mechanism is disabled by config (e.g.
+ * `oauth.dpop.enabled = false`). Null-returning factories are filtered at
+ * composition time — they never contribute to the synthesized middleware.
+ *
+ * Unlike `grantMiddleware`, which contributes a pre-composed middleware
+ * (each module owning its own `tokenBindingMw`), `tokenBindingMechanisms`
+ * contributes raw mechanisms so that core can compose ONE `tokenBindingMw`
+ * across all modules. This lets the configured `DispatchPolicy`
+ * (`intent-explicit` / `strict-mutual-exclusion`) arbitrate cross-module
+ * when multiple mechanism modules (DPoP, mTLS, ...) are installed.
+ *
+ * Per Wave 2 Token-binding Cluster cross-mechanism dispatch refactor spec
+ * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+ */
+export type TokenBindingMechanismFactory<Deps> = (deps: Deps) => TokenBindingMechanism | null;
+
+/**
  * Declaration-merged map of contribution kinds.
  *
  * Per A2-α §4.1 the v0.5.0 baseline declares 7 kinds. A5 (Phase 7) adds
@@ -174,4 +196,33 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * factory.
 	 */
 	readonly grantMiddleware?: readonly GrantMiddlewareFactory<Deps>[];
+	/**
+	 * Mechanism contributions composed by core into a single
+	 * `tokenBindingMw` instance mounted on the OAuth token endpoint
+	 * (`/oauth/token` with the bundled `oauthModule`) BEFORE grant dispatch.
+	 *
+	 * Use this — NOT `grantMiddleware` — when a module ships a token-binding
+	 * mechanism (DPoP, mTLS, future). Core's `assembleApp` collects all
+	 * contributions, filters nulls, and composes one `tokenBindingMw` with
+	 * the configured `DispatchPolicy` arbitrating cross-module:
+	 *
+	 * - `intent-explicit` (default): explicit-intent mechanisms (DPoP) win
+	 *   over ambient mechanisms (mTLS) on a single request. ≥2 explicit-
+	 *   intent mechanisms succeeding → 400 `invalid_request`.
+	 * - `strict-mutual-exclusion`: any 2+ mechanisms succeeding → 400
+	 *   `invalid_request`.
+	 *
+	 * The dispatch-policy comes from
+	 * `config.oauth.tokenBinding.dispatch-policy` (declared by core's
+	 * bundled config schema).
+	 *
+	 * List-shaped — multiple modules may contribute. Within a single module
+	 * a factory typically returns one mechanism (or `null` when disabled by
+	 * config), but the list is allowed to contain multiple factories to
+	 * support a single module shipping multiple mechanisms.
+	 *
+	 * Per cross-mechanism dispatch refactor spec at
+	 * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+	 */
+	readonly tokenBindingMechanisms?: readonly TokenBindingMechanismFactory<Deps>[];
 }

@@ -158,6 +158,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"routes",
 	"grantPolicyHooks",
 	"grantMiddleware",
+	"tokenBindingMechanisms",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1143,7 +1144,12 @@ function checkListShapedOverrides(
 				stage: "validateManifests",
 				details: {
 					reason: "list-shaped-override-not-allowed",
-					kind: kind as "routes" | "auditHooks" | "grantPolicyHooks" | "grantMiddleware",
+					kind: kind as
+						| "routes"
+						| "auditHooks"
+						| "grantPolicyHooks"
+						| "grantMiddleware"
+						| "tokenBindingMechanisms",
 					module: m.name,
 				},
 			});
