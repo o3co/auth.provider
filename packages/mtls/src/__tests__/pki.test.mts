@@ -37,6 +37,7 @@ const intermediate = loadCert("intermediate.pem");
 const leaf = loadCert("leaf.pem");
 const badIntermediate = loadCert("bad-intermediate.pem");
 const leafBadChain = loadCert("leaf-bad-chain.pem");
+const attackerLeaf = loadCert("attacker-leaf.pem");
 
 const NOW = new Date("2026-06-01T00:00:00Z");
 
@@ -85,6 +86,32 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 			// need to switch to "CA=false" instead, which the explicit
 			// `issuerIsCA` check in pki.mts already covers as defense-in-depth.
 			expect(result.step).toMatch(/no path to trust anchor|CA=false/);
+		}
+	});
+
+	it("rejects a forged leaf with matching issuer DN but a different signing key (Copilot Critical regression)", () => {
+		// Adversarial: attackerLeaf was signed by attacker-root.pem, but its
+		// issuer DN matches the LEGITIMATE root's subject DN (`CN=Test Root CA`).
+		// `X509Certificate.checkIssued()` (backed by OpenSSL X509_check_issued)
+		// performs DN + AKID/SKID + CA-bit checks but does NOT verify the
+		// cryptographic signature. Without the explicit `verify(publicKey)`
+		// step in pki.mts, this forge would be accepted as "issued by the
+		// trusted root", letting any attacker who controls any private key
+		// produce a valid mTLS binding once they label a cert with the right
+		// issuer DN.
+		//
+		// Contract: validateCertChain MUST reject the forge, AND the rejection
+		// reason MUST distinguish "signature failed" from "no DN match" so
+		// audit logs surface the attack signal clearly.
+		const result = validateCertChain(attackerLeaf, [], [root], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			// One of two outcomes is acceptable: (a) Node's checkIssued
+			// already rejects via AKID/SKID side-effect (→ "no path…"), or
+			// (b) checkIssued passes but our explicit verify fails (→
+			// "signature verification failed"). Either way, the chain MUST
+			// NOT validate.
+			expect(result.step).toMatch(/signature verification failed|no path to trust anchor/);
 		}
 	});
 

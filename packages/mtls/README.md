@@ -113,7 +113,7 @@ For each presented chain `leaf → intermediate₁ → … → intermediateₙ �
 1. Leaf cert validity window (`notBefore <= now <= notAfter`).
 2. Hop-by-hop walk with `fingerprint256` cycle detection.
 3. For each intermediate: validity window + `basicConstraints.CA === true` (RFC 5280 §4.2.1.9 — non-CA cannot sign certs).
-4. Trust-anchor match via `X509Certificate.checkIssued()`, which internally enforces issuer-DN match **and** the CA-bit on the would-be-issuer (OpenSSL `X509_check_issued`).
+4. **Pair check at every hop**: `X509Certificate.checkIssued()` (DN / AKID / SKID match) **AND** `X509Certificate.verify(issuer.publicKey)` (cryptographic signature). Both required — `checkIssued` alone does NOT verify the signature (OpenSSL `X509_check_issued` documents this explicitly), so an attacker omitting or crafting AKID could otherwise mint a forged cert with matching DN.
 5. Anchor validity window.
 
 ### Checks NOT performed (load-bearing scope-out)

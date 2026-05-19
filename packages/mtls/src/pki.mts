@@ -57,6 +57,38 @@ type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly s
  */
 const issuerIsCA = (issuer: X509Certificate): boolean => issuer.ca === true;
 
+/**
+ * Cryptographically verify that `subject` was signed by `issuer`'s private key.
+ *
+ * `X509Certificate.verify(publicKey)` performs the signature check; it does NOT
+ * also check DN or extensions (those are checkIssued's job). The pair must be
+ * gated TOGETHER: checkIssued for the DN/AKID/SKID match, then `verify` for the
+ * cryptographic proof.
+ *
+ * **Why this is load-bearing**: `X509_check_issued` (OpenSSL primitive backing
+ * Node's `checkIssued`) does NOT verify signatures — its docs are explicit. The
+ * incidental AKID/SKID checks reject many naive forges, but they are not a
+ * security guarantee: an attacker who omits the AKID extension entirely (legal
+ * per RFC 5280) or carefully crafts a matching AKID can bypass `checkIssued`
+ * without ever proving cryptographic relation to the issuer. The explicit
+ * `verify(publicKey)` closes the gap and matches the spec §7.2 "current signed
+ * directly by …" contract that the README "PKI Mode Scope" advertises.
+ *
+ * Returns `false` on any verification failure (mismatched signature, algorithm
+ * mismatch, etc.) — the caller maps this to a chain-validation failure with the
+ * specific failing hop named in `step`.
+ */
+const isSignedBy = (subject: X509Certificate, issuer: X509Certificate): boolean => {
+	try {
+		return subject.verify(issuer.publicKey);
+	} catch {
+		// `verify` throws when the public key type is incompatible with the
+		// subject's signature algorithm. Treat as a verification failure — the
+		// chain is rejected, not the whole request.
+		return false;
+	}
+};
+
 export const validateCertChain = (
 	leaf: X509Certificate,
 	intermediates: readonly X509Certificate[],
@@ -81,7 +113,11 @@ export const validateCertChain = (
 		if (seen.has(fingerprint)) return { ok: false, step: "cycle detected" };
 		seen.add(fingerprint);
 
-		const anchor = trustedCas.find((ca) => current.checkIssued(ca));
+		// Trust-anchor match: gated by BOTH checkIssued (DN/AKID/SKID) and
+		// isSignedBy (cryptographic signature). checkIssued alone does not
+		// verify the signature, so a forged cert with matching DN could
+		// otherwise pass — see isSignedBy's JSDoc.
+		const anchor = trustedCas.find((ca) => current.checkIssued(ca) && isSignedBy(current, ca));
 		if (anchor) {
 			if (now < new Date(anchor.validFrom)) {
 				return { ok: false, step: "trust anchor not yet valid" };
@@ -92,8 +128,32 @@ export const validateCertChain = (
 			return { ok: true };
 		}
 
-		const issuer = intermediates.find((iss) => current.checkIssued(iss));
-		if (!issuer) return { ok: false, step: "no path to trust anchor" };
+		// Defense-in-depth: if a trust anchor was DN-matched but the signature
+		// didn't verify (i.e., checkIssued succeeded but isSignedBy failed),
+		// reject explicitly so the audit signal distinguishes "no candidate
+		// anchor" from "candidate present but signature invalid".
+		const dnMatchedAnchor = trustedCas.find((ca) => current.checkIssued(ca));
+		if (dnMatchedAnchor) {
+			return {
+				ok: false,
+				step: "trust anchor matched by DN but signature verification failed",
+			};
+		}
+
+		const issuer = intermediates.find(
+			(iss) => current.checkIssued(iss) && isSignedBy(current, iss),
+		);
+		if (!issuer) {
+			// Same defense-in-depth distinction for intermediates.
+			const dnMatchedIssuer = intermediates.find((iss) => current.checkIssued(iss));
+			if (dnMatchedIssuer) {
+				return {
+					ok: false,
+					step: "intermediate matched by DN but signature verification failed",
+				};
+			}
+			return { ok: false, step: "no path to trust anchor" };
+		}
 
 		if (now < new Date(issuer.validFrom)) {
 			return { ok: false, step: "intermediate not yet valid" };

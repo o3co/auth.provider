@@ -11,6 +11,14 @@ P-256 ECDSA certificate chain for `pki.test.mts` chain-walk regression coverage.
   RFC 5280 §4.2.1.9 regression: a non-CA cannot sign certs.
 - `leaf-bad-chain.pem` — signed by `bad-intermediate`, `CA:FALSE` (1 year validity).
   Used as the leaf in the "intermediate has `CA:FALSE`" rejection test.
+- `attacker-root.pem` — adversarial self-signed root with **the same DN** (`CN=Test Root CA`)
+  as `root.pem`, but a **different** private key. Used in the forged-cert
+  regression: an attacker mints a leaf with matching issuer DN.
+- `attacker-leaf.pem` — signed by `attacker-root`, with issuer DN matching the
+  legitimate `root`. Pins the "checkIssued alone is insufficient — explicit
+  signature verification is required" contract: validating this leaf against
+  the legitimate `root.pem` MUST reject (it was not actually signed by the
+  legitimate root, just labelled as if it were).
 
 ## Regeneration
 

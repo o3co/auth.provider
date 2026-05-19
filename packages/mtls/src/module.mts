@@ -52,8 +52,11 @@ import { createMtlsMechanism } from "./extractor.mjs";
  *
  * Note: `oauth.tokenBinding.dispatch-policy` is also declared in dpop's
  * schema. When both modules are installed, the consumer's withFallback
- * chain resolves the duplicate — HOCON last-write wins, so any explicit
- * application.conf override beats both reference.conf defaults.
+ * chain resolves the duplicate: the LEFT (higher-precedence) side of each
+ * `.withFallback(...)` call wins. The consumer's application.conf at the
+ * top of the chain overrides any reference.conf default; among the
+ * package reference.conf layers, whichever appears earlier in the
+ * consumer's composition wins. There is no "last-write" rule in HOCON.
  *
  * Per Wave 2 Phase 3 spec §10.2.
  */

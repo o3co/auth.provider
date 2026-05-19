@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Request } from "express";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MtlsError } from "#/errors.mjs";
 import { createMtlsMechanism } from "#/extractor.mjs";
 
@@ -178,15 +178,56 @@ describe("createMtlsMechanism — tls-layer source", () => {
 });
 
 describe("createMtlsMechanism — validity window (mode-agnostic)", () => {
-	it("self-signed mode runs the validity window check (expired cert rejected)", async () => {
-		// Mock a fully synthetic 'cert' would be ugly; instead use a leaf and
-		// freeze time far in the future. We can't mock Date globally here
-		// safely, so just verify the contract: cert with notAfter < now → reject.
-		// This is exercised by the extractor's step §6.4 — the leaf cert PEM has
-		// `-days 365` so post-2027 it will expire. For deterministic CI we'd
-		// need a time-injection. Skip live validity in this unit; the chain
-		// test covers it deterministically via NOW injection in pki.test.mts.
-		expect(true).toBe(true);
+	beforeEach(() => {
+		vi.useFakeTimers();
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("self-signed mode rejects a cert that is not yet valid (now < notBefore)", async () => {
+		// The committed leaf.pem was minted on 2026-05-19; pivot now to 1990
+		// so notBefore is in the future. extractor.mts §6.4 must reject with
+		// reason `cert_not_yet_valid`.
+		vi.setSystemTime(new Date("1990-01-01T00:00:00Z"));
+		const mech = createMtlsMechanism({
+			source: "header",
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		await expect(
+			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }) as Request),
+		).rejects.toMatchObject({ reason: "cert_not_yet_valid" });
+	});
+
+	it("self-signed mode rejects a cert that has expired (now > notAfter)", async () => {
+		// Leaf is 1-year valid from generation date (~2026-05-19), so pivot
+		// to 2126 puts now well past notAfter.
+		vi.setSystemTime(new Date("2126-01-01T00:00:00Z"));
+		const mech = createMtlsMechanism({
+			source: "header",
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		await expect(
+			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }) as Request),
+		).rejects.toMatchObject({ reason: "cert_expired" });
+	});
+
+	it("PKI mode also runs the validity window check before chain walk", async () => {
+		// PKI mode shares step §6.4 — an expired leaf is rejected with the
+		// validity reason, not chain_validation_failed.
+		vi.setSystemTime(new Date("2126-01-01T00:00:00Z"));
+		const mech = createMtlsMechanism({
+			source: "header",
+			certHeaderDialect: "envoy",
+			mode: "pki",
+			trustedCas: [ROOT_PEM],
+		});
+		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)};Chain=${encodeURIComponent(INTERMEDIATE_PEM)}`;
+		await expect(
+			mech.extract(makeReq({ "x-forwarded-client-cert": xfcc }) as Request),
+		).rejects.toMatchObject({ reason: "cert_expired" });
 	});
 });
 
