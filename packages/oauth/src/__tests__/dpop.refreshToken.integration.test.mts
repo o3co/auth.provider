@@ -293,3 +293,79 @@ describe("DPoP refresh-token binding matrix — §9.2 (5 rows)", () => {
 		expect((newRtPayload.cnf as { jkt?: string } | undefined)?.jkt).toBe("MATCH-JKT");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Mechanism-boundary regressions (Codex Important #1 + #2 convergence, PR #185)
+// ---------------------------------------------------------------------------
+
+describe("DPoP refresh-token mechanism boundary", () => {
+	it("non-DPoP mechanism emitting cnf.jkt cannot satisfy a DPoP-bound RT (Codex Important #2)", async () => {
+		// The Confirmation union is mechanism-extensible — a custom mechanism
+		// (e.g. a future FIDO attestation binding) could emit `{ jkt: "..." }`
+		// without being DPoP. The matrix's proof extraction MUST gate on
+		// `kind === "dpop"` so a non-DPoP mechanism cannot satisfy a
+		// DPoP-bound RT just by reusing the jkt confirmation shape.
+		const rt = await mintRefreshToken({
+			clientId: PUBLIC_CLIENT_ID,
+			cnfJkt: "RT-DPOP-BOUND-JKT",
+		});
+		const handler = createRefreshTokenGrant(mockDeps);
+		const ctx = buildCtx({
+			refreshToken: rt,
+			authenticatedClient: publicAuthClient,
+			tokenBinding: {
+				// Hypothetical non-DPoP mechanism emitting a jkt-shaped cnf.
+				// `as TokenBinding` is required because "fido" isn't a known
+				// kind value, but the type system allows downstream
+				// mechanism authors to extend `kind` via string union.
+				kind: "fido",
+				confirmation: { jkt: "RT-DPOP-BOUND-JKT" },
+			} as TokenBinding,
+		});
+
+		const { result } = await handler.handle(ctx);
+
+		// MUST reject as row 3 (RT bound, proof absent for DPoP purposes)
+		// rather than passing the matrix on jkt structural match. The kind
+		// boundary is enforced structurally — not by convention.
+		expect(result.status).toBe(400);
+		if (!("error" in result)) expect.fail("Expected error in result");
+		expect(result.error).toBe("invalid_grant");
+		expect(result.errorDescription).toContain("requires a DPoP proof");
+	});
+
+	it("mTLS public-client refresh leaves new RT plain (Phase 3 mTLS RT-binding deferred — Codex Important #1)", async () => {
+		// An mTLS binding on a public client refresh path MUST NOT issue an
+		// mTLS-bound RT in Phase 2 — there is no refresh-time mTLS
+		// enforcement matrix yet, so a bound RT could later be refreshed
+		// without proof and silently degrade to plain. Pins the Phase 2
+		// contract; Phase 3 will invert this assertion when mTLS RT-binding
+		// + refresh-time enforcement land together.
+		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
+		const handler = createRefreshTokenGrant(mockDeps);
+		const ctx = buildCtx({
+			refreshToken: rt,
+			authenticatedClient: publicAuthClient,
+			tokenBinding: {
+				kind: "mtls",
+				confirmation: { "x5t#S256": "MTLS-RT-THUMB" },
+			},
+		});
+
+		const { result } = await handler.handle(ctx);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		// mTLS keeps Bearer per RFC 8705 §3
+		expect(result.tokens.token_type).toBe("Bearer");
+		// AT gets mTLS cnf (mechanism-agnostic propagation per RFC 7800)
+		const atPayload = decodeJwt(result.tokens.access_token);
+		expect((atPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
+			"MTLS-RT-THUMB",
+		);
+		// New RT MUST be plain in Phase 2 (the deferred contract).
+		expect(result.tokens.refresh_token).toBeTruthy();
+		const newRtPayload = decodeJwt(result.tokens.refresh_token as string);
+		expect(newRtPayload.cnf).toBeUndefined();
+	});
+});

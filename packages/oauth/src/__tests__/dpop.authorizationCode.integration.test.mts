@@ -221,8 +221,15 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			expect(result.tokens.token_type).toBe("DPoP");
 		});
 
-		it("token_type Bearer when kind === 'mtls' (mTLS binding shape)", async () => {
-			// mTLS keeps Bearer per RFC 8705 §3; AT cnf carries x5t#S256 instead of jkt
+		it("token_type Bearer when kind === 'mtls' (mTLS binding shape); RT stays plain (Phase 3 mTLS RT-binding deferred)", async () => {
+			// mTLS keeps Bearer per RFC 8705 §3. AT cnf carries x5t#S256
+			// (RFC 7800 is mechanism-neutral). RT MUST remain plain in
+			// Phase 2 even for public clients — issuing an mTLS-bound RT
+			// without a corresponding refresh-time mTLS enforcement matrix
+			// would silently degrade to an unbound RT on next refresh.
+			// Phase 3 will add mTLS-aware refresh-time enforcement together
+			// with mTLS RT binding (Codex Important #1 + Claude #1
+			// convergence at PR #185).
 			const deps = makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode }));
 			const handler = createAuthorizationGrant(deps);
 
@@ -240,16 +247,17 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			if (!("tokens" in result)) expect.fail("Expected tokens in result");
 			expect(result.tokens.token_type).toBe("Bearer");
 
-			// AT gets the mTLS cnf shape
+			// AT gets the mTLS cnf shape (mechanism-agnostic propagation)
 			const atPayload = decodePayload(result.tokens.access_token as string);
 			const atCnf = atPayload.cnf as Record<string, string> | undefined;
 			expect(atCnf?.["x5t#S256"]).toBe("MTLS-THUMBPRINT-AC");
 			expect(atCnf?.jkt).toBeUndefined();
 
-			// Public client → RT is also bound with the mTLS cnf shape
+			// Public client + mTLS → RT MUST be plain (Phase 2 contract).
+			// Pins the deferral so Phase 3 mTLS RT-binding lands as a
+			// deliberate additive change, not a side-effect.
 			const rtPayload = decodePayload(result.tokens.refresh_token as string);
-			const rtCnf = rtPayload.cnf as Record<string, string> | undefined;
-			expect(rtCnf?.["x5t#S256"]).toBe("MTLS-THUMBPRINT-AC");
+			expect(rtPayload.cnf).toBeUndefined();
 		});
 	});
 });
