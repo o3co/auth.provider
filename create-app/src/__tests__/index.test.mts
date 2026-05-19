@@ -150,6 +150,7 @@ describe("scaffold", () => {
 		const expectedPackages: Record<string, string> = {
 			"@o3co/auth-provider-core": "../packages/core/package.json",
 			"@o3co/auth-provider-dpop": "../packages/dpop/package.json",
+			"@o3co/auth-provider-mtls": "../packages/mtls/package.json",
 			"@o3co/auth-provider-federation-github": "../packages/federation-github/package.json",
 			"@o3co/auth-provider-federation-google": "../packages/federation-google/package.json",
 			"@o3co/auth-provider-foundation": "../packages/foundation/package.json",
