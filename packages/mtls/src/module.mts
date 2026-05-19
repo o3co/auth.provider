@@ -35,7 +35,7 @@
  * Per Wave 2 Phase 3 spec §10 (config) + §11 (module) + feedback_secure_default_opt_in.md.
  */
 
-import { defineModule, tokenBindingMw } from "@o3co/auth-provider-core";
+import { defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMtlsMechanism } from "./extractor.mjs";
 
@@ -44,31 +44,21 @@ import { createMtlsMechanism } from "./extractor.mjs";
 // ---------------------------------------------------------------------------
 
 /**
- * Zod schema for the `oauth.mtls` + shared `oauth.tokenBinding` config slices.
+ * Zod schema for the `oauth.mtls` config slice.
  *
  * Keys use kebab-case to match the HOCON reference.conf keys verbatim.
  * HOCON preserves key names exactly; TypeScript accesses them via bracket
  * notation: `config.oauth.mtls["cert-header"]`.
  *
- * Note: `oauth.tokenBinding.dispatch-policy` is also declared in dpop's
- * schema. When both modules are installed, the consumer's withFallback
- * chain resolves the duplicate: the LEFT (higher-precedence) side of each
- * `.withFallback(...)` call wins. The consumer's application.conf at the
- * top of the chain overrides any reference.conf default; among the
- * package reference.conf layers, whichever appears earlier in the
- * consumer's composition wins. There is no "last-write" rule in HOCON.
+ * NOTE: `oauth.tokenBinding.dispatch-policy` is declared by core's bundled
+ * `CoreConfigSchema` since the cross-mechanism dispatch refactor — it
+ * applies across ALL installed binding-mechanism modules (DPoP, mTLS, ...).
+ * This package no longer redeclares it.
  *
  * Per Wave 2 Phase 3 spec §10.2.
  */
 export const mtlsConfigSchema = z.object({
 	oauth: z.object({
-		tokenBinding: z
-			.object({
-				"dispatch-policy": z
-					.enum(["intent-explicit", "strict-mutual-exclusion"])
-					.default("intent-explicit"),
-			})
-			.default(() => ({ "dispatch-policy": "intent-explicit" as const })),
 		mtls: z
 			.object({
 				/** When false (default), mtlsModule contributes null — no mTLS middleware mounted. */
@@ -103,10 +93,11 @@ export const mtlsConfigSchema = z.object({
  * Declarative manifest for the mTLS package.
  *
  * When `config.oauth.mtls.enabled` is `false` (the secure default), the
- * `grantMiddleware` factory returns `null` and the boot planner skips it —
- * no mTLS middleware is mounted. When `enabled` is `true`, a
- * `tokenBindingMw` wrapping the mTLS mechanism is mounted BEFORE grant
- * dispatch at `/oauth/token`.
+ * mechanism factory returns `null` and core's synthesizer filters it out —
+ * no mTLS mechanism is included in the composed `tokenBindingMw`. When
+ * `enabled` is `true`, the factory returns the configured mTLS mechanism
+ * for core to compose alongside any other binding-mechanism modules
+ * (DPoP, future) under the unified `oauth.tokenBinding.dispatch-policy`.
  *
  * Boot-time fail-loud invariants (Phase 3 spec §11.2):
  *
@@ -124,7 +115,13 @@ export const mtlsConfigSchema = z.object({
  * `createMtlsMechanism` re-enforces both invariants defensively, but the
  * module fires first and produces operator-friendly error messages.
  *
- * Per Wave 2 Phase 3 spec §11.
+ * Migrated from the `grantMiddleware` contribution slot (Phase 3 Sub-PR 3b)
+ * to `tokenBindingMechanisms` (cross-mechanism dispatch refactor, 2026-05-19)
+ * so the `DispatchPolicy` can arbitrate cross-module when both DPoP and
+ * mTLS are installed.
+ *
+ * Per Wave 2 Phase 3 spec §11 + cross-mechanism dispatch refactor spec at
+ * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
  */
 export const mtlsModule = defineModule<"config", "logger">({
 	name: "mtls",
@@ -132,12 +129,12 @@ export const mtlsModule = defineModule<"config", "logger">({
 	requires: ["config"],
 	optional: ["logger"],
 	contributes: {
-		grantMiddleware: [
+		tokenBindingMechanisms: [
 			(deps) => {
 				const mtlsConfig = (deps.config as { oauth?: { mtls?: { enabled?: unknown } } }).oauth
 					?.mtls;
 				if (!mtlsConfig || mtlsConfig.enabled !== true) {
-					// Disabled by config — no middleware mounted.
+					// Disabled by config — no mechanism contributed.
 					return null;
 				}
 
@@ -150,9 +147,6 @@ export const mtlsModule = defineModule<"config", "logger">({
 							"cert-header-dialect": "envoy" | "plain-pem";
 							mode: "self-signed" | "pki";
 							"trusted-cas": readonly string[];
-						};
-						tokenBinding: {
-							"dispatch-policy": "intent-explicit" | "strict-mutual-exclusion";
 						};
 					};
 				};
@@ -178,18 +172,12 @@ export const mtlsModule = defineModule<"config", "logger">({
 					);
 				}
 
-				return tokenBindingMw({
-					mechanisms: [
-						createMtlsMechanism({
-							source: cfg.source,
-							certHeader: cfg["cert-header"],
-							certHeaderDialect: cfg["cert-header-dialect"],
-							mode: cfg.mode,
-							trustedCas: cfg["trusted-cas"],
-							logger: deps.logger,
-						}),
-					],
-					dispatchPolicy: typedConfig.oauth.tokenBinding["dispatch-policy"],
+				return createMtlsMechanism({
+					source: cfg.source,
+					certHeader: cfg["cert-header"],
+					certHeaderDialect: cfg["cert-header-dialect"],
+					mode: cfg.mode,
+					trustedCas: cfg["trusted-cas"],
 					logger: deps.logger,
 				});
 			},

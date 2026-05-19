@@ -43,7 +43,7 @@
 
 // biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below
 import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
-import { defineModule, tokenBindingMw } from "@o3co/auth-provider-core";
+import { defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
 import type { DPoPReplayStore } from "./replay-store.mjs";
@@ -89,16 +89,13 @@ declare module "@o3co/auth-provider-core" {
  */
 export const dpopConfigSchema = z.object({
 	oauth: z.object({
-		tokenBinding: z
-			.object({
-				"dispatch-policy": z
-					.enum(["intent-explicit", "strict-mutual-exclusion"])
-					.default("intent-explicit"),
-			})
-			.default(() => ({ "dispatch-policy": "intent-explicit" as const })),
+		// NOTE: `oauth.tokenBinding.dispatch-policy` is declared by core's
+		// bundled `CoreConfigSchema` since the cross-mechanism dispatch
+		// refactor — it applies across ALL installed binding-mechanism modules
+		// (DPoP, mTLS, ...). This package no longer redeclares it.
 		dpop: z
 			.object({
-				/** When false (default), dpopModule contributes null — no DPoP middleware mounted. */
+				/** When false (default), the dpop mechanism factory returns null — no DPoP mechanism contributed. */
 				enabled: z.boolean().default(false),
 				/** Acceptance window for the iat claim in seconds. Default: 60. */
 				"iat-window-seconds": z.number().int().positive().default(60),
@@ -127,16 +124,23 @@ export const dpopConfigSchema = z.object({
  * Declarative manifest for the DPoP package.
  *
  * When `config.oauth.dpop.enabled` is `false` (the secure default), the
- * `grantMiddleware` factory returns `null` and the boot planner skips it —
- * no DPoP middleware is mounted. When `enabled` is `true`, a
- * `tokenBindingMw` wrapping the DPoP mechanism is mounted BEFORE grant
- * dispatch at `/oauth/token`.
+ * mechanism factory returns `null` and core's synthesizer filters it out —
+ * no DPoP mechanism is included in the composed `tokenBindingMw`. When
+ * `enabled` is `true`, the factory returns the configured DPoP mechanism
+ * for core to compose alongside any other binding-mechanism modules
+ * (mTLS, future) under the unified `oauth.tokenBinding.dispatch-policy`.
  *
  * The `dpopReplayStore` optional slot is backed by `createMemoryDPoPReplayStore`
  * when absent. Production deployments provide a Redis-backed implementation
  * by wiring the `dpopReplayStore` slot via their composition root.
  *
- * Per Wave 2 Phase 2 spec §11.2.
+ * Migrated from the `grantMiddleware` contribution slot (Phase 2) to
+ * `tokenBindingMechanisms` (cross-mechanism dispatch refactor, 2026-05-19)
+ * so the `DispatchPolicy` can arbitrate cross-module when both DPoP and
+ * mTLS are installed. The mechanism itself is unchanged.
+ *
+ * Per Wave 2 Phase 2 spec §11.2 + cross-mechanism dispatch refactor spec at
+ * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
  */
 export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 	name: "dpop",
@@ -144,12 +148,12 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 	requires: ["config"],
 	optional: ["logger", "dpopReplayStore"],
 	contributes: {
-		grantMiddleware: [
+		tokenBindingMechanisms: [
 			(deps) => {
 				const dpopConfig = (deps.config as { oauth?: { dpop?: { enabled?: unknown } } }).oauth
 					?.dpop;
 				if (!dpopConfig || dpopConfig.enabled !== true) {
-					// Disabled by config — no middleware mounted.
+					// Disabled by config — no mechanism contributed.
 					return null;
 				}
 
@@ -161,9 +165,6 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 							"alg-whitelist": readonly string[];
 							"replay-store": "memory" | "redis";
 							"replay-store-ttl-seconds": number;
-						};
-						tokenBinding: {
-							"dispatch-policy": "intent-explicit" | "strict-mutual-exclusion";
 						};
 					};
 				};
@@ -183,19 +184,11 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 				}
 				const replayStore: DPoPReplayStore = deps.dpopReplayStore ?? createMemoryDPoPReplayStore();
 
-				return tokenBindingMw({
-					mechanisms: [
-						createDPoPMechanism({
-							replayStore,
-							iatWindowSeconds: typedConfig.oauth.dpop["iat-window-seconds"],
-							algWhitelist: typedConfig.oauth.dpop["alg-whitelist"],
-							replayTtlSeconds: typedConfig.oauth.dpop["replay-store-ttl-seconds"],
-							logger: deps.logger,
-						}),
-					],
-					// dispatchPolicy is guaranteed by dpopConfigSchema (default
-					// "intent-explicit"); no nullish-coalesce needed.
-					dispatchPolicy: typedConfig.oauth.tokenBinding["dispatch-policy"],
+				return createDPoPMechanism({
+					replayStore,
+					iatWindowSeconds: typedConfig.oauth.dpop["iat-window-seconds"],
+					algWhitelist: typedConfig.oauth.dpop["alg-whitelist"],
+					replayTtlSeconds: typedConfig.oauth.dpop["replay-store-ttl-seconds"],
 					logger: deps.logger,
 				});
 			},
