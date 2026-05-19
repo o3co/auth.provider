@@ -131,6 +131,77 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
+			// Wave 2 Phase 2 §9.2: refresh-time DPoP binding matrix (RFC 9449
+			// §5 + Codex Round 1 Important #1). RT carries `cnf.jkt` only
+			// when issued to a public client with proof; confidential-client
+			// RTs are always plain (no `cnf`). Five rows, evaluated BEFORE
+			// any further work so the rejection short-circuits ahead of
+			// policy evaluation, store I/O, and `generateToken` keystore
+			// signatures:
+			//
+			//   RT cnf.jkt | proof JKT       | Outcome
+			//   no         | no              | issue plain Bearer (legacy)
+			//   no         | yes             | issue DPoP-bound AT (opt-in upgrade)
+			//   yes        | no              | reject invalid_grant
+			//   yes        | yes, differs    | reject invalid_grant (multi-key attack)
+			//   yes        | yes, equal      | issue DPoP-bound AT + bound RT (rotation preserves)
+			//
+			// Error code is `invalid_grant` (RFC 6749 §5.2) — at refresh
+			// time the RT IS the grant; a missing/mismatched proof means
+			// the grant cannot be used. RFC 9449 §5 does not pin a specific
+			// OAuth error code for this branch; `invalid_grant` is more
+			// caller-actionable than `invalid_dpop_proof` (the proof itself
+			// is well-formed; the grant is what cannot be honored).
+			const cnfClaim = (tokenPayload as { cnf?: unknown }).cnf;
+			const rtCnfJkt =
+				typeof cnfClaim === "object" &&
+				cnfClaim !== null &&
+				"jkt" in cnfClaim &&
+				typeof (cnfClaim as { jkt: unknown }).jkt === "string"
+					? (cnfClaim as { jkt: string }).jkt
+					: undefined;
+			// `presentedConfirmation` is mechanism-agnostic and feeds the
+			// AT cnf claim emission below (RFC 7800 — mechanism-neutral).
+			// `proofJkt` extraction is gated on `kind === "dpop"` (Codex
+			// Important #2 at PR #185): the `Confirmation` union is
+			// mechanism-extensible, so a non-DPoP mechanism that emits
+			// `{ jkt: "..." }` could otherwise satisfy a DPoP-bound RT
+			// without actually presenting a DPoP proof. Restrict the
+			// matrix to its declared mechanism so the kind boundary is
+			// enforced structurally, not by convention.
+			const presentedConfirmation = ctx.tokenBinding?.confirmation;
+			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
+			const proofJkt =
+				bindingIsDpop && presentedConfirmation && "jkt" in presentedConfirmation
+					? presentedConfirmation.jkt
+					: undefined;
+			if (rtCnfJkt !== undefined) {
+				if (proofJkt === undefined) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "refresh_token requires a DPoP proof",
+						},
+					};
+				}
+				// Plain `!==` is acceptable here: the JKT is a SHA-256
+				// thumbprint of a *public* key (RFC 7638) — not a secret. A
+				// timing-side-channel cannot leak material an attacker
+				// could not already derive from the public key they
+				// presented. Mirrors PKCE which uses constantTimeStringEqual
+				// only because the code_verifier IS secret.
+				if (proofJkt !== rtCnfJkt) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "DPoP proof does not match refresh_token binding",
+						},
+					};
+				}
+			}
+
 			const subjectStr = typeof tokenPayload.sub === "string" ? tokenPayload.sub : undefined;
 			const scopeStr =
 				typeof claims.scope === "string"
@@ -335,6 +406,27 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// token response omits scope rather than emitting `scope: ""`.
 			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
 
+			// Wave 2 Phase 2 §9.2: new tokens inherit the request-time
+			// binding.
+			//
+			// **AT cnf** is mechanism-agnostic. `presentedConfirmation`
+			// (defined above) is the full `ctx.tokenBinding?.confirmation`
+			// regardless of kind — DPoP `{jkt}`, mTLS `{x5t#S256}`, and
+			// future mechanisms all flow through unchanged because RFC 7800
+			// cnf claim shape is mechanism-neutral.
+			//
+			// **New RT cnf** is gated on `bindingIsDpop && isPublicClient`,
+			// mirroring §9.1's auth_code rule. mTLS RT-binding semantics
+			// belong to Phase 3 — issuing an mTLS-bound RT here without
+			// corresponding refresh-time enforcement would create a silent
+			// degradation surface on the next refresh (Codex Important #1
+			// + Claude #1 convergence at PR #185).
+			//
+			// The wire-level `token_type` is "DPoP" only for the DPoP kind.
+			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
+			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
+			const bindNewRefreshToken = bindingIsDpop && isPublicClient;
+
 			const newAccessToken = await generateToken(
 				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
 				{
@@ -352,6 +444,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					...(presentedConfirmation ? { confirmation: presentedConfirmation } : {}),
 				},
 			);
 
@@ -368,6 +461,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
+					...(bindNewRefreshToken ? { confirmation: presentedConfirmation } : {}),
 				},
 			);
 
@@ -534,10 +628,13 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({
-						accessToken: newAccessToken,
-						refreshToken: newRefreshToken,
-					}),
+					tokens: generateTokenResponse(
+						{
+							accessToken: newAccessToken,
+							refreshToken: newRefreshToken,
+						},
+						{ tokenType },
+					),
 				},
 			};
 		},

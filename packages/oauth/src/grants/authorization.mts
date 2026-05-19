@@ -361,6 +361,39 @@ export const createAuthorizationGrant = (
 			// consumers can't distinguish from "scope claim omitted").
 			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
 
+			// Wave 2 Phase 2 §9.1: propagate the token-binding confirmation
+			// (RFC 7800 `cnf`) into the issued tokens.
+			//
+			// **AT cnf** is mechanism-agnostic: any binding's confirmation
+			// (DPoP `{jkt}`, mTLS `{x5t#S256}`, future mechanisms) flows
+			// through unchanged because RFC 7800 cnf claim shape is
+			// mechanism-neutral.
+			//
+			// **RT cnf** is gated on `kind === "dpop"` for Phase 2:
+			//   1. RT binding is restricted to **public clients**
+			//      (`tokenEndpointAuthMethod === "none"`): confidential
+			//      clients use the client secret as the refresh-time
+			//      authenticator (RFC 9449 §5), so RT-key-binding adds no
+			//      security and would force key retention across the RT
+			//      lifetime.
+			//   2. **mTLS RT binding semantics are deliberately out of Phase
+			//      2 scope.** The §9.2 refresh-time matrix only enforces
+			//      DPoP `jkt` continuity. Issuing an mTLS-bound RT (`cnf:
+			//      {"x5t#S256"}`) here without a corresponding refresh-time
+			//      enforcement would silently degrade to an unbound RT on
+			//      next refresh — a multi-reviewer convergence finding
+			//      (Codex Important #1 + Claude #1) at PR #185. Phase 3
+			//      will add mTLS-aware refresh-time enforcement together
+			//      with mTLS RT binding.
+			//
+			// The wire-level `token_type` is "DPoP" only for the DPoP kind
+			// (mTLS keeps "Bearer" per RFC 8705 §3).
+			const confirmation = ctx.tokenBinding?.confirmation;
+			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
+			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
+			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
+			const bindRefreshToken = bindingIsDpop && isPublicClient;
+
 			// TODO-F-3: both access_token and refresh_token carry family_id and, when
 			// sid is present, the sid claim so introspect (Task 5) and refresh (Task 4)
 			// can propagate them without re-reading the session store on every request.
@@ -377,6 +410,7 @@ export const createAuthorizationGrant = (
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					...(confirmation ? { confirmation } : {}),
 				},
 			);
 			const refreshToken = await generateToken(
@@ -391,6 +425,7 @@ export const createAuthorizationGrant = (
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
+					...(bindRefreshToken ? { confirmation } : {}),
 				},
 			);
 
@@ -592,7 +627,7 @@ export const createAuthorizationGrant = (
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }),
+					tokens: generateTokenResponse({ accessToken, refreshToken, idToken }, { tokenType }),
 				},
 				sessionMutation: {
 					// D-1: /authorize no longer writes session.code* in v0.5.1.
