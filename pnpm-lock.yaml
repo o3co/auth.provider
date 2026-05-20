@@ -46,8 +46,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@o3co/ts.hocon':
-        specifier: ^1.1.0
-        version: 1.1.0(zod@4.4.3)
+        specifier: ^1.2.0
+        version: 1.2.0(zod@4.4.3)
       '@types/bcrypt':
         specifier: ^6.0.0
         version: 6.0.0
@@ -418,8 +418,8 @@ importers:
         specifier: ^0.0.4
         version: 0.0.4(express@5.2.1)(pino@10.3.1)
       '@o3co/ts.hocon':
-        specifier: ^1.1.0
-        version: 1.1.0(zod@4.4.3)
+        specifier: ^1.2.0
+        version: 1.2.0(zod@4.4.3)
       connect-redis:
         specifier: ^9.0.0
         version: 9.0.0(express-session@1.19.0)(redis@5.12.1)
@@ -820,9 +820,9 @@ packages:
       pino:
         optional: true
 
-  '@o3co/ts.hocon@1.1.0':
-    resolution: {integrity: sha512-lN3h9DL9h2Wz6Dh7Td+vlhugAcK8HK/Mb1HEWoYAsjE6C5Skt+f36ebfdSLaWBFIkZEAUkabkRNvATwdCTX9Tg==}
-    engines: {node: '>=18'}
+  '@o3co/ts.hocon@1.2.0':
+    resolution: {integrity: sha512-xRSWWhNxyn/O9S2DvrQUW67oDXorYs1pgyeD86sc/tPjIomP6blNUgC8M4vOwBwEPYrk3c4dVEPNtfaob/t8tw==}
+    engines: {node: '>=22'}
     peerDependencies:
       zod: '>=4.0.0'
     peerDependenciesMeta:
@@ -2101,8 +2101,8 @@ packages:
     resolution: {integrity: sha512-r34yH/GlQpKZbU1BvFFqOjhISRo1MNx1tWYsYvmj6KIRHSPMT2+yHOEb1SG6NMvRoHRF0a07kCOox/9yakl1vg==}
     hasBin: true
 
-  postcss@8.5.14:
-    resolution: {integrity: sha512-SoSL4+OSEtR99LHFZQiJLkT59C5B1amGO1NzTwj7TT1qCUgUO6hxOvzkOYxD+vMrXBM3XJIKzokoERdqQq/Zmg==}
+  postcss@8.5.15:
+    resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
     engines: {node: ^10 || ^12 || >=14}
 
   process-nextick-args@2.0.1:
@@ -2882,7 +2882,7 @@ snapshots:
     optionalDependencies:
       pino: 10.3.1
 
-  '@o3co/ts.hocon@1.1.0(zod@4.4.3)':
+  '@o3co/ts.hocon@1.2.0(zod@4.4.3)':
     optionalDependencies:
       zod: 4.4.3
 
@@ -4147,7 +4147,7 @@ snapshots:
       sonic-boom: 4.2.1
       thread-stream: 4.1.0
 
-  postcss@8.5.14:
+  postcss@8.5.15:
     dependencies:
       nanoid: 3.3.12
       picocolors: 1.1.1
@@ -4653,7 +4653,7 @@ snapshots:
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
-      postcss: 8.5.14
+      postcss: 8.5.15
       rolldown: 1.0.0-rc.18
       tinyglobby: 0.2.16
     optionalDependencies:
