@@ -152,9 +152,19 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			//   RT cnf.x5t#S256 | client cert    | Outcome
 			//   no              | no             | issue plain Bearer (legacy)
 			//   no              | yes            | issue mTLS-bound AT (opt-in upgrade)
-			//   yes             | no             | reject invalid_grant ("cert_absent")
-			//   yes             | yes, differs   | reject invalid_grant ("thumbprint_mismatch")
+			//   yes             | no             | reject invalid_grant — errorDescription
+			//                                       "refresh_token requires a client certificate"
+			//   yes             | yes, differs   | reject invalid_grant — errorDescription
+			//                                       "client certificate does not match refresh_token binding"
 			//   yes             | yes, equal     | issue mTLS-bound AT + bound RT (rotation preserves)
+			//
+			// Row 3 vs row 4 use distinct errorDescription strings so SIEMs
+			// can distinguish "stolen RT replayed without cert" from
+			// "mid-rotation / multi-cert attack" today. A future cross-cutting
+			// sub-PR will add audit-emission reason codes (spec §12.2:
+			// `rt_binding_mismatch` with `reason: "cert_absent" |
+			// "thumbprint_mismatch"`) — those are NOT wire strings and are
+			// out of Sub-PR 3c scope; do not grep the code for them.
 			//
 			// **Compound-cnf rejection (Codex Critical #2):** if the RT
 			// carries BOTH `cnf.jkt` AND `cnf.x5t#S256` we short-circuit
