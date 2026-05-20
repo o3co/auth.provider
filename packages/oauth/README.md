@@ -121,9 +121,9 @@ When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `
 - **RT cnf is gated on `(bindingIsDpop || bindingIsMtls) && isPublicClient`.** Confidential clients always get plain RTs (RFC 9449 §5 rationale generalized: client_secret is the refresh-time authenticator). Public clients with a bound AT get a bound RT so the next refresh enforces continuity.
 - **Wire-level `token_type`:** `"DPoP"` only when `kind === "dpop"` (RFC 9449 §5). mTLS keeps `"Bearer"` (RFC 8705 §3) — the cert IS the binding evidence, not the wire token type.
 
-### Refresh-time matrix (5 rows per mechanism)
+### Refresh-time matrix (5 outcomes — applied independently per mechanism)
 
-`refreshToken.mts` runs a per-mechanism matrix that correlates the RT's persisted `cnf` with the request-time binding:
+`refreshToken.mts` runs a separate matrix per binding mechanism (one for DPoP `cnf.jkt`, one for mTLS `cnf.x5t#S256`). Each matrix has the same 5 outcomes, expressed below in mechanism-agnostic form:
 
 | RT cnf | request binding | outcome |
 | --- | --- | --- |
@@ -133,7 +133,7 @@ When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `
 | bound | bound, differs | reject `invalid_grant` (multi-key / cert-substitution attack) |
 | bound | bound, matches | rotation preserves binding |
 
-Each mechanism owns its own matrix; the proof field is extracted gated on `kind === "<mechanism>"` so a confirmation shape alone cannot satisfy a bound RT (mechanism-boundary regression from PR #185 / Codex Important #2). RT carrying BOTH `cnf.jkt` AND `cnf.x5t#S256` is rejected with `invalid_grant` BEFORE either matrix runs (compound-cnf reject from Codex Critical #2).
+The proof field is extracted gated on `kind === "<mechanism>"` so a confirmation shape alone cannot satisfy a bound RT (mechanism-boundary regression from PR #185 / Codex Important #2). RT carrying BOTH `cnf.jkt` AND `cnf.x5t#S256` is rejected with `invalid_grant` BEFORE either matrix runs (compound-cnf reject from Codex Critical #2).
 
 ### Introspect
 

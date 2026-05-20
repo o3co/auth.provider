@@ -45,7 +45,7 @@ When both `dpopModule` and `mtlsModule` are installed, the `oauth.tokenBinding.d
 - `intent-explicit` (default) — DPoP wins because the DPoP header is explicit-intent; mTLS cert is ambient.
 - `strict-mutual-exclusion` — both succeeding is rejected with HTTP 400 `invalid_request`.
 
-See [the cross-mechanism dispatch refactor spec](../../.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md) for the design rationale and [packages/mtls/README.md](../mtls/README.md#cross-mechanism-dispatch-dpop--mtls) for the symmetric view from the mTLS side.
+See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md) for the design rationale and [packages/mtls/README.md](../mtls/README.md#cross-mechanism-dispatch-dpop--mtls) for the symmetric view from the mTLS side.
 
 ## Operator requirements
 
