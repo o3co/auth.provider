@@ -131,14 +131,16 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				};
 			}
 
-			// Wave 2 Phase 2 §9.2: refresh-time DPoP binding matrix (RFC 9449
-			// §5 + Codex Round 1 Important #1). RT carries `cnf.jkt` only
-			// when issued to a public client with proof; confidential-client
-			// RTs are always plain (no `cnf`). Five rows, evaluated BEFORE
-			// any further work so the rejection short-circuits ahead of
-			// policy evaluation, store I/O, and `generateToken` keystore
-			// signatures:
+			// Wave 2 Phase 2 §9.2 + Phase 3 §9.2 (mTLS rows): refresh-time
+			// binding matrices for DPoP (RFC 9449 §5) and mTLS (RFC 8705 §4).
+			// RT carries `cnf` (jkt or x5t#S256) only when issued to a public
+			// client with proof; confidential-client RTs are always plain.
+			// Each mechanism owns its own 5-row matrix (parallel structure)
+			// and they are evaluated BEFORE any further work so rejections
+			// short-circuit ahead of policy evaluation, store I/O, and
+			// `generateToken` keystore signatures.
 			//
+			// DPoP matrix (unchanged from Phase 2):
 			//   RT cnf.jkt | proof JKT       | Outcome
 			//   no         | no              | issue plain Bearer (legacy)
 			//   no         | yes             | issue DPoP-bound AT (opt-in upgrade)
@@ -146,12 +148,30 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			//   yes        | yes, differs    | reject invalid_grant (multi-key attack)
 			//   yes        | yes, equal      | issue DPoP-bound AT + bound RT (rotation preserves)
 			//
+			// mTLS matrix (new in Phase 3, parallel to DPoP):
+			//   RT cnf.x5t#S256 | client cert    | Outcome
+			//   no              | no             | issue plain Bearer (legacy)
+			//   no              | yes            | issue mTLS-bound AT (opt-in upgrade)
+			//   yes             | no             | reject invalid_grant ("cert_absent")
+			//   yes             | yes, differs   | reject invalid_grant ("thumbprint_mismatch")
+			//   yes             | yes, equal     | issue mTLS-bound AT + bound RT (rotation preserves)
+			//
+			// **Compound-cnf rejection (Codex Critical #2):** if the RT
+			// carries BOTH `cnf.jkt` AND `cnf.x5t#S256` we short-circuit
+			// with `invalid_grant` BEFORE running either matrix. Stage 1
+			// only supports single-mechanism bindings; a compound cnf could
+			// only arise from a bug or an attacker-crafted RT and accepting
+			// it would create ambiguous enforcement semantics. The reject
+			// makes the boundary explicit and structural.
+			//
 			// Error code is `invalid_grant` (RFC 6749 §5.2) — at refresh
 			// time the RT IS the grant; a missing/mismatched proof means
-			// the grant cannot be used. RFC 9449 §5 does not pin a specific
-			// OAuth error code for this branch; `invalid_grant` is more
-			// caller-actionable than `invalid_dpop_proof` (the proof itself
-			// is well-formed; the grant is what cannot be honored).
+			// the grant cannot be used. Neither RFC 9449 §5 nor RFC 8705
+			// §4 pin a specific OAuth error code for this branch;
+			// `invalid_grant` is more caller-actionable than
+			// `invalid_dpop_proof` / a future `invalid_client_certificate`
+			// (the proof / cert itself is well-formed; the grant is what
+			// cannot be honored).
 			const cnfClaim = (tokenPayload as { cnf?: unknown }).cnf;
 			const rtCnfJkt =
 				typeof cnfClaim === "object" &&
@@ -160,20 +180,46 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				typeof (cnfClaim as { jkt: unknown }).jkt === "string"
 					? (cnfClaim as { jkt: string }).jkt
 					: undefined;
+			const rtCnfX5t =
+				typeof cnfClaim === "object" &&
+				cnfClaim !== null &&
+				"x5t#S256" in cnfClaim &&
+				typeof (cnfClaim as { "x5t#S256": unknown })["x5t#S256"] === "string"
+					? (cnfClaim as { "x5t#S256": string })["x5t#S256"]
+					: undefined;
+
+			// Compound-cnf pre-matrix reject — see comment above.
+			if (rtCnfJkt !== undefined && rtCnfX5t !== undefined) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription:
+							"refresh_token has compound cnf binding which is not supported (Stage 1)",
+					},
+				};
+			}
+
 			// `presentedConfirmation` is mechanism-agnostic and feeds the
 			// AT cnf claim emission below (RFC 7800 — mechanism-neutral).
-			// `proofJkt` extraction is gated on `kind === "dpop"` (Codex
-			// Important #2 at PR #185): the `Confirmation` union is
-			// mechanism-extensible, so a non-DPoP mechanism that emits
-			// `{ jkt: "..." }` could otherwise satisfy a DPoP-bound RT
-			// without actually presenting a DPoP proof. Restrict the
-			// matrix to its declared mechanism so the kind boundary is
-			// enforced structurally, not by convention.
+			// Each mechanism's matrix extracts its own proof field gated on
+			// `kind === "<mechanism>"` (PR #185 / Codex Important #2): the
+			// `Confirmation` union is mechanism-extensible, so a non-DPoP
+			// mechanism emitting `{ jkt: "..." }` (or a non-mTLS mechanism
+			// emitting `{ "x5t#S256": "..." }`) could otherwise satisfy a
+			// bound RT without actually presenting the right proof.
+			// Restrict each matrix to its declared mechanism so the kind
+			// boundary is enforced structurally, not by convention.
 			const presentedConfirmation = ctx.tokenBinding?.confirmation;
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
+			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
 			const proofJkt =
 				bindingIsDpop && presentedConfirmation && "jkt" in presentedConfirmation
 					? presentedConfirmation.jkt
+					: undefined;
+			const proofX5t =
+				bindingIsMtls && presentedConfirmation && "x5t#S256" in presentedConfirmation
+					? presentedConfirmation["x5t#S256"]
 					: undefined;
 			if (rtCnfJkt !== undefined) {
 				if (proofJkt === undefined) {
@@ -197,6 +243,31 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 							status: 400,
 							error: "invalid_grant",
 							errorDescription: "DPoP proof does not match refresh_token binding",
+						},
+					};
+				}
+			}
+			if (rtCnfX5t !== undefined) {
+				if (proofX5t === undefined) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "refresh_token requires a client certificate",
+						},
+					};
+				}
+				// Plain `!==` is acceptable here: x5t#S256 is a SHA-256
+				// thumbprint of the cert's DER (RFC 8705 §3.1), which is
+				// presented openly during the TLS handshake. No secret
+				// material is leaked by timing — same rationale as the
+				// DPoP `jkt` comparison above.
+				if (proofX5t !== rtCnfX5t) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "client certificate does not match refresh_token binding",
 						},
 					};
 				}
@@ -406,8 +477,8 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// token response omits scope rather than emitting `scope: ""`.
 			const scopeClaim = finalScope && finalScope.length > 0 ? finalScope : null;
 
-			// Wave 2 Phase 2 §9.2: new tokens inherit the request-time
-			// binding.
+			// Wave 2 Phase 2 §9.2 + Phase 3 §9.2 (mTLS rows): new tokens
+			// inherit the request-time binding.
 			//
 			// **AT cnf** is mechanism-agnostic. `presentedConfirmation`
 			// (defined above) is the full `ctx.tokenBinding?.confirmation`
@@ -415,17 +486,20 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// future mechanisms all flow through unchanged because RFC 7800
 			// cnf claim shape is mechanism-neutral.
 			//
-			// **New RT cnf** is gated on `bindingIsDpop && isPublicClient`,
-			// mirroring §9.1's auth_code rule. mTLS RT-binding semantics
-			// belong to Phase 3 — issuing an mTLS-bound RT here without
-			// corresponding refresh-time enforcement would create a silent
-			// degradation surface on the next refresh (Codex Important #1
-			// + Claude #1 convergence at PR #185).
+			// **New RT cnf** is gated on
+			// `(bindingIsDpop || bindingIsMtls) && isPublicClient`,
+			// mirroring §9.1's auth_code rule. The gate is a mechanism
+			// allowlist: only the mechanisms whose refresh-time matrix
+			// (above) actually enforces continuity may emit a bound RT.
+			// Adding a future mechanism MUST land its refresh-time matrix
+			// BEFORE being added here (PR #185 / Codex Important #1
+			// convergence — silent degradation prevention).
 			//
-			// The wire-level `token_type` is "DPoP" only for the DPoP kind.
+			// The wire-level `token_type` is "DPoP" only for the DPoP kind
+			// (mTLS keeps "Bearer" per RFC 8705 §3).
 			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
 			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
-			const bindNewRefreshToken = bindingIsDpop && isPublicClient;
+			const bindNewRefreshToken = (bindingIsDpop || bindingIsMtls) && isPublicClient;
 
 			const newAccessToken = await generateToken(
 				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },

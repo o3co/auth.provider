@@ -361,38 +361,43 @@ export const createAuthorizationGrant = (
 			// consumers can't distinguish from "scope claim omitted").
 			const scopeClaim = grantedScopes && grantedScopes.length > 0 ? grantedScopes.join(" ") : null;
 
-			// Wave 2 Phase 2 §9.1: propagate the token-binding confirmation
-			// (RFC 7800 `cnf`) into the issued tokens.
+			// Wave 2 Phase 2 §9.1 + Phase 3 §9.1 (mTLS RT binding):
+			// propagate the token-binding confirmation (RFC 7800 `cnf`) into
+			// the issued tokens.
 			//
 			// **AT cnf** is mechanism-agnostic: any binding's confirmation
 			// (DPoP `{jkt}`, mTLS `{x5t#S256}`, future mechanisms) flows
 			// through unchanged because RFC 7800 cnf claim shape is
 			// mechanism-neutral.
 			//
-			// **RT cnf** is gated on `kind === "dpop"` for Phase 2:
+			// **RT cnf** is gated on `(bindingIsDpop || bindingIsMtls) &&
+			// isPublicClient`:
 			//   1. RT binding is restricted to **public clients**
 			//      (`tokenEndpointAuthMethod === "none"`): confidential
 			//      clients use the client secret as the refresh-time
-			//      authenticator (RFC 9449 §5), so RT-key-binding adds no
-			//      security and would force key retention across the RT
-			//      lifetime.
-			//   2. **mTLS RT binding semantics are deliberately out of Phase
-			//      2 scope.** The §9.2 refresh-time matrix only enforces
-			//      DPoP `jkt` continuity. Issuing an mTLS-bound RT (`cnf:
-			//      {"x5t#S256"}`) here without a corresponding refresh-time
-			//      enforcement would silently degrade to an unbound RT on
-			//      next refresh — a multi-reviewer convergence finding
-			//      (Codex Important #1 + Claude #1) at PR #185. Phase 3
-			//      will add mTLS-aware refresh-time enforcement together
-			//      with mTLS RT binding.
+			//      authenticator (RFC 9449 §5 for DPoP; the same rationale
+			//      generalizes to mTLS per RFC 8705 §4 which talks about
+			//      client-cert-bound RTs for clients that have no other
+			//      strong refresh-time credential). RT-key-binding adds no
+			//      security for confidential clients and would force key /
+			//      cert retention across the RT lifetime.
+			//   2. The gate is a **mechanism allowlist** — only the binding
+			//      kinds whose refresh-time enforcement matrix this grant
+			//      knows how to honor are admitted. A future mechanism
+			//      (FIDO attestation etc.) MUST land its refresh-time
+			//      matrix in `refreshToken.mts` BEFORE being added here,
+			//      mirroring the PR #185 mechanism-allowlist rationale that
+			//      stopped Phase 2 from silently emitting unenforceable
+			//      mTLS-bound RTs.
 			//
 			// The wire-level `token_type` is "DPoP" only for the DPoP kind
 			// (mTLS keeps "Bearer" per RFC 8705 §3).
 			const confirmation = ctx.tokenBinding?.confirmation;
 			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
+			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
 			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
 			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
-			const bindRefreshToken = bindingIsDpop && isPublicClient;
+			const bindRefreshToken = (bindingIsDpop || bindingIsMtls) && isPublicClient;
 
 			// TODO-F-3: both access_token and refresh_token carry family_id and, when
 			// sid is present, the sid claim so introspect (Task 5) and refresh (Task 4)
