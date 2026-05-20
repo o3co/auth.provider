@@ -221,15 +221,20 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			expect(result.tokens.token_type).toBe("DPoP");
 		});
 
-		it("token_type Bearer when kind === 'mtls' (mTLS binding shape); RT stays plain (Phase 3 mTLS RT-binding deferred)", async () => {
-			// mTLS keeps Bearer per RFC 8705 §3. AT cnf carries x5t#S256
-			// (RFC 7800 is mechanism-neutral). RT MUST remain plain in
-			// Phase 2 even for public clients — issuing an mTLS-bound RT
-			// without a corresponding refresh-time mTLS enforcement matrix
-			// would silently degrade to an unbound RT on next refresh.
-			// Phase 3 will add mTLS-aware refresh-time enforcement together
-			// with mTLS RT binding (Codex Important #1 + Claude #1
-			// convergence at PR #185).
+		it("public client + mTLS binding → RT bound with x5t#S256 (RFC 8705 §4 SHOULD)", async () => {
+			// Phase 3 inversion of the Phase 2 deferral: mTLS-bound RT now
+			// rides RFC 8705 §4 ("the authorization server SHOULD bind the
+			// refresh token to the certificate the client used"). mTLS still
+			// keeps wire-level token_type "Bearer" per RFC 8705 §3 — only
+			// DPoP signals "DPoP" in the response wrapper. AT cnf propagation
+			// remains mechanism-agnostic (RFC 7800).
+			//
+			// The previous "RT stays plain" assertion was pinned at PR #185
+			// because there was no refresh-time mTLS enforcement matrix in
+			// Phase 2. Phase 3 Sub-PR 3c adds that matrix (§9.2 mTLS rows)
+			// together with this RT-binding emission, so the pair lands
+			// atomically — no window where a bound RT could be refreshed
+			// without proof.
 			const deps = makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode }));
 			const handler = createAuthorizationGrant(deps);
 
@@ -245,6 +250,7 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 
 			expect(result.status).toBe(200);
 			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			// mTLS keeps wire-level "Bearer" per RFC 8705 §3.
 			expect(result.tokens.token_type).toBe("Bearer");
 
 			// AT gets the mTLS cnf shape (mechanism-agnostic propagation)
@@ -253,9 +259,44 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			expect(atCnf?.["x5t#S256"]).toBe("MTLS-THUMBPRINT-AC");
 			expect(atCnf?.jkt).toBeUndefined();
 
-			// Public client + mTLS → RT MUST be plain (Phase 2 contract).
-			// Pins the deferral so Phase 3 mTLS RT-binding lands as a
-			// deliberate additive change, not a side-effect.
+			// Public client + mTLS → RT MUST carry cnf.x5t#S256 (RFC 8705 §4).
+			const rtPayload = decodePayload(result.tokens.refresh_token as string);
+			const rtCnf = rtPayload.cnf as Record<string, string> | undefined;
+			expect(rtCnf?.["x5t#S256"]).toBe("MTLS-THUMBPRINT-AC");
+			expect(rtCnf?.jkt).toBeUndefined();
+		});
+
+		it("confidential client + mTLS binding → RT stays plain (gate restricts to public clients)", async () => {
+			// Phase 3: mTLS RT-binding mirrors DPoP's public-client gate
+			// (RFC 9449 §5 rationale generalized — confidential clients
+			// authenticate via client_secret at refresh time, so binding the
+			// RT to the cert adds no security and would force cert retention
+			// across the RT lifetime). The §9.1 comment in authorization.mts
+			// is the single source of truth on this.
+			const deps = makeDeps(vi.fn().mockResolvedValue({ ...validCode }));
+			const handler = createAuthorizationGrant(deps);
+
+			const ctx: GrantContext = {
+				...baseCtxConfidential,
+				tokenBinding: {
+					kind: "mtls",
+					confirmation: { "x5t#S256": "MTLS-THUMBPRINT-CONF" },
+				},
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			expect(result.tokens.token_type).toBe("Bearer");
+
+			// AT cnf still propagates (mechanism-agnostic).
+			const atPayload = decodePayload(result.tokens.access_token as string);
+			expect((atPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
+				"MTLS-THUMBPRINT-CONF",
+			);
+
+			// Confidential client: RT MUST stay plain regardless of mechanism.
 			const rtPayload = decodePayload(result.tokens.refresh_token as string);
 			expect(rtPayload.cnf).toBeUndefined();
 		});

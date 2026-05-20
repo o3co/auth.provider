@@ -334,13 +334,15 @@ describe("DPoP refresh-token mechanism boundary", () => {
 		expect(result.errorDescription).toContain("requires a DPoP proof");
 	});
 
-	it("mTLS public-client refresh leaves new RT plain (Phase 3 mTLS RT-binding deferred — Codex Important #1)", async () => {
-		// An mTLS binding on a public client refresh path MUST NOT issue an
-		// mTLS-bound RT in Phase 2 — there is no refresh-time mTLS
-		// enforcement matrix yet, so a bound RT could later be refreshed
-		// without proof and silently degrade to plain. Pins the Phase 2
-		// contract; Phase 3 will invert this assertion when mTLS RT-binding
-		// + refresh-time enforcement land together.
+	it("mTLS public-client row 2 (RT plain + cert) → opt-in upgrade, new RT bound with x5t#S256 (RFC 8705 §4)", async () => {
+		// Phase 3 inversion. The Phase 2 deferral has been removed: the mTLS
+		// refresh-time matrix (§9.2 mTLS rows) lands together with the §9.1
+		// RT-emission gate, so a public-client mTLS refresh now MUST emit a
+		// bound RT to enforce cross-refresh continuity (parallel to DPoP
+		// row 2 public-variant).
+		//
+		// Confidential clients still get RT-plain (public-client gate
+		// covers both mechanisms per the §9.1 comment).
 		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
 		const handler = createRefreshTokenGrant(mockDeps);
 		const ctx = buildCtx({
@@ -356,16 +358,18 @@ describe("DPoP refresh-token mechanism boundary", () => {
 
 		expect(result.status).toBe(200);
 		if (!("tokens" in result)) expect.fail("Expected tokens in result");
-		// mTLS keeps Bearer per RFC 8705 §3
+		// mTLS keeps Bearer per RFC 8705 §3.
 		expect(result.tokens.token_type).toBe("Bearer");
-		// AT gets mTLS cnf (mechanism-agnostic propagation per RFC 7800)
+		// AT gets mTLS cnf (mechanism-agnostic propagation per RFC 7800).
 		const atPayload = decodeJwt(result.tokens.access_token);
 		expect((atPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
 			"MTLS-RT-THUMB",
 		);
-		// New RT MUST be plain in Phase 2 (the deferred contract).
+		// Public client + mTLS → new RT MUST carry cnf.x5t#S256 (RFC 8705 §4).
 		expect(result.tokens.refresh_token).toBeTruthy();
 		const newRtPayload = decodeJwt(result.tokens.refresh_token as string);
-		expect(newRtPayload.cnf).toBeUndefined();
+		expect((newRtPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
+			"MTLS-RT-THUMB",
+		);
 	});
 });

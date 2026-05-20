@@ -4,6 +4,45 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### Added (Phase 3 Sub-PR 3c — 2026-05-20)
+
+- **mTLS refresh-token binding is now enforced end-to-end.** The gate
+  in `@o3co/auth-provider-oauth` grants (`authorization.mts` and
+  `refreshToken.mts`) was widened from `bindingIsDpop && isPublicClient`
+  to `(bindingIsDpop || bindingIsMtls) && isPublicClient`. Public clients
+  presenting an mTLS certificate for token binding now receive both an
+  AT carrying `cnf.x5t#S256` AND an RT carrying `cnf.x5t#S256` (RFC
+  8705 §4 SHOULD). Note: this is RFC 8705 §3-§4 sender-constrained
+  *token binding*, not the RFC 8705 §2 mTLS *client authentication*
+  flow (which remains out of scope).
+- **mTLS refresh-time matrix (§9.2 mTLS rows)** added in
+  `refreshToken.mts`, parallel to the existing DPoP matrix. Five rows
+  enforce that an RT promising mTLS binding is only honored when the
+  presented client certificate's `x5t#S256` matches the persisted
+  binding. Row 3 (cert absent) and row 4 (thumbprint mismatch) reject
+  with `invalid_grant` and distinct error descriptions so SIEMs can
+  distinguish "RT replayed without cert" from "mid-rotation /
+  multi-cert attack". Confidential clients continue to issue plain
+  RTs (mirroring the DPoP public-client gate per RFC 9449 §5 reasoning,
+  generalized to mTLS).
+- **Compound-cnf rejection** — an RT carrying BOTH `cnf.jkt` AND
+  `cnf.x5t#S256` is rejected with `invalid_grant` BEFORE either matrix
+  runs. Stage 1 only supports single-mechanism bindings; a compound
+  cnf could only arise from a bug or attacker-crafted RT. The reject
+  closes the ambiguity structurally (Codex Critical #2 from the
+  Phase 3 §11.4 review chain).
+- **Mechanism-boundary regression**: a non-mTLS-emitting mechanism that
+  hypothetically presents an `{ "x5t#S256": "..." }` confirmation
+  cannot satisfy an mTLS-bound RT — the `proofX5t` extraction gates on
+  `kind === "mtls"`. Symmetric to the PR #185 DPoP boundary rule.
+- The Phase 2 deferral pin tests in
+  `dpop.authorizationCode.integration.test.mts` and
+  `dpop.refreshToken.integration.test.mts` are inverted: mTLS public
+  clients are now asserted to receive bound RTs (was: asserted RT
+  plain). The RT-binding emission and the refresh-time matrix land
+  atomically — there is no release window where a bound RT could be
+  refreshed without a cert.
+
 ### Changed (Cross-mechanism dispatch refactor — 2026-05-19)
 
 - **Contribution shape migrated** from `grantMiddleware` to the new
