@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-20
+
+v0.8.0 ships **Wave 2 Token-binding Cluster** — sender-constrained access tokens via DPoP (RFC 9449) and mTLS (RFC 8705) as a first-class extension surface. Two new OSS packages (`@o3co/auth-provider-dpop`, `@o3co/auth-provider-mtls`), a new core abstraction (`TokenBindingMechanism` + `TokenBindingMechanismFactory<Deps>` + `tokenBindingMechanisms` contribution slot), grant-side `cnf` claim emission, and a §9.2 5-row refresh-time enforcement matrix per mechanism. Plus ADR `2026-05-20-token-binding-first-class-abstraction.md` documenting the design.
+
+Zero behavior change for any v0.7.x consumer that does not opt into the cluster: both mechanism modules default to disabled (`oauth.dpop.enabled = false` / `oauth.mtls.enabled = false`); without opt-in, `req.tokenBinding` stays `undefined`, no `cnf` claim is emitted, and introspect responses are byte-identical to v0.7.x for tokens without `cnf`.
+
+### Added (Wave 2 Phase 4 — end-to-end polish)
+
+- **End-to-end integration test** pairing the issuance side (DPoP / mTLS bound AT) with `/oauth/introspect` — first test exercising both code paths on the same access token.
+- **ADR `2026-05-20-token-binding-first-class-abstraction.md`** documents the Wave 2 design rationale (why `TokenBindingMechanism` is a first-class extension surface, what `Confirmation`'s narrowness buys, why the grant gate uses a mechanism allowlist, why cross-mechanism dispatch lives in core).
+- **README updates** across `@o3co/auth-provider-core` ("Token-binding mechanisms" section under "Public API"), `@o3co/auth-provider-oauth` ("Token-binding cnf flow" section + refresh-time matrix), `@o3co/auth-provider-dpop` (quick-start + cross-mechanism dispatch), and `@o3co/auth-provider-mtls` (Phase 3 completion status).
+
+### Added (Wave 2 Phase 3 — mTLS RFC 8705)
+
+- **New OSS package `@o3co/auth-provider-mtls`** — RFC 8705 sender-constrained access tokens via mTLS. Ships `createMtlsMechanism` (header / tls-layer sources, envoy + plain-pem dialects), narrow-mode PKI chain validation with explicit cryptographic signature verification at every hop, and `mtlsModule` wiring via the core `tokenBindingMechanisms` contribution slot.
+- **Grant-side `cnf.x5t#S256` emission** for both AT and RT (public clients per RFC 8705 §4 SHOULD). The §9.1 RT-emission gate widened from `bindingIsDpop && isPublicClient` to `(bindingIsDpop || bindingIsMtls) && isPublicClient`, structurally preserving the PR #185 mechanism allowlist (custom mechanisms emitting `{ jkt }` or `{ "x5t#S256" }` cannot satisfy a bound RT).
+- **mTLS §9.2 refresh-time enforcement matrix** in the `refresh_token` grant, parallel to the existing DPoP matrix. Row 3 (cert absent) and row 4 (thumbprint mismatch) carry distinct error descriptions so SIEMs can distinguish "stolen RT replayed without cert" from "mid-rotation / multi-cert attack".
+- **Compound-`cnf` pre-matrix reject** — an RT carrying BOTH `cnf.jkt` AND `cnf.x5t#S256` is rejected with `invalid_grant` BEFORE either matrix runs. Stage 1 supports single-mechanism bindings only; the runtime check is the cross-layer defense for JWT-decoded payloads (Phase 1's narrow `Confirmation` union is the TypeScript-layer defense).
+- **Security fix in PKI chain validation** — `validateCertChain` now requires explicit cryptographic signature verification at every hop. The previous implementation used only `X509Certificate.checkIssued()` which performs DN / AKID / SKID / CA-bit matching but does NOT verify the signature (OpenSSL `X509_check_issued` documents this limitation). Pinned by a regression test with a committed attacker-leaf fixture (same DN as the legit root, different signing key).
+
+See [packages/mtls/CHANGELOG.md](packages/mtls/CHANGELOG.md) for full Phase 3 detail.
+
+### Changed (Wave 2 Cross-mechanism dispatch refactor)
+
+- **New `tokenBindingMechanisms` contribution kind in `@o3co/auth-provider-core`.** Modules now ship a `TokenBindingMechanismFactory<Deps>` returning a raw `TokenBindingMechanism | null`; core's `assembleApp` collects all contributions, filters null returns, and composes ONE `tokenBindingMw` mounted on `/oauth/token` so the configured `DispatchPolicy` arbitrates cross-mechanism (resolves the §11.4 known limitation from Sub-PR 3b where each module mounted its own middleware and the second silently overwrote `req.tokenBinding`).
+- **`oauth.tokenBinding.dispatch-policy` config key** moved to core's bundled `CoreConfigSchema` + `reference.conf` as the single source of truth. `dpop` and `mtls` modules no longer redeclare it. Env override: `OAUTH_TOKEN_BINDING_DISPATCH_POLICY`.
+- **`dpopModule` and `mtlsModule` migrated** from the `grantMiddleware` slot to `tokenBindingMechanisms`. Mechanism internals (`createDPoPMechanism`, `createMtlsMechanism`) unchanged.
+
 ### Added (Wave 2 Token-binding Cluster — Phase 2 Sub-PR 2c)
 
 - **RFC 7800 `cnf` claim emission in the 3 OAuth grants.** `client_credentials`, `authorization_code`, and `refresh_token` now propagate `ctx.tokenBinding?.confirmation` into the issued access-token's `cnf` claim, and set the response `token_type` to `"DPoP"` when the binding kind is `"dpop"` (mechanism-agnostic — mTLS keeps `"Bearer"` per RFC 8705 §3). Confidential clients (`tokenEndpointAuthMethod !== "none"`) get plain refresh tokens regardless of proof presence; **public clients with a DPoP binding** additionally receive a `cnf.jkt`-bound refresh token so the binding survives rotations. RT binding is DPoP-only in Phase 2 — mTLS public clients keep plain refresh tokens (Phase 3 will add mTLS RT-binding together with mTLS-aware refresh-time enforcement). Per Wave 2 Phase 2 spec §9.1 + RFC 9449 §5.
