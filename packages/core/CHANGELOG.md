@@ -40,8 +40,8 @@ All notable changes to this package will be documented in this file.
   reads this with a defensive fallback to `"intent-explicit"`. The
   default also ships in `packages/core/config/reference.conf` with the
   `OAUTH_TOKEN_BINDING_DISPATCH_POLICY` env-var override hook.
-- Per cross-mechanism dispatch refactor spec at
-  `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+- See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+  for the cross-mechanism design rationale.
 
 ### Notes
 

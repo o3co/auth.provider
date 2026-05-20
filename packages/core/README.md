@@ -632,7 +632,7 @@ Two new optional `AppOptions` fields introduced for federation + OIDC support:
 - `userSessionStore`: sid-keyed session metadata (auth_time, active RPs, family IDs, OIDC claims). Built-in adapters: `memory`, `redis`.
 - `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens. Built-in adapters: `memory`, `redis` (with mandatory AES-256-GCM encryption of refresh_token; `allow-plaintext` is opt-in and emits a warning).
 
-Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_token + /userinfo), F-5 (logout), and F-6 (/oauth/federation/:name/token). This plan (F-1) only adds the plumbing. The full interface + encryption contract is summarized below.
+Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_token + /userinfo), F-5 (logout), and F-6 (/oauth/federation/:name/token). This plan (F-1) only adds the plumbing. See the exported type signatures in `@o3co/auth-provider-core` (`UserSessionStore`, `FederationTokenStore`) for the full interface; the redis adapter's encryption contract is documented inline at its construction site.
 
 **F-3 consumers activated.** `CodeData` now carries two optional fields wired by the login paths:
 
