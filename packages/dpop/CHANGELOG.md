@@ -4,6 +4,16 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### Changed (Wave 2 Phase 4 — 2026-05-20)
+
+- **README quick-start filled in** with the composition-root snippet,
+  the `application.conf` opt-in block, and a "Cross-mechanism
+  dispatch (DPoP + mTLS)" section pointing at the symmetric mTLS-side
+  documentation. The pre-Phase-4 placeholder "(Filled in by Sub-PR
+  2b/2c)" is removed.
+- See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md)
+  for the cross-cutting Wave 2 design rationale.
+
 ### Changed (Cross-mechanism dispatch refactor — 2026-05-19)
 
 - **Contribution shape migrated** from `grantMiddleware` to the new

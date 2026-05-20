@@ -2,7 +2,7 @@
 
 mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained access token support for `@o3co/auth-provider`.
 
-> **Status:** Phase 3 (Wave 2). Sub-PR 3a + 3b ship the package skeleton, dialect parsers, thumbprint, `createMtlsMechanism` factory, narrow-mode PKI chain validation, and `mtlsModule` wiring. Grant-side `cnf.x5t#S256` emission + refresh-token binding for public clients land in Sub-PR 3c.
+> **Status:** Phase 3 (Wave 2) complete. The package ships `createMtlsMechanism` (header / tls-layer sources, envoy + plain-pem dialects), narrow-mode PKI chain validation with explicit cryptographic signature verification at every hop, `mtlsModule` wiring via the core `tokenBindingMechanisms` contribution slot, grant-side `cnf.x5t#S256` emission, and the §9.2 mTLS refresh-time enforcement matrix (5 rows + compound-`cnf` pre-matrix reject + mechanism-boundary regression). RT binding for public clients per RFC 8705 §4 is enforced end-to-end.
 
 ## Overview
 

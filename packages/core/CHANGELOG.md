@@ -4,6 +4,21 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### Added (Wave 2 Phase 4 — 2026-05-20)
+
+- **ADR `2026-05-20-token-binding-first-class-abstraction.md`** at
+  `packages/core/docs/adr/` documents the Wave 2 design rationale:
+  why `TokenBindingMechanism` is a first-class extension surface,
+  what the `Confirmation` union narrowness buys, why grant-side
+  mechanism allowlist is preferred over `confirmation !== undefined`,
+  and why the cross-mechanism refactor was inserted mid-flight after
+  Sub-PR 3b review.
+- **README section "Token-binding mechanisms (Wave 2)"** added to
+  `packages/core/README.md` documenting `TokenBinding`, `Confirmation`,
+  `TokenBindingMechanism`, `TokenBindingMechanismFactory`, the
+  built-in mechanism packages, and `oauth.tokenBinding.dispatch-policy`
+  semantics.
+
 ### Added (Cross-mechanism dispatch refactor — 2026-05-19)
 
 - **New `tokenBindingMechanisms` contribution kind.** Modules ship a

@@ -4,6 +4,16 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### Changed (Wave 2 Phase 4 — 2026-05-20)
+
+- **README status line updated** to reflect Phase 3 completion — the
+  Phase 3 Sub-PR 3c grant-side `cnf.x5t#S256` emission + §9.2
+  refresh-time matrix + compound-`cnf` reject + mechanism-boundary
+  regression are all shipped. The earlier "lands in Sub-PR 3c" hedge
+  is removed.
+- See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md)
+  for the cross-cutting Wave 2 design rationale.
+
 ### Added (Phase 3 Sub-PR 3c — 2026-05-20)
 
 - **mTLS refresh-token binding is now enforced end-to-end.** The gate

@@ -591,6 +591,41 @@ Five extension points introduced in v0.4.0 (see
 
 All five adapters are optional — absence = no-op default.
 
+### Token-binding mechanisms (Wave 2)
+
+Sender-constrained token binding is a first-class extension surface. The
+`tokenBindingMechanisms` contribution slot lets a module ship a custom
+`TokenBindingMechanism` without forking core. See [ADR
+2026-05-20-token-binding-first-class-abstraction.md](docs/adr/2026-05-20-token-binding-first-class-abstraction.md)
+for the full design rationale.
+
+#### Public types
+
+- `TokenBinding` — `{ readonly kind: string; readonly confirmation: Confirmation }`. The cross-cutting binding shape; `kind` is open so downstream mechanisms can extend additively.
+- `Confirmation` — narrow union `{ readonly jkt: string } | { readonly "x5t#S256": string }`. RFC 7800 cnf claim payload; adding a new variant is a core semver-minor change.
+- `TokenBindingMechanism` — `{ kind, intentExplicit, extract(req) }`. The verb-side abstraction; `intentExplicit: true` for header-driven mechanisms (DPoP), `false` for ambient ones (mTLS).
+- `TokenBindingMechanismFactory<Deps>` — `(deps) => TokenBindingMechanism | null`. The contribution-slot entry shape; return `null` when the module is disabled by config (secure-default opt-in).
+
+#### Built-in mechanism packages
+
+- `@o3co/auth-provider-dpop` — RFC 9449 DPoP (explicit-intent).
+- `@o3co/auth-provider-mtls` — RFC 8705 mTLS certificate-bound tokens (ambient).
+
+Both packages contribute via `tokenBindingMechanisms`. Core's `assembleApp` collects all contributions, filters nulls, and composes ONE `tokenBindingMw` mounted on `/oauth/token`.
+
+#### Dispatch policy
+
+When multiple mechanisms are installed, `oauth.tokenBinding.dispatch-policy` (in core's bundled `CoreConfigSchema` — single source of truth) arbitrates:
+
+- `intent-explicit` (default) — prefer explicit-intent mechanisms over ambient.
+- `strict-mutual-exclusion` — reject `invalid_request` if more than one mechanism's `extract` returns a binding.
+
+Env override: `OAUTH_TOKEN_BINDING_DISPATCH_POLICY`.
+
+#### Grant-side allowlist
+
+The grants in `@o3co/auth-provider-oauth` emit `cnf`-bound RTs only for mechanisms in an explicit allowlist (`bindingIsDpop || bindingIsMtls`). Adding a new mechanism to bound-RT issuance MUST land its refresh-time enforcement matrix in the same PR — see [`packages/oauth`](../oauth/) for the §9.2 matrix pattern.
+
 ### UserSessionStore / FederationTokenStore (TODO-F)
 
 Two new optional `AppOptions` fields introduced for federation + OIDC support:
