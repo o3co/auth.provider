@@ -45,7 +45,7 @@
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
-		"@vitest/coverage-v8": "^4.1.6",
+		"@vitest/coverage-v8": "^4.1.7",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.6"
 	}
