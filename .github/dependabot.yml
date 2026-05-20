@@ -5,3 +5,19 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    ignore:
+      # @simplewebauthn/server is pinned to an exact version (S12 discipline,
+      # see packages/webauthn/README.md). Only major bumps should surface as
+      # PRs so each upgrade is a deliberate security review.
+      - dependency-name: "@simplewebauthn/server"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
+      # TypeScript major bumps require workspace-wide migration across the four
+      # auth.* OSS repos (auth.provider / auth.policy-verifier / auth.proxy /
+      # auth.utils). A per-repo Dependabot bump would split TS versions across
+      # the workspace and complicate dev-tool onboarding. TS major upgrades are
+      # handled as a deliberate cross-repo PR, not auto-bumped.
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
