@@ -41,7 +41,7 @@
 	},
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
-		"@simplewebauthn/server": "13.1.1",
+		"@simplewebauthn/server": "13.3.0",
 		"zod": "^4.3.6"
 	},
 	"peerDependencies": {
