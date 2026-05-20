@@ -4,7 +4,7 @@ DPoP (RFC 9449) sender-constrained access token support for [@o3co/auth-provider
 
 ## Status
 
-Stage 1 (token-endpoint binding). See [the Phase 2 spec](https://github.com/o3co/auth.provider/blob/develop/.claude/superpowers/specs/2026-05-18-wave-2-phase-2-dpop-spec.md) for the scope boundary — Stage 2 will add nonce challenge (RFC 9449 §8) and the `dpop_jkt` query parameter at `/authorize` (RFC 9449 §10).
+Stage 1 (token-endpoint binding). Stage 2 will add nonce challenge (RFC 9449 §8) and the `dpop_jkt` query parameter at `/authorize` (RFC 9449 §10).
 
 ## Quick start
 

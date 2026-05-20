@@ -554,8 +554,7 @@ const userRepo = new InMemoryUserRepository(users);
 
 ### Extension points (v0.4.0)
 
-Five extension points introduced in v0.4.0 (see
-`.claude/superpowers/specs/2026-04-21-extension-surface-decisions-design.md`).
+Five extension points introduced in v0.4.0.
 
 #### MFA
 
@@ -633,7 +632,7 @@ Two new optional `AppOptions` fields introduced for federation + OIDC support:
 - `userSessionStore`: sid-keyed session metadata (auth_time, active RPs, family IDs, OIDC claims). Built-in adapters: `memory`, `redis`.
 - `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens. Built-in adapters: `memory`, `redis` (with mandatory AES-256-GCM encryption of refresh_token; `allow-plaintext` is opt-in and emits a warning).
 
-Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_token + /userinfo), F-5 (logout), and F-6 (/oauth/federation/:name/token). This plan (F-1) only adds the plumbing. See [the TODO-F spec](../../.claude/superpowers/specs/2026-04-21-todo-f-federation-token-lifecycle-design.md) for the full interface + encryption contract.
+Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_token + /userinfo), F-5 (logout), and F-6 (/oauth/federation/:name/token). This plan (F-1) only adds the plumbing. The full interface + encryption contract is summarized below.
 
 **F-3 consumers activated.** `CodeData` now carries two optional fields wired by the login paths:
 

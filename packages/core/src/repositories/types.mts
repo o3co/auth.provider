@@ -116,8 +116,8 @@ export interface User {
  *
  * `consumeByCode` (atomic single-use) is the sole authenticity gate; `client_id`
  * and `redirect_uri` embedded in the record replace the session-based identity
- * gates removed in v0.5.1 (see CHANGELOG and the D-1 spec at
- * `auth/.claude/superpowers/specs/2026-05-05-d1-code-repository-rewrite.md`).
+ * gates removed in v0.5.1 (see CHANGELOG for the historical context — the
+ * design rationale is the D-1 code-repository rewrite shipped in that release).
  *
  * Breaking change for custom CodeRepository implementations: `client_id` and
  * `redirect_uri` are now required. The compile-time guard

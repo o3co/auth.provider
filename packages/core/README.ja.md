@@ -510,8 +510,7 @@ const userRepo = new InMemoryUserRepository(users);
 
 ### 拡張ポイント (v0.4.0)
 
-v0.4.0 で追加された 5 つの拡張ポイント (詳細:
-`.claude/superpowers/specs/2026-04-21-extension-surface-decisions-design.md`)。
+v0.4.0 で追加された 5 つの拡張ポイント。
 
 #### MFA
 
@@ -554,7 +553,7 @@ Federation + OIDC 対応のために `AppOptions` に追加された 2 つのオ
 - `userSessionStore`: sid キーの session metadata (auth_time、active RP、family ID、OIDC claim)。Built-in: `memory`、`redis`。
 - `federationTokenStore`: `(sid, federationName)` キーの upstream IdP token。Built-in: `memory`、`redis` (refresh_token は AES-256-GCM による暗号化必須。`allow-plaintext` は opt-in で警告を出力)。
 
-両 store は TODO-F-3 (cascading revoke)、F-4 (id_token + /userinfo)、F-5 (logout)、F-6 (/oauth/federation/:name/token) で消費される。本 F-1 では plumbing のみを追加する。詳細な interface + encryption contract は [TODO-F spec](../../.claude/superpowers/specs/2026-04-21-todo-f-federation-token-lifecycle-design.md) を参照。
+両 store は TODO-F-3 (cascading revoke)、F-4 (id_token + /userinfo)、F-5 (logout)、F-6 (/oauth/federation/:name/token) で消費される。本 F-1 では plumbing のみを追加する。
 
 **F-3 での consumer 有効化。** `CodeData` にログインパスが書き込む 2 つのオプションフィールドが追加された:
 

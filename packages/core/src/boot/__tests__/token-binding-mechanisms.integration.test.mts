@@ -30,8 +30,8 @@
  *   5. Factory returns null → filtered; not included in the composition.
  *   6. dispatch-policy absent from config → defaults to `intent-explicit`.
  *
- * Per cross-mechanism dispatch refactor spec §6.1 at
- * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+ * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+ * for the cross-mechanism design rationale.
  */
 
 import express, { type Request, type RequestHandler, Router } from "express";

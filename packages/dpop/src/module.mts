@@ -139,8 +139,8 @@ export const dpopConfigSchema = z.object({
  * so the `DispatchPolicy` can arbitrate cross-module when both DPoP and
  * mTLS are installed. The mechanism itself is unchanged.
  *
- * Per Wave 2 Phase 2 spec §11.2 + cross-mechanism dispatch refactor spec at
- * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+ * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+ * for the cross-mechanism design rationale.
  */
 export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 	name: "dpop",
