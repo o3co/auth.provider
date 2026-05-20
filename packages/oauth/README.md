@@ -111,6 +111,36 @@ server.listen(config.http.port);
 await handle.dispose();
 ```
 
+## Token-binding cnf flow (Wave 2)
+
+When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `@o3co/auth-provider-mtls`), the grants here emit RFC 7800 `cnf` claims and the introspect handler echoes them back to resource servers.
+
+### Issuance
+
+- **AT cnf is mechanism-agnostic.** Any binding's `confirmation` flows through unchanged — DPoP `{ jkt }`, mTLS `{ "x5t#S256" }`, or future mechanisms (all variants in the [`Confirmation` union](../core/README.md#token-binding-mechanisms-wave-2)).
+- **RT cnf is gated on `(bindingIsDpop || bindingIsMtls) && isPublicClient`.** Confidential clients always get plain RTs (RFC 9449 §5 rationale generalized: client_secret is the refresh-time authenticator). Public clients with a bound AT get a bound RT so the next refresh enforces continuity.
+- **Wire-level `token_type`:** `"DPoP"` only when `kind === "dpop"` (RFC 9449 §5). mTLS keeps `"Bearer"` (RFC 8705 §3) — the cert IS the binding evidence, not the wire token type.
+
+### Refresh-time matrix (5 rows per mechanism)
+
+`refreshToken.mts` runs a per-mechanism matrix that correlates the RT's persisted `cnf` with the request-time binding:
+
+| RT cnf | request binding | outcome |
+| --- | --- | --- |
+| plain | none | issue plain Bearer (legacy) |
+| plain | bound | opt-in upgrade — bind new AT (RT bound only for public clients) |
+| bound | none | reject `invalid_grant` |
+| bound | bound, differs | reject `invalid_grant` (multi-key / cert-substitution attack) |
+| bound | bound, matches | rotation preserves binding |
+
+Each mechanism owns its own matrix; the proof field is extracted gated on `kind === "<mechanism>"` so a confirmation shape alone cannot satisfy a bound RT (mechanism-boundary regression from PR #185 / Codex Important #2). RT carrying BOTH `cnf.jkt` AND `cnf.x5t#S256` is rejected with `invalid_grant` BEFORE either matrix runs (compound-cnf reject from Codex Critical #2).
+
+### Introspect
+
+`/oauth/introspect` reads `cnf` from the AT claims and sets `token_type` based on whether `jkt` is present (DPoP) or not (Bearer for mTLS or unbound). The introspect response carries the full `cnf` so resource servers can require the right mechanism's proof at their boundary.
+
+See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md) for the design rationale.
+
 ## TODO-F-4 changes
 
 ### `authorization_code` grant — id_token issuance
