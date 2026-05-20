@@ -32,6 +32,7 @@
 import type { RequestHandler, Router } from "express";
 import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
+import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type {
 	AuditHook,
 	ExchangeTokenValidator,
@@ -200,6 +201,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),
 		grantMiddleware: makeIdentityDedupListCollector<RequestHandler | null>(),
+		tokenBindingMechanisms: makeIdentityDedupListCollector<TokenBindingMechanism | null>(),
 	};
 	// Consumer keys override built-ins; unknown consumer kinds pass through.
 	return { ...builtin, ...(consumer ?? {}) } as ContributionCollectorMap;

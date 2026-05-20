@@ -193,6 +193,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-dpop':
+        specifier: workspace:*
+        version: link:../dpop
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
@@ -205,6 +208,9 @@ importers:
       express:
         specifier: ^5.0.0
         version: 5.2.1
+      jose:
+        specifier: ^6.2.2
+        version: 6.2.3
       supertest:
         specifier: ^7.2.2
         version: 7.2.2

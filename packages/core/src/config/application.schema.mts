@@ -314,6 +314,22 @@ export const CoreConfigSchema = z.object({
 				enabled: coerceBooleanFromEnv,
 			})
 			.optional(),
+		// Wave 2 cross-mechanism dispatch refactor: declared in core (single
+		// source of truth) because the dispatch-policy applies across ALL
+		// installed binding-mechanism modules (DPoP, mTLS, ...). Each module
+		// no longer redeclares this key in its own schema. Shape-only — the
+		// default lives in HOCON (see core reference.conf). The synthesized
+		// `tokenBindingMw` in `assembleApp` reads
+		// `config.oauth.tokenBinding["dispatch-policy"]` and falls back to
+		// `"intent-explicit"` when absent.
+		//
+		// Per cross-mechanism dispatch refactor spec §4.2 at
+		// `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+		tokenBinding: z
+			.object({
+				"dispatch-policy": z.enum(["intent-explicit", "strict-mutual-exclusion"]),
+			})
+			.optional(),
 	}),
 });
 

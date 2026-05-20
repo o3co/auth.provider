@@ -13,13 +13,15 @@ This package plugs into the existing `tokenBindingMw` from `@o3co/auth-provider-
 ## Quick start
 
 ```ts
-// composition root — enable ONE binding-mechanism module per Phase 3 deployment
-// (see "Known Limitations" below for the cross-mechanism dispatch caveat).
+// composition root — mtls alone, or alongside dpop (see "Cross-mechanism
+// dispatch" below for the unified DispatchPolicy).
 import { mtlsModule } from "@o3co/auth-provider-mtls";
+import { dpopModule } from "@o3co/auth-provider-dpop"; // optional, runs together
 
 await createApp({
   modules: [
     /* ... existing modules ... */
+    dpopModule,
     mtlsModule,
   ],
   bootstrapComponents: { config, /* logger ... */ },
@@ -43,15 +45,20 @@ oauth.mtls {
 oauth.tokenBinding.dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
 ```
 
-## Known Limitations (Phase 3)
+## Cross-mechanism dispatch (DPoP + mTLS)
 
-### Cross-mechanism dispatch (single binding mechanism per deployment)
+When both `@o3co/auth-provider-dpop` and `@o3co/auth-provider-mtls` are installed, core composes a **single** `tokenBindingMw` from both modules' contributions. The configured `oauth.tokenBinding.dispatch-policy` arbitrates cross-mechanism:
 
-Phase 3 ships `dpopModule` and `mtlsModule` as independent grant-middleware contributors. **Deploying both simultaneously does NOT route through a single `dispatch-policy` arbitrator** — each module registers its own `tokenBindingMw` instance, the two run sequentially, and whichever runs **later** silently overwrites `req.tokenBinding`. The `intent-explicit` and `strict-mutual-exclusion` dispatch policies cannot arbitrate across module boundaries.
+- `"intent-explicit"` (default): explicit-intent mechanisms (DPoP) win over ambient mechanisms (mTLS) on a single request. ≥2 explicit-intent mechanisms succeeding → 400 `invalid_request`.
+- `"strict-mutual-exclusion"`: any 2+ mechanisms succeeding → 400 `invalid_request`.
 
-**Practical guidance for Phase 3:** enable **one** binding-mechanism module per deployment — either `dpopModule` or `mtlsModule`, not both. The single-mechanism deployment works correctly under either dispatch policy.
+Set it once at the application layer:
 
-A follow-up Phase 3 sub-PR will refactor the contribution surface so multiple mechanisms compose into a single `tokenBindingMw` instance and the dispatch policy applies across them. Until then, multi-mechanism configurations are unsupported.
+```hocon
+oauth.tokenBinding.dispatch-policy = "intent-explicit"   # or "strict-mutual-exclusion"
+```
+
+The key is declared by core's bundled config schema (single source of truth). It applies across all installed binding-mechanism modules.
 
 ## Source modes
 

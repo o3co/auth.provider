@@ -4,6 +4,25 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### Changed (Cross-mechanism dispatch refactor — 2026-05-19)
+
+- **Contribution shape migrated** from `grantMiddleware` to the new
+  `tokenBindingMechanisms` slot (declared by `@o3co/auth-provider-core`).
+  `mtlsModule` now contributes the raw `TokenBindingMechanism` and core
+  composes ONE `tokenBindingMw` from all installed binding-mechanism
+  modules so the configured `DispatchPolicy` arbitrates cross-module.
+  Resolves the §11.4 known limitation documented at Sub-PR 3b merge.
+  See `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+- **Removed `oauth.tokenBinding` declarations** from `mtlsConfigSchema`
+  and `reference.conf`. The `oauth.tokenBinding.dispatch-policy` key is
+  now owned by core's bundled config schema (single source of truth
+  across DPoP, mTLS, and future binding-mechanism modules).
+- **README**: "Known Limitations" section replaced with "Cross-mechanism
+  dispatch (DPoP + mTLS)" describing the unified DispatchPolicy
+  behavior. Composition root example updated to enable both modules.
+- The mTLS extractor + PKI chain validation themselves
+  (`createMtlsMechanism`, `validateCertChain`) are unchanged.
+
 ### Security (Phase 3 Sub-PR 3b — Copilot Critical regression)
 
 - **`validateCertChain` now requires explicit cryptographic signature verification at every hop.** Previously the chain walk used only `X509Certificate.checkIssued()` which performs DN / AKID / SKID / CA-bit matching but does NOT verify the signature (OpenSSL `X509_check_issued` documents this). An attacker omitting or crafting the AKID extension could forge a leaf with matching issuer DN and pass our chain validation without proving cryptographic relation to the trust anchor. Each hop now pairs `checkIssued` with `X509Certificate.verify(issuer.publicKey)`. Distinct audit reasons (`"trust anchor matched by DN but signature verification failed"` / `"intermediate matched by DN but signature verification failed"`) make the attack signal visible. Pinned by a new regression test using a committed attacker-leaf.pem fixture (same DN as the legit root, signed by a different key).

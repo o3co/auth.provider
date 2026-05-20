@@ -244,6 +244,7 @@ export type {
 	RouteContributionEntry,
 	RouteContributionFactory,
 	RouteHandler,
+	TokenBindingMechanismFactory,
 	TokenExchangeValidatorResolver,
 } from "./modules/index.mjs";
 export {

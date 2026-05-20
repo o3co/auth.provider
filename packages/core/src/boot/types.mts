@@ -32,6 +32,7 @@ import type { RequestHandler, Router } from "express";
 import type { z } from "zod";
 import type { LifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { AppConfig } from "../config/application.schema.mjs";
+import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
 	AuditHook,
@@ -102,6 +103,7 @@ export type ContributionKind =
 	| "routes"
 	| "grantPolicyHooks"
 	| "grantMiddleware"
+	| "tokenBindingMechanisms"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -434,6 +436,20 @@ export interface ContributionCollectorMap {
 	 * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
 	 */
 	readonly grantMiddleware?: ListCollector<RequestHandler | null>;
+	/**
+	 * Collector for `tokenBindingMechanisms` contributions. Each entry is a
+	 * `TokenBindingMechanism | null` returned by a
+	 * `TokenBindingMechanismFactory`. Null entries (disabled-by-config) are
+	 * filtered at consumption time in `assembleApp`.
+	 *
+	 * Unlike `grantMiddleware` which contributes pre-composed middleware,
+	 * this slot contributes raw mechanisms. `assembleApp` composes ONE
+	 * `tokenBindingMw` across all collected mechanisms so the configured
+	 * `DispatchPolicy` can arbitrate cross-module. See the cross-mechanism
+	 * dispatch refactor spec at
+	 * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+	 */
+	readonly tokenBindingMechanisms?: ListCollector<TokenBindingMechanism | null>;
 }
 
 /**
@@ -752,7 +768,12 @@ export interface ContributeAndOverrideSameKeyDetails {
 /** Per A2-β §6.1. */
 export interface ListShapedOverrideDetails {
 	readonly reason: "list-shaped-override-not-allowed";
-	readonly kind: "routes" | "auditHooks" | "grantPolicyHooks" | "grantMiddleware";
+	readonly kind:
+		| "routes"
+		| "auditHooks"
+		| "grantPolicyHooks"
+		| "grantMiddleware"
+		| "tokenBindingMechanisms";
 	readonly module: string;
 }
 
