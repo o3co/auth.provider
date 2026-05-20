@@ -5,3 +5,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    ignore:
+      # @simplewebauthn/server is pinned to an exact version (S12 discipline,
+      # see packages/webauthn/README.md). Only major bumps should surface as
+      # PRs so each upgrade is a deliberate security review.
+      - dependency-name: "@simplewebauthn/server"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
