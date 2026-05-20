@@ -10,8 +10,11 @@ All notable changes to this package will be documented in this file.
   in `@o3co/auth-provider-oauth` grants (`authorization.mts` and
   `refreshToken.mts`) was widened from `bindingIsDpop && isPublicClient`
   to `(bindingIsDpop || bindingIsMtls) && isPublicClient`. Public clients
-  authenticating with mTLS now receive both an AT carrying
-  `cnf.x5t#S256` AND an RT carrying `cnf.x5t#S256` (RFC 8705 §4 SHOULD).
+  presenting an mTLS certificate for token binding now receive both an
+  AT carrying `cnf.x5t#S256` AND an RT carrying `cnf.x5t#S256` (RFC
+  8705 §4 SHOULD). Note: this is RFC 8705 §3-§4 sender-constrained
+  *token binding*, not the RFC 8705 §2 mTLS *client authentication*
+  flow (which remains out of scope).
 - **mTLS refresh-time matrix (§9.2 mTLS rows)** added in
   `refreshToken.mts`, parallel to the existing DPoP matrix. Five rows
   enforce that an RT promising mTLS binding is only honored when the
