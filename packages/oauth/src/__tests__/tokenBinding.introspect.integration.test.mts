@@ -128,7 +128,15 @@ async function buildApp(
 	const keyStore = createSymmetricKeyStore(SECRET);
 
 	if (mechanisms.length > 0) {
+		// Mount path-scoped to mirror production composition
+		// (`assembleApp` mounts `tokenBindingMw` on `/oauth/token` only).
+		// Without the path scope the middleware would also fire on
+		// `/oauth/introspect` and stamp `req.tokenBinding`, which could
+		// mask a future regression where introspect reads `req.tokenBinding`
+		// instead of decoding the AT's `cnf` claim. The introspect handler
+		// MUST derive `cnf` from the JWT payload, not from request state.
 		app.use(
+			"/oauth/token",
 			tokenBindingMw({
 				mechanisms,
 				dispatchPolicy: "intent-explicit",

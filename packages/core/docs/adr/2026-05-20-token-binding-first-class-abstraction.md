@@ -2,10 +2,11 @@
 
 ## Status
 
-Accepted (2026-05-20). Implements the Wave 2 Token-binding Cluster (DPoP +
-mTLS + introspect cnf typing) — see
-`.claude/superpowers/specs/2026-05-18-wave-2-token-binding-cluster-spec.md`
-in the agent-scope.
+Accepted (2026-05-20). Implements the Wave 2 Token-binding Cluster
+(DPoP + mTLS + introspect cnf typing). The cluster spec lives in
+the internal agent-scope workspace alongside other planning material
+and is not shipped in the OSS repo; this ADR is the public summary
+of the load-bearing decisions.
 
 ## Context
 
