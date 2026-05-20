@@ -21,7 +21,8 @@ All notable changes to this package will be documented in this file.
   `dpopModule` now contributes the raw `TokenBindingMechanism` and core
   composes ONE `tokenBindingMw` from all installed binding-mechanism
   modules so the configured `DispatchPolicy` arbitrates cross-module.
-  See `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+  See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+  for the design rationale.
 - **Removed `oauth.tokenBinding` declarations** from `dpopConfigSchema`
   and `reference.conf`. The `oauth.tokenBinding.dispatch-policy` key is
   now owned by core's bundled config schema (single source of truth

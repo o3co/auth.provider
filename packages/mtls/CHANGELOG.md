@@ -61,7 +61,8 @@ All notable changes to this package will be documented in this file.
   composes ONE `tokenBindingMw` from all installed binding-mechanism
   modules so the configured `DispatchPolicy` arbitrates cross-module.
   Resolves the §11.4 known limitation documented at Sub-PR 3b merge.
-  See `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+  See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+  for the design rationale.
 - **Removed `oauth.tokenBinding` declarations** from `mtlsConfigSchema`
   and `reference.conf`. The `oauth.tokenBinding.dispatch-policy` key is
   now owned by core's bundled config schema (single source of truth
@@ -92,7 +93,7 @@ All notable changes to this package will be documented in this file.
 
 - **Single binding mechanism per deployment.** When both `dpopModule` and `mtlsModule` are enabled, each contributes its own independent `tokenBindingMw`; `dispatch-policy` cannot arbitrate across module boundaries and the second mechanism's binding silently overwrites the first. Enable one mechanism per AS until a follow-up sub-PR refactors the contribution surface. See README "Known Limitations" + spec §11.4.
 
-Implements the Phase 3 spec at `.claude/superpowers/specs/2026-05-18-wave-2-phase-3-mtls-spec.md` §13 T3b.
+Implements Wave 2 Phase 3 Sub-PR 3b per the internal design spec.
 
 ### Added (Phase 3 Sub-PR 3a)
 
@@ -103,4 +104,4 @@ Implements the Phase 3 spec at `.claude/superpowers/specs/2026-05-18-wave-2-phas
 - `ClientCertificate` type + `parseDerToCertificate`.
 - `MtlsError` + `MtlsReasonCode` union.
 
-Implements the Phase 3 spec at `.claude/superpowers/specs/2026-05-18-wave-2-phase-3-mtls-spec.md` §13 T3a.
+Implements Wave 2 Phase 3 Sub-PR 3a per the internal design spec.
