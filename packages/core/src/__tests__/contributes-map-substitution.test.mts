@@ -64,13 +64,12 @@ describe("AS-M1: same-package concrete substitutions in contributes-map", () => 
 });
 
 describe("AS-M1: cross-package types still deferred to Phase F", () => {
-	// Per spec (`auth/.claude/superpowers/specs/2026-05-05-as-export-pattern-batch.md`
-	// lines 197-199): substituting `FederationProvider` (session package)
-	// and `ExchangeTokenValidator` (oauth-token-exchange package) requires
+	// Substituting `FederationProvider` (session package) and
+	// `ExchangeTokenValidator` (oauth-token-exchange package) requires
 	// resolving a circular package-import concern. The pragmatic v0.5.1
 	// resolution leaves these two as `unknown`. These pins fail-closed if
-	// a future PR substitutes them without the documented cross-package
-	// mechanism.
+	// a future PR substitutes them without first resolving the cross-
+	// package import cycle.
 
 	it("FederationProvider is still `unknown` (Phase F deferral)", () => {
 		expectTypeOf<FederationProvider>().toEqualTypeOf<unknown>();

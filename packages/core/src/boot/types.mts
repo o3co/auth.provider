@@ -445,9 +445,9 @@ export interface ContributionCollectorMap {
 	 * Unlike `grantMiddleware` which contributes pre-composed middleware,
 	 * this slot contributes raw mechanisms. `assembleApp` composes ONE
 	 * `tokenBindingMw` across all collected mechanisms so the configured
-	 * `DispatchPolicy` can arbitrate cross-module. See the cross-mechanism
-	 * dispatch refactor spec at
-	 * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+	 * `DispatchPolicy` can arbitrate cross-module. See ADR
+	 * `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+	 * for the cross-mechanism design rationale.
 	 */
 	readonly tokenBindingMechanisms?: ListCollector<TokenBindingMechanism | null>;
 }

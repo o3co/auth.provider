@@ -323,8 +323,8 @@ export const CoreConfigSchema = z.object({
 		// `config.oauth.tokenBinding["dispatch-policy"]` and falls back to
 		// `"intent-explicit"` when absent.
 		//
-		// Per cross-mechanism dispatch refactor spec §4.2 at
-		// `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+		// See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+		// for the cross-mechanism design rationale.
 		tokenBinding: z
 			.object({
 				"dispatch-policy": z.enum(["intent-explicit", "strict-mutual-exclusion"]),

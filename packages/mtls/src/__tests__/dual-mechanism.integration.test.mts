@@ -30,8 +30,8 @@
  *            `tokenBindingMechanisms` contributions; dispatch-policy applies
  *            across mechanisms.
  *
- * Per cross-mechanism dispatch refactor spec §6.4 at
- * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+ * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+ * for the cross-mechanism design rationale.
  */
 
 import { createHash, X509Certificate } from "node:crypto";

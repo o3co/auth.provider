@@ -133,8 +133,6 @@ Deferred to subsequent waves:
 - RFC 8707 Stage 2 audience-restrict enforcement ([issue #173](https://github.com/o3co/auth.provider/issues/173))
 - Attestation root chain verification (Stage 2+)
 
-See `.claude/superpowers/specs/2026-05-12-wave-1-spec.md` §2 for the full Stage 1 contract.
-
 ## License
 
 Apache-2.0 © 1o1 Co. Ltd.

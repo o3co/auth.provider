@@ -132,8 +132,8 @@ export type GrantMiddlewareFactory<Deps> = (deps: Deps) => RequestHandler | null
  * (`intent-explicit` / `strict-mutual-exclusion`) arbitrate cross-module
  * when multiple mechanism modules (DPoP, mTLS, ...) are installed.
  *
- * Per Wave 2 Token-binding Cluster cross-mechanism dispatch refactor spec
- * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+ * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+ * for the cross-mechanism design rationale.
  */
 export type TokenBindingMechanismFactory<Deps> = (deps: Deps) => TokenBindingMechanism | null;
 
@@ -221,8 +221,8 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * config), but the list is allowed to contain multiple factories to
 	 * support a single module shipping multiple mechanisms.
 	 *
-	 * Per cross-mechanism dispatch refactor spec at
-	 * `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+	 * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+	 * for the cross-mechanism design rationale.
 	 */
 	readonly tokenBindingMechanisms?: readonly TokenBindingMechanismFactory<Deps>[];
 }

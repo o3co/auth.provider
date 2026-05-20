@@ -542,9 +542,9 @@ export function assembleApp(
 	// middleware. Multiple mechanism modules (DPoP, mTLS, ...) contribute
 	// raw mechanisms; core composes them into one middleware so the
 	// configured `DispatchPolicy` (`intent-explicit` / `strict-mutual-
-	// exclusion`) arbitrates across modules. See the cross-mechanism
-	// dispatch refactor spec at
-	// `.claude/superpowers/specs/2026-05-19-wave-2-cross-mechanism-dispatch-refactor-spec.md`.
+	// exclusion`) arbitrates across modules. See ADR
+	// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
+	// for the design rationale.
 	//
 	// Null entries (disabled-by-config) are filtered. When no mechanisms
 	// are contributed, no middleware is synthesized.

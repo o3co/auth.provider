@@ -105,7 +105,7 @@ location / {
 
 `$ssl_client_escaped_cert` is the URL-encoded PEM of the validated client leaf cert. The `cert-header-dialect = "plain-pem"` parser auto-decodes the percent-encoding.
 
-> **Note:** nginx does not emit Envoy-format XFCC. The Phase 3 `cert-header-dialect` enumeration is `"envoy" | "plain-pem"` — `"plain-pem"` is what nginx + similar minimal proxies should use, NOT an nginx-specific XFCC variant (which is out of scope for Stage 1 — see [#1.3 of the spec](../../.claude/superpowers/specs/2026-05-18-wave-2-phase-3-mtls-spec.md)).
+> **Note:** nginx does not emit Envoy-format XFCC. The Phase 3 `cert-header-dialect` enumeration is `"envoy" | "plain-pem"` — `"plain-pem"` is what nginx + similar minimal proxies should use, NOT an nginx-specific XFCC variant (which is out of scope for Stage 1).
 >
 > To strip any inbound header before nginx injects its own, add `proxy_set_header X-Forwarded-Client-Cert "";` to a higher-priority location, or use a sanitization filter on the upstream.
 

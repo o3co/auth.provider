@@ -120,7 +120,9 @@ registration. HOCON `${?ENV_VAR}` substitution returns a string when the variabl
 
 ## Implementation reference
 
-- Spec: `.claude/superpowers/specs/2026-05-13-reference-conf-shipping.md`
+- The internal design spec lives in the agent-scope workspace, not in
+  the OSS repo. This ADR is the public summary of the load-bearing
+  decisions.
 - PR commits: TBD (filled in at release tag time per release-policy R6 step 5).
 
 ## Related
