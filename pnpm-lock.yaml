@@ -430,8 +430,8 @@ importers:
         specifier: ^1.19.0
         version: 1.19.0
       helmet:
-        specifier: ^8.1.0
-        version: 8.1.0
+        specifier: ^8.2.0
+        version: 8.2.0
       ioredis:
         specifier: ^5.4.1
         version: 5.10.1
@@ -1716,8 +1716,8 @@ packages:
   headers-polyfill@5.0.1:
     resolution: {integrity: sha512-1TJ6Fih/b8h5TIcv+1+Hw0PDQWJTKDKzFZzcKOiW1wJza3XoAQlkCuXLbymPYB8+ZQyw8mHvdw560e8zVFIWyA==}
 
-  helmet@8.1.0:
-    resolution: {integrity: sha512-jOiHyAZsmnr8LqoPGmCjYAaiuWwjAPLgY8ZX2XrmHawt99/u1y6RgrZMTeoPfpUbV96HOalYgz1qzkRbw54Pmg==}
+  helmet@8.2.0:
+    resolution: {integrity: sha512-DRgTIUgnWcJ62KyarxxziuqYxKGnR6Rgg19BlbucN/dpmJbl1XOit6qvoOX0ZT+HhWe5OUVhU/a1zpGyc1xA0Q==}
     engines: {node: '>=18.0.0'}
 
   html-escaper@2.0.2:
@@ -3805,7 +3805,7 @@ snapshots:
       '@types/set-cookie-parser': 2.4.10
       set-cookie-parser: 3.1.0
 
-  helmet@8.1.0: {}
+  helmet@8.2.0: {}
 
   html-escaper@2.0.2: {}
 
