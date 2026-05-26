@@ -46,8 +46,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@o3co/ts.hocon':
-        specifier: ^1.2.0
-        version: 1.2.0(zod@4.4.3)
+        specifier: ^1.5.2
+        version: 1.5.2(zod@4.4.3)
       '@types/bcrypt':
         specifier: ^6.0.0
         version: 6.0.0
@@ -418,8 +418,8 @@ importers:
         specifier: ^0.0.4
         version: 0.0.4(express@5.2.1)(pino@10.3.1)
       '@o3co/ts.hocon':
-        specifier: ^1.2.0
-        version: 1.2.0(zod@4.4.3)
+        specifier: ^1.5.2
+        version: 1.5.2(zod@4.4.3)
       connect-redis:
         specifier: ^9.0.0
         version: 9.0.0(express-session@1.19.0)(redis@5.12.1)
@@ -820,8 +820,8 @@ packages:
       pino:
         optional: true
 
-  '@o3co/ts.hocon@1.2.0':
-    resolution: {integrity: sha512-xRSWWhNxyn/O9S2DvrQUW67oDXorYs1pgyeD86sc/tPjIomP6blNUgC8M4vOwBwEPYrk3c4dVEPNtfaob/t8tw==}
+  '@o3co/ts.hocon@1.5.2':
+    resolution: {integrity: sha512-D/Bp5UsZo+Y9KpJ8XW4oflrM/E54Mxi+DKOYUEIRrognVnhUvbglYrt2gu8fKbTNQtu3VfxxO9wdvqa3OQ0KNA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: '>=4.0.0'
@@ -2876,7 +2876,7 @@ snapshots:
     optionalDependencies:
       pino: 10.3.1
 
-  '@o3co/ts.hocon@1.2.0(zod@4.4.3)':
+  '@o3co/ts.hocon@1.5.2(zod@4.4.3)':
     optionalDependencies:
       zod: 4.4.3
 
