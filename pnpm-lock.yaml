@@ -46,8 +46,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@o3co/ts.hocon':
-        specifier: ^1.2.0
-        version: 1.2.0(zod@4.4.3)
+        specifier: ^1.7.0
+        version: 1.7.0(zod@4.4.3)
       '@types/bcrypt':
         specifier: ^6.0.0
         version: 6.0.0
@@ -418,8 +418,8 @@ importers:
         specifier: ^0.0.4
         version: 0.0.4(express@5.2.1)(pino@10.3.1)
       '@o3co/ts.hocon':
-        specifier: ^1.2.0
-        version: 1.2.0(zod@4.4.3)
+        specifier: ^1.7.0
+        version: 1.7.0(zod@4.4.3)
       connect-redis:
         specifier: ^9.0.0
         version: 9.0.0(express-session@1.19.0)(redis@5.12.1)
@@ -820,8 +820,8 @@ packages:
       pino:
         optional: true
 
-  '@o3co/ts.hocon@1.2.0':
-    resolution: {integrity: sha512-xRSWWhNxyn/O9S2DvrQUW67oDXorYs1pgyeD86sc/tPjIomP6blNUgC8M4vOwBwEPYrk3c4dVEPNtfaob/t8tw==}
+  '@o3co/ts.hocon@1.7.0':
+    resolution: {integrity: sha512-xUYR/On4kkUsen8vueBjuTjPthKXt9Ezztc7CAMTLvSB4iwe66DYBkS5DUJcgq8x8UFll4t6s5CV4K87atcJSA==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: '>=4.0.0'
@@ -2399,6 +2399,10 @@ packages:
     resolution: {integrity: sha512-pn99VhoACYR8nFHhxqix+uvsbXineAasWm5ojXoN8xEwK5Kd3/TrhNn1wByuD52UxWRLy8pu+kRMniEi6Eq9Zg==}
     engines: {node: '>=12.0.0'}
 
+  tinyglobby@0.2.17:
+    resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
+    engines: {node: '>=12.0.0'}
+
   tinyrainbow@3.1.0:
     resolution: {integrity: sha512-Bf+ILmBgretUrdJxzXM0SgXLZ3XfiaUuOj/IKQHuTXip+05Xn+uyEYdVg0kYDipTBcLrCVyUzAPz7QmArb0mmw==}
     engines: {node: '>=14.0.0'}
@@ -2876,7 +2880,7 @@ snapshots:
     optionalDependencies:
       pino: 10.3.1
 
-  '@o3co/ts.hocon@1.2.0(zod@4.4.3)':
+  '@o3co/ts.hocon@1.7.0(zod@4.4.3)':
     optionalDependencies:
       zod: 4.4.3
 
@@ -4565,6 +4569,11 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.4)
       picomatch: 4.0.4
 
+  tinyglobby@0.2.17:
+    dependencies:
+      fdir: 6.5.0(picomatch@4.0.4)
+      picomatch: 4.0.4
+
   tinyrainbow@3.1.0: {}
 
   tldts-core@7.0.30: {}
@@ -4638,7 +4647,7 @@ snapshots:
       picomatch: 4.0.4
       postcss: 8.5.15
       rolldown: 1.0.0-rc.18
-      tinyglobby: 0.2.16
+      tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 25.9.1
       esbuild: 0.28.0
