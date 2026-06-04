@@ -56,7 +56,7 @@
 		"@o3co/auth-provider-dpop": "workspace:*",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.0",
-		"@vitest/coverage-v8": "^4.1.6",
+		"@vitest/coverage-v8": "^4.1.8",
 		"express": "^5.0.0",
 		"jose": "^6.2.2",
 		"supertest": "^7.2.2",
