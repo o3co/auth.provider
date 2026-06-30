@@ -95,6 +95,31 @@ describe("JWKS path resolution", () => {
 	});
 });
 
+describe("createRouter input validation (direct callers bypass the schema)", () => {
+	const ks = createSymmetricKeyStore("test-secret");
+
+	it("throws on a non-absolute path", () => {
+		expect(() => createRouter(createMockExpress(), ks, { path: "keys/jwks.json" })).toThrow(
+			/absolute path/,
+		);
+	});
+
+	it("throws on a negative or non-integer cacheMaxAgeSeconds", () => {
+		expect(() => createRouter(createMockExpress(), ks, { cacheMaxAgeSeconds: -1 })).toThrow(
+			/non-negative integer/,
+		);
+		expect(() => createRouter(createMockExpress(), ks, { cacheMaxAgeSeconds: 1.5 })).toThrow(
+			/non-negative integer/,
+		);
+	});
+
+	it("accepts a valid absolute path and a 0 max-age", () => {
+		expect(() =>
+			createRouter(createMockExpress(), ks, { path: "/keys/jwks.json", cacheMaxAgeSeconds: 0 }),
+		).not.toThrow();
+	});
+});
+
 describe("JWKS cache max-age resolution", () => {
 	it("defaults to 300 seconds", () => {
 		expect(DEFAULT_JWKS_CACHE_MAX_AGE).toBe(300);

@@ -40,15 +40,24 @@ export interface JwksRouterOptions {
 
 /**
  * Build the JWKS publishing Router. The router registers `path` as an
- * **absolute** path internally, so consumers MUST mount the router at the
- * application root (`app.use(createRouter(express, keyStore))`) — NOT under
- * a path prefix. Mounting at a prefix (e.g. `/auth`) would expose
- * `/auth${path}`, which no verifier looks up and which diverges from the
- * `jwks_uri` OIDC discovery advertises. (This is also why the core
- * `jwksModule` mounts at "/".)
+ * **absolute** path internally, so the effective endpoint is the router's
+ * mount point + `path`. Mount at the application root (`app.use(createRouter(
+ * express, keyStore))`) for the common case. Prefix-mounting (e.g.
+ * `app.use("/auth", createRouter(...))`) is valid only when the advertised
+ * `jwks_uri` carries the same base path — typically because the issuer
+ * identifier itself has that prefix (`jwks_uri = ${issuer}${path}`). If the
+ * mount prefix and the issuer prefix disagree, discovery advertises a
+ * `jwks_uri` that does not resolve. (The core `jwksModule` mounts at "/" and
+ * relies on the issuer prefix to carry any base path.)
  *
  * The response carries `Cache-Control: public, max-age=<cacheMaxAgeSeconds>`
  * (JWKS is public data and the most-polled verifier endpoint).
+ *
+ * Direct callers bypass the config schema, so `path` and `cacheMaxAgeSeconds`
+ * are validated here and the factory throws on misconfiguration (a non-
+ * absolute path or a negative / non-integer cache age) — failing fast at
+ * boot rather than registering an unexpected route or emitting an invalid
+ * `Cache-Control` header.
  */
 export const createRouter = (
 	express: { Router: () => Router },
@@ -56,7 +65,17 @@ export const createRouter = (
 	opts: JwksRouterOptions = {},
 ): Router => {
 	const path = opts.path ?? DEFAULT_JWKS_PATH;
+	if (!path.startsWith("/")) {
+		throw new Error(
+			`createJwksRouter: path must be an absolute path beginning with "/", got ${JSON.stringify(path)}`,
+		);
+	}
 	const cacheMaxAgeSeconds = opts.cacheMaxAgeSeconds ?? DEFAULT_JWKS_CACHE_MAX_AGE;
+	if (!Number.isInteger(cacheMaxAgeSeconds) || cacheMaxAgeSeconds < 0) {
+		throw new Error(
+			`createJwksRouter: cacheMaxAgeSeconds must be a non-negative integer, got ${cacheMaxAgeSeconds}`,
+		);
+	}
 	const router = express.Router();
 
 	const cacheControl = `public, max-age=${cacheMaxAgeSeconds}`;

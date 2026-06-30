@@ -34,23 +34,34 @@ export interface OidcConfigRouterOptions {
 	 */
 	logoutSupported?: boolean;
 	/**
-	 * Absolute path (relative to the issuer origin) at which the JWKS is
-	 * published, used to build the advertised `jwks_uri`. Defaults to
-	 * `/.well-known/jwks.json`. oauthModule resolves this via the shared
-	 * core `resolveJwksPath` so the advertised URI matches the path the core
-	 * `jwksModule` actually registers. Direct callers who publish JWKS at a
-	 * non-default path MUST set this so discovery does not advertise a
-	 * dangling `jwks_uri`.
+	 * Absolute path appended to the issuer identifier (after trailing-slash
+	 * trimming) to build the advertised `jwks_uri` — i.e. `jwks_uri =
+	 * ${issuer}${jwksPath}`, so when the issuer itself has a path prefix the
+	 * JWKS URI inherits it. Defaults to `/.well-known/jwks.json`. oauthModule
+	 * resolves this via the shared core `resolveJwksPath` so the advertised
+	 * URI matches the path the core `jwksModule` actually registers. Direct
+	 * callers who publish JWKS at a non-default path MUST set this (an absolute
+	 * path beginning with "/") so discovery does not advertise a dangling
+	 * `jwks_uri`.
 	 */
 	jwksPath?: string;
 }
 
 export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions): Router {
+	// Validate jwksPath at router-creation (boot) time so a misconfigured
+	// direct caller fails fast rather than serving a discovery document whose
+	// `jwks_uri` is malformed. oauthModule always passes a schema-validated,
+	// `resolveJwksPath`-resolved value, so this never fires on the config path.
+	const jwksPath = opts.jwksPath ?? DEFAULT_JWKS_PATH;
+	if (!jwksPath.startsWith("/")) {
+		throw new Error(
+			`OIDC discovery: jwksPath must be an absolute path beginning with "/", got ${JSON.stringify(jwksPath)}`,
+		);
+	}
 	const router = express.Router();
 
 	router.get("/.well-known/openid-configuration", (_req: Request, res: Response) => {
 		const iss = opts.issuer.replace(/\/+$/, "");
-		const jwksPath = opts.jwksPath ?? DEFAULT_JWKS_PATH;
 		return res.status(200).json({
 			// Return the normalized issuer so it matches the `iss` claim minted
 			// on tokens (both use trailing-slash-stripped form). Returning the
