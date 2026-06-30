@@ -224,12 +224,14 @@ describe("standalone smoke test", () => {
 
 	it("issuer-configured buildModules serves the advertised jwks_uri (discovery <-> JWKS presence contract)", async () => {
 		// Guards the cross-module contract end-to-end against the REAL composition
-		// root: oauthModule advertises `jwks_uri` in discovery, while the JWKS
-		// route is mounted by core's `jwksModule`. If `buildModules` ever drops
-		// `jwksModule`, discovery would advertise a path that 404s — this test
-		// fails (RED) in that case. (The oauth package's integration test
-		// hand-composes both modules, so only a scaffold-level test like this can
-		// catch the composition root forgetting to wire jwksModule.)
+		// root: core's `jwksModule` contributes `jwks_uri` to discovery AND mounts
+		// the JWKS route, while `oauthModule` contributes the provider endpoints;
+		// core's aggregator assembles the document. If `buildModules` ever drops
+		// `jwksModule`, the issuer-configured composition now fails the discovery
+		// presence contract at boot (missing `jwks_uri`) — this test fails (RED) in
+		// that case. (The oauth package's integration test hand-composes both
+		// modules, so only a scaffold-level test like this can catch the
+		// composition root forgetting to wire jwksModule.)
 		const issuerConfig: AppConfig = {
 			...config,
 			oauth: {

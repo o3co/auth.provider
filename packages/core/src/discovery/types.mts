@@ -1,0 +1,44 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * A partial OIDC discovery document contributed by an endpoint-owning module
+ * (oauth, jwks, future PAR / device-authorization, …). The boot planner
+ * aggregates every module's `discoveryMetadata` contribution into the single
+ * `/.well-known/openid-configuration` document via {@link buildDiscoveryDocument}.
+ *
+ * Splitting `endpoints` (issuer-relative paths the aggregator prefixes) from
+ * `metadata` (literal fields) lets the aggregator own issuer-relative URL
+ * construction while modules stay agnostic of the deployment's issuer origin.
+ */
+export interface DiscoveryMetadata {
+	/**
+	 * Endpoint paths RELATIVE to the issuer identifier. The aggregator emits
+	 * `${issuer}${path}` under the given discovery field name (e.g.
+	 * `authorization_endpoint`, `jwks_uri`). Each path MUST be absolute
+	 * (begin with "/"). Two modules contributing the same field must resolve
+	 * to the same URL, else boot fails.
+	 */
+	readonly endpoints?: { readonly [field: string]: string };
+	/**
+	 * Literal discovery fields merged as-is. Array values are concatenated and
+	 * de-duplicated across contributions (first-seen order preserved); scalar
+	 * values from two contributions must agree, else boot fails. Must NOT carry
+	 * a reserved field (`issuer`, `id_token_signing_alg_values_supported`) — the
+	 * aggregator owns those — nor a field already provided via `endpoints`.
+	 */
+	readonly metadata?: { readonly [field: string]: unknown };
+}

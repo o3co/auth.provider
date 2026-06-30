@@ -29,6 +29,8 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
+import { buildDiscoveryDocument, contributesProviderSurface } from "../discovery/buildDocument.mjs";
+import type { DiscoveryMetadata } from "../discovery/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import {
 	type DispatchPolicy,
@@ -591,6 +593,54 @@ export function assembleApp(
 				router.use("/oauth/token", mw);
 			}
 		}
+	}
+
+	// Synthesize the single OIDC discovery document from the
+	// `discoveryMetadata` collector and mount it at the spec-fixed path
+	// `/.well-known/openid-configuration`. The aggregator owns `issuer`
+	// (trailing-slash normalized) and `id_token_signing_alg_values_supported`
+	// (from `keyStore.algorithm`); endpoint-owning modules contribute the
+	// issuer-relative endpoints + literal metadata they advertise.
+	//
+	// Gated on TWO conditions, both required:
+	//   1. An issuer is configured — without it the deployment is not an OIDC
+	//      provider, so no discovery document is served (mirrors the
+	//      pre-aggregator gating that lived in the oauth module).
+	//   2. A provider-defining endpoint (authorization_endpoint) was contributed
+	//      — `contributesProviderSurface`. A composition that wires no
+	//      discovery-contributing module, OR only an ancillary contributor like
+	//      the JWKS module (which contributes just `jwks_uri`), is not an OpenID
+	//      Provider: it boots cleanly and serves nothing. This is what lets a
+	//      key-publishing deployment mount JWKS without the full OAuth suite even
+	//      with an issuer configured.
+	//
+	// Once the provider surface IS contributed, the structural presence contract
+	// bites: `buildDiscoveryDocument` is called at boot, so a composition that
+	// declares a provider but is missing an OIDC-required field (e.g. the OAuth
+	// module is wired but the JWKS module that owns `jwks_uri` is absent) throws
+	// `DiscoveryDocumentError` here and fails the boot fast rather than serving a
+	// malformed document.
+	const issuerConfig = (frozen.components as Record<string, unknown>).config as
+		| { oauth?: { jwt?: { issuer?: unknown } } }
+		| undefined;
+	const issuerValue = issuerConfig?.oauth?.jwt?.issuer;
+	const discoveryCollector = frozen.registries.get("discoveryMetadata") as
+		| ListCollector<DiscoveryMetadata>
+		| undefined;
+	const discoveryItems = discoveryCollector !== undefined ? [...discoveryCollector.values()] : [];
+	if (
+		typeof issuerValue === "string" &&
+		issuerValue.length > 0 &&
+		contributesProviderSurface(discoveryItems)
+	) {
+		const keyStore = (frozen.components as Record<string, unknown>).keyStore as
+			| { algorithm?: unknown }
+			| undefined;
+		const signingAlgs = typeof keyStore?.algorithm === "string" ? [keyStore.algorithm] : [];
+		const doc = buildDiscoveryDocument(discoveryItems, { issuer: issuerValue, signingAlgs });
+		router.get("/.well-known/openid-configuration", (_req, res) => {
+			res.status(200).json(doc);
+		});
 	}
 
 	// Mount each route contribution in mount-index order.

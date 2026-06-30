@@ -5,14 +5,17 @@ import type { ProviderDeps } from "../provider.mjs";
 // Local fixture deps — does NOT augment shared ComponentMap.
 type LocalDeps = { readonly _localCfg: { readonly url: string } };
 
-test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms", () => {
+test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBindingMechanisms + discoveryMetadata", () => {
 	// Per A2-α §4.1 baseline declares 7 kinds. A5 (Phase 7) adds
 	// `federationRedirectPolicies` via `declare module` augmentation in the
 	// session package. Wave 2 Phase 1 retro (Phase 2 DPoP spec §11.1) adds
 	// `grantMiddleware` as the 8th kind. Cross-mechanism dispatch refactor
 	// (Wave 2 Phase 3 follow-up) adds `tokenBindingMechanisms` as the 9th
 	// kind so multiple binding-mechanism modules can compose into a single
-	// `tokenBindingMw` with a unified `DispatchPolicy`.
+	// `tokenBindingMw` with a unified `DispatchPolicy`. The OIDC discovery
+	// aggregator adds `discoveryMetadata` as the 10th kind so endpoint-owning
+	// modules contribute their slice of the
+	// `/.well-known/openid-configuration` document, which core synthesizes.
 	type Keys = keyof ContributesMap<LocalDeps>;
 	expectTypeOf<Keys>().toEqualTypeOf<
 		| "grants"
@@ -24,6 +27,7 @@ test("ContributesMap has all 7 v0.5.0 base kinds plus grantMiddleware + tokenBin
 		| "grantPolicyHooks"
 		| "grantMiddleware"
 		| "tokenBindingMechanisms"
+		| "discoveryMetadata"
 	>();
 });
 

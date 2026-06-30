@@ -19,6 +19,7 @@ export type {
 	AuditHook,
 	AuditHookFactory,
 	ContributesMap,
+	DiscoveryMetadataFactory,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
 	FederationFactory,

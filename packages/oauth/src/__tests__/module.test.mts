@@ -145,23 +145,28 @@ describe("oauthModule — manifest shape", () => {
 		expect((routes as unknown[]).length).toBe(1);
 	});
 
-	it("includes oauth-endpoints + oidc-discovery when issuer is configured", () => {
+	it("contributes a single oauth-endpoints route regardless of issuer (discovery is core-aggregated)", () => {
+		// Discovery is no longer an oauth ROUTE; oauth contributes a
+		// `discoveryMetadata` slice instead, which core's assembleApp aggregates
+		// into `/.well-known/openid-configuration`. So oauth always contributes
+		// exactly one route (oauth-endpoints), issuer or not.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
-			oauth: {
-				...base.oauth,
-				jwt: {
-					...base.oauth.jwt,
-					issuer: "https://auth.example.com",
-				},
-			},
+			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" } },
 		};
 		const module = oauthModule({ config });
 		const routes = module.contributes?.routes;
 		expect(Array.isArray(routes)).toBe(true);
-		// oauth-endpoints + oidc-discovery (JWKS is contributed by core jwksModule)
-		expect((routes as unknown[]).length).toBe(2);
+		expect((routes as unknown[]).length).toBe(1);
+	});
+
+	it("contributes a single discoveryMetadata factory (issuer-independent; core gates emission)", () => {
+		const config = makeValidAppConfig();
+		const module = oauthModule({ config });
+		const discoveryMetadata = module.contributes?.discoveryMetadata;
+		expect(Array.isArray(discoveryMetadata)).toBe(true);
+		expect((discoveryMetadata as unknown[]).length).toBe(1);
 	});
 });
 
@@ -216,21 +221,21 @@ describe("oauthModule — createTestApp route inspection", () => {
 		await handle.dispose();
 	});
 
-	it("registers both oauth-endpoints and oidc-discovery routes when issuer is set", async () => {
+	it("contributes no oidc-discovery route even with an issuer; core mounts discovery from aggregated metadata", async () => {
+		// Discovery is now mounted by core's assembleApp from the aggregated
+		// `discoveryMetadata` collector — it is NOT an oauth route contribution,
+		// so it never appears in the inspected route ids. jwksModule is co-installed
+		// so the issuer-enabled composition forms a valid discovery document
+		// (jwks owns `jwks_uri`); without it boot fails the presence contract.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
-			oauth: {
-				...base.oauth,
-				jwt: {
-					...base.oauth.jwt,
-					issuer: "https://auth.example.com",
-				},
-			},
+			oauth: { ...base.oauth, jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com" } },
 		};
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
@@ -239,7 +244,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 		});
 		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
 		expect(routeIds).toContain("oauth-endpoints");
-		expect(routeIds).toContain("oidc-discovery");
+		expect(routeIds).not.toContain("oidc-discovery");
 		await handle.dispose();
 	});
 
@@ -259,13 +264,10 @@ describe("oauthModule — createTestApp route inspection", () => {
 		await handle.dispose();
 	});
 
-	it("oidc-discovery serves the spec-fixed /.well-known/openid-configuration path", async () => {
-		// Behavioral, not just shape: the legacy `mountPath: "/.well-known/openid-
-		// configuration"` paired with the router's internal
-		// `router.get("/.well-known/openid-configuration", ...)` produced a
-		// double-pathed handler at `/.well-known/openid-configuration/.well-
-		// known/openid-configuration` — the standard endpoint returned 404. This
-		// test mounts the contribution and probes the actual path.
+	it("core serves the spec-fixed /.well-known/openid-configuration when oauth + jwks + issuer compose", async () => {
+		// End-to-end: oauth contributes its endpoints + metadata, jwks contributes
+		// `jwks_uri`, core aggregates and mounts the document at the spec-fixed
+		// path (no path-doubling). Probes the actual path.
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -277,6 +279,7 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
@@ -338,6 +341,44 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const res = await request(app).get(jwksPath);
 		expect(res.status).toBe(200);
 		expect(Array.isArray(res.body.keys)).toBe(true);
+		await handle.dispose();
+	});
+
+	it("aggregated discovery document matches the pre-refactor golden field set (no-logout composition)", async () => {
+		// Equivalence guard for the oauth-owned → aggregator migration: with oauth
+		// + jwks + issuer (and no session stores → logout omitted), the assembled
+		// `/.well-known/openid-configuration` must carry exactly the fields the
+		// legacy oauth-owned `OpenidConfiguration.createRouter` produced.
+		const config = issuerConfig();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				jwksModule,
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const { body } = await request(app).get("/.well-known/openid-configuration");
+		const iss = "https://auth.example.com";
+		expect(body).toEqual({
+			issuer: iss,
+			authorization_endpoint: `${iss}/oauth/authorize`,
+			token_endpoint: `${iss}/oauth/token`,
+			userinfo_endpoint: `${iss}/oauth/userinfo`,
+			jwks_uri: `${iss}/.well-known/jwks.json`,
+			introspection_endpoint: `${iss}/oauth/introspect`,
+			response_types_supported: ["code"],
+			subject_types_supported: ["public"],
+			// keyStoreModule signs HS256, so the aggregator advertises exactly that.
+			id_token_signing_alg_values_supported: ["HS256"],
+			scopes_supported: ["openid", "profile", "email", "groups"],
+			token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
+			code_challenge_methods_supported: ["S256"],
+		});
 		await handle.dispose();
 	});
 
@@ -573,6 +614,9 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// Issuer is configured, so the discovery presence contract requires
+				// the JWKS-owning module to be co-installed (it contributes jwks_uri).
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreWithSecret,

@@ -21,11 +21,9 @@ import {
 	type FederationProviderHandle,
 	type Module,
 	type ProviderDeps,
-	resolveJwksPath,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
-import * as oidcConfig from "./routes/OpenidConfiguration.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 
 /**
@@ -69,9 +67,14 @@ const oauthConfigSchema = z.object({
  * All dependencies now flow through the typed DI graph (`requires` / `optional`).
  *
  * Route contributions (Amendment 1):
- *   - "oauth-endpoints" @ /oauth — always contributed.
- *   - "oidc-discovery"  @ /.well-known/openid-configuration — conditional on
- *     config.oauth.jwt.issuer being a non-empty string.
+ *   - "oauth-endpoints" @ /oauth — the only route, always contributed.
+ *
+ * OIDC discovery is NO LONGER an oauth route. oauth instead contributes a
+ * `discoveryMetadata` slice (its issuer-relative endpoints + capability
+ * metadata); core's `assembleApp` aggregates every module's `discoveryMetadata`
+ * (oauth's endpoints, the jwksModule's `jwks_uri`) into the single
+ * `/.well-known/openid-configuration` document, mounting it only when an issuer
+ * is configured.
  *
  * The v0.4.x lazy closure `() => context.federationProviders` is REMOVED.
  * `deps.federationProviders` is the typed, stable read at factory invocation
@@ -89,10 +92,7 @@ const oauthConfigSchema = z.object({
  * Theme D (immutability — const defineModule, no ctx mutation),
  * Theme E (structural temporal contracts — stable deps closure replaces lazy getter).
  */
-export const oauthModule = (params: { config: AppConfig }): Module => {
-	const issuer = (params.config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
-	const hasIssuer = typeof issuer === "string" && issuer.length > 0;
-
+export const oauthModule = (_params: { config: AppConfig }): Module => {
 	// Inline route factories so `defineModule` infers the typed `deps`
 	// shape from `requires` / `optional` (ProviderDeps<R, O>). Splitting
 	// them into a typed const array would require restating R / O at the
@@ -182,73 +182,77 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 					});
 					return { id: "oauth-endpoints", mountPath: "/oauth", handler: router };
 				},
-				// JWKS is contributed by the core `jwksModule` (key-management layer,
-				// depends only on keyStore), NOT here — so a provider can publish its
-				// verification keys without the full OAuth grant suite, and discovery
-				// stays free of a feature it does not own. The discovery `jwks_uri`
-				// below and the core JWKS route both resolve the path through
-				// `resolveJwksPath`, so they cannot drift. See core/src/jwks/.
-				//
-				// oidc-discovery — conditional on config.oauth.jwt.issuer (Theme E:
-				// structural conditional evaluated at boot, not at request time).
-				// When issuer is absent, the factory short-circuits with a no-op
-				// contribution that the planner detects and elides.
-				...(hasIssuer
-					? [
-							(
-								deps: ProviderDeps<
-									| "config"
-									| "clientRepository"
-									| "codeRepository"
-									| "keyStore"
-									| "grantHandlerResolver",
-									| "rateLimiter"
-									| "auditSink"
-									| "grantPolicy"
-									| "refreshTokenFamilyRevocation"
-									| "accessTokenDenylist"
-									| "userSessionStore"
-									| "sessionRPRegistry"
-									| "sessionFamilyIndex"
-									| "sessionFederationIndex"
-									| "federationTokenStore"
-									| "federationProviders"
-									| "logger"
-								>,
-							) => {
-								const logoutSupported =
-									!!deps.userSessionStore &&
-									!!deps.sessionRPRegistry &&
-									!!deps.sessionFamilyIndex &&
-									!!deps.sessionFederationIndex &&
-									!!deps.federationTokenStore &&
-									!!deps.refreshTokenFamilyRevocation;
-								return {
-									id: "oidc-discovery",
-									// The OIDC discovery path `/.well-known/openid-configuration`
-									// is fixed by the spec, so `oidcConfig.createRouter` registers
-									// the absolute path inside the router itself (kept that way
-									// to preserve the public createRouter contract — direct
-									// callers do `app.use(createRouter(...))`). Mount at "/" to
-									// avoid composing the path twice; otherwise express produces
-									// `/.well-known/openid-configuration/.well-known/openid-
-									// configuration` and the standard endpoint returns 404.
-									mountPath: "/",
-									handler: oidcConfig.createRouter(express, {
-										issuer: issuer as string,
-										signingAlgs: [deps.keyStore.algorithm],
-										logoutSupported,
-										// Resolve via the shared core helper so the advertised
-										// jwks_uri always matches the path the core jwksModule
-										// registers (single source of truth — cannot drift).
-										jwksPath: resolveJwksPath(
-											deps.config as { oauth?: { jwt?: { jwksPath?: unknown } } },
-										),
-									}),
-								};
-							},
-						]
-					: []),
+			],
+			// OIDC discovery contribution. core's `assembleApp` merges this with every
+			// other module's `discoveryMetadata` (notably the core jwksModule's
+			// `jwks_uri`) into the single `/.well-known/openid-configuration` document,
+			// prefixing the issuer-relative endpoint paths and owning `issuer` +
+			// `id_token_signing_alg_values_supported`. core gates the document on a
+			// configured issuer, so oauth contributes unconditionally — the document is
+			// simply not emitted when no issuer is set.
+			//
+			// `jwks_uri` is deliberately NOT contributed here: it is a key-management
+			// concern owned by the core jwksModule, so a provider can publish
+			// verification keys without the full OAuth grant suite and the advertised
+			// URI never drifts from the registered JWKS route. See core/src/jwks/.
+			discoveryMetadata: [
+				(
+					deps: ProviderDeps<
+						"config" | "clientRepository" | "codeRepository" | "keyStore" | "grantHandlerResolver",
+						| "rateLimiter"
+						| "auditSink"
+						| "grantPolicy"
+						| "refreshTokenFamilyRevocation"
+						| "accessTokenDenylist"
+						| "userSessionStore"
+						| "sessionRPRegistry"
+						| "sessionFamilyIndex"
+						| "sessionFederationIndex"
+						| "federationTokenStore"
+						| "federationProviders"
+						| "logger"
+					>,
+				) => {
+					// Logout discovery fields are advertised only when every session store
+					// backing the logout cascade is wired. Issuer gating lives in core, so
+					// this is purely the store-presence check.
+					const logoutSupported =
+						!!deps.userSessionStore &&
+						!!deps.sessionRPRegistry &&
+						!!deps.sessionFamilyIndex &&
+						!!deps.sessionFederationIndex &&
+						!!deps.federationTokenStore &&
+						!!deps.refreshTokenFamilyRevocation;
+					return {
+						endpoints: {
+							authorization_endpoint: "/oauth/authorize",
+							token_endpoint: "/oauth/token",
+							userinfo_endpoint: "/oauth/userinfo",
+							introspection_endpoint: "/oauth/introspect",
+							...(logoutSupported ? { end_session_endpoint: "/oauth/logout" } : {}),
+						},
+						metadata: {
+							response_types_supported: ["code"],
+							subject_types_supported: ["public"],
+							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
+							scopes_supported: ["openid", "profile", "email", "groups"],
+							token_endpoint_auth_methods_supported: [
+								"client_secret_basic",
+								"client_secret_post",
+								"none",
+							],
+							code_challenge_methods_supported: ["S256"],
+							...(logoutSupported
+								? {
+										backchannel_logout_supported: true,
+										backchannel_logout_session_supported: true,
+										frontchannel_logout_supported: true,
+										frontchannel_logout_session_supported: true,
+									}
+								: {}),
+						},
+					};
+				},
 			],
 		},
 	});

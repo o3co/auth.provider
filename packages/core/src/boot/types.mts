@@ -32,6 +32,7 @@ import type { RequestHandler, Router } from "express";
 import type { z } from "zod";
 import type { LifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { AppConfig } from "../config/application.schema.mjs";
+import type { DiscoveryMetadata } from "../discovery/types.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
@@ -104,6 +105,7 @@ export type ContributionKind =
 	| "grantPolicyHooks"
 	| "grantMiddleware"
 	| "tokenBindingMechanisms"
+	| "discoveryMetadata"
 	| (string & { readonly __consumerKind?: unique symbol });
 
 // ---------------------------------------------------------------------------
@@ -450,6 +452,13 @@ export interface ContributionCollectorMap {
 	 * for the cross-mechanism design rationale.
 	 */
 	readonly tokenBindingMechanisms?: ListCollector<TokenBindingMechanism | null>;
+	/**
+	 * Collector for `discoveryMetadata` contributions. Each entry is a
+	 * `DiscoveryMetadata` partial. `assembleApp` aggregates all entries into the
+	 * single `/.well-known/openid-configuration` document via
+	 * `buildDiscoveryDocument` (mounted only when an issuer is configured).
+	 */
+	readonly discoveryMetadata?: ListCollector<DiscoveryMetadata>;
 }
 
 /**
@@ -773,7 +782,8 @@ export interface ListShapedOverrideDetails {
 		| "auditHooks"
 		| "grantPolicyHooks"
 		| "grantMiddleware"
-		| "tokenBindingMechanisms";
+		| "tokenBindingMechanisms"
+		| "discoveryMetadata";
 	readonly module: string;
 }
 

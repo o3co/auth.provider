@@ -81,6 +81,11 @@ export {
 	composeConfigSchema,
 	fullSectionsSchema,
 } from "./config/application.schema.mjs";
+// OIDC discovery aggregation — modules contribute `discoveryMetadata`
+// (DiscoveryMetadataFactory above) and core synthesizes the
+// `/.well-known/openid-configuration` document via `buildDiscoveryDocument`.
+export { buildDiscoveryDocument, DiscoveryDocumentError } from "./discovery/buildDocument.mjs";
+export type { DiscoveryMetadata } from "./discovery/types.mjs";
 // AS-1/AS-2 RFC 6749 §5.2 shared error envelope. Consumer code that builds
 // custom routes outside the bundled session/oauth surfaces benefits from
 // the same helper so the entire auth product surface emits a single shape.
@@ -222,6 +227,7 @@ export type {
 	ComponentMap,
 	ConfigSchema,
 	ContributesMap,
+	DiscoveryMetadataFactory,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
 	FederationFactory,

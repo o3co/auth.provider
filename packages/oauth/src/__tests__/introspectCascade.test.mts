@@ -22,6 +22,7 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	defineModule,
+	jwksModule,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
 import { createTestApp, GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
@@ -421,6 +422,9 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// Issuer is configured, so the discovery presence contract requires
+				// the JWKS-owning module (contributes jwks_uri) to be co-installed.
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreForC1,

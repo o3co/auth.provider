@@ -64,5 +64,17 @@ export const jwksModule = defineModule({
 				};
 			},
 		],
+		// OIDC discovery `jwks_uri` is a key-management concern owned by this
+		// module, so jwks contributes it rather than the oauth module guessing
+		// the path. Resolved through the same `resolveJwksPath` the route above
+		// uses, so the advertised URI and the registered route can never drift.
+		// The aggregator prefixes this issuer-relative path with the issuer and
+		// only emits the document when an issuer is configured.
+		discoveryMetadata: [
+			(deps) => {
+				const config = deps.config as { oauth?: { jwt?: { jwksPath?: unknown } } };
+				return { endpoints: { jwks_uri: resolveJwksPath(config) } };
+			},
+		],
 	},
 });
