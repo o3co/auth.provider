@@ -222,6 +222,40 @@ describe("standalone smoke test", () => {
 		expect(res.status).toBe(200);
 	});
 
+	it("issuer-configured buildModules serves the advertised jwks_uri (discovery <-> JWKS presence contract)", async () => {
+		// Guards the cross-module contract end-to-end against the REAL composition
+		// root: oauthModule advertises `jwks_uri` in discovery, while the JWKS
+		// route is mounted by core's `jwksModule`. If `buildModules` ever drops
+		// `jwksModule`, discovery would advertise a path that 404s — this test
+		// fails (RED) in that case. (The oauth package's integration test
+		// hand-composes both modules, so only a scaffold-level test like this can
+		// catch the composition root forgetting to wire jwksModule.)
+		const issuerConfig: AppConfig = {
+			...config,
+			oauth: {
+				...config.oauth,
+				jwt: { ...config.oauth.jwt, issuer: "https://auth.example.com" },
+			},
+		};
+		const handle = await createApp({
+			modules: buildModules(issuerConfig, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			}),
+			bootstrapComponents: { config: issuerConfig, pathResolver: (s) => s },
+		});
+		handleRef = handle;
+		const app = express();
+		app.use(handle.router);
+		const disco = await request(app).get("/.well-known/openid-configuration");
+		expect(disco.status).toBe(200);
+		const jwksPath = new URL(disco.body.jwks_uri as string).pathname;
+		const res = await request(app).get(jwksPath);
+		expect(res.status).toBe(200);
+		expect(Array.isArray(res.body.keys)).toBe(true);
+	});
+
 	it("POST /oauth/token with unsupported grant_type returns 400", async () => {
 		const { app, handle } = await buildApp();
 		handleRef = handle;

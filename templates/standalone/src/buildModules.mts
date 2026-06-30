@@ -17,6 +17,7 @@ import {
 	type AppConfig,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
+	jwksModule,
 	type Module,
 	memoryRateLimiterModule,
 } from "@o3co/auth-provider-core";
@@ -165,6 +166,13 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		oauthModule({ config }),
 		oauthSessionModule({ config }),
 		oauthAuthorizationModule({ config }),
+		// JWKS publishing — always wired (depends only on config + keyStore).
+		// Contributed by core's `jwksModule`, NOT oauthModule: a provider that
+		// signs tokens must publish its verification keys regardless of OIDC
+		// issuer config. Co-installed with oauthModule so the discovery
+		// `jwks_uri` (advertised by oauthModule when an issuer is set) always
+		// resolves to this mounted route.
+		jwksModule,
 		sessionModule,
 		...(googleEnabled ? [googleFederationModule, googleFederationConfigModule] : []),
 		overrides.keyStoreModule ?? keyStoreModule,

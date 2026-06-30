@@ -65,6 +65,35 @@ async function callRoute(opts: {
 	return res.getBody() as Record<string, unknown>;
 }
 
+describe("jwksPath option", () => {
+	it("appends a custom absolute jwksPath onto the issuer identifier", async () => {
+		const express = createMockExpress();
+		createRouter(express, {
+			issuer: "https://auth.example.com",
+			signingAlgs: ["RS256"],
+			jwksPath: "/keys/jwks.json",
+		});
+		const res = createMockRes();
+		await express.routes["/.well-known/openid-configuration"](
+			{} as Request,
+			res as unknown as Response,
+		);
+		expect((res.getBody() as { jwks_uri: string }).jwks_uri).toBe(
+			"https://auth.example.com/keys/jwks.json",
+		);
+	});
+
+	it("throws at router creation on a non-absolute jwksPath (fail fast, not a dangling jwks_uri)", () => {
+		expect(() =>
+			createRouter(createMockExpress(), {
+				issuer: "https://auth.example.com",
+				signingAlgs: ["RS256"],
+				jwksPath: "keys/jwks.json",
+			}),
+		).toThrow(/absolute path/);
+	});
+});
+
 describe("GET /.well-known/openid-configuration", () => {
 	it("returns discovery metadata with F-4 scoped endpoints + signing algs", async () => {
 		const body = await callRoute({

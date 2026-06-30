@@ -21,6 +21,7 @@ import {
 	type FederationProviderHandle,
 	type Module,
 	type ProviderDeps,
+	resolveJwksPath,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -181,6 +182,13 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 					});
 					return { id: "oauth-endpoints", mountPath: "/oauth", handler: router };
 				},
+				// JWKS is contributed by the core `jwksModule` (key-management layer,
+				// depends only on keyStore), NOT here — so a provider can publish its
+				// verification keys without the full OAuth grant suite, and discovery
+				// stays free of a feature it does not own. The discovery `jwks_uri`
+				// below and the core JWKS route both resolve the path through
+				// `resolveJwksPath`, so they cannot drift. See core/src/jwks/.
+				//
 				// oidc-discovery — conditional on config.oauth.jwt.issuer (Theme E:
 				// structural conditional evaluated at boot, not at request time).
 				// When issuer is absent, the factory short-circuits with a no-op
@@ -230,6 +238,12 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 										issuer: issuer as string,
 										signingAlgs: [deps.keyStore.algorithm],
 										logoutSupported,
+										// Resolve via the shared core helper so the advertised
+										// jwks_uri always matches the path the core jwksModule
+										// registers (single source of truth — cannot drift).
+										jwksPath: resolveJwksPath(
+											deps.config as { oauth?: { jwt?: { jwksPath?: unknown } } },
+										),
 									}),
 								};
 							},
