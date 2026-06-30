@@ -17,6 +17,7 @@
 import type { Request, Response, Router } from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "#/jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH, resolveJwksPath } from "#/jwks/path.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { createRouter } from "#/routes/Jwks.mjs";
@@ -37,6 +38,7 @@ function createMockExpress() {
 function createMockRes() {
 	let statusCode = 200;
 	let body: unknown;
+	const headers: Record<string, string> = {};
 	return {
 		status(code: number) {
 			statusCode = code;
@@ -50,8 +52,13 @@ function createMockRes() {
 			statusCode = code;
 			return this;
 		},
+		setHeader(name: string, value: string) {
+			headers[name] = value;
+			return this;
+		},
 		getStatusCode: () => statusCode,
 		getBody: () => body,
+		getHeader: (name: string) => headers[name],
 	};
 }
 
@@ -83,8 +90,87 @@ describe("JWKS path resolution", () => {
 	it("registers the explicit path when one is passed", () => {
 		const ks = createSymmetricKeyStore("test-secret");
 		const express = createMockExpress();
-		createRouter(express, ks, "/keys/jwks.json");
+		createRouter(express, ks, { path: "/keys/jwks.json" });
 		expect(Object.keys(express.routes)).toEqual(["/keys/jwks.json"]);
+	});
+});
+
+describe("JWKS cache max-age resolution", () => {
+	it("defaults to 300 seconds", () => {
+		expect(DEFAULT_JWKS_CACHE_MAX_AGE).toBe(300);
+		expect(resolveJwksCacheMaxAge({})).toBe(300);
+		expect(resolveJwksCacheMaxAge({ oauth: { jwt: {} } })).toBe(300);
+	});
+
+	it("honors a configured oauth.jwt.jwksCacheMaxAge override (incl. 0)", () => {
+		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: 3600 } } })).toBe(3600);
+		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: 0 } } })).toBe(0);
+	});
+
+	it("falls back to default for negative / non-integer / non-number values", () => {
+		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: -1 } } })).toBe(300);
+		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: 1.5 } } })).toBe(300);
+		expect(resolveJwksCacheMaxAge({ oauth: { jwt: { jwksCacheMaxAge: "60" } } })).toBe(300);
+	});
+});
+
+describe("JWKS Cache-Control", () => {
+	async function getHeaderFor(opts?: Parameters<typeof createRouter>[2]) {
+		const ks = createSymmetricKeyStore("test-secret");
+		const express = createMockExpress();
+		createRouter(express, ks, opts);
+		const res = createMockRes();
+		await express.routes[opts?.path ?? "/.well-known/jwks.json"](
+			{} as Request,
+			res as unknown as Response,
+		);
+		return res.getHeader("Cache-Control");
+	}
+
+	it("sets public, max-age=300 by default", async () => {
+		expect(await getHeaderFor()).toBe("public, max-age=300");
+	});
+
+	it("reflects a custom cacheMaxAgeSeconds", async () => {
+		expect(await getHeaderFor({ cacheMaxAgeSeconds: 3600 })).toBe("public, max-age=3600");
+	});
+
+	it("sets the header on the HS256 empty-set response too", async () => {
+		// createSymmetricKeyStore yields HS256 → empty keys; header must still be present.
+		expect(await getHeaderFor({ cacheMaxAgeSeconds: 60 })).toBe("public, max-age=60");
+	});
+
+	it("sets the header on the asymmetric (ES256) success path", async () => {
+		const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
+		const ks = await createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "k1",
+			privateKeyPem: await exportPKCS8(privateKey),
+			publicKeyPem: await exportSPKI(publicKey),
+		});
+		const express = createMockExpress();
+		createRouter(express, ks);
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		expect(res.getHeader("Cache-Control")).toBe("public, max-age=300");
+	});
+
+	it("does NOT set Cache-Control when key export fails (no cacheable 5xx)", async () => {
+		// A failing remote/KMS keystore must not produce a cacheable error: the
+		// header is set only after getVerificationKeys()/exportJWK() succeed.
+		const failingKeyStore = {
+			algorithm: "ES256" as const,
+			getVerificationKeys: async () => {
+				throw new Error("kms unavailable");
+			},
+		} as unknown as Parameters<typeof createRouter>[1];
+		const express = createMockExpress();
+		createRouter(express, failingKeyStore);
+		const res = createMockRes();
+		await expect(
+			express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response),
+		).rejects.toThrow("kms unavailable");
+		expect(res.getHeader("Cache-Control")).toBeUndefined();
 	});
 });
 

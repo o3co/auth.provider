@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - **`jwksModule` (`@o3co/auth-provider-core`).** A route-contributing module that publishes the provider's verification keys at the JWKS endpoint. It depends only on the `keyStore` and is mounted unconditionally — a provider that signs tokens must publish its keys regardless of whether an OIDC issuer is configured, so (unlike issuer-gated `oidc-discovery`) it is a key-management concern owned by core, not the `oauth` module. The standalone scaffold wires it alongside `oauthModule`. `createJwksRouter` remains exported for direct composition.
 - **Configurable JWKS path via `oauth.jwt.jwksPath`.** `jwks_uri` is operator-choosable per OIDC Discovery; it now defaults to `/.well-known/jwks.json` and can be overridden (must be an absolute path). The JWKS route and the discovery `jwks_uri` both resolve the path through the new exported `resolveJwksPath` helper (with `DEFAULT_JWKS_PATH`), so the registered path and the advertised URI cannot drift.
+- **JWKS responses now send `Cache-Control: public, max-age=<N>`.** JWKS is the most-polled verifier endpoint, so the response is now cacheable; `max-age` defaults to 300s and is operator-tunable via `oauth.jwt.jwksCacheMaxAge` (keep it well below the key-overlap window so a rotated kid propagates in time). New exports: `DEFAULT_JWKS_CACHE_MAX_AGE`, `resolveJwksCacheMaxAge`. `createJwksRouter`'s third argument is now an options object (`{ path?, cacheMaxAgeSeconds? }`).
 
 ### Fixed
 

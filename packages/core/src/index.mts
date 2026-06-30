@@ -152,6 +152,7 @@ export type {
 // is the underlying factory for direct composition. `DEFAULT_JWKS_PATH` /
 // `resolveJwksPath` are the single source of truth for the publishing path,
 // shared with oauth discovery's `jwks_uri` so the two never drift.
+export { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "./jwks/cache.mjs";
 export { jwksModule } from "./jwks/module.mjs";
 export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
 // JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
@@ -307,7 +308,7 @@ export type {
 	User,
 } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
-export { createRouter as createJwksRouter } from "./routes/Jwks.mjs";
+export { createRouter as createJwksRouter, type JwksRouterOptions } from "./routes/Jwks.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,

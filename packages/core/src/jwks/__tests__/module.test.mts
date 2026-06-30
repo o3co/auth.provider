@@ -65,6 +65,25 @@ describe("jwksModule", () => {
 		const res = await request(app).get("/.well-known/jwks.json");
 		expect(res.status).toBe(200);
 		expect(Array.isArray(res.body.keys)).toBe(true);
+		// Default Cache-Control so verifiers cache the key set.
+		expect(res.headers["cache-control"]).toBe("public, max-age=300");
+		await handle.dispose();
+	});
+
+	it("reflects a configured oauth.jwt.jwksCacheMaxAge in Cache-Control", async () => {
+		const config = makeValidAppConfig() as { oauth?: { jwt?: Record<string, unknown> } };
+		const withMaxAge = {
+			...config,
+			oauth: { ...config.oauth, jwt: { ...config.oauth?.jwt, jwksCacheMaxAge: 3600 } },
+		} as unknown as ReturnType<typeof makeValidAppConfig>;
+		const handle = await createTestApp({
+			modules: [jwksModule, keyStoreModule],
+			bootstrapComponents: { config: withMaxAge, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const res = await request(app).get("/.well-known/jwks.json");
+		expect(res.headers["cache-control"]).toBe("public, max-age=3600");
 		await handle.dispose();
 	});
 

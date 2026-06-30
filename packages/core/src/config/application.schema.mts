@@ -153,6 +153,11 @@ const jwtSchemaBase = z.object({
 		.string()
 		.startsWith("/", "oauth.jwt.jwksPath must be an absolute path beginning with '/'")
 		.optional(),
+	// JWKS response `Cache-Control: public, max-age=<N>` lifetime (seconds).
+	// Operator-tunable; defaults to 300 (applied by `resolveJwksCacheMaxAge`).
+	// Keep well below the key-overlap window so a rotated kid propagates to
+	// caching verifiers in time. See `core/src/jwks/cache.mts`.
+	jwksCacheMaxAge: z.number().int().nonnegative().optional(),
 	// SF-1 (v0.5.1): when true (default in HOCON), the central JWT verifier
 	// accepts tokens whose `typ` header is absent and emits a deprecation
 	// warning. v0.6+ should set this to false and reject typ-less tokens.

@@ -15,8 +15,28 @@
  */
 import type { Request, Response, Router } from "express";
 import { exportJWK } from "jose";
+import { DEFAULT_JWKS_CACHE_MAX_AGE } from "../jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH } from "../jwks/path.mjs";
 import type { KeyStore } from "../keys/KeyStore.mjs";
+
+/** Options for {@link createRouter}. */
+export interface JwksRouterOptions {
+	/**
+	 * Absolute path the router registers internally. Defaults to
+	 * {@link DEFAULT_JWKS_PATH}. Callers honoring the `oauth.jwt.jwksPath`
+	 * override resolve it via `resolveJwksPath` and pass the result here so
+	 * the registered path matches the advertised `jwks_uri`.
+	 */
+	path?: string;
+	/**
+	 * `Cache-Control: public, max-age=<N>` lifetime in seconds for the JWKS
+	 * response. Defaults to {@link DEFAULT_JWKS_CACHE_MAX_AGE}. Callers
+	 * honoring `oauth.jwt.jwksCacheMaxAge` resolve it via
+	 * `resolveJwksCacheMaxAge`. Keep well below the key-overlap window so a
+	 * freshly-rotated kid propagates to caching verifiers in time.
+	 */
+	cacheMaxAgeSeconds?: number;
+}
 
 /**
  * Build the JWKS publishing Router. The router registers `path` as an
@@ -27,20 +47,29 @@ import type { KeyStore } from "../keys/KeyStore.mjs";
  * `jwks_uri` OIDC discovery advertises. (This is also why the core
  * `jwksModule` mounts at "/".)
  *
- * `path` defaults to {@link DEFAULT_JWKS_PATH}. Callers that honor the
- * `oauth.jwt.jwksPath` config override resolve it via `resolveJwksPath`
- * and pass the result here, so the registered path always matches the
- * advertised `jwks_uri`.
+ * The response carries `Cache-Control: public, max-age=<cacheMaxAgeSeconds>`
+ * (JWKS is public data and the most-polled verifier endpoint).
  */
 export const createRouter = (
 	express: { Router: () => Router },
 	keyStore: KeyStore,
-	path: string = DEFAULT_JWKS_PATH,
+	opts: JwksRouterOptions = {},
 ): Router => {
+	const path = opts.path ?? DEFAULT_JWKS_PATH;
+	const cacheMaxAgeSeconds = opts.cacheMaxAgeSeconds ?? DEFAULT_JWKS_CACHE_MAX_AGE;
 	const router = express.Router();
+
+	const cacheControl = `public, max-age=${cacheMaxAgeSeconds}`;
 
 	router.get(path, async (_req: Request, res: Response) => {
 		if (keyStore.algorithm === "HS256") {
+			// Set Cache-Control only on the SUCCESS path. If we set it up-front
+			// and `getVerificationKeys()`/`exportJWK()` then threw (e.g. a remote
+			// KMS-backed keystore outage), Express would emit a 5xx with the
+			// header still attached, and an explicit `public, max-age` makes that
+			// transient error cacheable by shared caches/CDNs for the full
+			// lifetime — turning a brief outage into a stuck JWKS failure.
+			res.setHeader("Cache-Control", cacheControl);
 			return res.json({ keys: [] });
 		}
 		const managedKeys = await keyStore.getVerificationKeys();
@@ -50,6 +79,8 @@ export const createRouter = (
 				return { ...jwk, kid: mk.kid, use: "sig", alg: keyStore.algorithm };
 			}),
 		);
+		// Header set only after key export succeeded (see HS256 branch note).
+		res.setHeader("Cache-Control", cacheControl);
 		return res.json({ keys });
 	});
 

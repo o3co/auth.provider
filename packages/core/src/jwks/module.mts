@@ -18,6 +18,7 @@ import { createRequire } from "node:module";
 import type { Router } from "express";
 import { defineModule } from "../modules/index.mjs";
 import { createRouter as createJwksRouter } from "../routes/Jwks.mjs";
+import { resolveJwksCacheMaxAge } from "./cache.mjs";
 import { resolveJwksPath } from "./path.mjs";
 
 /**
@@ -50,11 +51,16 @@ export const jwksModule = defineModule({
 			async (deps) => {
 				const require = createRequire(import.meta.url);
 				const express = require("express") as { Router: () => Router };
-				const path = resolveJwksPath(deps.config as { oauth?: { jwt?: { jwksPath?: unknown } } });
+				const config = deps.config as {
+					oauth?: { jwt?: { jwksPath?: unknown; jwksCacheMaxAge?: unknown } };
+				};
 				return {
 					id: "jwks",
 					mountPath: "/",
-					handler: createJwksRouter(express, deps.keyStore, path),
+					handler: createJwksRouter(express, deps.keyStore, {
+						path: resolveJwksPath(config),
+						cacheMaxAgeSeconds: resolveJwksCacheMaxAge(config),
+					}),
 				};
 			},
 		],

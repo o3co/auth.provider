@@ -103,6 +103,27 @@ describe("oauth.jwt.signingKey schema", () => {
 		expect((parsed as { jwksPath?: string }).jwksPath).toBeUndefined();
 	});
 
+	it("accepts a non-negative integer oauth.jwt.jwksCacheMaxAge", () => {
+		const parsed = jwtSchema.parse({
+			signingKey: { provider: "local", local: validLocal() },
+			jwksCacheMaxAge: 3600,
+		});
+		expect((parsed as { jwksCacheMaxAge?: number }).jwksCacheMaxAge).toBe(3600);
+	});
+
+	it("rejects a negative or non-integer oauth.jwt.jwksCacheMaxAge", () => {
+		for (const bad of [-1, 1.5]) {
+			const result = jwtSchema.safeParse({
+				signingKey: { provider: "local", local: validLocal() },
+				jwksCacheMaxAge: bad,
+			});
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.error.issues.map((i) => i.path.join("."))).toContain("jwksCacheMaxAge");
+			}
+		}
+	});
+
 	it("does NOT superRefine-reject missing secret for HS256 (schema does shape only; builder enforces field presence)", () => {
 		// Previously the schema would reject HS256 without a secret. After
 		// migration the schema only enforces shape (field presence per the
