@@ -68,6 +68,18 @@ export function contributesProviderSurface(items: readonly DiscoveryMetadata[]):
 	return items.some((item) => item.endpoints?.[PROVIDER_SURFACE_FIELD] !== undefined);
 }
 
+/**
+ * Whether a discovery field is an issuer-relative endpoint. Endpoint fields MUST
+ * be contributed via `endpoints` (so they get absolute-path validation + issuer
+ * prefixing) rather than `metadata` (emitted literally). Everything ending in
+ * `_endpoint` plus `jwks_uri` is an endpoint; literal URI metadata such as
+ * `op_policy_uri` / `service_documentation` is an absolute external URL, NOT an
+ * issuer-relative endpoint, so it legitimately stays in `metadata`.
+ */
+function isEndpointField(field: string): boolean {
+	return field.endsWith("_endpoint") || field === "jwks_uri";
+}
+
 /** Thrown when module `discoveryMetadata` contributions cannot form a valid document. */
 export class DiscoveryDocumentError extends Error {
 	override readonly name = "DiscoveryDocumentError";
@@ -120,6 +132,17 @@ export function buildDiscoveryDocument(
 			`discovery issuer must not be empty after trailing-slash normalization (got ${JSON.stringify(opts.issuer)})`,
 		);
 	}
+	// `id_token_signing_alg_values_supported` is an OIDC-required field whose
+	// emptiness the REQUIRED_FIELDS presence check cannot catch (the array is
+	// present, just empty). An empty set advertises a document no RP can use to
+	// verify id_tokens, so fail the boot fast rather than serving it. Empty here
+	// signals `assembleApp` could not read a usable `keyStore.algorithm`.
+	if (opts.signingAlgs.length === 0) {
+		throw new DiscoveryDocumentError(
+			"discovery document requires at least one id_token signing algorithm " +
+				"(id_token_signing_alg_values_supported must be non-empty); none were derived from the keyStore",
+		);
+	}
 	const doc: Record<string, unknown> = {
 		issuer,
 		id_token_signing_alg_values_supported: dedupe(opts.signingAlgs),
@@ -150,6 +173,13 @@ export function buildDiscoveryDocument(
 			if (RESERVED_FIELDS.has(field)) {
 				throw new DiscoveryDocumentError(
 					`discoveryMetadata may not contribute the reserved field "${field}" (owned by the aggregator)`,
+				);
+			}
+			if (isEndpointField(field)) {
+				throw new DiscoveryDocumentError(
+					`discoveryMetadata endpoint field "${field}" must be contributed via \`endpoints\` ` +
+						`(for absolute-path validation + issuer prefixing), not \`metadata\` ` +
+						`(which is emitted literally and would advertise an origin-less URL)`,
 				);
 			}
 			if (Array.isArray(value)) {

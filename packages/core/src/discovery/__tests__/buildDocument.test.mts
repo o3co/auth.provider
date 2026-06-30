@@ -178,6 +178,58 @@ describe("buildDiscoveryDocument", () => {
 		];
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/jwks_uri/);
 	});
+
+	it("throws when no signing algorithms are provided (empty id_token_signing_alg_values_supported is OIDC-invalid)", () => {
+		// An empty `signingAlgs` would otherwise pass the REQUIRED_FIELDS check
+		// (the array is present, just empty) yet advertise a document no RP can
+		// use to verify id_tokens — a silent non-compliance. Fail the boot fast.
+		expect(() =>
+			buildDiscoveryDocument(completeItems(), { issuer: OPTS.issuer, signingAlgs: [] }),
+		).toThrow(/signing alg/i);
+	});
+
+	it("rejects an endpoint field (`*_endpoint`) contributed via `metadata` instead of `endpoints`", () => {
+		// `metadata` fields are emitted literally (no absolute-path validation, no
+		// issuer prefixing). An endpoint contributed there would advertise a
+		// relative/origin-less URL. Endpoint fields MUST go through `endpoints`.
+		const items: DiscoveryMetadata[] = [
+			...completeItems(),
+			{ metadata: { revocation_endpoint: "/oauth/revoke" } },
+		];
+		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/endpoints/);
+	});
+
+	it("rejects `jwks_uri` contributed via `metadata` instead of `endpoints`", () => {
+		const items: DiscoveryMetadata[] = [
+			{
+				endpoints: { authorization_endpoint: "/oauth/authorize", token_endpoint: "/oauth/token" },
+				metadata: {
+					response_types_supported: ["code"],
+					subject_types_supported: ["public"],
+					jwks_uri: "/.well-known/jwks.json",
+				},
+			},
+		];
+		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/endpoints/);
+	});
+
+	it("still allows literal URI metadata that is NOT an issuer-relative endpoint (op_policy_uri, service_documentation)", () => {
+		// These OIDC metadata fields are absolute external URLs, not issuer-relative
+		// endpoints — they legitimately belong in `metadata` and must not be caught
+		// by the endpoint-field guard.
+		const items: DiscoveryMetadata[] = [
+			...completeItems(),
+			{
+				metadata: {
+					op_policy_uri: "https://op.example/policy",
+					service_documentation: "https://op.example/docs",
+				},
+			},
+		];
+		const doc = buildDiscoveryDocument(items, OPTS);
+		expect(doc.op_policy_uri).toBe("https://op.example/policy");
+		expect(doc.service_documentation).toBe("https://op.example/docs");
+	});
 });
 
 describe("contributesProviderSurface", () => {
