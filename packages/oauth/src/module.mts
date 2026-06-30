@@ -17,6 +17,7 @@
 import {
 	type AppConfig,
 	consoleLogger,
+	createJwksRouter,
 	defineModule,
 	type FederationProviderHandle,
 	type Module,
@@ -181,6 +182,18 @@ export const oauthModule = (params: { config: AppConfig }): Module => {
 					});
 					return { id: "oauth-endpoints", mountPath: "/oauth", handler: router };
 				},
+				// jwks — always contributed: a provider that signs tokens must
+				// publish its verification keys for offline validation, regardless
+				// of OIDC issuer config (so it is NOT issuer-gated like discovery).
+				// core ships routes/Jwks.mts but mounted it nowhere — this wires it
+				// so /.well-known/jwks.json matches the jwks_uri that oidc-discovery
+				// advertises. createJwksRouter registers the spec-fixed absolute path
+				// internally, so mount at "/" to avoid path doubling.
+				(deps) => ({
+					id: "jwks",
+					mountPath: "/",
+					handler: createJwksRouter(express, deps.keyStore),
+				}),
 				// oidc-discovery — conditional on config.oauth.jwt.issuer (Theme E:
 				// structural conditional evaluated at boot, not at request time).
 				// When issuer is absent, the factory short-circuits with a no-op

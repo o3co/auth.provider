@@ -300,6 +300,9 @@ export type {
 	User,
 } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
+// Routes — JWKS publishing (mounted by the oauth module so every provider that
+// signs tokens exposes /.well-known/jwks.json for offline verification).
+export { createRouter as createJwksRouter } from "./routes/Jwks.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,

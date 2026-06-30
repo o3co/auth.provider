@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **JWKS endpoint is now mounted.** `@o3co/auth-provider-core` shipped `routes/Jwks.mts` but no module mounted it, so OIDC discovery advertised `jwks_uri` while `GET /.well-known/jwks.json` returned 404 — verifiers had no key source for offline asymmetric-token validation. The `oauth` module now contributes the JWKS route, mounted unconditionally (a provider that signs tokens must publish its verification keys regardless of whether an OIDC issuer is configured, so it is not issuer-gated like `oidc-discovery`). `@o3co/auth-provider-core` additionally exports `createJwksRouter` for direct composition.
+
 ## [0.8.0] - 2026-05-20
 
 v0.8.0 ships **Wave 2 Token-binding Cluster** — sender-constrained access tokens via DPoP (RFC 9449) and mTLS (RFC 8705) as a first-class extension surface. Two new OSS packages (`@o3co/auth-provider-dpop`, `@o3co/auth-provider-mtls`), a new core abstraction (`TokenBindingMechanism` + `TokenBindingMechanismFactory<Deps>` + `tokenBindingMechanisms` contribution slot), grant-side `cnf` claim emission, and a §9.2 5-row refresh-time enforcement matrix per mechanism. Plus ADR `2026-05-20-token-binding-first-class-abstraction.md` documenting the design.

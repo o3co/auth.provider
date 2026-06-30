@@ -133,17 +133,17 @@ describe("oauthModule — manifest shape", () => {
 		expect(result.success).toBe(true);
 	});
 
-	it("includes oauth-endpoints route contribution when issuer is absent", () => {
+	it("includes oauth-endpoints + jwks route contributions when issuer is absent", () => {
 		const base = makeValidAppConfig();
-		// No issuer set — only oauth-endpoints factory should appear
+		// No issuer set — oauth-endpoints and jwks are always contributed; only
+		// oidc-discovery is issuer-gated, so it is absent here.
 		const module = oauthModule({ config: base });
 		const routes = module.contributes?.routes;
 		expect(Array.isArray(routes)).toBe(true);
-		// At minimum the oauth-endpoints factory is always present
-		expect((routes as unknown[]).length).toBeGreaterThanOrEqual(1);
+		expect((routes as unknown[]).length).toBe(2);
 	});
 
-	it("includes both route contributions when issuer is configured", () => {
+	it("includes oauth-endpoints + jwks + oidc-discovery when issuer is configured", () => {
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -158,8 +158,8 @@ describe("oauthModule — manifest shape", () => {
 		const module = oauthModule({ config });
 		const routes = module.contributes?.routes;
 		expect(Array.isArray(routes)).toBe(true);
-		// oauth-endpoints + oidc-discovery
-		expect((routes as unknown[]).length).toBe(2);
+		// oauth-endpoints + jwks + oidc-discovery
+		expect((routes as unknown[]).length).toBe(3);
 	});
 });
 
@@ -286,6 +286,52 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const res = await request(app).get("/.well-known/openid-configuration");
 		expect(res.status).toBe(200);
 		expect(res.body.issuer).toBe("https://auth.example.com");
+		await handle.dispose();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// JWKS — the provider must publish its verification keys so verifiers (BFF,
+// RPs) can validate asymmetric-signed tokens offline. core ships
+// routes/Jwks.mts but, pre-fix, no module mounted it: oidc-discovery advertised
+// `jwks_uri` while GET /.well-known/jwks.json returned 404. JWKS is mounted
+// unconditionally (unlike issuer-gated oidc-discovery) because it must be
+// reachable whenever the provider signs tokens.
+// ---------------------------------------------------------------------------
+
+describe("oauthModule — jwks route", () => {
+	it("registers a jwks route contribution even when issuer is absent", async () => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
+		expect(routeIds).toContain("jwks");
+		await handle.dispose();
+	});
+
+	it("serves /.well-known/jwks.json (reachable, not 404)", async () => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const res = await request(app).get("/.well-known/jwks.json");
+		expect(res.status).toBe(200);
+		expect(Array.isArray(res.body.keys)).toBe(true);
 		await handle.dispose();
 	});
 });
