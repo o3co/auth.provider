@@ -170,6 +170,54 @@ function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContrib
 }
 
 // ---------------------------------------------------------------------------
+// Internal: core-synthesized OIDC discovery route collision guard
+// ---------------------------------------------------------------------------
+
+/** The RFC 8414 / OIDC Discovery 1.0 fixed discovery path. */
+const OIDC_DISCOVERY_PATH = "/.well-known/openid-configuration";
+
+/**
+ * Throw a `BootError` if any contributed route would effectively serve
+ * `GET /.well-known/openid-configuration` — i.e. collide with the
+ * core-synthesized discovery route. Since the core route is registered before
+ * the contribution mount loop, such a contribution would otherwise be silently
+ * shadowed; this mirrors `checkMaterialisedRouteCollisions` so the collision
+ * fails the boot fast instead.
+ *
+ * Detection covers (a) a route advertising `GET` at the effective discovery
+ * path, and (b) a route mounted directly at the discovery path (any method —
+ * an Express router mounted there handles GET on it). An opaque router at "/"
+ * that internally serves the path without advertising it is NOT detectable —
+ * the same limitation `checkMaterialisedRouteCollisions` has for every route.
+ * @internal
+ */
+function assertNoDiscoveryRouteCollision(routes: readonly CollectedRouteContribution[]): void {
+	const collapseSlashes = (p: string): string => p.replace(/\/{2,}/g, "/");
+	for (const { contribution: route, contributedBy: module } of routes) {
+		const mountedAtDiscoveryPath = collapseSlashes(route.mountPath) === OIDC_DISCOVERY_PATH;
+		const advertisesDiscoveryGet = (route.routes ?? []).some(
+			(adv) =>
+				adv.method === "GET" &&
+				collapseSlashes(`${route.mountPath}${adv.path}`) === OIDC_DISCOVERY_PATH,
+		);
+		if (mountedAtDiscoveryPath || advertisesDiscoveryGet) {
+			throw new BootError({
+				message: `assembleApp: module "${module}" contributes a route that collides with the core-synthesized OIDC discovery endpoint "GET ${OIDC_DISCOVERY_PATH}". Discovery is synthesized by core from \`discoveryMetadata\` contributions — remove the route and contribute \`discoveryMetadata\` instead.`,
+				reason: "duplicate-contribute",
+				stage: "assembleApp",
+				details: {
+					reason: "duplicate-contribute",
+					kind: "routes",
+					identity: `GET ${OIDC_DISCOVERY_PATH}`,
+					identityKind: "effective-method-path",
+					modules: ["core:oidc-discovery", module],
+				},
+			});
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Internal: mount-order computation (§5.6 step 1)
 // ---------------------------------------------------------------------------
 
@@ -638,13 +686,18 @@ export function assembleApp(
 			| undefined;
 		const signingAlgs = typeof keyStore?.algorithm === "string" ? [keyStore.algorithm] : [];
 		const doc = buildDiscoveryDocument(discoveryItems, { issuer: issuerValue, signingAlgs });
-		// This path is core-owned and synthesized here, NOT a route contribution,
-		// so it does not flow through the contribution collision check
-		// (`checkMaterialisedRouteCollisions`). It is registered before the
-		// contribution mount loop below, so on the RFC-fixed
-		// `/.well-known/openid-configuration` path this exact handler wins; a
-		// module that contributed a route at the same path would be shadowed
-		// rather than flagged as a duplicate.
+		// The core-synthesized discovery route is NOT a route contribution, so it
+		// does not flow through `checkMaterialisedRouteCollisions`. Without the
+		// guard below it would silently SHADOW a module that contributed a route
+		// effectively serving the same `GET /.well-known/openid-configuration`
+		// (this handler is registered before the contribution mount loop). Mirror
+		// the contribution collision semantics: fail the boot fast on a detectable
+		// collision rather than silently dropping the module's route. Detection is
+		// limited to ADVERTISED effective paths and a route mounted directly at the
+		// discovery path — an opaque router at "/" with no advertisement is not
+		// detectable here, the same limitation `checkMaterialisedRouteCollisions`
+		// has for every route.
+		assertNoDiscoveryRouteCollision(frozen.routes);
 		router.get("/.well-known/openid-configuration", (_req, res) => {
 			res.status(200).json(doc);
 		});

@@ -82,6 +82,27 @@ const jwksLikeModule = defineModule({
 	},
 });
 
+/**
+ * A rogue module that contributes a route effectively serving
+ * `GET /.well-known/openid-configuration` (mountPath "/" + advertised path).
+ * It would be silently shadowed by the core-synthesized discovery route unless
+ * the aggregator fails fast on the collision.
+ */
+const conflictingDiscoveryRouteModule = defineModule({
+	name: "test:rogue-discovery-route",
+	requires: [],
+	contributes: {
+		routes: [
+			() => ({
+				id: "rogue-discovery",
+				mountPath: "/",
+				handler: express.Router(),
+				routes: [{ method: "GET" as const, path: "/.well-known/openid-configuration" }],
+			}),
+		],
+	},
+});
+
 function withIssuer(issuer: string) {
 	const config = makeValidAppConfig() as { oauth?: { jwt?: Record<string, unknown> } };
 	return {
@@ -163,6 +184,23 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		expect(res.status).toBe(404);
 
 		await handle.dispose();
+	});
+
+	it("fails fast when a module contributes a route colliding with the core discovery path", async () => {
+		// The core-synthesized `GET /.well-known/openid-configuration` is mounted
+		// directly on the router (not a route contribution), so it would silently
+		// shadow a module that advertised the same effective method+path. The
+		// aggregator must instead detect the collision and fail the boot fast,
+		// consistent with `checkMaterialisedRouteCollisions` for contributed routes.
+		await expect(
+			createTestApp({
+				modules: [oauthLikeModule, jwksLikeModule, conflictingDiscoveryRouteModule, keyStoreModule],
+				bootstrapComponents: {
+					config: withIssuer("https://auth.example.com"),
+					pathResolver: (s) => s,
+				},
+			}),
+		).rejects.toMatchObject({ name: "BootError" });
 	});
 
 	it("issuer absent → discovery route is not mounted (404)", async () => {
