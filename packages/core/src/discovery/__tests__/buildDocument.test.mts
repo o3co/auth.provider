@@ -126,6 +126,21 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it.each([
+		"/",
+		"//",
+		"///",
+	])("throws when the issuer normalizes to empty (issuer %j)", (issuer) => {
+		// An all-slashes issuer survives the assemble-app gate (`length > 0`) but
+		// trailing-slash normalization reduces it to "", which would emit
+		// `issuer: ""` plus origin-less endpoint URLs (`/oauth/authorize`). That
+		// is a misconfiguration, so the aggregator fails the boot fast rather
+		// than advertising a malformed discovery document.
+		expect(() =>
+			buildDiscoveryDocument(completeItems(), { issuer, signingAlgs: ["ES256"] }),
+		).toThrow(DiscoveryDocumentError);
+	});
+
+	it.each([
 		"issuer",
 		"id_token_signing_alg_values_supported",
 	])("throws when a contribution sets the reserved field %s (via metadata)", (field) => {

@@ -34,6 +34,7 @@
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { DiscoveryDocumentError } from "../../discovery/buildDocument.mjs";
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
@@ -176,5 +177,31 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		expect(res.status).toBe(404);
 
 		await handle.dispose();
+	});
+
+	it("issuer + provider surface contributed but jwks_uri missing → boot fails fast (DiscoveryDocumentError)", async () => {
+		// The migration's headline behavioral contract, pinned at the level it
+		// actually executes. Once a provider-defining endpoint is contributed
+		// (contributesProviderSurface → true), assembleApp invokes
+		// buildDiscoveryDocument at boot; a composition that wires the OAuth
+		// provider surface + an issuer but omits the jwks_uri-owning module fails
+		// the OIDC-required presence check, so the boot itself rejects rather than
+		// serving (or lazily erroring on) a document missing `jwks_uri`.
+		//
+		// buildDocument.test.mts covers the throw on the function in isolation;
+		// this test pins that assembleApp/createApp actually call it under the
+		// gate and propagate the DiscoveryDocumentError out of createTestApp — the
+		// wiring a future refactor (e.g. deferring the build into the route
+		// handler) could silently break while every other test stayed green.
+		await expect(
+			createTestApp({
+				// jwksLikeModule deliberately omitted — no module contributes `jwks_uri`.
+				modules: [oauthLikeModule, keyStoreModule],
+				bootstrapComponents: {
+					config: withIssuer("https://auth.example.com"),
+					pathResolver: (s) => s,
+				},
+			}),
+		).rejects.toThrow(DiscoveryDocumentError);
 	});
 });

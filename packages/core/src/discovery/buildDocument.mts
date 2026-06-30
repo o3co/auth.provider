@@ -110,6 +110,16 @@ export function buildDiscoveryDocument(
 	opts: { readonly issuer: string; readonly signingAlgs: readonly string[] },
 ): Record<string, unknown> {
 	const issuer = opts.issuer.replace(/\/+$/, "");
+	// An all-slashes issuer (e.g. "/", "//") passes the assemble-app gate
+	// (`issuerValue.length > 0` on the RAW value) but normalizes to "" here,
+	// which would emit `issuer: ""` and origin-less endpoint URLs. That is a
+	// misconfiguration, so fail the boot fast rather than advertising a
+	// malformed document.
+	if (issuer === "") {
+		throw new DiscoveryDocumentError(
+			`discovery issuer must not be empty after trailing-slash normalization (got ${JSON.stringify(opts.issuer)})`,
+		);
+	}
 	const doc: Record<string, unknown> = {
 		issuer,
 		id_token_signing_alg_values_supported: dedupe(opts.signingAlgs),

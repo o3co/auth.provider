@@ -638,6 +638,13 @@ export function assembleApp(
 			| undefined;
 		const signingAlgs = typeof keyStore?.algorithm === "string" ? [keyStore.algorithm] : [];
 		const doc = buildDiscoveryDocument(discoveryItems, { issuer: issuerValue, signingAlgs });
+		// This path is core-owned and synthesized here, NOT a route contribution,
+		// so it does not flow through the contribution collision check
+		// (`checkMaterialisedRouteCollisions`). It is registered before the
+		// contribution mount loop below, so on the RFC-fixed
+		// `/.well-known/openid-configuration` path this exact handler wins; a
+		// module that contributed a route at the same path would be shadowed
+		// rather than flagged as a duplicate.
 		router.get("/.well-known/openid-configuration", (_req, res) => {
 			res.status(200).json(doc);
 		});
