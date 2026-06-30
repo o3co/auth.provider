@@ -15,12 +15,31 @@
  */
 import type { Request, Response, Router } from "express";
 import { exportJWK } from "jose";
+import { DEFAULT_JWKS_PATH } from "../jwks/path.mjs";
 import type { KeyStore } from "../keys/KeyStore.mjs";
 
-export const createRouter = (express: { Router: () => Router }, keyStore: KeyStore): Router => {
+/**
+ * Build the JWKS publishing Router. The router registers `path` as an
+ * **absolute** path internally, so consumers MUST mount the router at the
+ * application root (`app.use(createRouter(express, keyStore))`) — NOT under
+ * a path prefix. Mounting at a prefix (e.g. `/auth`) would expose
+ * `/auth${path}`, which no verifier looks up and which diverges from the
+ * `jwks_uri` OIDC discovery advertises. (This is also why the core
+ * `jwksModule` mounts at "/".)
+ *
+ * `path` defaults to {@link DEFAULT_JWKS_PATH}. Callers that honor the
+ * `oauth.jwt.jwksPath` config override resolve it via `resolveJwksPath`
+ * and pass the result here, so the registered path always matches the
+ * advertised `jwks_uri`.
+ */
+export const createRouter = (
+	express: { Router: () => Router },
+	keyStore: KeyStore,
+	path: string = DEFAULT_JWKS_PATH,
+): Router => {
 	const router = express.Router();
 
-	router.get("/.well-known/jwks.json", async (_req: Request, res: Response) => {
+	router.get(path, async (_req: Request, res: Response) => {
 		if (keyStore.algorithm === "HS256") {
 			return res.json({ keys: [] });
 		}

@@ -1,0 +1,83 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import express from "express";
+import request from "supertest";
+import { describe, expect, it } from "vitest";
+import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
+import { defineModule } from "../../modules/index.mjs";
+import { createTestApp } from "../../testing/create-test-app.mjs";
+import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { jwksModule } from "../module.mjs";
+
+/** Inline module satisfying jwksModule's `requires: ["keyStore"]`. */
+const keyStoreModule = defineModule({
+	name: "test:key-store",
+	provides: {
+		keyStore: () => createSymmetricKeyStore("test-secret-for-jwks-module!!!!"),
+	},
+});
+
+function withJwksPath(jwksPath: string) {
+	const config = makeValidAppConfig() as { oauth?: { jwt?: Record<string, unknown> } };
+	return {
+		...config,
+		oauth: {
+			...config.oauth,
+			jwt: { ...config.oauth?.jwt, jwksPath },
+		},
+	} as unknown as ReturnType<typeof makeValidAppConfig>;
+}
+
+describe("jwksModule", () => {
+	it("contributes a route with id 'jwks' (mounted unconditionally, no issuer needed)", async () => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [jwksModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
+		expect(routeIds).toContain("jwks");
+		await handle.dispose();
+	});
+
+	it("serves the default /.well-known/jwks.json (reachable, not 404)", async () => {
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [jwksModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const res = await request(app).get("/.well-known/jwks.json");
+		expect(res.status).toBe(200);
+		expect(Array.isArray(res.body.keys)).toBe(true);
+		await handle.dispose();
+	});
+
+	it("serves the configured oauth.jwt.jwksPath override (and not the default)", async () => {
+		const config = withJwksPath("/keys/jwks.json");
+		const handle = await createTestApp({
+			modules: [jwksModule, keyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		expect((await request(app).get("/keys/jwks.json")).status).toBe(200);
+		expect((await request(app).get("/.well-known/jwks.json")).status).toBe(404);
+		await handle.dispose();
+	});
+});

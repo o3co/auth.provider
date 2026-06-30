@@ -24,6 +24,7 @@ import {
 	defineModule,
 	type FederationProviderHandle,
 	type FederationTokenStore,
+	jwksModule,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
@@ -133,17 +134,18 @@ describe("oauthModule — manifest shape", () => {
 		expect(result.success).toBe(true);
 	});
 
-	it("includes oauth-endpoints + jwks route contributions when issuer is absent", () => {
+	it("includes only oauth-endpoints when issuer is absent (JWKS moved to core jwksModule)", () => {
 		const base = makeValidAppConfig();
-		// No issuer set — oauth-endpoints and jwks are always contributed; only
-		// oidc-discovery is issuer-gated, so it is absent here.
+		// No issuer set — only oauth-endpoints is contributed. oidc-discovery is
+		// issuer-gated; JWKS is no longer an oauth contribution (core jwksModule
+		// owns it now).
 		const module = oauthModule({ config: base });
 		const routes = module.contributes?.routes;
 		expect(Array.isArray(routes)).toBe(true);
-		expect((routes as unknown[]).length).toBe(2);
+		expect((routes as unknown[]).length).toBe(1);
 	});
 
-	it("includes oauth-endpoints + jwks + oidc-discovery when issuer is configured", () => {
+	it("includes oauth-endpoints + oidc-discovery when issuer is configured", () => {
 		const base = makeValidAppConfig();
 		const config = {
 			...base,
@@ -158,8 +160,8 @@ describe("oauthModule — manifest shape", () => {
 		const module = oauthModule({ config });
 		const routes = module.contributes?.routes;
 		expect(Array.isArray(routes)).toBe(true);
-		// oauth-endpoints + jwks + oidc-discovery
-		expect((routes as unknown[]).length).toBe(3);
+		// oauth-endpoints + oidc-discovery (JWKS is contributed by core jwksModule)
+		expect((routes as unknown[]).length).toBe(2);
 	});
 });
 
@@ -291,36 +293,36 @@ describe("oauthModule — createTestApp route inspection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// JWKS — the provider must publish its verification keys so verifiers (BFF,
-// RPs) can validate asymmetric-signed tokens offline. core ships
-// routes/Jwks.mts but, pre-fix, no module mounted it: oidc-discovery advertised
-// `jwks_uri` while GET /.well-known/jwks.json returned 404. JWKS is mounted
-// unconditionally (unlike issuer-gated oidc-discovery) because it must be
-// reachable whenever the provider signs tokens.
+// Discovery <-> JWKS path agreement (presence + config-drift contract).
+//
+// JWKS is now contributed by the core `jwksModule`, while oidc-discovery
+// (which advertises `jwks_uri`) is contributed by oauth. They live in
+// different modules, so an issuer-enabled composition MUST co-install both
+// or discovery publishes a dangling `jwks_uri`. These tests pin that
+// cross-module contract end-to-end: the advertised `jwks_uri` must resolve
+// to a mounted JWKS route, including under an `oauth.jwt.jwksPath` override
+// (both endpoints resolve the path via the shared `resolveJwksPath`, so
+// they cannot drift).
 // ---------------------------------------------------------------------------
 
-describe("oauthModule — jwks route", () => {
-	it("registers a jwks route contribution even when issuer is absent", async () => {
-		const config = makeValidAppConfig();
-		const handle = await createTestApp({
-			modules: [
-				oauthModule({ config }),
-				clientRepositoryModule,
-				codeRepositoryModule,
-				keyStoreModule,
-			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
-		});
-		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
-		expect(routeIds).toContain("jwks");
-		await handle.dispose();
-	});
+describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
+	function issuerConfig(extraJwt: Record<string, unknown> = {}) {
+		const base = makeValidAppConfig();
+		return {
+			...base,
+			oauth: {
+				...base.oauth,
+				jwt: { ...base.oauth.jwt, issuer: "https://auth.example.com", ...extraJwt },
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+	}
 
-	it("serves /.well-known/jwks.json (reachable, not 404)", async () => {
-		const config = makeValidAppConfig();
+	it("advertised jwks_uri resolves to a mounted JWKS route (default path)", async () => {
+		const config = issuerConfig();
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
@@ -329,9 +331,36 @@ describe("oauthModule — jwks route", () => {
 		});
 		const app = express();
 		app.use(handle.router);
-		const res = await request(app).get("/.well-known/jwks.json");
+		const disco = await request(app).get("/.well-known/openid-configuration");
+		expect(disco.status).toBe(200);
+		const jwksPath = new URL(disco.body.jwks_uri as string).pathname;
+		expect(jwksPath).toBe("/.well-known/jwks.json");
+		const res = await request(app).get(jwksPath);
 		expect(res.status).toBe(200);
 		expect(Array.isArray(res.body.keys)).toBe(true);
+		await handle.dispose();
+	});
+
+	it("honors oauth.jwt.jwksPath for BOTH the advertised jwks_uri and the mounted route", async () => {
+		const config = issuerConfig({ jwksPath: "/keys/jwks.json" });
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				jwksModule,
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const disco = await request(app).get("/.well-known/openid-configuration");
+		expect(disco.body.jwks_uri).toBe("https://auth.example.com/keys/jwks.json");
+		const jwksPath = new URL(disco.body.jwks_uri as string).pathname;
+		expect((await request(app).get(jwksPath)).status).toBe(200);
+		// The old default path is no longer served under the override.
+		expect((await request(app).get("/.well-known/jwks.json")).status).toBe(404);
 		await handle.dispose();
 	});
 });

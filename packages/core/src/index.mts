@@ -147,6 +147,13 @@ export type {
 	SessionData,
 	SessionMutation,
 } from "./grants/types.mjs";
+// JWKS publishing — `jwksModule` mounts the route so every provider that signs
+// tokens exposes its verification keys for offline validation; `createJwksRouter`
+// is the underlying factory for direct composition. `DEFAULT_JWKS_PATH` /
+// `resolveJwksPath` are the single source of truth for the publishing path,
+// shared with oauth discovery's `jwks_uri` so the two never drift.
+export { jwksModule } from "./jwks/module.mjs";
+export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
 // JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
 export type {
 	JwtType,
@@ -300,8 +307,6 @@ export type {
 	User,
 } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
-// Routes — JWKS publishing (mounted by the oauth module so every provider that
-// signs tokens exposes /.well-known/jwks.json for offline verification).
 export { createRouter as createJwksRouter } from "./routes/Jwks.mjs";
 export {
 	createSessionFamilyIndexFactory,

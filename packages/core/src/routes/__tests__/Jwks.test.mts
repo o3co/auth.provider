@@ -17,6 +17,7 @@
 import type { Request, Response, Router } from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_JWKS_PATH, resolveJwksPath } from "#/jwks/path.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { createRouter } from "#/routes/Jwks.mjs";
 
@@ -53,6 +54,39 @@ function createMockRes() {
 		getBody: () => body,
 	};
 }
+
+describe("JWKS path resolution", () => {
+	it("defaults to the conventional well-known path", () => {
+		expect(DEFAULT_JWKS_PATH).toBe("/.well-known/jwks.json");
+		expect(resolveJwksPath({})).toBe(DEFAULT_JWKS_PATH);
+		expect(resolveJwksPath({ oauth: { jwt: {} } })).toBe(DEFAULT_JWKS_PATH);
+	});
+
+	it("honors a configured oauth.jwt.jwksPath override", () => {
+		expect(resolveJwksPath({ oauth: { jwt: { jwksPath: "/keys/jwks.json" } } })).toBe(
+			"/keys/jwks.json",
+		);
+	});
+
+	it("falls back to default for an empty/invalid configured value", () => {
+		expect(resolveJwksPath({ oauth: { jwt: { jwksPath: "" } } })).toBe(DEFAULT_JWKS_PATH);
+		expect(resolveJwksPath({ oauth: { jwt: { jwksPath: 123 } } })).toBe(DEFAULT_JWKS_PATH);
+	});
+
+	it("registers exactly the default path when no path is passed (single source of truth)", () => {
+		const ks = createSymmetricKeyStore("test-secret");
+		const express = createMockExpress();
+		createRouter(express, ks);
+		expect(Object.keys(express.routes)).toEqual([DEFAULT_JWKS_PATH]);
+	});
+
+	it("registers the explicit path when one is passed", () => {
+		const ks = createSymmetricKeyStore("test-secret");
+		const express = createMockExpress();
+		createRouter(express, ks, "/keys/jwks.json");
+		expect(Object.keys(express.routes)).toEqual(["/keys/jwks.json"]);
+	});
+});
 
 describe("JWKS endpoint", () => {
 	it("returns an empty JWK set for HS256 without exposing shared secrets", async () => {

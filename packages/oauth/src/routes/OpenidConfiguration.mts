@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { DEFAULT_JWKS_PATH } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 
 type ExpressLike = {
@@ -32,6 +33,16 @@ export interface OidcConfigRouterOptions {
 	 * oauthModule sets this to the computed `!!stores && !!issuer` expression.
 	 */
 	logoutSupported?: boolean;
+	/**
+	 * Absolute path (relative to the issuer origin) at which the JWKS is
+	 * published, used to build the advertised `jwks_uri`. Defaults to
+	 * `/.well-known/jwks.json`. oauthModule resolves this via the shared
+	 * core `resolveJwksPath` so the advertised URI matches the path the core
+	 * `jwksModule` actually registers. Direct callers who publish JWKS at a
+	 * non-default path MUST set this so discovery does not advertise a
+	 * dangling `jwks_uri`.
+	 */
+	jwksPath?: string;
 }
 
 export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions): Router {
@@ -39,6 +50,7 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 
 	router.get("/.well-known/openid-configuration", (_req: Request, res: Response) => {
 		const iss = opts.issuer.replace(/\/+$/, "");
+		const jwksPath = opts.jwksPath ?? DEFAULT_JWKS_PATH;
 		return res.status(200).json({
 			// Return the normalized issuer so it matches the `iss` claim minted
 			// on tokens (both use trailing-slash-stripped form). Returning the
@@ -48,7 +60,7 @@ export function createRouter(express: ExpressLike, opts: OidcConfigRouterOptions
 			authorization_endpoint: `${iss}/oauth/authorize`,
 			token_endpoint: `${iss}/oauth/token`,
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
-			jwks_uri: `${iss}/.well-known/jwks.json`,
+			jwks_uri: `${iss}${jwksPath}`,
 			introspection_endpoint: `${iss}/oauth/introspect`,
 			// Logout discovery fields are only advertised when the logout router is mounted.
 			// opts.logoutSupported defaults to false (explicit opt-in); oauthModule sets it

@@ -145,6 +145,14 @@ const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
 const jwtSchemaBase = z.object({
 	issuer: z.string().optional(),
 	signingKey: signingKeySchema,
+	// JWKS publishing path (OIDC `jwks_uri`). Operator-choosable per OIDC
+	// Discovery; defaults to `/.well-known/jwks.json` when unset (applied by
+	// `resolveJwksPath`). Must be an absolute path so the JWKS route and the
+	// advertised `jwks_uri` agree. See `core/src/jwks/path.mts`.
+	jwksPath: z
+		.string()
+		.startsWith("/", "oauth.jwt.jwksPath must be an absolute path beginning with '/'")
+		.optional(),
 	// SF-1 (v0.5.1): when true (default in HOCON), the central JWT verifier
 	// accepts tokens whose `typ` header is absent and emits a deprecation
 	// warning. v0.6+ should set this to false and reject typ-less tokens.

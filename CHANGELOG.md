@@ -6,9 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`jwksModule` (`@o3co/auth-provider-core`).** A route-contributing module that publishes the provider's verification keys at the JWKS endpoint. It depends only on the `keyStore` and is mounted unconditionally — a provider that signs tokens must publish its keys regardless of whether an OIDC issuer is configured, so (unlike issuer-gated `oidc-discovery`) it is a key-management concern owned by core, not the `oauth` module. The standalone scaffold wires it alongside `oauthModule`. `createJwksRouter` remains exported for direct composition.
+- **Configurable JWKS path via `oauth.jwt.jwksPath`.** `jwks_uri` is operator-choosable per OIDC Discovery; it now defaults to `/.well-known/jwks.json` and can be overridden (must be an absolute path). The JWKS route and the discovery `jwks_uri` both resolve the path through the new exported `resolveJwksPath` helper (with `DEFAULT_JWKS_PATH`), so the registered path and the advertised URI cannot drift.
+
 ### Fixed
 
-- **JWKS endpoint is now mounted.** `@o3co/auth-provider-core` shipped `routes/Jwks.mts` but no module mounted it, so OIDC discovery advertised `jwks_uri` while `GET /.well-known/jwks.json` returned 404 — verifiers had no key source for offline asymmetric-token validation. The `oauth` module now contributes the JWKS route, mounted unconditionally (a provider that signs tokens must publish its verification keys regardless of whether an OIDC issuer is configured, so it is not issuer-gated like `oidc-discovery`). `@o3co/auth-provider-core` additionally exports `createJwksRouter` for direct composition.
+- **JWKS endpoint is now mounted.** `@o3co/auth-provider-core` shipped `routes/Jwks.mts` but no module mounted it, so OIDC discovery advertised `jwks_uri` while `GET /.well-known/jwks.json` returned 404 — verifiers (BFFs, RPs) had no key source for offline asymmetric-token validation. The new `jwksModule` mounts the route; an integration test pins that the advertised `jwks_uri` always resolves to the mounted route (including under a `jwksPath` override).
 
 ## [0.8.0] - 2026-05-20
 
