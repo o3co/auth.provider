@@ -15,7 +15,10 @@ let client: Redis;
 let keyCounter = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine").withExposedPorts(6379).start();
+	container = await new GenericContainer("redis:7.2-alpine")
+		.withExposedPorts(6379)
+		.withStartupTimeout(120_000)
+		.start();
 	client = new Redis({
 		host: container.getHost(),
 		port: container.getMappedPort(6379),

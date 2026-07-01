@@ -180,8 +180,16 @@ jobs:
           fi
           echo "OK: no ignoreExpiration: true call sites outside revoke handler or tests"
       - run: pnpm -r --if-present run typecheck
-      - run: pnpm run test
-      - run: pnpm run test:coverage
+      # Run each package's suite one package at a time on CI. The runner is
+      # 2-vCPU; running multiple packages' vitest workers (plus redis
+      # testcontainers) concurrently over-subscribes the runner and surfaces
+      # loaded-runner flakes (ephemeral-port pressure, timing-margin misses,
+      # slow container port binding). Serializing packages bounds total
+      # concurrency to one package's worker pool. Local `pnpm run test` stays
+      # fully parallel — this cap is CI-only. Within a package, vitest still
+      # parallelizes test files.
+      - run: pnpm -r --workspace-concurrency=1 run test
+      - run: pnpm -r --filter "./packages/**" --if-present --workspace-concurrency=1 run test:coverage
 
       - name: Upload coverage to Codecov (core)
         uses: codecov/codecov-action@v5
