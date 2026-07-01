@@ -29,8 +29,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
-import { buildDiscoveryDocument, contributesProviderSurface } from "../discovery/buildDocument.mjs";
-import type { DiscoveryMetadata } from "../discovery/types.mjs";
+import { planDiscoveryRoute } from "../discovery/planRoute.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import {
 	type DispatchPolicy,
@@ -165,54 +164,6 @@ function checkMaterialisedRouteCollisions(routes: readonly CollectedRouteContrib
 				});
 			}
 			seenEffective.set(effectiveIdentity, { module, mountPath: route.mountPath });
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Internal: core-synthesized OIDC discovery route collision guard
-// ---------------------------------------------------------------------------
-
-/** The RFC 8414 / OIDC Discovery 1.0 fixed discovery path. */
-const OIDC_DISCOVERY_PATH = "/.well-known/openid-configuration";
-
-/**
- * Throw a `BootError` if any contributed route would effectively serve
- * `GET /.well-known/openid-configuration` — i.e. collide with the
- * core-synthesized discovery route. Since the core route is registered before
- * the contribution mount loop, such a contribution would otherwise be silently
- * shadowed; this mirrors `checkMaterialisedRouteCollisions` so the collision
- * fails the boot fast instead.
- *
- * Detection covers (a) a route advertising `GET` at the effective discovery
- * path, and (b) a route mounted directly at the discovery path (any method —
- * an Express router mounted there handles GET on it). An opaque router at "/"
- * that internally serves the path without advertising it is NOT detectable —
- * the same limitation `checkMaterialisedRouteCollisions` has for every route.
- * @internal
- */
-function assertNoDiscoveryRouteCollision(routes: readonly CollectedRouteContribution[]): void {
-	const collapseSlashes = (p: string): string => p.replace(/\/{2,}/g, "/");
-	for (const { contribution: route, contributedBy: module } of routes) {
-		const mountedAtDiscoveryPath = collapseSlashes(route.mountPath) === OIDC_DISCOVERY_PATH;
-		const advertisesDiscoveryGet = (route.routes ?? []).some(
-			(adv) =>
-				adv.method === "GET" &&
-				collapseSlashes(`${route.mountPath}${adv.path}`) === OIDC_DISCOVERY_PATH,
-		);
-		if (mountedAtDiscoveryPath || advertisesDiscoveryGet) {
-			throw new BootError({
-				message: `assembleApp: module "${module}" contributes a route that collides with the core-synthesized OIDC discovery endpoint "GET ${OIDC_DISCOVERY_PATH}". Discovery is synthesized by core from \`discoveryMetadata\` contributions — remove the route and contribute \`discoveryMetadata\` instead.`,
-				reason: "duplicate-contribute",
-				stage: "assembleApp",
-				details: {
-					reason: "duplicate-contribute",
-					kind: "routes",
-					identity: `GET ${OIDC_DISCOVERY_PATH}`,
-					identityKind: "effective-method-path",
-					modules: ["core:oidc-discovery", module],
-				},
-			});
 		}
 	}
 }
@@ -550,21 +501,13 @@ export function assembleApp(
 		readonly lifecycleReg?: InternalLifecycleRegistrar;
 	} = {},
 ): AppHandle {
-	// Pre-pass: post-apply route collision check (MUST-FIX 2 / §5.6 pre-pass).
-	// Catches collisions produced by factory-generated routes that were opaque
-	// at validate-manifests time. Same checks as stage 1, but runs against the
-	// full materialised frozen.routes list.
-	checkMaterialisedRouteCollisions(frozen.routes);
-
-	// Step 1: Mount-order computation (§5.6 step 1).
-	const ordered = computeMountOrder(frozen.routes);
-
-	// Step 2: Construct router (§5.6 step 2).
-	// Resolve Router constructor: accept injected value (for tests/overrides)
-	// or fall back to a synchronous require of the express peer dep. The
-	// require also yields the express() factory used by handle.listen() to
-	// wrap the router in a real Express app (Router is middleware and would
-	// crash with "next is not a function" if passed bare to createServer).
+	// Resolve the Router constructor first — it is needed to build the
+	// core-synthesized discovery route below, before the collision check. Accept
+	// an injected value (for tests/overrides) or fall back to a synchronous
+	// require of the express peer dep. The require also yields the express()
+	// factory used by handle.listen() to wrap the router in a real Express app
+	// (Router is middleware and would crash with "next is not a function" if
+	// passed bare to createServer).
 	let RouterCtor = options.express?.Router;
 	let expressFactory: ExpressFactory | undefined;
 	try {
@@ -585,6 +528,41 @@ export function assembleApp(
 		);
 	}
 
+	// The OIDC discovery subsystem decides — from issuer config + provider-root
+	// contributions — whether to synthesize a discovery route, and returns it as
+	// an ORDINARY route contribution (mounted at "/", advertising
+	// `GET /.well-known/openid-configuration`). All OIDC knowledge lives in
+	// `discovery/`; from here discovery is just another route that flows through
+	// the standard collision-check + mount-order + mount pipeline below, so a
+	// module contributing a colliding route fails the boot fast with no special-
+	// casing. `null` when no document is served.
+	const discoveryRoute = planDiscoveryRoute({
+		components: frozen.components as Record<string, unknown>,
+		registries: frozen.registries,
+		routerFactory: RouterCtor,
+	});
+	const allRoutes: readonly CollectedRouteContribution[] =
+		discoveryRoute === null
+			? frozen.routes
+			: [
+					...frozen.routes,
+					{
+						contribution: discoveryRoute,
+						contributedBy: "core:discovery",
+						declarationIndex: frozen.routes.length,
+					},
+				];
+
+	// Pre-pass: post-apply route collision check (MUST-FIX 2 / §5.6 pre-pass).
+	// Catches collisions produced by factory-generated routes that were opaque
+	// at validate-manifests time, AND any module route colliding with the
+	// synthesized discovery route. Same checks as stage 1, over the full list.
+	checkMaterialisedRouteCollisions(allRoutes);
+
+	// Step 1: Mount-order computation (§5.6 step 1).
+	const ordered = computeMountOrder(allRoutes);
+
+	// Step 2: Construct router (§5.6 step 2).
 	const router: Router = RouterCtor();
 
 	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
@@ -643,67 +621,9 @@ export function assembleApp(
 		}
 	}
 
-	// Synthesize the single OIDC discovery document from the
-	// `discoveryMetadata` collector and mount it at the spec-fixed path
-	// `/.well-known/openid-configuration`. The aggregator owns `issuer`
-	// (trailing-slash normalized) and `id_token_signing_alg_values_supported`
-	// (from `keyStore.algorithm`); endpoint-owning modules contribute the
-	// issuer-relative endpoints + literal metadata they advertise.
-	//
-	// Gated on TWO conditions, both required:
-	//   1. An issuer is configured — without it the deployment is not an OIDC
-	//      provider, so no discovery document is served (mirrors the
-	//      pre-aggregator gating that lived in the oauth module).
-	//   2. A provider-defining endpoint (authorization_endpoint) was contributed
-	//      — `contributesProviderSurface`. A composition that wires no
-	//      discovery-contributing module, OR only an ancillary contributor like
-	//      the JWKS module (which contributes just `jwks_uri`), is not an OpenID
-	//      Provider: it boots cleanly and serves nothing. This is what lets a
-	//      key-publishing deployment mount JWKS without the full OAuth suite even
-	//      with an issuer configured.
-	//
-	// Once the provider surface IS contributed, the structural presence contract
-	// bites: `buildDiscoveryDocument` is called at boot, so a composition that
-	// declares a provider but is missing an OIDC-required field (e.g. the OAuth
-	// module is wired but the JWKS module that owns `jwks_uri` is absent) throws
-	// `DiscoveryDocumentError` here and fails the boot fast rather than serving a
-	// malformed document.
-	const issuerConfig = (frozen.components as Record<string, unknown>).config as
-		| { oauth?: { jwt?: { issuer?: unknown } } }
-		| undefined;
-	const issuerValue = issuerConfig?.oauth?.jwt?.issuer;
-	const discoveryCollector = frozen.registries.get("discoveryMetadata") as
-		| ListCollector<DiscoveryMetadata>
-		| undefined;
-	const discoveryItems = discoveryCollector !== undefined ? [...discoveryCollector.values()] : [];
-	if (
-		typeof issuerValue === "string" &&
-		issuerValue.length > 0 &&
-		contributesProviderSurface(discoveryItems)
-	) {
-		const keyStore = (frozen.components as Record<string, unknown>).keyStore as
-			| { algorithm?: unknown }
-			| undefined;
-		const signingAlgs = typeof keyStore?.algorithm === "string" ? [keyStore.algorithm] : [];
-		const doc = buildDiscoveryDocument(discoveryItems, { issuer: issuerValue, signingAlgs });
-		// The core-synthesized discovery route is NOT a route contribution, so it
-		// does not flow through `checkMaterialisedRouteCollisions`. Without the
-		// guard below it would silently SHADOW a module that contributed a route
-		// effectively serving the same `GET /.well-known/openid-configuration`
-		// (this handler is registered before the contribution mount loop). Mirror
-		// the contribution collision semantics: fail the boot fast on a detectable
-		// collision rather than silently dropping the module's route. Detection is
-		// limited to ADVERTISED effective paths and a route mounted directly at the
-		// discovery path — an opaque router at "/" with no advertisement is not
-		// detectable here, the same limitation `checkMaterialisedRouteCollisions`
-		// has for every route.
-		assertNoDiscoveryRouteCollision(frozen.routes);
-		router.get("/.well-known/openid-configuration", (_req, res) => {
-			res.status(200).json(doc);
-		});
-	}
-
-	// Mount each route contribution in mount-index order.
+	// Mount each route contribution in mount-index order. The synthesized
+	// discovery route (when present) is in `ordered` like any other, so it mounts
+	// here through the same path — no special-casing.
 	for (const orderedRoute of ordered) {
 		router.use(orderedRoute.contribution.mountPath, orderedRoute.contribution.handler as never);
 	}

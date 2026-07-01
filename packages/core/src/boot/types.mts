@@ -32,7 +32,7 @@ import type { RequestHandler, Router } from "express";
 import type { z } from "zod";
 import type { LifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { AppConfig } from "../config/application.schema.mjs";
-import type { DiscoveryMetadata } from "../discovery/types.mjs";
+import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type {
@@ -454,11 +454,11 @@ export interface ContributionCollectorMap {
 	readonly tokenBindingMechanisms?: ListCollector<TokenBindingMechanism | null>;
 	/**
 	 * Collector for `discoveryMetadata` contributions. Each entry is a
-	 * `DiscoveryMetadata` partial. `assembleApp` aggregates all entries into the
+	 * `OidcDiscoveryContribution` partial. `assembleApp` aggregates all entries into the
 	 * single `/.well-known/openid-configuration` document via
 	 * `buildDiscoveryDocument` (mounted only when an issuer is configured).
 	 */
-	readonly discoveryMetadata?: ListCollector<DiscoveryMetadata>;
+	readonly discoveryMetadata?: ListCollector<OidcDiscoveryContribution>;
 }
 
 /**
@@ -609,10 +609,11 @@ export type BootStage =
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 23 reasons.
+ * exactly 24 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
- * federation-stores-incomplete).
+ * federation-stores-incomplete) and the OIDC discovery aggregator
+ * (discovery-document-invalid).
  */
 export type BootErrorReason =
 	| "duplicate-module-name"
@@ -637,7 +638,8 @@ export type BootErrorReason =
 	| "federation-redirect-policy-unpaired"
 	| "grant-policy-without-issuer"
 	| "mfa-partial-wiring"
-	| "federation-stores-incomplete";
+	| "federation-stores-incomplete"
+	| "discovery-document-invalid";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — 23 total, Per A2-β §6.1
@@ -946,6 +948,20 @@ export interface FederationStoresIncompleteDetails {
 }
 
 /**
+ * The aggregated OIDC discovery document could not be formed from the
+ * `discoveryMetadata` contributions (missing required field, reserved-field
+ * contribution, conflicting values, empty signing algs, endpoint-in-metadata,
+ * …). Wraps the underlying `DiscoveryDocumentError` (carried as `cause`) so a
+ * discovery misconfiguration surfaces through the same `BootError` taxonomy as
+ * every other assembleApp failure. Per the OIDC discovery aggregator.
+ */
+export interface DiscoveryDocumentInvalidDetails {
+	readonly reason: "discovery-document-invalid";
+	/** The underlying `DiscoveryDocumentError` message. */
+	readonly detail: string;
+}
+
+/**
  * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
@@ -976,7 +992,8 @@ export type BootErrorDetails =
 	| FederationRedirectPolicyUnpairedDetails
 	| GrantPolicyWithoutIssuerDetails
 	| MfaPartialWiringDetails
-	| FederationStoresIncompleteDetails;
+	| FederationStoresIncompleteDetails
+	| DiscoveryDocumentInvalidDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

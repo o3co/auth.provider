@@ -29,7 +29,7 @@
  * contributes the aggregator-owned reserved fields.
  */
 
-import type { AppConfig, DiscoveryMetadata } from "@o3co/auth-provider-core";
+import type { AppConfig, OidcDiscoveryContribution } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { oauthModule } from "../module.mjs";
@@ -44,7 +44,7 @@ const allLogoutStores = {
 	refreshTokenFamilyRevocation: {},
 };
 
-function discoveryContribution(deps: Record<string, unknown> = {}): DiscoveryMetadata {
+function discoveryContribution(deps: Record<string, unknown> = {}): OidcDiscoveryContribution {
 	const config = makeValidAppConfig() as unknown as AppConfig;
 	const factory = oauthModule({ config }).contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("oauthModule contributes no discoveryMetadata");
@@ -52,6 +52,13 @@ function discoveryContribution(deps: Record<string, unknown> = {}): DiscoveryMet
 }
 
 describe("oauthModule — discoveryMetadata contribution", () => {
+	it("declares itself the provider root so core activates discovery", () => {
+		// oauth owns the authorization-server surface, so it sets `providerRoot`.
+		// This is the explicit signal (not an inferred `authorization_endpoint`)
+		// that core uses to decide whether to synthesize the discovery document.
+		expect(discoveryContribution().providerRoot).toBe(true);
+	});
+
 	it("contributes issuer-relative OAuth endpoints (aggregator prefixes the issuer)", () => {
 		const meta = discoveryContribution();
 		expect(meta.endpoints?.authorization_endpoint).toBe("/oauth/authorize");

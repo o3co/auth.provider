@@ -15,17 +15,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import {
-	buildDiscoveryDocument,
-	contributesProviderSurface,
-	DiscoveryDocumentError,
-} from "#/discovery/buildDocument.mjs";
-import type { DiscoveryMetadata } from "#/discovery/types.mjs";
+import { buildDiscoveryDocument, DiscoveryDocumentError } from "#/discovery/buildDocument.mjs";
+import type { OidcDiscoveryContribution } from "#/discovery/types.mjs";
 
 const OPTS = { issuer: "https://auth.example.com", signingAlgs: ["ES256"] };
 
 /** A minimal pair of contributions that together satisfy the OIDC-required set. */
-function completeItems(): DiscoveryMetadata[] {
+function completeItems(): OidcDiscoveryContribution[] {
 	return [
 		{
 			// oauth-like
@@ -69,7 +65,7 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it("concatenates + de-duplicates array metadata across contributions", () => {
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{ metadata: { scopes_supported: ["openid", "profile"] } },
 			{ metadata: { scopes_supported: ["profile", "email"] } },
@@ -87,7 +83,7 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it("accepts a scalar field contributed twice with the same value", () => {
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{ metadata: { service_documentation: "https://docs" } },
 			{ metadata: { service_documentation: "https://docs" } },
@@ -96,7 +92,7 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it("throws on a conflicting scalar value", () => {
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{ metadata: { op_policy_uri: "https://a" } },
 			{ metadata: { op_policy_uri: "https://b" } },
@@ -105,7 +101,7 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it("accepts an endpoint contributed twice with the same resolved URL", () => {
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{ endpoints: { token_endpoint: "/oauth/token" } },
 		];
@@ -113,7 +109,7 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it("throws on a conflicting endpoint value", () => {
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{ endpoints: { token_endpoint: "/oauth/token2" } },
 		];
@@ -121,7 +117,7 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it("throws on a non-absolute endpoint path", () => {
-		const items: DiscoveryMetadata[] = [{ endpoints: { jwks_uri: "keys/jwks.json" } }];
+		const items: OidcDiscoveryContribution[] = [{ endpoints: { jwks_uri: "keys/jwks.json" } }];
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/absolute path/);
 	});
 
@@ -144,17 +140,23 @@ describe("buildDiscoveryDocument", () => {
 		"issuer",
 		"id_token_signing_alg_values_supported",
 	])("throws when a contribution sets the reserved field %s (via metadata)", (field) => {
-		const items: DiscoveryMetadata[] = [...completeItems(), { metadata: { [field]: ["x"] } }];
+		const items: OidcDiscoveryContribution[] = [
+			...completeItems(),
+			{ metadata: { [field]: ["x"] } },
+		];
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/reserved field/);
 	});
 
 	it("throws when a contribution sets a reserved field via endpoints", () => {
-		const items: DiscoveryMetadata[] = [...completeItems(), { endpoints: { issuer: "/whatever" } }];
+		const items: OidcDiscoveryContribution[] = [
+			...completeItems(),
+			{ endpoints: { issuer: "/whatever" } },
+		];
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/reserved field/);
 	});
 
 	it("throws on array-vs-scalar field shape conflict", () => {
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{ metadata: { acr_values_supported: ["a"] } },
 			{ metadata: { acr_values_supported: "b" } },
@@ -164,13 +166,15 @@ describe("buildDiscoveryDocument", () => {
 
 	it("throws when the assembled document is missing an OIDC-required field (presence contract)", () => {
 		// jwks-only: no authorization/token endpoints, no response/subject types.
-		const items: DiscoveryMetadata[] = [{ endpoints: { jwks_uri: "/.well-known/jwks.json" } }];
+		const items: OidcDiscoveryContribution[] = [
+			{ endpoints: { jwks_uri: "/.well-known/jwks.json" } },
+		];
 		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/missing OIDC-required field/);
 	});
 
 	it("throws when jwks_uri is absent (the structural anti-dangling guarantee)", () => {
 		// oauth-only: everything except jwks_uri.
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			{
 				endpoints: { authorization_endpoint: "/oauth/authorize", token_endpoint: "/oauth/token" },
 				metadata: { response_types_supported: ["code"], subject_types_supported: ["public"] },
@@ -192,7 +196,7 @@ describe("buildDiscoveryDocument", () => {
 		// `metadata` fields are emitted literally (no absolute-path validation, no
 		// issuer prefixing). An endpoint contributed there would advertise a
 		// relative/origin-less URL. Endpoint fields MUST go through `endpoints`.
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{ metadata: { revocation_endpoint: "/oauth/revoke" } },
 		];
@@ -200,7 +204,7 @@ describe("buildDiscoveryDocument", () => {
 	});
 
 	it("rejects `jwks_uri` contributed via `metadata` instead of `endpoints`", () => {
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			{
 				endpoints: { authorization_endpoint: "/oauth/authorize", token_endpoint: "/oauth/token" },
 				metadata: {
@@ -217,7 +221,7 @@ describe("buildDiscoveryDocument", () => {
 		// These OIDC metadata fields are absolute external URLs, not issuer-relative
 		// endpoints — they legitimately belong in `metadata` and must not be caught
 		// by the endpoint-field guard.
-		const items: DiscoveryMetadata[] = [
+		const items: OidcDiscoveryContribution[] = [
 			...completeItems(),
 			{
 				metadata: {
@@ -230,28 +234,32 @@ describe("buildDiscoveryDocument", () => {
 		expect(doc.op_policy_uri).toBe("https://op.example/policy");
 		expect(doc.service_documentation).toBe("https://op.example/docs");
 	});
-});
 
-describe("contributesProviderSurface", () => {
-	it("is false for no contributions", () => {
-		expect(contributesProviderSurface([])).toBe(false);
-	});
-
-	it("is false for an ancillary-only contribution (jwks_uri, no authorization_endpoint)", () => {
-		const items: DiscoveryMetadata[] = [{ endpoints: { jwks_uri: "/.well-known/jwks.json" } }];
-		expect(contributesProviderSurface(items)).toBe(false);
-	});
-
-	it("is true once any contribution supplies authorization_endpoint", () => {
-		const items: DiscoveryMetadata[] = [
-			{ endpoints: { jwks_uri: "/.well-known/jwks.json" } },
-			{ endpoints: { authorization_endpoint: "/oauth/authorize" } },
+	it("rejects a metadata field whose VALUE looks issuer-relative (string beginning with '/')", () => {
+		// `check_session_iframe` is an issuer-relative OIDC endpoint that does NOT
+		// end in `_endpoint`. Contributed via `metadata` it would be emitted
+		// origin-less; the value-shape guard ("/"-prefixed string) catches it
+		// regardless of field name — belt-and-suspenders with the name-based check.
+		const items: OidcDiscoveryContribution[] = [
+			...completeItems(),
+			{ metadata: { check_session_iframe: "/connect/session" } },
 		];
-		expect(contributesProviderSurface(items)).toBe(true);
+		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/issuer-relative|endpoints/);
 	});
 
-	it("is false when contributions carry only literal metadata (no endpoints)", () => {
-		const items: DiscoveryMetadata[] = [{ metadata: { scopes_supported: ["openid"] } }];
-		expect(contributesProviderSurface(items)).toBe(false);
+	it("throws when a required array field is present but empty (validity, not just presence)", () => {
+		// `response_types_supported: []` is present (passes the REQUIRED_FIELDS
+		// presence check) but OIDC-invalid — an RP cannot use it. Fail fast.
+		const items: OidcDiscoveryContribution[] = [
+			{
+				endpoints: {
+					authorization_endpoint: "/oauth/authorize",
+					token_endpoint: "/oauth/token",
+					jwks_uri: "/.well-known/jwks.json",
+				},
+				metadata: { response_types_supported: [], subject_types_supported: ["public"] },
+			},
+		];
+		expect(() => buildDiscoveryDocument(items, OPTS)).toThrow(/non-empty array/);
 	});
 });

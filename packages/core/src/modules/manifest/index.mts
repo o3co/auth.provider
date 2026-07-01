@@ -19,7 +19,6 @@ export type {
 	AuditHook,
 	AuditHookFactory,
 	ContributesMap,
-	DiscoveryMetadataFactory,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
 	FederationFactory,
@@ -34,6 +33,7 @@ export type {
 	GrantPolicyHookFactory,
 	MfaFactor,
 	MfaFactorFactory,
+	OidcDiscoveryContributionFactory,
 	TokenBindingMechanismFactory,
 } from "./contributes-map.mjs";
 export { defineModule } from "./define-module.mjs";

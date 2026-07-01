@@ -39,6 +39,7 @@ import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
+import { BootError } from "../types.mjs";
 
 /** Inline module providing the `keyStore` component (HS256 → algorithm "HS256"). */
 const keyStoreModule = defineModule({
@@ -60,6 +61,9 @@ const oauthLikeModule = defineModule({
 	contributes: {
 		discoveryMetadata: [
 			() => ({
+				// Provider root: the explicit "an OpenID Provider exists here" signal
+				// that activates discovery aggregation.
+				providerRoot: true,
 				endpoints: {
 					authorization_endpoint: "/oauth/authorize",
 					token_endpoint: "/oauth/token",
@@ -162,14 +166,14 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("issuer set + JWKS-only contribution (no OAuth provider surface) → no route, no boot error", async () => {
+	it("issuer set + JWKS-only contribution (no providerRoot) → no route, no boot error", async () => {
 		// A key-publishing deployment may mount jwksModule WITHOUT the full OAuth
 		// suite, even with an issuer configured (jwks depends only on keyStore).
-		// jwks contributes only the ancillary `jwks_uri`, which does NOT by itself
-		// make the deployment an OpenID Provider — so it must not trigger discovery
-		// aggregation (else boot would fail on the missing OAuth-required fields).
-		// Aggregation opts in only once a provider-defining endpoint
-		// (authorization_endpoint) is contributed.
+		// jwks contributes only the ancillary `jwks_uri` and does NOT set
+		// `providerRoot`, so it does not by itself make the deployment an OpenID
+		// Provider — discovery aggregation must not activate (else boot would fail
+		// on the missing OAuth-required fields). Activation opts in only once a
+		// contribution declares `providerRoot: true`.
 		const handle = await createTestApp({
 			modules: [jwksLikeModule, keyStoreModule],
 			bootstrapComponents: {
@@ -187,11 +191,11 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 	});
 
 	it("fails fast when a module contributes a route colliding with the core discovery path", async () => {
-		// The core-synthesized `GET /.well-known/openid-configuration` is mounted
-		// directly on the router (not a route contribution), so it would silently
-		// shadow a module that advertised the same effective method+path. The
-		// aggregator must instead detect the collision and fail the boot fast,
-		// consistent with `checkMaterialisedRouteCollisions` for contributed routes.
+		// The core-synthesized discovery route is a normal (synthetic) route
+		// contribution advertising `GET /.well-known/openid-configuration`, so it
+		// flows through `checkMaterialisedRouteCollisions` like any other route. A
+		// module advertising the same effective method+path therefore fails the
+		// boot fast as a duplicate — no special-casing, no silent shadowing.
 		await expect(
 			createTestApp({
 				modules: [oauthLikeModule, jwksLikeModule, conflictingDiscoveryRouteModule, keyStoreModule],
@@ -217,29 +221,33 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
-	it("issuer + provider surface contributed but jwks_uri missing → boot fails fast (DiscoveryDocumentError)", async () => {
+	it("issuer + providerRoot contributed but jwks_uri missing → boot fails fast (BootError wrapping DiscoveryDocumentError)", async () => {
 		// The migration's headline behavioral contract, pinned at the level it
-		// actually executes. Once a provider-defining endpoint is contributed
-		// (contributesProviderSurface → true), assembleApp invokes
-		// buildDiscoveryDocument at boot; a composition that wires the OAuth
-		// provider surface + an issuer but omits the jwks_uri-owning module fails
-		// the OIDC-required presence check, so the boot itself rejects rather than
-		// serving (or lazily erroring on) a document missing `jwks_uri`.
-		//
-		// buildDocument.test.mts covers the throw on the function in isolation;
-		// this test pins that assembleApp/createApp actually call it under the
-		// gate and propagate the DiscoveryDocumentError out of createTestApp — the
-		// wiring a future refactor (e.g. deferring the build into the route
-		// handler) could silently break while every other test stayed green.
-		await expect(
-			createTestApp({
-				// jwksLikeModule deliberately omitted — no module contributes `jwks_uri`.
-				modules: [oauthLikeModule, keyStoreModule],
-				bootstrapComponents: {
-					config: withIssuer("https://auth.example.com"),
-					pathResolver: (s) => s,
-				},
-			}),
-		).rejects.toThrow(DiscoveryDocumentError);
+		// actually executes. Once a contribution declares `providerRoot: true`,
+		// the discovery planner invokes buildDiscoveryDocument at boot; a
+		// composition that wires the OAuth provider surface + an issuer but omits
+		// the jwks_uri-owning module fails the OIDC-required presence check. The
+		// planner wraps the `DiscoveryDocumentError` in a `BootError`
+		// (reason="discovery-document-invalid", cause=the original) so a discovery
+		// misconfiguration surfaces through the same boot-failure taxonomy as every
+		// other assembleApp error — `instanceof BootError` consumers don't miss it.
+		const err = await createTestApp({
+			// jwksLikeModule deliberately omitted — no module contributes `jwks_uri`.
+			modules: [oauthLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		}).then(
+			(handle) => {
+				void handle.dispose();
+				return null;
+			},
+			(e: unknown) => e,
+		);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("discovery-document-invalid");
+		expect((err as BootError).cause).toBeInstanceOf(DiscoveryDocumentError);
+		expect(String((err as BootError).message)).toMatch(/jwks_uri/);
 	});
 });

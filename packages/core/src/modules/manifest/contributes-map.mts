@@ -16,7 +16,7 @@
 
 import type { RequestHandler } from "express";
 import type { AuditSink } from "../../audit/types.mjs";
-import type { DiscoveryMetadata } from "../../discovery/types.mjs";
+import type { OidcDiscoveryContribution } from "../../discovery/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
 import type { MfaProvider } from "../../mfa/types.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
@@ -107,13 +107,13 @@ export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContri
 /**
  * Factory type for the `discoveryMetadata` contribution kind.
  *
- * Returns a {@link DiscoveryMetadata} partial — the endpoints + literal fields
+ * Returns a {@link OidcDiscoveryContribution} partial — the endpoints + literal fields
  * this module wants advertised in the OIDC `/.well-known/openid-configuration`
  * document. Core's `assembleApp` aggregates every module's contribution into
  * one document (issuer-gated). List-shaped: multiple modules contribute
  * (oauth its endpoints + capabilities, jwks its `jwks_uri`, …).
  */
-export type DiscoveryMetadataFactory<Deps> = (deps: Deps) => DiscoveryMetadata;
+export type OidcDiscoveryContributionFactory<Deps> = (deps: Deps) => OidcDiscoveryContribution;
 
 /**
  * Factory type for the `grantMiddleware` contribution kind.
@@ -248,5 +248,5 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * literal `metadata` (capability arrays, logout flags). See
 	 * `core/src/discovery/buildDocument.mts` for the merge + validation rules.
 	 */
-	readonly discoveryMetadata?: readonly DiscoveryMetadataFactory<Deps>[];
+	readonly discoveryMetadata?: readonly OidcDiscoveryContributionFactory<Deps>[];
 }

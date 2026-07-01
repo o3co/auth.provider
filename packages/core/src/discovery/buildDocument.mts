@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { DiscoveryMetadata } from "./types.mjs";
+import type { OidcDiscoveryContribution } from "./types.mjs";
 
 /**
  * Discovery fields owned by the aggregator itself — a module contribution may
@@ -43,41 +43,39 @@ const REQUIRED_FIELDS = [
 ] as const;
 
 /**
- * The OpenID-Provider-defining endpoint. A composition is treated as an OpenID
- * Provider — and therefore expected to serve a discovery document — only when
- * some module contributes this endpoint. Modules that contribute ONLY ancillary
- * endpoints (notably the JWKS module's `jwks_uri`) do not by themselves make
- * the deployment a provider, so they must not trigger discovery aggregation: a
- * key-publishing deployment can mount JWKS without the full OAuth suite even
- * with an issuer configured. `authorization_endpoint` is OIDC Discovery 1.0
- * §3's first REQUIRED endpoint and the canonical marker that an authorization
- * server exists. See {@link contributesProviderSurface}.
+ * Required fields whose VALUE must be a non-empty array. The presence check
+ * (`REQUIRED_FIELDS`) only verifies a field is defined; an empty array or a
+ * scalar where an array is required still produces an OIDC-invalid document an
+ * RP cannot use (e.g. `response_types_supported: []`). Validated after merge.
  */
-const PROVIDER_SURFACE_FIELD = "authorization_endpoint";
+const REQUIRED_NONEMPTY_ARRAY_FIELDS = [
+	"response_types_supported",
+	"subject_types_supported",
+	"id_token_signing_alg_values_supported",
+] as const;
 
 /**
- * Whether the contributions declare an OpenID Provider surface (vs. only
- * ancillary endpoints like `jwks_uri`). The aggregator uses this to decide
- * whether to synthesize + mount the discovery document at all: only once a
- * provider-defining endpoint is contributed does the OIDC presence contract
- * (all REQUIRED fields present, else boot fails) apply. This reproduces the
- * pre-aggregator trigger — "the OAuth module is wired and an issuer is set" —
- * without core having to name the oauth module.
+ * Known issuer-relative endpoint field NAMES that do NOT end in `_endpoint`.
+ * Endpoint fields must be contributed via `endpoints` (so they are issuer-
+ * prefixed + absolute-path validated); contributing them via `metadata` would
+ * emit an origin-less URL. The `_endpoint` suffix covers most OIDC endpoints
+ * (`authorization_endpoint`, `registration_endpoint`, …); these are the
+ * spec-defined exceptions that are issuer-relative URLs without that suffix.
  */
-export function contributesProviderSurface(items: readonly DiscoveryMetadata[]): boolean {
-	return items.some((item) => item.endpoints?.[PROVIDER_SURFACE_FIELD] !== undefined);
-}
+const ISSUER_RELATIVE_FIELD_NAMES = new Set(["jwks_uri", "check_session_iframe"]);
 
 /**
- * Whether a discovery field is an issuer-relative endpoint. Endpoint fields MUST
- * be contributed via `endpoints` (so they get absolute-path validation + issuer
- * prefixing) rather than `metadata` (emitted literally). Everything ending in
- * `_endpoint` plus `jwks_uri` is an endpoint; literal URI metadata such as
- * `op_policy_uri` / `service_documentation` is an absolute external URL, NOT an
- * issuer-relative endpoint, so it legitimately stays in `metadata`.
+ * Whether a `metadata` field looks like an issuer-relative endpoint that belongs
+ * in `endpoints` instead. Catches it three ways so the guard does not rely on a
+ * name allowlist alone: (a) the `_endpoint` suffix, (b) known non-suffixed
+ * endpoint names, and — the general catch — (c) any VALUE that is a string
+ * beginning with "/", which is issuer-relative by shape regardless of field
+ * name. Literal metadata is booleans, capability arrays, or absolute external
+ * URLs (`op_policy_uri: "https://…"`), none of which match, so they pass.
  */
-function isEndpointField(field: string): boolean {
-	return field.endsWith("_endpoint") || field === "jwks_uri";
+function looksIssuerRelative(field: string, value: unknown): boolean {
+	if (field.endsWith("_endpoint") || ISSUER_RELATIVE_FIELD_NAMES.has(field)) return true;
+	return typeof value === "string" && value.startsWith("/");
 }
 
 /** Thrown when module `discoveryMetadata` contributions cannot form a valid document. */
@@ -102,8 +100,8 @@ function dedupe(values: readonly unknown[]): unknown[] {
 }
 
 /**
- * Aggregate every module's {@link DiscoveryMetadata} contribution into the
- * single OIDC discovery document.
+ * Aggregate every module's {@link OidcDiscoveryContribution} into the single
+ * OIDC discovery document.
  *
  * The aggregator owns `issuer` (trailing-slash-normalized) and
  * `id_token_signing_alg_values_supported` (from the keyStore). Module
@@ -118,7 +116,7 @@ function dedupe(values: readonly unknown[]): unknown[] {
  * output is deterministic.
  */
 export function buildDiscoveryDocument(
-	items: readonly DiscoveryMetadata[],
+	items: readonly OidcDiscoveryContribution[],
 	opts: { readonly issuer: string; readonly signingAlgs: readonly string[] },
 ): Record<string, unknown> {
 	const issuer = opts.issuer.replace(/\/+$/, "");
@@ -175,10 +173,10 @@ export function buildDiscoveryDocument(
 					`discoveryMetadata may not contribute the reserved field "${field}" (owned by the aggregator)`,
 				);
 			}
-			if (isEndpointField(field)) {
+			if (looksIssuerRelative(field, value)) {
 				throw new DiscoveryDocumentError(
-					`discoveryMetadata endpoint field "${field}" must be contributed via \`endpoints\` ` +
-						`(for absolute-path validation + issuer prefixing), not \`metadata\` ` +
+					`discoveryMetadata field "${field}" looks issuer-relative and must be contributed via ` +
+						`\`endpoints\` (for absolute-path validation + issuer prefixing), not \`metadata\` ` +
 						`(which is emitted literally and would advertise an origin-less URL)`,
 				);
 			}
@@ -207,6 +205,19 @@ export function buildDiscoveryDocument(
 			`discovery document is missing OIDC-required field(s): ${missing.join(", ")}. ` +
 				`Ensure every endpoint-owning module (e.g. the OAuth module and the JWKS module) is wired ` +
 				`when an issuer is configured.`,
+		);
+	}
+
+	// Validity (not just presence): required array fields must be non-empty
+	// arrays. A scalar or `[]` here is present-but-OIDC-invalid (an RP cannot use
+	// `response_types_supported: []`), which the presence check above misses.
+	const invalidArrays = REQUIRED_NONEMPTY_ARRAY_FIELDS.filter(
+		(f) => !Array.isArray(doc[f]) || (doc[f] as unknown[]).length === 0,
+	);
+	if (invalidArrays.length > 0) {
+		throw new DiscoveryDocumentError(
+			`discovery document field(s) must be a non-empty array: ${invalidArrays.join(", ")}. ` +
+				`A present-but-empty or non-array value is advertised as OIDC-invalid metadata.`,
 		);
 	}
 

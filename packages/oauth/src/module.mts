@@ -224,6 +224,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						!!deps.federationTokenStore &&
 						!!deps.refreshTokenFamilyRevocation;
 					return {
+						// oauth owns the authorization-server surface, so it is the
+						// provider root: this is the explicit signal that core should
+						// synthesize + serve the discovery document (when an issuer is
+						// configured). Ancillary contributors (jwksModule's `jwks_uri`)
+						// leave it unset.
+						providerRoot: true,
 						endpoints: {
 							authorization_endpoint: "/oauth/authorize",
 							token_endpoint: "/oauth/token",
