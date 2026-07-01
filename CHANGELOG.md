@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-01
+
 ### Added
 
 - **`jwksModule` (`@o3co/auth-provider-core`).** A route-contributing module that publishes the provider's verification keys at the JWKS endpoint. It depends only on the `keyStore` and is mounted unconditionally — a provider that signs tokens must publish its keys regardless of whether an OIDC issuer is configured, so (unlike issuer-gated `oidc-discovery`) it is a key-management concern owned by core, not the `oauth` module. The standalone scaffold wires it alongside `oauthModule`. `createJwksRouter` remains exported for direct composition.
