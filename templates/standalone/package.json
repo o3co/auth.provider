@@ -4,7 +4,7 @@
 	"private": true,
 	"license": "Apache-2.0",
 	"engines": {
-		"node": ">=18.19.0"
+		"node": ">=22.0.0"
 	},
 	"packageManager": "pnpm@10.29.3",
 	"type": "module",
@@ -40,7 +40,7 @@
 	"devDependencies": {
 		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
-		"@types/node": "^25.9.1",
+		"@types/node": "^22.0.0",
 		"@types/supertest": "^7.2.0",
 		"supertest": "^7.1.0",
 		"tsx": "^4.22.3",

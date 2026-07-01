@@ -31,8 +31,8 @@ const REFERENCE_CONF_SUBPATH = "@o3co/auth-provider-core/reference.conf";
  * 3-tier HOCON precedence chain (reference.conf → application.conf → {env}.conf).
  *
  * Primary path: `import.meta.resolve` (Node.js Stability 1.2 RC, unflagged
- * since Node 18.19.0 / 20.6.0 — the engine floor of every package in this
- * scope). Fallback: `createRequire(import.meta.url).resolve(...)`. The
+ * since Node 18.19.0 / 20.6.0 — well below this scope's Node 22 engine floor,
+ * so it is always available). Fallback: `createRequire(import.meta.url).resolve(...)`. The
  * fallback covers two edge cases:
  *
  * 1. A future Node release deprecates or alters the sync form of

@@ -4,7 +4,7 @@
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"engines": {
-		"node": ">=18.19.0"
+		"node": ">=22.0.0"
 	},
 	"type": "module",
 	"main": "./dist/index.mjs",
@@ -71,7 +71,7 @@
 		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
 		"@types/js-yaml": "^4.0.9",
-		"@types/node": "^25.9.1",
+		"@types/node": "^22.0.0",
 		"@types/supertest": "^7.2.0",
 		"express": "^5.2.1",
 		"pino": "^10.3.1",

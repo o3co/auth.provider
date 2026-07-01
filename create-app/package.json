@@ -31,10 +31,10 @@
 		"test": "vitest run"
 	},
 	"engines": {
-		"node": ">=18.19.0"
+		"node": ">=22.0.0"
 	},
 	"devDependencies": {
-		"@types/node": "^25.9.1",
+		"@types/node": "^22.0.0",
 		"vitest": "^4.1.8"
 	}
 }

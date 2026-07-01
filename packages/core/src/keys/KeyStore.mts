@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { createSecretKey, type KeyObject } from "node:crypto";
+import { createSecretKey, type KeyObject, type webcrypto } from "node:crypto";
 import { importPKCS8, importSPKI, SignJWT } from "jose";
 
 /**
@@ -43,7 +43,12 @@ export interface SignJwtOptions {
 	header?: { typ?: string };
 }
 
-export type KeyLike = CryptoKey | KeyObject | Uint8Array;
+// `webcrypto.CryptoKey` (not the bare global `CryptoKey`): the global type is
+// only declared by @types/node >= 24, but this package supports Node >= 22 (see
+// `engines`). Both refer to the same Web Crypto key shape, so consumers are
+// unaffected; do NOT "simplify" this back to `CryptoKey` — it breaks typecheck
+// on the minimum supported @types/node.
+export type KeyLike = webcrypto.CryptoKey | KeyObject | Uint8Array;
 
 export interface ManagedKey {
 	kid: string;

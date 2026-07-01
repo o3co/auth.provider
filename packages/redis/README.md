@@ -4,7 +4,7 @@ Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core
 
 ## Requirements
 
-- **Node.js** `>=18.19.0`
+- **Node.js** `>=22.0.0`
 - **Redis server** `>=7.2 LTS` — the session adapters issue a
   `PEXPIREAT … NX` + `PEXPIREAT … GT` pair for safe concurrent TTL writes
   (D-10). NX sets the TTL on first write because a bare `… GT` silently
