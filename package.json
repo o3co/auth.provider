@@ -3,6 +3,9 @@
 	"private": true,
 	"packageManager": "pnpm@10.29.3",
 	"type": "module",
+	"engines": {
+		"node": ">=22.0.0"
+	},
 	"scripts": {
 		"build": "pnpm -r run build",
 		"docs": "typedoc",
@@ -23,7 +26,8 @@
 		],
 		"overrides": {
 			"qs@>=6.11.1 <=6.15.1": "^6.15.2",
-			"js-yaml@>=4.0.0 <=4.1.1": "^4.2.0"
+			"js-yaml@>=4.0.0 <=4.1.1": "^4.2.0",
+			"@types/node": "^22.0.0"
 		}
 	}
 }

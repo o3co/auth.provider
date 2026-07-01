@@ -4,7 +4,7 @@ Deployable server template for auth.provider. This is the composition root — i
 
 ## Requirements
 
-- **Node.js** `>=18.19.0`
+- **Node.js** `>=22.0.0`
 - **`bcrypt` native binary**: this template depends transitively on `bcrypt@6.x`, which ships **prebuilt N-API binaries** for `darwin-arm64`, `darwin-x64`, `linux-x64` (glibc and musl), `linux-arm64` (glibc and musl), `linux-arm`, `win32-x64`, and `win32-arm64`. On these platforms `pnpm install` succeeds without compiling from source, and no extra toolchain is required (the `darwin-*`, `node:*-alpine`, and `node:*-bookworm` images all match a shipped prebuild). On platforms or libc/arch combinations that have no matching prebuild, `pnpm install` falls back to compiling, which then requires a C++ compiler and Python (the standard Node.js native-addon toolchain): Debian/Ubuntu `apt-get install build-essential python3`, Alpine `apk add make g++ python3`, macOS `xcode-select --install`. The pnpm 10 `onlyBuiltDependencies` allowlist for `bcrypt` is set in this template's `package.json` so a fresh `pnpm install` does not silently skip the install hook on those platforms.
 - **Redis 7.2 LTS or later** for any Redis-backed adapter (refresh token family store, code repository, federation token store, session store). The `pExpireGT` flag pair on which several adapters depend was introduced in Redis 7.0+; 7.2 LTS is the tested floor. Tested against AWS ElastiCache for Redis 7.2, Upstash Redis, Redis Cloud 7.2, and self-managed `redis:7.2-alpine`.
 - **ioredis** `^5.4.1` (direct runtime dependency, used by the refresh-token-family client). Other Redis-backed adapters in this template still use the `redis` npm package; ioredis is added for the RT family store specifically.

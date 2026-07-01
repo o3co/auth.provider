@@ -1,6 +1,14 @@
 {
 	"compilerOptions": {
-		"target": "esnext",
+		// `es2023` target (NOT esnext) with `lib: esnext` — mirrors the monorepo's
+		// tsconfig.base.json. This template is copied verbatim into scaffolded
+		// consumer projects (so it must stay self-contained and cannot `extends`
+		// ../../tsconfig.base.json). Capping the emit target at ES2023 — the newest
+		// edition Node 22 (this template's engine floor) parses natively — makes tsc
+		// downlevel any newer syntax (e.g. `await using`) into helpers, so the built
+		// server actually runs on the Node it advertises. Do NOT raise to `esnext`
+		// without also raising the engine floor.
+		"target": "es2023",
 		"lib": ["esnext"],
 		"module": "nodenext",
 		"moduleResolution": "nodenext",

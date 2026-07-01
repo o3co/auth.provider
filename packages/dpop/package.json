@@ -4,7 +4,7 @@
 	"description": "DPoP (RFC 9449) sender-constrained access token support for @o3co/auth-provider",
 	"license": "Apache-2.0",
 	"engines": {
-		"node": ">=18.19.0"
+		"node": ">=22.0.0"
 	},
 	"type": "module",
 	"main": "./dist/index.mjs",

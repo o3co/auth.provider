@@ -1,6 +1,15 @@
 {
 	"compilerOptions": {
-		"target": "esnext",
+		// `target: es2023` (NOT esnext) with `lib: esnext`: the lib gives us the
+		// full esnext TYPE surface (AsyncDisposable, Symbol.asyncDispose, …), but
+		// the emit target is capped at ES2023 — the newest ECMAScript edition fully
+		// supported by our Node 22 engine floor. This makes tsc DOWNLEVEL any newer
+		// syntax (e.g. `await using` explicit resource management, which Node 22
+		// cannot parse — it needs Node 24+) into inlined helpers, so every published
+		// package actually runs on the Node version its `engines` advertises. Do NOT
+		// raise this back to `esnext` without also raising the engine floor to a Node
+		// that parses the emitted syntax natively.
+		"target": "es2023",
 		"lib": ["esnext"],
 		"module": "nodenext",
 		"moduleResolution": "nodenext",
