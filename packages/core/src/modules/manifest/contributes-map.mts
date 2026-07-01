@@ -16,6 +16,7 @@
 
 import type { RequestHandler } from "express";
 import type { AuditSink } from "../../audit/types.mjs";
+import type { OidcDiscoveryContribution } from "../../discovery/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
 import type { MfaProvider } from "../../mfa/types.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
@@ -102,6 +103,17 @@ export type ExchangeTokenValidatorFactory<Deps> = (deps: Deps) => ExchangeTokenV
 export type MfaFactorFactory<Deps> = (deps: Deps) => MfaFactor;
 export type AuditHookFactory<Deps> = (deps: Deps) => AuditHook;
 export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContribution;
+
+/**
+ * Factory type for the `discoveryMetadata` contribution kind.
+ *
+ * Returns a {@link OidcDiscoveryContribution} partial — the endpoints + literal fields
+ * this module wants advertised in the OIDC `/.well-known/openid-configuration`
+ * document. Core's `assembleApp` aggregates every module's contribution into
+ * one document (issuer-gated). List-shaped: multiple modules contribute
+ * (oauth its endpoints + capabilities, jwks its `jwks_uri`, …).
+ */
+export type OidcDiscoveryContributionFactory<Deps> = (deps: Deps) => OidcDiscoveryContribution;
 
 /**
  * Factory type for the `grantMiddleware` contribution kind.
@@ -225,4 +237,16 @@ export interface ContributesMap<Deps = ProviderDeps<never, never>> {
 	 * for the cross-mechanism design rationale.
 	 */
 	readonly tokenBindingMechanisms?: readonly TokenBindingMechanismFactory<Deps>[];
+	/**
+	 * OIDC discovery metadata contributions. List-shaped — each endpoint-owning
+	 * module contributes the endpoints + literal fields it wants advertised, and
+	 * core's `assembleApp` aggregates them into the single
+	 * `/.well-known/openid-configuration` document (mounted only when an issuer
+	 * is configured). The aggregator owns `issuer` and
+	 * `id_token_signing_alg_values_supported`; contributions supply issuer-
+	 * relative `endpoints` (e.g. `authorization_endpoint`, `jwks_uri`) and
+	 * literal `metadata` (capability arrays, logout flags). See
+	 * `core/src/discovery/buildDocument.mts` for the merge + validation rules.
+	 */
+	readonly discoveryMetadata?: readonly OidcDiscoveryContributionFactory<Deps>[];
 }

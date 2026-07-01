@@ -133,7 +133,7 @@ export const mtlsModule = defineModule<"config", "logger">({
 			(deps) => {
 				const mtlsConfig = (deps.config as { oauth?: { mtls?: { enabled?: unknown } } }).oauth
 					?.mtls;
-				if (!mtlsConfig || mtlsConfig.enabled !== true) {
+				if (mtlsConfig?.enabled !== true) {
 					// Disabled by config — no mechanism contributed.
 					return null;
 				}

@@ -159,6 +159,7 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"grantPolicyHooks",
 	"grantMiddleware",
 	"tokenBindingMechanisms",
+	"discoveryMetadata",
 ]);
 
 // ---------------------------------------------------------------------------

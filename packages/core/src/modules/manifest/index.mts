@@ -33,6 +33,7 @@ export type {
 	GrantPolicyHookFactory,
 	MfaFactor,
 	MfaFactorFactory,
+	OidcDiscoveryContributionFactory,
 	TokenBindingMechanismFactory,
 } from "./contributes-map.mjs";
 export { defineModule } from "./define-module.mjs";

@@ -152,7 +152,7 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 			(deps) => {
 				const dpopConfig = (deps.config as { oauth?: { dpop?: { enabled?: unknown } } }).oauth
 					?.dpop;
-				if (!dpopConfig || dpopConfig.enabled !== true) {
+				if (dpopConfig?.enabled !== true) {
 					// Disabled by config — no mechanism contributed.
 					return null;
 				}

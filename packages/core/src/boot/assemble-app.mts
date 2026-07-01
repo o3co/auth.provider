@@ -29,6 +29,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
+import { planDiscoveryRoute } from "../discovery/planRoute.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import {
 	type DispatchPolicy,
@@ -500,21 +501,13 @@ export function assembleApp(
 		readonly lifecycleReg?: InternalLifecycleRegistrar;
 	} = {},
 ): AppHandle {
-	// Pre-pass: post-apply route collision check (MUST-FIX 2 / §5.6 pre-pass).
-	// Catches collisions produced by factory-generated routes that were opaque
-	// at validate-manifests time. Same checks as stage 1, but runs against the
-	// full materialised frozen.routes list.
-	checkMaterialisedRouteCollisions(frozen.routes);
-
-	// Step 1: Mount-order computation (§5.6 step 1).
-	const ordered = computeMountOrder(frozen.routes);
-
-	// Step 2: Construct router (§5.6 step 2).
-	// Resolve Router constructor: accept injected value (for tests/overrides)
-	// or fall back to a synchronous require of the express peer dep. The
-	// require also yields the express() factory used by handle.listen() to
-	// wrap the router in a real Express app (Router is middleware and would
-	// crash with "next is not a function" if passed bare to createServer).
+	// Resolve the Router constructor first — it is needed to build the
+	// core-synthesized discovery route below, before the collision check. Accept
+	// an injected value (for tests/overrides) or fall back to a synchronous
+	// require of the express peer dep. The require also yields the express()
+	// factory used by handle.listen() to wrap the router in a real Express app
+	// (Router is middleware and would crash with "next is not a function" if
+	// passed bare to createServer).
 	let RouterCtor = options.express?.Router;
 	let expressFactory: ExpressFactory | undefined;
 	try {
@@ -535,6 +528,41 @@ export function assembleApp(
 		);
 	}
 
+	// The OIDC discovery subsystem decides — from issuer config + provider-root
+	// contributions — whether to synthesize a discovery route, and returns it as
+	// an ORDINARY route contribution (mounted at "/", advertising
+	// `GET /.well-known/openid-configuration`). All OIDC knowledge lives in
+	// `discovery/`; from here discovery is just another route that flows through
+	// the standard collision-check + mount-order + mount pipeline below, so a
+	// module contributing a colliding route fails the boot fast with no special-
+	// casing. `null` when no document is served.
+	const discoveryRoute = planDiscoveryRoute({
+		components: frozen.components as Record<string, unknown>,
+		registries: frozen.registries,
+		routerFactory: RouterCtor,
+	});
+	const allRoutes: readonly CollectedRouteContribution[] =
+		discoveryRoute === null
+			? frozen.routes
+			: [
+					...frozen.routes,
+					{
+						contribution: discoveryRoute,
+						contributedBy: "core:discovery",
+						declarationIndex: frozen.routes.length,
+					},
+				];
+
+	// Pre-pass: post-apply route collision check (MUST-FIX 2 / §5.6 pre-pass).
+	// Catches collisions produced by factory-generated routes that were opaque
+	// at validate-manifests time, AND any module route colliding with the
+	// synthesized discovery route. Same checks as stage 1, over the full list.
+	checkMaterialisedRouteCollisions(allRoutes);
+
+	// Step 1: Mount-order computation (§5.6 step 1).
+	const ordered = computeMountOrder(allRoutes);
+
+	// Step 2: Construct router (§5.6 step 2).
 	const router: Router = RouterCtor();
 
 	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
@@ -593,7 +621,9 @@ export function assembleApp(
 		}
 	}
 
-	// Mount each route contribution in mount-index order.
+	// Mount each route contribution in mount-index order. The synthesized
+	// discovery route (when present) is in `ordered` like any other, so it mounts
+	// here through the same path — no special-casing.
 	for (const orderedRoute of ordered) {
 		router.use(orderedRoute.contribution.mountPath, orderedRoute.contribution.handler as never);
 	}
