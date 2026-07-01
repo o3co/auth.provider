@@ -30,6 +30,7 @@
  * ADR 2026-04-30.
  */
 import { z } from "zod";
+import { isValidJwksPath } from "../jwks/path.mjs";
 
 const rateLimitSchema = z.object({
 	windowMs: z.coerce.number(),
@@ -151,7 +152,11 @@ const jwtSchemaBase = z.object({
 	// advertised `jwks_uri` agree. See `core/src/jwks/path.mts`.
 	jwksPath: z
 		.string()
-		.startsWith("/", "oauth.jwt.jwksPath must be an absolute path beginning with '/'")
+		.refine(isValidJwksPath, {
+			message:
+				"oauth.jwt.jwksPath must be an absolute path beginning with '/' with no '//', " +
+				"dot-segments, query/fragment, backslash, percent-encoding, or control characters",
+		})
 		.optional(),
 	// JWKS response `Cache-Control: public, max-age=<N>` lifetime (seconds).
 	// Operator-tunable; defaults to 300 (applied by `resolveJwksCacheMaxAge`).
