@@ -617,10 +617,10 @@ function filterClaimsByScope(
 
 #### `/.well-known/openid-configuration`
 
-OIDC Discovery 1.0 メタデータエンドポイント。OAuth モジュール（`@o3co/auth-provider-oauth`）が `config.oauth.jwt.issuer` が設定されている場合にのみ登録する。登録された場合、以下を含む JSON ドキュメントを返す:
+OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issuer` が設定され、かつ provider surface を宣言するモジュールがある（`oauthModule` が `discoveryMetadata` contribution に `providerRoot: true` を設定）場合に、core が合成して mount する。core は各モジュールの `discoveryMetadata` slice（`oauthModule` が endpoints + capabilities、`jwksModule` が `jwks_uri`）を集約して 1 つのドキュメントにする:
 
 - `issuer`、`authorization_endpoint`、`token_endpoint`、`userinfo_endpoint`、`introspection_endpoint`
-- `jwks_uri` — 非対称な署名アルゴリズムが 1 つ以上設定されている場合のみ広告する（HS256 のみの構成では JWKS ルートが 404 を返すため省略）
+- `jwks_uri` — 常に広告する（`jwksModule` が contribute）。issuer 設定済みの構成は `jwksModule` を必ず組み込む必要があり、欠如すると boot が `DiscoveryDocumentError` で fail-fast する。HS256 のみの構成では JWKS ルートは空の鍵セット（`{ "keys": [] }`、HTTP 200）を返す（404 ではない）— 対称鍵の secret は決して公開されない。
 - `response_types_supported: ["code"]`
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — 設定された `KeyStore.algorithm` から導出

@@ -16,8 +16,36 @@
 import type { Request, Response, Router } from "express";
 import { exportJWK } from "jose";
 import { DEFAULT_JWKS_CACHE_MAX_AGE } from "../jwks/cache.mjs";
-import { DEFAULT_JWKS_PATH } from "../jwks/path.mjs";
+import { DEFAULT_JWKS_PATH, isValidJwksPath } from "../jwks/path.mjs";
 import type { KeyStore } from "../keys/KeyStore.mjs";
+
+/**
+ * JWK members that carry PRIVATE or SYMMETRIC key material and must never
+ * appear in a published JWKS: RSA (`d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`),
+ * EC/OKP (`d`), and symmetric (`k`). Per RFC 7517 §9.3 / RFC 7518.
+ */
+const PRIVATE_JWK_MEMBERS: readonly string[] = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
+
+/**
+ * Reduce an exported JWK to its public members, or drop it entirely.
+ *
+ * Defense-in-depth for the `KeyStore` public extension point: the built-in
+ * stores only ever hold public verification material, but a third-party / KMS
+ * adapter that mistakenly returns a private (or symmetric) key as `publicKey`
+ * would otherwise have `exportJWK`'s private components spread straight into
+ * the JWKS response. Symmetric (`kty: "oct"`) keys have no public
+ * representation at all, so they are excluded (returns `null`); for asymmetric
+ * keys the private members are stripped.
+ */
+function toPublicJwk(jwk: Record<string, unknown>): Record<string, unknown> | null {
+	if (jwk.kty === "oct") return null;
+	const pub: Record<string, unknown> = {};
+	for (const [member, value] of Object.entries(jwk)) {
+		if (PRIVATE_JWK_MEMBERS.includes(member)) continue;
+		pub[member] = value;
+	}
+	return pub;
+}
 
 /** Options for {@link createRouter}. */
 export interface JwksRouterOptions {
@@ -65,9 +93,11 @@ export const createRouter = (
 	opts: JwksRouterOptions = {},
 ): Router => {
 	const path = opts.path ?? DEFAULT_JWKS_PATH;
-	if (!path.startsWith("/")) {
+	if (!isValidJwksPath(path)) {
 		throw new Error(
-			`createJwksRouter: path must be an absolute path beginning with "/", got ${JSON.stringify(path)}`,
+			`createJwksRouter: path must be an absolute path beginning with "/" ` +
+				`(no "//", dot-segments, query/fragment, backslash, percent-encoding, or control chars), ` +
+				`got ${JSON.stringify(path)}`,
 		);
 	}
 	const cacheMaxAgeSeconds = opts.cacheMaxAgeSeconds ?? DEFAULT_JWKS_CACHE_MAX_AGE;
@@ -92,12 +122,14 @@ export const createRouter = (
 			return res.json({ keys: [] });
 		}
 		const managedKeys = await keyStore.getVerificationKeys();
-		const keys = await Promise.all(
+		const exported = await Promise.all(
 			managedKeys.map(async (mk) => {
-				const jwk = await exportJWK(mk.publicKey);
-				return { ...jwk, kid: mk.kid, use: "sig", alg: keyStore.algorithm };
+				const publicJwk = toPublicJwk((await exportJWK(mk.publicKey)) as Record<string, unknown>);
+				if (publicJwk === null) return null;
+				return { ...publicJwk, kid: mk.kid, use: "sig", alg: keyStore.algorithm };
 			}),
 		);
+		const keys = exported.filter((k): k is NonNullable<typeof k> => k !== null);
 		// Header set only after key export succeeded (see HS256 branch note).
 		res.setHeader("Cache-Control", cacheControl);
 		return res.json({ keys });

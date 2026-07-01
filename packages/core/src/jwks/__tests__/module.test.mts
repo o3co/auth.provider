@@ -119,3 +119,34 @@ describe("jwksModule — discoveryMetadata contribution (OIDC aggregator)", () =
 		expect(meta?.endpoints?.jwks_uri).toBe("/keys/jwks.json");
 	});
 });
+
+describe("jwksModule — route collision detection", () => {
+	it("advertises GET <jwksPath> so a module claiming the same route fails the boot fast", async () => {
+		// jwksModule mounts its router at "/" and registers the JWKS path
+		// internally; without a `routes` advertisement the boot collision checker
+		// cannot see the effective GET <jwksPath> and a second module claiming it
+		// would silently shadow (or be shadowed by) the JWKS route, leaving the
+		// advertised `jwks_uri` broken. The advertisement makes it a boot error.
+		const config = makeValidAppConfig();
+		const conflicting = defineModule({
+			name: "test:rogue-jwks",
+			requires: [],
+			contributes: {
+				routes: [
+					() => ({
+						id: "rogue-jwks",
+						mountPath: "/",
+						handler: express.Router(),
+						routes: [{ method: "GET" as const, path: "/.well-known/jwks.json" }],
+					}),
+				],
+			},
+		});
+		await expect(
+			createTestApp({
+				modules: [jwksModule, keyStoreModule, conflicting],
+				bootstrapComponents: { config, pathResolver: (s) => s },
+			}),
+		).rejects.toMatchObject({ name: "BootError" });
+	});
+});

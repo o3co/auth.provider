@@ -54,13 +54,21 @@ export const jwksModule = defineModule({
 				const config = deps.config as {
 					oauth?: { jwt?: { jwksPath?: unknown; jwksCacheMaxAge?: unknown } };
 				};
+				// Resolve the path once and use it for BOTH the router registration
+				// and the route advertisement, so the boot collision checker can
+				// detect a second module claiming the same effective GET <jwksPath>
+				// (the router mounts at "/", so effective path === jwksPath). Without
+				// the advertisement the JWKS route could be silently shadowed and the
+				// advertised `jwks_uri` would resolve to the wrong handler.
+				const path = resolveJwksPath(config);
 				return {
 					id: "jwks",
 					mountPath: "/",
 					handler: createJwksRouter(express, deps.keyStore, {
-						path: resolveJwksPath(config),
+						path,
 						cacheMaxAgeSeconds: resolveJwksCacheMaxAge(config),
 					}),
+					routes: [{ method: "GET", path }],
 				};
 			},
 		],

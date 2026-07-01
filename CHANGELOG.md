@@ -24,6 +24,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 
 - **JWKS endpoint is now mounted.** `@o3co/auth-provider-core` shipped `routes/Jwks.mts` but no module mounted it, so OIDC discovery advertised `jwks_uri` while `GET /.well-known/jwks.json` returned 404 — verifiers (BFFs, RPs) had no key source for offline asymmetric-token validation. The new `jwksModule` mounts the route; an integration test pins that the advertised `jwks_uri` always resolves to the mounted route (including under a `jwksPath` override).
+- **`jwksModule` now advertises `GET <jwksPath>` as a route.** Previously the JWKS route carried no `routes` advertisement, so the boot collision checker could not detect a second module claiming the same path — the JWKS route could be silently shadowed and the advertised `jwks_uri` broken. It now advertises the effective path (resolved once, shared with the router registration), so a collision fails the boot fast.
+
+### Security
+
+- **JWKS route sanitizes exported JWKs (defense-in-depth).** The `KeyStore` is a public extension point; a third-party / KMS adapter that mistakenly returns a private (or symmetric) key as its `publicKey` would previously have had `exportJWK`'s private components (`d`, `p`, `q`, `dp`, `dq`, `qi`, `oth`, `k`) spread straight into the JWKS response. The route now strips private JWK members and drops `kty:"oct"` keys entirely. Built-in key stores were never affected (they hold public material only).
+- **`oauth.jwt.jwksPath` validation hardened.** Was `startsWith("/")` only, which admitted values (`/../keys`, `//x`, `/keys?x=1`, `/keys#f`, backslashes, `%2e%2e`, control/whitespace) that Express could normalize to a different dereferenced path than the route registers — breaking the route ↔ `jwks_uri` single-source guarantee. A single shared `isValidJwksPath` rule (config schema + `resolveJwksPath` + `createJwksRouter`) now rejects them.
 
 ## [0.8.0] - 2026-05-20
 

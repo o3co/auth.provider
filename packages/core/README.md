@@ -696,10 +696,10 @@ Maps `UserSessionClaims` to the JWT-shaped claim subset that the granted scopes 
 
 #### `/.well-known/openid-configuration`
 
-OIDC Discovery 1.0 metadata endpoint. Registered by the OAuth module (`@o3co/auth-provider-oauth`) when `config.oauth.jwt.issuer` is configured. When registered, it returns a JSON document advertising:
+OIDC Discovery 1.0 metadata endpoint. Synthesized and mounted by core when `config.oauth.jwt.issuer` is configured AND a module declares the provider surface (`oauthModule` sets `providerRoot: true` on its `discoveryMetadata` contribution). Core aggregates every module's `discoveryMetadata` slice — `oauthModule` contributes the endpoints + capabilities, `jwksModule` contributes `jwks_uri` — into one document advertising:
 
 - `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `introspection_endpoint`
-- `jwks_uri` — only advertised when at least one asymmetric signing alg is configured (omitted for HS256-only deployments since the JWKS route returns 404 for symmetric keys)
+- `jwks_uri` — always advertised (contributed by `jwksModule`); an issuer-configured composition MUST install `jwksModule` or boot fails fast with `DiscoveryDocumentError`. For HS256-only deployments the JWKS route serves an empty key set (`{ "keys": [] }`, HTTP 200) rather than 404 — the symmetric secret is never published.
 - `response_types_supported: ["code"]`
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — derived from the configured `KeyStore.algorithm`

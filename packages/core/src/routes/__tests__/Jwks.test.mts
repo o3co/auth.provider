@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { createSecretKey } from "node:crypto";
 import type { Request, Response, Router } from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
 import { describe, expect, it } from "vitest";
@@ -80,6 +81,24 @@ describe("JWKS path resolution", () => {
 		expect(resolveJwksPath({ oauth: { jwt: { jwksPath: 123 } } })).toBe(DEFAULT_JWKS_PATH);
 	});
 
+	it.each([
+		"relative/jwks.json", // not absolute
+		"//evil.example/jwks.json", // protocol-relative-ish
+		"/../keys/jwks.json", // dot-segment traversal
+		"/./keys/jwks.json", // single-dot segment
+		"/keys/jwks.json?x=1", // query
+		"/keys/jwks.json#frag", // fragment
+		"/keys\\jwks.json", // backslash
+		"/%2e%2e/keys", // percent-encoded traversal
+		"/keys /jwks.json", // whitespace
+	])("falls back to default for a malformed configured path (%j)", (jwksPath) => {
+		// A path that would normalize to a different dereferenced route than the
+		// one registered breaks the route ↔ jwks_uri single-source guarantee, so
+		// the resolver rejects it (falls back to the safe default) rather than
+		// publishing keys at — and advertising — a broken/ambiguous path.
+		expect(resolveJwksPath({ oauth: { jwt: { jwksPath } } })).toBe(DEFAULT_JWKS_PATH);
+	});
+
 	it("registers exactly the default path when no path is passed (single source of truth)", () => {
 		const ks = createSymmetricKeyStore("test-secret");
 		const express = createMockExpress();
@@ -102,6 +121,16 @@ describe("createRouter input validation (direct callers bypass the schema)", () 
 		expect(() => createRouter(createMockExpress(), ks, { path: "keys/jwks.json" })).toThrow(
 			/absolute path/,
 		);
+	});
+
+	it.each([
+		"/../keys/jwks.json",
+		"//evil/jwks.json",
+		"/keys?x=1",
+		"/keys#f",
+		"/keys\\x",
+	])("throws on a malformed path (%j) that would normalize away", (path) => {
+		expect(() => createRouter(createMockExpress(), ks, { path })).toThrow(/absolute path/);
 	});
 
 	it("throws on a negative or non-integer cacheMaxAgeSeconds", () => {
@@ -231,6 +260,45 @@ describe("JWKS endpoint", () => {
 		expect(body.keys[0].use).toBe("sig");
 		expect(body.keys[0].alg).toBe("ES256");
 		expect(body.keys[0].d).toBeUndefined(); // no private key
+	});
+
+	it("strips private JWK members if a custom KeyStore adapter mistakenly returns a private key (defense in depth)", async () => {
+		// The built-in stores only ever hold public key material, but `KeyStore`
+		// is a public extension point. A third-party/KMS adapter that accidentally
+		// hands the PRIVATE key as `publicKey` would otherwise export `d` (+ RSA
+		// CRT params) straight into the JWKS response. The route must sanitize.
+		const { privateKey } = await generateKeyPair("ES256", { extractable: true });
+		const leakyKeyStore = {
+			algorithm: "ES256" as const,
+			getVerificationKeys: async () => [{ kid: "leaky", publicKey: privateKey }],
+		} as unknown as Parameters<typeof createRouter>[1];
+		const express = createMockExpress();
+		createRouter(express, leakyKeyStore);
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		const body = res.getBody() as { keys: Array<Record<string, unknown>> };
+		expect(body.keys).toHaveLength(1);
+		expect(body.keys[0].kid).toBe("leaky");
+		for (const priv of ["d", "p", "q", "dp", "dq", "qi", "oth", "k"]) {
+			expect(body.keys[0][priv]).toBeUndefined();
+		}
+	});
+
+	it("excludes an oct (symmetric) key a custom adapter mistakenly returns (never publish `k`)", async () => {
+		// exportJWK of a symmetric KeyObject yields `{ kty: "oct", k: <secret> }`.
+		// A symmetric key has no public representation, so it must be dropped from
+		// the JWKS entirely rather than sanitized to a keyless entry.
+		const secret = createSecretKey(Buffer.from("super-secret-value-for-oct-jwks-test!!"));
+		const octKeyStore = {
+			algorithm: "ES256" as const,
+			getVerificationKeys: async () => [{ kid: "oct-leak", publicKey: secret }],
+		} as unknown as Parameters<typeof createRouter>[1];
+		const express = createMockExpress();
+		createRouter(express, octKeyStore);
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		const body = res.getBody() as { keys: Array<Record<string, unknown>> };
+		expect(body.keys).toHaveLength(0);
 	});
 
 	it("includes non-expired previous keys", async () => {
