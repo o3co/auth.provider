@@ -91,6 +91,8 @@ describe("JWKS path resolution", () => {
 		"/keys\\jwks.json", // backslash
 		"/%2e%2e/keys", // percent-encoded traversal
 		"/keys /jwks.json", // whitespace
+		"/keys//jwks.json", // internal empty segment ("//")
+		"/keys/jwks.json/", // trailing slash
 	])("falls back to default for a malformed configured path (%j)", (jwksPath) => {
 		// A path that would normalize to a different dereferenced route than the
 		// one registered breaks the route ↔ jwks_uri single-source guarantee, so

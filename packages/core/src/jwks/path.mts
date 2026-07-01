@@ -36,15 +36,18 @@ export const DEFAULT_JWKS_PATH = "/.well-known/jwks.json";
  * path segments.
  */
 export function isValidJwksPath(path: unknown): path is string {
-	if (typeof path !== "string") return false;
-	if (!path.startsWith("/") || path.startsWith("//")) return false;
+	if (typeof path !== "string" || !path.startsWith("/")) return false;
 	for (const ch of path) {
 		const code = ch.codePointAt(0) ?? 0;
 		if (code <= 0x20 || code === 0x7f) return false; // control chars + space
 		if (ch === "?" || ch === "#" || ch === "\\" || ch === "%") return false;
 	}
 	const segments = path.split("/");
-	return !segments.includes(".") && !segments.includes("..");
+	// `segments[0]` is the empty string before the leading "/". Any OTHER empty
+	// segment is an internal "//" or a trailing "/", and any "."/".." is a
+	// dot-segment — all of which normalize to a different dereferenced path than
+	// the route registers. (This also covers a leading "//".)
+	return !segments.slice(1).includes("") && !segments.includes(".") && !segments.includes("..");
 }
 
 /**
