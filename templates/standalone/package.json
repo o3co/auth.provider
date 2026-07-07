@@ -28,7 +28,7 @@
 		"@o3co/auth-provider-foundation": "workspace:*",
 		"@o3co/auth-provider-redis": "workspace:*",
 		"@o3co/auth.utils": "^0.0.4",
-		"@o3co/ts.hocon": "^1.2.0",
+		"@o3co/ts.hocon": "^1.8.0",
 		"connect-redis": "^9.0.0",
 		"express": "^5.2.1",
 		"express-session": "^1.19.0",
