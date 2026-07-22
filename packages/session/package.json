@@ -40,7 +40,7 @@
 		"@o3co/auth-provider-core": "workspace:*",
 		"connect-redis": "^9.0.0",
 		"express-rate-limit": "^8.5.2",
-		"redis": "^5.12.1"
+		"redis": "^6.1.0"
 	},
 	"peerDependencies": {
 		"express": "^5.0.0",
