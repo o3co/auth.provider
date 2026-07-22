@@ -5,6 +5,23 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 10
+    # Group routine minor/patch churn into few PRs. Many separate lockfile-
+    # touching PRs race at merge time: GitHub's server-side squash/merge does
+    # NOT honor the .gitattributes `merge=binary` driver, so a PR merged without
+    # first rebasing onto the updated base can duplicate pnpm-lock.yaml entries
+    # (ERR_PNPM_BROKEN_LOCKFILE). Fewer concurrent PRs = fewer such races. Majors
+    # stay ungrouped so each remains a deliberate review.
+    groups:
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      production-minor-patch:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
     ignore:
       # @simplewebauthn/server is pinned to an exact version (S12 discipline,
       # see packages/webauthn/README.md). Only major bumps should surface as
