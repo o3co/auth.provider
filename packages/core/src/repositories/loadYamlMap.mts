@@ -15,7 +15,9 @@
  */
 
 import fs from "node:fs";
-import yaml from "js-yaml";
+// js-yaml 5 dropped the default export; import the namespace so `yaml.load`
+// resolves to the named export.
+import * as yaml from "js-yaml";
 import type { z } from "zod";
 
 export const loadYamlMap = <T extends z.ZodTypeAny>(
@@ -23,7 +25,14 @@ export const loadYamlMap = <T extends z.ZodTypeAny>(
 	schema: T,
 ): Map<string, z.infer<T>> => {
 	const content = fs.readFileSync(filePath, "utf-8");
-	const raw = yaml.load(content);
+	// js-yaml 5 throws "expected a document" on empty / whitespace / comment-only
+	// input, where js-yaml 4 returned undefined. An empty config file means "no
+	// entries", so treat a document-less file as an empty mapping.
+	const hasDocument = content.split(/\r?\n/).some((line) => {
+		const trimmed = line.trim();
+		return trimmed !== "" && !trimmed.startsWith("#");
+	});
+	const raw = hasDocument ? yaml.load(content) : undefined;
 	if (raw !== null && raw !== undefined && (typeof raw !== "object" || Array.isArray(raw))) {
 		throw new Error(`Invalid configuration in ${filePath}: expected a YAML mapping`);
 	}
