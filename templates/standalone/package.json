@@ -33,14 +33,14 @@
 		"express": "^5.2.1",
 		"express-session": "^1.19.0",
 		"helmet": "^8.1.0",
-		"ioredis": "^5.11.0",
+		"ioredis": "^5.11.1",
 		"pino": "^10.3.1",
 		"redis": "^5.12.1"
 	},
 	"devDependencies": {
 		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
-		"@types/node": "^22.0.0",
+		"@types/node": "^26.1.1",
 		"@types/supertest": "^7.2.0",
 		"supertest": "^7.1.0",
 		"tsx": "^4.23.1",
