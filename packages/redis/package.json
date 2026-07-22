@@ -67,7 +67,7 @@
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-dpop": "workspace:*",
-		"@vitest/coverage-v8": "^4.1.6",
+		"@vitest/coverage-v8": "^4.1.10",
 		"ioredis": "^5.11.1",
 		"redis": "^5.10.0",
 		"testcontainers": "^12.0.4",
