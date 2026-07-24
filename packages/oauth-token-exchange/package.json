@@ -37,7 +37,7 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"jose": "^6.2.2",
+		"jose": "^6.2.4",
 		"zod": "^4.3.6"
 	},
 	"peerDependencies": {
