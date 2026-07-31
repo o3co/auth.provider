@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`isCompoundConfirmation` (`@o3co/auth-provider-oauth`).** Predicate reporting whether a raw `cnf` claim carries BOTH a well-formed `jkt` and a well-formed `x5t#S256`. Member validation matches `extractConfirmation`, so a `cnf` whose second member is empty-string or non-string counts as single-mechanism-with-junk, not as compound. Exported for composition roots that build their own introspection surface and need the same admission check the bundled handler applies.
+
 ### Security
+
+- **`/oauth/introspect` no longer vouches for a token carrying a compound `cnf` (`@o3co/auth-provider-oauth`).** An access token presenting BOTH `cnf.jkt` and `cnf.x5t#S256` was narrowed to the intent-explicit winner (`jkt`) and reported with `active: true`, advertising a binding the AS never issued. This provider cannot mint such a token — a grant emits exactly one mechanism's confirmation — so it indicates a forged token or a bug, and the handler now answers `active: false` before building a response. This matches the refresh path, which already rejects a compound `cnf` with `invalid_grant`, and it closes the gap between the two surfaces described in the token-binding ADR.
+
+  Not an exploit fix: minting a compound `cnf` requires forging a JWT, and an attacker holding the signing key can mint a clean single-mechanism token regardless. The change is about consistency and about not masking evidence of a malformed token.
+
+  **Note for anyone applying the same fix downstream:** rejecting inside `extractConfirmation` (so that `cnf` is dropped from the response) is *not* equivalent and is unsafe — `active` would stay `true` with no `cnf`, and a resource server would then treat a bound token as a plain bearer token and enforce no proof-of-possession. `extractConfirmation`'s narrowing behavior is deliberately unchanged; the rejection lives at the endpoint, via `isCompoundConfirmation`.
 
 - **The `WWW-Authenticate` realm on the sender-constrained 401 is no longer request-derived (`@o3co/auth-provider-oauth`).** The sender-constrained reject path at `/oauth/token` built its challenge from a per-request local whose fallback is `req.get("host")`, and interpolated it into the `realm` quoted-string with no character filtering — every other emission site in the package runs the value through `SAFE_REALM_CHARS`, whose exclusion of `"` is what keeps the value from terminating that quoted-string. A deployment with `oauth.jwt.issuer` unset, behind a proxy it trusts, therefore let the caller append arbitrary auth-params to the header via the `Host` header (not response splitting — Node rejects CR/LF in outgoing header values). The realm now comes from the router-scope configured issuer only, through the filter. Exposure was bounded: production providers set `oauth.jwt.issuer`, since it is the `iss` claim and is required for OIDC and federation.
 
