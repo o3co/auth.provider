@@ -67,10 +67,12 @@ binding mechanism.
 `kind` is not a display name. It appears in three places that outlive your
 package:
 
-- **Error codes.** A throw from `extract` without a `code` field becomes
-  `invalid_<kind>_proof`. Since OAuth error codes must match
-  `/^[a-z][a-z0-9_]*$/`, `kind` must be lowercase snake_case — `acme_hw` gives
-  `invalid_acme_hw_proof`; `AcmeHW` produces a malformed code.
+- **Error codes.** A throw from `extract` surfaces as `invalid_<kind>_proof`
+  unless it carries a `code` that is a string matching `/^[a-z][a-z0-9_]*$/` —
+  so a missing code and a malformed one (`"ECONNREFUSED"`, `"Invalid-Proof"`)
+  both land on the fallback. `kind` must therefore be lowercase snake_case
+  itself: `acme_hw` gives `invalid_acme_hw_proof`, while `AcmeHW` would emit a
+  malformed code with nothing left to fall back to.
 - **`SenderConstraint.methods`.** Operators list kinds to require a binding on
   a client (`{ required: true, methods: ["dpop"] }`). Renaming `kind` later is
   a breaking change to their stored client records, not just to your package.
@@ -123,9 +125,13 @@ malformed header into someone else's request can break it. Weakening it is a
 security change, not a robustness fix.
 
 Attach `code` to the thrown error when you want a specific OAuth error code;
-it must match `/^[a-z][a-z0-9_]*$/`. Anything else falls back to
-`invalid_<kind>_proof`, which is deliberate — it keeps infrastructure-layer
-codes (`ECONNREFUSED` and friends) out of the public error envelope.
+it must be a string matching `/^[a-z][a-z0-9_]*$/`. A missing code, a
+non-string code, and a code that fails the pattern all fall back to
+`invalid_<kind>_proof` — the check is a shape test, not a presence test. That
+is deliberate: it keeps infrastructure-layer codes (`ECONNREFUSED` and
+friends) out of the public error envelope by construction rather than by
+asking every mechanism author to remember. The consequence to know is that a
+typo'd code does not surface as itself; it silently becomes the fallback.
 
 ### 5. Land the refresh-time matrix in the SAME PR as the allowlist entry
 
@@ -155,7 +161,8 @@ around merging.
       intent — and, if ambient, the multi-ambient behavior was decided rather
       than inherited
 - [ ] `extract` returns `null` only for absence, throws for invalid material
-- [ ] Thrown `code` matches `/^[a-z][a-z0-9_]*$/`, or the fallback is intended
+- [ ] Thrown `code` is a string matching `/^[a-z][a-z0-9_]*$/`, or the
+      `invalid_<kind>_proof` fallback is the intended wire result
 - [ ] Refresh-time matrix and the `refreshToken.mts` allowlist entry land in
       the same PR
 - [ ] Integration test mounting your module alongside `dpopModule` and
