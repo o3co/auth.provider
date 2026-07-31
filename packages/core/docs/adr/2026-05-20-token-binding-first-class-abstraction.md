@@ -271,6 +271,15 @@ single-mechanism token anyway.
 - Wave 2 Phase 4 — end-to-end introspect cnf test, this ADR, README
   updates, CHANGELOG roll-up.
 
+### Writing a new mechanism
+
+The author-facing recipe derived from this ADR — `kind` naming, the
+`intentExplicit` decision, the all-or-nothing `extract` contract, and the
+requirement that a refresh-time matrix land in the same PR as its
+allowlist entry — lives in [`CONTRIBUTING.md`](../../../../CONTRIBUTING.md).
+This ADR records *why* the design is shaped that way; that file records
+what to do.
+
 ### Migration from v0.7 `grantMiddleware` contributions
 
 Added 2026-07-31 (resolves the audit finding #199 I4 / R3), which noted
