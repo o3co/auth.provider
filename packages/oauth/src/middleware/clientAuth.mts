@@ -66,6 +66,30 @@ interface ClientAuthMiddlewareOptions {
 	allowPublicClients?: boolean;
 }
 
+// URI-safe characters per RFC 3986 (plus the few sub-delims commonly seen in
+// absolute URIs). Deliberately excludes `"` and `\`, which RFC 7235 §2.2 +
+// RFC 7230 quoted-string rules require to be backslash-escaped, and CTL bytes,
+// which are forbidden outright.
+const SAFE_REALM_CHARS = /^[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/;
+
+/**
+ * Resolves the `realm` parameter for a `WWW-Authenticate: Basic` challenge.
+ *
+ * Every emission site MUST route through this helper. Interpolating an
+ * unfiltered value into the quoted-string lets it terminate the string early
+ * and append attacker- or operator-controlled auth-params to the header, so a
+ * value carrying anything outside {@link SAFE_REALM_CHARS} degrades to the
+ * literal `"oauth"` rather than being emitted malformed.
+ *
+ * Callers pass the configured issuer (`oauth.jwt.issuer`). Request-derived
+ * values (e.g. `req.get("host")`) MUST NOT be passed: a realm is a property of
+ * the deployment, not of the request, and behind a trusted proxy the Host
+ * header is caller-controlled.
+ */
+export function resolveRealm(issuer: string | undefined): string {
+	return issuer && issuer.length > 0 && SAFE_REALM_CHARS.test(issuer) ? issuer : "oauth";
+}
+
 /**
  * Decodes an `application/x-www-form-urlencoded`-encoded string per RFC 6749 §2.3.1.
  * `+` is a synonym for space in x-www-form-urlencoded encoding (distinct from %20).
@@ -157,17 +181,9 @@ export function createClientAuthMiddleware(
 	const logger: Logger = opts.logger ?? consoleLogger;
 	// Copilot review: validate `issuer` against a safe character set before
 	// embedding it into the `WWW-Authenticate: Basic realm="..."` quoted-string.
-	// RFC 7235 §2.2 + RFC 7230 quoted-string rules require backslash-escaping of
-	// `"` and `\` and forbid CTL bytes; rather than emitting a malformed (or
-	// header-injecting) value when an operator misconfigures the issuer, we
-	// fall back to the literal "oauth" realm. URI-safe characters per RFC 3986
-	// (plus the few sub-delims commonly seen in absolute URIs) are accepted.
-	const SAFE_REALM_CHARS = /^[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+$/;
-	const realm =
-		opts.issuer && opts.issuer.length > 0 && SAFE_REALM_CHARS.test(opts.issuer)
-			? opts.issuer
-			: "oauth";
-	const wwwAuth = `Basic realm="${realm}"`;
+	// Shared with the sender-constrained reject path in `routes.mts` so the two
+	// emission sites cannot drift.
+	const wwwAuth = `Basic realm="${resolveRealm(opts.issuer)}"`;
 	const allowPublicClients = opts.allowPublicClients === true;
 
 	function rejectBasic(res: Response, status: number, errorDescription?: string): void {

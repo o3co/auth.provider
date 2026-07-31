@@ -60,6 +60,18 @@ const fullConfig = {
 	endpoints: { login: { url: "/login" } },
 } as unknown as AppConfig;
 
+// Deployment that never configured a canonical issuer. Production providers
+// set `oauth.jwt.issuer` (it is the `iss` claim, required for OIDC and
+// federation), but the reject path must stay safe when it is absent.
+const noIssuerConfig = {
+	oauth: {
+		jwt: {},
+		accessToken: { expiresIn: 3600 },
+	},
+	rateLimit: { failMode: "open" as const },
+	endpoints: { login: { url: "/login" } },
+} as unknown as AppConfig;
+
 const codeRepoStub: CodeRepository = {
 	createCode: async () => ({
 		code: "code-x",
@@ -100,6 +112,7 @@ interface BuildOptions {
 	readonly clientRepo: ClientRepository;
 	readonly mountMw?: boolean;
 	readonly mechanisms?: readonly TokenBindingMechanism[];
+	readonly config?: AppConfig;
 }
 
 async function buildApp(handler: GrantHandler, options: BuildOptions): Promise<express.Express> {
@@ -120,7 +133,7 @@ async function buildApp(handler: GrantHandler, options: BuildOptions): Promise<e
 	}
 	const { router } = await createOAuthRouter(express, {
 		registry,
-		config: fullConfig,
+		config: options.config ?? fullConfig,
 		clientRepository: options.clientRepo,
 		codeRepository: codeRepoStub,
 		keyStore,
@@ -288,6 +301,57 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 
 		expect(res.status).toBe(401);
 		expect(res.headers["www-authenticate"]).toBe(`Basic realm="${ISSUER}"`);
+	});
+
+	it("never derives the reject-path realm from the request when the issuer is unset", async () => {
+		// The realm on this path used to interpolate a local whose fallback was
+		// `req.get("host")`, so a deployment without `oauth.jwt.issuer` behind a
+		// trusted proxy let the caller choose the value embedded in the
+		// `WWW-Authenticate` quoted-string. `"` is deliberately outside
+		// SAFE_REALM_CHARS precisely because it terminates that quoted-string.
+		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
+		const repo = makeInMemoryRepo(sc);
+		const handler = capturingHandler();
+		const app = await buildApp(handler, {
+			clientRepo: repo,
+			mountMw: false,
+			config: noIssuerConfig,
+		});
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.set("Host", 'evil.example" injected="1')
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+
+		expect(res.status).toBe(401);
+		expect(res.headers["www-authenticate"]).toBe('Basic realm="oauth"');
+		expect(res.headers["www-authenticate"]).not.toContain("evil.example");
+	});
+
+	it('falls back to realm="oauth" when the issuer is unset even for a benign Host', async () => {
+		// Same fallback as clientAuthMw for an issuer-less deployment: the two
+		// emission sites must agree, so the reject path stops advertising the
+		// request Host entirely rather than filtering it case by case.
+		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
+		const repo = makeInMemoryRepo(sc);
+		const handler = capturingHandler();
+		const app = await buildApp(handler, {
+			clientRepo: repo,
+			mountMw: false,
+			config: noIssuerConfig,
+		});
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.set("Host", "provider.internal")
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+
+		expect(res.status).toBe(401);
+		expect(res.headers["www-authenticate"]).toBe('Basic realm="oauth"');
 	});
 
 	it("rejects invalid_client when req.tokenBinding is null (defensive against custom middleware)", async () => {
