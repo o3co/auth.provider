@@ -249,3 +249,111 @@ describe("dpopModule + mtlsModule — cross-mechanism dispatch (refactor §6.4)"
 		await handle.dispose();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// No-downgrade at the HTTP boundary (#199 R2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every case above presents well-formed material. The interesting case is
+ * mixed validity: a **malformed DPoP proof** alongside a **valid mTLS cert**.
+ *
+ * The v0.8.0 audit raised this shape as a possible DoS on legitimate mTLS
+ * clients (I2) — an attacker who can inject a junk `DPoP` header into a
+ * cert-bearing request kills it. It was closed as intentional: spec §3.6
+ * forbids downgrade, so a request carrying invalid binding material is
+ * rejected outright rather than quietly falling back to the binding that did
+ * validate. The audit's follow-up (R2) was to make that intent test-explicit
+ * at the HTTP boundary, since it had only ever been pinned at the middleware
+ * level with fake mechanisms.
+ *
+ * The distinction matters: "rejects the request" and "falls back to mTLS" are
+ * both plausible readings of the same code, and only one of them is a
+ * downgrade. Pinning it with the real modules means a future refactor that
+ * makes DPoP failures non-fatal — which would look like a DoS fix — fails
+ * here instead of silently weakening the binding guarantee.
+ */
+describe("dpopModule + mtlsModule — no downgrade on mixed validity (#199 R2)", () => {
+	it("malformed DPoP + valid mTLS cert → 400, NOT a silent fallback to the mTLS binding", async () => {
+		const received: { binding?: unknown } = {};
+		const handle = await createApp({
+			modules: [dpopModule, mtlsModule, makeObserverModule(received)],
+			bootstrapComponents: makeBoot({ dispatchPolicy: "intent-explicit" }),
+		});
+		const app = express();
+		app.use(express.json());
+		app.use(handle.router);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			// Not a JWT at all — fails at parse, before any claim check.
+			.set("DPoP", "not-a-valid-dpop-proof")
+			.set("Host", "as.example")
+			.set("x-forwarded-client-cert", encodeURIComponent(LEAF_PEM))
+			.send({});
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_dpop_proof");
+		// The load-bearing assertion: the observer route was never reached, so
+		// no mTLS binding was handed downstream in place of the failed DPoP one.
+		expect(received.binding).toBeUndefined();
+
+		await handle.dispose();
+	});
+
+	it("rejects on mechanism order too — mtlsModule registered first", async () => {
+		// The middleware short-circuits on the first failing mechanism, so
+		// swapping registration order exercises a different code path (early
+		// return vs. reject-after-success) for the same observable outcome.
+		// Without this, a refactor could make the outcome order-dependent and
+		// only one arrangement would catch it.
+		const received: { binding?: unknown } = {};
+		const handle = await createApp({
+			modules: [mtlsModule, dpopModule, makeObserverModule(received)],
+			bootstrapComponents: makeBoot({ dispatchPolicy: "intent-explicit" }),
+		});
+		const app = express();
+		app.use(express.json());
+		app.use(handle.router);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("DPoP", "not-a-valid-dpop-proof")
+			.set("Host", "as.example")
+			.set("x-forwarded-client-cert", encodeURIComponent(LEAF_PEM))
+			.send({});
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_dpop_proof");
+		expect(received.binding).toBeUndefined();
+
+		await handle.dispose();
+	});
+
+	it("malformed DPoP with no cert presented → same rejection, no unbound fallthrough", async () => {
+		// Completes the shape: the rejection is a property of the invalid
+		// material, not of there being a competing valid mechanism. A request
+		// with junk binding material must not proceed as an unbound request
+		// either.
+		const received: { binding?: unknown } = {};
+		const handle = await createApp({
+			modules: [dpopModule, mtlsModule, makeObserverModule(received)],
+			bootstrapComponents: makeBoot({ dispatchPolicy: "intent-explicit" }),
+		});
+		const app = express();
+		app.use(express.json());
+		app.use(handle.router);
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("DPoP", "not-a-valid-dpop-proof")
+			.set("Host", "as.example")
+			.send({});
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_dpop_proof");
+		expect(received.binding).toBeUndefined();
+
+		await handle.dispose();
+	});
+});
