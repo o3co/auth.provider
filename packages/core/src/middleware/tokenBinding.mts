@@ -84,12 +84,36 @@ const hasOAuthErrorCode = (err: unknown): err is { code: string } =>
 	typeof (err as { code: unknown }).code === "string" &&
 	OAUTH_ERROR_CODE_PATTERN.test((err as { code: string }).code);
 
+/**
+ * Brand stamped on every handler {@link tokenBindingMw} returns, so boot can
+ * recognise one that arrives through the legacy `grantMiddleware` slot.
+ *
+ * `Symbol.for` rather than a module-local symbol: the check must still work
+ * when a consumer's tree ends up with two copies of this package, where a
+ * local symbol would differ per copy. A missed detection is the failure mode
+ * that matters here — the brand only drives a diagnostic.
+ */
+const TOKEN_BINDING_MW_BRAND = Symbol.for("o3co.auth-provider.tokenBindingMw");
+
+/**
+ * Whether `handler` was produced by {@link tokenBindingMw}.
+ *
+ * Used by `assembleApp` to detect a deployment running BOTH token-binding
+ * surfaces — contributed `tokenBindingMechanisms` and a leftover v0.7
+ * `grantMiddleware`-mounted `tokenBindingMw`. Exported so a custom
+ * composition root that mounts `grantMiddleware` itself can run the same
+ * check.
+ */
+export const isTokenBindingMw = (handler: unknown): boolean =>
+	typeof handler === "function" &&
+	(handler as unknown as Record<PropertyKey, unknown>)[TOKEN_BINDING_MW_BRAND] === true;
+
 export const tokenBindingMw = ({
 	mechanisms,
 	dispatchPolicy,
 	logger,
 }: TokenBindingMiddlewareOptions): RequestHandler => {
-	return async (req, res, next) => {
+	const handler: RequestHandler = async (req, res, next) => {
 		// Step 1 — validate all presented binding material.
 		const successes: MechanismResult[] = [];
 		for (const mechanism of mechanisms) {
@@ -163,4 +187,13 @@ export const tokenBindingMw = ({
 		req.tokenBinding = firstSuccess.binding;
 		next();
 	};
+	// Non-enumerable so the brand never shows up in middleware introspection,
+	// logging, or a structural clone of the handler.
+	Object.defineProperty(handler, TOKEN_BINDING_MW_BRAND, {
+		value: true,
+		enumerable: false,
+		writable: false,
+		configurable: false,
+	});
+	return handler;
 };
