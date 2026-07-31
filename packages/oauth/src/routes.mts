@@ -43,7 +43,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
-import { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
+import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
@@ -306,9 +306,23 @@ export const createOAuthRouter = async (
 								required_methods: sc.methods,
 							},
 						});
+						// The realm is a property of the deployment, so it comes from
+						// the router-scope `issuerForRealm` (config only) through the
+						// same filter `clientAuthMw` uses — NOT from the per-request
+						// `issuer` local above, whose `req.get("host")` fallback is
+						// caller-controlled behind a trusted proxy.
+						//
+						// The `Basic` challenge scheme is retained: this response is
+						// `invalid_client` + 401, and RFC 6749 §5.2 requires a
+						// challenge matching the scheme the client used when it
+						// authenticated via the Authorization header. Whether
+						// `invalid_client` is the right code for "authenticated fine,
+						// but presented no token binding" is a separate, breaking
+						// question (#199 M3) — changing the challenge without changing
+						// the error code would just make the pair non-conformant.
 						return res
 							.status(401)
-							.set("WWW-Authenticate", `Basic realm="${issuer}"`)
+							.set("WWW-Authenticate", `Basic realm="${resolveRealm(issuerForRealm)}"`)
 							.json(
 								errorEnvelope(
 									"invalid_client",
