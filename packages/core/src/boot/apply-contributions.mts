@@ -635,7 +635,13 @@ export async function applyContributions(
 					});
 				}
 
-				if (entry.kind === "grantMiddleware" && isTokenBindingMw(value)) {
+				if (
+					entry.kind === "grantMiddleware" &&
+					isTokenBindingMw(value) &&
+					// A module may register several such factories; the operator
+					// acts on the module, so name it once.
+					!legacyTokenBindingModules.includes(moduleName)
+				) {
 					legacyTokenBindingModules.push(moduleName);
 				}
 

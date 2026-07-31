@@ -106,6 +106,10 @@ const TOKEN_BINDING_MW_BRAND = Symbol.for("o3co.auth-provider.tokenBindingMw");
  */
 export const isTokenBindingMw = (handler: unknown): boolean =>
 	typeof handler === "function" &&
+	// Own property, not plain access: a brand planted on a shared prototype
+	// would otherwise make every function in the process match, and the
+	// warning this drives would then name innocent modules.
+	Object.hasOwn(handler, TOKEN_BINDING_MW_BRAND) &&
 	(handler as unknown as Record<PropertyKey, unknown>)[TOKEN_BINDING_MW_BRAND] === true;
 
 export const tokenBindingMw = ({

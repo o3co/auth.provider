@@ -112,6 +112,20 @@ const legacyTokenBindingModule = (name: string, mechanism: TokenBindingMechanism
 		},
 	});
 
+/** Module contributing the legacy surface TWICE — one module, two factories. */
+const doubleLegacyTokenBindingModule = (name: string, mechanism: TokenBindingMechanism) =>
+	defineModule({
+		name,
+		requires: [],
+		optional: [],
+		contributes: {
+			grantMiddleware: [
+				() => tokenBindingMw({ mechanisms: [mechanism], dispatchPolicy: "intent-explicit" }),
+				() => tokenBindingMw({ mechanisms: [mechanism], dispatchPolicy: "intent-explicit" }),
+			],
+		},
+	});
+
 /** Module contributing an ordinary, unrelated `grantMiddleware`. */
 const plainGrantMiddlewareModule = (name: string) =>
 	defineModule({
@@ -168,6 +182,26 @@ describe("isTokenBindingMw", () => {
 		expect(isTokenBindingMw({})).toBe(false);
 		expect(isTokenBindingMw("tokenBindingMw")).toBe(false);
 	});
+
+	it("does not match a brand inherited through the prototype chain", () => {
+		// The brand is an own property of the returned handler. Reading it with
+		// plain property access would also see one planted on a shared
+		// prototype, turning every function in the process into a false
+		// positive and filling boot logs with warnings that name innocent
+		// modules. Precision is the entire reason the brand exists.
+		const brand = Symbol.for("o3co.auth-provider.tokenBindingMw");
+		const polluted = Object.create(Function.prototype);
+		Object.defineProperty(Object.getPrototypeOf(polluted), brand, {
+			value: true,
+			configurable: true,
+		});
+		try {
+			const handler = function notTokenBindingMw() {};
+			expect(isTokenBindingMw(handler)).toBe(false);
+		} finally {
+			delete (Function.prototype as unknown as Record<PropertyKey, unknown>)[brand];
+		}
+	});
 });
 
 describe("token-binding surface overlap — boot warning (#199 I4)", () => {
@@ -186,6 +220,27 @@ describe("token-binding surface overlap — boot warning (#199 I4)", () => {
 		expect(matched).toHaveLength(1);
 		// The warning must name the offending module so the operator can find
 		// the leftover contribution without bisecting their composition root.
+		expect(matched[0]?.obj.modules).toEqual(["legacy-surface"]);
+
+		await handle.dispose();
+	});
+
+	it("names a module once even when it contributes the legacy surface twice", async () => {
+		// Provenance is collected per contribution, so a module registering two
+		// token-binding grantMiddleware factories would otherwise be listed
+		// twice — noise in the one field an operator acts on.
+		const warns: CapturedWarn[] = [];
+		const handle = await createApp({
+			modules: [
+				routeModule(),
+				mechanismModule("new-surface", dpopMech),
+				doubleLegacyTokenBindingModule("legacy-surface", mtlsMech),
+			],
+			bootstrapComponents: makeBoot(makeCapturingLogger(warns)),
+		});
+
+		const matched = overlapWarnings(warns);
+		expect(matched).toHaveLength(1);
 		expect(matched[0]?.obj.modules).toEqual(["legacy-surface"]);
 
 		await handle.dispose();
