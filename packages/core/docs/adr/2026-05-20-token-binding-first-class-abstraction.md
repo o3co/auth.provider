@@ -151,13 +151,50 @@ same PR so a bound RT can never be issued without enforcement.
   allowlist entry (which the new package's own PR adds).
 - **Cross-module arbitration is a single configurable policy** — not
   a fork-per-deployment ad-hoc resolution rule.
-- **Compound-`cnf` runtime defense is in one place** (the grant's
-  refresh-time matrix), not duplicated per mechanism.
+- **Compound-`cnf` runtime defense is mechanism-agnostic**, not
+  duplicated per mechanism. It is applied per AS surface that acts on a
+  `cnf`, using one shared shape check — see below.
 - **Introspect cnf is mechanism-agnostic.** The introspect handler
   reads `cnf` from the AT claims and decides `token_type` based on
   whether `jkt` is present (DPoP → "DPoP" per RFC 9449 §5) or not
   (Bearer for mTLS + unbound per RFC 8705 §3). No mechanism-specific
   branches.
+
+#### Compound cnf across the AS surfaces
+
+Amended 2026-07-31 (resolves the audit finding #199 I3 / R4). The
+original wording — "compound-`cnf` runtime defense is in one place (the
+grant's refresh-time matrix)" — was read as covering the whole AS. It did
+not: `/oauth/introspect` also acts on a `cnf` and was silently narrowing a
+compound one to the intent-explicit winner, vouching (`active: true`) for a
+binding the AS never issued.
+
+The rule is now stated per surface, and both surfaces fail closed:
+
+| Surface | Compound `cnf` outcome |
+| --- | --- |
+| Refresh grant (`grants/refreshToken.mts`) | `invalid_grant`, pre-matrix short-circuit |
+| Introspection (`/oauth/introspect`) | `active: false`, before any response is built |
+| `extractConfirmation` (claim-shape validator) | Narrows to `jkt` — unchanged |
+
+`extractConfirmation` deliberately does **not** reject. It is a public
+export describing claim shape, and rejection is an admission decision that
+belongs to the surface doing the vouching. The two are kept apart by an
+explicit predicate, `isCompoundConfirmation`, which both surfaces share so
+the notion of "compound" cannot drift between them.
+
+Rejecting rather than narrowing is the only safe direction here, and the
+alternative is worth recording because it is the intuitive one: making
+`extractConfirmation` return `undefined` for a compound `cnf` would cause
+the handler to omit `cnf` while still answering `active: true`, so a
+resource server would read a bound token as a plain bearer token and
+enforce no proof-of-possession at all — weaker than the narrowing it was
+meant to replace.
+
+Note this is a consistency and evidence-preservation fix, not a patched
+exploit: this AS cannot mint a compound `cnf`, so producing one requires
+forging a JWT, and an attacker holding the signing key can mint a clean
+single-mechanism token anyway.
 
 ### Bad
 

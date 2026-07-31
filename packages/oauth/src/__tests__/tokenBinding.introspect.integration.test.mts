@@ -36,6 +36,7 @@
  * Phase 1 introspect typing — but never both on a single AT.
  */
 
+import { createSecretKey } from "node:crypto";
 import {
 	type AppConfig,
 	type CodeRepository,
@@ -47,6 +48,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
+import { decodeJwt, decodeProtectedHeader, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
@@ -221,5 +223,81 @@ describe("Phase 4 T4.1 — end-to-end issuance + introspection cnf propagation",
 		expect(introspect.active).toBe(true);
 		expect(introspect.token_type).toBe("Bearer");
 		expect(introspect.cnf).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Compound-cnf rejection (#199 I3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-signs a genuine AT with an added compound `cnf` claim.
+ *
+ * This AS cannot mint a compound binding — the grant emits exactly one
+ * mechanism's confirmation — so the only way such a token reaches
+ * `/introspect` is a forgery (signing-key compromise) or an AS bug. Starting
+ * from a real AT and re-signing keeps every other claim and header member
+ * exactly as issued, so the token passes verification and the test isolates
+ * the cnf shape as the single variable.
+ */
+async function forgeCompoundCnfToken(genuineAccessToken: string): Promise<string> {
+	const header = decodeProtectedHeader(genuineAccessToken);
+	const payload = decodeJwt(genuineAccessToken);
+	const { iss, aud, sub, exp, iat, ...rest } = payload;
+	return new SignJWT({
+		...rest,
+		cnf: { jkt: "FORGED-JKT", "x5t#S256": "FORGED-THUMB" },
+	})
+		.setProtectedHeader({
+			alg: header.alg as string,
+			...(header.kid !== undefined && { kid: header.kid }),
+			...(header.typ !== undefined && { typ: header.typ }),
+		})
+		.setIssuer(iss as string)
+		.setAudience(aud as string)
+		.setSubject(sub as string)
+		.setIssuedAt(iat)
+		.setExpirationTime(exp as number)
+		.sign(createSecretKey(Buffer.from(SECRET)));
+}
+
+describe("#199 I3 — compound cnf on introspection", () => {
+	it("reports active:false for an AT carrying both cnf.jkt and cnf.x5t#S256", async () => {
+		// The refresh path already rejects a compound cnf outright
+		// (`grants/refreshToken.mts`, invalid_grant). Introspection used to
+		// narrow it to the intent-explicit winner and still vouch for the
+		// token with active:true, which reported a binding the AS never
+		// issued. Fail closed instead: the AS does not vouch for a token it
+		// could not have minted. RFC 7662 §2.2 permits active:false for any
+		// token the AS declines to vouch for.
+		const app = await buildApp([makeDpopMechanism("E2E-DPOP-JKT")]);
+		const { accessToken } = await issueAndIntrospect(app);
+		const forged = await forgeCompoundCnfToken(accessToken);
+
+		const res = await request(app)
+			.post("/oauth/introspect")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ token: forged });
+
+		expect(res.status).toBe(200);
+		expect(res.body.active).toBe(false);
+		// Nothing about the rejected token leaks alongside active:false.
+		expect(res.body.cnf).toBeUndefined();
+		expect(res.body.token_type).toBeUndefined();
+		expect(res.body.sub).toBeUndefined();
+	});
+
+	it("does not weaken a genuine single-mechanism binding", async () => {
+		// Regression guard for the fail-open shape that #199's option (a)
+		// would have produced: dropping cnf while keeping active:true would
+		// present a DPoP-bound token to the RS as a plain bearer token.
+		const app = await buildApp([makeDpopMechanism("E2E-DPOP-JKT")]);
+
+		const { introspect } = await issueAndIntrospect(app);
+
+		expect(introspect.active).toBe(true);
+		expect(introspect.token_type).toBe("DPoP");
+		expect((introspect.cnf as Record<string, string>).jkt).toBe("E2E-DPOP-JKT");
 	});
 });

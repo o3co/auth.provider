@@ -48,7 +48,11 @@ import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
 import * as userinfo from "./routes/userinfo.mjs";
-import { extractConfirmation, type IntrospectResponse } from "./types/introspect.mjs";
+import {
+	extractConfirmation,
+	type IntrospectResponse,
+	isCompoundConfirmation,
+} from "./types/introspect.mjs";
 
 // Session data type augmentation
 //
@@ -528,6 +532,24 @@ export const createOAuthRouter = async (
 					// and return "Bearer". `extractConfirmation` validates member types
 					// (rejects empty-string thumbprints, non-string variants); see
 					// types/introspect.mts.
+					// #199 I3: refuse to vouch for a token carrying an ambiguous
+					// compound cnf (both `jkt` and `x5t#S256`). This AS cannot mint
+					// one — a grant emits a single mechanism's confirmation — so it
+					// signals a forgery or a bug. Narrowing it to the intent-explicit
+					// winner would report a binding that was never issued, and
+					// dropping the cnf while keeping `active: true` would be worse
+					// still: the RS would treat a bound token as a plain bearer token
+					// and enforce nothing. Fail closed instead, matching the refresh
+					// path's structural reject (`grants/refreshToken.mts`).
+					// RFC 7662 §2.2 permits `active: false` for any token the AS
+					// declines to vouch for.
+					if (isCompoundConfirmation(claims.cnf)) {
+						logger.warn(
+							{ reason: "compound_cnf", site: "introspect_body", jti },
+							"introspect_compound_cnf_rejected",
+						);
+						return res.status(200).json({ active: false });
+					}
 					const cnf = extractConfirmation(claims.cnf);
 					const tokenType: "Bearer" | "DPoP" = cnf && "jkt" in cnf ? "DPoP" : "Bearer";
 					const response: IntrospectResponse = {

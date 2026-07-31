@@ -9,7 +9,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { extractConfirmation, type IntrospectResponse } from "../types/introspect.mjs";
+import {
+	extractConfirmation,
+	type IntrospectResponse,
+	isCompoundConfirmation,
+} from "../types/introspect.mjs";
 
 describe("IntrospectResponse typed shape", () => {
 	it("active response with no cnf", () => {
@@ -106,6 +110,14 @@ describe("extractConfirmation", () => {
 		// Spec §1 declares compound binding out of scope for Stage 1.
 		// If both are present (malformed / forged / future), jkt wins,
 		// matching the intent-explicit dispatch policy (spec §3.5).
+		//
+		// Unchanged by #199 I3: the introspect handler now screens compound
+		// cnf with `isCompoundConfirmation` and answers active:false BEFORE
+		// reaching this narrowing, so this branch is no longer load-bearing
+		// there. It is retained because `extractConfirmation` is a public
+		// export whose narrowing contract other composition roots may rely
+		// on — the rejection belongs to the endpoint policy, not to the
+		// claim-shape validator.
 		expect(extractConfirmation({ jkt: "abc", "x5t#S256": "def" })).toEqual({ jkt: "abc" });
 	});
 
@@ -122,5 +134,38 @@ describe("extractConfirmation", () => {
 		expect(extractConfirmation({ jkt: 123, "x5t#S256": "def" })).toEqual({
 			"x5t#S256": "def",
 		});
+	});
+});
+
+describe("isCompoundConfirmation", () => {
+	it("detects a cnf carrying both valid jkt and valid x5t#S256", () => {
+		expect(isCompoundConfirmation({ jkt: "abc", "x5t#S256": "def" })).toBe(true);
+	});
+
+	it("is false for a single-mechanism cnf", () => {
+		expect(isCompoundConfirmation({ jkt: "abc" })).toBe(false);
+		expect(isCompoundConfirmation({ "x5t#S256": "def" })).toBe(false);
+	});
+
+	it("is false for non-objects and empty objects", () => {
+		expect(isCompoundConfirmation(undefined)).toBe(false);
+		expect(isCompoundConfirmation(null)).toBe(false);
+		expect(isCompoundConfirmation("string")).toBe(false);
+		expect(isCompoundConfirmation(42)).toBe(false);
+		expect(isCompoundConfirmation([])).toBe(false);
+		expect(isCompoundConfirmation([{ jkt: "abc", "x5t#S256": "def" }])).toBe(false);
+		expect(isCompoundConfirmation({})).toBe(false);
+	});
+
+	it("requires BOTH members to be well-formed — a malformed half is not compound", () => {
+		// Mirrors `extractConfirmation`'s member validation. A cnf whose
+		// second member is empty-string or non-string is a single-mechanism
+		// binding with junk attached, not an ambiguous compound binding, and
+		// `extractConfirmation` already narrows it to the valid member. Only
+		// a genuinely ambiguous cnf triggers the endpoint rejection.
+		expect(isCompoundConfirmation({ jkt: "abc", "x5t#S256": "" })).toBe(false);
+		expect(isCompoundConfirmation({ jkt: "", "x5t#S256": "def" })).toBe(false);
+		expect(isCompoundConfirmation({ jkt: "abc", "x5t#S256": 456 })).toBe(false);
+		expect(isCompoundConfirmation({ jkt: 123, "x5t#S256": "def" })).toBe(false);
 	});
 });

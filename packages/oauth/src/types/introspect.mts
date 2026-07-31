@@ -73,6 +73,12 @@ export interface IntrospectResponse {
  * present, this helper returns the `jkt` variant — matching the intent-
  * explicit dispatch policy (spec §3.5) where DPoP wins over an ambient
  * mTLS signal.
+ *
+ * That narrowing is a claim-shape contract, NOT an admission decision.
+ * Callers that vouch for a token to a third party (the `/oauth/introspect`
+ * handler) MUST screen with {@link isCompoundConfirmation} first and refuse
+ * the token — narrowing alone would report a binding the AS never issued.
+ * See the token-binding ADR, "compound cnf across the AS surfaces".
  */
 export const extractConfirmation = (raw: unknown): Confirmation | undefined => {
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
@@ -86,4 +92,28 @@ export const extractConfirmation = (raw: unknown): Confirmation | undefined => {
 		return { "x5t#S256": x5t };
 	}
 	return undefined;
+};
+
+/**
+ * Whether a raw `cnf` claim value carries BOTH a well-formed `jkt` and a
+ * well-formed `x5t#S256` — an ambiguous compound binding.
+ *
+ * This AS never mints one: a grant emits exactly one mechanism's
+ * confirmation. A compound cnf therefore indicates a forged token (signing-key
+ * compromise) or an AS bug, and the response is to refuse the token rather
+ * than to pick a winner — the same structural stance the refresh path already
+ * takes (`grants/refreshToken.mts` rejects a compound RT cnf with
+ * `invalid_grant`).
+ *
+ * Member validation matches {@link extractConfirmation}: a cnf whose second
+ * member is empty-string or non-string is a single-mechanism binding with junk
+ * attached, not an ambiguous one, so it is NOT compound and `extractConfirmation`
+ * narrows it to the well-formed member as usual.
+ */
+export const isCompoundConfirmation = (raw: unknown): boolean => {
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+	const obj = raw as Record<string, unknown>;
+	const jkt = obj.jkt;
+	const x5t = obj["x5t#S256"];
+	return typeof jkt === "string" && jkt.length > 0 && typeof x5t === "string" && x5t.length > 0;
 };
