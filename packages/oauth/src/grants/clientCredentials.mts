@@ -23,7 +23,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
-import { extractResourceParam } from "./_resourceIndicator.mjs";
+import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
 
 const GRANT_TYPE = "client_credentials";
 
@@ -96,12 +96,20 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			// (the default) skips this block entirely — preserving pre-existing
 			// semantics for deployments that wire grantPolicy without RFC 8707.
 			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+			// Stage 2 (#173): read outside the policy block. Enforcement is gated
+			// on the flag ALONE — a deployment that enables RFC 8707 without a
+			// policy hook still derives an audience below, and minting it for a
+			// resource the client did not request is the §2 violation Stage 2
+			// closes. Stage 1 only ever read this when a policy was wired.
+			const requestedResource = resourceIndicatorEnabled
+				? extractResourceParam(ctx.body as Record<string, unknown>)
+				: null;
 			if (deps.grantPolicy && resourceIndicatorEnabled) {
 				// CP-18 pattern: fail-closed on policy throw — same rationale
 				// as the refresh_token path. Policy is a security boundary;
 				// failing open would effectively grant the pre-policy scope
 				// ceiling.
-				const resource = extractResourceParam(ctx.body as Record<string, unknown>);
+				const resource = requestedResource;
 				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
 				try {
 					decision = await deps.grantPolicy.evaluate(
@@ -186,6 +194,24 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 			}
 
 			const audience = policyGrantedAudience ?? client.allowedAudiences?.[0] ?? issuer ?? null;
+
+			// RFC 8707 §2 (Stage 2, #173): the token's audience MUST be the
+			// resource indicator(s) the client asked for. Everything above only
+			// *forwarded* `resource` to the policy; this is where an audience
+			// that fails to represent the request stops being issued. Runs after
+			// the audience is final so it covers all three derivations — policy
+			// narrowing, the allowedAudiences fallback, and the issuer fallback.
+			const unrepresented = unrepresentedResources(requestedResource, audience);
+			if (unrepresented.length > 0) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_target",
+						errorDescription: `requested_resources_not_in_audience: ${unrepresented.join(" ")}`,
+					},
+				};
+			}
+
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
 			// Wave 2 Phase 2 §9.1: propagate the token-binding confirmation

@@ -39,3 +39,37 @@ export function extractResourceParam(body: Record<string, unknown>): readonly st
 	if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as readonly string[];
 	return null;
 }
+
+/**
+ * Returns the requested resource indicators that the issued token's audience
+ * does NOT represent. Empty result means the request is satisfiable.
+ *
+ * RFC 8707 §2 requires the access token's audience to be the resource
+ * indicator(s) the client asked for; when the AS cannot bind the token to
+ * them, the response is `invalid_target`. This helper is the shared decision
+ * for that check across `client_credentials`, `refresh_token`, and
+ * `authorization_code`, generalising the enforcement the token-exchange grant
+ * has carried since v0.5.3 (IH-8).
+ *
+ * `generateToken` emits a SINGLE `aud`, so "represented" is string equality
+ * against that one value. Two consequences worth stating, because both look
+ * like helper decisions and are actually token-shape consequences:
+ *
+ * - Two distinct resources can never both be represented. The multi-resource
+ *   case therefore rejects rather than issuing an array-valued `aud` or
+ *   splitting into several tokens.
+ * - A token with no audience represents nothing, so any resource request
+ *   against it is unsatisfiable. Failing closed there avoids minting an
+ *   audience-less token in response to an explicit targeting request.
+ *
+ * Duplicates that match the audience are not a widening — the client named one
+ * target more than once — and are accepted.
+ */
+export function unrepresentedResources(
+	resources: readonly string[] | null | undefined,
+	audience: string | null | undefined,
+): readonly string[] {
+	if (!resources || resources.length === 0) return [];
+	if (audience === null || audience === undefined) return [...resources];
+	return resources.filter((resource) => resource !== audience);
+}

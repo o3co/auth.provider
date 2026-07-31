@@ -402,8 +402,15 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 			})),
 		);
 
+		// No `resource` here: this case is about the scope ceiling. Under
+		// Stage 1 the parameter was inert, so carrying it was harmless; under
+		// Stage 2 (#173) it is enforced against the issued audience, which
+		// would couple a scope test to audience configuration and could make it
+		// pass for the wrong reason if the two checks were ever reordered.
+		// RFC 8707 forwarding has its own coverage in
+		// `resourceIndicator.flag.test.mts`.
 		const { result } = await handler.handle(
-			makeCtx(client, { grant_type: "client_credentials", scope: "read", resource: "https://rs1" }),
+			makeCtx(client, { grant_type: "client_credentials", scope: "read" }),
 		);
 
 		expect(result.status).toBe(400);
@@ -424,8 +431,14 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 			})),
 		);
 
+		// See the sibling case above: `resource` is dropped because this test is
+		// about scope stripping. With Stage 2 (#173) enforcing it, the policy
+		// here returns `grantedAudience: undefined`, so the audience falls back
+		// to allowedAudiences[0] and a request for `https://rs1` would now
+		// correctly reject with `invalid_target` — a true result, but not the
+		// one this case exists to assert.
 		const { result } = await handler.handle(
-			makeCtx(client, { grant_type: "client_credentials", scope: "read", resource: "https://rs1" }),
+			makeCtx(client, { grant_type: "client_credentials", scope: "read" }),
 		);
 
 		expect(result.status).toBe(200);
