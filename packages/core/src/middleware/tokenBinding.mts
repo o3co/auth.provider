@@ -182,12 +182,20 @@ export const tokenBindingMw = ({
 			next();
 			return;
 		}
-		// All successes are ambient. Stage 1 has exactly one ambient
-		// mechanism (mTLS), so `successes.length` is provably 1 here
-		// (and `firstSuccess` is its single element). Stage 2+ adding a
-		// second ambient mechanism must revisit this first-wins rule —
-		// a corresponding test for multi-ambient is intentionally
-		// deferred until that second mechanism exists.
+		// All successes are ambient. With Stage 1's single ambient mechanism
+		// (mTLS) `successes.length` is 1 here, but that is a property of the
+		// mechanisms currently shipped, not of this code: with two ambient
+		// mechanisms succeeding, the first-registered wins and the rest are
+		// discarded silently — unlike the ≥2-explicit branch above, which
+		// rejects.
+		//
+		// Whoever adds a second ambient mechanism must decide deliberately
+		// whether first-wins is right for two ambient signals, or whether it
+		// should reject like the explicit branch. That decision is no longer
+		// guarded by this comment alone: the behavior is pinned in
+		// `__tests__/tokenBinding.test.mts` ("two ambient mechanisms
+		// succeeding → first-registered wins"), so changing it is an explicit
+		// test edit rather than a silent behavior change (#199 M2).
 		req.tokenBinding = firstSuccess.binding;
 		next();
 	};

@@ -453,3 +453,74 @@ describe("createDPoPMechanism", () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Replay TTL vs iat window (#199 M1)
+// ---------------------------------------------------------------------------
+
+describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
+	/**
+	 * The `iat` check is `Math.abs(now - iat) > iatWindowSeconds`, so a proof
+	 * with `iat = T` is acceptable across `now ∈ [T - W, T + W]` — a span of
+	 * `2W`, not `W`.
+	 *
+	 * A replay entry is written when the proof is FIRST seen, which under
+	 * clock skew can be as early as `T - W`, and it expires at
+	 * `firstSeen + TTL`. For the entry to still exist for as long as the proof
+	 * is accepted, `T - W + TTL >= T + W`, i.e. `TTL >= 2W`. Below that, the
+	 * proof outlives its own replay entry and becomes replayable while still
+	 * inside its acceptance window.
+	 */
+	const capturingLogger = (warns: { obj: unknown; msg?: string }[]) =>
+		({
+			debug: () => {},
+			info: () => {},
+			warn: (obj: unknown, msg?: string) => warns.push({ obj, msg }),
+			error: () => {},
+			child() {
+				return this;
+			},
+		}) as unknown as Parameters<typeof createDPoPMechanism>[0]["logger"];
+
+	const ttlWarnings = (warns: { obj: unknown; msg?: string }[]) =>
+		warns.filter((w) => (w.obj as { reason?: string })?.reason === "replay_ttl_below_iat_window");
+
+	it("warns when replayTtlSeconds is below 2x iatWindowSeconds", () => {
+		const warns: { obj: unknown; msg?: string }[] = [];
+		createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			iatWindowSeconds: 180,
+			// Satisfies the old "at least iatWindowSeconds" advice and is still
+			// short of the 360 the window actually needs.
+			replayTtlSeconds: 300,
+			logger: capturingLogger(warns),
+		});
+
+		const matched = ttlWarnings(warns);
+		expect(matched).toHaveLength(1);
+		expect(matched[0]?.obj).toMatchObject({
+			iatWindowSeconds: 180,
+			replayTtlSeconds: 300,
+			requiredTtlSeconds: 360,
+		});
+	});
+
+	it("does not warn at exactly 2x, nor for the defaults", () => {
+		const atBoundary: { obj: unknown; msg?: string }[] = [];
+		createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			iatWindowSeconds: 150,
+			replayTtlSeconds: 300,
+			logger: capturingLogger(atBoundary),
+		});
+		expect(ttlWarnings(atBoundary)).toHaveLength(0);
+
+		// Defaults are 60 / 300 — 2x60 = 120, comfortably covered.
+		const defaults: { obj: unknown; msg?: string }[] = [];
+		createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			logger: capturingLogger(defaults),
+		});
+		expect(ttlWarnings(defaults)).toHaveLength(0);
+	});
+});
