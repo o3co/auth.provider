@@ -270,3 +270,43 @@ single-mechanism token anyway.
   deployment" limitation discovered during Sub-PR 3b review.
 - Wave 2 Phase 4 — end-to-end introspect cnf test, this ADR, README
   updates, CHANGELOG roll-up.
+
+### Migration from v0.7 `grantMiddleware` contributions
+
+Added 2026-07-31 (resolves the audit finding #199 I4 / R3), which noted
+this ADR described the `tokenBindingMechanisms` slot without saying what
+happens to a v0.7 composition that is only partly migrated.
+
+Before the cross-mechanism dispatch refactor, a module shipping a
+token-binding mechanism composed its **own** `tokenBindingMw` and mounted
+it through the `grantMiddleware` contribution kind. Since the refactor it
+contributes the raw mechanism to `tokenBindingMechanisms`, and core
+composes exactly one `tokenBindingMw` so `DispatchPolicy` can arbitrate
+across modules.
+
+Both slots still exist, and a composition may populate both. When it does,
+the outcome is fixed rather than order-dependent — `assembleApp` mounts the
+composed middleware on `/oauth/token` first and `grantMiddleware`
+contributions after, and `tokenBindingMw` assigns `req.tokenBinding`
+without guarding an already-populated field:
+
+> a leftover `grantMiddleware`-mounted `tokenBindingMw` runs last and
+> **always** overrides the binding the composed surface resolved.
+
+So a consumer who adopts `tokenBindingMechanisms` but leaves the old
+`grantMiddleware` wiring in place keeps their v0.7 behavior, and the
+`dispatch-policy` they configured decides nothing. Nothing fails: no error,
+no changed response shape, and the new surface still looks wired. That is
+why the condition is reported at boot rather than left to documentation —
+`applyContributions` warns with `reason: "token_binding_surface_overlap"`
+and names the offending modules, using the `isTokenBindingMw` brand that
+`tokenBindingMw` stamps on every handler it returns.
+
+The warning is deliberately narrow. It stays silent when only the legacy
+surface is present (an un-migrated deployment working as it always did, not
+an override) and when `grantMiddleware` carries ordinary middleware — rate
+limiters, body pre-processing — which the slot is equally meant for.
+
+`grantMiddleware` is **not** deprecated by this; it remains the general
+pre-dispatch middleware slot. What is superseded is its use as the mounting
+point for a token-binding mechanism.

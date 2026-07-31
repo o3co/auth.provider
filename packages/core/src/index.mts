@@ -212,6 +212,7 @@ export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
 // Middleware — tokenBindingMw factory + plugin surface (Wave 2 Token-binding Cluster §4.7)
 export {
 	type DispatchPolicy,
+	isTokenBindingMw,
 	type TokenBindingMechanism,
 	type TokenBindingMiddlewareOptions,
 	tokenBindingMw,

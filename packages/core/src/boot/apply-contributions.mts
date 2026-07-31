@@ -31,6 +31,9 @@
  * Per A2-β §5.4.
  */
 
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+import type { Logger } from "../logging/Logger.mjs";
+import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import type {
 	GrantHandlerResolver,
@@ -292,6 +295,59 @@ function collectorFor(
 		| undefined;
 }
 
+/**
+ * Warn when a deployment runs BOTH token-binding surfaces (#199 I4).
+ *
+ * `assembleApp` mounts the composed `tokenBindingMw` (synthesized from
+ * `tokenBindingMechanisms`) on `/oauth/token` first, and `grantMiddleware`
+ * contributions after. `tokenBindingMw` assigns `req.tokenBinding` without
+ * guarding an already-populated field, so a `tokenBindingMw` arriving through
+ * `grantMiddleware` runs last and **always** wins — the configured
+ * `dispatch-policy` on the composed surface never decides anything.
+ *
+ * That is the shape of an incomplete v0.7 → v0.8 migration: the consumer
+ * adopted `tokenBindingMechanisms` but left their old `grantMiddleware`
+ * wiring in place. It produces no error and no behavioral signal, which is
+ * exactly why it needs a boot-time warning.
+ *
+ * Deliberately silent when only the legacy surface is present — that is a
+ * working pre-migration deployment, not an override — and when the
+ * `grantMiddleware` contributions are ordinary middleware (rate limiters,
+ * body pre-processing), which the slot is equally intended for.
+ * @internal
+ */
+function warnOnTokenBindingSurfaceOverlap(
+	components: Record<string, unknown>,
+	contributionKinds: ContributionCollectorMap,
+	legacyTokenBindingModules: readonly string[],
+): void {
+	if (legacyTokenBindingModules.length === 0) return;
+
+	const mechanismCollector = collectorFor(contributionKinds, "tokenBindingMechanisms");
+	if (mechanismCollector === undefined || mechanismCollector.kind !== "list") return;
+	// Null entries are the disabled-by-config path — a module whose mechanism
+	// is switched off contributes nothing to the composed middleware, so it
+	// cannot be the surface being overridden.
+	let hasMechanism = false;
+	for (const m of mechanismCollector.values()) {
+		if (m !== null) {
+			hasMechanism = true;
+			break;
+		}
+	}
+	if (!hasMechanism) return;
+
+	const logger = components.logger as Logger | undefined;
+	(logger ?? consoleLogger).warn(
+		{
+			reason: "token_binding_surface_overlap",
+			modules: [...legacyTokenBindingModules],
+		},
+		"a grantMiddleware-mounted tokenBindingMw runs after the composed one and will override every binding it resolves; " +
+			"migrate these modules to the tokenBindingMechanisms contribution kind, or the configured dispatch-policy stays inert",
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Public API — applyContributions
 // ---------------------------------------------------------------------------
@@ -343,6 +399,12 @@ export async function applyContributions(
 	// Step 0: prepareSyntheticProjections. Per A2-β §5.4 step 0.
 	// ---------------------------------------------------------------------------
 	prepareSyntheticProjections(components, contributionKinds);
+
+	// Modules that mounted a `tokenBindingMw` through the legacy v0.7
+	// `grantMiddleware` slot. Collected here because module provenance is only
+	// in scope inside the loop below — `ListCollector` keeps values, not the
+	// module that contributed them. Evaluated after the loop (#199 I4).
+	const legacyTokenBindingModules: string[] = [];
 
 	// ---------------------------------------------------------------------------
 	// Step 2: Name-keyed pass in BootPlan.initOrder.
@@ -573,17 +635,30 @@ export async function applyContributions(
 					});
 				}
 
+				if (
+					entry.kind === "grantMiddleware" &&
+					isTokenBindingMw(value) &&
+					// A module may register several such factories; the operator
+					// acts on the module, so name it once.
+					!legacyTokenBindingModules.includes(moduleName)
+				) {
+					legacyTokenBindingModules.push(moduleName);
+				}
+
 				collector.append(value);
 			}
 			// kind === "name-keyed" entries are handled in step 2; skip here.
 		}
 	}
 
+	warnOnTokenBindingSurfaceOverlap(components, contributionKinds, legacyTokenBindingModules);
+
 	// ---------------------------------------------------------------------------
 	// Build registries map: kind → collector reference. Stage 5 uses this to
 	// call freeze() on each collector that exposes it.
 	// Per A2-β §5.4 output.
 	// ---------------------------------------------------------------------------
+	// (see warnOnTokenBindingSurfaceOverlap above)
 	const registries = new Map<ContributionKind, unknown>();
 	for (const [kind, collector] of Object.entries(contributionKinds)) {
 		if (collector !== undefined) {
