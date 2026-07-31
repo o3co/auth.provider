@@ -36,8 +36,45 @@ export function extractResourceParam(body: Record<string, unknown>): readonly st
 	const v = body.resource;
 	if (v === undefined || v === null || v === "") return null;
 	if (typeof v === "string") return [v];
-	if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as readonly string[];
+	if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
+		// Drop empty entries so the array shape agrees with the single-string
+		// shape on what "absent" means. `?resource=&resource=https://x` reaches
+		// Express as `["", "https://x"]`, and an empty entry surviving into
+		// Stage 2 enforcement would reject with an error naming a blank
+		// resource. All-empty collapses to null, i.e. not requested at all.
+		const nonEmpty = (v as readonly string[]).filter((x) => x !== "");
+		return nonEmpty.length > 0 ? nonEmpty : null;
+	}
 	return null;
+}
+
+/**
+ * The audience to mint for when a `resource` was requested and no policy
+ * narrowed one — RFC 8707 §2 read as "the AS derives the audience from the
+ * request", rather than minting its default and then rejecting it.
+ *
+ * Returns `undefined` when derivation is not possible, leaving the caller's
+ * existing fallback in place; {@link unrepresentedResources} then rejects the
+ * request, so a non-derivable case still fails closed rather than silently
+ * issuing a mismatched audience.
+ *
+ * Derivation is bounded by `allow` — the client's `allowedAudiences` plus its
+ * own client id, the same ceiling a policy-returned audience is held to.
+ * Without that bound, naming a resource would be enough to mint a token for
+ * any audience, which is the opposite of what resource indicators are for.
+ *
+ * Two distinct resources are not derivable: `aud` is a single string. A
+ * repeated identical resource collapses to that one audience.
+ */
+export function deriveAudienceFromResources(
+	resources: readonly string[] | null | undefined,
+	allow: ReadonlySet<string>,
+): string | undefined {
+	if (!resources || resources.length === 0) return undefined;
+	const distinct = [...new Set(resources)];
+	if (distinct.length !== 1) return undefined;
+	const only = distinct[0];
+	return only !== undefined && allow.has(only) ? only : undefined;
 }
 
 /**

@@ -23,7 +23,11 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
-import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
+import {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./_resourceIndicator.mjs";
 
 const GRANT_TYPE = "client_credentials";
 
@@ -193,7 +197,20 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 				}
 			}
 
-			const audience = policyGrantedAudience ?? client.allowedAudiences?.[0] ?? issuer ?? null;
+			// RFC 8707 §2 audience derivation (Stage 2, #173). When a `resource`
+			// was requested and no policy narrowed an audience, the AS derives
+			// `aud` from the request instead of minting its default and then
+			// rejecting it — otherwise resource indicators would be unusable
+			// without a policy hook wired, which is not what the flag promises.
+			// Bounded by allowedAudiences ∪ {clientId}, the same ceiling a
+			// policy-returned audience is checked against.
+			const derivedAudience =
+				policyGrantedAudience ??
+				deriveAudienceFromResources(
+					requestedResource,
+					new Set([...(client.allowedAudiences ?? []), client.clientId]),
+				);
+			const audience = derivedAudience ?? client.allowedAudiences?.[0] ?? issuer ?? null;
 
 			// RFC 8707 §2 (Stage 2, #173): the token's audience MUST be the
 			// resource indicator(s) the client asked for. Everything above only

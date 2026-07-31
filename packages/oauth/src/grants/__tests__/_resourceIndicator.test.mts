@@ -15,7 +15,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { extractResourceParam, unrepresentedResources } from "#/grants/_resourceIndicator.mjs";
+import {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "#/grants/_resourceIndicator.mjs";
 
 describe("extractResourceParam", () => {
 	it("returns null when resource is absent", () => {
@@ -109,5 +113,57 @@ describe("unrepresentedResources", () => {
 		expect(unrepresentedResources(["https://api.example"], undefined)).toEqual([
 			"https://api.example",
 		]);
+	});
+});
+
+describe("extractResourceParam — empty entries in the array shape", () => {
+	it("drops empty-string entries so both shapes agree on what 'absent' means", () => {
+		// `?resource=&resource=https://api.example` reaches Express as
+		// ["", "https://api.example"]. The single-string branch already treats
+		// "" as absent; letting it through here would reach Stage 2 enforcement
+		// and produce `requested_resources_not_in_audience: ` naming an empty
+		// token.
+		expect(extractResourceParam({ resource: ["", "https://api.example"] })).toEqual([
+			"https://api.example",
+		]);
+	});
+
+	it("returns null when every entry is empty", () => {
+		expect(extractResourceParam({ resource: ["", ""] })).toBeNull();
+	});
+});
+
+describe("deriveAudienceFromResources", () => {
+	const allow = new Set(["https://api.example", "client1"]);
+
+	it("derives the audience from a single allowed resource", () => {
+		// Acceptance criterion 1, third bullet: when the policy returns no
+		// grantedAudience the library derives `aud` from the request rather
+		// than minting the default and rejecting it.
+		expect(deriveAudienceFromResources(["https://api.example"], allow)).toBe("https://api.example");
+	});
+
+	it("collapses a repeated identical resource to that one audience", () => {
+		expect(deriveAudienceFromResources(["https://api.example", "https://api.example"], allow)).toBe(
+			"https://api.example",
+		);
+	});
+
+	it("refuses to derive from two distinct resources", () => {
+		expect(
+			deriveAudienceFromResources(["https://api.example", "https://other.example"], allow),
+		).toBeUndefined();
+	});
+
+	it("refuses to derive an audience the client is not allowed", () => {
+		// Derivation must not become a way to mint a token for any audience by
+		// asking for it — the allowlist is the same boundary a policy-returned
+		// audience is held to.
+		expect(deriveAudienceFromResources(["https://evil.example"], allow)).toBeUndefined();
+	});
+
+	it("returns undefined when no resource was requested", () => {
+		expect(deriveAudienceFromResources(null, allow)).toBeUndefined();
+		expect(deriveAudienceFromResources([], allow)).toBeUndefined();
 	});
 });

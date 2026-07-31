@@ -42,7 +42,11 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { extractResourceParam, unrepresentedResources } from "./grants/_resourceIndicator.mjs";
+import {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./grants/_resourceIndicator.mjs";
 import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
@@ -951,8 +955,25 @@ export const createOAuthRouter = async (
 				// token response, which is indistinguishable from "scope claim
 				// omitted" and surprises consumers.
 				const scopeForPersist = grantedScopes.length > 0 ? grantedScopes : undefined;
+				// RFC 8707 §2 audience derivation (Stage 2, #173). When a `resource`
+				// was requested and no policy narrowed an audience, derive it here so
+				// the value persisted on the code — which the token endpoint reads and
+				// enforces against — already reflects the request. Deriving at
+				// `/authorize` rather than `/token` is what keeps the audience decided
+				// exactly once (C-2 / D-1). Bounded by the client's allowedAudiences
+				// plus its own id, the same ceiling a policy-returned audience meets.
+				let effectiveGrantedAudience = grantedAudience;
+				if (resourceIndicatorEnabled && authorizeResource && !effectiveGrantedAudience) {
+					const derived = deriveAudienceFromResources(
+						authorizeResource,
+						new Set([...(client.allowedAudiences ?? []), client_id]),
+					);
+					if (derived !== undefined) effectiveGrantedAudience = [derived];
+				}
 				const audienceForPersist =
-					grantedAudience && grantedAudience.length > 0 ? grantedAudience : undefined;
+					effectiveGrantedAudience && effectiveGrantedAudience.length > 0
+						? effectiveGrantedAudience
+						: undefined;
 
 				// RFC 8707 §2 (Stage 2, #173): reject here rather than issuing a code
 				// that is already doomed. The token endpoint applies the same check

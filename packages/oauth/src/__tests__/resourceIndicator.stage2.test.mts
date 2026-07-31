@@ -45,7 +45,7 @@ import {
 	type GrantDependencies,
 	type GrantPolicyHook,
 } from "@o3co/auth-provider-core";
-import { SignJWT } from "jose";
+import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
@@ -209,15 +209,27 @@ const makeAuthzCtx = (body: Record<string, unknown> = {}): GrantContext => ({
 // ---------------------------------------------------------------------------
 
 describe("Stage 2 — client_credentials", () => {
-	it("rejects invalid_target when the derived audience does not represent the request", async () => {
-		// No policy wired: audience falls back to allowedAudiences[0] = API,
-		// which does not represent a request for OTHER.
+	it("derives the audience from an allowed resource when no policy narrows one", async () => {
+		// Acceptance criterion 1, third bullet: without this the audience would
+		// fall back to allowedAudiences[0] = API and a request for OTHER would
+		// reject, making RFC 8707 unusable unless a policy hook is wired.
 		const grant = createClientCredentialsGrant(makeCCDeps());
 		const out = await grant.handle(makeCCCtx({ resource: OTHER }));
 
+		expect(out.result.status).toBe(200);
+		if (!("tokens" in out.result)) throw new Error("expected tokens");
+		expect(decodeJwt(out.result.tokens.access_token).aud).toBe(OTHER);
+	});
+
+	it("rejects invalid_target for a resource the client is not allowed", async () => {
+		// Derivation is bounded by allowedAudiences ∪ {clientId} — naming a
+		// resource must not be enough to mint a token for any audience.
+		const grant = createClientCredentialsGrant(makeCCDeps());
+		const out = await grant.handle(makeCCCtx({ resource: "https://evil.example" }));
+
 		expect(out.result.status).toBe(400);
 		expect(out.result.error).toBe("invalid_target");
-		expect(out.result.errorDescription).toContain(OTHER);
+		expect(out.result.errorDescription).toContain("https://evil.example");
 	});
 
 	it("allows when the derived audience represents the request", async () => {
@@ -280,15 +292,25 @@ describe("Stage 2 — client_credentials", () => {
 // ---------------------------------------------------------------------------
 
 describe("Stage 2 — refresh_token", () => {
-	it("rejects invalid_target when the derived audience does not represent the request", async () => {
-		// No policy wired: finalAudience defaults to the authenticated client id,
-		// which does not represent a request for API.
+	it("derives the audience from an allowed resource when no policy narrows one", async () => {
+		// Without derivation `finalAudience` stays the authenticated client id
+		// and an otherwise-allowed resource would reject.
 		const grant = createRefreshTokenGrant(makeRefreshDeps());
 		const out = await grant.handle(makeRefreshCtx(await makeRefreshToken(), { resource: API }));
 
+		expect(out.result.status).toBe(200);
+		if (!("tokens" in out.result)) throw new Error("expected tokens");
+		expect(decodeJwt(out.result.tokens.access_token).aud).toBe(API);
+	});
+
+	it("rejects invalid_target for a resource the client is not allowed", async () => {
+		const grant = createRefreshTokenGrant(makeRefreshDeps());
+		const out = await grant.handle(
+			makeRefreshCtx(await makeRefreshToken(), { resource: "https://evil.example" }),
+		);
+
 		expect(out.result.status).toBe(400);
 		expect(out.result.error).toBe("invalid_target");
-		expect(out.result.errorDescription).toContain(API);
 	});
 
 	it("honours a policy that narrows the audience to the requested resource", async () => {

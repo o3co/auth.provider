@@ -26,7 +26,11 @@ import {
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
-import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
+import {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./_resourceIndicator.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore, logger } = deps;
@@ -427,10 +431,23 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				}
 			}
 
+			// RFC 8707 §2 audience derivation (Stage 2, #173). `finalAudience` is
+			// still the authenticated client id unless a policy narrowed it, so
+			// without this a request for an otherwise-allowed resource would be
+			// rejected even though the AS could satisfy it. Only applies when the
+			// policy left the audience alone — a policy decision always wins.
+			if (finalAudience === authenticatedClientId && requestedResource) {
+				const derived = deriveAudienceFromResources(
+					requestedResource,
+					new Set([...(ctx.authenticatedClient.allowedAudiences ?? []), authenticatedClientId]),
+				);
+				if (derived !== undefined) finalAudience = derived;
+			}
+
 			// RFC 8707 §2 (Stage 2, #173): the refreshed token's audience MUST be
-			// the resource indicator(s) the client asked for. Placed after the
-			// policy block so it covers both the policy-narrowed audience and the
-			// authenticated-client default.
+			// the resource indicator(s) the client asked for. Placed after both
+			// the policy block and the derivation above, so a request that could
+			// not be satisfied either way still fails closed.
 			const unrepresented = unrepresentedResources(requestedResource, finalAudience);
 			if (unrepresented.length > 0) {
 				return {

@@ -38,6 +38,31 @@ issuer fallback, and the client-id default identically. An enforcement that
 lived inside the policy branch would only ever check the case that was already
 least likely to be wrong.
 
+### D1b — When no policy narrows an audience, derive it from the request
+
+RFC 8707 §2 asks the AS to bind the token to the requested resource, not
+merely to check whether its default happens to match. So when `resource` is
+present and the policy returned no `grantedAudience` — including when no policy
+is wired at all — the audience is **derived** from the request:
+`deriveAudienceFromResources` returns the single requested resource, and the
+grant mints for it.
+
+Enforcement alone was not enough, and shipping only that was a genuine defect:
+it made every request whose resource differed from the grant's default audience
+(`allowedAudiences[0]`, the issuer, the client id) fail, so RFC 8707 became
+unusable unless a policy hook was wired — contradicting D3 below, which exists
+precisely so the flag does not require one.
+
+Derivation is bounded by `allowedAudiences ∪ {clientId}`, the same ceiling a
+policy-returned audience is validated against (and the bound
+`oauth-token-exchange` already uses). Without it, naming a resource would be
+enough to mint a token for any audience — the opposite of what resource
+indicators are for. A resource outside that set is not derivable, and the
+enforcement in D1 then rejects it.
+
+A policy-returned audience always wins; derivation only fills the gap the
+policy left.
+
 ### D2 — Multiple distinct resources are rejected, not split or merged
 
 #173 left this open ("the AS may issue one token per resource OR a single token

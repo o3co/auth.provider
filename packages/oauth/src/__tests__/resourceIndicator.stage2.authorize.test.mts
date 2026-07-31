@@ -223,17 +223,30 @@ describe("Stage 2 — /authorize rejects an unsatisfiable resource request", () 
 		expect(locationOf(res).searchParams.get("error")).toBe("invalid_target");
 	});
 
-	it("falls back to the client id as the audience when no policy narrows one", async () => {
-		// Mirrors the token endpoint's default (`authenticatedClientId`), so a
-		// resource that is not the client id is unsatisfiable without a policy.
-		const app = await buildApp({ enabled: true });
+	it("derives and persists the audience when no policy narrows one", async () => {
+		// Acceptance criterion 1, third bullet, at the authorization endpoint:
+		// the derived audience is what gets persisted on the code, so the token
+		// endpoint's later enforcement passes without ever consulting a policy.
+		const captured: Parameters<CodeRepository["createCode"]>[0][] = [];
+		const app = await buildApp({ enabled: true, captureCode: (p) => captured.push(p) });
 
-		const rejected = await request(app).get(authorizeUrl({ resource: API }));
-		expect(locationOf(rejected).searchParams.get("error")).toBe("invalid_target");
+		const res = await request(app).get(authorizeUrl({ resource: API }));
 
-		const accepted = await request(app).get(authorizeUrl({ resource: CLIENT_ID }));
-		expect(locationOf(accepted).searchParams.get("error")).toBeNull();
-		expect(locationOf(accepted).searchParams.get("code")).toBe("auth-code");
+		expect(locationOf(res).searchParams.get("error")).toBeNull();
+		expect(locationOf(res).searchParams.get("code")).toBe("auth-code");
+		expect(captured[0]?.grantedAudience).toEqual([API]);
+	});
+
+	it("rejects a resource the client is not allowed, even with no policy", async () => {
+		// Derivation is bounded by allowedAudiences ∪ {client_id}; naming a
+		// resource must not be enough to have it persisted as the audience.
+		const captured: unknown[] = [];
+		const app = await buildApp({ enabled: true, captureCode: (p) => captured.push(p) });
+
+		const res = await request(app).get(authorizeUrl({ resource: "https://evil.example" }));
+
+		expect(locationOf(res).searchParams.get("error")).toBe("invalid_target");
+		expect(captured).toHaveLength(0);
 	});
 
 	it("flag off: `resource` is ignored and the code is issued", async () => {
