@@ -453,3 +453,94 @@ describe("createDPoPMechanism", () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Replay TTL vs iat window (#199 M1)
+// ---------------------------------------------------------------------------
+
+describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
+	/**
+	 * The `iat` check is `Math.abs(floor(now) - iat) > W`, so a proof with
+	 * `iat = T` keeps being accepted until real time `T + W + 1` (exclusive)
+	 * — the second-truncation buys it very nearly an extra second past
+	 * `T + W`.
+	 *
+	 * Its replay entry is written only after the window check passes, so the
+	 * earliest it exists is `T - W`, and it expires half-open at
+	 * `firstSeen + TTL` (the memory store keeps an entry only while
+	 * `expiry > now`). Covering the whole accepted interval therefore needs
+	 * `T - W + TTL >= T + W + 1`, i.e. `TTL >= 2W + 1`.
+	 *
+	 * `2W` is NOT sufficient: the entry dies at `T + W` while the proof stays
+	 * acceptable for up to another second. The boundary cases below pin that,
+	 * because an off-by-one here is exactly a replay window.
+	 */
+	const capturingLogger = (warns: { obj: unknown; msg?: string }[]) =>
+		({
+			debug: () => {},
+			info: () => {},
+			warn: (obj: unknown, msg?: string) => warns.push({ obj, msg }),
+			error: () => {},
+			child() {
+				return this;
+			},
+		}) as unknown as Parameters<typeof createDPoPMechanism>[0]["logger"];
+
+	const ttlWarnings = (warns: { obj: unknown; msg?: string }[]) =>
+		warns.filter((w) => (w.obj as { reason?: string })?.reason === "replay_ttl_below_iat_window");
+
+	it("warns when replayTtlSeconds is below the requirement", () => {
+		const warns: { obj: unknown; msg?: string }[] = [];
+		createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			iatWindowSeconds: 180,
+			// Satisfies the old "at least iatWindowSeconds" advice and is still
+			// short of the 361 the window actually needs.
+			replayTtlSeconds: 300,
+			logger: capturingLogger(warns),
+		});
+
+		const matched = ttlWarnings(warns);
+		expect(matched).toHaveLength(1);
+		expect(matched[0]?.obj).toMatchObject({
+			iatWindowSeconds: 180,
+			replayTtlSeconds: 300,
+			requiredTtlSeconds: 361,
+		});
+	});
+
+	it("still warns at exactly 2x — the entry would die a second early", () => {
+		// The tight boundary. `2W` leaves the proof acceptable for up to one
+		// more second after its replay entry expires, so this must warn.
+		const warns: { obj: unknown; msg?: string }[] = [];
+		createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			iatWindowSeconds: 150,
+			replayTtlSeconds: 300,
+			logger: capturingLogger(warns),
+		});
+
+		const matched = ttlWarnings(warns);
+		expect(matched).toHaveLength(1);
+		expect(matched[0]?.obj).toMatchObject({ requiredTtlSeconds: 301 });
+	});
+
+	it("does not warn at 2x + 1, nor for the defaults", () => {
+		const atBoundary: { obj: unknown; msg?: string }[] = [];
+		createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			iatWindowSeconds: 150,
+			replayTtlSeconds: 301,
+			logger: capturingLogger(atBoundary),
+		});
+		expect(ttlWarnings(atBoundary)).toHaveLength(0);
+
+		// Defaults are 60 / 300 — the requirement is 121, comfortably covered.
+		const defaults: { obj: unknown; msg?: string }[] = [];
+		createDPoPMechanism({
+			replayStore: createMemoryDPoPReplayStore(),
+			logger: capturingLogger(defaults),
+		});
+		expect(ttlWarnings(defaults)).toHaveLength(0);
+	});
+});

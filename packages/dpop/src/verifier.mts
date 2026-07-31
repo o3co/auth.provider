@@ -66,7 +66,29 @@ export interface DPoPMechanismOptions {
 	readonly algWhitelist?: readonly string[];
 	/**
 	 * TTL in seconds for replay entries in the store. Default: 300 (5 minutes).
-	 * SHOULD be at least `iatWindowSeconds` to cover the acceptance window.
+	 *
+	 * MUST be at least **`2 × iatWindowSeconds + 1`**, not `iatWindowSeconds`.
+	 *
+	 * The `iat` check is `Math.abs(now - iat) > iatWindowSeconds` against
+	 * `now = Math.floor(Date.now() / 1000)`, so the acceptance window is
+	 * symmetric around `iat` AND truncated to whole seconds: a proof with
+	 * `iat = T` keeps being accepted while `floor(now) <= T + W`, i.e. until
+	 * real time `T + W + 1` (exclusive) — very nearly a second past `T + W`.
+	 *
+	 * A replay entry is written only after the window check passes (step 14
+	 * follows step 12), so the earliest it can be created is real time
+	 * `T - W`, and it expires at `firstSeen + TTL`. Expiry is half-open — the
+	 * memory store treats an entry as live only while `expiry > now` — so the
+	 * entry is already gone at `firstSeen + TTL`.
+	 *
+	 * Covering the whole accepted interval therefore requires
+	 * `T - W + TTL >= T + W + 1`, i.e. `TTL >= 2W + 1`. At exactly `2W` the
+	 * entry dies at `T + W` while the proof stays acceptable for up to another
+	 * second — a real, if narrow, replay window.
+	 *
+	 * The defaults (60 / 300) satisfy this with margin. A mechanism
+	 * constructed below the requirement logs a warning
+	 * (`reason: "replay_ttl_below_iat_window"`, carrying `requiredTtlSeconds`).
 	 */
 	readonly replayTtlSeconds?: number;
 	readonly logger?: Logger;
@@ -117,6 +139,29 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 	const iatWindowSeconds = options.iatWindowSeconds ?? DEFAULT_IAT_WINDOW_SECONDS;
 	const replayTtlSeconds = options.replayTtlSeconds ?? DEFAULT_REPLAY_TTL_SECONDS;
 	const { replayStore, logger } = options;
+
+	// Replay entries must outlive the acceptance window they protect. The iat
+	// check is symmetric AND second-truncated (`Math.abs(floor(now) - iat) > W`),
+	// so a proof stays acceptable until real time `T + W + 1` (exclusive),
+	// while its entry starts at first sighting — possibly the earliest edge,
+	// `T - W` — and expires half-open at `firstSeen + TTL`. Hence `2W + 1`,
+	// not `2W`: at exactly `2W` the entry dies a second early. See the
+	// `replayTtlSeconds` docs for the derivation.
+	// Warn rather than throw: the failure is a weakened replay guarantee under
+	// clock skew, not an unusable configuration, and refusing to construct
+	// would break deployments that are running today.
+	const requiredTtlSeconds = iatWindowSeconds * 2 + 1;
+	if (replayTtlSeconds < requiredTtlSeconds) {
+		logger?.warn(
+			{
+				reason: "replay_ttl_below_iat_window",
+				iatWindowSeconds,
+				replayTtlSeconds,
+				requiredTtlSeconds,
+			},
+			"replayTtlSeconds is below 2x iatWindowSeconds; a proof can outlive its replay entry and be replayed while still inside its acceptance window",
+		);
+	}
 
 	return {
 		kind: "dpop",

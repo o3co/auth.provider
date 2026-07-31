@@ -201,6 +201,71 @@ describe("tokenBindingMw", () => {
 		expect(req.tokenBinding).toEqual(fakeMtls);
 	});
 
+	it("intent-explicit: two ambient mechanisms succeeding → first-registered wins (#199 M2)", async () => {
+		// The ambient tail of the intent-explicit branch used to assert its
+		// own precondition in a comment — "Stage 1 has exactly one ambient
+		// mechanism (mTLS), so successes.length is provably 1 here" — and
+		// deferred the test until a second ambient mechanism shipped. A
+		// comment cannot fail, so the day a second ambient mechanism is added
+		// the first-wins rule would be applied silently, without anyone being
+		// asked whether it is the right rule for two ambient signals.
+		//
+		// This pins the behavior with a synthetic second ambient mechanism, so
+		// the decision surfaces as a failing test rather than as production
+		// behavior. It asserts what the code does today, NOT that first-wins
+		// is necessarily correct for a real multi-ambient deployment: whoever
+		// adds that mechanism must consciously either keep this or change it
+		// (e.g. to reject like the ≥2-explicit branch does).
+		const secondAmbient: TokenBindingMechanism = {
+			kind: "mtls-secondary",
+			intentExplicit: false,
+			extract: async () => ({
+				kind: "mtls-secondary",
+				confirmation: { "x5t#S256": "CCC" },
+			}),
+		};
+		const mw = tokenBindingMw({
+			mechanisms: [mtlsMechanism(fakeMtls), secondAmbient],
+			dispatchPolicy: "intent-explicit",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+
+		expect(next).toHaveBeenCalledOnce();
+		// First-registered wins; the second ambient success is discarded.
+		expect(req.tokenBinding).toEqual(fakeMtls);
+		expect(res.status).not.toHaveBeenCalled();
+	});
+
+	it("strict-mutual-exclusion: two ambient mechanisms succeeding → rejected (#199 M2)", async () => {
+		// Contrast with the case above: strict-mutual-exclusion counts raw
+		// successes and does not care about intent, so it already refuses two
+		// ambient mechanisms. Pinning both makes the asymmetry explicit —
+		// intent-explicit silently picks a winner where strict rejects.
+		const secondAmbient: TokenBindingMechanism = {
+			kind: "mtls-secondary",
+			intentExplicit: false,
+			extract: async () => ({
+				kind: "mtls-secondary",
+				confirmation: { "x5t#S256": "CCC" },
+			}),
+		};
+		const mw = tokenBindingMw({
+			mechanisms: [mtlsMechanism(fakeMtls), secondAmbient],
+			dispatchPolicy: "strict-mutual-exclusion",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+
+		expect(next).not.toHaveBeenCalled();
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(req.tokenBinding).toBeUndefined();
+	});
+
 	it("strict-mutual-exclusion: single succeeding mechanism assigns binding and calls next()", async () => {
 		// Happy-path coverage for the strict-mutex branch — guards against
 		// a regression that turns the policy into a hard-reject for ALL
