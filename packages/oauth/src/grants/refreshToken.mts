@@ -26,7 +26,11 @@ import {
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
-import { extractResourceParam } from "./_resourceIndicator.mjs";
+import {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./_resourceIndicator.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore, logger } = deps;
@@ -328,16 +332,22 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// a body-spoofable identity flow.
 			let finalAudience: string | null = authenticatedClientId;
 
+			// Stage 2 (#173): read outside the policy block. Enforcement below is
+			// gated on the flag ALONE — with no policy wired `finalAudience`
+			// stays the authenticated client id, and issuing that in response to
+			// a `resource` request is the RFC 8707 §2 violation Stage 2 closes.
+			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+			const requestedResource = resourceIndicatorEnabled
+				? extractResourceParam(body as Record<string, unknown>)
+				: null;
+
 			if (deps.grantPolicy) {
 				// CP-18: fail-closed. grantPolicy is a security boundary (it
 				// narrows scope/audience); if it throws we cannot know what
 				// the narrowed decision would have been. Failing open would
 				// effectively grant the pre-policy scope ceiling, which is
 				// exactly what policy exists to prevent.
-				const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
-				const resource = resourceIndicatorEnabled
-					? extractResourceParam(body as Record<string, unknown>)
-					: null;
+				const resource = requestedResource;
 				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
 				try {
 					decision = await deps.grantPolicy.evaluate(
@@ -419,6 +429,34 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					// for this grant path — matches cc and authorization_code patterns).
 					finalAudience = decision.grantedAudience[0];
 				}
+			}
+
+			// RFC 8707 §2 audience derivation (Stage 2, #173). `finalAudience` is
+			// still the authenticated client id unless a policy narrowed it, so
+			// without this a request for an otherwise-allowed resource would be
+			// rejected even though the AS could satisfy it. Only applies when the
+			// policy left the audience alone — a policy decision always wins.
+			if (finalAudience === authenticatedClientId && requestedResource) {
+				const derived = deriveAudienceFromResources(
+					requestedResource,
+					new Set([...(ctx.authenticatedClient.allowedAudiences ?? []), authenticatedClientId]),
+				);
+				if (derived !== undefined) finalAudience = derived;
+			}
+
+			// RFC 8707 §2 (Stage 2, #173): the refreshed token's audience MUST be
+			// the resource indicator(s) the client asked for. Placed after both
+			// the policy block and the derivation above, so a request that could
+			// not be satisfied either way still fails closed.
+			const unrepresented = unrepresentedResources(requestedResource, finalAudience);
+			if (unrepresented.length > 0) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_target",
+						errorDescription: `requested_resources_not_in_audience: ${unrepresented.join(" ")}`,
+					},
+				};
 			}
 
 			const tokenPayloadClaims = tokenPayload as Record<string, unknown>;

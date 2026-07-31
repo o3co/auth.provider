@@ -42,6 +42,11 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./grants/_resourceIndicator.mjs";
 import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
@@ -841,6 +846,15 @@ export const createOAuthRouter = async (
 				// via a crafted /token request after /authorize decided the narrow.
 				let grantedScopes: readonly string[] = allowedFilteredScopes;
 				let grantedAudience: readonly string[] | undefined;
+				// RFC 8707 §2 at the authorization endpoint (Stage 2, #173). Read
+				// from the query string here — `/authorize` is a GET — using the
+				// same extractor the token endpoint uses, so a repeated
+				// `?resource=` (which Express surfaces as an array) is handled
+				// identically on both endpoints.
+				const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
+				const authorizeResource = resourceIndicatorEnabled
+					? extractResourceParam(req.query as Record<string, unknown>)
+					: null;
 				const subjectForPolicy =
 					typeof (req.session.user as Record<string, unknown> | undefined)?.id === "string"
 						? ((req.session.user as Record<string, unknown>).id as string)
@@ -864,6 +878,15 @@ export const createOAuthRouter = async (
 								subject: subjectForPolicy,
 								requestedScope: requestedScopes.length > 0 ? requestedScopes : undefined,
 								originalScope: allowedScopes,
+								// RFC 8707 Stage 2 (#173): `resource` is accepted at the
+								// AUTHORIZATION endpoint for this flow and forwarded here,
+								// so the policy can narrow `grantedAudience` to the
+								// requested target before it is persisted on the code.
+								// This is what keeps the token endpoint free of policy:
+								// the audience decision happens once, here (C-2 / D-1).
+								...(resourceIndicatorEnabled && authorizeResource
+									? { resource: authorizeResource }
+									: {}),
 							},
 							{
 								ip: req.ip,
@@ -932,8 +955,49 @@ export const createOAuthRouter = async (
 				// token response, which is indistinguishable from "scope claim
 				// omitted" and surprises consumers.
 				const scopeForPersist = grantedScopes.length > 0 ? grantedScopes : undefined;
+				// RFC 8707 §2 audience derivation (Stage 2, #173). When a `resource`
+				// was requested and no policy narrowed an audience, derive it here so
+				// the value persisted on the code — which the token endpoint reads and
+				// enforces against — already reflects the request. Deriving at
+				// `/authorize` rather than `/token` is what keeps the audience decided
+				// exactly once (C-2 / D-1). Bounded by the client's allowedAudiences
+				// plus its own id, the same ceiling a policy-returned audience meets.
+				let effectiveGrantedAudience = grantedAudience;
+				if (resourceIndicatorEnabled && authorizeResource && !effectiveGrantedAudience) {
+					const derived = deriveAudienceFromResources(
+						authorizeResource,
+						new Set([...(client.allowedAudiences ?? []), client_id]),
+					);
+					if (derived !== undefined) effectiveGrantedAudience = [derived];
+				}
 				const audienceForPersist =
-					grantedAudience && grantedAudience.length > 0 ? grantedAudience : undefined;
+					effectiveGrantedAudience && effectiveGrantedAudience.length > 0
+						? effectiveGrantedAudience
+						: undefined;
+
+				// RFC 8707 §2 (Stage 2, #173): reject here rather than issuing a code
+				// that is already doomed. The token endpoint applies the same check
+				// against the persisted audience, so a code whose audience cannot
+				// represent the requested resource would fail there anyway — after the
+				// user has completed the redirect. Failing at `/authorize` surfaces
+				// `invalid_target` while the client can still act on it, which is where
+				// RFC 8707 §2 places the error for this endpoint.
+				//
+				// The effective audience mirrors the token endpoint's derivation: the
+				// persisted audience when the policy narrowed one, else the client id
+				// (the `authorization_code` default).
+				if (resourceIndicatorEnabled && authorizeResource) {
+					const effectiveAudience = audienceForPersist?.[0] ?? client_id;
+					const unrepresented = unrepresentedResources(authorizeResource, effectiveAudience);
+					if (unrepresented.length > 0) {
+						return redirectError(
+							redirect_uri,
+							"invalid_target",
+							`requested_resources_not_in_audience: ${unrepresented.join(" ")}`,
+							toStr(state),
+						);
+					}
+				}
 
 				let issue: Awaited<ReturnType<typeof codeRepository.createCode>>;
 				try {

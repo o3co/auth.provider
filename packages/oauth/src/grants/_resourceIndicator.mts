@@ -36,6 +36,77 @@ export function extractResourceParam(body: Record<string, unknown>): readonly st
 	const v = body.resource;
 	if (v === undefined || v === null || v === "") return null;
 	if (typeof v === "string") return [v];
-	if (Array.isArray(v) && v.every((x) => typeof x === "string")) return v as readonly string[];
+	if (Array.isArray(v) && v.every((x) => typeof x === "string")) {
+		// Drop empty entries so the array shape agrees with the single-string
+		// shape on what "absent" means. `?resource=&resource=https://x` reaches
+		// Express as `["", "https://x"]`, and an empty entry surviving into
+		// Stage 2 enforcement would reject with an error naming a blank
+		// resource. All-empty collapses to null, i.e. not requested at all.
+		const nonEmpty = (v as readonly string[]).filter((x) => x !== "");
+		return nonEmpty.length > 0 ? nonEmpty : null;
+	}
 	return null;
+}
+
+/**
+ * The audience to mint for when a `resource` was requested and no policy
+ * narrowed one — RFC 8707 §2 read as "the AS derives the audience from the
+ * request", rather than minting its default and then rejecting it.
+ *
+ * Returns `undefined` when derivation is not possible, leaving the caller's
+ * existing fallback in place; {@link unrepresentedResources} then rejects the
+ * request, so a non-derivable case still fails closed rather than silently
+ * issuing a mismatched audience.
+ *
+ * Derivation is bounded by `allow` — the client's `allowedAudiences` plus its
+ * own client id, the same ceiling a policy-returned audience is held to.
+ * Without that bound, naming a resource would be enough to mint a token for
+ * any audience, which is the opposite of what resource indicators are for.
+ *
+ * Two distinct resources are not derivable: `aud` is a single string. A
+ * repeated identical resource collapses to that one audience.
+ */
+export function deriveAudienceFromResources(
+	resources: readonly string[] | null | undefined,
+	allow: ReadonlySet<string>,
+): string | undefined {
+	if (!resources || resources.length === 0) return undefined;
+	const distinct = [...new Set(resources)];
+	if (distinct.length !== 1) return undefined;
+	const only = distinct[0];
+	return only !== undefined && allow.has(only) ? only : undefined;
+}
+
+/**
+ * Returns the requested resource indicators that the issued token's audience
+ * does NOT represent. Empty result means the request is satisfiable.
+ *
+ * RFC 8707 §2 requires the access token's audience to be the resource
+ * indicator(s) the client asked for; when the AS cannot bind the token to
+ * them, the response is `invalid_target`. This helper is the shared decision
+ * for that check across `client_credentials`, `refresh_token`, and
+ * `authorization_code`, generalising the enforcement the token-exchange grant
+ * has carried since v0.5.3 (IH-8).
+ *
+ * `generateToken` emits a SINGLE `aud`, so "represented" is string equality
+ * against that one value. Two consequences worth stating, because both look
+ * like helper decisions and are actually token-shape consequences:
+ *
+ * - Two distinct resources can never both be represented. The multi-resource
+ *   case therefore rejects rather than issuing an array-valued `aud` or
+ *   splitting into several tokens.
+ * - A token with no audience represents nothing, so any resource request
+ *   against it is unsatisfiable. Failing closed there avoids minting an
+ *   audience-less token in response to an explicit targeting request.
+ *
+ * Duplicates that match the audience are not a widening — the client named one
+ * target more than once — and are accepted.
+ */
+export function unrepresentedResources(
+	resources: readonly string[] | null | undefined,
+	audience: string | null | undefined,
+): readonly string[] {
+	if (!resources || resources.length === 0) return [];
+	if (audience === null || audience === undefined) return [...resources];
+	return resources.filter((resource) => resource !== audience);
 }

@@ -30,6 +30,7 @@ import {
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
+import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
 import { resolvePkceSupportedMethods } from "./pkce.mjs";
 
 export const createAuthorizationGrant = (
@@ -355,6 +356,37 @@ export const createAuthorizationGrant = (
 				grantedAudiencesFromCode && grantedAudiencesFromCode.length > 0
 					? grantedAudiencesFromCode[0]
 					: authenticatedClientId;
+
+			// RFC 8707 §2 (Stage 2, #173). RFC 8707 permits `resource` at both
+			// `/authorize` and `/token` for this flow, so a conformant client may
+			// present it here — but the audience was already decided at
+			// `/authorize` and persisted on the code.
+			//
+			// This is enforcement ONLY: a comparison against the persisted value,
+			// with no policy invocation. Re-running `grantPolicy` here to
+			// re-narrow would reintroduce exactly the token-endpoint surface D-1
+			// removed and break evaluate-once-at-authorize (C-2 / D-1). Ignoring
+			// the parameter instead would silently hand back a token whose `aud`
+			// is not what the client asked for, which is the §2 violation. So the
+			// request is honoured by being checked, not by being re-decided.
+			//
+			// The `/authorize` endpoint forwards `resource` to the policy hook so
+			// the audience persisted on the code can reflect it; see the ADR
+			// `packages/core/docs/adr/2026-07-31-rfc8707-resource-audience-binding.md`.
+			const resourceIndicatorEnabled = deps.config.oauth.resourceIndicator?.enabled === true;
+			if (resourceIndicatorEnabled) {
+				const requestedResource = extractResourceParam(body as Record<string, unknown>);
+				const unrepresented = unrepresentedResources(requestedResource, audience);
+				if (unrepresented.length > 0) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `requested_resources_not_in_audience: ${unrepresented.join(" ")}`,
+						},
+					};
+				}
+			}
 
 			// CP-12: normalize empty scope array to null so the token response
 			// omits `scope` entirely instead of emitting `scope: ""` (which
