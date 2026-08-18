@@ -234,7 +234,9 @@ export function makeIoredisClients(io: Redis): {
 			opts?.NX
 				? (io.zadd(k, "NX", e.score, e.value) as Promise<unknown> as Promise<number>)
 				: (io.zadd(k, e.score, e.value) as Promise<unknown> as Promise<number>),
-		zRange: (k, s, e) => io.zrange(k, s, e),
+		// ioredis 6 types zrange's `stop` as `string | Buffer` (no `number`);
+		// the wire protocol stringifies args anyway, so String() is lossless.
+		zRange: (k, s, e) => io.zrange(k, String(s), String(e)),
 		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
 	};
 
