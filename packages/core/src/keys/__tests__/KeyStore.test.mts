@@ -205,30 +205,29 @@ describe("SymmetricKeyStore — multi-key rotation (IH-9)", () => {
 });
 
 describe("AsymmetricKeyStore", () => {
-	it.each([
-		"ES256",
-		"RS256",
-		"EdDSA",
-	] as const)("creates %s key store and signs/verifies round-trip", async (alg) => {
-		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair(alg);
-		const store = await createAsymmetricKeyStore({
-			algorithm: alg,
-			kid: "k1",
-			privateKeyPem,
-			publicKeyPem,
-		});
+	it.each(["ES256", "RS256", "EdDSA"] as const)(
+		"creates %s key store and signs/verifies round-trip",
+		async (alg) => {
+			const { privateKeyPem, publicKeyPem } = await generateTestKeyPair(alg);
+			const store = await createAsymmetricKeyStore({
+				algorithm: alg,
+				kid: "k1",
+				privateKeyPem,
+				publicKeyPem,
+			});
 
-		expect(store.algorithm).toBe(alg);
-		expect(store.getSigningKidFallback()).toBe("k1");
+			expect(store.algorithm).toBe(alg);
+			expect(store.getSigningKidFallback()).toBe("k1");
 
-		const token = await store.sign({ claims: { sub: "user1" } });
-		const header = decodeProtectedHeader(token);
-		expect(header.kid).toBe("k1");
+			const token = await store.sign({ claims: { sub: "user1" } });
+			const header = decodeProtectedHeader(token);
+			expect(header.kid).toBe("k1");
 
-		const verificationKey = await store.getVerificationKey(header.kid as string);
-		const { payload } = await jwtVerify(token, verificationKey);
-		expect(payload.sub).toBe("user1");
-	});
+			const verificationKey = await store.getVerificationKey(header.kid as string);
+			const { payload } = await jwtVerify(token, verificationKey);
+			expect(payload.sub).toBe("user1");
+		},
+	);
 
 	it("includes previous keys in getVerificationKeys", async () => {
 		const current = await generateTestKeyPair("ES256");

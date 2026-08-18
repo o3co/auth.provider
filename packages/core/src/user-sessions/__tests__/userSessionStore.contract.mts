@@ -104,7 +104,7 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			s1?.expiresAt.setTime(0);
 			s1?.createdAt.setTime(0);
 			const s2 = await store.get("iso");
-			expect((s2?.claims as Record<string, unknown>).injected).toBeUndefined();
+			expect((s2?.claims as Record<string, unknown> | undefined)?.injected).toBeUndefined();
 			expect(s2?.claims.groups).toEqual(["alpha", "beta"]);
 			expect(s2?.authTime.getTime()).not.toBe(0);
 			expect(s2?.expiresAt.getTime()).not.toBe(0);

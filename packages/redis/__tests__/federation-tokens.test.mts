@@ -305,7 +305,7 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 		await store.attach("sid-1", "google", { ...tokens, expiresAt: accessTokenExpiry });
 		const round = await store.get("sid-1", "google");
 		expect(round?.expiresAt).toBeInstanceOf(Date);
-		expect((round?.expiresAt as Date).getTime()).toBe(accessTokenExpiry.getTime());
+		expect((round?.expiresAt as Date | undefined)?.getTime()).toBe(accessTokenExpiry.getTime());
 	});
 
 	it("expiresAt=null round-trips as null (GitHub OAuth Apps classic)", async () => {

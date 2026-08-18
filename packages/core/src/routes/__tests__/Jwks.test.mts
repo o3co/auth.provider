@@ -125,15 +125,12 @@ describe("createRouter input validation (direct callers bypass the schema)", () 
 		);
 	});
 
-	it.each([
-		"/../keys/jwks.json",
-		"//evil/jwks.json",
-		"/keys?x=1",
-		"/keys#f",
-		"/keys\\x",
-	])("throws on a malformed path (%j) that would normalize away", (path) => {
-		expect(() => createRouter(createMockExpress(), ks, { path })).toThrow(/absolute path/);
-	});
+	it.each(["/../keys/jwks.json", "//evil/jwks.json", "/keys?x=1", "/keys#f", "/keys\\x"])(
+		"throws on a malformed path (%j) that would normalize away",
+		(path) => {
+			expect(() => createRouter(createMockExpress(), ks, { path })).toThrow(/absolute path/);
+		},
+	);
 
 	it("throws on a negative or non-integer cacheMaxAgeSeconds", () => {
 		expect(() => createRouter(createMockExpress(), ks, { cacheMaxAgeSeconds: -1 })).toThrow(

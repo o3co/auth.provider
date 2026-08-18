@@ -326,7 +326,9 @@ describe("materializeComponents — cleanup error during partial rollback collec
 			expect(err.details.cleanupErrors).toHaveLength(1);
 			expect(err.details.cleanupErrors?.[0]?.module).toBe("A");
 			expect(err.details.cleanupErrors?.[0]?.componentKey).toBe("slotA");
-			expect((err.details.cleanupErrors?.[0]?.error as Error).message).toBe("cleanup-A-error");
+			expect((err.details.cleanupErrors?.[0]?.error as Error | undefined)?.message).toBe(
+				"cleanup-A-error",
+			);
 		} else {
 			expect.fail("unexpected details reason");
 		}

@@ -123,40 +123,35 @@ describe("parseProof — structural validation only (no signature check)", () =>
 
 	// Step 7: JWK must not carry private material — parameterized for the 7 fields
 	// the parser checks (d, p, q, dp, dq, qi, k).
-	it.each([
-		"d",
-		"p",
-		"q",
-		"dp",
-		"dq",
-		"qi",
-		"k",
-	])("throws private_jwk when JWK contains '%s' field", async (field) => {
-		const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
-		const pubJwk = await exportJWK(publicKey);
-		const legitProof = await new SignJWT({
-			htm: "POST",
-			htu: "https://as/token",
-			iat: 1,
-			jti: "y",
-		})
-			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: pubJwk })
-			.sign(privateKey);
-		const [_hdr, payload, sig] = legitProof.split(".");
-		// Surgically inject the private-key field into an otherwise-public JWK
-		// so each iteration exercises exactly one private field.
-		const headerObj = {
-			typ: "dpop+jwt",
-			alg: "ES256",
-			jwk: { ...pubJwk, [field]: "REDACTED" },
-		};
-		const fakeHeader = Buffer.from(JSON.stringify(headerObj)).toString("base64url");
-		const crafted = `${fakeHeader}.${payload}.${sig}`;
-		await expect(parseProof(crafted)).rejects.toMatchObject({
-			reason: "private_jwk",
-			message: expect.stringContaining(field),
-		});
-	});
+	it.each(["d", "p", "q", "dp", "dq", "qi", "k"])(
+		"throws private_jwk when JWK contains '%s' field",
+		async (field) => {
+			const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
+			const pubJwk = await exportJWK(publicKey);
+			const legitProof = await new SignJWT({
+				htm: "POST",
+				htu: "https://as/token",
+				iat: 1,
+				jti: "y",
+			})
+				.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: pubJwk })
+				.sign(privateKey);
+			const [_hdr, payload, sig] = legitProof.split(".");
+			// Surgically inject the private-key field into an otherwise-public JWK
+			// so each iteration exercises exactly one private field.
+			const headerObj = {
+				typ: "dpop+jwt",
+				alg: "ES256",
+				jwk: { ...pubJwk, [field]: "REDACTED" },
+			};
+			const fakeHeader = Buffer.from(JSON.stringify(headerObj)).toString("base64url");
+			const crafted = `${fakeHeader}.${payload}.${sig}`;
+			await expect(parseProof(crafted)).rejects.toMatchObject({
+				reason: "private_jwk",
+				message: expect.stringContaining(field),
+			});
+		},
+	);
 
 	// Step 8: invalid JWK shape (passes private-field name screen, fails
 	// jose's structural validation in `calculateJwkThumbprint`). Without
