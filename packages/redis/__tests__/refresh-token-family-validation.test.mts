@@ -145,27 +145,30 @@ describe("TS-M1: RedisRefreshTokenFamilyStore.findFamily — corrupt-data valida
 		["expiresAtMs negative", -1],
 		["expiresAtMs fractional (1.5)", 1.5],
 		["expiresAtMs fractional (Date.now()+0.5)", Date.now() + 0.5],
-	])("throws corrupt-data when %s passes JSON.parse but fails the tightened schema", async (_label, badValue) => {
-		const store = new Map<string, string>([
-			[
-				`${keyPrefix}fam-tight`,
-				JSON.stringify({
-					familyId: "fam-tight",
-					activeJti: "j1",
-					revoked: false,
-					expiresAtMs: badValue,
-				}),
-			],
-		]);
-		const pttls = new Map<string, number>([[`${keyPrefix}fam-tight`, 60_000]]);
-		const repo = createRedisRefreshTokenFamilyStore({
-			client: makeMockClient(store, pttls),
-			keyPrefix,
-		});
+	])(
+		"throws corrupt-data when %s passes JSON.parse but fails the tightened schema",
+		async (_label, badValue) => {
+			const store = new Map<string, string>([
+				[
+					`${keyPrefix}fam-tight`,
+					JSON.stringify({
+						familyId: "fam-tight",
+						activeJti: "j1",
+						revoked: false,
+						expiresAtMs: badValue,
+					}),
+				],
+			]);
+			const pttls = new Map<string, number>([[`${keyPrefix}fam-tight`, 60_000]]);
+			const repo = createRedisRefreshTokenFamilyStore({
+				client: makeMockClient(store, pttls),
+				keyPrefix,
+			});
 
-		const err = await repo.findFamily("fam-tight").catch((e: unknown) => e);
-		expect((err as RefreshTokenStorageError).reason).toBe("corrupt-data");
-	});
+			const err = await repo.findFamily("fam-tight").catch((e: unknown) => e);
+			expect((err as RefreshTokenStorageError).reason).toBe("corrupt-data");
+		},
+	);
 
 	it("returns the family normally for a valid envelope (regression guard)", async () => {
 		const expiresAtMs = Date.now() + 60_000;

@@ -37,64 +37,63 @@ function makeFactory() {
 }
 
 describe("Integration: generateToken + asymmetric KeyStore", () => {
-	it.each([
-		"ES256",
-		"RS256",
-		"EdDSA",
-	] as const)("%s: factory.create -> generateToken -> jwtVerify round-trip", async (alg) => {
-		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair(alg);
-		const factory = makeFactory();
+	it.each(["ES256", "RS256", "EdDSA"] as const)(
+		"%s: factory.create -> generateToken -> jwtVerify round-trip",
+		async (alg) => {
+			const { privateKeyPem, publicKeyPem } = await generateTestKeyPair(alg);
+			const factory = makeFactory();
 
-		const keyStore = await factory.create({
-			type: "local",
-			algorithm: alg,
-			kid: `${alg.toLowerCase()}-v1`,
-			privateKey: privateKeyPem,
-			publicKey: publicKeyPem,
-			previousKeys: [],
-		});
+			const keyStore = await factory.create({
+				type: "local",
+				algorithm: alg,
+				kid: `${alg.toLowerCase()}-v1`,
+				privateKey: privateKeyPem,
+				publicKey: publicKeyPem,
+				previousKeys: [],
+			});
 
-		const token = await generateToken(
-			{ role: "admin" },
-			{
-				keyStore,
+			const token = await generateToken(
+				{ role: "admin" },
+				{
+					keyStore,
+					issuer: "https://auth.example.com",
+					audience: "https://api.example.com",
+					subject: "user-123",
+					scope: "read write",
+					expiresIn: 3600,
+					tokenType: "at+jwt",
+				},
+			);
+
+			expect(token.token).toBeDefined();
+			expect(token.issuer).toBe("https://auth.example.com");
+			expect(token.audience).toBe("https://api.example.com");
+			expect(token.scope).toBe("read write");
+			expect(token.expiresIn).toBe(3600);
+			expect(token.tokenType).toBe("at+jwt");
+
+			// Verify the JWT header
+			const header = decodeProtectedHeader(token.token);
+			expect(header.alg).toBe(alg);
+			expect(header.kid).toBe(`${alg.toLowerCase()}-v1`);
+			expect(header.typ).toBe("at+jwt");
+
+			// Verify the JWT payload using the KeyStore's verification key
+			const verificationKey = await keyStore.getVerificationKey(header.kid as string);
+			const { payload } = await jwtVerify(token.token, verificationKey, {
 				issuer: "https://auth.example.com",
 				audience: "https://api.example.com",
-				subject: "user-123",
-				scope: "read write",
-				expiresIn: 3600,
-				tokenType: "at+jwt",
-			},
-		);
+			});
 
-		expect(token.token).toBeDefined();
-		expect(token.issuer).toBe("https://auth.example.com");
-		expect(token.audience).toBe("https://api.example.com");
-		expect(token.scope).toBe("read write");
-		expect(token.expiresIn).toBe(3600);
-		expect(token.tokenType).toBe("at+jwt");
-
-		// Verify the JWT header
-		const header = decodeProtectedHeader(token.token);
-		expect(header.alg).toBe(alg);
-		expect(header.kid).toBe(`${alg.toLowerCase()}-v1`);
-		expect(header.typ).toBe("at+jwt");
-
-		// Verify the JWT payload using the KeyStore's verification key
-		const verificationKey = await keyStore.getVerificationKey(header.kid as string);
-		const { payload } = await jwtVerify(token.token, verificationKey, {
-			issuer: "https://auth.example.com",
-			audience: "https://api.example.com",
-		});
-
-		expect(payload.sub).toBe("user-123");
-		expect(payload.role).toBe("admin");
-		expect((payload as Record<string, unknown>).scope).toBe("read write");
-		expect(payload.iss).toBe("https://auth.example.com");
-		expect(payload.aud).toBe("https://api.example.com");
-		expect(payload.iat).toBeTypeOf("number");
-		expect(payload.exp).toBeTypeOf("number");
-	});
+			expect(payload.sub).toBe("user-123");
+			expect(payload.role).toBe("admin");
+			expect((payload as Record<string, unknown>).scope).toBe("read write");
+			expect(payload.iss).toBe("https://auth.example.com");
+			expect(payload.aud).toBe("https://api.example.com");
+			expect(payload.iat).toBeTypeOf("number");
+			expect(payload.exp).toBeTypeOf("number");
+		},
+	);
 
 	it("key rotation: token signed with old key is verifiable after rotation", async () => {
 		const oldPair = await generateTestKeyPair("ES256");
