@@ -26,7 +26,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
 import rateLimit from "express-rate-limit";
-import { extractUserClaims } from "#/internal/extractUserClaims.mjs";
+import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 
 declare module "express-session" {
 	interface SessionData {

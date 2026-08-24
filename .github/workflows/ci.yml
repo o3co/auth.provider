@@ -318,6 +318,34 @@ jobs:
           fi
           echo "OK: no __tests__ artifacts in any published tarball's dist/"
 
+      - name: Assert no `#/` subpath imports in published tarballs
+        run: |
+          set -euo pipefail
+          # Per AGENTS.md "Module Resolution": shipped source uses relative
+          # specifiers and only test files use the `#/` alias. Node applies
+          # `--conditions` to every package on the graph, not just the root, so
+          # a `#/` specifier surviving into dist/ makes any consumer that runs
+          # with `--conditions=development` (Vitest, `tsx watch`) resolve it
+          # through this package's own `imports` map to `./src/*` — which no
+          # tarball ships. The workspace cannot see this (src is right there);
+          # it only breaks after publish, so assert it against the tarball.
+          FAILED=0
+          for tgz in /tmp/tarballs/*.tgz; do
+            for f in $(tar -tzf "$tgz" | grep -E '^package/dist/.*\.(mjs|d\.mts)$' || true); do
+              HITS=$(tar -xzOf "$tgz" "$f" | grep -nE '(from|import|require)[[:space:]]*\(?[[:space:]]*["'"'"']#/' || true)
+              if [ -n "$HITS" ]; then
+                echo "::error::$tgz: $f keeps a '#/' subpath import:"
+                echo "$HITS"
+                FAILED=1
+              fi
+            done
+          done
+          if [ "$FAILED" -eq 1 ]; then
+            echo "Shipped source must use a relative specifier (../…) — see AGENTS.md \"Module Resolution\"."
+            exit 1
+          fi
+          echo "OK: no '#/' subpath imports in any published tarball's dist/"
+
       - name: Check versions.json sync
         run: node create-app/scripts/check-versions-json.mjs
 
