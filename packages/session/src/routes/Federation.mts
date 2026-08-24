@@ -25,10 +25,10 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
-import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
 import { type FederationProvider, supportsClaimMapping } from "../federations/types.mjs";
+import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 
 declare module "express-session" {
 	interface SessionData {
