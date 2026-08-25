@@ -54,7 +54,7 @@
 		"express-session": "^1.18.0",
 		"supertest": "^7.2.2",
 		"typescript": "^5.9.3",
-		"vitest": "^4.1.10",
+		"vitest": "^4.1.11",
 		"@vitest/coverage-v8": "^4.1.10"
 	}
 }
