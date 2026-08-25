@@ -37,7 +37,7 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"openid-client": "^6.8.3"
+		"openid-client": "^6.8.7"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "^0.0.0",
@@ -46,7 +46,7 @@
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",
-		"jose": "^6.2.7",
+		"jose": "^6.2.10",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.10",
 		"@vitest/coverage-v8": "^4.1.10"

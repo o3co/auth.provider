@@ -51,7 +51,7 @@
 		"@o3co/auth-provider-core": "^0.0.0",
 		"@o3co/auth-provider-dpop": "^0.0.0",
 		"ioredis": "^6.0.0",
-		"redis": "^6.2.0"
+		"redis": "^6.2.1"
 	},
 	"peerDependenciesMeta": {
 		"@o3co/auth-provider-dpop": {
@@ -69,7 +69,7 @@
 		"@o3co/auth-provider-dpop": "workspace:*",
 		"@vitest/coverage-v8": "^4.1.10",
 		"ioredis": "^6.0.0",
-		"redis": "^6.2.0",
+		"redis": "^6.2.1",
 		"testcontainers": "^12.1.0",
 		"typescript": "^5.9.3",
 		"vitest": "^4.1.10"

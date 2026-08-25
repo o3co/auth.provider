@@ -42,18 +42,18 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       jose:
-        specifier: ^6.2.7
-        version: 6.2.8
+        specifier: ^6.2.10
+        version: 6.2.10
       js-yaml:
-        specifier: ^5.2.3
-        version: 5.2.3
+        specifier: ^5.3.0
+        version: 5.3.0
       zod:
         specifier: ^4.3.6
         version: 4.4.3
     devDependencies:
       '@o3co/ts.hocon':
-        specifier: ^1.12.0
-        version: 1.12.0(yaml@2.9.0)(zod@4.4.3)
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.4.3)
       '@types/bcrypt':
         specifier: ^6.0.0
         version: 6.0.0
@@ -91,8 +91,8 @@ importers:
   packages/dpop:
     dependencies:
       jose:
-        specifier: ^6.2.7
-        version: 6.2.8
+        specifier: ^6.2.10
+        version: 6.2.10
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -125,8 +125,8 @@ importers:
   packages/federation-github:
     dependencies:
       openid-client:
-        specifier: ^6.8.3
-        version: 6.8.4
+        specifier: ^6.8.7
+        version: 6.8.7
     devDependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
@@ -147,8 +147,8 @@ importers:
   packages/federation-google:
     dependencies:
       openid-client:
-        specifier: ^6.8.3
-        version: 6.8.4
+        specifier: ^6.8.7
+        version: 6.8.7
     devDependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
@@ -160,8 +160,8 @@ importers:
         specifier: ^4.1.10
         version: 4.1.11(vitest@4.1.10)
       jose:
-        specifier: ^6.2.7
-        version: 6.2.8
+        specifier: ^6.2.10
+        version: 6.2.10
       typescript:
         specifier: ^5.9.3
         version: 5.9.3
@@ -215,8 +215,8 @@ importers:
         specifier: ^5.0.0
         version: 5.2.1
       jose:
-        specifier: ^6.2.7
-        version: 6.2.8
+        specifier: ^6.2.10
+        version: 6.2.10
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
@@ -236,8 +236,8 @@ importers:
         specifier: ^2.0.0
         version: 2.0.0
       jose:
-        specifier: ^6.2.7
-        version: 6.2.8
+        specifier: ^6.2.10
+        version: 6.2.10
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -273,8 +273,8 @@ importers:
   packages/oauth-token-exchange:
     dependencies:
       jose:
-        specifier: ^6.2.7
-        version: 6.2.8
+        specifier: ^6.2.10
+        version: 6.2.10
       zod:
         specifier: ^4.3.6
         version: 4.4.3
@@ -311,8 +311,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       redis:
-        specifier: ^6.2.0
-        version: 6.2.0
+        specifier: ^6.2.1
+        version: 6.2.1
       testcontainers:
         specifier: ^12.1.0
         version: 12.1.0
@@ -330,13 +330,13 @@ importers:
         version: link:../core
       connect-redis:
         specifier: ^10.0.0
-        version: 10.0.0(express-session@1.19.0)(redis@6.2.0)
+        version: 10.0.0(express-session@1.19.0)(redis@6.2.1)
       express-rate-limit:
         specifier: ^8.6.2
         version: 8.6.2(express@5.2.1)
       redis:
-        specifier: ^6.2.0
-        version: 6.2.0
+        specifier: ^6.2.1
+        version: 6.2.1
     devDependencies:
       '@types/express':
         specifier: ^5.0.6
@@ -424,11 +424,11 @@ importers:
         specifier: ^0.0.4
         version: 0.0.4(express@5.2.1)(pino@10.3.1)
       '@o3co/ts.hocon':
-        specifier: ^1.12.0
-        version: 1.12.0(yaml@2.9.0)(zod@4.4.3)
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.4.3)
       connect-redis:
         specifier: ^10.0.0
-        version: 10.0.0(express-session@1.19.0)(redis@6.2.0)
+        version: 10.0.0(express-session@1.19.0)(redis@6.2.1)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -445,8 +445,8 @@ importers:
         specifier: ^10.3.1
         version: 10.3.1
       redis:
-        specifier: ^6.2.0
-        version: 6.2.0
+        specifier: ^6.2.1
+        version: 6.2.1
     devDependencies:
       '@types/express':
         specifier: ^5.0.6
@@ -827,8 +827,8 @@ packages:
       pino:
         optional: true
 
-  '@o3co/ts.hocon@1.12.0':
-    resolution: {integrity: sha512-JgR8xrzRUT1PPih9b+qmShGBPXwwT7U+yf+xFjZEXkQPXDhgVXf+F/2FrIHdkiYPmSR3Fqv832583cNEr0K+9g==}
+  '@o3co/ts.hocon@1.13.0':
+    resolution: {integrity: sha512-CefBHGrQbA90m7enlyTyMs/sAaERI57rRKIZ06i9DvDeFt7nAj1eyZNzL7sZLvpBzd7nncKqxE95aErdlQWeUw==}
     engines: {node: '>=22'}
     peerDependencies:
       smol-toml: '>=1.0.0'
@@ -915,14 +915,14 @@ packages:
   '@protobufjs/utf8@1.1.1':
     resolution: {integrity: sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==}
 
-  '@redis/bloom@6.2.0':
-    resolution: {integrity: sha512-ggQvzpeCKnybwUrEiMVVtE1Np4vWnRfpeAaIP2MdZiVw7PHOhJrF4cONVuLRn1TkMi6ehp2OPjTOMK+8XmiQSQ==}
+  '@redis/bloom@6.2.1':
+    resolution: {integrity: sha512-huQgNLaCIZfQ9SeLn4q9124uOUd8HbZDYHwwUzNcRgHqCHiHKl2dDxMqJCeWh8cMqZAoWuHR8XnWbDMIf+o7ag==}
     engines: {node: '>= 20.0.0'}
     peerDependencies:
-      '@redis/client': ^6.2.0
+      '@redis/client': ^6.2.1
 
-  '@redis/client@6.2.0':
-    resolution: {integrity: sha512-HHszna68MTBRiDZV3Wo2wANH7Z5v/nuh+ZyCAGBce0PS8tDcg1/yzZ1vqbKbUyTdz1wB54kqZxXrnPwpR8Ivdw==}
+  '@redis/client@6.2.1':
+    resolution: {integrity: sha512-LzxBY7SIBvvJiyCgcaJZZakE3fJrZZ++i24+EDW9fKpCl68D35uJcKFpZZwCfOoG9WZTbyZlMzMeM0gtOAMU9Q==}
     engines: {node: '>= 20.0.0'}
     peerDependencies:
       '@node-rs/xxhash': ^1.1.0
@@ -933,23 +933,23 @@ packages:
       '@opentelemetry/api':
         optional: true
 
-  '@redis/json@6.2.0':
-    resolution: {integrity: sha512-oweO7PfHWYXkgVT88K+Fm3Wx98lKYKAEXaH162gVbw1kmBOBVQHxw0Yjh1p6BYBUIQMHqLyWwYe99eK7/hD1VQ==}
+  '@redis/json@6.2.1':
+    resolution: {integrity: sha512-AFIUJ8Gj0DaaSBHYuSt8+O0oYWM+50OK1c0OmodB7XERIA8+BbyV3O4v76f9iccWasd1/7qjfZTpuzexUaZtrQ==}
     engines: {node: '>= 20.0.0'}
     peerDependencies:
-      '@redis/client': ^6.2.0
+      '@redis/client': ^6.2.1
 
-  '@redis/search@6.2.0':
-    resolution: {integrity: sha512-chLEQfalFW3+uCPE99XoIOZhcQ3eF7S3fGxgiiaPf6MMrOZHEiTvgMnXR4xXZX0yDecyoWjGYlQQKTYag/ZExg==}
+  '@redis/search@6.2.1':
+    resolution: {integrity: sha512-2vfOAOyYFE7UUw3sBBlkqqruBtOUS4HRY5MtW4hp83llrwvtrTE4r22CEqXddlV+54zkLxBE4nmsIJ/dpezQrQ==}
     engines: {node: '>= 20.0.0'}
     peerDependencies:
-      '@redis/client': ^6.2.0
+      '@redis/client': ^6.2.1
 
-  '@redis/time-series@6.2.0':
-    resolution: {integrity: sha512-/H/eE/lnhZLZYpHGpI+ZN7TePb7isEaub8b07oQcTDQptPslVKdUFwNhUm+hQHks781oh+F1Leiip1WHh4HfWw==}
+  '@redis/time-series@6.2.1':
+    resolution: {integrity: sha512-kiYniph04dJOole+L359B6C9E+jYS2uDP7hca6Onj0xF38ZIpyxARO0Iq0W4ZRn1e8Q6vqW00QFZVSMRA/2Ijw==}
     engines: {node: '>= 20.0.0'}
     peerDependencies:
-      '@redis/client': ^6.2.0
+      '@redis/client': ^6.2.1
 
   '@rolldown/binding-android-arm64@1.0.0-rc.18':
     resolution: {integrity: sha512-lIDyUAfD7U3+BWKzdxMbJcsYHuqXqmGz40aeRqvuAm3y5TkJSYTBW2RDrn65DJFPQqVjUAUqq5uz8urzQ8aBdQ==}
@@ -1808,14 +1808,14 @@ packages:
   jackspeak@3.4.3:
     resolution: {integrity: sha512-OGlZQpz2yfahA/Rd1Y8Cd9SIEsqvXkLVoSw/cgwhnhFMDbsQFeZYoJJ7bIZBS9BcamUW96asq/npPWugM+RQBw==}
 
-  jose@6.2.8:
-    resolution: {integrity: sha512-Bsdjwm3Qsd/P0jR+BHDe3LytDfY7WBq2HmCCLIwuVRHMuEC9ae7/R474GIUdF1NgCyZjzVo/A9DOiOBtXq8ZoQ==}
+  jose@6.2.10:
+    resolution: {integrity: sha512-iiW7J9qRFlGxvCOIBDBDxFePQSn7ZMAnrYGhrrOo6siO/MIqwfyilLR27pkfDgUk+raLuzADS8A3S/KLBisc0g==}
 
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
 
-  js-yaml@5.2.3:
-    resolution: {integrity: sha512-n+mUVyUX5bVv7G/G2zyIHOhdxfuU1dY2NOFzTQUWiMUbFss8b57NFlgCCaggU78wSw5KVS9cllzeLyzyR+n5nw==}
+  js-yaml@5.3.0:
+    resolution: {integrity: sha512-muutsYr+e2+d3rTgUGslq5rxbBlUy3cJ61IsHag2QNDQV+7zXWjkUpmALIajhrlLlrgRUiymj6U3zUr/TMK84Q==}
     hasBin: true
 
   lazystream@1.0.1:
@@ -2040,8 +2040,8 @@ packages:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
     engines: {node: '>=0.10.0'}
 
-  oauth4webapi@3.8.6:
-    resolution: {integrity: sha512-iwemM91xz8nryHti2yTmg5fhyEMVOkOXwHNqbvcATjyajb5oQxCQzrNOA6uElRHuMhQQTKUyFKV9y/CNyg25BQ==}
+  oauth4webapi@3.8.7:
+    resolution: {integrity: sha512-4RxcKxXjuItDFZ20RRPf4YTw3kpeXJyCgJFxVzJ068A7PNJ18st2Dg90tlC1LkSDS0GecroagCLHYEIVUhCAkw==}
 
   object-inspect@1.13.4:
     resolution: {integrity: sha512-W67iLl4J2EXEGTbfeHCffrjDfitvLANg0UlX3wFUUSTx92KXRFegMHUVgSqE+wvhAbi4WqjGg9czysTV2Epbew==}
@@ -2066,8 +2066,8 @@ packages:
   once@1.4.0:
     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
 
-  openid-client@6.8.4:
-    resolution: {integrity: sha512-QSw0BA08piujetEwfZsHoTrDpMEha7GDZDicQqVwX4u0ChCjefvjDB++TZ8BTg76UpwhzIQgdvvfgfl3HpCSAw==}
+  openid-client@6.8.7:
+    resolution: {integrity: sha512-gtKthNu7evSBvTdrrlHb4F3Fi9dcwlb5QaITlCs+9mfpvuOi0Q3qtBf5+iY4sEP8hy1qCoAdxBNPDcmZeVSDzQ==}
 
   outvariant@1.4.3:
     resolution: {integrity: sha512-+Sl2UErvtsoajRDKCE5/dBz4DIvHXQQnAxtQTF04OJxY0+DyZXSo5P5Bb7XYWOh81syohlYL24hbDwxedPUJCA==}
@@ -2204,8 +2204,8 @@ packages:
     resolution: {integrity: sha512-1qny3OExCf0UvUV/5wpYKf2YwPcOqXzkwKKSmKHiE6ZMQs5heeE/c8eXK+PNllPvmjgAbfnsbpkGZWy8cBpn9w==}
     engines: {node: '>=4'}
 
-  redis@6.2.0:
-    resolution: {integrity: sha512-BShYVyT0Gx67CE80xry5XroSSv6Vxr60yKs0HRiBbUc7kHm+bY7gvSDBBgTjuiV/reWKeZWLyA1ebC5z359wRQ==}
+  redis@6.2.1:
+    resolution: {integrity: sha512-Z9VHtgYs48PiQC77X9O2Er8Hj4T+5BtFjT91/vi5Is1D04N72cA946ZslM1ImJw8ZctFBZWAVjM7S5wJNeHMpg==}
     engines: {node: '>= 20.0.0'}
 
   require-directory@2.1.1:
@@ -2888,7 +2888,7 @@ snapshots:
     optionalDependencies:
       pino: 10.3.1
 
-  '@o3co/ts.hocon@1.12.0(yaml@2.9.0)(zod@4.4.3)':
+  '@o3co/ts.hocon@1.13.0(yaml@2.9.0)(zod@4.4.3)':
     optionalDependencies:
       yaml: 2.9.0
       zod: 4.4.3
@@ -2974,25 +2974,25 @@ snapshots:
 
   '@protobufjs/utf8@1.1.1': {}
 
-  '@redis/bloom@6.2.0(@redis/client@6.2.0)':
+  '@redis/bloom@6.2.1(@redis/client@6.2.1)':
     dependencies:
-      '@redis/client': 6.2.0
+      '@redis/client': 6.2.1
 
-  '@redis/client@6.2.0':
+  '@redis/client@6.2.1':
     dependencies:
       cluster-key-slot: 1.1.2
 
-  '@redis/json@6.2.0(@redis/client@6.2.0)':
+  '@redis/json@6.2.1(@redis/client@6.2.1)':
     dependencies:
-      '@redis/client': 6.2.0
+      '@redis/client': 6.2.1
 
-  '@redis/search@6.2.0(@redis/client@6.2.0)':
+  '@redis/search@6.2.1(@redis/client@6.2.1)':
     dependencies:
-      '@redis/client': 6.2.0
+      '@redis/client': 6.2.1
 
-  '@redis/time-series@6.2.0(@redis/client@6.2.0)':
+  '@redis/time-series@6.2.1(@redis/client@6.2.1)':
     dependencies:
-      '@redis/client': 6.2.0
+      '@redis/client': 6.2.1
 
   '@rolldown/binding-android-arm64@1.0.0-rc.18':
     optional: true
@@ -3479,10 +3479,10 @@ snapshots:
       normalize-path: 3.0.0
       readable-stream: 4.7.0
 
-  connect-redis@10.0.0(express-session@1.19.0)(redis@6.2.0):
+  connect-redis@10.0.0(express-session@1.19.0)(redis@6.2.1):
     dependencies:
       express-session: 1.19.0
-      redis: 6.2.0
+      redis: 6.2.1
 
   content-disposition@1.1.0: {}
 
@@ -3897,11 +3897,11 @@ snapshots:
     optionalDependencies:
       '@pkgjs/parseargs': 0.11.0
 
-  jose@6.2.8: {}
+  jose@6.2.10: {}
 
   js-tokens@10.0.0: {}
 
-  js-yaml@5.2.3:
+  js-yaml@5.3.0:
     dependencies:
       argparse: 2.0.1
 
@@ -4083,7 +4083,7 @@ snapshots:
 
   normalize-path@3.0.0: {}
 
-  oauth4webapi@3.8.6: {}
+  oauth4webapi@3.8.7: {}
 
   object-inspect@1.13.4: {}
 
@@ -4101,10 +4101,10 @@ snapshots:
     dependencies:
       wrappy: 1.0.2
 
-  openid-client@6.8.4:
+  openid-client@6.8.7:
     dependencies:
-      jose: 6.2.8
-      oauth4webapi: 3.8.6
+      jose: 6.2.10
+      oauth4webapi: 3.8.7
 
   outvariant@1.4.3: {}
 
@@ -4264,13 +4264,13 @@ snapshots:
 
   redis-errors@1.2.0: {}
 
-  redis@6.2.0:
+  redis@6.2.1:
     dependencies:
-      '@redis/bloom': 6.2.0(@redis/client@6.2.0)
-      '@redis/client': 6.2.0
-      '@redis/json': 6.2.0(@redis/client@6.2.0)
-      '@redis/search': 6.2.0(@redis/client@6.2.0)
-      '@redis/time-series': 6.2.0(@redis/client@6.2.0)
+      '@redis/bloom': 6.2.1(@redis/client@6.2.1)
+      '@redis/client': 6.2.1
+      '@redis/json': 6.2.1(@redis/client@6.2.1)
+      '@redis/search': 6.2.1(@redis/client@6.2.1)
+      '@redis/time-series': 6.2.1(@redis/client@6.2.1)
     transitivePeerDependencies:
       - '@node-rs/xxhash'
       - '@opentelemetry/api'
