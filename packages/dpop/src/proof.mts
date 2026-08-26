@@ -22,6 +22,17 @@ export interface DPoPProofClaims {
 	readonly htu: string;
 	readonly iat: number;
 	readonly jti: string;
+	/**
+	 * `base64url(SHA-256(access token))` — RFC 9449 §4.2.
+	 *
+	 * Optional here because the claim's necessity depends on where the proof is
+	 * presented, which this parser does not know. At the token endpoint there
+	 * is no access token yet and the claim is absent; at a protected resource
+	 * it is REQUIRED and the resource verifies it against the token it was
+	 * handed (§7.1). That binding is what stops a proof captured alongside one
+	 * request from being replayed with a different stolen token.
+	 */
+	readonly ath?: string;
 }
 
 /**
@@ -135,6 +146,14 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 		throw new DPoPError("malformed_proof", "invalid claim types");
 	}
 
+	// `ath` is optional at this layer but must not be silently dropped when
+	// present-and-wrong-typed: dropping it would downgrade a proof the client
+	// meant to bind to a specific access token into an unbound one, which is
+	// precisely the property a protected resource relies on.
+	if ("ath" in claims && typeof claims.ath !== "string") {
+		throw new DPoPError("malformed_proof", "invalid claim types");
+	}
+
 	// Step 8 (spec §6): RFC 7638 SHA-256 thumbprint over the validated JWK.
 	// `computeJkt` delegates to jose's `calculateJwkThumbprint`, which throws
 	// `JWKInvalid` for malformed JWK shapes (e.g. EC key missing `crv`/`x`/`y`,
@@ -157,6 +176,7 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 			htu: claims.htu,
 			iat: claims.iat,
 			jti: claims.jti,
+			...(typeof claims.ath === "string" ? { ath: claims.ath } : {}),
 		},
 		raw,
 	};

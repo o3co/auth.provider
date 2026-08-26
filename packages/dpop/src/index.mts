@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+export { athMatches, computeAth } from "./ath.mjs";
 export { DPoPError, type DPoPErrorCode, type DPoPReasonCode } from "./errors.mjs";
 // `normalizeHtu` intentionally NOT exported per spec §7 — internal utility
 // only. The verifier consumes it via relative import. Promoting it to the

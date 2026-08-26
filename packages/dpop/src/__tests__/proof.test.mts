@@ -258,3 +258,60 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// `ath` — RFC 9449 §4.2, required when the proof accompanies an access token
+//
+// At the token endpoint there is no access token yet, so `ath` is absent and
+// the proof is still valid. At a protected resource the proof MUST carry
+// `ath = base64url(SHA-256(access token))`, and the resource verifies it —
+// that binding is what stops a proof captured from one request being replayed
+// alongside a different stolen token.
+// ---------------------------------------------------------------------------
+
+describe("parseProof — ath claim", () => {
+	it("surfaces ath when present", async () => {
+		const { privateKey, publicKey } = await generateKeyPair("ES256");
+		const jwk = await exportJWK(publicKey);
+		const raw = await new SignJWT({
+			htm: "GET",
+			htu: "https://as.example/oauth/userinfo",
+			iat: Math.floor(Date.now() / 1000),
+			jti: crypto.randomUUID(),
+			ath: "0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I",
+		})
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+			.sign(privateKey);
+
+		const proof = await parseProof(raw);
+
+		expect(proof.claims.ath).toBe("0ZcOCORZNYy-DWpqq30jZyJGHTN0d2HglBV3uiguA4I");
+	});
+
+	it("leaves ath undefined when absent, since the token endpoint has no access token", async () => {
+		const proof = await parseProof(validProof);
+
+		expect(proof.claims.ath).toBeUndefined();
+	});
+
+	it("throws malformed_proof when ath is present but not a string", async () => {
+		// A wrong-typed ath is structural, matching how the other claims are
+		// treated — and it must not be silently dropped, because dropping it
+		// would turn a bound proof into an unbound one.
+		const { privateKey, publicKey } = await generateKeyPair("ES256");
+		const jwk = await exportJWK(publicKey);
+		const raw = await new SignJWT({
+			htm: "GET",
+			htu: "https://as.example/oauth/userinfo",
+			iat: Math.floor(Date.now() / 1000),
+			jti: crypto.randomUUID(),
+			ath: 12345,
+		})
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+			.sign(privateKey);
+
+		await expect(parseProof(raw)).rejects.toMatchObject({
+			reason: "malformed_proof",
+		});
+	});
+});
