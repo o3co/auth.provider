@@ -13,7 +13,33 @@
  * limitations under the License.
  */
 
-import type { Logger } from "./Logger.mjs";
+import type { Logger, LogLevel } from "./Logger.mjs";
+
+/**
+ * Ascending severity. A call is emitted when its level's rank is at least the
+ * configured threshold's; `silent` sits above every level so nothing clears it.
+ */
+const LEVEL_RANK: Record<LogLevel, number> = {
+	trace: 10,
+	debug: 20,
+	info: 30,
+	warn: 40,
+	error: 50,
+	fatal: 60,
+	silent: 70,
+};
+
+export interface ConsoleLoggerOptions {
+	/**
+	 * Minimum level to emit. Defaults to `"info"`.
+	 *
+	 * The interface has carried six levels since D-4, but this implementation
+	 * emitted all of them unconditionally — so `trace` and `debug` fired in
+	 * production, burying the events an operator needs under request-shaped
+	 * detail. `"silent"` drops everything, which is what test harnesses want.
+	 */
+	readonly level?: LogLevel;
+}
 
 /**
  * Console-backed `Logger` implementation. Default fallback when no structured
@@ -60,29 +86,38 @@ function emit(
  * the given `bindings`. Pass no argument to obtain a logger with no bindings
  * (equivalent to the exported `consoleLogger` singleton).
  */
-export function createConsoleLogger(bindings: Record<string, unknown> = {}): Logger {
+export function createConsoleLogger(
+	bindings: Record<string, unknown> = {},
+	options: ConsoleLoggerOptions = {},
+): Logger {
 	const frozen = { ...bindings };
+	const threshold = LEVEL_RANK[options.level ?? "info"];
+	const enabled = (level: LogLevel): boolean => LEVEL_RANK[level] >= threshold;
+
 	const logger: Logger = {
 		trace(obj: Record<string, unknown> | string, msg?: string, ...args: unknown[]) {
-			emit("debug", frozen, obj, msg, args);
+			if (enabled("trace")) emit("debug", frozen, obj, msg, args);
 		},
 		debug(obj: Record<string, unknown> | string, msg?: string, ...args: unknown[]) {
-			emit("debug", frozen, obj, msg, args);
+			if (enabled("debug")) emit("debug", frozen, obj, msg, args);
 		},
 		info(obj: Record<string, unknown> | string, msg?: string, ...args: unknown[]) {
-			emit("info", frozen, obj, msg, args);
+			if (enabled("info")) emit("info", frozen, obj, msg, args);
 		},
 		warn(obj: Record<string, unknown> | string, msg?: string, ...args: unknown[]) {
-			emit("warn", frozen, obj, msg, args);
+			if (enabled("warn")) emit("warn", frozen, obj, msg, args);
 		},
 		error(obj: Record<string, unknown> | string, msg?: string, ...args: unknown[]) {
-			emit("error", frozen, obj, msg, args);
+			if (enabled("error")) emit("error", frozen, obj, msg, args);
 		},
 		fatal(obj: Record<string, unknown> | string, msg?: string, ...args: unknown[]) {
-			emit("error", frozen, obj, msg, args);
+			if (enabled("fatal")) emit("error", frozen, obj, msg, args);
 		},
+		// The child inherits the threshold. A child that reverted to the default
+		// would leak debug output from exactly the request-scoped loggers most
+		// likely to carry request detail.
 		child(extra) {
-			return createConsoleLogger({ ...frozen, ...extra });
+			return createConsoleLogger({ ...frozen, ...extra }, options);
 		},
 	};
 	return logger;

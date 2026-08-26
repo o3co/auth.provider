@@ -16,6 +16,7 @@
 import path from "node:path";
 import {
 	type AppConfig,
+	consoleLogger,
 	createFederationTokenStoreFactory,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
@@ -25,6 +26,7 @@ import {
 	createRepositoryFactories,
 	defineModule,
 	type LifecycleRegistrar,
+	type Logger,
 	type Module,
 	type ReadinessRegistrar,
 	registerBuiltinFederationTokenStores,
@@ -45,8 +47,6 @@ import { extractFederationSection } from "@o3co/auth-provider-session";
 // permissive about CJS interop). Standalone production source is built
 // with strict nodenext, so the named import is the right shape here.
 import { Redis } from "ioredis";
-
-import logger from "./logger.mjs";
 
 /**
  * Helper: turn a v0.4.x { type, [type]: {...} } adapter-config slice into the
@@ -276,30 +276,45 @@ export const storesModule: Module = defineModule({
 export const standaloneRedisClientsModule: Module = defineModule({
 	name: "standalone:redis-clients",
 	requires: ["config"] as const,
-	optional: ["lifecycleRegistrar", "readinessRegistrar"] as const,
+	optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"] as const,
 	provides: {
-		refreshTokenFamilyClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+		refreshTokenFamilyClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.refreshTokenFamilyClient;
 		},
-		userSessionStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+		userSessionStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.userSessionStoreClient;
 		},
-		sessionRPRegistryClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+		sessionRPRegistryClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionRPRegistryClient;
 		},
-		sessionFamilyIndexClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+		sessionFamilyIndexClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionFamilyIndexClient;
 		},
-		sessionFederationIndexClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+		sessionFederationIndexClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionFederationIndexClient;
 		},
-		rateLimiterClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+		rateLimiterClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.rateLimiterClient;
 		},
 		// OR-9: code-repository client wired off the same shared ioredis
@@ -308,8 +323,8 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		// high-volume — sharing the connection avoids opening a separate
 		// socket while the per-purpose typed wrapper keeps the Redis
 		// command surface consumed by RedisCodeRepository explicit.
-		codeRepositoryClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+		codeRepositoryClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.codeRepositoryClient;
 		},
 	},
@@ -334,7 +349,9 @@ function getOrCreateClients(
 	config: AppConfig,
 	lifecycleRegistrar: LifecycleRegistrar | undefined,
 	readinessRegistrar?: ReadinessRegistrar,
+	injectedLogger?: Logger,
 ): ReturnType<typeof makeIoredisClients> {
+	const logger = injectedLogger ?? consoleLogger;
 	const cached = lifecycleRegistrar ? clientsCache.get(lifecycleRegistrar) : undefined;
 	if (cached) return cached;
 

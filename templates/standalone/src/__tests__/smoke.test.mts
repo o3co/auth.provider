@@ -37,6 +37,7 @@ const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "u
 
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
+	logging: { level: "silent" },
 	oauth: {
 		jwt: {
 			signingKey: {
