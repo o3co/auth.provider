@@ -59,6 +59,13 @@ import { createApp } from "@o3co/auth-provider-core";
 import { makeIoredisClients, redisChallengeStoreModule } from "@o3co/auth-provider-redis";
 
 const io = new Redis({ host: "localhost", port: 6379 });
+
+// Required. ioredis emits `error` on socket failures — including while it is
+// auto-reconnecting — and an EventEmitter `error` with no listener throws and
+// takes the process down. This connection is yours: `makeIoredisClients` does
+// not attach a listener to it, only to the connections it opens itself for
+// refresh rotation.
+io.on("error", (err) => logger.error({ err }, "redis_client_error"));
 const clients = makeIoredisClients(io);
 
 const handle = await createApp({

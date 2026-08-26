@@ -16,6 +16,7 @@
 import {
 	type AdapterFactory,
 	type BuilderContext,
+	consoleLogger,
 	createAdapterFactory,
 } from "@o3co/auth-provider-core";
 import type session from "express-session";
@@ -50,6 +51,11 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
  * The redis builder forwards the BuilderContext supplied at adapter-create time
  * (via `createSessionStoreFactory(ctx)`) so it can register `client.quit()` on
  * the lifecycle registrar — closes OR-M2.
+ *
+ * The redis client's `error` events are reported through
+ * `BuilderContext.logger` — the same context that carries `lifecycle` and
+ * `readiness` — falling back to `consoleLogger` when the composition wires no
+ * logger slot.
  */
 export function registerBuiltinSessionStores(factory: SessionStoreFactory): void {
 	factory.register("memory", () => undefined);
@@ -67,6 +73,24 @@ export function registerBuiltinSessionStores(factory: SessionStoreFactory): void
 			url,
 			password: typeof password === "string" ? password : undefined,
 		});
+
+		// node-redis emits `error` on socket failures — including while it is
+		// happily auto-reconnecting — and an EventEmitter `error` with no
+		// listener throws, taking the whole process down. Since
+		// `session.storage.type = "redis"` is the shipped default, a Redis
+		// failover blip crashed the provider, and the restart reconnected into
+		// the same flapping Redis: a crash loop of the identity provider.
+		//
+		// Attached BEFORE connect(): a connection that fails during the
+		// handshake emits while connect() is still in flight, which is exactly
+		// the boot-time flap this guards against. Reconnection is node-redis's
+		// job; the handler's job is to make the event observed rather than
+		// fatal, and to leave a trace an operator can correlate with.
+		const logger = ctx.logger ?? consoleLogger;
+		client.on("error", (err: unknown) => {
+			logger.error({ err }, "session_store_redis_error");
+		});
+
 		await client.connect();
 		// D-5 / OR-M2: register quit() with the lifecycle registrar so the
 		// connect-redis client is released during AppHandle.dispose().

@@ -14,6 +14,7 @@
 // because the goal is to exercise the adapter's branching logic, not the
 // Lua atomicity (which is closed by construction at the Redis server).
 
+import { EventEmitter } from "node:events";
 import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
@@ -153,5 +154,77 @@ describe("makeIoredisClients federationTokenStoreClient.compareAndDelete", () =>
 		);
 		// Critical assertion: EVAL is NOT called as a fallback for non-NOSCRIPT errors.
 		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Duplicated connections must not be able to crash the process
+//
+// `refreshTokenFamilyClient.duplicate()` opens a fresh ioredis connection per
+// refresh rotation, and ioredis `duplicate()` copies options but NOT event
+// listeners — a duplicate starts with zero `error` listeners. An EventEmitter
+// `error` with no listener throws, so a socket blip on any of those short-lived
+// connections took the provider down. Same crash class as the node-redis
+// session client, on a much hotter path.
+// ---------------------------------------------------------------------------
+
+describe("makeIoredisClients refreshTokenFamilyClient.duplicate", () => {
+	class FakeDuplicate extends EventEmitter {
+		set = vi.fn();
+		get = vi.fn();
+		pttl = vi.fn();
+		watch = vi.fn();
+		unwatch = vi.fn();
+		multi = vi.fn();
+		quit = vi.fn().mockResolvedValue("OK");
+		disconnect = vi.fn();
+		duplicate = vi.fn();
+	}
+
+	function makeParentWithDuplicate(dup: FakeDuplicate): Redis {
+		return makeFakeIoredis({ duplicate: vi.fn(() => dup) as never });
+	}
+
+	it("attaches an error listener to the duplicated connection", async () => {
+		const dup = new FakeDuplicate();
+		const clients = makeIoredisClients(makeParentWithDuplicate(dup));
+
+		const disposable = clients.refreshTokenFamilyClient.duplicate();
+
+		expect(dup.listenerCount("error")).toBe(1);
+		expect(() => dup.emit("error", new Error("ECONNRESET"))).not.toThrow();
+		await disposable[Symbol.asyncDispose]();
+	});
+
+	it("reports the duplicated connection's errors through the supplied logger", async () => {
+		const error = vi.fn();
+		const dup = new FakeDuplicate();
+		const clients = makeIoredisClients(makeParentWithDuplicate(dup), {
+			logger: { warn: vi.fn(), error },
+		});
+
+		const disposable = clients.refreshTokenFamilyClient.duplicate();
+		dup.emit("error", new Error("ECONNRESET"));
+
+		expect(error).toHaveBeenCalledTimes(1);
+		expect(error.mock.calls[0]?.[1]).toBe("redis_duplicate_connection_error");
+		await disposable[Symbol.asyncDispose]();
+	});
+
+	it("falls back to disconnect() when quit() rejects, so disposal never throws", async () => {
+		// This runs on an `await using` binding around a refresh rotation. A
+		// rejecting disposal reports failure for a rotation that already
+		// committed — the client then retries with the old refresh token, replay
+		// detection fires, and the whole family is revoked. And when the body
+		// already threw, a rejecting disposal buries the original error inside a
+		// SuppressedError.
+		const dup = new FakeDuplicate();
+		dup.quit = vi.fn().mockRejectedValue(new Error("Connection is closed."));
+		const clients = makeIoredisClients(makeParentWithDuplicate(dup));
+
+		const disposable = clients.refreshTokenFamilyClient.duplicate();
+
+		await expect(disposable[Symbol.asyncDispose]()).resolves.toBeUndefined();
+		expect(dup.disconnect).toHaveBeenCalledTimes(1);
 	});
 });
