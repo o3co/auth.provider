@@ -74,9 +74,17 @@ export function createRouter(
 ): Router {
 	const router = express.Router();
 	const includeErrorDetail = opts.includeErrorDetail === true;
+	// Held for the router's lifetime so concurrent and repeated scrapes join one
+	// in-flight check per dependency instead of queueing a command each. During
+	// a partition the driver never answers, and this endpoint is reachable
+	// without credentials.
+	const inFlight = new Map<string, Promise<unknown>>();
 
 	router.get(opts.path ?? "/readyz", async (_req: Request, res: Response) => {
-		const report = await runReadinessProbes(opts.probes, { timeoutMs: opts.timeoutMs });
+		const report = await runReadinessProbes(opts.probes, {
+			timeoutMs: opts.timeoutMs,
+			inFlight,
+		});
 
 		// An orchestrator polls this; a cached "ready" would outlive the outage
 		// it describes.

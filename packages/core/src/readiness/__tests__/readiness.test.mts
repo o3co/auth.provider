@@ -132,6 +132,65 @@ describe("runReadinessProbes", () => {
 		expect(report.checks.map((c) => `${c.name}:${c.ok}`)).toEqual(["a:false", "b:true"]);
 	});
 
+	it("joins an in-flight check instead of issuing a second one", async () => {
+		// Abandoning a check at the deadline does not cancel it: against a
+		// partitioned Redis the driver holds the PING in its offline queue until
+		// reconnect, so an un-coalesced endpoint accumulates one pending command
+		// per scrape and releases them as a burst on recovery.
+		const check = vi.fn(() => new Promise(() => {}));
+		const inFlight = new Map<string, Promise<unknown>>();
+		const probes = [{ name: "redis", check }];
+
+		await runReadinessProbes(probes, { timeoutMs: 10, inFlight });
+		await runReadinessProbes(probes, { timeoutMs: 10, inFlight });
+		await runReadinessProbes(probes, { timeoutMs: 10, inFlight });
+
+		expect(check).toHaveBeenCalledTimes(1);
+		expect(inFlight.size).toBe(1);
+	});
+
+	it("starts a fresh check once the previous one settles", async () => {
+		// The join must not turn into a cached verdict — readiness is a question
+		// about now.
+		const check = vi.fn(async () => "PONG");
+		const inFlight = new Map<string, Promise<unknown>>();
+		const probes = [{ name: "redis", check }];
+
+		await runReadinessProbes(probes, { timeoutMs: 100, inFlight });
+		await runReadinessProbes(probes, { timeoutMs: 100, inFlight });
+
+		expect(check).toHaveBeenCalledTimes(2);
+		expect(inFlight.size).toBe(0);
+	});
+
+	it("does not surface an unhandled rejection when every waiter has timed out", async () => {
+		// The shared promise outlives its waiters; whoever rejects last must not
+		// take the process down.
+		const unhandled: unknown[] = [];
+		const onUnhandled = (reason: unknown) => unhandled.push(reason);
+		process.on("unhandledRejection", onUnhandled);
+		try {
+			const inFlight = new Map<string, Promise<unknown>>();
+			const probes = [
+				{
+					name: "redis",
+					check: () =>
+						new Promise((_resolve, reject) =>
+							setTimeout(() => reject(new Error("late ECONNRESET")), 30),
+						),
+				},
+			];
+
+			const report = await runReadinessProbes(probes, { timeoutMs: 5, inFlight });
+			expect(report.ready).toBe(false);
+
+			await new Promise((resolve) => setTimeout(resolve, 60));
+			expect(unhandled).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onUnhandled);
+		}
+	});
+
 	it("leaves no armed timer behind after a probe resolves", async () => {
 		// A timer left armed keeps the event loop alive; on an endpoint scraped
 		// every few seconds that is a leak proportional to probe rate, and it

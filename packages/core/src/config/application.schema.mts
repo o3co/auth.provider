@@ -286,7 +286,12 @@ export const CoreConfigSchema = z.object({
 		// 1ms, so every probe against a perfectly healthy Redis would time out
 		// and the replica would answer 503 forever, draining all traffic with
 		// nothing actually wrong. Failing boot loudly is the right outcome.
-		readinessTimeoutMs: z.coerce.number().int().positive(),
+		// The upper bound is Node's timer range. `setTimeout` silently clamps a
+		// delay above 2^31-1 to 1ms, so an operator who wrote a large number
+		// meaning "be patient" would get the most impatient possible deadline
+		// and a replica that is unready forever — the same failure as the empty
+		// string, reached from the opposite direction.
+		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
 	}),
 	oauth: z.object({
 		jwt: jwtSchema,

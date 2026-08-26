@@ -55,6 +55,9 @@ describe("CoreConfigSchema http.readinessTimeoutMs", () => {
 		["zero", 0],
 		["negative", -1],
 		["fractional", 1.5],
+		// setTimeout clamps anything above 2^31-1 to 1ms, so "be very patient"
+		// becomes "be maximally impatient".
+		["beyond Node's timer range", 2_147_483_648],
 	])("rejects %s", (_label, value) => {
 		const result = CoreConfigSchema.safeParse({
 			...minimalCoreConfig,
