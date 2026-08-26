@@ -334,6 +334,29 @@ describe("createSessionGrant", () => {
 				expect(decoded.azp).toBe("first-party-app");
 			});
 
+			it("uses the client's configured audience when one is registered", async () => {
+				// Forcing `aud` to the client id would mint tokens the operator's own
+				// API rejects, since its audience check never names the client.
+				const handler = createSessionGrant(makeDeps());
+				const { result } = await handler.handle({
+					body: { scope: "read" },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: {
+						...basicAuthClient,
+						allowedAudiences: ["https://api.example.com"],
+					},
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+				expect(decoded.aud).toBe("https://api.example.com");
+				// azp still names who asked, not what the token is for.
+				expect(decoded.azp).toBe("first-party-app");
+			});
+
 			it("returns 401 when the request was not client-authenticated", async () => {
 				const handler = createSessionGrant(makeDeps());
 				const { result } = await handler.handle({

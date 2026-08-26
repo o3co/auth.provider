@@ -102,6 +102,20 @@ export const createSessionGrant = (
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
+			// `allowedAudiences[0]` is the client's configured resource audience, and
+			// per the AuthenticatedClient contract a grant issuing tokens straight
+			// from the client record takes it as the default `aud`. Forcing the
+			// client id here instead would mint tokens that the very API the
+			// operator configured would reject, since `aud` would never name it.
+			//
+			// The fallback is the client id rather than the issuer (the shape
+			// `client_credentials` uses): this token is bound to an end user and
+			// meant for a resource, so naming the authorization server would be
+			// wrong, and `authorization_code` already falls back the same way. What
+			// matters either way is that `aud` is never null — an audience-less
+			// token was half of what made the old path a self-elevation.
+			const audience = client.allowedAudiences?.[0] ?? client.clientId;
+
 			return {
 				result: {
 					status: 200,
@@ -112,7 +126,7 @@ export const createSessionGrant = (
 								keyStore,
 								expiresIn: config.oauth.accessToken.expiresIn,
 								issuer,
-								audience: client.clientId,
+								audience,
 								subject: userId ?? null,
 								authorizedParty: client.clientId,
 								scope: scopes?.join(" ") ?? null,
