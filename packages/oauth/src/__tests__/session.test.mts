@@ -51,6 +51,16 @@ const makeDeps = (
 
 const mockDeps = makeDeps();
 
+// #260: every /token request reaches a grant through `clientAuthMw`, so
+// `ctx.authenticatedClient` is always populated in production. Tests that are
+// not about client authentication itself supply this default so they exercise
+// the same shape the route does.
+const AUTH_CLIENT = {
+	clientId: "my-app",
+	tokenEndpointAuthMethod: "client_secret_basic" as const,
+	allowedScopes: ["read", "write"],
+};
+
 describe("createSessionGrant", () => {
 	describe("handle", () => {
 		it("returns 401 when session is not authenticated", async () => {
@@ -60,6 +70,7 @@ describe("createSessionGrant", () => {
 				session: { isAuthenticated: false },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -78,6 +89,7 @@ describe("createSessionGrant", () => {
 				session: {},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -96,6 +108,7 @@ describe("createSessionGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -119,6 +132,7 @@ describe("createSessionGrant", () => {
 				},
 				issuer: "localhost",
 				metadata: { ip: "192.168.1.1", customField: "value" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -127,19 +141,14 @@ describe("createSessionGrant", () => {
 			expect("tokens" in result).toBe(true);
 		});
 
-		it("includes audience when client_id is provided", async () => {
-			const deps = makeDeps();
-			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
-				clientId: "my-app",
-				allowedRedirectUris: [],
-				allowedScopes: ["read", "write"],
-			});
-			const handler = createSessionGrant(deps);
+		it("binds audience and azp to the authenticated client", async () => {
+			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {
-				body: { client_id: "my-app" },
+				body: {},
 				session: { isAuthenticated: true, user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -154,19 +163,14 @@ describe("createSessionGrant", () => {
 			}
 		});
 
-		it("validates scope against client allowedScopes when client_id is provided", async () => {
-			const deps = makeDeps();
-			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
-				clientId: "my-app",
-				allowedRedirectUris: [],
-				allowedScopes: ["read", "write"],
-			});
-			const handler = createSessionGrant(deps);
+		it("validates scope against the authenticated client's allowedScopes", async () => {
+			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {
-				body: { client_id: "my-app", scope: "read" },
+				body: { scope: "read" },
 				session: { isAuthenticated: true, user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -179,18 +183,13 @@ describe("createSessionGrant", () => {
 		});
 
 		it("rejects scope exceeding client allowedScopes", async () => {
-			const deps = makeDeps();
-			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue({
-				clientId: "my-app",
-				allowedRedirectUris: [],
-				allowedScopes: ["read"],
-			});
-			const handler = createSessionGrant(deps);
+			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {
-				body: { client_id: "my-app", scope: "read admin" },
+				body: { scope: "read admin" },
 				session: { isAuthenticated: true, user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -202,30 +201,39 @@ describe("createSessionGrant", () => {
 			}
 		});
 
-		it("returns 400 when client_id is provided but client not found", async () => {
-			const deps = makeDeps();
-			(deps.clientRepository.findById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
-			const handler = createSessionGrant(deps);
+		it("ignores a body client_id naming a different client", async () => {
+			// clientAuthMw rejects a body client_id that contradicts Basic
+			// credentials, so this shape cannot reach the grant through /token.
+			// The assertion pins that identity is read from the authenticated
+			// slot regardless, rather than relying on that upstream check alone.
+			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {
-				body: { client_id: "unknown" },
+				body: { client_id: "other-app", scope: "read" },
 				session: { isAuthenticated: true, user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
 
-			expect(result.status).toBe(400);
-			expect("error" in result).toBe(true);
+			expect(result.status).toBe(200);
+			expect("tokens" in result).toBe(true);
+			if ("tokens" in result) {
+				const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+				expect(decoded.aud).toBe("my-app");
+				expect(decoded.azp).toBe("my-app");
+			}
 		});
 
-		it("accepts scope without client_id (no validation)", async () => {
+		it("grants the requested scope when it is within the allowlist", async () => {
 			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {
 				body: { scope: "read write" },
 				session: { isAuthenticated: true, user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -244,6 +252,7 @@ describe("createSessionGrant", () => {
 				session: { isAuthenticated: true, user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -262,6 +271,7 @@ describe("createSessionGrant", () => {
 				session: { isAuthenticated: true, user: { id: "u1" } },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { result } = await handler.handle(ctx);
@@ -273,6 +283,109 @@ describe("createSessionGrant", () => {
 			}
 		});
 
+		// -------------------------------------------------------------------
+		// #260 — the grant must authorize against the *authenticated* client
+		//
+		// `clientAuthMw` runs before every grant on /token and populates
+		// `ctx.authenticatedClient`. When the client authenticates with HTTP
+		// Basic — the canonical transport for a confidential client — its
+		// `client_id` lives in the Authorization header and never appears in
+		// the body, so a grant that reads `body.client_id` to find the client
+		// sees nothing and skips its allowlist entirely.
+		// -------------------------------------------------------------------
+		describe("#260 — authorization binds to ctx.authenticatedClient", () => {
+			const basicAuthClient = {
+				clientId: "first-party-app",
+				tokenEndpointAuthMethod: "client_secret_basic" as const,
+				allowedScopes: ["read"],
+			};
+
+			it("enforces allowedScopes for a Basic-authenticated client that sends no body client_id", async () => {
+				const handler = createSessionGrant(makeDeps());
+				const { result } = await handler.handle({
+					// Basic credentials are consumed by clientAuthMw; the body carries
+					// only the grant parameters.
+					body: { scope: "admin:*" },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: basicAuthClient,
+				});
+
+				expect(result.status).toBe(400);
+				if (!("error" in result)) throw new Error("expected error");
+				expect(result.error).toBe("invalid_scope");
+			});
+
+			it("binds aud and azp to the authenticated client rather than the body", async () => {
+				const handler = createSessionGrant(makeDeps());
+				const { result } = await handler.handle({
+					body: { scope: "read" },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: basicAuthClient,
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+				expect(decoded.aud).toBe("first-party-app");
+				expect(decoded.azp).toBe("first-party-app");
+			});
+
+			it("uses the client's configured audience when one is registered", async () => {
+				// Forcing `aud` to the client id would mint tokens the operator's own
+				// API rejects, since its audience check never names the client.
+				const handler = createSessionGrant(makeDeps());
+				const { result } = await handler.handle({
+					body: { scope: "read" },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: {
+						...basicAuthClient,
+						allowedAudiences: ["https://api.example.com"],
+					},
+				});
+
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				const decoded = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+				expect(decoded.aud).toBe("https://api.example.com");
+				// azp still names who asked, not what the token is for.
+				expect(decoded.azp).toBe("first-party-app");
+			});
+
+			it("returns 401 when the request was not client-authenticated", async () => {
+				const handler = createSessionGrant(makeDeps());
+				const { result } = await handler.handle({
+					body: { scope: "admin:*" },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+				});
+
+				expect(result.status).toBe(401);
+				if (!("error" in result)) throw new Error("expected error");
+				expect(result.error).toBe("invalid_client");
+			});
+
+			it("does not consult the client repository — the authenticated record is authoritative", async () => {
+				const deps = makeDeps();
+				const handler = createSessionGrant(deps);
+				await handler.handle({
+					body: { scope: "read" },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: basicAuthClient,
+				});
+
+				expect(deps.clientRepository.findById).not.toHaveBeenCalled();
+			});
+		});
+
 		it("does not return sessionMutation", async () => {
 			const handler = createSessionGrant(mockDeps);
 			const ctx: GrantContext = {
@@ -280,6 +393,7 @@ describe("createSessionGrant", () => {
 				session: { isAuthenticated: true },
 				issuer: "localhost",
 				metadata: {},
+				authenticatedClient: AUTH_CLIENT,
 			};
 
 			const { sessionMutation } = await handler.handle(ctx);
