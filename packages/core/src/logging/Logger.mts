@@ -75,3 +75,26 @@ declare module "@o3co/auth-provider-core" {
 		readonly logger?: Logger;
 	}
 }
+
+/**
+ * The narrow logger shape that injection seams accept.
+ *
+ * `Logger` is the interface this project logs *through*; `EventLogger` is the
+ * one it is willing to *demand* of a caller. The difference matters at seams a
+ * composition root wires by hand — a readiness route, an adapter that reports
+ * connection errors — because a host logger that omits `trace` / `fatal` /
+ * `child`, or whose methods require a message argument, cannot satisfy
+ * `Logger`. Neither can it satisfy `Pick<Logger, "error">`: narrowing to one
+ * method keeps that method's full two-overload shape, which is the part such a
+ * logger fails. The logger the standalone template ships is exactly that case.
+ *
+ * So seams that only ever emit a named structured event — `logger.error({ err },
+ * "session_store_redis_error")` — take this instead. `Logger` satisfies it, and
+ * so does a leaner host logger. Use `Logger` where the full surface is genuinely
+ * used; use this where the alternative is a caller who cannot pass anything at
+ * all.
+ */
+export interface EventLogger {
+	warn(obj: Record<string, unknown>, msg: string): void;
+	error(obj: Record<string, unknown>, msg: string): void;
+}

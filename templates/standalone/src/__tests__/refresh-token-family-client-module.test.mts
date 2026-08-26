@@ -31,6 +31,7 @@ vi.mock("ioredis", () => {
 		}
 		on = vi.fn();
 		quit = vi.fn(async () => "OK" as const);
+		ping = vi.fn(async () => "PONG" as const);
 		// Minimal command surface — `makeIoredisClients` only invokes these
 		// during construction in some paths; tests never exercise the wrapped
 		// client itself, so most stubs are unused.
@@ -168,7 +169,7 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		expect(onSpies[0]).toHaveBeenCalledWith("error", expect.any(Function));
 	});
 
-	it("declares 'config' as required and 'lifecycleRegistrar' as optional", async () => {
+	it("declares 'config' as required and both registrars as optional", async () => {
 		const { standaloneRedisClientsModule } = await importModule();
 		const m = standaloneRedisClientsModule as {
 			requires?: readonly string[];
@@ -176,5 +177,36 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		};
 		expect(m.requires).toContain("config");
 		expect(m.optional).toContain("lifecycleRegistrar");
+		expect(m.optional).toContain("readinessRegistrar");
+	});
+
+	it("registers one readiness probe for the shared connection, not one per slot", async () => {
+		// Every Redis-backed adapter draws from a single socket, so a probe per
+		// consumed slot would report the same connection six times.
+		const probes: Array<{ name: string; check: () => Promise<unknown> }> = [];
+		const readinessRegistrar = { register: (p: (typeof probes)[number]) => probes.push(p) };
+
+		const { standaloneRedisClientsModule } = await importModule();
+		const provides = (
+			standaloneRedisClientsModule as unknown as {
+				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
+			}
+		).provides;
+		const lifecycleRegistrar: LifecycleRegistrar = { register: () => {} };
+
+		await provides.refreshTokenFamilyClient({
+			config: { ...baseConfig },
+			lifecycleRegistrar,
+			readinessRegistrar,
+		});
+		await provides.rateLimiterClient({
+			config: { ...baseConfig },
+			lifecycleRegistrar,
+			readinessRegistrar,
+		});
+
+		expect(redisCtorCalls).toHaveLength(1);
+		expect(probes.map((p) => p.name)).toEqual(["redis"]);
+		await expect(probes[0]?.check()).resolves.toBe("PONG");
 	});
 });

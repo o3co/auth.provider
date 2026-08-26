@@ -26,6 +26,7 @@ import {
 	defineModule,
 	type LifecycleRegistrar,
 	type Module,
+	type ReadinessRegistrar,
 	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
@@ -273,26 +274,31 @@ export const storesModule: Module = defineModule({
 export const standaloneRedisClientsModule: Module = defineModule({
 	name: "standalone:redis-clients",
 	requires: ["config"] as const,
-	optional: ["lifecycleRegistrar"] as const,
+	optional: ["lifecycleRegistrar", "readinessRegistrar"] as const,
 	provides: {
-		refreshTokenFamilyClient: async ({ config, lifecycleRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).refreshTokenFamilyClient;
+		refreshTokenFamilyClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+				.refreshTokenFamilyClient;
 		},
-		userSessionStoreClient: async ({ config, lifecycleRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).userSessionStoreClient;
+		userSessionStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+				.userSessionStoreClient;
 		},
-		sessionRPRegistryClient: async ({ config, lifecycleRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).sessionRPRegistryClient;
+		sessionRPRegistryClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+				.sessionRPRegistryClient;
 		},
-		sessionFamilyIndexClient: async ({ config, lifecycleRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).sessionFamilyIndexClient;
+		sessionFamilyIndexClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+				.sessionFamilyIndexClient;
 		},
-		sessionFederationIndexClient: async ({ config, lifecycleRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar)
+		sessionFederationIndexClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
 				.sessionFederationIndexClient;
 		},
-		rateLimiterClient: async ({ config, lifecycleRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).rateLimiterClient;
+		rateLimiterClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+				.rateLimiterClient;
 		},
 		// OR-9: code-repository client wired off the same shared ioredis
 		// socket. `redisCodeRepositoryModule` consumes this slot when
@@ -300,8 +306,9 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		// high-volume — sharing the connection avoids opening a separate
 		// socket while the per-purpose typed wrapper keeps the Redis
 		// command surface consumed by RedisCodeRepository explicit.
-		codeRepositoryClient: async ({ config, lifecycleRegistrar }) => {
-			return getOrCreateClients(config as AppConfig, lifecycleRegistrar).codeRepositoryClient;
+		codeRepositoryClient: async ({ config, lifecycleRegistrar, readinessRegistrar }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar)
+				.codeRepositoryClient;
 		},
 	},
 });
@@ -324,6 +331,7 @@ const clientsCache = new WeakMap<LifecycleRegistrar, ReturnType<typeof makeIored
 function getOrCreateClients(
 	config: AppConfig,
 	lifecycleRegistrar: LifecycleRegistrar | undefined,
+	readinessRegistrar?: ReadinessRegistrar,
 ): ReturnType<typeof makeIoredisClients> {
 	const cached = lifecycleRegistrar ? clientsCache.get(lifecycleRegistrar) : undefined;
 	if (cached) return cached;
@@ -355,6 +363,14 @@ function getOrCreateClients(
 
 	lifecycleRegistrar?.register(async () => {
 		await io.quit();
+	});
+
+	// One probe for the one socket. Registering per consumed slot would report
+	// the same connection six times; the cache above means this runs once per
+	// boot, on the call that actually constructs the client.
+	readinessRegistrar?.register({
+		name: "redis",
+		check: () => io.ping(),
 	});
 
 	const clients = makeIoredisClients(io);

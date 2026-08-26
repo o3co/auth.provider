@@ -73,6 +73,14 @@ export function registerBuiltinSessionStores(factory: SessionStoreFactory): void
 		ctx.lifecycle?.register(async () => {
 			await client.quit();
 		});
+		// Sessions are load-bearing for every logged-in request, so a replica
+		// that has lost this connection should stop receiving traffic. The
+		// client is not reachable from the returned RedisStore, so registering
+		// the probe here is the only place it can be done.
+		ctx.readiness?.register({
+			name: "session-store",
+			check: () => client.ping(),
+		});
 		return new RedisStore({ client });
 	});
 }

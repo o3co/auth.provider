@@ -25,7 +25,7 @@ import {
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
 const minimalCoreConfig = {
-	http: { port: 3000, trustProxy: false },
+	http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
 	oauth: {
 		jwt: {
 			signingKey: {
@@ -43,6 +43,37 @@ const minimalCoreConfig = {
 		oidcMode: "oidc-required",
 	},
 };
+
+describe("CoreConfigSchema http.readinessTimeoutMs", () => {
+	// HOCON substitutes an unset-but-present environment variable as "", and
+	// z.coerce.number() turns "" into 0. setTimeout clamps 0 to 1ms, so a
+	// deployment that shipped HTTP_READINESS_TIMEOUT_MS= (blank) would answer
+	// /readyz with 503 forever against a perfectly healthy Redis. Boot has to
+	// reject it rather than silently drain every replica.
+	it.each([
+		["empty string (blank env var)", ""],
+		["zero", 0],
+		["negative", -1],
+		["fractional", 1.5],
+		// setTimeout clamps anything above 2^31-1 to 1ms, so "be very patient"
+		// becomes "be maximally impatient".
+		["beyond Node's timer range", 2_147_483_648],
+	])("rejects %s", (_label, value) => {
+		const result = CoreConfigSchema.safeParse({
+			...minimalCoreConfig,
+			http: { ...minimalCoreConfig.http, readinessTimeoutMs: value },
+		});
+		expect(result.success).toBe(false);
+	});
+
+	it("accepts a positive integer supplied as a string, as HOCON env substitution produces", () => {
+		const result = CoreConfigSchema.safeParse({
+			...minimalCoreConfig,
+			http: { ...minimalCoreConfig.http, readinessTimeoutMs: "250" },
+		});
+		expect(result.success).toBe(true);
+	});
+});
 
 describe("CoreConfigSchema", () => {
 	it("validates minimal core config (just http + oauth)", () => {
@@ -210,7 +241,7 @@ describe("fullSectionsSchema endpoints optionality", () => {
 describe("AppConfigSchema backward compatibility", () => {
 	it("still validates full config with all sections", () => {
 		const fullConfig = {
-			http: { port: 3000, trustProxy: false },
+			http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
 			oauth: {
 				jwt: {
 					signingKey: {

@@ -16,9 +16,15 @@
 import { expect, test } from "vitest";
 import { SYNTHETIC_COMPONENT_KEYS } from "../synthetic-keys.mjs";
 
-test("SYNTHETIC_COMPONENT_KEYS has 5 members after A5 + D-5", () => {
-	// 4 baseline (A5) + lifecycleRegistrar (D-5) = 5.
-	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(5);
+test("SYNTHETIC_COMPONENT_KEYS has 6 members after A5 + D-5 + readiness", () => {
+	// 4 baseline (A5) + lifecycleRegistrar (D-5) + readinessRegistrar = 6.
+	expect(SYNTHETIC_COMPONENT_KEYS.size).toBe(6);
+});
+
+test("SYNTHETIC_COMPONENT_KEYS includes readinessRegistrar", () => {
+	// Reserved for the same reason as lifecycleRegistrar: a consumer-supplied
+	// registrar would collect probes the planner never reads.
+	expect(SYNTHETIC_COMPONENT_KEYS.has("readinessRegistrar")).toBe(true);
 });
 
 test("SYNTHETIC_COMPONENT_KEYS includes federationRedirectPolicyResolver", () => {

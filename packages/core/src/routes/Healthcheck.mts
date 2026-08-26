@@ -15,12 +15,32 @@
  */
 import type { Request, Response, Router } from "express";
 
-export const createRouter = (express: { Router: () => Router }): Router => {
+export interface HealthcheckRouterOptions {
+	/** Route path. Defaults to `/_healthcheck`. */
+	readonly path?: string;
+}
+
+/**
+ * Liveness endpoint — answers whether this process is up and its event loop is
+ * turning. Always `200`, and deliberately so: it touches no dependency.
+ *
+ * The counterpart is `routes/Readiness.mts`. Wiring liveness to anything that
+ * probes a backing service turns one dependency outage into a cluster-wide
+ * restart loop, which reconnects nothing and adds cold starts to an incident.
+ * Losing Redis is a reason to stop routing to a replica, not to kill it.
+ *
+ * Mount it on the host app ahead of the composed auth router so it stays
+ * reachable while the auth pipeline is degraded.
+ */
+export function createRouter(
+	express: { Router: () => Router },
+	opts: HealthcheckRouterOptions = {},
+): Router {
 	const router = express.Router();
 
-	router.get("/_healthcheck", (_req: Request, res: Response) => {
-		res.json({ code: 200, message: "healthy" });
+	router.get(opts.path ?? "/_healthcheck", (_req: Request, res: Response) => {
+		res.status(200).json({ status: "ok" });
 	});
 
 	return router;
-};
+}

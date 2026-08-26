@@ -274,6 +274,24 @@ export const CoreConfigSchema = z.object({
 	http: z.object({
 		port: z.coerce.number(),
 		trustProxy: z.boolean(),
+		// Per-probe deadline for the readiness endpoint. Must stay well under
+		// the orchestrator's probe timeout, or a partitioned dependency reads
+		// as a slow replica rather than an unready one. Shape-only; default
+		// lives in HOCON.
+		//
+		// `.positive()` is load-bearing, not decoration. HOCON substitutes an
+		// empty environment variable as `""` — a very common shape in a .env
+		// file, a compose `environment:` entry, or a ConfigMap key left blank —
+		// and `z.coerce.number()` turns `""` into `0`. `setTimeout` clamps 0 to
+		// 1ms, so every probe against a perfectly healthy Redis would time out
+		// and the replica would answer 503 forever, draining all traffic with
+		// nothing actually wrong. Failing boot loudly is the right outcome.
+		// The upper bound is Node's timer range. `setTimeout` silently clamps a
+		// delay above 2^31-1 to 1ms, so an operator who wrote a large number
+		// meaning "be patient" would get the most impatient possible deadline
+		// and a replica that is unready forever — the same failure as the empty
+		// string, reached from the opposite direction.
+		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
 	}),
 	oauth: z.object({
 		jwt: jwtSchema,

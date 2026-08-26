@@ -410,3 +410,52 @@ describe("createApp — 7. boot-failure LifecycleRegistrar drain (D-5)", () => {
 		expect(cleanupRan).toBe(true);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 8. ReadinessRegistrar seeding
+// ---------------------------------------------------------------------------
+
+describe("createApp — 8. ReadinessRegistrar seeding", () => {
+	it("surfaces probes registered by a module on the handle", async () => {
+		// The connection a probe pings is held by the builder that opened it and
+		// is never exposed as a component, so registration has to happen there.
+		const probeMod = defineModule<never, "readinessRegistrar">({
+			name: "ProbeMod",
+			optional: ["readinessRegistrar"],
+			provides: {
+				slotCA: async (deps) => {
+					deps.readinessRegistrar?.register({
+						name: "redis",
+						check: async () => "PONG",
+					});
+					return 1;
+				},
+			},
+			lifecycle: { slotCA: { eager: true } },
+		});
+
+		const handle = await createApp({
+			modules: [probeMod],
+			bootstrapComponents: minBoot,
+			contributionKinds: makeStubCollectors(),
+		});
+
+		expect(handle.readinessProbes.map((p) => p.name)).toEqual(["redis"]);
+	});
+
+	it("exposes an empty probe list when no module registered one", async () => {
+		const plainMod = defineModule({
+			name: "PlainMod",
+			provides: { slotCA: async () => 1 },
+			lifecycle: { slotCA: { eager: true } },
+		});
+
+		const handle = await createApp({
+			modules: [plainMod],
+			bootstrapComponents: minBoot,
+			contributionKinds: makeStubCollectors(),
+		});
+
+		expect(handle.readinessProbes).toEqual([]);
+	});
+});

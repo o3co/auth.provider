@@ -48,9 +48,21 @@ COPY --from=builder /home/node/config/ ./config/
 ENV HTTP_PORT=3000
 EXPOSE ${HTTP_PORT}
 
+# Probes /_healthcheck (liveness), NOT /readyz. Docker has exactly one health
+# signal, and on Swarm / ECS / autoheal-style supervisors an unhealthy
+# container is stopped and replaced. Pointing it at /readyz would mean a 90s
+# Redis failover marks every replica unhealthy and gets them all rescheduled —
+# which reconnects nothing and adds cold starts to the incident. Losing Redis
+# is a reason to stop routing to a replica, not to kill it.
+#
+# /readyz is the load-balancer / Kubernetes readinessProbe target; see the
+# "Health endpoints" section of README.md. A compose file that genuinely wants
+# `depends_on: condition: service_healthy` to mean "ready" can override this
+# per-service, which keeps the restart-driving signal out of it.
+#
 # Use the shell form so ${HTTP_PORT} expands at probe time. The HOCON
 # config reads `${?HTTP_PORT}` for `http.port`, so app.listen() and the
-# healthcheck stay in sync regardless of the operator's port choice.
+# probe stay in sync regardless of the operator's port choice.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -q -O /dev/null "http://localhost:${HTTP_PORT}/_healthcheck" || exit 1
 

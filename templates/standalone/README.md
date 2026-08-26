@@ -60,6 +60,7 @@ fail fast rather than silently falling back to defaults.
 |---|---|---|
 | `HTTP_PORT` | `3000` | Port the server listens on |
 | `HTTP_TRUST_PROXY` | `false` | Set to `true` when running behind a reverse proxy |
+| `HTTP_READINESS_TIMEOUT_MS` | `1000` | Per-probe deadline for `/readyz` (see [Health endpoints](#health-endpoints)) |
 
 ### OAuth JWT
 
@@ -216,6 +217,78 @@ docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
 
 `EXPOSE` is image metadata and does not publish ports by itself, so the
 explicit `-p` mapping is still required.
+
+### Health endpoints
+
+Two routes, answering two different questions. Both are mounted on the host
+app ahead of the auth router, so they keep answering while the auth pipeline
+is degraded.
+
+| Route | Question | Answer |
+|---|---|---|
+| `GET /_healthcheck` | Is the process up? | Always `200 {"status":"ok"}` |
+| `GET /readyz` | Can this replica serve right now? | `200 {"status":"ready", …}` or `503 {"status":"unready", …}` |
+
+Use them for different probes:
+
+```yaml
+livenessProbe:
+  httpGet: { path: /_healthcheck, port: 3000 }
+readinessProbe:
+  httpGet: { path: /readyz, port: 3000 }
+```
+
+Pointing liveness at `/readyz` is the mistake worth avoiding: a Redis
+partition would then look like a broken container and Kubernetes would
+restart every replica in a loop, which reconnects nothing and adds cold
+starts to an incident. Losing Redis is a reason to stop *routing* to a
+replica, not to kill it.
+
+The image's `HEALTHCHECK` probes `/_healthcheck` for the same reason. Docker
+has exactly one health signal, and on Swarm and ECS an unhealthy container is
+stopped and replaced — so wiring it to `/readyz` would reintroduce the restart
+loop for every non-Kubernetes orchestrator. If you want
+`depends_on: condition: service_healthy` to mean "ready" rather than "alive",
+override `healthcheck:` for that one service in your compose file instead of
+changing the image.
+
+`/readyz` runs one probe per backing connection and reports each by name:
+
+```json
+{
+  "status": "unready",
+  "checks": [
+    { "name": "redis", "ok": true, "durationMs": 2 },
+    { "name": "session-store", "ok": false, "durationMs": 1001 }
+  ]
+}
+```
+
+The failure's *reason* is deliberately absent from the body and goes to the log
+instead (`readiness_probe_failed`, with the full per-check detail). A driver
+error reads `connect ECONNREFUSED 10.0.3.14:6379` — an internal host and port —
+and this endpoint is unauthenticated because an orchestrator has no credentials
+to present. Set `includeErrorDetail: true` on `createReadinessRouter` only when
+the endpoint is reachable solely from inside the deployment.
+
+For the same reason, keep `/readyz` off the public listener. It sits ahead of
+the auth router, so it is outside that router's rate limiter, and each request
+issues one command per probe against the very dependency it reports on —
+enough for an anonymous request loop to add load during an incident. Bind it to
+the internal network, an admin listener, or your ingress' internal-only path
+rules.
+
+Probes are registered by whichever builder opened the connection, so the list
+reflects what this deployment actually wired: the shared ioredis client
+(`redis`) and the connect-redis session client (`session-store`) when the
+Redis adapters are selected, and **nothing at all** for a memory-only
+deployment — which is therefore always ready, because it has no dependency to
+be unready for.
+
+`http.readinessTimeoutMs` (env `HTTP_READINESS_TIMEOUT_MS`, default `1000`)
+is the per-probe deadline. Keep it below the orchestrator's own probe timeout;
+otherwise an unreachable dependency reads as a slow replica rather than an
+unready one.
 
 ## Adding Custom Modules
 

@@ -15,7 +15,13 @@
  */
 import { fileURLToPath } from "node:url";
 import { gracefulShutdown } from "@o3co/auth.utils";
-import { type AppConfig, AppConfigSchema, createApp } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	AppConfigSchema,
+	createApp,
+	createHealthcheckRouter,
+	createReadinessRouter,
+} from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
@@ -80,11 +86,28 @@ await (async (): Promise<void> => {
 		},
 	});
 
-	// Step 4: Wire host-level routes (healthcheck) before the auth router so
-	// they remain reachable even when the auth pipeline is degraded.
-	app.get("/_healthcheck", (_req, res) => {
-		res.status(200).json({ status: "ok" });
-	});
+	// Step 4: Wire host-level routes before the auth router so they remain
+	// reachable even when the auth pipeline is degraded — which is exactly when
+	// an operator needs an answer from them.
+	//
+	// Liveness: the process is up and its event loop is turning. Deliberately
+	// static — restarting the process would not bring Redis back, so a Redis
+	// outage must not read as "this container is broken, kill it".
+	app.use(createHealthcheckRouter(express));
+
+	// Readiness: can this replica serve right now? Redis backs sessions,
+	// authorization codes and refresh-token families in the deployable
+	// defaults, so a replica that has lost it answers 503 here and should be
+	// taken out of rotation. Probes are contributed by the builders that own
+	// each connection; a memory-only deployment registers none and is always
+	// ready.
+	app.use(
+		createReadinessRouter(express, {
+			probes: handle.readinessProbes,
+			timeoutMs: config.http.readinessTimeoutMs,
+			logger,
+		}),
+	);
 
 	// Step 5: Mount the composed auth router and start the HTTP server.
 	app.use(handle.router);
