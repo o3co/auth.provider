@@ -191,6 +191,45 @@ describe("runReadinessProbes", () => {
 		}
 	});
 
+	it("describes a non-Error rejection without losing it", async () => {
+		// Drivers do not always reject with an Error — a string or a plain object
+		// is common enough, and the endpoint must still name the failure.
+		const report = await runReadinessProbes(
+			[{ name: "redis", check: () => Promise.reject("CONNECTION_BROKEN") }],
+			{ timeoutMs: 100 },
+		);
+
+		expect(report.ready).toBe(false);
+		expect(report.checks[0]?.error).toBe("CONNECTION_BROKEN");
+	});
+
+	it("does not evict a newer check when a slower predecessor settles", async () => {
+		// The in-flight entry is keyed by probe name, so a late settle must clear
+		// only its own entry — otherwise it would drop the check a subsequent
+		// scrape had already started, and that scrape's successor would issue a
+		// duplicate command.
+		let release: (() => void) | undefined;
+		const slow = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const inFlight = new Map<string, Promise<unknown>>();
+		const probes = [{ name: "redis", check: () => slow }];
+
+		// First scrape times out; `slow` stays in the map.
+		await runReadinessProbes(probes, { timeoutMs: 5, inFlight });
+		expect(inFlight.get("redis")).toBe(slow);
+
+		// A newer entry lands under the same name.
+		const newer = Promise.resolve("PONG");
+		inFlight.set("redis", newer);
+
+		release?.();
+		await slow;
+		await Promise.resolve();
+
+		expect(inFlight.get("redis")).toBe(newer);
+	});
+
 	it("leaves no armed timer behind after a probe resolves", async () => {
 		// A timer left armed keeps the event loop alive; on an endpoint scraped
 		// every few seconds that is a leak proportional to probe rate, and it
