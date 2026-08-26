@@ -15,38 +15,46 @@
  */
 
 import type { Request, Response, Router } from "express";
+import type { EventLogger } from "../logging/Logger.mjs";
 import { runReadinessProbes } from "../readiness/run.mjs";
 import type { ReadinessProbe } from "../readiness/types.mjs";
 
-/** The one logging call this route makes. See {@link ReadinessRouterOptions.logger}. */
-export interface ReadinessLogger {
-	warn(obj: Record<string, unknown>, msg: string): void;
-}
-
 export interface ReadinessRouterOptions {
-	/**
-	 * The probes to run. Read on every request rather than captured, so a
-	 * registrar still collecting probes during boot can be passed directly.
-	 */
+	/** The probes to run, in registration order. */
 	readonly probes: readonly ReadinessProbe[];
-	/** Per-probe deadline in milliseconds. Defaults to 1000. */
-	readonly timeoutMs?: number;
 	/**
-	 * When wired, an unready result is logged at warn with the failing checks.
-	 *
-	 * Typed as the single call this route makes rather than as the full
-	 * {@link Logger}. Readiness is what an operator reaches for while things
-	 * are already broken; requiring a logger to also carry `trace` / `fatal` /
-	 * `child` to be accepted here would make the endpoint the hardest thing in
-	 * the app to wire, and both `Logger` and the leaner logger the standalone
-	 * template ships satisfy this shape.
+	 * Per-probe deadline in milliseconds. Required rather than defaulted: the
+	 * right value depends on the orchestrator's own probe timeout, which only
+	 * the composition root knows, and a default here would be a second place
+	 * for that number to live.
 	 */
-	readonly logger?: ReadinessLogger;
+	readonly timeoutMs: number;
+	/**
+	 * When wired, an unready result is logged at warn with the failing checks
+	 * — including each failure's message, which the response body omits.
+	 *
+	 * Typed as {@link EventLogger} rather than `Logger`: readiness is what an
+	 * operator reaches for while things are already broken, and it should not
+	 * be the endpoint that is hardest to wire.
+	 */
+	readonly logger?: EventLogger;
 	/** Route path. Defaults to `/readyz`. */
 	readonly path?: string;
+	/**
+	 * Include each failing probe's error message in the response body.
+	 * Defaults to `false`.
+	 *
+	 * This endpoint is unauthenticated by design — an orchestrator has no
+	 * credentials — and probe failures carry text straight from the driver:
+	 * `connect ECONNREFUSED 10.0.3.14:6379` names an internal host and port.
+	 * On an identity provider that is a free map of the backend network for
+	 * anyone who can reach the pod. The failing dependency's *name* is what a
+	 * probe consumer needs; the message goes to the log, where the operator
+	 * reading it has already authenticated. Turn this on only when the
+	 * endpoint is reachable solely from inside the deployment.
+	 */
+	readonly includeErrorDetail?: boolean;
 }
-
-const DEFAULT_TIMEOUT_MS = 1000;
 
 /**
  * Readiness endpoint — answers whether this replica can currently serve.
@@ -65,22 +73,29 @@ export function createRouter(
 	opts: ReadinessRouterOptions,
 ): Router {
 	const router = express.Router();
-	const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+	const includeErrorDetail = opts.includeErrorDetail === true;
 
 	router.get(opts.path ?? "/readyz", async (_req: Request, res: Response) => {
-		const report = await runReadinessProbes(opts.probes, { timeoutMs });
+		const report = await runReadinessProbes(opts.probes, { timeoutMs: opts.timeoutMs });
 
 		// An orchestrator polls this; a cached "ready" would outlive the outage
 		// it describes.
 		res.setHeader("Cache-Control", "no-store");
 
 		if (!report.ready) {
+			// The log keeps the full detail the body drops — the operator reading
+			// it is already inside the deployment.
 			opts.logger?.warn({ checks: report.checks.filter((c) => !c.ok) }, "readiness_probe_failed");
 		}
 
 		res.status(report.ready ? 200 : 503).json({
 			status: report.ready ? "ready" : "unready",
-			checks: report.checks,
+			checks: report.checks.map(({ name, ok, durationMs, error }) => ({
+				name,
+				ok,
+				durationMs,
+				...(includeErrorDetail && error !== undefined ? { error } : {}),
+			})),
 		});
 	});
 

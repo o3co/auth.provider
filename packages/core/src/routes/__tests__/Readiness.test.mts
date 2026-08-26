@@ -16,12 +16,12 @@
 
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/Readiness.mjs";
 
-function buildApp(opts: Parameters<typeof createRouter>[1]) {
+function buildApp(opts: Omit<Parameters<typeof createRouter>[1], "timeoutMs">) {
 	const app = express();
-	app.use(createRouter(express, opts));
+	app.use(createRouter(express, { timeoutMs: 100, ...opts }));
 	return app;
 }
 
@@ -55,7 +55,57 @@ describe("GET /readyz", () => {
 		expect(res.body.status).toBe("unready");
 		const failed = res.body.checks.find((c: { name: string }) => c.name === "session-store");
 		expect(failed.ok).toBe(false);
-		expect(failed.error).toContain("ECONNREFUSED");
+	});
+
+	it("keeps the driver's error message out of the response body by default", async () => {
+		// The endpoint is unauthenticated by design, and a driver error names
+		// the internal host and port it failed to reach.
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const app = buildApp({
+			logger,
+			probes: [
+				{
+					name: "redis",
+					check: async () => {
+						throw new Error("connect ECONNREFUSED 10.0.3.14:6379");
+					},
+				},
+			],
+		});
+
+		const res = await request(app).get("/readyz");
+
+		expect(res.status).toBe(503);
+		expect(res.body.checks[0]).toEqual({
+			name: "redis",
+			ok: false,
+			durationMs: expect.any(Number),
+		});
+		expect(JSON.stringify(res.body)).not.toContain("10.0.3.14");
+
+		// The detail is not discarded — it goes where the reader is authenticated.
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		const [payload, msg] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(msg).toBe("readiness_probe_failed");
+		expect(JSON.stringify(payload)).toContain("10.0.3.14");
+	});
+
+	it("includes the error message when the operator opts in", async () => {
+		const app = buildApp({
+			includeErrorDetail: true,
+			probes: [
+				{
+					name: "redis",
+					check: async () => {
+						throw new Error("connect ECONNREFUSED 10.0.3.14:6379");
+					},
+				},
+			],
+		});
+
+		const res = await request(app).get("/readyz");
+
+		expect(res.body.checks[0].error).toContain("10.0.3.14");
 	});
 
 	it("answers 200 when nothing registered a probe", async () => {
@@ -72,24 +122,22 @@ describe("GET /readyz", () => {
 		expect(res.headers["cache-control"]).toBe("no-store");
 	});
 
-	it("reads probes at request time so a late registration is still seen", async () => {
-		// Probes are registered by builders during boot, and the route may be
-		// constructed from a live registrar rather than a settled array.
-		const probes: Array<{ name: string; check: () => Promise<unknown> }> = [];
-		const app = buildApp({ probes });
-
-		const before = await request(app).get("/readyz");
-		expect(before.body.checks).toEqual([]);
-
-		probes.push({
-			name: "late",
-			check: async () => {
-				throw new Error("down");
-			},
+	it("re-runs every probe per request rather than caching the first verdict", async () => {
+		// Readiness is a question about *now*. A route that answered from a
+		// boot-time verdict would keep reporting ready through the outage it
+		// exists to detect.
+		let healthy = true;
+		const check = vi.fn(async () => {
+			if (!healthy) throw new Error("down");
+			return "PONG";
 		});
+		const app = buildApp({ probes: [{ name: "redis", check }] });
 
-		const after = await request(app).get("/readyz");
-		expect(after.status).toBe(503);
-		expect(after.body.checks).toHaveLength(1);
+		expect((await request(app).get("/readyz")).status).toBe(200);
+		healthy = false;
+		expect((await request(app).get("/readyz")).status).toBe(503);
+		healthy = true;
+		expect((await request(app).get("/readyz")).status).toBe(200);
+		expect(check).toHaveBeenCalledTimes(3);
 	});
 });

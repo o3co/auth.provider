@@ -18,6 +18,7 @@ import { readFileSync } from "node:fs";
 import {
 	type AppConfig,
 	createApp,
+	createHealthcheckRouter,
 	createKeyStoreFactory,
 	createReadinessRouter,
 	defineModule,
@@ -174,9 +175,7 @@ describe("standalone smoke test", () => {
 		});
 
 		const app = express();
-		app.get("/_healthcheck", (_req, res) => {
-			res.status(200).json({ status: "ok" });
-		});
+		app.use(createHealthcheckRouter(express));
 		app.use(
 			createReadinessRouter(express, {
 				probes: handle.readinessProbes,
@@ -213,7 +212,7 @@ describe("standalone smoke test", () => {
 		// `[$]` (character class) sidesteps biome's `noTemplateCurlyInString`
 		// false-positive without changing what we actually accept.
 		expect(dockerfile).toMatch(
-			/CMD\s+wget\s+-q\s+-O\s+\/dev\/null\s+"http:\/\/localhost:[$]\{HTTP_PORT\}\/readyz"\s+\|\|\s+exit\s+1/,
+			/CMD\s+wget\s+-q\s+-O\s+\/dev\/null\s+"http:\/\/localhost:[$]\{HTTP_PORT\}\/_healthcheck"\s+\|\|\s+exit\s+1/,
 		);
 		expect(dockerfile).toMatch(/FROM node-base AS deps[\s\S]*USER node[\s\S]*RUN pnpm install/);
 		expect(dockerfile).toMatch(/FROM deps AS builder[\s\S]*USER node[\s\S]*RUN pnpm run build/);

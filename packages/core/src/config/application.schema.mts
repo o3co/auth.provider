@@ -278,7 +278,15 @@ export const CoreConfigSchema = z.object({
 		// the orchestrator's probe timeout, or a partitioned dependency reads
 		// as a slow replica rather than an unready one. Shape-only; default
 		// lives in HOCON.
-		readinessTimeoutMs: z.coerce.number(),
+		//
+		// `.positive()` is load-bearing, not decoration. HOCON substitutes an
+		// empty environment variable as `""` — a very common shape in a .env
+		// file, a compose `environment:` entry, or a ConfigMap key left blank —
+		// and `z.coerce.number()` turns `""` into `0`. `setTimeout` clamps 0 to
+		// 1ms, so every probe against a perfectly healthy Redis would time out
+		// and the replica would answer 503 forever, draining all traffic with
+		// nothing actually wrong. Failing boot loudly is the right outcome.
+		readinessTimeoutMs: z.coerce.number().int().positive(),
 	}),
 	oauth: z.object({
 		jwt: jwtSchema,

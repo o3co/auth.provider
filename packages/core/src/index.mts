@@ -188,7 +188,7 @@ export {
 } from "./keys/KeyStore.mjs";
 export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";
 // Logging
-export type { Logger } from "./logging/Logger.mjs";
+export type { EventLogger, Logger } from "./logging/Logger.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";
 export type { MfaRouteDeps } from "./mfa/route.mjs";
 export { createMfaRouter } from "./mfa/route.mjs";
@@ -322,10 +322,13 @@ export type {
 	User,
 } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
+export {
+	createRouter as createHealthcheckRouter,
+	type HealthcheckRouterOptions,
+} from "./routes/Healthcheck.mjs";
 export { createRouter as createJwksRouter, type JwksRouterOptions } from "./routes/Jwks.mjs";
 export {
 	createRouter as createReadinessRouter,
-	type ReadinessLogger,
 	type ReadinessRouterOptions,
 } from "./routes/Readiness.mjs";
 export {

@@ -19,6 +19,7 @@ import {
 	type AppConfig,
 	AppConfigSchema,
 	createApp,
+	createHealthcheckRouter,
 	createReadinessRouter,
 } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
@@ -92,9 +93,7 @@ await (async (): Promise<void> => {
 	// Liveness: the process is up and its event loop is turning. Deliberately
 	// static — restarting the process would not bring Redis back, so a Redis
 	// outage must not read as "this container is broken, kill it".
-	app.get("/_healthcheck", (_req, res) => {
-		res.status(200).json({ status: "ok" });
-	});
+	app.use(createHealthcheckRouter(express));
 
 	// Readiness: can this replica serve right now? Redis backs sessions,
 	// authorization codes and refresh-token families in the deployable

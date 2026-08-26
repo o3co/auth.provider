@@ -37,12 +37,12 @@ export interface ReadinessProbe {
 }
 
 /**
- * Passed to adapter builders via {@link BuilderContext.readiness}. Builders
+ * Passed to adapter builders via `BuilderContext.readiness`. Builders
  * that open a connection SHOULD register a probe for it:
  *
  *     ctx.readiness?.register({ name: "redis", check: () => client.ping() })
  *
- * Mirrors {@link LifecycleRegistrar}: the boot planner owns the instance and
+ * Mirrors `LifecycleRegistrar`: the boot planner owns the instance and
  * seeds it as the `readinessRegistrar` bootstrap component, so a builder
  * reached through a module that declares `optional: ["readinessRegistrar"]`
  * receives it. Always use optional chaining — a factory constructed outside

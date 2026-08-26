@@ -11,6 +11,7 @@ test first).
 ## Contents
 
 - [Writing a new token-binding mechanism](#writing-a-new-token-binding-mechanism)
+- [Writing an adapter builder that opens a connection](#writing-an-adapter-builder-that-opens-a-connection)
 
 ---
 
@@ -175,3 +176,118 @@ around merging.
   the v0.7 `grantMiddleware` migration note
 - Reference implementations: `packages/dpop` (explicit), `packages/mtls`
   (ambient)
+
+---
+
+## Writing an adapter builder that opens a connection
+
+Three things belong in a builder that dials something — a Redis client, a
+database pool, anything holding a socket. All three are easy to leave out, none
+of them fail loudly, and each has already shipped as a production incident.
+
+```ts
+factory.register("redis", async (config, ctx) => {
+  const client = createClient({ url });
+
+  // 1. Error listener, BEFORE connect().
+  client.on("error", (err) => logger.error({ err }, "session_store_redis_error"));
+
+  await client.connect();
+
+  // 2. Cleanup.
+  ctx.lifecycle?.register(async () => { await client.quit(); });
+
+  // 3. Readiness probe.
+  ctx.readiness?.register({ name: "session-store", check: () => client.ping() });
+
+  return wrap(client);
+});
+```
+
+### 1. Attach the `error` listener before connecting
+
+Both node-redis and ioredis emit `error` on socket failures — including while
+they are happily auto-reconnecting — and an EventEmitter `error` with no
+listener **throws and takes the process down**. Redis is load-bearing for
+sessions, codes, and refresh-token families in the deployable defaults, so a
+failover blip crashed the identity provider.
+
+Before `connect()`, not after: a connection that fails during the handshake
+emits while `connect()` is still in flight, which is exactly the flapping
+backend this guards against.
+
+The listener's job is to make the event *observed*, not to implement retry —
+the driver already does that. Log it as a named structured event and move on.
+
+**This applies to connections you derive, too.** `ioredis.duplicate()` copies
+options but **not** listeners, so a duplicate starts with zero. If your wrapper
+opens a connection the caller never sees, the wrapper owns its listener.
+
+### 2. Register cleanup on `ctx.lifecycle`
+
+`AppHandle.dispose()` drains these in LIFO order. Without one, the connection
+outlives the app and shutdown hangs on an open handle.
+
+Disposal must never be the thing that fails. Wrap a `quit()` that can reject:
+
+```ts
+ctx.lifecycle?.register(async () => {
+  try { await client.quit(); } catch { client.disconnect(); }
+});
+```
+
+A rejecting disposal on an `await using` binding surfaces as a `SuppressedError`
+that hides the real error, and can report failure for work that already
+committed.
+
+### 3. Register a readiness probe on `ctx.readiness`
+
+The builder is the only place holding the connection: the adapter you return
+exposes a narrow command surface with no `ping`, deliberately. Skip this and
+`/readyz` answers `200` while your backend is unreachable — a failure that
+looks exactly like success.
+
+- `name` identifies the **resource**, not the module: `redis`, `session-store`,
+  `database`. It appears in the readiness response body, so it is a public
+  name.
+- `check` resolves when reachable and throws when not. The return value is
+  ignored; only settlement matters.
+- **One probe per connection.** Six adapters sharing one socket get one probe —
+  register where the connection is constructed, not in each consumed slot.
+- Use optional chaining. A factory constructed outside the boot planner (unit
+  tests) receives `{}` as its context.
+
+Modules forwarding these declare them optional and pass both through:
+
+```ts
+optional: ["lifecycleRegistrar", "readinessRegistrar"],
+// …
+const ctx: BuilderContext = {
+  lifecycle: deps.lifecycleRegistrar,
+  readiness: deps.readinessRegistrar,
+};
+```
+
+### Test the forwarding, not just the builder
+
+The memory adapter registers nothing, so a test that exercises it passes
+whether or not the module forwards the registrars. Delete
+`readiness: deps.readinessRegistrar` and a suite covering only the memory path
+stays green while the probe silently disappears. Cover the connecting adapter
+with the driver mocked, and assert the probe arrives.
+
+### Checklist
+
+- [ ] `error` listener attached **before** `connect()`, logging a named event
+- [ ] Listener attached to connections the wrapper derives (`duplicate()`)
+- [ ] `ctx.lifecycle?.register` for cleanup, and the cleanup cannot reject
+- [ ] `ctx.readiness?.register` with a resource-named probe
+- [ ] One probe per connection, not per consumed slot
+- [ ] The forwarding module declares both registrars in `optional`
+- [ ] A test that fails if the forwarding is removed
+
+### Reference
+
+- ADR: `packages/core/docs/adr/2026-08-26-readiness-probes-registered-by-connection-owners.md`
+- Reference implementations: `packages/session/src/store/factory.mts` (node-redis),
+  `templates/standalone/src/modules.mts` `getOrCreateClients` (shared ioredis)

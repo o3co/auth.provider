@@ -44,6 +44,34 @@ const minimalCoreConfig = {
 	},
 };
 
+describe("CoreConfigSchema http.readinessTimeoutMs", () => {
+	// HOCON substitutes an unset-but-present environment variable as "", and
+	// z.coerce.number() turns "" into 0. setTimeout clamps 0 to 1ms, so a
+	// deployment that shipped HTTP_READINESS_TIMEOUT_MS= (blank) would answer
+	// /readyz with 503 forever against a perfectly healthy Redis. Boot has to
+	// reject it rather than silently drain every replica.
+	it.each([
+		["empty string (blank env var)", ""],
+		["zero", 0],
+		["negative", -1],
+		["fractional", 1.5],
+	])("rejects %s", (_label, value) => {
+		const result = CoreConfigSchema.safeParse({
+			...minimalCoreConfig,
+			http: { ...minimalCoreConfig.http, readinessTimeoutMs: value },
+		});
+		expect(result.success).toBe(false);
+	});
+
+	it("accepts a positive integer supplied as a string, as HOCON env substitution produces", () => {
+		const result = CoreConfigSchema.safeParse({
+			...minimalCoreConfig,
+			http: { ...minimalCoreConfig.http, readinessTimeoutMs: "250" },
+		});
+		expect(result.success).toBe(true);
+	});
+});
+
 describe("CoreConfigSchema", () => {
 	it("validates minimal core config (just http + oauth)", () => {
 		const result = CoreConfigSchema.safeParse(minimalCoreConfig);

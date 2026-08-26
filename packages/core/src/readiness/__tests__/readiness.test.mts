@@ -85,22 +85,34 @@ describe("runReadinessProbes", () => {
 		expect(report.checks[0]?.error).toContain("timed out");
 	});
 
-	it("runs probes concurrently so total latency is bounded by the slowest", async () => {
-		const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-		const started = Date.now();
+	it("runs probes concurrently rather than one after another", async () => {
+		// Asserted by overlap, not by wall-clock: all three probes must be
+		// in flight at the same moment. A duration bound would be a coin flip
+		// under CI load.
+		let inFlight = 0;
+		let peak = 0;
+		const release: Array<() => void> = [];
+		const probe = (name: string) => ({
+			name,
+			check: () =>
+				new Promise<void>((resolve) => {
+					inFlight++;
+					peak = Math.max(peak, inFlight);
+					release.push(() => {
+						inFlight--;
+						resolve();
+					});
+				}),
+		});
 
-		const report = await runReadinessProbes(
-			[
-				{ name: "a", check: () => delay(40) },
-				{ name: "b", check: () => delay(40) },
-				{ name: "c", check: () => delay(40) },
-			],
-			{ timeoutMs: 500 },
-		);
+		const pending = runReadinessProbes([probe("a"), probe("b"), probe("c")], {
+			timeoutMs: 500,
+		});
+		await Promise.resolve();
+		expect(peak).toBe(3);
 
-		expect(report.ready).toBe(true);
-		// Sequential execution would need ~120ms; allow generous headroom.
-		expect(Date.now() - started).toBeLessThan(110);
+		for (const r of release) r();
+		expect((await pending).ready).toBe(true);
 	});
 
 	it("keeps one failing probe from masking the others", async () => {
@@ -120,15 +132,21 @@ describe("runReadinessProbes", () => {
 		expect(report.checks.map((c) => `${c.name}:${c.ok}`)).toEqual(["a:false", "b:true"]);
 	});
 
-	it("does not leave a pending timer behind after a probe resolves", async () => {
-		// A timer left armed keeps the event loop alive; on a probe running per
-		// scrape that is a leak proportional to probe rate.
-		const clearSpy = vi.spyOn(globalThis, "clearTimeout");
-		const before = clearSpy.mock.calls.length;
-
-		await runReadinessProbes([{ name: "redis", check: async () => "PONG" }], { timeoutMs: 100 });
-
-		expect(clearSpy.mock.calls.length).toBeGreaterThan(before);
-		clearSpy.mockRestore();
+	it("leaves no armed timer behind after a probe resolves", async () => {
+		// A timer left armed keeps the event loop alive; on an endpoint scraped
+		// every few seconds that is a leak proportional to probe rate, and it
+		// delays process exit at shutdown. Asserted on the timer count rather
+		// than on clearTimeout being called, so an implementation that avoids
+		// the timer entirely also passes.
+		vi.useFakeTimers();
+		try {
+			const before = vi.getTimerCount();
+			await runReadinessProbes([{ name: "redis", check: async () => "PONG" }], {
+				timeoutMs: 100,
+			});
+			expect(vi.getTimerCount()).toBe(before);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
