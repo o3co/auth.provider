@@ -1694,6 +1694,218 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 	});
 });
 
+// ---------------------------------------------------------------------------
+// #259 — access/refresh token `sub` binds to the code's UserSession
+//
+// The token endpoint is a back-channel call for confidential clients: it
+// carries no end-user cookie, so `ctx.session.user` is undefined there. The
+// subject therefore has to come from the `UserSession` the code points at via
+// `sid` — the same source the id_token already uses — with `ctx.session.user`
+// left as the fallback only for deployments that wire no session store.
+// ---------------------------------------------------------------------------
+
+describe("#259 — AT/RT subject derives from the code-bound UserSession", () => {
+	const ISSUER = "https://auth.example.com";
+	const configWithIssuer = {
+		oauth: {
+			jwt: { secret: "test-secret", issuer: ISSUER },
+			accessToken: { expiresIn: 3600 },
+			refreshToken: { expiresIn: 86400 },
+			grants: {
+				session: { enabled: true },
+				authorization_code: { enabled: true },
+				refresh_token: { enabled: true },
+			},
+		},
+	} as unknown as GrantDependencies["config"];
+
+	function makeStore(sid: string, sub: string) {
+		return {
+			kind: "spy",
+			async create() {},
+			async get(querySid: string) {
+				if (querySid !== sid) return null;
+				return {
+					sid,
+					sub,
+					authTime: new Date("2026-04-21T00:00:00Z"),
+					createdAt: new Date(),
+					expiresAt: new Date(Date.now() + 3600_000),
+					claims: {},
+				};
+			},
+			async delete() {},
+		};
+	}
+
+	it("issues a sub on a cookie-less back-channel code exchange", async () => {
+		const deps = {
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
+			config: configWithIssuer,
+			userSessionStore: makeStore("sid-259", "u-259"),
+			sessionFamilyIndex: makeSessionFamilyIndex(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+		};
+		const handler = createAuthorizationGrant(deps);
+
+		// No `user` key: the confidential-client /token request carries no cookie.
+		const { result } = await handler.handle({
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			session: { code: "abc", code_client_id: "client1" },
+			issuer: ISSUER,
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		expect(decodeJwt(result.tokens.access_token).sub).toBe("u-259");
+		expect(decodeJwt(result.tokens.refresh_token as string).sub).toBe("u-259");
+	});
+
+	it("prefers the code-bound session when the request session names another user", async () => {
+		const deps = {
+			...makeDeps(
+				vi.fn().mockResolvedValue({
+					code: "abc",
+					sid: "sid-259",
+					grantedScope: ["openid"],
+					...validCode,
+				}),
+			),
+			config: configWithIssuer,
+			userSessionStore: makeStore("sid-259", "u-259"),
+			sessionFamilyIndex: makeSessionFamilyIndex(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+		};
+		const handler = createAuthorizationGrant(deps);
+
+		// Same-origin/BFF topology where /token does carry a cookie, and the
+		// browser session moved to a different user between /authorize and /token.
+		const { result } = await handler.handle({
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			session: { code: "abc", code_client_id: "client1", user: { id: "other-user" } },
+			issuer: ISSUER,
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		const idToken = result.tokens.id_token;
+		if (typeof idToken !== "string") throw new Error("expected id_token");
+
+		// All three tokens agree, and none of them names the request session's user.
+		expect(decodeJwt(result.tokens.access_token).sub).toBe("u-259");
+		expect(decodeJwt(result.tokens.refresh_token as string).sub).toBe("u-259");
+		expect(decodeJwt(idToken).sub).toBe("u-259");
+	});
+
+	it("refuses when the session's subject changes between the two store reads", async () => {
+		// The AT/RT are signed from the first read and the id_token from the
+		// re-check. A store that answered with a different subject for the same
+		// sid would hand back tokens that disagree about who the user is — which
+		// is the confusion this whole subject handling exists to prevent.
+		let call = 0;
+		const store = {
+			kind: "spy",
+			async create() {},
+			async get() {
+				call++;
+				return {
+					sid: "sid-259",
+					sub: call === 1 ? "u-259" : "someone-else",
+					authTime: new Date("2026-04-21T00:00:00Z"),
+					createdAt: new Date(),
+					expiresAt: new Date(Date.now() + 3600_000),
+					claims: {},
+				};
+			},
+			async delete() {},
+		};
+		const sessionFamilyIndex = makeSessionFamilyIndex();
+		const deps = {
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
+			config: configWithIssuer,
+			userSessionStore: store,
+			sessionFamilyIndex,
+			sessionRPRegistry: makeSessionRPRegistry(),
+		};
+
+		const { result } = await createAuthorizationGrant(deps).handle({
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			session: { code: "abc", code_client_id: "client1" },
+			issuer: ISSUER,
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+
+		expect(result.status).toBe(400);
+		if (!("error" in result)) throw new Error("expected error");
+		expect(result.error).toBe("invalid_grant");
+		// Nothing is linked to a session whose identity we could not agree on.
+		expect(sessionFamilyIndex.addFamilyId).not.toHaveBeenCalled();
+	});
+
+	it("refuses when a wired store returns a record with no usable sub", async () => {
+		// Gating the request-session fallback on `sub` being nullish rather than
+		// on the store being absent would silently revert to the cookie-derived
+		// identity here — the cross-user mismatch this fix removes.
+		const store = {
+			kind: "spy",
+			async create() {},
+			async get() {
+				return {
+					sid: "sid-259",
+					sub: undefined as unknown as string,
+					authTime: new Date("2026-04-21T00:00:00Z"),
+					createdAt: new Date(),
+					expiresAt: new Date(Date.now() + 3600_000),
+					claims: {},
+				};
+			},
+			async delete() {},
+		};
+		const deps = {
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-259", ...validCode })),
+			config: configWithIssuer,
+			userSessionStore: store,
+			sessionFamilyIndex: makeSessionFamilyIndex(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+		};
+
+		const { result } = await createAuthorizationGrant(deps).handle({
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			// A cookie IS present and names a different user — the BFF topology.
+			session: { code: "abc", code_client_id: "client1", user: { id: "cookie-user" } },
+			issuer: ISSUER,
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+
+		expect(result.status).toBe(400);
+		if (!("error" in result)) throw new Error("expected error");
+		expect(result.error).toBe("invalid_grant");
+	});
+
+	it("falls back to the request session when no session store is wired", async () => {
+		const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
+		const handler = createAuthorizationGrant(deps);
+
+		const { result } = await handler.handle({
+			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			session: { code: "abc", code_client_id: "client1", user: { id: "u-legacy" } },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens");
+		expect(decodeJwt(result.tokens.access_token).sub).toBe("u-legacy");
+	});
+});
+
 // F6 coverage boost — patch lines for PR #126 (IH-13 + SF-3 + IH-16 + TS-4)
 // that are reachable but were not exercised by the original test suite.
 // Each test pins both status code AND errorDescription so a future refactor
