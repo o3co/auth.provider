@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { Logger } from "../logging/Logger.mjs";
 import type { ReadinessRegistrar } from "../readiness/types.mjs";
 
 /**
@@ -74,6 +75,19 @@ export interface BuilderContext {
 	 * {@link BuilderContext.lifecycle}.
 	 */
 	readiness?: ReadinessRegistrar;
+	/**
+	 * Structured logger provided by the boot planner from the optional
+	 * `logger` ComponentMap slot. Builders that attach an `error` listener to
+	 * a connection they open report through it:
+	 *
+	 *     client.on("error", (err) => ctx.logger?.error({ err }, "…_error"))
+	 *
+	 * Same channel as `lifecycle` and `readiness` on purpose: a builder that
+	 * opens a connection owns its cleanup, its probe, and its error listener,
+	 * and having those three arrive by three different routes is how one of
+	 * them gets forgotten. Falls back to `consoleLogger` when absent.
+	 */
+	logger?: Logger;
 }
 
 /**

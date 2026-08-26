@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { createHash } from "node:crypto";
+import { consoleLogger, type EventLogger } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import type {
 	ChallengeStoreClient,
@@ -82,8 +83,24 @@ let scriptCached = false;
  * spreading.
  *
  * Per Phase 10 addendum §3.
+ *
+ * @param options.logger — where errors from connections this wrapper opens
+ *   itself (see `refreshTokenFamilyClient.duplicate()`) are reported. Defaults
+ *   to `consoleLogger`. Typed as `EventLogger` rather than `Logger` because
+ *   composition roots pass their host logger here, and a logger without
+ *   `trace` / `fatal` / `child` cannot satisfy `Logger`. The connection passed
+ *   in as `io` stays the caller's responsibility — they own its lifetime and
+ *   its listeners; see the README for the listener it needs.
  */
-export function makeIoredisClients(io: Redis): {
+export interface IoredisClientsOptions {
+	/** See {@link makeIoredisClients}. */
+	readonly logger?: EventLogger;
+}
+
+export function makeIoredisClients(
+	io: Redis,
+	options: IoredisClientsOptions = {},
+): {
 	challengeStoreClient: ChallengeStoreClient;
 	replaySeenSetClient: ReplaySeenSetClient;
 	refreshTokenFamilyClient: RefreshTokenFamilyClient;
@@ -95,6 +112,8 @@ export function makeIoredisClients(io: Redis): {
 	rateLimiterClient: RateLimiterClient;
 	codeRepositoryClient: CodeRepositoryClient;
 } {
+	const logger = options.logger ?? consoleLogger;
+
 	const challengeStoreClient: ChallengeStoreClient = {
 		set: (k, v, _mode, ttl, _cond) => io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>,
 		pttl: (k) => io.pttl(k),
@@ -117,11 +136,37 @@ export function makeIoredisClients(io: Redis): {
 		multi: () => buildRefreshMulti(underlying.multi()),
 		duplicate: () => {
 			const dup = underlying.duplicate();
+			// ioredis `duplicate()` copies options but NOT event listeners, so a
+			// fresh duplicate starts with zero `error` listeners — and an
+			// EventEmitter `error` with none throws, taking the process down.
+			// One of these is opened per refresh rotation, so a socket blip on
+			// any short-lived duplicate crashed the provider. The parent
+			// connection is the caller's to instrument; this one is ours,
+			// because it never leaves this wrapper.
+			dup.on("error", (err: unknown) => {
+				logger.error({ err }, "redis_duplicate_connection_error");
+			});
 			const inner = buildRefreshClient(dup);
 			const disposable: DisposableRefreshTokenFamilyClient = {
 				...inner,
 				[Symbol.asyncDispose]: async () => {
-					await dup.quit();
+					// Disposal must never be the thing that fails. This runs on an
+					// `await using` binding around a refresh rotation: if `quit()`
+					// rejects after the rotation already committed, the grant reports
+					// failure for committed work, the client retries with the old
+					// refresh token, replay detection fires, and the whole family is
+					// revoked — the user is forced to re-login. And if the body
+					// already threw, a rejecting disposal wraps it in a
+					// SuppressedError that hides the original.
+					//
+					// `disconnect()` tears the socket down synchronously and does not
+					// reject, so it is the correct fallback for a connection that is
+					// already gone.
+					try {
+						await dup.quit();
+					} catch {
+						dup.disconnect();
+					}
 				},
 			};
 			return disposable;

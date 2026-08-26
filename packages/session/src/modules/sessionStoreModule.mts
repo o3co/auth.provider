@@ -48,12 +48,14 @@ const sessionStoreConfigSchema = fullSectionsSchema.pick({
  */
 export const sessionStoreModule = defineModule<
 	"config",
-	"lifecycleRegistrar" | "readinessRegistrar"
+	"lifecycleRegistrar" | "readinessRegistrar" | "logger"
 >({
 	name: "sessionStoreModule",
 	configSchema: sessionStoreConfigSchema,
 	requires: ["config"],
-	optional: ["lifecycleRegistrar", "readinessRegistrar"],
+	// `logger` is optional (D-4): the redis client's error handler falls back
+	// to consoleLogger when the composition wires no logger slot.
+	optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
 	contributes: {
 		routes: [
 			async (deps) => {
@@ -61,6 +63,7 @@ export const sessionStoreModule = defineModule<
 				const ctx: BuilderContext = {
 					lifecycle: deps.lifecycleRegistrar,
 					readiness: deps.readinessRegistrar,
+					logger: deps.logger,
 				};
 				const factory = createSessionStoreFactory(ctx);
 				registerBuiltinSessionStores(factory);

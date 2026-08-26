@@ -46,6 +46,8 @@ import { extractFederationSection } from "@o3co/auth-provider-session";
 // with strict nodenext, so the named import is the right shape here.
 import { Redis } from "ioredis";
 
+import logger from "#/logger.mjs";
+
 /**
  * Helper: turn a v0.4.x { type, [type]: {...} } adapter-config slice into the
  * flat `{ type, ...rest }` shape consumed by AdapterFactory<T>.create().
@@ -352,13 +354,11 @@ function getOrCreateClients(
 	// flip does not silently change the failure mode.
 	const io = new Redis(cfg.url, { password, lazyConnect: false });
 
-	// Attach error handler so unhandled "error" events from ioredis 5.x do
-	// not crash the Node.js process. Initial connection failures surface
-	// here; downstream adapter operations then fail visibly. TODO(D-4):
-	// swap `console.error` for the Logger interface once a v0.5.2 polish
-	// PR lands.
+	// Attach an error handler so unhandled "error" events do not crash the
+	// process. Initial connection failures surface here; downstream adapter
+	// operations then fail visibly.
 	io.on("error", (err: unknown) => {
-		console.error("[standalone:redis-clients] ioredis error", err);
+		logger.error({ err }, "standalone_redis_clients_error");
 	});
 
 	lifecycleRegistrar?.register(async () => {
@@ -373,7 +373,10 @@ function getOrCreateClients(
 		check: () => io.ping(),
 	});
 
-	const clients = makeIoredisClients(io);
+	// The wrapper opens its own connections for refresh rotation
+	// (`refreshTokenFamilyClient.duplicate()`), which inherit no listeners from
+	// `io`; passing the logger lets those report through the same channel.
+	const clients = makeIoredisClients(io, { logger });
 	if (lifecycleRegistrar) clientsCache.set(lifecycleRegistrar, clients);
 	return clients;
 }
