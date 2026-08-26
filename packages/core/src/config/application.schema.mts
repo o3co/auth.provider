@@ -30,6 +30,7 @@
  * ADR 2026-04-30.
  */
 import { z } from "zod";
+import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { isValidJwksPath } from "../jwks/path.mjs";
 
 const rateLimitSchema = z.object({
@@ -144,7 +145,19 @@ const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
 ];
 
 const jwtSchemaBase = z.object({
-	issuer: z.string().optional(),
+	// The issuer is a property of the deployment, not of a request. It is
+	// REQUIRED: `/oauth/token` used to fall back to `req.get("host")` when this
+	// was unset, which made `iss` caller-controlled behind a trusted proxy and
+	// the resulting tokens non-portable. See `core/src/issuer/canonical.mts`.
+	issuer: z.string().superRefine((value, ctx) => {
+		const rejection = checkCanonicalIssuer(value);
+		if (rejection) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: `oauth.jwt.issuer ${describeIssuerRejection(rejection)}`,
+			});
+		}
+	}),
 	signingKey: signingKeySchema,
 	// JWKS publishing path (OIDC `jwks_uri`). Operator-choosable per OIDC
 	// Discovery; defaults to `/.well-known/jwks.json` when unset (applied by

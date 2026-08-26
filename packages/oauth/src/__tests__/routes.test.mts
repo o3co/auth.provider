@@ -36,6 +36,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 
 const mockConfig = {
+	// `oauth.jwt.issuer` is required by createOAuthRouter (#266) — the router
+	// stamps it on every minted token and never derives one from the request.
+	oauth: { jwt: { issuer: "https://issuer.example" } },
 	endpoints: {
 		login: { url: "/login" },
 	},

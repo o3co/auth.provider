@@ -20,7 +20,9 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	checkCanonicalIssuer,
 	consoleLogger,
+	describeIssuerRejection,
 	emitAuditEvent,
 	errorEnvelope,
 	type FederationProviderHandle,
@@ -129,22 +131,32 @@ export const createOAuthRouter = async (
 ): Promise<{ router: Router; registry: GrantHandlerResolver }> => {
 	const router = express.Router();
 
-	// Construct once at router-creation time so the closure is not re-allocated per request.
-	// `issuer` populates the `realm` parameter on `WWW-Authenticate: Basic`
-	// challenges (RFC 7235 §2.2). When the operator has not configured a
-	// canonical issuer (or this router is constructed in a partial-config test
-	// fixture), the middleware falls back to the literal "oauth".
-	const issuerForRealm = (config as { oauth?: { jwt?: { issuer?: string } } }).oauth?.jwt?.issuer;
+	// #266: `iss` is a property of the deployment, never of a request. The token
+	// endpoint used to compute `config.oauth.jwt.issuer ?? req.get("host")`, so an
+	// unconfigured deployment behind a trusted proxy minted tokens whose issuer the
+	// caller chose. A canonical issuer is now required, and it is the only source —
+	// resolved once at router-creation time so no request path can reach a fallback.
+	// It also populates the `realm` parameter on `WWW-Authenticate: Basic`
+	// challenges (RFC 7235 §2.2).
+	const issuerRejection = checkCanonicalIssuer(
+		(config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer,
+	);
+	if (issuerRejection) {
+		throw new Error(
+			`createOAuthRouter: oauth.jwt.issuer ${describeIssuerRejection(issuerRejection)}`,
+		);
+	}
+	const canonicalIssuer = (config as unknown as { oauth: { jwt: { issuer: string } } }).oauth.jwt
+		.issuer;
 	// SF-1 / Phase G / S2: legacyTypAccept default is `false`
-	// (v0.5.x was `true`). Use the same defensive cast as `issuerForRealm`
-	// so partial-config test fixtures (no `oauth.jwt` block at all) don't
-	// throw at router construction.
+	// (v0.5.x was `true`). Use a defensive cast so partial-config test fixtures
+	// (no `oauth.jwt` block at all) don't throw at router construction.
 	const legacyTypAcceptOpt = (config as { oauth?: { jwt?: { legacyTypAccept?: boolean } } }).oauth
 		?.jwt?.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
-		issuer: issuerForRealm,
+		issuer: canonicalIssuer,
 		logger,
 		allowPublicClients: true,
 	});
@@ -152,7 +164,7 @@ export const createOAuthRouter = async (
 	// known client_id is a non-secret value and would otherwise let any party
 	// query token metadata. The default (`allowPublicClients: false`) applies.
 	const introspectClientAuthMw = createClientAuthMiddleware(clientRepository, {
-		issuer: issuerForRealm,
+		issuer: canonicalIssuer,
 		logger,
 	});
 
@@ -237,7 +249,6 @@ export const createOAuthRouter = async (
 			tokenClientAuthMw,
 			async (req: Request, res: Response) => {
 				const { grant_type } = req.body;
-				const issuer = config.oauth.jwt.issuer ?? req.get("host");
 
 				if (typeof grant_type !== "string" || grant_type === "") {
 					await emitAuditEvent(auditSink, {
@@ -274,7 +285,7 @@ export const createOAuthRouter = async (
 				const ctx = {
 					body: req.body,
 					session: req.session,
-					issuer,
+					issuer: canonicalIssuer,
 					metadata: { ip: req.ip },
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
@@ -316,10 +327,8 @@ export const createOAuthRouter = async (
 							},
 						});
 						// The realm is a property of the deployment, so it comes from
-						// the router-scope `issuerForRealm` (config only) through the
-						// same filter `clientAuthMw` uses — NOT from the per-request
-						// `issuer` local above, whose `req.get("host")` fallback is
-						// caller-controlled behind a trusted proxy.
+						// the router-scope `canonicalIssuer` (config only) through the
+						// same filter `clientAuthMw` uses.
 						//
 						// The `Basic` challenge scheme is retained: this response is
 						// `invalid_client` + 401, and RFC 6749 §5.2 requires a
@@ -331,7 +340,7 @@ export const createOAuthRouter = async (
 						// the error code would just make the pair non-conformant.
 						return res
 							.status(401)
-							.set("WWW-Authenticate", `Basic realm="${resolveRealm(issuerForRealm)}"`)
+							.set("WWW-Authenticate", `Basic realm="${resolveRealm(canonicalIssuer)}"`)
 							.json(
 								errorEnvelope(
 									"invalid_client",
@@ -434,7 +443,7 @@ export const createOAuthRouter = async (
 						// as their own introspection credential.
 						await verifyJwt(bearerToken, keyStore, {
 							type: "access_token",
-							expectedIssuer: issuerForRealm ?? "",
+							expectedIssuer: canonicalIssuer,
 							legacyTypAccept: legacyTypAcceptOpt ?? false,
 							...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
 							logger,
@@ -474,7 +483,7 @@ export const createOAuthRouter = async (
 					// Wave 1 (C4): denylist consulted so revoked ATs report active:false.
 					const verified = await verifyJwt(token, keyStore, {
 						type: "access_token",
-						expectedIssuer: issuerForRealm ?? "",
+						expectedIssuer: canonicalIssuer,
 						...(req.oauthClient ? { expectedAudience: req.oauthClient.clientId } : {}),
 						legacyTypAccept: legacyTypAcceptOpt ?? false,
 						...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
@@ -861,10 +870,9 @@ export const createOAuthRouter = async (
 						: undefined;
 				if (grantPolicy) {
 					// CP-11: issuer must NOT be request-derived (Host header is
-					// attacker-controlled in many deployments). Prefer the
-					// configured jwt.issuer so policy decisions match the issuer
-					// claim on minted tokens.
-					const trustedIssuer = config.oauth.jwt.issuer ?? "";
+					// attacker-controlled in many deployments). `canonicalIssuer` is
+					// config-only, so policy decisions match the issuer claim on
+					// minted tokens.
 					// CP-18 (authorize side): fail-closed on policy throw. Same
 					// rationale as the refresh_token path — policy is a security
 					// boundary and failing open would hand out the pre-policy
@@ -891,7 +899,7 @@ export const createOAuthRouter = async (
 							{
 								ip: req.ip,
 								userAgent: req.get("user-agent"),
-								issuer: trustedIssuer,
+								issuer: canonicalIssuer,
 							},
 						);
 					} catch {
@@ -1059,7 +1067,7 @@ export const createOAuthRouter = async (
 			userSessionStore,
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
-			issuer: issuerForRealm,
+			issuer: canonicalIssuer,
 			legacyTypAccept: legacyTypAcceptOpt,
 			logger,
 		}),
@@ -1068,9 +1076,7 @@ export const createOAuthRouter = async (
 	// Federation endpoints — mount conditionally based on available stores and config.
 	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
 	// POST /oauth/federation/:name/token.
-	// issuer is required for logout_token signing in POST /oauth/logout only.
-	const issuer = (config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer;
-	const hasIssuer = typeof issuer === "string" && issuer.length > 0;
+	// logout_token signing needs the issuer; it is the router-scope canonical one.
 
 	// Logout (back-channel logout_token signing requires issuer).
 	const logoutSupported =
@@ -1079,8 +1085,7 @@ export const createOAuthRouter = async (
 		!!sessionFamilyIndex &&
 		!!sessionFederationIndex &&
 		!!federationTokenStore &&
-		!!refreshTokenFamilyRevocation &&
-		hasIssuer;
+		!!refreshTokenFamilyRevocation;
 
 	// Federation-token endpoint forwards upstream; does NOT need our issuer.
 	// Symmetry with logoutSupported: gates on all 4 sibling stores even
@@ -1099,7 +1104,7 @@ export const createOAuthRouter = async (
 		router.use(
 			logoutRoute.createRouter(express, {
 				keyStore,
-				issuer: issuer as string,
+				issuer: canonicalIssuer,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
 				userSessionStore: userSessionStore!,
 				// biome-ignore lint/style/noNonNullAssertion: composition-root invariant per A4 §3.4 / §8.1 + truthy gate above
@@ -1138,7 +1143,7 @@ export const createOAuthRouter = async (
 				accessTokenDenylist,
 				auditSink,
 				logger,
-				issuer: issuerForRealm,
+				issuer: canonicalIssuer,
 				legacyTypAccept: legacyTypAcceptOpt,
 			}),
 		);
@@ -1154,7 +1159,7 @@ export const createOAuthRouter = async (
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
 			logger,
-			issuer: issuerForRealm ?? "",
+			issuer: canonicalIssuer,
 		}),
 	);
 

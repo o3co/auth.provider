@@ -226,7 +226,10 @@ describe("token_exchange — integration", () => {
 			provides: { keyStore: () => keyStore },
 		});
 
+		// The fixture carries an issuer (required since auth.provider#266), so strip
+		// it here to reach the state this test is about.
 		const config = makeValidAppConfig();
+		delete (config.oauth.jwt as { issuer?: unknown }).issuer;
 		await expect(
 			createTestApp({
 				modules: [tokenExchangeModule, clientRepositoryModule, keyStoreModule],

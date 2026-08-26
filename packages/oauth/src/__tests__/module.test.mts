@@ -203,24 +203,6 @@ describe("oauthModule — createTestApp boot failure", () => {
 });
 
 describe("oauthModule — createTestApp route inspection", () => {
-	it("registers only oauth-endpoints route when issuer is absent", async () => {
-		const config = makeValidAppConfig();
-		// makeValidAppConfig does not set oauth.jwt.issuer
-		const handle = await createTestApp({
-			modules: [
-				oauthModule({ config }),
-				clientRepositoryModule,
-				codeRepositoryModule,
-				keyStoreModule,
-			],
-			bootstrapComponents: { config, pathResolver: (s) => s },
-		});
-		const routeIds = handle.inspect.routes.map((r) => r.contribution.id);
-		expect(routeIds).toContain("oauth-endpoints");
-		expect(routeIds).not.toContain("oidc-discovery");
-		await handle.dispose();
-	});
-
 	it("contributes no oidc-discovery route even with an issuer; core mounts discovery from aggregated metadata", async () => {
 		// Discovery is now mounted by core's assembleApp from the aggregated
 		// `discoveryMetadata` collector — it is NOT an oauth route contribution,
@@ -250,9 +232,13 @@ describe("oauthModule — createTestApp route inspection", () => {
 
 	it("oauth-endpoints is mounted at /oauth", async () => {
 		const config = makeValidAppConfig();
+		// jwksModule is co-installed because every config now carries an issuer
+		// (#266), so the provider-root contribution always activates discovery —
+		// which requires a module owning `jwks_uri` to form a valid document.
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
@@ -447,6 +433,7 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreWithSecret,
@@ -652,10 +639,13 @@ describe("oauthModule — federation logout via typed deps", () => {
 		await handle.dispose();
 	});
 
-	it("federation-token endpoint is mounted even when issuer is absent (returns 401, not 404)", async () => {
+	it("federation-token endpoint is mounted from the store wiring alone (returns 401, not 404)", async () => {
 		// federationTokenSupported in routes.mts gates on the 4-store split +
-		// federationTokenStore + refreshTokenFamilyRevocation. Issuer absence
-		// must NOT break this gate — that is what the test asserts.
+		// federationTokenStore + refreshTokenFamilyRevocation, and on nothing
+		// else — the endpoint forwards upstream and never mints our own `iss`.
+		// It used to be worth asserting that an absent issuer did not break the
+		// gate; since #266 an issuer is always configured, so what this pins is
+		// that the gate is the store wiring.
 		const sessionStore: UserSessionStore = {
 			kind: "memory",
 			create: vi.fn(),
@@ -720,11 +710,11 @@ describe("oauthModule — federation logout via typed deps", () => {
 		});
 
 		const config = makeValidAppConfig();
-		// No issuer — oidc-discovery not mounted, but /oauth/federation/* must be mounted
 
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,

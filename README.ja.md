@@ -76,6 +76,9 @@ HOCON 設定ファイル + 環境変数オーバーライド。設定スキー�
 http { port = 3000 }
 oauth {
   jwt {
+    # 必須。すべてのトークンの `iss` に刻まれる canonical issuer。
+    # 絶対 https URL（`http` は loopback ホストのみ）、query / fragment 不可。
+    # 未設定なら起動に失敗する — Host ヘッダから導出されることはない。
     issuer = ${?OAUTH_JWT_ISSUER}
     signingKey {
       provider = "local"           # 組み込みは "local" のみ。KeyStoreFactory で拡張可能

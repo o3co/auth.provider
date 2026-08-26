@@ -50,7 +50,7 @@ overlay の値は `application.conf` を上書きします。scaffold には
 |---|---|---|
 | `OAUTH_JWT_ALGORITHM` | `HS256` | JWT 署名アルゴリズム（例: `RS256`、`ES256`） |
 | `OAUTH_JWT_SECRET` | — | 署名シークレット（HMAC アルゴリズム用） |
-| `OAUTH_JWT_ISSUER` | — | JWT の `iss` クレーム値 |
+| `OAUTH_JWT_ISSUER` | **（必須）** | すべてのトークンの `iss` に刻まれる canonical issuer URL。絶対 `https` URL（`http` は loopback ホストのみ）で、query / fragment を含まないこと。未設定なら起動に失敗する — `Host` ヘッダから導出されることはない。 |
 | `OAUTH_JWT_KID` | `v0` | JWT ヘッダーに含まれる key ID |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM エンコードされた秘密鍵（非対称アルゴリズム用） |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | PEM 秘密鍵ファイルのパス |

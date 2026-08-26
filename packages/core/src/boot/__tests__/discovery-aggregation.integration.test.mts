@@ -26,15 +26,17 @@
  *      `id_token_signing_alg_values_supported` (from `keyStore.algorithm`);
  *      module contributions supply issuer-relative endpoints + literal metadata,
  *      merged across modules.
- *   2. issuer absent → the discovery route is NOT mounted (no document is
- *      served, mirroring the pre-aggregator issuer-gating that lived in the
- *      oauth module).
+ *   2. no `providerRoot` contribution → the discovery route is NOT mounted (no
+ *      document is served). Since #266 an issuer is always configured, so the
+ *      contribution is the only remaining gate at boot; the planner's own
+ *      issuer guard is pinned directly.
  */
 
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { DiscoveryDocumentError } from "../../discovery/buildDocument.mjs";
+import { planDiscoveryRoute } from "../../discovery/planRoute.mjs";
 import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
@@ -207,18 +209,19 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		).rejects.toMatchObject({ name: "BootError" });
 	});
 
-	it("issuer absent → discovery route is not mounted (404)", async () => {
-		const handle = await createTestApp({
-			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
-			bootstrapComponents: { config: makeValidAppConfig(), pathResolver: (s) => s },
+	it("issuer absent → the planner declines to synthesize the route", () => {
+		// #266 made `oauth.jwt.issuer` required at the schema boundary, so this
+		// state is no longer reachable through boot — every createTestApp config
+		// carries one. The planner keeps its own guard for callers that reach it
+		// with a config that never passed the schema, so it is pinned here
+		// directly rather than through an unreachable boot fixture.
+		const route = planDiscoveryRoute({
+			components: { config: { oauth: { jwt: {} } } },
+			registries: new Map(),
+			routerFactory: () => express.Router(),
 		});
-		const app = express();
-		app.use(handle.router);
 
-		const res = await request(app).get("/.well-known/openid-configuration");
-		expect(res.status).toBe(404);
-
-		await handle.dispose();
+		expect(route).toBeNull();
 	});
 
 	it("issuer + providerRoot contributed but jwks_uri missing → boot fails fast (BootError wrapping DiscoveryDocumentError)", async () => {

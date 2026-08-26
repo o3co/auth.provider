@@ -29,6 +29,7 @@ const minimalCoreConfig = {
 	logging: { level: "info" },
 	oauth: {
 		jwt: {
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousSecrets: [] },
@@ -130,6 +131,7 @@ describe("CoreConfigSchema", () => {
 			oauth: {
 				...minimalCoreConfig.oauth,
 				jwt: {
+					issuer: "https://auth.test",
 					signingKey: {
 						provider: "local",
 						local: { algorithm: "HS256", kid: "v0", previousSecrets: [] },
@@ -246,6 +248,7 @@ describe("AppConfigSchema backward compatibility", () => {
 			logging: { level: "info" },
 			oauth: {
 				jwt: {
+					issuer: "https://auth.test",
 					signingKey: {
 						provider: "local",
 						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousSecrets: [] },

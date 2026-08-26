@@ -19,6 +19,7 @@ describe("provider config", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_ISSUER: "https://auth.test",
 				SESSION_SECRET: "test-session-secret",
 			},
 		});
@@ -52,6 +53,7 @@ describe("provider config", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_ISSUER: "https://auth.test",
 				SESSION_SECRET: "test-session-secret",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_APP_BASE_URL: "http://localhost:8080",
@@ -81,6 +83,7 @@ describe("provider config", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_ISSUER: "https://auth.test",
 				SESSION_SECRET: "test-session-secret",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
@@ -94,6 +97,7 @@ describe("provider config", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_ISSUER: "https://auth.test",
 				SESSION_SECRET: "test-session-secret",
 			},
 		});
@@ -105,6 +109,7 @@ describe("provider config", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_ISSUER: "https://auth.test",
 				SESSION_SECRET: "test-session-secret",
 			},
 		});
@@ -118,6 +123,7 @@ describe("provider config", () => {
 			parseFile(path, {
 				env: {
 					OAUTH_JWT_SECRET: "test-secret",
+					OAUTH_JWT_ISSUER: "https://auth.test",
 					SESSION_SECRET: "test-session-secret",
 				},
 			}),
@@ -129,6 +135,7 @@ describe("provider config", () => {
 			parseFile(path, {
 				env: {
 					OAUTH_JWT_SECRET: "test-secret",
+					OAUTH_JWT_ISSUER: "https://auth.test",
 					SESSION_SECRET: "test-session-secret",
 					MEMORY_RATE_LIMITER_MAX_BUCKETS: "123",
 				},
@@ -150,6 +157,7 @@ describe("jwt config schema", () => {
 
 	it("rejects bare local sub-section (algorithm/kid are required at the schema boundary)", () => {
 		const result = jwtSchema.safeParse({
+			issuer: "https://auth.test",
 			signingKey: { provider: "local", local: { secret: "x" } },
 		});
 		expect(result.success).toBe(false);
@@ -163,6 +171,7 @@ describe("jwt config schema", () => {
 
 	it("accepts RS256 with key fields", () => {
 		const result = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -182,6 +191,7 @@ describe("jwt config schema", () => {
 
 	it("accepts ES256 and EdDSA algorithms", () => {
 		const es256 = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -196,6 +206,7 @@ describe("jwt config schema", () => {
 		expect((es256.signingKey.local as Record<string, unknown>).algorithm).toBe("ES256");
 
 		const eddsa = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -212,6 +223,7 @@ describe("jwt config schema", () => {
 
 	it("accepts previousKeys array with valid entries", () => {
 		const result = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -242,6 +254,7 @@ describe("jwt config schema", () => {
 
 	it("secret is optional for asymmetric algorithms", () => {
 		const result = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -264,6 +277,7 @@ describe("jwt config schema", () => {
 	it("rejects HS256 without secret (builder-level)", async () => {
 		// Schema parse succeeds — no secret required at schema level.
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: { algorithm: "HS256", kid: "v0", previousSecrets: [] },
@@ -277,6 +291,7 @@ describe("jwt config schema", () => {
 
 	it("rejects asymmetric algorithm without privateKey (builder-level)", async () => {
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: { algorithm: "ES256", kid: "v0", previousKeys: [], publicKey: "pub" },
@@ -290,6 +305,7 @@ describe("jwt config schema", () => {
 
 	it("rejects asymmetric algorithm without publicKey (builder-level)", async () => {
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: { algorithm: "RS256", kid: "v0", previousKeys: [], privateKey: "pk" },
@@ -306,6 +322,7 @@ describe("jwt config schema", () => {
 		// We supply real-looking (but fake) inline PEM strings to pass the schema — the builder
 		// throws before it attempts to import them, so actual crypto validity is irrelevant here.
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {

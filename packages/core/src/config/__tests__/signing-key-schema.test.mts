@@ -50,6 +50,7 @@ describe("oauth.jwt.signingKey schema", () => {
 
 	it("rejects signingKey when provider is omitted (schema is strict — defaults live in hocon)", () => {
 		const result = jwtSchema.safeParse({
+			issuer: "https://auth.test",
 			signingKey: { local: validLocal() },
 		});
 		expect(result.success).toBe(false);
@@ -61,6 +62,7 @@ describe("oauth.jwt.signingKey schema", () => {
 
 	it("preserves unknown provider sub-sections via passthrough", () => {
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: { provider: "kms", kms: { keyArn: "arn:aws:..." } },
 		});
 		expect((parsed.signingKey as Record<string, unknown>).kms).toEqual({
@@ -78,6 +80,7 @@ describe("oauth.jwt.signingKey schema", () => {
 
 	it("accepts an absolute oauth.jwt.jwksPath override", () => {
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: { provider: "local", local: validLocal() },
 			jwksPath: "/keys/jwks.json",
 		});
@@ -86,6 +89,7 @@ describe("oauth.jwt.signingKey schema", () => {
 
 	it("rejects a non-absolute oauth.jwt.jwksPath (must begin with '/')", () => {
 		const result = jwtSchema.safeParse({
+			issuer: "https://auth.test",
 			signingKey: { provider: "local", local: validLocal() },
 			jwksPath: "keys/jwks.json",
 		});
@@ -98,6 +102,7 @@ describe("oauth.jwt.signingKey schema", () => {
 
 	it("omitting oauth.jwt.jwksPath is valid (resolveJwksPath applies the default)", () => {
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: { provider: "local", local: validLocal() },
 		});
 		expect((parsed as { jwksPath?: string }).jwksPath).toBeUndefined();
@@ -105,6 +110,7 @@ describe("oauth.jwt.signingKey schema", () => {
 
 	it("accepts a non-negative integer oauth.jwt.jwksCacheMaxAge", () => {
 		const parsed = jwtSchema.parse({
+			issuer: "https://auth.test",
 			signingKey: { provider: "local", local: validLocal() },
 			jwksCacheMaxAge: 3600,
 		});
@@ -114,6 +120,7 @@ describe("oauth.jwt.signingKey schema", () => {
 	it("rejects a negative or non-integer oauth.jwt.jwksCacheMaxAge", () => {
 		for (const bad of [-1, 1.5]) {
 			const result = jwtSchema.safeParse({
+				issuer: "https://auth.test",
 				signingKey: { provider: "local", local: validLocal() },
 				jwksCacheMaxAge: bad,
 			});
@@ -131,6 +138,7 @@ describe("oauth.jwt.signingKey schema", () => {
 		// algorithm-specific key material is absent.
 		expect(() =>
 			jwtSchema.parse({
+				issuer: "https://auth.test",
 				signingKey: {
 					provider: "local",
 					local: { algorithm: "HS256", kid: "v0", previousSecrets: [] },
@@ -149,6 +157,7 @@ describe("AppConfigSchema exports signingKey shape (integration)", () => {
 describe("signingKey.local schema - HS256 rotation (IH-9)", () => {
 	it("rejects HS256 with previousKeys (asymmetric-shaped field) via discriminated union strict", () => {
 		const result = jwtSchema.safeParse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -182,6 +191,7 @@ describe("signingKey.local schema - HS256 rotation (IH-9)", () => {
 
 	it("accepts HS256 with previousSecrets containing kid+secret+expiresAt entries", () => {
 		const result = jwtSchema.safeParse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -203,6 +213,7 @@ describe("signingKey.local schema - HS256 rotation (IH-9)", () => {
 
 	it("accepts HS256 without previousSecrets (optional field — backward compatible)", () => {
 		const result = jwtSchema.safeParse({
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
