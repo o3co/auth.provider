@@ -289,6 +289,13 @@ export type {
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
+export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
+export type {
+	ProbeResult,
+	ReadinessProbe,
+	ReadinessRegistrar,
+	ReadinessReport,
+} from "./readiness/types.mjs";
 // Repository interfaces
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository } from "./repositories/CodeRepository.mjs";
@@ -316,6 +323,11 @@ export type {
 } from "./repositories/types.mjs";
 export type { UserRepository } from "./repositories/UserRepository.mjs";
 export { createRouter as createJwksRouter, type JwksRouterOptions } from "./routes/Jwks.mjs";
+export {
+	createRouter as createReadinessRouter,
+	type ReadinessLogger,
+	type ReadinessRouterOptions,
+} from "./routes/Readiness.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,

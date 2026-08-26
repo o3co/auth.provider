@@ -83,6 +83,11 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		// that silently diverge — the planner drains its own instance while
 		// builders register cleanups on the consumer's. Reserve the key.
 		"lifecycleRegistrar",
+		// Same reservation for the readiness registrar: two registrars would
+		// diverge silently, the planner reading its own (empty) instance while
+		// builders register probes on the consumer's — `/readyz` would then
+		// answer ready with nothing actually probed.
+		"readinessRegistrar",
 	]),
 );
 

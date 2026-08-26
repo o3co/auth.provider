@@ -24,6 +24,7 @@ vi.mock("redis", () => ({
 		__mock: "redis-client",
 		__opts: opts,
 		connect: vi.fn().mockResolvedValue(undefined),
+		ping: vi.fn().mockResolvedValue("PONG"),
 	})),
 }));
 
@@ -105,5 +106,29 @@ describe("SessionStoreFactory", () => {
 		const factory = createSessionStoreFactory();
 		registerBuiltinSessionStores(factory);
 		await expect(factory.create({ type: "redis" })).rejects.toThrow(/url/);
+	});
+
+	it("registers a readiness probe for the redis client it opens", async () => {
+		// The client never leaves the builder — the returned RedisStore is a
+		// connect-redis object, not a connection — so the probe has to be
+		// registered here or readiness has nothing to ping.
+		const probes: Array<{ name: string; check: () => Promise<unknown> }> = [];
+		const factory = createSessionStoreFactory({ readiness: { register: (p) => probes.push(p) } });
+		registerBuiltinSessionStores(factory);
+
+		await factory.create({ type: "redis", url: "redis://localhost:6379" });
+
+		expect(probes.map((p) => p.name)).toEqual(["session-store"]);
+		await expect(probes[0]?.check()).resolves.toBe("PONG");
+	});
+
+	it("registers no readiness probe for the memory adapter", async () => {
+		const probes: Array<{ name: string; check: () => Promise<unknown> }> = [];
+		const factory = createSessionStoreFactory({ readiness: { register: (p) => probes.push(p) } });
+		registerBuiltinSessionStores(factory);
+
+		await factory.create({ type: "memory" });
+
+		expect(probes).toEqual([]);
 	});
 });

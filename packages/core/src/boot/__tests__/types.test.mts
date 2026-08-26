@@ -345,9 +345,9 @@ describe("BootError", () => {
 // ---------------------------------------------------------------------------
 
 describe("AppHandle", () => {
-	it("has exactly the five expected keys", () => {
+	it("has exactly the six expected keys", () => {
 		expectTypeOf<keyof AppHandle>().toEqualTypeOf<
-			"router" | "listen" | "dispose" | "components" | "routes"
+			"router" | "listen" | "dispose" | "components" | "routes" | "readinessProbes"
 		>();
 	});
 });

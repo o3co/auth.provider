@@ -37,6 +37,7 @@ import {
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
+import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import type {
 	AppHandle,
 	CleanupRecord,
@@ -499,6 +500,14 @@ export function assembleApp(
 		 * provide one — Steps 1-2 still run.
 		 */
 		readonly lifecycleReg?: InternalLifecycleRegistrar;
+		/**
+		 * Boot-planner-owned ReadinessRegistrar threaded through createApp. Its
+		 * probes are exposed on `AppHandle.readinessProbes` for the composition
+		 * root to mount behind a readiness route. Optional for the same reason
+		 * `lifecycleReg` is: direct callers (test harnesses) need not supply one,
+		 * and the handle then reports no probes.
+		 */
+		readonly readinessReg?: InternalReadinessRegistrar;
 	} = {},
 ): AppHandle {
 	// Resolve the Router constructor first — it is needed to build the
@@ -660,6 +669,7 @@ export function assembleApp(
 		dispose,
 		components: frozen.components,
 		routes: ordered,
+		readinessProbes: options.readinessReg?._probes() ?? [],
 	};
 
 	// Theme D: freeze the whole AppHandle before returning (§6.3).

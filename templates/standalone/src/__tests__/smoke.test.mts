@@ -19,6 +19,7 @@ import {
 	type AppConfig,
 	createApp,
 	createKeyStoreFactory,
+	createReadinessRouter,
 	defineModule,
 	generateToken,
 	InMemoryClientRepository,
@@ -34,7 +35,7 @@ import { buildModules } from "../buildModules.mjs";
 const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 
 const config: AppConfig = {
-	http: { port: 0, trustProxy: false },
+	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	oauth: {
 		jwt: {
 			signingKey: {
@@ -176,6 +177,12 @@ describe("standalone smoke test", () => {
 		app.get("/_healthcheck", (_req, res) => {
 			res.status(200).json({ status: "ok" });
 		});
+		app.use(
+			createReadinessRouter(express, {
+				probes: handle.readinessProbes,
+				timeoutMs: config.http.readinessTimeoutMs,
+			}),
+		);
 		app.use(handle.router);
 		return { app, handle };
 	}
@@ -206,7 +213,7 @@ describe("standalone smoke test", () => {
 		// `[$]` (character class) sidesteps biome's `noTemplateCurlyInString`
 		// false-positive without changing what we actually accept.
 		expect(dockerfile).toMatch(
-			/CMD\s+wget\s+-q\s+-O\s+\/dev\/null\s+"http:\/\/localhost:[$]\{HTTP_PORT\}\/_healthcheck"\s+\|\|\s+exit\s+1/,
+			/CMD\s+wget\s+-q\s+-O\s+\/dev\/null\s+"http:\/\/localhost:[$]\{HTTP_PORT\}\/readyz"\s+\|\|\s+exit\s+1/,
 		);
 		expect(dockerfile).toMatch(/FROM node-base AS deps[\s\S]*USER node[\s\S]*RUN pnpm install/);
 		expect(dockerfile).toMatch(/FROM deps AS builder[\s\S]*USER node[\s\S]*RUN pnpm run build/);
@@ -220,6 +227,39 @@ describe("standalone smoke test", () => {
 		handleRef = handle;
 		const res = await request(app).get("/_healthcheck");
 		expect(res.status).toBe(200);
+	});
+
+	it("GET /readyz returns 200 for a memory-only composition with no probes", async () => {
+		// These smoke modules are all in-memory, so nothing registers a probe.
+		// Readiness must not invent a dependency that is not wired.
+		const { app, handle } = await buildApp();
+		handleRef = handle;
+		const res = await request(app).get("/readyz");
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ status: "ready", checks: [] });
+	});
+
+	it("GET /readyz returns 503 naming the dependency when a probe fails", async () => {
+		const { handle } = await buildApp();
+		handleRef = handle;
+		const app = express();
+		app.use(
+			createReadinessRouter(express, {
+				probes: [
+					{
+						name: "redis",
+						check: async () => {
+							throw new Error("ECONNREFUSED");
+						},
+					},
+				],
+				timeoutMs: config.http.readinessTimeoutMs,
+			}),
+		);
+		const res = await request(app).get("/readyz");
+		expect(res.status).toBe(503);
+		expect(res.body.status).toBe("unready");
+		expect(res.body.checks[0].name).toBe("redis");
 	});
 
 	it("issuer-configured buildModules serves the advertised jwks_uri (discovery <-> JWKS presence contract)", async () => {

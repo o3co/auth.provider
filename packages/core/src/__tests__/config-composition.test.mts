@@ -25,7 +25,7 @@ import {
 import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
 
 const minimalCoreConfig = {
-	http: { port: 3000, trustProxy: false },
+	http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
 	oauth: {
 		jwt: {
 			signingKey: {
@@ -210,7 +210,7 @@ describe("fullSectionsSchema endpoints optionality", () => {
 describe("AppConfigSchema backward compatibility", () => {
 	it("still validates full config with all sections", () => {
 		const fullConfig = {
-			http: { port: 3000, trustProxy: false },
+			http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
 			oauth: {
 				jwt: {
 					signingKey: {

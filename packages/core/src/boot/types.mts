@@ -46,6 +46,7 @@ import type {
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { HttpMethod, RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import type { PathResolver } from "../modules/types.mjs";
+import type { ReadinessProbe, ReadinessRegistrar } from "../readiness/types.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap bootstrap slots (per A2-β §6.2 DefaultBootstrapMap contract)
@@ -77,6 +78,18 @@ declare module "@o3co/auth-provider-core" {
 		 * `overrideComponents`.
 		 */
 		readonly lifecycleRegistrar: LifecycleRegistrar;
+		/**
+		 * Boot-planner-owned readiness registrar. Pre-seeded alongside
+		 * `lifecycleRegistrar` and subject to the same rules: modules that open a
+		 * connection declare `optional: ["readinessRegistrar"]` and forward the
+		 * value into `createAdapterFactory(kind, { readiness: deps.readinessRegistrar })`
+		 * so builders can register a probe for the resource they hold.
+		 *
+		 * Also NOT consumer-overridable — a second registrar would collect probes
+		 * the planner never reads, and `/readyz` would report ready while the
+		 * dependency it was meant to watch is down.
+		 */
+		readonly readinessRegistrar: ReadinessRegistrar;
 	}
 }
 
@@ -582,6 +595,18 @@ export interface AppHandle {
 	 * resolution. Populated by assembleApp (stage 6). Per A2-β §6.3 / A2-γ §7.2.
 	 */
 	readonly routes: readonly OrderedRouteContribution[];
+
+	/**
+	 * Probes registered by builders during boot, in registration order.
+	 *
+	 * A composition root feeds these to the readiness route
+	 * (`routes/Readiness.mts`) — mounted on the host app rather than inside
+	 * `router`, so it stays answerable while the auth pipeline is degraded,
+	 * which is exactly when readiness has something to say. Empty when nothing
+	 * registered a probe (a memory-only deployment has no dependency to be
+	 * unready for).
+	 */
+	readonly readinessProbes: readonly ReadinessProbe[];
 }
 
 // ---------------------------------------------------------------------------

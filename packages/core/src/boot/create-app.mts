@@ -42,6 +42,7 @@ import type {
 	GrantPolicyHookContribution,
 	MfaFactor,
 } from "../modules/manifest/contributes-map.mjs";
+import { createReadinessRegistrar } from "../readiness/registrar.mjs";
 import { applyContributions } from "./apply-contributions.mjs";
 import { assembleApp } from "./assemble-app.mjs";
 import { freezeWorld } from "./freeze-world.mjs";
@@ -112,9 +113,13 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	// validateManifests via `bootstrap-component-collision` if a consumer
 	// supplies it via overrideComponents).
 	const lifecycleReg = createLifecycleRegistrar();
+	// Same pre-seeding for readiness: a builder that opens a connection is the
+	// only place that can probe it, so it needs the registrar at build time.
+	const readinessReg = createReadinessRegistrar();
 	const bootstrapWithLifecycle = {
 		...validatedBootstrap,
 		lifecycleRegistrar: lifecycleReg,
+		readinessRegistrar: readinessReg,
 	} as typeof validatedBootstrap;
 
 	try {
@@ -145,7 +150,7 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		}
 
 		// Stage 6: assembleApp. Per A2-β §5.6 / §6.3.
-		return assembleApp(frozen, { express: expressMod, lifecycleReg });
+		return assembleApp(frozen, { express: expressMod, lifecycleReg, readinessReg });
 	} catch (err) {
 		// D-5 partial-boot failure: any builder may have already registered a
 		// cleanup callback before a later stage threw. Best-effort drain so

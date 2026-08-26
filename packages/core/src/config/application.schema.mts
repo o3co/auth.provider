@@ -274,6 +274,11 @@ export const CoreConfigSchema = z.object({
 	http: z.object({
 		port: z.coerce.number(),
 		trustProxy: z.boolean(),
+		// Per-probe deadline for the readiness endpoint. Must stay well under
+		// the orchestrator's probe timeout, or a partitioned dependency reads
+		// as a slow replica rather than an unready one. Shape-only; default
+		// lives in HOCON.
+		readinessTimeoutMs: z.coerce.number(),
 	}),
 	oauth: z.object({
 		jwt: jwtSchema,

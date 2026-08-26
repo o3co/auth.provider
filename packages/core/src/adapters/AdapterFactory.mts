@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import type { ReadinessRegistrar } from "../readiness/types.mjs";
+
 /**
  * Passed to AdapterFactory builders via {@link BuilderContext.lifecycle}.
  * Builders that create disposable sub-resources (Redis clients, interval
@@ -57,6 +59,21 @@ export interface BuilderContext {
 	 * use optional chaining.
 	 */
 	lifecycle?: LifecycleRegistrar;
+	/**
+	 * Readiness registrar provided by the boot planner. Builders that open a
+	 * connection SHOULD register a probe for it:
+	 *
+	 *     ctx.readiness?.register({ name: "redis", check: () => client.ping() })
+	 *
+	 * Registration belongs here for the same reason cleanup does: the builder
+	 * is the only place holding the connection. The adapter it returns exposes
+	 * a narrow command surface with no `ping`, so a composition root cannot
+	 * build the probe from the outside.
+	 *
+	 * Optional, and subject to the same optional-chaining rule as
+	 * {@link BuilderContext.lifecycle}.
+	 */
+	readiness?: ReadinessRegistrar;
 }
 
 /**

@@ -46,16 +46,22 @@ const sessionStoreConfigSchema = fullSectionsSchema.pick({
  * middleware is mounted inside `handle.router`, ordered first by list
  * position. See CHANGELOG v0.5.1 D-5 BREAKING entry for the migration note.
  */
-export const sessionStoreModule = defineModule<"config", "lifecycleRegistrar">({
+export const sessionStoreModule = defineModule<
+	"config",
+	"lifecycleRegistrar" | "readinessRegistrar"
+>({
 	name: "sessionStoreModule",
 	configSchema: sessionStoreConfigSchema,
 	requires: ["config"],
-	optional: ["lifecycleRegistrar"],
+	optional: ["lifecycleRegistrar", "readinessRegistrar"],
 	contributes: {
 		routes: [
 			async (deps) => {
 				const config = deps.config as AppConfig;
-				const ctx: BuilderContext = { lifecycle: deps.lifecycleRegistrar };
+				const ctx: BuilderContext = {
+					lifecycle: deps.lifecycleRegistrar,
+					readiness: deps.readinessRegistrar,
+				};
 				const factory = createSessionStoreFactory(ctx);
 				registerBuiltinSessionStores(factory);
 				const storageSlice = config.session.storage as { type: string } & Record<string, unknown>;
