@@ -337,8 +337,48 @@ export const createAuthorizationGrant = (
 				};
 			}
 
+			// The subject of every token issued here is the user the *code* was
+			// bound to, resolved through `sid` — not whoever owns the session that
+			// happens to accompany the token request. For a confidential client
+			// `/token` is a back-channel call with no end-user cookie, so
+			// `session.user` is undefined; reading it there produced access and
+			// refresh tokens with no `sub` at all, while the id_token (which has
+			// always read the UserSession) carried one. In a same-origin topology
+			// where `/token` does carry cookies, the two could name different
+			// users if the session changed between `/authorize` and `/token`.
+			//
+			// Resolving the session here rather than in the linking block below
+			// also means a session deleted between `/authorize` and `/token` is
+			// rejected before any token is signed.
+			let userSession: UserSession | null = null;
+			if (deps.userSessionStore && sid) {
+				try {
+					userSession = await deps.userSessionStore.get(sid);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session store unavailable",
+						},
+					};
+				}
+				if (!userSession) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "session_invalid",
+						},
+					};
+				}
+			}
+
+			// Deployments that wire no userSessionStore have no sid to resolve, so
+			// the token-request session stays the only available subject there.
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
-			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
+			const sessionUserId = typeof rawUserId === "string" ? rawUserId : undefined;
+			const subject = userSession?.sub ?? sessionUserId ?? null;
 
 			// Initial rt+jwt opens a new refresh-token family for replay detection
 			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same
@@ -442,7 +482,7 @@ export const createAuthorizationGrant = (
 					keyStore,
 					issuer,
 					audience,
-					subject: userId ?? null,
+					subject,
 					// D-6: `azp` is the authenticated client (was raw body `client_id`).
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
@@ -457,7 +497,7 @@ export const createAuthorizationGrant = (
 					keyStore,
 					issuer,
 					audience,
-					subject: userId ?? null,
+					subject,
 					// D-6: `azp` is the authenticated client (was raw body `client_id`).
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
@@ -503,35 +543,11 @@ export const createAuthorizationGrant = (
 			// are invisible to logout orchestration.
 			// sid is guaranteed non-null here when deps.userSessionStore is set because
 			// the earlier guard (deps.userSessionStore && !sid) already rejected that case.
-			// TODO-F-4: userSession is lifted outside the block so id_token generation
-			// (below) can use it after the block completes.
-			let userSession: UserSession | null = null;
+			// `userSession` was resolved before token generation (Fix I1: a session
+			// deleted between /authorize and /token must not produce tokens, which
+			// would be orphaned from logout orchestration); the re-check below keeps
+			// the CR-4 window narrow across the findById await.
 			if (deps.userSessionStore && sid) {
-				// Fix I1: validate session still exists (mirrors refresh_token grant pattern).
-				// A session deleted between /authorize and /token exchange must not produce
-				// tokens — they would be orphaned from logout orchestration.
-				let fetchedSession: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
-				try {
-					fetchedSession = await deps.userSessionStore.get(sid);
-				} catch {
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "session store unavailable",
-						},
-					};
-				}
-				if (!fetchedSession) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "session_invalid",
-						},
-					};
-				}
-				userSession = fetchedSession;
 				// Fix I2: clientRepository.findById is fallible — move inside try/catch
 				// so a throw here returns a controlled 503 instead of propagating to the
 				// express default handler as an unhandled HTML 500.
@@ -543,8 +559,8 @@ export const createAuthorizationGrant = (
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
 					// CR-4: re-validate session liveness immediately before mutating the
-					// family index. Between the first `get` (line above) and `addFamilyId`,
-					// `findById` is awaited — a `cascadeLogout` interleaving in that window
+					// family index. Between the first `get` (before token generation) and
+					// `addFamilyId`, `findById` is awaited — a `cascadeLogout` in that window
 					// would leave the just-issued tokens orphaned from logout orchestration.
 					// Per Codex Delta 1, this REDUCES the window for the common case
 					// (logout fully completes before the second check). It does NOT close
@@ -552,7 +568,7 @@ export const createAuthorizationGrant = (
 					// Phase F's atomic `addFamilyIdIfSessionActive` Lua EVAL closes that.
 					//
 					// The store-availability path is handled by its OWN try/catch (mirrors
-					// the first-get pattern at line ~437) so a Redis blip emits the same
+					// the first-get pattern before token generation) so a Redis blip emits the same
 					// `"session store unavailable"` errorDescription as the first-get path,
 					// rather than being misattributed to the outer "session linking
 					// unavailable" catch (which spans findById + addFamilyId + registerRP).
