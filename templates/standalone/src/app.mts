@@ -28,7 +28,8 @@ import express from "express";
 import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
-import logger from "./logger.mjs";
+import { createAppLogger } from "./logger.mjs";
+import { createMetrics } from "./metrics.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
 // ENV = CONFIG_ENV || NODE_ENV || "development"; missing {ENV}.conf is fatal.
@@ -49,6 +50,13 @@ const config: AppConfig = validate(
 	AppConfigSchema,
 );
 
+// The logger is built from config so its level is operator-controlled, and it
+// is wired into `bootstrapComponents` so every module that declares
+// `optional: ["logger"]` receives this one rather than falling back to its own
+// default. Without that slot filled, configuring a level here would change
+// nothing about what the modules emit.
+const logger = createAppLogger(config);
+
 await (async (): Promise<void> => {
 	// Step 2: Create the Express app and apply base security middleware.
 	const app = express();
@@ -63,6 +71,12 @@ await (async (): Promise<void> => {
 			},
 		}),
 	);
+
+	// Timing middleware goes ahead of everything so the histogram covers the
+	// whole stack — including responses produced by middleware that short-circuits
+	// before any route runs, such as the rate limiter's 429s.
+	const metrics = createMetrics();
+	app.use(metrics.middleware);
 
 	// Step 3: Boot the auth pipeline.
 	// D-5: express-session middleware is now wired by `sessionStoreModule`
@@ -82,6 +96,7 @@ await (async (): Promise<void> => {
 		bootstrapComponents: {
 			config,
 			pathResolver: import.meta.resolve,
+			logger,
 		},
 	});
 
@@ -105,6 +120,16 @@ await (async (): Promise<void> => {
 			probes: handle.readinessProbes,
 			timeoutMs: config.http.readinessTimeoutMs,
 			logger,
+		}),
+	);
+
+	// Prometheus scrape endpoint. Same reasoning as the probes above: it has to
+	// keep answering while the auth pipeline is degraded, because that is when
+	// the series matter.
+	app.use(
+		metrics.route(express, {
+			probes: handle.readinessProbes,
+			probeTimeoutMs: config.http.readinessTimeoutMs,
 		}),
 	);
 

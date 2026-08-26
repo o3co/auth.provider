@@ -9,15 +9,21 @@ import { consoleLogger, createConsoleLogger } from "../consoleLogger.mjs";
 describe("consoleLogger level routing", () => {
 	afterEach(() => vi.restoreAllMocks());
 
+	// The two sub-info levels are exercised through a trace-level logger: the
+	// `consoleLogger` singleton now defaults to `info`, so it drops them by
+	// design. What is under test here is the 6-levels-onto-4-console-methods
+	// mapping, not the threshold.
+	const verbose = createConsoleLogger({}, { level: "trace" });
+
 	it("routes trace to console.debug", () => {
 		const spy = vi.spyOn(console, "debug").mockImplementation(() => {});
-		consoleLogger.trace({ x: 1 }, "trace message");
+		verbose.trace({ x: 1 }, "trace message");
 		expect(spy).toHaveBeenCalledWith({ x: 1 }, "trace message");
 	});
 
 	it("routes debug to console.debug", () => {
 		const spy = vi.spyOn(console, "debug").mockImplementation(() => {});
-		consoleLogger.debug({ x: 1 }, "debug message");
+		verbose.debug({ x: 1 }, "debug message");
 		expect(spy).toHaveBeenCalledWith({ x: 1 }, "debug message");
 	});
 
@@ -124,5 +130,87 @@ describe("createConsoleLogger factory", () => {
 		const root = createConsoleLogger();
 		root.warn({ x: 1 }, "test");
 		expect(spy).toHaveBeenCalledWith({ x: 1 }, "test");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Level threshold
+//
+// The interface has always carried six levels but the console-backed default
+// emitted all of them unconditionally, so `trace` and `debug` fired in
+// production. On an identity provider that is both noise that buries the
+// events an operator needs and a channel that carries request-shaped detail.
+// ---------------------------------------------------------------------------
+
+describe("createConsoleLogger level threshold", () => {
+	const spies = () => ({
+		debug: vi.spyOn(console, "debug").mockImplementation(() => {}),
+		info: vi.spyOn(console, "info").mockImplementation(() => {}),
+		warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
+		error: vi.spyOn(console, "error").mockImplementation(() => {}),
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("defaults to info, dropping trace and debug", async () => {
+		const s = spies();
+		const logger = createConsoleLogger();
+
+		logger.trace({ a: 1 }, "t");
+		logger.debug({ a: 1 }, "d");
+		logger.info({ a: 1 }, "i");
+
+		expect(s.debug).not.toHaveBeenCalled();
+		expect(s.info).toHaveBeenCalledTimes(1);
+	});
+
+	it("emits everything at or above the configured level", async () => {
+		const s = spies();
+		const logger = createConsoleLogger({}, { level: "warn" });
+
+		logger.info({}, "i");
+		logger.warn({}, "w");
+		logger.error({}, "e");
+		logger.fatal({}, "f");
+
+		expect(s.info).not.toHaveBeenCalled();
+		expect(s.warn).toHaveBeenCalledTimes(1);
+		// error + fatal both route to console.error.
+		expect(s.error).toHaveBeenCalledTimes(2);
+	});
+
+	it("silences every level at 'silent'", async () => {
+		const s = spies();
+		const logger = createConsoleLogger({}, { level: "silent" });
+
+		logger.trace({}, "t");
+		logger.info({}, "i");
+		logger.fatal({}, "f");
+
+		expect(s.debug).not.toHaveBeenCalled();
+		expect(s.info).not.toHaveBeenCalled();
+		expect(s.error).not.toHaveBeenCalled();
+	});
+
+	it("carries the level into children, which inherit rather than reset it", async () => {
+		// A child that silently reverted to the default would leak debug output
+		// from exactly the request-scoped loggers most likely to carry detail.
+		const s = spies();
+		const child = createConsoleLogger({}, { level: "error" }).child({ requestId: "r1" });
+
+		child.warn({}, "w");
+		child.error({}, "e");
+
+		expect(s.warn).not.toHaveBeenCalled();
+		expect(s.error).toHaveBeenCalledTimes(1);
+	});
+
+	it("still merges bindings when the level admits the call", async () => {
+		const s = spies();
+		createConsoleLogger({ svc: "auth" }, { level: "debug" }).debug({ a: 1 }, "msg");
+
+		expect(s.debug).toHaveBeenCalledWith({ svc: "auth", a: 1 }, "msg");
 	});
 });

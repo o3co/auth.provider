@@ -40,6 +40,14 @@
  * interface; consumers without a structured logger should rely on it via the
  * optional `ComponentMap.logger` slot.
  */
+/**
+ * The six emitting levels plus `silent`, which emits nothing.
+ *
+ * `silent` is a threshold value, not something a call site passes — there is no
+ * `logger.silent(...)`.
+ */
+export type LogLevel = "trace" | "debug" | "info" | "warn" | "error" | "fatal" | "silent";
+
 export interface Logger {
 	// Two overload shapes mirror pino: object-first carries structured
 	// bindings + optional message, string-first carries a printf-style

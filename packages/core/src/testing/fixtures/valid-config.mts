@@ -77,6 +77,7 @@ type FullSectionsConfig = z.infer<typeof fullSectionsSchema>;
 export function makeValidCoreConfig() {
 	return {
 		http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
+		logging: { level: "info" },
 		oauth: {
 			jwt: {
 				signingKey: {

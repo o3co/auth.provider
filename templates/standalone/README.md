@@ -61,6 +61,7 @@ fail fast rather than silently falling back to defaults.
 | `HTTP_PORT` | `3000` | Port the server listens on |
 | `HTTP_TRUST_PROXY` | `false` | Set to `true` when running behind a reverse proxy |
 | `HTTP_READINESS_TIMEOUT_MS` | `1000` | Per-probe deadline for `/readyz` (see [Health endpoints](#health-endpoints)) |
+| `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent` |
 
 ### OAuth JWT
 
@@ -345,3 +346,72 @@ gracefulShutdown(server, () => handle.dispose());
 - [`@o3co/auth-provider-session`](../../packages/session) — Session module
 - [`@o3co/auth-provider-foundation`](../../packages/foundation) — Built-in adapter registration
 - [`@o3co/create-auth-provider`](../../create-app) — CLI scaffolder that generates this template
+
+## Observability
+
+### Logging
+
+The provider logs newline-delimited JSON on stdout via [pino](https://getpino.io),
+which is what a log aggregator ingests without a parser. `LOG_LEVEL` (HOCON
+`logging.level`) sets the threshold; `trace` and `debug` carry request-shaped
+detail and are off by default, and pino drops sub-threshold calls before
+formatting, so they cost nothing in production rather than being emitted and
+filtered downstream.
+
+The logger is wired into the boot planner's `logger` component slot, so every
+module that declares `optional: ["logger"]` — oauth, session, dpop, mtls,
+token-exchange — logs through this one instance. Filling that slot is what makes
+`LOG_LEVEL` reach them; a composition root that leaves it empty gets each
+module's own `consoleLogger` default instead, and configuring a level changes
+nothing.
+
+Events are structured and named: `logger.error({ err }, "session_store_redis_error")`.
+Alert on the name, not on the message text.
+
+To swap the backend, replace `createAppLogger` in `src/logger.mts`. Anything
+satisfying core's `Logger` works — the interface has pino's two-overload call
+shape, so a pino-compatible logger needs no adapter.
+
+### Metrics
+
+`GET /metrics` serves the Prometheus text exposition format.
+
+| Metric | Type | What it answers |
+|---|---|---|
+| `http_request_duration_seconds` | histogram | Request rate, error rate and latency, by `method` / `route` / `status` |
+| `auth_dependency_up` | gauge | Whether each backing dependency answered its readiness probe (`dependency="redis"`, `"session-store"`) |
+| `auth_provider_*` | various | Node process defaults — event-loop lag, heap, GC, handles |
+
+`auth_dependency_up` is the series that separates "Redis is gone" from "the app
+is slow", which is otherwise only distinguishable by grepping container logs. It
+reuses the probes the adapter builders already registered, so it reflects what
+this deployment actually wired rather than a second, drifting list. Dependencies
+are re-sampled on every scrape — a cached verdict would report healthy for
+exactly as long as an incident lasts — and in-flight probes are joined rather
+than re-issued, so a scrape loop does not stack commands on a dependency that is
+already in trouble.
+
+Route labels use the Express route **pattern** (`/oauth/token`,
+`/api/widgets/:id`), never the URL, and unmatched requests collapse to
+`route="unmatched"`. Labelling by path would mint a series per distinct URL, and
+this server's paths carry opaque values — that is how a metrics endpoint takes
+down the monitoring that was supposed to watch it.
+
+A scrape example:
+
+```yaml
+scrape_configs:
+  - job_name: auth-provider
+    static_configs:
+      - targets: ["auth-provider:3000"]
+```
+
+Keep `/metrics` off the public listener, for the same reason as `/readyz`: it is
+unauthenticated, it sits ahead of the auth router and so outside its rate
+limiter, and each scrape samples the readiness probes.
+
+**Not published yet:** rate-limiter fail-closed counts and audit-sink drops.
+Both happen inside `@o3co/auth-provider-core` and are not observable from the
+composition root; counting them needs a metrics hook in core rather than
+something this template can reach. Until then, alert on the
+`rate_limiter_failed_closed` and `rate_limit.unavailable` log events.

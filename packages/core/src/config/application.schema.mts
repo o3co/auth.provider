@@ -293,6 +293,11 @@ export const CoreConfigSchema = z.object({
 		// string, reached from the opposite direction.
 		readinessTimeoutMs: z.coerce.number().int().positive().max(2_147_483_647),
 	}),
+	// Shape-only; the default lives in HOCON. `silent` is a threshold, not a
+	// level anything emits at.
+	logging: z.object({
+		level: z.enum(["trace", "debug", "info", "warn", "error", "fatal", "silent"]),
+	}),
 	oauth: z.object({
 		jwt: jwtSchema,
 		accessToken: z.object({

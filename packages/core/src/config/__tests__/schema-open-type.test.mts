@@ -107,6 +107,7 @@ describe("schema open type", () => {
 	it("rejects legacy top-level `clients` key once renamed to `repositories`", () => {
 		const result = AppConfigSchema.safeParse({
 			http: { port: 3000, trustProxy: false, readinessTimeoutMs: 1000 },
+			logging: { level: "info" },
 			oauth: {
 				jwt: {
 					signingKey: { provider: "local", local: { algorithm: "HS256", kid: "v0", secret: "s" } },
