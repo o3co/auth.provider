@@ -46,7 +46,7 @@ import { extractFederationSection } from "@o3co/auth-provider-session";
 // with strict nodenext, so the named import is the right shape here.
 import { Redis } from "ioredis";
 
-import logger from "#/logger.mjs";
+import logger from "./logger.mjs";
 
 /**
  * Helper: turn a v0.4.x { type, [type]: {...} } adapter-config slice into the

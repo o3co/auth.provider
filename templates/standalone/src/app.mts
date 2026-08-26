@@ -26,10 +26,9 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import helmet from "helmet";
-
-import logger from "#/logger.mjs";
 import { buildModules } from "./buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
+import logger from "./logger.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
 // ENV = CONFIG_ENV || NODE_ENV || "development"; missing {ENV}.conf is fatal.

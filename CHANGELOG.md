@@ -50,6 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   `Symbol.asyncDispose` on a duplicated connection no longer lets `quit()` reject. That disposal runs on an `await using` binding around a refresh rotation: a rejection there reports failure for a rotation that already committed, the client retries with the old refresh token, replay detection fires, and the entire family is revoked — the user is forced to re-login. When the body already threw, a rejecting disposal also buries the original error inside a `SuppressedError`. It now falls back to `disconnect()`, which tears the socket down synchronously and cannot reject.
 
+  The standalone template's source also moves off the `#/logger.mjs` subpath alias onto a relative import. `#/*` maps to `./dist/*` under the default condition, so running the scaffold from source before its first build resolved to a file that does not exist yet — the same class of breakage #255 fixed for `@o3co/auth-provider-session`, and what AGENTS.md's module-resolution rule exists to prevent.
+
   The `@o3co/auth-provider-redis` README's composition example showed `new Redis(...)` with no `error` listener — the crashing shape, on the *shared* socket, for anyone following it. It now shows the listener and says the connection stays the caller's responsibility.
 
   Worth recording, since the original report assumed otherwise: with node-redis 6 a **boot-time** connection failure does not crash — `connect()` rejects cleanly and no `error` event fires unhandled — so the failure mode is a blip on an already-established connection, not the initial dial. Reconnection policy is left to node-redis's default; the handler's job is to make the event observed rather than fatal.
