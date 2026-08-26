@@ -374,11 +374,33 @@ export const createAuthorizationGrant = (
 				}
 			}
 
-			// Deployments that wire no userSessionStore have no sid to resolve, so
-			// the token-request session stays the only available subject there.
-			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
-			const sessionUserId = typeof rawUserId === "string" ? rawUserId : undefined;
-			const subject = userSession?.sub ?? sessionUserId ?? null;
+			// The fallback is gated on the *store* being absent, not on `sub` being
+			// nullish. `userSession?.sub ?? sessionUserId` would look equivalent,
+			// but it silently reverts to the cookie-derived identity whenever a
+			// store returns a record with no usable `sub` — reintroducing exactly
+			// the cross-user mismatch this fix removes, in the one topology
+			// (same-origin/BFF) where `/token` does carry cookies. `UserSession.sub`
+			// is typed `string`, but the store boundary is not enforced at runtime
+			// and custom implementations exist.
+			let subject: string | null;
+			if (deps.userSessionStore) {
+				const sub = userSession?.sub;
+				if (typeof sub !== "string" || sub.length === 0) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "session_invalid",
+						},
+					};
+				}
+				subject = sub;
+			} else {
+				// No store wired means no sid to resolve, so the token-request
+				// session is the only available subject.
+				const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
+				subject = typeof rawUserId === "string" ? rawUserId : null;
+			}
 
 			// Initial rt+jwt opens a new refresh-token family for replay detection
 			// per RFC 6819 §5.2.2.3. All subsequent rotations carry the same
@@ -559,8 +581,10 @@ export const createAuthorizationGrant = (
 					const clientRecord = await clientRepository.findById(authenticatedClientId);
 
 					// CR-4: re-validate session liveness immediately before mutating the
-					// family index. Between the first `get` (before token generation) and
-					// `addFamilyId`, `findById` is awaited — a `cascadeLogout` in that window
+					// family index. The first `get` now happens before token generation,
+					// so the span between the two reads also covers both `generateToken`
+					// signings and `refreshTokenFamilyRotation.register` in addition to
+					// the `findById` awaited just above — a `cascadeLogout` in that window
 					// would leave the just-issued tokens orphaned from logout orchestration.
 					// Per Codex Delta 1, this REDUCES the window for the common case
 					// (logout fully completes before the second check). It does NOT close
@@ -593,6 +617,27 @@ export const createAuthorizationGrant = (
 						logger?.warn(
 							{ sid, clientId: authenticatedClientId },
 							"authorization_grant_rejected_session_invalidated_during_token_issuance",
+						);
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "session_invalidated",
+							},
+						};
+					}
+					// The access and refresh tokens were signed from the FIRST read's
+					// `sub`; the id_token below is minted from this one. A store that
+					// returned a different subject for the same `sid` between the two
+					// reads would hand back tokens that disagree about who the user is
+					// — the exact confusion this grant's subject handling exists to
+					// prevent. A `sub` change under a fixed `sid` is a store invariant
+					// violation, not a race worth tolerating, so refuse rather than
+					// reconcile.
+					if (revalidatedSession.sub !== subject) {
+						logger?.warn(
+							{ sid, clientId: authenticatedClientId },
+							"authorization_grant_rejected_session_subject_changed_during_token_issuance",
 						);
 						return {
 							result: {
