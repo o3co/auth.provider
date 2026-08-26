@@ -188,7 +188,7 @@ export {
 } from "./keys/KeyStore.mjs";
 export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";
 // Logging
-export type { EventLogger, Logger } from "./logging/Logger.mjs";
+export type { EventLogger, Logger, LogLevel } from "./logging/Logger.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";
 export type { MfaRouteDeps } from "./mfa/route.mjs";
 export { createMfaRouter } from "./mfa/route.mjs";

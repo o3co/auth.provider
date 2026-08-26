@@ -29,6 +29,31 @@ import { collectDefaultMetrics, Gauge, Histogram, Registry } from "prom-client";
  * classic way to take Prometheus down with the thing that was supposed to
  * watch it. Unmatched requests collapse to a single `unmatched` bucket.
  */
+/**
+ * Method label, bounded to the methods this server can actually serve.
+ *
+ * `req.method` is attacker-controlled: Node's HTTP parser accepts any valid
+ * token, so `FOO` and `M000001` reach here as readily as `GET`. Each distinct
+ * value would mint a fresh histogram child carrying every bucket — the same
+ * unbounded-cardinality failure {@link routeLabel} guards against, one label
+ * over, and reachable without any access to `/metrics` itself.
+ */
+const KNOWN_METHODS = new Set([
+	"GET",
+	"HEAD",
+	"POST",
+	"PUT",
+	"PATCH",
+	"DELETE",
+	"OPTIONS",
+	"TRACE",
+	"CONNECT",
+]);
+
+function methodLabel(req: Request): string {
+	return KNOWN_METHODS.has(req.method) ? req.method : "other";
+}
+
 function routeLabel(req: Request): string {
 	const route = (req as Request & { route?: { path?: string } }).route?.path;
 	if (typeof route === "string" && route.length > 0) {
@@ -107,15 +132,25 @@ export function createMetrics(): Metrics {
 
 	const middleware: RequestHandler = (req: Request, res: Response, next: NextFunction) => {
 		const endTimer = requestDuration.startTimer();
-		// `finish` rather than wrapping `res.end`: it fires for every terminal
-		// path including the error handler, and `req.route` is populated by then.
-		res.once("finish", () => {
+		let observed = false;
+		// Both terminal events, with a guard, rather than `finish` alone.
+		// `finish` covers every response the server completes — including ones
+		// produced by an error handler, and `req.route` is populated by then. But
+		// a client or proxy that disconnects mid-handler emits `close` WITHOUT
+		// `finish`, and those are disproportionately the slow and failing requests
+		// that RED metrics exist to surface; counting only `finish` would drop
+		// them from both the rate and the latency series.
+		const observe = () => {
+			if (observed) return;
+			observed = true;
 			endTimer({
-				method: req.method,
+				method: methodLabel(req),
 				route: routeLabel(req),
 				status: String(res.statusCode),
 			});
-		});
+		};
+		res.once("finish", observe);
+		res.once("close", observe);
 		next();
 	};
 
