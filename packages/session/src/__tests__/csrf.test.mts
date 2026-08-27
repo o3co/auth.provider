@@ -26,6 +26,7 @@
  * acceptance rule that composes them.
  */
 
+import { fullSectionsSchema } from "@o3co/auth-provider-core";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -35,6 +36,7 @@ import {
 	createCsrfGuard,
 	createCsrfIssueHandler,
 	createCsrfProtection,
+	MAX_CSRF_TTL_SECONDS,
 } from "#/csrf.mjs";
 
 const SECRET = "test-session-secret-value";
@@ -209,6 +211,103 @@ describe("csrf — signed double-submit token", () => {
 		);
 
 		expect(verdict).toBe("invalid");
+	});
+});
+
+/**
+ * `ttlSeconds` is used in arithmetic *and* stringified into the token, so a
+ * value that is not a positive integer does not fail loudly — it silently
+ * disables the token arm. The zod schema catches this for configs that go
+ * through it; this is the guard for the ones that do not (hand-built objects
+ * in tests and embedders, which the schema never sees).
+ */
+describe("csrf — ttlSeconds validation at construction", () => {
+	it.each([
+		["a decimal", 7200.5],
+		["zero", 0],
+		["a negative value", -1],
+		["NaN", Number.NaN],
+		["Infinity", Number.POSITIVE_INFINITY],
+		["a value beyond the ceiling", MAX_CSRF_TTL_SECONDS + 1],
+	])("throws on %s", (_label, ttlSeconds) => {
+		expect(() => createCsrfProtection({ secret: SECRET, ttlSeconds })).toThrow(/ttlSeconds/);
+	});
+
+	it("accepts the ceiling itself", () => {
+		expect(() =>
+			createCsrfProtection({ secret: SECRET, ttlSeconds: MAX_CSRF_TTL_SECONDS }),
+		).not.toThrow();
+	});
+
+	it("throws rather than silently flooring a decimal", () => {
+		// Rounding would hide an operator's typo behind a working system, and
+		// the value it silently picked would not be the one they wrote.
+		expect(() => createCsrfProtection({ secret: SECRET, ttlSeconds: 7200.5 })).toThrow();
+	});
+
+	it("agrees with the config schema about what is acceptable", () => {
+		// Two guards, one rule. If either side's bounds drift this fails, which
+		// is the point — the schema restates a constant it cannot import.
+		const cases = [7200, MAX_CSRF_TTL_SECONDS, 1, 0, -1, 7200.5, MAX_CSRF_TTL_SECONDS + 1];
+		for (const ttlSeconds of cases) {
+			const schemaAccepts = fullSectionsSchema.shape.session.shape.csrf.safeParse({
+				trustedOrigins: [],
+				ttlSeconds,
+			}).success;
+			let constructorAccepts = true;
+			try {
+				createCsrfProtection({ secret: SECRET, ttlSeconds });
+			} catch {
+				constructorAccepts = false;
+			}
+			expect({ ttlSeconds, schemaAccepts }).toEqual({
+				ttlSeconds,
+				schemaAccepts: constructorAccepts,
+			});
+		}
+	});
+
+	it("mints a token matching the wire shape for every accepted ttl", () => {
+		// The failure mode this closes: a token whose expiry field does not
+		// match the shape the verifier requires is unverifiable the instant it
+		// is issued, so `GET /session/csrf` would hand out material that
+		// `POST /session/login` then rejects.
+		const wireShape = /^\d{1,15}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}$/;
+		for (const ttlSeconds of [1, 60, 7200, MAX_CSRF_TTL_SECONDS]) {
+			const csrf = createCsrfProtection({ secret: SECRET, ttlSeconds });
+			const token = csrf.mint();
+			expect(token).toMatch(wireShape);
+			// And it round-trips, which the shape alone does not prove.
+			expect(
+				csrf.verify(
+					fakeRequest({
+						cookies: { [csrf.cookieName]: token },
+						headers: { [csrf.headerName]: token },
+					}),
+				),
+			).toBe("valid");
+		}
+	});
+
+	it("mints a verifiable token when the clock seam returns a fractional epoch", () => {
+		// `Date.now()` is integral in practice, but a seam or a faked clock need
+		// not be — and the expiry is floored, not the raw sum.
+		const csrf = createCsrfProtection({
+			secret: SECRET,
+			ttlSeconds: 7200,
+			now: () => 1_000_000_000_123.7,
+		});
+		const token = csrf.mint();
+
+		expect(token).toMatch(/^\d{1,15}\./);
+		expect(
+			csrf.verify(
+				fakeRequest({
+					cookies: { [csrf.cookieName]: token },
+					headers: { [csrf.headerName]: token },
+				}),
+			),
+		).toBe("valid");
 	});
 });
 

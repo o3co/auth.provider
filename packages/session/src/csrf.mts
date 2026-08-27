@@ -58,6 +58,17 @@ export const DEFAULT_CSRF_HEADER_NAME = "x-csrf-token";
 export const DEFAULT_CSRF_BODY_FIELD = "csrf_token";
 /** Default token lifetime. Two hours: long enough to outlive a login form. */
 export const DEFAULT_CSRF_TTL_SECONDS = 7200;
+/**
+ * Ceiling on the token lifetime, in seconds (24 hours).
+ *
+ * A policy bound rather than a mechanical one. The token exists to outlive a
+ * login form sitting open; past a day it stops being that and becomes a
+ * long-lived bearer value sitting in a JS-readable cookie. `reference.conf`
+ * and the `session.csrf.ttlSeconds` schema restate this number — the schema
+ * cannot import it, since `session` depends on `core` and not the reverse, so
+ * a test in this package pins the two together.
+ */
+export const MAX_CSRF_TTL_SECONDS = 86_400;
 
 /**
  * HKDF `info` string. The signing key is derived from the session secret
@@ -167,11 +178,44 @@ const readCookie = (req: Request, name: string): string | undefined => {
 	return undefined;
 };
 
+/**
+ * Reject a `ttlSeconds` that would silently disable the token arm.
+ *
+ * The value is used in arithmetic *and* stringified into the token as its
+ * expiry field, so every non-conforming value fails quietly rather than
+ * loudly. A decimal mints `7200.5` into the expiry position, which
+ * {@link TOKEN_SHAPE} then rejects — so every token the provider issues is
+ * unverifiable the instant it is issued, including the one `GET /session/csrf`
+ * just handed the caller. A zero or negative value mints tokens that are
+ * already expired, which locks out every header-less client with nothing in
+ * the configuration visibly wrong. Zero is the one to worry about: HOCON
+ * substitutes an empty `SESSION_CSRF_TTL_SECONDS` as `""` and coercion turns
+ * that into `0`.
+ *
+ * The `session.csrf.ttlSeconds` zod schema enforces the same bounds for config
+ * that goes through it. This guard is for the config that does not — a
+ * hand-built object from a test or an embedder composing its own `AppConfig`
+ * never meets the schema, and the failure would surface as "CSRF is broken in
+ * production" rather than "boot refused a bad value".
+ *
+ * It throws rather than rounding or clamping: silently picking a value the
+ * operator did not write buys a working system at the cost of hiding their
+ * typo, and this one is security configuration.
+ */
+const assertValidTtlSeconds = (ttlSeconds: number): void => {
+	if (!Number.isInteger(ttlSeconds) || ttlSeconds <= 0 || ttlSeconds > MAX_CSRF_TTL_SECONDS) {
+		throw new Error(
+			`csrf: ttlSeconds must be an integer between 1 and ${MAX_CSRF_TTL_SECONDS} seconds, received ${String(ttlSeconds)}`,
+		);
+	}
+};
+
 export const createCsrfProtection = (options: CsrfProtectionOptions): CsrfProtection => {
 	const cookieName = options.cookieName ?? DEFAULT_CSRF_COOKIE_NAME;
 	const headerName = (options.headerName ?? DEFAULT_CSRF_HEADER_NAME).toLowerCase();
 	const bodyField = options.bodyField ?? DEFAULT_CSRF_BODY_FIELD;
 	const ttlSeconds = options.ttlSeconds ?? DEFAULT_CSRF_TTL_SECONDS;
+	assertValidTtlSeconds(ttlSeconds);
 	const cookie = options.cookie ?? { secure: true, sameSite: "lax" as const };
 	const now = options.now ?? Date.now;
 	const key = deriveSigningKey(options.secret);

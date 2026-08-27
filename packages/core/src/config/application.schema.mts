@@ -498,7 +498,32 @@ export const fullSectionsSchema = z.object({
 		csrf: z
 			.object({
 				trustedOrigins: z.array(z.string()),
-				ttlSeconds: z.coerce.number(),
+				// `.int().positive()` is load-bearing, not decoration — the same
+				// trap `http.readinessTimeoutMs` above documents, reached through
+				// a different door. The value is used in arithmetic AND
+				// stringified into the CSRF token as its expiry field, so every
+				// non-conforming value disables the token arm *silently*:
+				//
+				//   ""   -> HOCON substitutes an empty SESSION_CSRF_TTL_SECONDS as
+				//           the empty string and `z.coerce.number()` makes that
+				//           `0`, so every minted token is already expired. The
+				//           token arm is dead, header-less clients are locked out,
+				//           and nothing in the config looks wrong.
+				//   0/-n -> the same, stated outright.
+				//   7200.5 -> the expiry stringifies as a decimal, which the
+				//           token's own shape check rejects. Every token the
+				//           provider issues is unverifiable the instant it is
+				//           issued, including the one `GET /session/csrf` just
+				//           handed the caller.
+				//
+				// The ceiling is a policy bound, not a mechanical one: a token
+				// whose job is to outlive a login form sitting open stops being
+				// that and becomes a long-lived bearer value in a JS-readable
+				// cookie. It restates `MAX_CSRF_TTL_SECONDS` from
+				// `@o3co/auth-provider-session`'s `csrf.mts`, which cannot be
+				// imported here (session depends on core, not the reverse); the
+				// two are pinned together by a test in that package.
+				ttlSeconds: z.coerce.number().int().positive().max(86_400),
 			})
 			.optional(),
 		storage: z
