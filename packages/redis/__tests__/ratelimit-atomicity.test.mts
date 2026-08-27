@@ -99,6 +99,23 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 		expect((await limiter.check("login.ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
 	});
 
+	it("falls back rather than throwing when defaultLimit is null or malformed", async () => {
+		// `redisRateLimiterBuilder` accepts a config object that never passed the
+		// zod schema, so `defaultLimit` can arrive as null or as a non-object.
+		// Dereferencing it would crash the limiter at construction — the one
+		// component whose job is to stay up while things go wrong.
+		for (const bad of [null, undefined, "nonsense", 42, {}]) {
+			const redis = fakeRedis();
+			const limiter = createRedisRateLimiter({
+				client: redis,
+				defaultLimit: bad as never,
+			});
+			const decision = await limiter.check("anything:foo", { ip: "1.2.3.4" });
+			expect(decision.allowed).toBe(true);
+			expect(redis.ttls.get("anything:foo")).toBe(60);
+		}
+	});
+
 	it("uses defaultLimit when a limit spec has a non-positive limit", async () => {
 		const redis = fakeRedis();
 		const limiter = createRedisRateLimiter({

@@ -34,15 +34,19 @@ interface RedisRateLimiterConfig {
 const isPositiveInteger = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && value > 0;
 
+/** Whether an arbitrary value is a usable {@link RateLimitSpec}. */
+const isRateLimitSpec = (value: unknown): value is RateLimitSpec =>
+	typeof value === "object" &&
+	value !== null &&
+	isPositiveInteger((value as { limit?: unknown }).limit) &&
+	isPositiveInteger((value as { windowSeconds?: unknown }).windowSeconds);
+
 function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
 	if (raw == null || typeof raw !== "object") return {};
 	const result: Record<string, RateLimitSpec> = {};
 	for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-		if (v && typeof v === "object" && "limit" in v && "windowSeconds" in v) {
-			const spec = v as { limit: unknown; windowSeconds: unknown };
-			if (isPositiveInteger(spec.limit) && isPositiveInteger(spec.windowSeconds)) {
-				result[k] = { limit: spec.limit, windowSeconds: spec.windowSeconds };
-			}
+		if (isRateLimitSpec(v)) {
+			result[k] = { limit: v.limit, windowSeconds: v.windowSeconds };
 		}
 	}
 	return result;
@@ -78,13 +82,16 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 	const limits = normalizeLimits(opts.limits);
 	// `defaultLimit` gets the same screening as the per-prefix specs: it is the
 	// fallback every unmatched key lands on, so a bad one is worse, not better.
-	const providedDefault = opts.defaultLimit;
-	const defaultLimit: RateLimitSpec =
-		providedDefault !== undefined &&
-		isPositiveInteger(providedDefault.limit) &&
-		isPositiveInteger(providedDefault.windowSeconds)
-			? providedDefault
-			: { limit: 60, windowSeconds: 60 };
+	//
+	// Screened as an unknown, not as a `RateLimitSpec`: `redisRateLimiterBuilder`
+	// accepts a config object that never passed the zod schema, so this can
+	// arrive as `null` or as a non-object. Reading `.limit` off it first would
+	// throw at construction — in the one component whose job is to keep working
+	// while other things go wrong.
+	const providedDefault = opts.defaultLimit as unknown;
+	const defaultLimit: RateLimitSpec = isRateLimitSpec(providedDefault)
+		? providedDefault
+		: { limit: 60, windowSeconds: 60 };
 	const client = opts.client;
 
 	return {
