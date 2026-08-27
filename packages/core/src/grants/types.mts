@@ -55,11 +55,13 @@ export interface AuthenticatedClient {
 	 */
 	readonly allowedScopes?: readonly string[];
 	/**
-	 * Per-client grant-type gate. Currently consumed only by
-	 * `client_credentials` (deny-by-absence semantics on the absent / empty
-	 * field). `authorization_code` / `refresh_token` continue to ignore this
-	 * field for backward compatibility with clients registered before the
-	 * field existed.
+	 * Per-client grant-type gate, mirrored from the client registration by
+	 * `clientAuthMw`. Enforced **centrally** by `isGrantTypeAllowed` at grant
+	 * dispatch and at `/authorize`, so every grant inherits the check (#268);
+	 * `client_credentials` and the WebAuthn grant layer a stricter
+	 * deny-by-absence rule on top. The absent / empty / non-empty semantics
+	 * are documented once, on `Client.allowedGrantTypes` in
+	 * `../repositories/types.mts`.
 	 */
 	readonly allowedGrantTypes?: readonly string[];
 	/**
