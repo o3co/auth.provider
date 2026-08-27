@@ -26,12 +26,28 @@ import { BootError } from "../types.mjs";
 
 /** Spy-instrumented mock Router factory. */
 function makeMockRouter() {
-	const useCalls: { mountPath: string; handler: unknown }[] = [];
+	const allUseCalls: { mountPath: string | readonly string[]; handler: unknown }[] = [];
 	const router = {
-		use: vi.fn((mountPath: string, handler: unknown) => {
-			useCalls.push({ mountPath, handler });
+		use: vi.fn((mountPath: string | readonly string[], handler: unknown) => {
+			allUseCalls.push({ mountPath, handler });
 		}),
-		useCalls,
+		allUseCalls,
+		/**
+		 * Only the mounts that came from a route contribution.
+		 *
+		 * `assembleApp` also mounts infrastructure middleware that no module
+		 * declared — the protected-resource sender-constraint guard (#264) —
+		 * across several paths at once. Route contributions always mount on a
+		 * single string path, so the array shape separates the two cleanly and
+		 * keeps these mount-order tests about the ordering algorithm rather
+		 * than about how many middlewares boot happens to install.
+		 */
+		get useCalls(): { mountPath: string; handler: unknown }[] {
+			return allUseCalls.filter(
+				(call): call is { mountPath: string; handler: unknown } =>
+					typeof call.mountPath === "string",
+			);
+		},
 	};
 	return router;
 }

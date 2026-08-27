@@ -44,6 +44,7 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import {
 	deriveAudienceFromResources,
 	extractResourceParam,
@@ -424,9 +425,12 @@ export const createOAuthRouter = async (
 			"/introspect",
 			async (req: Request, res: Response, next) => {
 				if (!(await checkRateLimit(req, res, "introspect"))) return;
-				const auth = req.headers.authorization;
-				if (auth?.startsWith("Bearer ")) {
-					const bearerToken = auth.slice(7);
+				// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
+				// access token used as the introspection credential. Which scheme a
+				// given token may use is enforced against its `cnf` by
+				// `protectedResourceBindingMw` upstream.
+				const bearerToken = parseAccessTokenHeader(req.headers.authorization);
+				if (bearerToken !== null) {
 					// Self-introspection pattern: RFC 7662 requires a valid credential to call introspect.
 					// When the caller uses their own token as the Bearer credential, the token in the
 					// request body must match that Bearer token. If they differ, return inactive (not 403)

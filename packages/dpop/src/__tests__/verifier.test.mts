@@ -17,6 +17,7 @@
 import type { Request } from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { beforeEach, describe, expect, it } from "vitest";
+import { computeAth } from "#/ath.mjs";
 import { DPoPError } from "#/errors.mjs";
 import { createMemoryDPoPReplayStore } from "#/memory/replay-store.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
@@ -542,5 +543,78 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 			logger: capturingLogger(defaults),
 		});
 		expect(ttlWarnings(defaults)).toHaveLength(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// RFC 9449 §7.1 — protected-resource profile (`ath`)
+// ---------------------------------------------------------------------------
+
+describe("createDPoPMechanism — protected-resource profile (ath, RFC 9449 §7.1)", () => {
+	let replayStore: ReturnType<typeof createMemoryDPoPReplayStore>;
+	let mechanism: ReturnType<typeof createDPoPMechanism>;
+
+	beforeEach(() => {
+		replayStore = createMemoryDPoPReplayStore();
+		mechanism = createDPoPMechanism({ replayStore, iatWindowSeconds: 60 });
+	});
+
+	const RESOURCE_REQ = ["GET", "/userinfo", "rs.example"] as const;
+	const makeResourceReq = (proof: string) =>
+		makeReq(proof, RESOURCE_REQ[0], RESOURCE_REQ[1], RESOURCE_REQ[2]);
+	const resourceHtu = `https://${RESOURCE_REQ[2]}${RESOURCE_REQ[1]}`;
+
+	it("accepts a proof whose ath matches the presented access token", async () => {
+		const accessToken = "at.example.token";
+		const { proof, jkt } = await mintProof({
+			htm: RESOURCE_REQ[0],
+			htu: resourceHtu,
+			extraClaims: { ath: await computeAth(accessToken) },
+		});
+		const result = await mechanism.extract(makeResourceReq(proof) as Request, {
+			boundAccessToken: accessToken,
+		});
+		expect(result).toEqual({ kind: "dpop", confirmation: { jkt } });
+	});
+
+	it("rejects a proof with no ath when an access token is in play", async () => {
+		const { proof } = await mintProof({ htm: RESOURCE_REQ[0], htu: resourceHtu });
+		await expect(
+			mechanism.extract(makeResourceReq(proof) as Request, {
+				boundAccessToken: "at.example.token",
+			}),
+		).rejects.toMatchObject({ reason: "ath_missing" });
+	});
+
+	it("rejects a proof whose ath belongs to a different access token", async () => {
+		// The replay scenario the enforcement exists for: a proof captured
+		// alongside one token, presented with another the attacker stole.
+		const { proof } = await mintProof({
+			htm: RESOURCE_REQ[0],
+			htu: resourceHtu,
+			extraClaims: { ath: await computeAth("the.captured.token") },
+		});
+		await expect(
+			mechanism.extract(makeResourceReq(proof) as Request, {
+				boundAccessToken: "a.different.stolen.token",
+			}),
+		).rejects.toMatchObject({ reason: "ath_mismatch" });
+	});
+
+	it("does not require ath when no context is passed (token-endpoint profile)", async () => {
+		const { proof, jkt } = await mintProof();
+		const result = await mechanism.extract(makeReq(proof) as Request);
+		expect(result).toEqual({ kind: "dpop", confirmation: { jkt } });
+	});
+
+	it("ignores a stray ath at the token endpoint rather than failing the grant", async () => {
+		// RFC 9449 §5 does not define `ath` for the token endpoint. A client
+		// that sends one anyway is doing something pointless, not something
+		// dangerous — there is no access token here for it to contradict.
+		const { proof, jkt } = await mintProof({
+			extraClaims: { ath: await computeAth("unrelated") },
+		});
+		const result = await mechanism.extract(makeReq(proof) as Request);
+		expect(result).toEqual({ kind: "dpop", confirmation: { jkt } });
 	});
 });
