@@ -54,7 +54,7 @@ describe("parseAccessTokenHeader", () => {
 		expect(parseAccessTokenHeader("DPoPish xyz")).toBeNull();
 	});
 
-	it("trims the surrounding whitespace RFC 9110 §5.6.3 permits", () => {
+	it("trims the optional whitespace RFC 9110 §5.6.3 permits around a field value", () => {
 		expect(parseAccessTokenHeader("Bearer   abc.def  ")).toBe("abc.def");
 	});
 });
