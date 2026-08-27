@@ -24,6 +24,7 @@ import {
 	createSymmetricKeyStore,
 	type GrantPolicyHook,
 	type Logger,
+	type RateLimitDecision,
 	type RateLimiter,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
@@ -100,9 +101,7 @@ const mockCodeRepository: CodeRepository = {
 	removeByCode: async () => {},
 };
 
-function createStubRateLimiter(
-	onCheck: (key: string) => { allowed: boolean; reason?: string; resetAt?: Date },
-): RateLimiter {
+function createStubRateLimiter(onCheck: (key: string) => RateLimitDecision): RateLimiter {
 	return {
 		kind: "stub",
 		async check(key) {
@@ -191,6 +190,31 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			expect(res.status).toBe(429);
 			expect(Number(res.headers["retry-after"])).toBeGreaterThan(0);
+		});
+
+		it("emits RateLimit-* headers like /session/login does (#325)", async () => {
+			// Pre-#325 only the session route emitted them — a drift the shared
+			// guard reconciles. No per-endpoint spec is configured for the OAuth
+			// endpoints, so the guard advertises exactly what the adapter reported.
+			const app = await buildApp({
+				rateLimiter: createStubRateLimiter(() => ({
+					allowed: false,
+					reason: "limit:token",
+					limit: 100,
+					remaining: 0,
+					resetAt: new Date(Date.now() + 30_000),
+				})),
+			});
+
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.send({ grant_type: "password" });
+
+			expect(res.status).toBe(429);
+			expect(res.headers["ratelimit-limit"]).toBe("100");
+			expect(res.headers["ratelimit-remaining"]).toBe("0");
+			expect(Number(res.headers["ratelimit-reset"])).toBeGreaterThan(0);
 		});
 
 		it("returns 429 rate_limited when rateLimiter denies /oauth/introspect", async () => {

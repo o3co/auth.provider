@@ -22,6 +22,7 @@ import {
 	type CodeRepository,
 	checkCanonicalIssuer,
 	consoleLogger,
+	createRateLimitGuard,
 	describeIssuerRejection,
 	emitAuditEvent,
 	errorEnvelope,
@@ -185,71 +186,25 @@ export const createOAuthRouter = async (
 		logger,
 	});
 
-	async function checkRateLimit(req: Request, res: Response, tag: string): Promise<boolean> {
-		if (!rateLimiter) return true;
-		const ip = req.ip ?? "unknown";
-		const key = `${tag}:ip:${ip}`;
-		let decision: Awaited<ReturnType<typeof rateLimiter.check>>;
-		try {
-			// CP-10: pass the same normalized ip into the check context as the
-			// key derivation uses, so limiters that re-use ctx.ip for logging
-			// or secondary keying observe the same value.
-			decision = await rateLimiter.check(key, {
-				ip,
-				userAgent: req.get("user-agent"),
-			});
-		} catch (cause) {
-			// OR-5: the previous implementation was silent fail-open with a
-			// fire-and-forget audit event. The audit sink is typically Redis-
-			// backed too, so during a Redis outage the audit emission also
-			// silently drops — operators saw nothing while rate limiting was
-			// down for hours. The `failMode` policy below makes the behavior
-			// configurable, and the `logger.error` call ensures operators see
-			// the outage regardless of audit-sink status.
-			const failMode = config.rateLimit.failMode;
-			const errorMessage = cause instanceof Error ? cause.message : String(cause);
-			logger.error(
-				{ error: errorMessage, mode: failMode, tag, ip },
-				failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
-			);
-			// Belt-and-suspenders: keep the audit event for ops dashboards
-			// that consume it. The logger call above is the operator-visible
-			// path; the audit event is the structured pipeline path.
-			emitAuditEvent(auditSink, {
-				timestamp: new Date(),
-				type: "rate_limit.unavailable",
-				ip,
-				userAgent: req.get("user-agent"),
-				details: {
+	// #325: the check + outage policy (OR-5 failMode, CP-10 context, AS-2 429
+	// envelope) lives in core's `createRateLimitGuard`, shared with the
+	// `/session/login` brute-force guard — one implementation of the security
+	// throttles instead of two hand-synchronized copies. These endpoints now
+	// also emit RFC RateLimit-* headers like `/session/login` does; no
+	// `headerFallback` is passed because no per-endpoint spec is configured
+	// here, so the guard only advertises what the adapter actually reported.
+	// The slot is optional: when no `rateLimiter` is wired the routes degrade
+	// gracefully (no rate limiting applied), as before.
+	const rateLimitGuard = (tag: string): RequestHandler =>
+		rateLimiter
+			? createRateLimitGuard({
+					limiter: rateLimiter,
 					tag,
-					error: errorMessage,
-				},
-			});
-			if (failMode === "closed") {
-				res.status(503).json({
-					error: "service_unavailable",
-					error_description: "Rate limiter temporarily unavailable",
-				});
-				return false;
-			}
-			return true;
-		}
-		if (!decision.allowed) {
-			if (decision.resetAt) {
-				const secs = Math.max(0, Math.ceil((decision.resetAt.getTime() - Date.now()) / 1000));
-				res.setHeader("Retry-After", String(secs));
-			}
-			// AS-2: rate-limit body migrated from `{error, reason}` to RFC 6749 §5.2
-			// `{error, error_description}` so all auth-product error responses share
-			// a single shape. `decision.reason` is the operator-visible cause string.
-			// `||` (not `??`) so that `decision.reason: ""` from a custom rate
-			// limiter also falls back — the envelope helper would otherwise drop
-			// the empty string and produce a 429 response with no `error_description`.
-			res.status(429).json(errorEnvelope("rate_limited", decision.reason || "Rate limit exceeded"));
-			return false;
-		}
-		return true;
-	}
+					failMode: config.rateLimit.failMode,
+					logger,
+					auditSink,
+				})
+			: (_req, _res, next) => next();
 
 	router
 		.use(express.json())
@@ -259,10 +214,7 @@ export const createOAuthRouter = async (
 			// D-6 ordering: rate limit BEFORE client auth so repeated unauthenticated
 			// hits cannot escape rate limiting via the clientAuthMw rejection path
 			// (and so DoS amplification through repository lookups is bounded).
-			async (req: Request, res: Response, next) => {
-				if (!(await checkRateLimit(req, res, "token"))) return;
-				next();
-			},
+			rateLimitGuard("token"),
 			tokenClientAuthMw,
 			async (req: Request, res: Response) => {
 				const { grant_type } = req.body;
@@ -473,8 +425,8 @@ export const createOAuthRouter = async (
 		// RFC 7662: Token Introspection
 		.post(
 			"/introspect",
+			rateLimitGuard("introspect"),
 			async (req: Request, res: Response, next) => {
-				if (!(await checkRateLimit(req, res, "introspect"))) return;
 				// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
 				// access token used as the introspection credential. Which scheme a
 				// given token may use is enforced against its `cnf` by
@@ -654,8 +606,7 @@ export const createOAuthRouter = async (
 				}
 			},
 		)
-		.get("/authorize", async (req: Request, res: Response) => {
-			if (!(await checkRateLimit(req, res, "authorize"))) return;
+		.get("/authorize", rateLimitGuard("authorize"), async (req: Request, res: Response) => {
 			if (!req.session.isAuthenticated) {
 				return res.redirect(
 					`${config.endpoints.login.url}?redirect_to=${encodeURIComponent(`${req.protocol}://${req.get("host")}${req.originalUrl}`)}`,

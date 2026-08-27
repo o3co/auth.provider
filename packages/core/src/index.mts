@@ -318,6 +318,13 @@ export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
+// #325: single guard factory behind both the OAuth-endpoint throttles and
+// the /session/login brute-force guard.
+export {
+	createRateLimitGuard,
+	type RateLimitFailMode,
+	type RateLimitGuardOptions,
+} from "./ratelimit/guard.mjs";
 export { resolveLoginLimitSpec } from "./ratelimit/loginSpec.mjs";
 export {
 	createMemoryRateLimiter,

@@ -28,6 +28,8 @@
 
 import type {
 	AppConfig,
+	AuditEvent,
+	AuditSink,
 	RateLimitDecision,
 	RateLimiter,
 	UserRepository,
@@ -65,7 +67,9 @@ const scriptedLimiter = (
 	};
 };
 
-const makeApp = (opts: { rateLimiter?: RateLimiter; config?: AppConfig } = {}) => {
+const makeApp = (
+	opts: { rateLimiter?: RateLimiter; auditSink?: AuditSink; config?: AppConfig } = {},
+) => {
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Record<string, unknown> }).session = {
@@ -87,6 +91,7 @@ const makeApp = (opts: { rateLimiter?: RateLimiter; config?: AppConfig } = {}) =
 			userRepository,
 			config: opts.config ?? stubConfig,
 			...(opts.rateLimiter ? { rateLimiter: opts.rateLimiter } : {}),
+			...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		}),
 	);
 	return app;
@@ -169,6 +174,26 @@ describe("/session/login rate limiting — limiter failure (#270)", () => {
 		} as unknown as AppConfig;
 		const res = await login(makeApp({ rateLimiter: limiter, config }));
 		expect(res.status).not.toBe(503);
+	});
+
+	it("emits rate_limit.unavailable when an audit sink is wired (#325)", async () => {
+		// Pre-#325 only the OAuth endpoints emitted this event on a limiter
+		// outage — a drift the shared guard reconciles. The sink is optional;
+		// compositions wiring none lose nothing they had.
+		const events: AuditEvent[] = [];
+		const sink: AuditSink = {
+			kind: "spy",
+			async record(event) {
+				events.push(event);
+			},
+		};
+		const limiter = scriptedLimiter(() => new Error("redis down"));
+		await login(makeApp({ rateLimiter: limiter, auditSink: sink }));
+		// Yield microtasks so the fire-and-forget audit emit settles
+		await new Promise((r) => setImmediate(r));
+		const ev = events.find((e) => e.type === "rate_limit.unavailable");
+		expect(ev).toBeDefined();
+		expect(ev?.details).toEqual({ tag: "login", error: "redis down" });
 	});
 });
 
