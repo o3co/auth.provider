@@ -86,6 +86,61 @@ describe("measureSecretEntropyBytes", () => {
 	});
 });
 
+describe("measureSecretEntropyBytes — base64 padding must be well-formed", () => {
+	// An encoder emits zero, one or two '=', and only where the body length
+	// calls for it. Trimming any run of '=' would turn a passphrase that merely
+	// ends in equals signs into a "valid" base64 body and score it at
+	// three-quarters of its real length.
+
+	it("accepts one '=' after a 3-character final group", () => {
+		const b64 = randomBytes(32).toString("base64"); // 43 body + 1 pad
+		expect(b64.endsWith("=")).toBe(true);
+		expect(b64.endsWith("==")).toBe(false);
+		expect(measureSecretEntropyBytes(b64)).toBe(32);
+	});
+
+	it("accepts two '=' after a 2-character final group", () => {
+		const b64 = randomBytes(31).toString("base64"); // 42 body + 2 pad
+		expect(b64.endsWith("==")).toBe(true);
+		expect(measureSecretEntropyBytes(b64)).toBe(31);
+	});
+
+	it("rejects more than two '=' — 'abcd====' is not base64, so it reads as 8 raw bytes", () => {
+		// Pre-fix this stripped all four, leaving the well-formed body "abcd"
+		// and scoring 3 bytes.
+		expect(measureSecretEntropyBytes("abcd====")).toBe(8);
+	});
+
+	it("rejects padding the body length does not call for ('abcd=')", () => {
+		// A 4-character body is already a whole group; one '=' after it is
+		// malformed, so the value reads as its 5 raw bytes.
+		expect(measureSecretEntropyBytes("abcd=")).toBe(5);
+	});
+
+	it("rejects two '=' after a 3-character group ('abc==')", () => {
+		expect(measureSecretEntropyBytes("abc==")).toBe(5);
+	});
+
+	it("does not punish a long passphrase that merely ends in equals signs", () => {
+		// 44 characters, of which the last four are '='. The whole point of the
+		// fix: this clears the floor on its raw length instead of being trimmed
+		// to a 40-character body and scored 30 bytes.
+		const passphrase = `${"a".repeat(40)}====`;
+		expect(passphrase).toHaveLength(44);
+		expect(measureSecretEntropyBytes(passphrase)).toBe(44);
+		expect(() =>
+			assertSecretEntropy(passphrase, {
+				configKey: "session.secret",
+				envVar: "SESSION_SECRET",
+			}),
+		).not.toThrow();
+	});
+
+	it("returns the raw reading for a value that is only padding", () => {
+		expect(measureSecretEntropyBytes("==")).toBe(2);
+	});
+});
+
 describe("assertSecretEntropy", () => {
 	const requirement = {
 		configKey: "oauth.jwt.signingKey.local.secret",
