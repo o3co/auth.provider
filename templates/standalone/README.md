@@ -202,9 +202,19 @@ Two configuration notes:
 | Variable | Default | Description |
 |---|---|---|
 | `CLIENT_USER_TYPE` | `http` | User repository backend: `http` |
-| `CLIENT_USER_AUTHENTICATE_URL` | — | URL for password-based user authentication |
-| `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | URL for token-based user authentication |
-| `CLIENT_USER_TIMEOUT` | `5000` | HTTP request timeout in milliseconds |
+| `CLIENT_USER_AUTHENTICATE_URL` | — | URL for password-based user authentication. **https required** (see below) |
+| `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | URL for token-based user authentication. **https required** (see below) |
+| `CLIENT_USER_TIMEOUT` | `5000` | HTTP request timeout in milliseconds. Positive integer ≤ `2147483647` |
+| `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | Largest upstream response body accepted, in bytes |
+
+Both user-authentication URLs carry **plaintext user credentials** to the
+upstream store, so both must be absolute `https://` URLs. `http://` is accepted
+only for a loopback host — `localhost`, an address in `127.0.0.0/8`, or `[::1]`
+— so that local development needs no certificate. A private-range address
+(`http://10.0.0.5/…`) or a container-network service name
+(`http://user-service/…`) still requires `https://`: those cross a network the
+deployment does not control end to end. Boot fails if either URL, the timeout,
+or the response cap is unusable, rather than at the first login attempt.
 
 ### Code Repository
 
