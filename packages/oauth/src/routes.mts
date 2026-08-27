@@ -54,8 +54,8 @@ import {
 	extractResourceParam,
 	unrepresentedResources,
 } from "./grants/_resourceIndicator.mjs";
-import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
+import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
@@ -136,6 +136,13 @@ export const createOAuthRouter = async (
 ): Promise<{ router: Router; registry: GrantHandlerResolver }> => {
 	const router = express.Router();
 
+	// #328: every `oauth.*` knob this router consumes is resolved exactly once,
+	// here, at router composition. `resolveOAuthOptions` owns the defensive
+	// reads for hand-built configs that never passed the zod schema — see its
+	// JSDoc for the per-field defaults (which are unchanged: strict `=== true`
+	// opt-ins for #267 `allowUnmarkedClients` and #297 `requireEmailVerified`,
+	// SF-1 `legacyTypAccept` left optional for sub-routers to default).
+	const options = resolveOAuthOptions(config, logger);
 	// #266: `iss` is a property of the deployment, never of a request. The token
 	// endpoint used to compute `config.oauth.jwt.issuer ?? req.get("host")`, so an
 	// unconfigured deployment behind a trusted proxy minted tokens whose issuer the
@@ -143,35 +150,17 @@ export const createOAuthRouter = async (
 	// resolved once at router-creation time so no request path can reach a fallback.
 	// It also populates the `realm` parameter on `WWW-Authenticate: Basic`
 	// challenges (RFC 7235 §2.2).
-	const issuerRejection = checkCanonicalIssuer(
-		(config as { oauth?: { jwt?: { issuer?: unknown } } }).oauth?.jwt?.issuer,
-	);
+	const issuerRejection = checkCanonicalIssuer(options.issuer);
 	if (issuerRejection) {
 		throw new Error(
 			`createOAuthRouter: oauth.jwt.issuer ${describeIssuerRejection(issuerRejection)}`,
 		);
 	}
-	const canonicalIssuer = (config as unknown as { oauth: { jwt: { issuer: string } } }).oauth.jwt
-		.issuer;
-	// SF-1 / Phase G / S2: legacyTypAccept default is `false`
-	// (v0.5.x was `true`). Use a defensive cast so partial-config test fixtures
-	// (no `oauth.jwt` block at all) don't throw at router construction.
-	const legacyTypAcceptOpt = (config as { oauth?: { jwt?: { legacyTypAccept?: boolean } } }).oauth
-		?.jwt?.legacyTypAccept;
-	// #267: the migration escape hatch for the `/authorize` first-party
-	// invariant. Resolved once at router construction; `CoreConfigSchema`
-	// requires the key, so a deployment that boots through the schema has
-	// answered it deliberately. The defensive cast is for hand-built configs
-	// that never passed the schema — same treatment `legacyTypAccept` gets
-	// above, and the safe reading of an absent value is `false` (enforce).
-	// #297: gate token issuance on Store-published email verification. Off
-	// unless the deployment opted in; the defensive read matches the treatment
-	// the sibling flags get, for hand-built configs that never met the schema.
-	const requireEmailVerified =
-		(config as { oauth?: { requireEmailVerified?: boolean } }).oauth?.requireEmailVerified === true;
-	const allowUnmarkedClients =
-		(config as { oauth?: { authorize?: { allowUnmarkedClients?: boolean } } }).oauth?.authorize
-			?.allowUnmarkedClients === true;
+	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
+	const canonicalIssuer = options.issuer as string;
+	const legacyTypAcceptOpt = options.legacyTypAccept;
+	const requireEmailVerified = options.requireEmailVerified;
+	const allowUnmarkedClients = options.allowUnmarkedClients;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
@@ -827,23 +816,9 @@ export const createOAuthRouter = async (
 					);
 				}
 
-				// B-7/B-8: resolve PKCE config
-				const grantsConfig = config.oauth.grants as
-					| Record<string, Record<string, unknown>>
-					| undefined;
-				const authorizationConfig = grantsConfig?.authorization_code as
-					| Record<string, unknown>
-					| undefined;
-				const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
-				const pkceRequired: boolean = pkceConfig?.required === true;
-				const defaultMethod: string =
-					typeof pkceConfig?.defaultMethod === "string" ? pkceConfig.defaultMethod : "plain";
-				// TS-4 (v0.5.1): per-element validation via `resolvePkceSupportedMethods`.
-				// See authorization.mts for the rationale — `Array.isArray + as string[]`
-				// silently accepted non-string operator-typed values. The router
-				// already has `logger` in scope (createOAuthRouter options); forward
-				// it so the helper's misconfig warnings reach the operator.
-				const supportedMethods = resolvePkceSupportedMethods(pkceConfig, logger);
+				// B-7/B-8: PKCE policy, resolved once at composition (#328) — see
+				// resolveOAuthOptions for the TS-4 per-element method validation.
+				const { required: pkceRequired, defaultMethod, supportedMethods } = options.pkce;
 
 				// D-6 (RFC 9700 §2.1.1): PKCE/S256 is mandatory for public clients
 				// regardless of operator `pkce.required` config. Public clients have
@@ -903,7 +878,7 @@ export const createOAuthRouter = async (
 				// length+character-set check rejects the request. Moving the gate
 				// any earlier than this is unsafe — it must follow `redirect_uri`
 				// validation so errors can use `redirectError`.
-				const nonceMaxLength = config.oauth.nonce?.maxLength ?? 256;
+				const nonceMaxLength = options.nonceMaxLength;
 				if (req.query.nonce !== undefined) {
 					// Reject non-string `nonce` (Copilot review on PR #126):
 					// Express + qs parses repeated `?nonce=a&nonce=b` as an
@@ -958,8 +933,7 @@ export const createOAuthRouter = async (
 				// `oauth.jwt.issuer` is missing or malformed (#266/#307, top of this
 				// factory), so by the time a request reaches this handler the server
 				// is always acting as an OIDC OP and `oidcMode` alone decides.
-				const oidcMode =
-					(config.oauth as { oidcMode?: "oidc-required" | "dual" }).oidcMode ?? "oidc-required";
+				const oidcMode = options.oidcMode;
 				if (
 					oidcMode === "oidc-required" &&
 					// Two failure modes both undermine "OIDC required":
@@ -1005,7 +979,7 @@ export const createOAuthRouter = async (
 				// same extractor the token endpoint uses, so a repeated
 				// `?resource=` (which Express surfaces as an array) is handled
 				// identically on both endpoints.
-				const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
+				const resourceIndicatorEnabled = options.resourceIndicatorEnabled;
 				const authorizeResource = resourceIndicatorEnabled
 					? extractResourceParam(req.query as Record<string, unknown>)
 					: null;

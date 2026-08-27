@@ -23,6 +23,7 @@ import {
 	generateTokenResponse,
 	isEmailVerified,
 } from "@o3co/auth-provider-core";
+import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /**
  * `session` grant — mints an access token for the user of an already
@@ -44,6 +45,11 @@ export const createSessionGrant = (
 	deps: GrantDependencies & { clientRepository: ClientRepository },
 ): GrantHandler => {
 	const { config, keyStore } = deps;
+	// #328: deployment config, not request state — resolved once at grant
+	// construction, matching the altitude the router resolves its knobs at.
+	// `resolveOAuthOptions` owns the defensive read for hand-built configs
+	// that never passed the schema (the cast that used to sit in `handle`).
+	const { requireEmailVerified } = resolveOAuthOptions(config);
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -88,11 +94,7 @@ export const createSessionGrant = (
 			// `invalid_grant` rather than `access_denied`: RFC 6749 §5.2 does not
 			// define the latter for the token endpoint, and the session is
 			// precisely the grant that cannot be honoured.
-			if (
-				(config as { oauth?: { requireEmailVerified?: boolean } }).oauth?.requireEmailVerified ===
-					true &&
-				!isEmailVerified(session.user)
-			) {
+			if (requireEmailVerified && !isEmailVerified(session.user)) {
 				return {
 					result: {
 						status: 400,
