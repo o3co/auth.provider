@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { RefreshTokenStorageError } from "../errors.mjs";
+import { withReason } from "../reason.mjs";
 import type {
 	RefreshTokenFamily,
 	RefreshTokenFamilyStore,
@@ -83,7 +84,13 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 			if (decision.action === "abort") {
 				// #274: `reason` is echoed verbatim and interpreted nowhere in this
 				// adapter — classification belongs to the wrapper layer (A3 §5.1).
-				return { outcome: "aborted", reason: decision.reason };
+				//
+				// Spread conditionally rather than writing `reason: decision.reason`:
+				// `reason` is OPTIONAL, and an unconditional assignment puts the key
+				// on the object holding `undefined`, which is a different value from
+				// an absent key to `in`, `Object.keys`, `toStrictEqual` and anything
+				// serialising the result. The contract says omitted, so omit it.
+				return { outcome: "aborted", ...withReason(decision.reason) };
 			}
 			const next = decision.family;
 			// Fail-closed parity with registerFamily: an updater that commits a
@@ -98,7 +105,7 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 				family: frozen,
 				expiresAtMs: frozen.expiresAtMs,
 			});
-			return { outcome: "committed", family: frozen, reason: decision.reason };
+			return { outcome: "committed", family: frozen, ...withReason(decision.reason) };
 		},
 	};
 }

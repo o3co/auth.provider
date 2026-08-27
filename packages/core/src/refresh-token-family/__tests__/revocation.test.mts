@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { createMemoryRefreshTokenFamilyStore } from "../adapters/memory.mjs";
+import { withReason } from "../reason.mjs";
 import { createRefreshTokenFamilyRevocation } from "../revocation.mjs";
 import type {
 	RefreshTokenFamily,
@@ -85,13 +86,13 @@ describe("createRefreshTokenFamilyRevocation", () => {
 			async updateFamily(_id, updater): Promise<RefreshTokenFamilyUpdateResult> {
 				const decision = updater(initial);
 				if (decision.action === "abort") {
-					return { outcome: "aborted", reason: decision.reason };
+					return { outcome: "aborted", ...withReason(decision.reason) };
 				}
 				captured = decision.family;
 				return {
 					outcome: "committed",
 					family: Object.freeze({ ...decision.family }),
-					reason: decision.reason,
+					...withReason(decision.reason),
 				};
 			},
 		};

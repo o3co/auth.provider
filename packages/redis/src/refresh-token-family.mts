@@ -20,6 +20,7 @@ import {
 	type RefreshTokenFamilyStore,
 	type RefreshTokenFamilyUpdateResult,
 	RefreshTokenStorageError,
+	withReason,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { RefreshTokenFamilyClient } from "./clients.mjs";
@@ -223,8 +224,10 @@ export function createRedisRefreshTokenFamilyStore(
 					await conn.unwatch();
 					// #274: `reason` is echoed verbatim and interpreted nowhere in
 					// this adapter — classification belongs to the wrapper layer
-					// (A3 §5.1).
-					return { outcome: "aborted", reason: decision.reason };
+					// (A3 §5.1). `withReason` omits the key when the decision
+					// carried none, so this result is shape-identical to the
+					// in-memory adapter's; see its JSDoc for why that matters.
+					return { outcome: "aborted", ...withReason(decision.reason) };
 				}
 
 				const next = decision.family;
@@ -270,7 +273,7 @@ export function createRedisRefreshTokenFamilyStore(
 				// along with their (failed) commits — which is the whole point of
 				// carrying the reason on the decision instead of in a closure the
 				// caller reads after the fact.
-				return { outcome: "committed", family: committed, reason: decision.reason };
+				return { outcome: "committed", family: committed, ...withReason(decision.reason) };
 			}
 
 			throw new RefreshTokenStorageError({ reason: "conflict-exhausted" });

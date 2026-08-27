@@ -141,19 +141,59 @@ export function runRefreshTokenFamilyStoreContract(
 			expect(after?.revoked).toBe(true);
 		});
 
-		it("updateFamily omits reason when the decision carried none", async () => {
+		it("updateFamily OMITS the reason key entirely when the decision carried none", async () => {
+			// `reason` is optional, so "absent" and "present but undefined" must not
+			// be the same value — a caller doing `"reason" in result` (or comparing
+			// results structurally) can tell them apart, and an adapter that always
+			// writes the key silently disagrees with its own contract.
+			//
+			// Asserted with `in` rather than `toEqual`, which treats a missing key
+			// and an `undefined` value as equal and would pass against exactly the
+			// shape this pins against.
 			const store = await factory();
 			const fam = FAMILY();
 			await store.registerFamily(fam);
+
 			const committed = await store.updateFamily(fam.familyId, (current) => ({
 				action: "commit",
 				family: { ...current, activeJti: "jti-no-reason" },
 			}));
 			expect(committed.outcome).toBe("committed");
-			if (committed.outcome === "committed") expect(committed.reason).toBeUndefined();
+			expect("reason" in committed).toBe(false);
+
 			const aborted = await store.updateFamily(fam.familyId, () => ({ action: "abort" }));
 			expect(aborted.outcome).toBe("aborted");
-			if (aborted.outcome === "aborted") expect(aborted.reason).toBeUndefined();
+			expect("reason" in aborted).toBe(false);
+
+			// not-found never invokes the updater, so there is no decision to echo.
+			const missing = await store.updateFamily("never-registered-at-all", (current) => ({
+				action: "commit",
+				family: current,
+			}));
+			expect(missing.outcome).toBe("not-found");
+			expect("reason" in missing).toBe(false);
+		});
+
+		it("updateFamily keeps the reason key present when the decision supplied one", async () => {
+			// The mirror of the case above: an explicitly-supplied reason must
+			// survive as an own property, so the conditional spread cannot be
+			// "fixed" by dropping the field altogether.
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+
+			const committed = await store.updateFamily(fam.familyId, (current) => ({
+				action: "commit",
+				family: { ...current, activeJti: "jti-with-reason" },
+				reason: "present",
+			}));
+			expect("reason" in committed).toBe(true);
+
+			const aborted = await store.updateFamily(fam.familyId, () => ({
+				action: "abort",
+				reason: "present",
+			}));
+			expect("reason" in aborted).toBe(true);
 		});
 
 		it("updateFamily returns committed with the new family on commit", async () => {
