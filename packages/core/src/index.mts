@@ -115,6 +115,7 @@ export type {
 export { supportsLock } from "./federation-tokens/types.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
+export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // id_token generation (OIDC Core §2)
 export {
 	type GenerateIdTokenOptions,

@@ -402,3 +402,55 @@ describe("createSessionGrant", () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// #297 — the email-verified gate on the session grant
+// ---------------------------------------------------------------------------
+
+describe("createSessionGrant — email-verified gate (#297)", () => {
+	const gatedConfig = {
+		...(mockConfig as unknown as Record<string, unknown>),
+		oauth: {
+			...(mockConfig as unknown as { oauth: Record<string, unknown> }).oauth,
+			requireEmailVerified: true,
+		},
+	} as unknown as GrantDependencies["config"];
+
+	const runWith = async (
+		config: GrantDependencies["config"],
+		user: Record<string, unknown> | undefined,
+	) => {
+		const handler = createSessionGrant(makeDeps({ config }));
+		const { result } = await handler.handle({
+			body: {},
+			session: { isAuthenticated: true, ...(user ? { user } : {}) },
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: AUTH_CLIENT,
+		} as GrantContext);
+		return result;
+	};
+
+	it("refuses when the gate is on and the Store published no verification", async () => {
+		// This grant mints straight from the browser session, so gating only
+		// /authorize would leave a deployment believing it had a gate.
+		const result = await runWith(gatedConfig, { id: "u1" });
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("refuses on an explicit false", async () => {
+		const result = await runWith(gatedConfig, { id: "u1", emailVerified: false });
+		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("admits when the Store published true", async () => {
+		const result = await runWith(gatedConfig, { id: "u1", emailVerified: true });
+		expect(result.status).toBe(200);
+	});
+
+	it("is inert when the gate is off", async () => {
+		const result = await runWith(mockConfig, { id: "u1" });
+		expect(result.status).toBe(200);
+	});
+});

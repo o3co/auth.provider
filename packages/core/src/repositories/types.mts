@@ -140,9 +140,46 @@ export interface Client {
 	readonly firstParty?: boolean;
 }
 
+/**
+ * A user as returned by a {@link UserRepository}.
+ *
+ * The claim-bearing fields below are the ones `extractUserClaims` reads when
+ * seeding a session's claims envelope, and they mirror `UserSessionClaims`
+ * exactly. They are declared rather than left to the index signature because a
+ * Store is reached across an untyped boundary — `HttpUserRepository` parses
+ * JSON — and until #297 the only thing telling an implementer that
+ * `emailVerified` was a *boolean* was the runtime `typeof` check that silently
+ * dropped it when it wasn't.
+ *
+ * `email_verified` in an issued token is Store-owned state that auth.provider
+ * only reflects. Issuing the verification token, delivering it, and flipping
+ * the state belong to the Store; this library reads the result and binds it
+ * into the artifact (responsibility #4).
+ *
+ * The index signature stays: a Store may carry custom claims beyond these, and
+ * a consumer may map them through a custom claim filter.
+ */
 export interface User {
 	readonly id: string;
 	readonly username: string;
+	/** Surfaced as the `email` claim under the `email` scope. */
+	readonly email?: string;
+	/**
+	 * Surfaced as the OIDC `email_verified` claim under the `email` scope.
+	 *
+	 * `false` and absent are **not** the same, and both reach relying parties
+	 * distinguishably: `false` says the Store tracks verification and this
+	 * address is not verified; absence says the Store does not model it at all.
+	 * A non-boolean is dropped rather than forwarded, so a truthy string cannot
+	 * become an affirmative claim in a signed token.
+	 */
+	readonly emailVerified?: boolean;
+	/** Surfaced as the `name` claim under the `profile` scope. */
+	readonly name?: string;
+	/** Surfaced as the `picture` claim under the `profile` scope. */
+	readonly picture?: string;
+	/** Surfaced as the non-standard `groups` claim under the `groups` scope. */
+	readonly groups?: readonly string[];
 	readonly [key: string]: unknown;
 }
 
