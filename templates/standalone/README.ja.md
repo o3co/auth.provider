@@ -42,7 +42,7 @@ overlay の値は `application.conf` を上書きします。scaffold には
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `HTTP_PORT` | `3000` | サーバーがリッスンするポート |
-| `HTTP_TRUST_PROXY` | `false` | リバースプロキシの背後で動作する場合は `true` に設定 |
+| `HTTP_TRUST_PROXY` | `false` | リバースプロキシの背後で動作する場合は `true` に設定。**ロードバランサ配下では必須** — 未設定だと `req.ip` が LB のアドレスになり、IP をキーとする全ての rate limit が全ユーザーで 1 バケットを共有する |
 
 ### OAuth JWT
 

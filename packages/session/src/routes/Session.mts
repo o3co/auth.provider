@@ -18,14 +18,15 @@ import { randomUUID } from "node:crypto";
 import {
 	type AppConfig,
 	consoleLogger,
+	createMemoryRateLimiter,
 	errorEnvelope,
 	type Logger,
+	type RateLimiter,
 	type User,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
-import rateLimit from "express-rate-limit";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 
 declare module "express-session" {
@@ -50,12 +51,28 @@ export const createRouter = (
 		userRepository,
 		config,
 		userSessionStore,
+		rateLimiter,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
 		userSessionStore?: UserSessionStore;
+		/**
+		 * Shared rate limiter for the login brute-force guard.
+		 *
+		 * `/session/login` used to run express-rate-limit's per-process
+		 * MemoryStore. Behind a load balancer every replica kept its own
+		 * buckets, so the configured limit was really limit × replicas and it
+		 * reset on every deploy — while the OAuth endpoints already had a
+		 * Redis-backed limiter this route could not reach (#270).
+		 *
+		 * When omitted the router builds a private in-memory limiter with the
+		 * same spec and warns, so a deployment that wires no limiter keeps the
+		 * protection it had rather than losing it — but is told the guard is
+		 * per-process.
+		 */
+		rateLimiter?: RateLimiter;
 		/** Session TTL in milliseconds. Default: 24h. */
 		sessionTtlMs?: number;
 		logger?: Logger;
@@ -78,12 +95,89 @@ export const createRouter = (
 		next();
 	};
 
-	const loginRateLimit = rateLimit({
-		windowMs: config.rateLimit.login.windowMs,
+	// The login guard now runs on the same `RateLimiter` component the OAuth
+	// endpoints use, so a deployment that wires the Redis adapter gets one
+	// shared bucket set across replicas instead of one per process (#270).
+	//
+	// `login` is the key prefix by which an adapter resolves this route's spec;
+	// it is the example key in `RateLimiter.check`'s own contract. Both bundled
+	// adapters seed `limits.login` from `config.rateLimit.login`, so the
+	// documented window and limit apply without the operator restating them.
+	const loginLimitSpec = {
 		limit: config.rateLimit.login.limit,
-		standardHeaders: true,
-		legacyHeaders: false,
-	});
+		windowSeconds: Math.max(1, Math.ceil(config.rateLimit.login.windowMs / 1000)),
+	};
+	if (rateLimiter === undefined) {
+		logger.warn(
+			{
+				limit: loginLimitSpec.limit,
+				windowSeconds: loginLimitSpec.windowSeconds,
+			},
+			"login_rate_limiter_not_shared",
+		);
+	}
+	// Falling back rather than leaving the route unguarded: this is the endpoint
+	// that exists to resist password guessing, and a per-process bucket is weak
+	// protection, not absent protection. The warning above says which one is in
+	// force so the weakness is stated rather than implied.
+	const loginLimiter: RateLimiter =
+		rateLimiter ??
+		createMemoryRateLimiter({
+			limits: { login: loginLimitSpec },
+			defaultLimit: loginLimitSpec,
+		});
+
+	const loginRateLimit = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+		const ip = req.ip ?? "unknown";
+		let decision: Awaited<ReturnType<RateLimiter["check"]>>;
+		try {
+			decision = await loginLimiter.check(`login:ip:${ip}`, {
+				ip,
+				userAgent: req.get("user-agent"),
+			});
+		} catch (cause) {
+			// Same `failMode` policy the OAuth endpoints apply, read from the same
+			// config key: a Redis outage should not mean "login sheds load" here
+			// and "login lets everything through" there.
+			const failMode = config.rateLimit.failMode;
+			const errorMessage = cause instanceof Error ? cause.message : String(cause);
+			logger.error(
+				{ error: errorMessage, mode: failMode, tag: "login", ip },
+				failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
+			);
+			if (failMode === "closed") {
+				res
+					.status(503)
+					.json(errorEnvelope("service_unavailable", "Rate limiter temporarily unavailable"));
+				return;
+			}
+			next();
+			return;
+		}
+
+		// `RateLimit-*` are preserved because this route emitted them under
+		// express-rate-limit (`standardHeaders: true`). The OAuth endpoints do
+		// not, but keeping behaviour on the route being changed matters more
+		// than matching routes that are not.
+		res.setHeader("RateLimit-Limit", String(loginLimitSpec.limit));
+		if (decision.remaining !== undefined) {
+			res.setHeader("RateLimit-Remaining", String(Math.max(0, decision.remaining)));
+		}
+		const resetSeconds =
+			decision.resetAt === undefined
+				? loginLimitSpec.windowSeconds
+				: Math.max(0, Math.ceil((decision.resetAt.getTime() - Date.now()) / 1000));
+		res.setHeader("RateLimit-Reset", String(resetSeconds));
+
+		if (!decision.allowed) {
+			if (decision.resetAt !== undefined) {
+				res.setHeader("Retry-After", String(resetSeconds));
+			}
+			res.status(429).json(errorEnvelope("rate_limited", decision.reason || "Rate limit exceeded"));
+			return;
+		}
+		next();
+	};
 
 	router
 		.use(express.json())
