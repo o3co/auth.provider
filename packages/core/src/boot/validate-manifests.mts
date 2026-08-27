@@ -35,6 +35,7 @@ import type { ComponentKey, ComponentMap } from "../modules/manifest/component-m
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
 import { SYNTHETIC_COMPONENT_KEYS } from "../modules/manifest/synthetic-keys.mjs";
+import { checkReplicaSafety } from "./replica-safety.mjs";
 import type {
 	BootstrapMap,
 	ContributionEntry,
@@ -1455,6 +1456,23 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		// (see FEDERATION_REQUIRED_STORES for the authoritative list).
 		// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
 		checkFederationStoresWiring(parsedConfig as AppConfig, plannedKeys);
+	}
+
+	// Step 13.8: Replica-safety guard — state held in this process's memory
+	// that a multi-replica deployment must share. Fails boot when
+	// `deployment.mode = "multi"`, warns when the mode is unset, silent when
+	// the operator declared `"single"`. Per issue #271.
+	//
+	// The logger comes from `bootstrapComponents` rather than a new parameter:
+	// a composition root that configured one has already put it there, and the
+	// warning is worthless if it goes somewhere the operator is not reading.
+	{
+		const bootLogger = bootstrapComponents.logger;
+		checkReplicaSafety({
+			modules: normalisedModules,
+			config: parsedConfig,
+			...(bootLogger !== undefined ? { logger: bootLogger } : {}),
+		});
 	}
 
 	// Step 14: Route-order edge sanity

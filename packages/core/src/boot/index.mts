@@ -32,6 +32,11 @@
  */
 
 export { createApp } from "./create-app.mjs";
+export {
+	type CheckReplicaSafetyInput,
+	checkReplicaSafety,
+	REPLICA_UNSAFE_MODULES,
+} from "./replica-safety.mjs";
 export type {
 	AppHandle,
 	BootErrorDetails,

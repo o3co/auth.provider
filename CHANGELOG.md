@@ -50,6 +50,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **Migration:** with `enabled = false` (the default) there is no behaviour change. Deployments already running `enabled = true` with a policy that does not narrow `grantedAudience` will begin seeing `invalid_target` where tokens were previously issued — that is the correction the flag was staged for. Stage 3 (`resource` MUST be present) remains a separate, unshipped toggle.
 
+- **Boot refuses in-memory shared state when `deployment.mode = "multi"` (`@o3co/auth-provider-core`).** `rateLimiter.adapter` and `userSessionStores.adapter` default to `"memory"`, the comments beside them say multi-replica deployments MUST set both to `redis`, and nothing checked. Scale the Deployment to two replicas for availability and user-session state silently forks: back-channel logout reaches one replica, a "logged out" session stays valid on the other, rate limits multiply by replica count. No boot signal fired at all (#271).
+
+  A new `deployment.mode` config drives a boot guard with **three** states, because "is this deployment scaled?" has three honest answers:
+
+  | `deployment.mode` | behaviour |
+  | --- | --- |
+  | `"multi"` | boot **fails** (`BootError`, reason `replica-unsafe-adapter`) naming every offending module and what each one costs |
+  | `"single"` | silent — the operator has declared one replica, and in-memory state is correct there |
+  | unset (the default) | one consolidated `replica_unsafe_adapters` warning naming what is held in this process's memory |
+
+  `deployment.mode` deliberately has **no HOCON literal default**: a baked-in `"single"` would make the unset state unreachable and the warning dead code — the same trap `oauth.code.adapter`'s comment already documents for a different key.
+
+  **The guard reads the installed modules, not the config.** The adapter switches are how these modules get *selected* in the bundled composition, but a composition root can wire a module directly or hand-build a config naming none of those keys. Checking what is actually installed also caught two stores the issue did not name, both worse than the ones it did: `core-access-token-denylist-memory` means a revoked access token keeps working on every replica that did not receive the revocation, and `core-replay-seen-set-memory` means a captured DPoP proof can be replayed once against each replica. Eight modules are covered in total; `REPLICA_UNSAFE_MODULES` is exported so a deployment can assert on the set from its own tests.
+
+  **What this cannot do**, stated plainly because the gap is real: it cannot catch an operator who scales to N replicas without ever setting `deployment.mode` — the case the issue describes. A process holding all its state in its own memory has no shared medium through which to observe peers, so the condition is undetectable from inside precisely when it is true. The unset-state warning and the standalone README's multi-replica section are what address that; the hard failure is for operators who have declared their shape.
+
+  New exports: `checkReplicaSafety`, `CheckReplicaSafetyInput`, `REPLICA_UNSAFE_MODULES`. `BootErrorReason` gains `"replica-unsafe-adapter"` and `BootErrorDetails` gains `ReplicaUnsafeAdapterDetails` (the literal count in `types.mts` was already documented as 23 while the union held 24; both counts are corrected to 25).
+
+  **Migration:** nothing is required, and no existing deployment changes behaviour unless it opts in. Set `DEPLOYMENT_MODE=multi` when you scale — that is the point of the feature — and `DEPLOYMENT_MODE=single` to silence the warning on a deployment that is genuinely single-node.
+
 ### Security
 
 - **Sender-constrained access tokens are now enforced at protected resources, not only at `/oauth/token` (`@o3co/auth-provider-core`, `@o3co/auth-provider-dpop`, `@o3co/auth-provider-oauth`).** `tokenBindingMw` was mounted on `/oauth/token` alone. It establishes the binding a grant stamps into the issued token's `cnf` and says nothing about any later request — so `/oauth/userinfo`, `POST /oauth/federation/:name/token`, `/oauth/logout` and bearer self-introspection accepted a `cnf`-bearing access token as an ordinary Bearer JWT, with no proof-of-possession check anywhere. A stolen DPoP- or mTLS-bound token replayed as a plain Bearer at every one of them, which is precisely what binding it was supposed to prevent. The federation-token endpoint is the sharpest case: it dispenses the user's **upstream Google / GitHub access token**, so the replay leaks third-party credentials.

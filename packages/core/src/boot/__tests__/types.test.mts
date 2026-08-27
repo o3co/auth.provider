@@ -66,14 +66,15 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 24 literals (Phase 9 added "grant-policy-without-
+// BootErrorReason — exactly 25 literals (Phase 9 added "grant-policy-without-
 // issuer" for the CP-20 invariant restoration; issue #101 added
 // "mfa-partial-wiring" and "federation-stores-incomplete"; the OIDC discovery
-// aggregator added "discovery-document-invalid")
+// aggregator added "discovery-document-invalid"; #271 added
+// "replica-unsafe-adapter")
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 24 reason literals", () => {
+	it("contains exactly the 25 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
 			| "duplicate-module-name"
 			| "duplicate-provides"
@@ -99,6 +100,7 @@ describe("BootErrorReason", () => {
 			| "mfa-partial-wiring"
 			| "federation-stores-incomplete"
 			| "discovery-document-invalid"
+			| "replica-unsafe-adapter"
 		>();
 	});
 });
