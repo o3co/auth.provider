@@ -145,7 +145,7 @@ const makeApp = async (
 	return { app, createCode, logger };
 };
 
-type Query = Record<string, string>;
+type Query = Record<string, string | string[]>;
 
 const baseQuery: Query = {
 	response_type: "code",
@@ -311,6 +311,88 @@ describe("#273 /authorize — S256 only, plain behind a per-client opt-in", () =
 	});
 });
 
+describe("#273 /authorize — repeated parameters cannot downgrade the method", () => {
+	// RFC 6749 §3.1: request parameters MUST NOT be included more than once.
+	// Express + `qs` surfaces a repeated `?p=a&p=b` as an ARRAY, and every read
+	// in the handler narrows a non-string to `undefined` — the same shape
+	// absence produces. For `code_challenge_method` that meant a repeat fell
+	// through to RFC 7636 §4.3's `plain` default, so a client the operator
+	// opted into `plain` could downgrade its own S256 request to `plain`
+	// simply by sending the parameter twice — with no S256 verifier ever
+	// computed and nothing in the request looking malformed.
+	// A well-formed S256 request, then the repeat under test layered on — so
+	// each case fails on the repeated parameter and not on the PKCE gate.
+	const repeated = (app: express.Express, params: Query) =>
+		request(app)
+			.get("/oauth/authorize")
+			.query({
+				...baseQuery,
+				code_challenge: S256_CHALLENGE,
+				code_challenge_method: "S256",
+				...params,
+			});
+
+	it("refuses a repeated code_challenge_method instead of reading it as absent", async () => {
+		const { app, createCode } = await makeApp({ client: { allowPlainPkce: true } });
+		const params = redirectParams(await repeated(app, { code_challenge_method: ["S256", "S256"] }));
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe(
+			"code_challenge_method must be a single string value",
+		);
+		expect(params.get("code")).toBeNull();
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("refuses it for a client with no plain opt-in too", async () => {
+		const { app } = await makeApp();
+		const params = redirectParams(
+			await repeated(app, { code_challenge_method: ["S256", "plain"] }),
+		);
+		expect(params.get("error_description")).toBe(
+			"code_challenge_method must be a single string value",
+		);
+	});
+
+	it.each([
+		["scope", ["openid", "read"]],
+		["state", ["a", "b"]],
+		["code_challenge", ["c1", "c2"]],
+		["nonce", ["n1", "n2"]],
+	])("refuses a repeated %s at the request boundary", async (name, value) => {
+		// The same class, not the same instance: a repeated `scope` was read as
+		// "no scope requested" and widened the grant to the client's whole
+		// registered allowlist, and a repeated `state` was silently dropped from
+		// the response, breaking the client's CSRF check rather than the request.
+		const { app, createCode } = await makeApp();
+		const params = redirectParams(await repeated(app, { [name]: value }));
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe(`${name} must be a single string value`);
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("keeps response_type's own more specific error rather than the generic one", async () => {
+		// `unsupported_response_type` is what RFC 6749 §4.1.2.1 defines for it,
+		// and it is already rejected correctly — the gate must not flatten it.
+		const { app } = await makeApp();
+		const params = redirectParams(await repeated(app, { response_type: ["code", "token"] }));
+		expect(params.get("error")).toBe("unsupported_response_type");
+	});
+
+	it("still accepts a repeated `resource` — RFC 8707 §2 permits it", async () => {
+		// The gate is about single-valued parameters. `resource` is defined as
+		// repeatable, so sweeping it in would break a conformant client.
+		const { app } = await makeApp({
+			client: { allowedAudiences: ["https://api.example"] },
+			oauth: { resourceIndicator: { enabled: true } },
+		});
+		const params = redirectParams(
+			await repeated(app, { resource: ["https://api.example", "https://api.example"] }),
+		);
+		expect(params.get("error")).toBeNull();
+		expect(params.get("code")).toBe("code-x");
+	});
+});
+
 describe("#273 /token — the same policy object decides redemption", () => {
 	it("refuses a code that carries no code_challenge_method", async () => {
 		// Pre-#273 this depended on `pkce.required`, which defaulted to false,
@@ -397,14 +479,29 @@ describe("#273 /token — the same policy object decides redemption", () => {
 });
 
 describe("#273 — operator signal for the now-inert pkce knobs", () => {
-	it("warns at composition when a config still carries them", async () => {
+	it("warns exactly once for a boot, not once per resolution", async () => {
+		// `makeApp` resolves the SAME config twice, exactly as a real boot does:
+		// once in `createAuthorizationGrant` for the token endpoint and once in
+		// `createOAuthRouter` for the routers. Both must read one policy — and
+		// the operator must be told once, not once per reader.
 		const { logger } = await makeApp({
 			oauth: {
 				grants: { authorization_code: { pkce: { requireS256: false, defaultMethod: "plain" } } },
 			},
 		});
-		expect(logger.warn).toHaveBeenCalledWith(
+		const warnings = logger.warn.mock.calls.filter(
+			(call) => call[1] === "pkce_config_ignored_s256_is_mandatory",
+		);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]?.[0]).toEqual(
 			expect.objectContaining({ ignoredKeys: ["requireS256", "defaultMethod"] }),
+		);
+	});
+
+	it("stays silent for a config that carries no inert key", async () => {
+		const { logger } = await makeApp();
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
 			"pkce_config_ignored_s256_is_mandatory",
 		);
 	});
