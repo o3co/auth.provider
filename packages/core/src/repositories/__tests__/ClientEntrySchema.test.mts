@@ -113,4 +113,36 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+	it("#316/#330: accepts firstParty, the marking /authorize requires", () => {
+		// The `.strict()` schema had no `firstParty` key, so a YAML/static
+		// registration could not carry the marking /authorize demands: writing
+		// it failed boot as an unrecognized key, omitting it made every
+		// /authorize return unauthorized_client. The file-backed adapters had
+		// no working configuration at all.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			firstParty: true,
+		});
+		expect(result.success).toBe(true);
+		expect(result.success && result.data.firstParty).toBe(true);
+	});
+
+	it("#316: firstParty stays optional — absence means not first-party", () => {
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+		});
+		expect(result.success).toBe(true);
+		expect(result.success && result.data.firstParty).toBeUndefined();
+	});
+
+	it("#316: rejects a non-boolean firstParty", () => {
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			firstParty: "true",
+		});
+		expect(result.success).toBe(false);
+	});
 });
