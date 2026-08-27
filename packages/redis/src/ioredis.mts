@@ -22,6 +22,31 @@ import type {
 } from "./clients.mjs";
 
 /**
+ * Rate-limit counter increment, atomic with its expiry (#269).
+ *
+ * `INCR` then a separate `EXPIRE` is not safe: a process death or an error
+ * between the two leaves the key with no TTL, and a counter that never resets
+ * 429s its client forever.
+ *
+ * The expiry is (re)established whenever the key has none — `TTL` returns -1
+ * for a key with no expiry — rather than only on the first hit. That is what
+ * repairs a key already stranded without a TTL by the previous
+ * implementation; a "first hit" guard never fires for one, because its count
+ * never comes back to 1. An existing expiry is left alone, so a steady stream
+ * of requests cannot hold the window open by refreshing it.
+ *
+ * `TTL` rather than `EXPIRE ... NX`: the NX flag is Redis 7.0+, and this
+ * package is used against whatever Redis the consumer runs.
+ */
+const LUA_INCREMENT_WITH_TTL = `
+local count = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) < 0 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return count
+`.trim();
+
+/**
  * Lua compare-and-delete script — atomic alternative to GET+DEL.
  * Returns 1 when the key was deleted (caller's token matched), 0 otherwise.
  * `KEYS[1]` = the lock key; `ARGV[1]` = the caller's acquire token.
@@ -325,8 +350,8 @@ export function makeIoredisClients(
 	};
 
 	const rateLimiterClient: RateLimiterClient = {
-		incr: (k) => io.incr(k),
-		expire: (k, s) => io.expire(k, s),
+		incrementWithTtl: async (k, ttlSeconds) =>
+			(await io.eval(LUA_INCREMENT_WITH_TTL, 1, k, String(ttlSeconds))) as number,
 	};
 
 	// OR-9: code-repository client. Codes are short-TTL (60-600s) high-volume
