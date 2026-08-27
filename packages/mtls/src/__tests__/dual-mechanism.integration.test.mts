@@ -90,13 +90,21 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 		pathResolver: (s: string) => s,
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
-/** Mint a real DPoP proof for `POST http://as.example/oauth/token`. */
+/**
+ * The deployment's canonical issuer, as `makeValidCoreConfig` sets it. Since
+ * #292 the DPoP verifier builds the expected `htu` from this rather than from
+ * the request's protocol and `Host` — so the proof names it even though the
+ * requests below still send `Host: as.example` over plain http.
+ */
+const ISSUER_ORIGIN = "https://auth.test";
+
+/** Mint a real DPoP proof for `POST <issuer origin>/oauth/token`. */
 const mintDpopProof = async () => {
 	const { publicKey, privateKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
 	const proof = await new SignJWT({
 		htm: "POST",
-		htu: "http://as.example/oauth/token",
+		htu: `${ISSUER_ORIGIN}/oauth/token`,
 		iat: Math.floor(Date.now() / 1000),
 		jti: crypto.randomUUID(),
 	})

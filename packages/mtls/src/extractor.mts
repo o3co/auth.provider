@@ -37,13 +37,16 @@
 
 import { X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { Logger, TokenBindingMechanism } from "@o3co/auth-provider-core";
+import {
+	createTrustedProxyMatcher,
+	type Logger,
+	type TokenBindingMechanism,
+} from "@o3co/auth-provider-core";
 import type { Request } from "express";
 import { MtlsError } from "./errors.mjs";
 import { type CertHeaderDialect, parseEnvoyXfccHeader, parsePlainPemHeader } from "./headers.mjs";
 import { pemToDer } from "./pem.mjs";
 import { validateCertChain } from "./pki.mjs";
-import { createTrustedProxyMatcher } from "./proxy.mjs";
 import { computeCertThumbprint } from "./thumbprint.mjs";
 
 // ---------------------------------------------------------------------------
@@ -63,10 +66,12 @@ export interface MtlsMechanismOptions {
 	readonly certHeader?: string;
 	readonly certHeaderDialect?: CertHeaderDialect;
 	/**
-	 * Peer addresses permitted to forward a client certificate header. Each
-	 * entry is an IPv4 / IPv6 literal or the `"loopback"` keyword; see
-	 * `proxy.mts`. Required (non-empty) when `source === "header"`, ignored
-	 * otherwise.
+	 * Peer addresses permitted to forward a client certificate header. Entries
+	 * use the shared trusted-proxy vocabulary owned by
+	 * `@o3co/auth-provider-core` — an IP literal, a CIDR range, or one of the
+	 * named ranges (`loopback`, `linklocal`, `uniquelocal`) — which is also
+	 * Express's own `trust proxy` vocabulary (#292). Required (non-empty) when
+	 * `source === "header"`, ignored otherwise.
 	 */
 	readonly trustedProxies?: readonly string[];
 	readonly mode: "self-signed" | "pki";
@@ -170,15 +175,19 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				"A forwarded client-certificate header is only evidence of a TLS handshake when the " +
 				"hop that forwarded it is authenticated; without the allowlist any client that can " +
 				"reach this process could assert any certificate. List the reverse proxy's address " +
-				'(or "loopback" for a sidecar), or use source = "tls-layer".',
+				'or CIDR range (or "loopback" for a sidecar), or use source = "tls-layer".',
 		);
 	}
 
 	// Built once at construction so a malformed allowlist entry fails boot
 	// rather than every request. Empty in tls-layer mode, where it is unused.
+	//
+	// The matcher is core's — the single trusted-proxy vocabulary shared with
+	// `http.trustProxy` (#292). Matching happens against the socket peer, never
+	// `req.ip`; see `peerAddressOf` above.
 	const isTrustedProxy =
 		source === "header"
-			? createTrustedProxyMatcher(options.trustedProxies ?? [])
+			? createTrustedProxyMatcher(options.trustedProxies ?? [], { label: "trusted-proxies" })
 			: () => false as boolean;
 
 	if (mode === "pki") {

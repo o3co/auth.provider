@@ -321,6 +321,21 @@ export {
 	defineModule,
 	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
+// The single trusted-proxy address vocabulary (#292) — Express's own
+// `trust proxy` forms. `http.trustProxy` validates its entries with
+// `checkTrustedProxyEntry`; `@o3co/auth-provider-mtls` matches
+// `req.socket.remoteAddress` with `createTrustedProxyMatcher`. Exported so a
+// custom composition root, or a future mechanism that has to authenticate a
+// forwarding hop, extends this list rather than starting a second dialect.
+export {
+	checkTrustedProxyEntry,
+	createTrustedProxyMatcher,
+	describeTrustedProxyEntryRejection,
+	isTrustedProxyEntry,
+	TRUSTED_PROXY_NAMED_RANGES,
+	type TrustedProxyEntryRejection,
+	type TrustedProxyMatcherOptions,
+} from "./net/trusted-proxy.mjs";
 export { createGrantPolicyHookFactory } from "./policy/factory.mjs";
 // Grant policy
 export type {

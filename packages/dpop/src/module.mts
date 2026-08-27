@@ -24,7 +24,9 @@
  *     Returns `null` (skip) when `config.oauth.dpop.enabled === false`.
  *
  * DI requires:
- *   - `config` — reads `config.oauth.dpop` + `config.oauth.tokenBinding`.
+ *   - `config` — reads `config.oauth.dpop` + `config.oauth.tokenBinding`, and
+ *     `config.oauth.jwt.issuer`, whose origin is the authority half of every
+ *     proof's expected `htu` (#292).
  *
  * DI optional:
  *   - `logger`           — forwarded to `tokenBindingMw` + `createDPoPMechanism`.
@@ -159,6 +161,7 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 
 				const typedConfig = deps.config as unknown as {
 					oauth: {
+						jwt?: { issuer?: unknown };
 						dpop: {
 							enabled: boolean;
 							"iat-window-seconds": number;
@@ -168,6 +171,27 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 						};
 					};
 				};
+
+				// #292: the expected `htu` is built from the deployment's own
+				// origin rather than reconstructed from `req.protocol` and the
+				// `Host` header, which `X-Forwarded-*` rewrites under Express
+				// `trust proxy`.
+				//
+				// `oauth.jwt.issuer` has been required by core's
+				// `CoreConfigSchema` since #266/#307, so this is not a second
+				// place to configure an origin — it is the same one, read. The
+				// guard exists for a composition root that hand-builds a config
+				// object without core's schema; `createDPoPMechanism` validates
+				// the value itself and produces the operator-facing message.
+				const issuer = typedConfig.oauth.jwt?.issuer;
+				if (typeof issuer !== "string" || issuer === "") {
+					throw new Error(
+						"dpopModule: config.oauth.jwt.issuer is required when DPoP is enabled. Its origin " +
+							"is what every DPoP proof's `htu` is checked against; without it the AS would " +
+							"have to rebuild that origin from the request's own forwarded headers, which a " +
+							"caller can choose (o3co/auth.provider#292).",
+					);
+				}
 
 				// `replay-store = "redis"` is a load-bearing contract for
 				// multi-replica deployments: per-process in-memory state would
@@ -185,6 +209,7 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 				const replayStore: DPoPReplayStore = deps.dpopReplayStore ?? createMemoryDPoPReplayStore();
 
 				return createDPoPMechanism({
+					issuer,
 					replayStore,
 					iatWindowSeconds: typedConfig.oauth.dpop["iat-window-seconds"],
 					algWhitelist: typedConfig.oauth.dpop["alg-whitelist"],

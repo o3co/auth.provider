@@ -23,10 +23,12 @@
  *     directly.
  *   - `validateCertChain` — internal PKI helper; consumers configure
  *     `mode = "pki"` and `trusted-cas` rather than calling it.
- *   - `createTrustedProxyMatcher` — internal; consumers configure
- *     `trusted-proxies` rather than building a matcher themselves. Exporting
- *     it would invite a second, subtly different notion of "trusted proxy"
- *     alongside the one #292 is consolidating.
+ *   - `createTrustedProxyMatcher` — no longer lives here at all. #292 moved the
+ *     trusted-proxy vocabulary into `@o3co/auth-provider-core`, where
+ *     `http.trustProxy` validates against the same definition; this package
+ *     consumes it. Consumers configure `trusted-proxies` rather than building a
+ *     matcher, and anything that does need one imports core's so a second,
+ *     subtly different notion of "trusted proxy" cannot appear.
  *   - `pemToDer`, `derToPem` — internal codec; surface minimization.
  *
  * Per Wave 2 Phase 3 spec §5.1.

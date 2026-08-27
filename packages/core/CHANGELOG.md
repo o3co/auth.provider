@@ -4,6 +4,45 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### BREAKING — `http.trustProxy` takes a CIDR / hop policy (#292)
+
+- **`http.trustProxy` widened from `boolean` to `boolean | number | string[]`**,
+  matching Express's own `trust proxy` vocabulary: `false`, `true`, a hop count,
+  or a list of IP literals / CIDR ranges / named ranges (`loopback`,
+  `linklocal`, `uniquelocal`). `false` and `true` are unchanged, so no existing
+  config has to move; the list is what lets a deployment say *which* hop may
+  rewrite `req.ip` rather than trusting a forwarded address from anyone able to
+  reach the process.
+
+  Because HOCON substitutes `${?HTTP_TRUST_PROXY}` as a scalar string, the
+  schema coerces: `"true"` / `"false"` to booleans, a bare integer to a hop
+  count, an empty value to `false` (fail closed), and anything else to a
+  comma-separated address list. Without that the only documented override
+  surface could not express a list.
+
+  Entries are validated at boot with the issue path naming the offending index.
+  A hostname, a typo'd keyword, an out-of-range prefix length, or dotted-netmask
+  notation fails loudly rather than becoming a rule that never matches — the
+  silent version surfaces as every user sharing one rate-limit bucket.
+
+### Added
+
+- **`src/net/trusted-proxy.mts` — the single trusted-proxy address vocabulary**
+  (#292), exported as `checkTrustedProxyEntry`, `isTrustedProxyEntry`,
+  `describeTrustedProxyEntryRejection`, `createTrustedProxyMatcher`,
+  `TRUSTED_PROXY_NAMED_RANGES`, and the `TrustedProxyEntryRejection` /
+  `TrustedProxyMatcherOptions` types. `checkTrustedProxyEntry` /
+  `describeTrustedProxyEntryRejection` mirror the `checkCanonicalIssuer` pair:
+  a reason for a Zod `superRefine`, a sentence for a `throw` site.
+
+  `@o3co/auth-provider-mtls` held a private copy of the matcher for
+  `oauth.mtls.trusted-proxies` (#280) and now consumes this one, so the two
+  keys cannot drift into different dialects. The matcher is built on
+  `node:net.BlockList` and is always fed `req.socket.remoteAddress`, never
+  `req.ip` — authenticating a forwarding hop with a header `X-Forwarded-For`
+  rewrites would prove nothing.
+
+
 ### Added (Wave 2 Phase 4 — 2026-05-20)
 
 - **ADR `2026-05-20-token-binding-first-class-abstraction.md`** at

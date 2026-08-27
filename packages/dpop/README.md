@@ -49,5 +49,9 @@ See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2
 
 ## Operator requirements
 
-- Express's `trust proxy` MUST be configured when the AS sits behind a TLS-terminating reverse proxy. Without it, `req.protocol` returns `http` and DPoP proof verification fails every request (`htu_mismatch`).
+- **`oauth.jwt.issuer` MUST name the origin clients actually reach.** Since [#292](https://github.com/o3co/auth.provider/issues/292) the `htu` a proof is checked against is built from the configured issuer's origin plus the path of the request, *not* from `req.protocol` and the `Host` header. Those two read `X-Forwarded-Proto` / `X-Forwarded-Host` whenever Express `trust proxy` is on, which let a caller who could reach the AS past the edge choose the value its own proof had to match — satisfying both halves of the comparison at once. The issuer is a property of the deployment and no request can move it, which is the whole reason it is the right source.
+
+  The practical consequence: a deployment whose issuer is `https://auth.example.com` verifies proofs whose `htu` names `https://auth.example.com/...` regardless of what the proxy forwards, and **regardless of whether `trust proxy` is set at all**. If clients reach the AS at some other origin, that origin — not the internal one — is the issuer you should have configured; DPoP is now one more thing that says so. A path prefix on the issuer is ignored: the path comes from the request, which already carries the prefix the AS is mounted under.
+
+  `http.trustProxy` still matters for IP-keyed rate limiting and for the CSRF origin check — it is simply no longer load-bearing for DPoP.
 - For multi-process / clustered deployments (PM2 cluster, Kubernetes replicas, etc.), the Redis replay store adapter is required. The in-memory adapter is for single-process dev / test use only.

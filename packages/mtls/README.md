@@ -91,13 +91,20 @@ RFC 8705 §3 accepts a client certificate from the TLS layer, or from an **authe
 ```hocon
 oauth.mtls.trusted-proxies = ["loopback"]        # sidecar proxy on the same host / pod
 oauth.mtls.trusted-proxies = ["10.0.4.7", "10.0.4.8"]
+oauth.mtls.trusted-proxies = ["10.0.0.0/8"]      # a pod network, where the address changes per restart
 ```
 
-Each entry is the `"loopback"` keyword (`127.0.0.0/8` + `::1`) or an IPv4 / IPv6 literal. An IPv4 entry also matches the IPv4-mapped form (`::ffff:10.0.4.7`) that a dual-stack listener reports. **CIDR ranges are not accepted yet** — they are rejected at boot rather than silently never matching; the shared trusted-proxy range vocabulary arrives with [#292](https://github.com/o3co/auth.provider/issues/292).
+Entries use the shared trusted-proxy vocabulary owned by `@o3co/auth-provider-core` — which is also Express's own `trust proxy` vocabulary ([#292](https://github.com/o3co/auth.provider/issues/292)):
+
+- an **IPv4 / IPv6 literal**. An IPv4 entry also matches the IPv4-mapped form (`::ffff:10.0.4.7`) that a dual-stack listener reports.
+- a **CIDR range** — `10.0.0.0/8`, `fc00::/7`.
+- a **named range** — `loopback` (`127.0.0.0/8` + `::1`), `linklocal`, `uniquelocal`.
+
+A hostname, a typo'd keyword or a malformed prefix length fails at boot rather than becoming a rule that silently never matches.
 
 The check runs against `req.socket.remoteAddress` — the peer that opened the connection — and deliberately **not** against `req.ip`, which `X-Forwarded-For` rewrites whenever Express `trust proxy` is on. Authenticating one header with another would prove nothing.
 
-For the same reason this list is **separate from `http.trustProxy`** and is not derived from it. `http.trustProxy` decides whether `X-Forwarded-For` may rewrite `req.ip` for rate limiting and URL reconstruction; turning that on must not silently start accepting forwarded client certificates.
+For the same reason this list is **separate from `http.trustProxy`** and is not derived from it. The two share a vocabulary, not a value: `http.trustProxy` decides whether `X-Forwarded-For` may rewrite `req.ip` for rate limiting, and turning that on must not silently start accepting forwarded client certificates.
 
 An address allowlist is a network-level control, not a cryptographic one. It is necessary, not sufficient.
 

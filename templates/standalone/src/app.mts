@@ -60,6 +60,13 @@ const logger = createAppLogger(config);
 await (async (): Promise<void> => {
 	// Step 2: Create the Express app and apply base security middleware.
 	const app = express();
+	// `false` | `true` | a hop count | a list of IPs / CIDR ranges / named
+	// ranges — the schema hands Express exactly the shapes `trust proxy`
+	// already understands, validated at boot so a typo'd range fails here
+	// rather than becoming a rule that silently never matches (#292). Prefer
+	// naming the proxy: `true` believes a forwarded client address from anyone
+	// who can reach this process, and `req.ip` is what every IP-keyed rate
+	// limit is bucketed on.
 	app.set("trust proxy", config.http.trustProxy);
 	app.use(
 		helmet({

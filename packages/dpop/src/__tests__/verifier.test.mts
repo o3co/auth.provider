@@ -27,6 +27,13 @@ import { createDPoPMechanism } from "#/verifier.mjs";
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * The deployment's canonical issuer. Since #292 this — not `req.protocol` and
+ * the `Host` header — is what the expected `htu` is built from, so every
+ * mechanism under test has to be told what deployment it belongs to.
+ */
+const ISSUER = "https://as.example";
+
 interface MintOptions {
 	htm?: string;
 	htu?: string;
@@ -109,6 +116,7 @@ describe("createDPoPMechanism", () => {
 	beforeEach(() => {
 		replayStore = createMemoryDPoPReplayStore();
 		mechanism = createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore,
 			iatWindowSeconds: 60,
 			algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
@@ -155,6 +163,7 @@ describe("createDPoPMechanism", () => {
 		// accept it structurally, but the verifier's whitelist check rejects it.
 		// Simplest approach: use custom mechanism with restricted whitelist.
 		const restrictedMechanism = createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore: createMemoryDPoPReplayStore(),
 			algWhitelist: ["ES256"],
 		});
@@ -163,6 +172,7 @@ describe("createDPoPMechanism", () => {
 		await expect(restrictedMechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
 			createDPoPMechanism({
+				issuer: ISSUER,
 				replayStore: createMemoryDPoPReplayStore(),
 				algWhitelist: ["ES256"],
 			}).extract(makeReq(proof) as Request),
@@ -185,7 +195,7 @@ describe("createDPoPMechanism", () => {
 		const req = makeReq(proof);
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
-			createDPoPMechanism({ replayStore: createMemoryDPoPReplayStore() }).extract(
+			createDPoPMechanism({ issuer: ISSUER, replayStore: createMemoryDPoPReplayStore() }).extract(
 				makeReq(proof) as Request,
 			),
 		).rejects.toMatchObject({ reason: "signature_invalid" });
@@ -207,7 +217,9 @@ describe("createDPoPMechanism", () => {
 		const req = makeReq(proof, "POST"); // proof says GET, request is POST
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
-			createDPoPMechanism({ replayStore: createMemoryDPoPReplayStore() }).extract(req as Request),
+			createDPoPMechanism({ issuer: ISSUER, replayStore: createMemoryDPoPReplayStore() }).extract(
+				req as Request,
+			),
 		).rejects.toMatchObject({ reason: "htm_mismatch" });
 	});
 
@@ -234,7 +246,9 @@ describe("createDPoPMechanism", () => {
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
-			createDPoPMechanism({ replayStore: createMemoryDPoPReplayStore() }).extract(req as Request),
+			createDPoPMechanism({ issuer: ISSUER, replayStore: createMemoryDPoPReplayStore() }).extract(
+				req as Request,
+			),
 		).rejects.toMatchObject({ reason: "htu_mismatch" });
 	});
 
@@ -251,6 +265,70 @@ describe("createDPoPMechanism", () => {
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
 		const result = await mechanism.extract(req as Request);
 		expect(result).not.toBeNull();
+	});
+
+	// -------------------------------------------------------------------------
+	// Step 11, continued: the origin comes from config, not from the request
+	// (#292)
+	// -------------------------------------------------------------------------
+
+	it("builds the expected htu from the configured issuer origin, not from Host and req.protocol", async () => {
+		// The forwarded values say `http://attacker.example`. Before #292 the
+		// expected htu was reconstructed from exactly those, so a client able to
+		// set `X-Forwarded-Host` / `X-Forwarded-Proto` through a `trust proxy`
+		// deployment chose what its own proof had to match — a binding it
+		// controlled both sides of.
+		const { proof } = await mintProof({ htu: "https://as.example/token" });
+		const req = makeReq(proof, "POST", "/token", "attacker.example", "http");
+		const result = await mechanism.extract(req as Request);
+		expect(result).not.toBeNull();
+	});
+
+	it("rejects a proof whose htu names the spoofed forwarded origin", async () => {
+		const { proof } = await mintProof({ htu: "http://attacker.example/token" });
+		const req = makeReq(proof, "POST", "/token", "attacker.example", "http");
+		await expect(mechanism.extract(req as Request)).rejects.toMatchObject({
+			reason: "htu_mismatch",
+			detail: { expected: "https://as.example/token" },
+		});
+	});
+
+	it("keeps only the issuer's origin, leaving the path to the request", async () => {
+		// A deployment whose issuer carries a path prefix still serves whatever
+		// path the request actually reached; the prefix is part of the mount,
+		// which `req.originalUrl` already reports.
+		const prefixed = createDPoPMechanism({
+			issuer: "https://as.example/tenant-a",
+			replayStore: createMemoryDPoPReplayStore(),
+		});
+		const { proof } = await mintProof({ htu: "https://as.example/tenant-a/token" });
+		const req = makeReq(proof, "POST", "/tenant-a/token", "as.example", "https");
+		expect(await prefixed.extract(req as Request)).not.toBeNull();
+	});
+
+	it("carries a non-default issuer port into the expected htu", async () => {
+		const ported = createDPoPMechanism({
+			issuer: "https://as.example:8443",
+			replayStore: createMemoryDPoPReplayStore(),
+		});
+		const { proof } = await mintProof({ htu: "https://as.example:8443/token" });
+		const req = makeReq(proof, "POST", "/token", "as.example", "https");
+		expect(await ported.extract(req as Request)).not.toBeNull();
+	});
+
+	it("cannot be pushed off the issuer origin by a protocol-relative request path", async () => {
+		// `//evil.example/token` as a request target must stay a *path* under
+		// the issuer's authority. Resolving it as a relative URL would move the
+		// host, which is the same spoof arriving through a different door.
+		const { proof } = await mintProof({ htu: "https://as.example//evil.example/token" });
+		const req = makeReq(proof, "POST", "//evil.example/token", "as.example", "https");
+		expect(await mechanism.extract(req as Request)).not.toBeNull();
+
+		const { proof: spoofed } = await mintProof({ htu: "https://evil.example/token" });
+		const spoofedReq = makeReq(spoofed, "POST", "//evil.example/token", "as.example", "https");
+		await expect(mechanism.extract(spoofedReq as Request)).rejects.toMatchObject({
+			reason: "htu_mismatch",
+		});
 	});
 
 	// -------------------------------------------------------------------------
@@ -272,6 +350,7 @@ describe("createDPoPMechanism", () => {
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
 			createDPoPMechanism({
+				issuer: ISSUER,
 				replayStore: createMemoryDPoPReplayStore(),
 				iatWindowSeconds: 60,
 			}).extract(req as Request),
@@ -285,6 +364,7 @@ describe("createDPoPMechanism", () => {
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
 			createDPoPMechanism({
+				issuer: ISSUER,
 				replayStore: createMemoryDPoPReplayStore(),
 				iatWindowSeconds: 60,
 			}).extract(req as Request),
@@ -361,6 +441,7 @@ describe("createDPoPMechanism", () => {
 	it("whitelist comparison is case-sensitive — lowercase whitelist entry does not match uppercase alg", async () => {
 		const { proof } = await mintProof({ alg: "ES256" });
 		const lowerCaseMechanism = createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore: createMemoryDPoPReplayStore(),
 			algWhitelist: ["es256"], // operator typo: lowercase
 		});
@@ -429,6 +510,7 @@ describe("createDPoPMechanism", () => {
 			},
 		};
 		const rangingMechanism = createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore: rangingStore,
 			replayTtlSeconds: -1, // forces RangeError at the store layer
 		});
@@ -446,7 +528,7 @@ describe("createDPoPMechanism", () => {
 				throw new Error("ECONNREFUSED — Redis down");
 			},
 		};
-		const failingMechanism = createDPoPMechanism({ replayStore: failingStore });
+		const failingMechanism = createDPoPMechanism({ issuer: ISSUER, replayStore: failingStore });
 		const { proof } = await mintProof();
 		await expect(failingMechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
 			reason: "replay_store_unavailable",
@@ -493,6 +575,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 	it("warns when replayTtlSeconds is below the requirement", () => {
 		const warns: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore: createMemoryDPoPReplayStore(),
 			iatWindowSeconds: 180,
 			// Satisfies the old "at least iatWindowSeconds" advice and is still
@@ -515,6 +598,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 		// more second after its replay entry expires, so this must warn.
 		const warns: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore: createMemoryDPoPReplayStore(),
 			iatWindowSeconds: 150,
 			replayTtlSeconds: 300,
@@ -529,6 +613,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 	it("does not warn at 2x + 1, nor for the defaults", () => {
 		const atBoundary: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore: createMemoryDPoPReplayStore(),
 			iatWindowSeconds: 150,
 			replayTtlSeconds: 301,
@@ -539,6 +624,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 		// Defaults are 60 / 300 — the requirement is 121, comfortably covered.
 		const defaults: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
+			issuer: ISSUER,
 			replayStore: createMemoryDPoPReplayStore(),
 			logger: capturingLogger(defaults),
 		});
@@ -556,10 +642,14 @@ describe("createDPoPMechanism — protected-resource profile (ath, RFC 9449 §7.
 
 	beforeEach(() => {
 		replayStore = createMemoryDPoPReplayStore();
-		mechanism = createDPoPMechanism({ replayStore, iatWindowSeconds: 60 });
+		mechanism = createDPoPMechanism({ issuer: ISSUER, replayStore, iatWindowSeconds: 60 });
 	});
 
-	const RESOURCE_REQ = ["GET", "/userinfo", "rs.example"] as const;
+	// The protected resources this middleware guards are the AS's own —
+	// `/oauth/userinfo`, `/oauth/logout`, the federation token endpoint (see
+	// `core/src/boot/assemble-app.mts`) — so they sit at the issuer's origin,
+	// which since #292 is where the expected `htu` comes from.
+	const RESOURCE_REQ = ["GET", "/userinfo", "as.example"] as const;
 	const makeResourceReq = (proof: string) =>
 		makeReq(proof, RESOURCE_REQ[0], RESOURCE_REQ[1], RESOURCE_REQ[2]);
 	const resourceHtu = `https://${RESOURCE_REQ[2]}${RESOURCE_REQ[1]}`;
@@ -616,5 +706,41 @@ describe("createDPoPMechanism — protected-resource profile (ath, RFC 9449 §7.
 		});
 		const result = await mechanism.extract(makeReq(proof) as Request);
 		expect(result).toEqual({ kind: "dpop", confirmation: { jkt } });
+	});
+});
+
+describe("createDPoPMechanism — the issuer is required at construction (#292)", () => {
+	it("throws when no issuer is configured", () => {
+		expect(() =>
+			createDPoPMechanism({
+				replayStore: createMemoryDPoPReplayStore(),
+			} as unknown as Parameters<typeof createDPoPMechanism>[0]),
+		).toThrow(/oauth\.jwt\.issuer/);
+	});
+
+	it("throws when the issuer is a bare host — the shape a Host header supplies", () => {
+		// Deriving an origin from it is exactly the reconstruction this change
+		// exists to stop doing. Refuse loudly instead.
+		expect(() =>
+			createDPoPMechanism({
+				issuer: "as.example:3000",
+				replayStore: createMemoryDPoPReplayStore(),
+			}),
+		).toThrow(/issuer/i);
+	});
+
+	it("throws when the issuer is empty", () => {
+		expect(() =>
+			createDPoPMechanism({ issuer: "", replayStore: createMemoryDPoPReplayStore() }),
+		).toThrow(/issuer/i);
+	});
+
+	it("accepts a loopback http issuer so local development needs no TLS", () => {
+		expect(() =>
+			createDPoPMechanism({
+				issuer: "http://localhost:3000",
+				replayStore: createMemoryDPoPReplayStore(),
+			}),
+		).not.toThrow();
 	});
 });
