@@ -130,7 +130,7 @@ fail fast rather than silently falling back to defaults.
 | `SESSION_SECURE` | `true` | Set `Secure` flag on session cookie |
 | `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`) |
 | `SESSION_DOMAIN` | — | Cookie domain (unset by default) |
-| `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds |
+| `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds. Integer, 1–86400; boot fails otherwise (an *empty* value coerces to `0` and would silently disable the token arm). |
 | `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory` |
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |

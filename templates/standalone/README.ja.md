@@ -81,7 +81,7 @@ overlay の値は `application.conf` を上書きします。scaffold には
 | `SESSION_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
 | `SESSION_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`） |
 | `SESSION_DOMAIN` | — | Cookie ドメイン（デフォルト未設定） |
-| `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒） |
+| `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒）。1〜86400 の整数で、外れると boot が失敗する（*空文字* は `0` に coerce され、トークン側の判定を無言で無効化してしまうため） |
 | `SESSION_STORAGE_TYPE` | `redis` | セッションストアのバックエンド: `redis` または `memory` |
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
