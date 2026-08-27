@@ -112,7 +112,7 @@ export const sessionModule = defineModule<
 	| "sessionFederationIndex"
 	| "federationProviders"
 	| "federationRedirectPolicyResolver",
-	"logger" | "rateLimiter"
+	"logger" | "rateLimiter" | "auditSink"
 >({
 	name: "session",
 	configSchema: sessionConfigSchema,
@@ -128,7 +128,10 @@ export const sessionModule = defineModule<
 	// `rateLimiter` is optional so a composition that installs no limiter module
 	// still boots; the session router falls back to a private in-memory limiter
 	// and warns that the login guard is per-process (#270).
-	optional: ["logger", "rateLimiter"],
+	// `auditSink` is optional for the same reason the oauth module treats it so:
+	// no events are emitted when absent (#325 — the login guard now emits
+	// `rate_limit.unavailable` on a limiter outage, like the OAuth endpoints).
+	optional: ["logger", "rateLimiter", "auditSink"],
 	contributes: {
 		routes: [
 			(deps) => {
@@ -141,6 +144,7 @@ export const sessionModule = defineModule<
 						config,
 						userSessionStore: deps.userSessionStore,
 						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
+						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						sessionTtlMs: config.session.maxAge,
 						logger: deps.logger ?? consoleLogger,
 					}),

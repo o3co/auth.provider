@@ -17,8 +17,10 @@
 import { randomUUID } from "node:crypto";
 import {
 	type AppConfig,
+	type AuditSink,
 	consoleLogger,
 	createMemoryRateLimiter,
+	createRateLimitGuard,
 	errorEnvelope,
 	type Logger,
 	type RateLimiter,
@@ -52,6 +54,7 @@ export const createRouter = (
 		config,
 		userSessionStore,
 		rateLimiter,
+		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
 	}: {
@@ -73,6 +76,14 @@ export const createRouter = (
 		 * per-process.
 		 */
 		rateLimiter?: RateLimiter;
+		/**
+		 * Structured pipeline for the login guard's `rate_limit.unavailable`
+		 * emission during a limiter outage (#325 — the OAuth endpoints emitted
+		 * it, this route did not; the shared guard emits it on both). Optional:
+		 * when absent no audit events are emitted, matching the OAuth routers'
+		 * treatment of the slot.
+		 */
+		auditSink?: AuditSink;
 		/** Session TTL in milliseconds. Default: 24h. */
 		sessionTtlMs?: number;
 		logger?: Logger;
@@ -127,65 +138,25 @@ export const createRouter = (
 			defaultLimit: loginLimitSpec,
 		});
 
-	const loginRateLimit = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-		const ip = req.ip ?? "unknown";
-		let decision: Awaited<ReturnType<RateLimiter["check"]>>;
-		try {
-			decision = await loginLimiter.check(`login:ip:${ip}`, {
-				ip,
-				userAgent: req.get("user-agent"),
-			});
-		} catch (cause) {
-			// Same `failMode` policy the OAuth endpoints apply, read from the same
-			// config key: a Redis outage should not mean "login sheds load" here
-			// and "login lets everything through" there.
-			const failMode = config.rateLimit.failMode;
-			const errorMessage = cause instanceof Error ? cause.message : String(cause);
-			logger.error(
-				{ error: errorMessage, mode: failMode, tag: "login", ip },
-				failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
-			);
-			if (failMode === "closed") {
-				res
-					.status(503)
-					.json(errorEnvelope("service_unavailable", "Rate limiter temporarily unavailable"));
-				return;
-			}
-			next();
-			return;
-		}
-
-		// `RateLimit-*` are preserved because this route emitted them under
-		// express-rate-limit (`standardHeaders: true`). The OAuth endpoints do
-		// not, but keeping behaviour on the route being changed matters more
-		// than matching routes that are not.
-		//
-		// The advertised limit is the one the adapter reports having *applied*,
-		// not the one configured here. They differ whenever an operator declares
-		// `limits.login` on the adapter — which deliberately overrides the value
-		// seeded from `rateLimit.login` — and a header advertising a limit no
-		// request is measured against is worse than no header. `decision.limit`
-		// is optional, so a custom adapter that does not report one falls back
-		// to the configured value.
-		res.setHeader("RateLimit-Limit", String(decision.limit ?? loginLimitSpec.limit));
-		if (decision.remaining !== undefined) {
-			res.setHeader("RateLimit-Remaining", String(Math.max(0, decision.remaining)));
-		}
-		const resetSeconds =
-			decision.resetAt === undefined
-				? loginLimitSpec.windowSeconds
-				: Math.max(0, Math.ceil((decision.resetAt.getTime() - Date.now()) / 1000));
-		res.setHeader("RateLimit-Reset", String(resetSeconds));
-
-		if (!decision.allowed) {
-			if (decision.resetAt !== undefined) {
-				res.setHeader("Retry-After", String(resetSeconds));
-			}
-			res.status(429).json(errorEnvelope("rate_limited", decision.reason || "Rate limit exceeded"));
-			return;
-		}
-		next();
-	};
+	// #325: the check + outage policy is core's `createRateLimitGuard`, shared
+	// with the OAuth endpoints — same `failMode` read from the same config key:
+	// a Redis outage should not mean "login sheds load" here and "login lets
+	// everything through" there. The guard also emits the
+	// `rate_limit.unavailable` audit event during an outage, which this route's
+	// hand-rolled copy of the policy did not.
+	//
+	// `RateLimit-*` are emitted as they were under express-rate-limit
+	// (`standardHeaders: true`); since #325 the OAuth endpoints emit them too.
+	// `headerFallback` backs the headers with the documented login spec when
+	// the adapter reports no applied limit / reset of its own.
+	const loginRateLimit = createRateLimitGuard({
+		limiter: loginLimiter,
+		tag: "login",
+		failMode: config.rateLimit.failMode,
+		logger,
+		auditSink,
+		headerFallback: loginLimitSpec,
+	});
 
 	router
 		.use(express.json())
