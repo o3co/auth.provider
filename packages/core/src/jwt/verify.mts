@@ -24,6 +24,7 @@ import {
 import type { AccessTokenDenylist } from "../access-token-denylist/types.mjs";
 import { ExpiredKidError, type KeyStore } from "../keys/KeyStore.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import type { SubjectRevocation } from "../user-sessions/types.mjs";
 
 /**
  * Token type — drives default `typ` expectation and selects appropriate
@@ -147,6 +148,16 @@ export interface JwtVerifyOptions {
 	 */
 	readonly denylist?: AccessTokenDenylist;
 	/**
+	 * #296: when present, verifyJwt rejects a token whose `iat` is at or before
+	 * this subject's revocation watermark, with reason "revoked".
+	 *
+	 * The companion to `denylist` rather than a replacement: the denylist
+	 * revokes a token by identity, this revokes every token a subject held as
+	 * of a moment — which is what a credential change needs, since the jtis
+	 * outstanding for a subject are not enumerable.
+	 */
+	readonly subjectRevocation?: SubjectRevocation;
+	/**
 	 * Wave 1 (§4.5): SECURITY GUARDRAIL — set true ONLY in the /oauth/revoke
 	 * AT path. Spreading this flag to other call sites bypasses token-lifetime
 	 * enforcement. CI lint must restrict `ignoreExpiration: true` to revoke handler.
@@ -221,6 +232,7 @@ export async function verifyJwt(
 		logger,
 		legacyTypAccept = false,
 		denylist,
+		subjectRevocation,
 		ignoreExpiration = false,
 	} = options;
 
@@ -453,6 +465,45 @@ export async function verifyJwt(
 				const err = new JwtVerificationError(
 					"revoked",
 					`JWT jti ${jti} is in the revocation denylist`,
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+		}
+	}
+
+	// #296: per-subject not-before watermark. A credential change cannot
+	// enumerate the jtis a subject currently holds, so it records the moment
+	// before which none of them count and this consults it.
+	//
+	// Same fail-closed stance and same ordering rationale as the denylist above:
+	// an unreachable backend must not read as "not revoked", and the check runs
+	// only for otherwise-valid tokens so `reason: "revoked"` stays crisp.
+	if (subjectRevocation !== undefined) {
+		const sub = typeof payload.sub === "string" ? payload.sub : undefined;
+		const iat = typeof payload.iat === "number" ? payload.iat : undefined;
+		if (sub !== undefined && iat !== undefined) {
+			let watermark: Date | null;
+			try {
+				watermark = await subjectRevocation.revokedBefore(sub);
+			} catch (cause) {
+				const causeMessage = cause instanceof Error ? cause.message : String(cause);
+				const err = new JwtVerificationError(
+					"revoked",
+					`subject revocation consult failed (fail-closed): ${causeMessage}`,
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
+			// Inclusive on purpose. `iat` is second-truncated and a multi-replica
+			// deployment has independent clocks, so a token minted a few hundred
+			// milliseconds *before* the revocation routinely lands in the same
+			// second as the watermark. Killing one minted just after costs a
+			// retry; letting one from just before survive is the vulnerability.
+			if (watermark !== null && iat <= Math.floor(watermark.getTime() / 1000)) {
+				const err = new JwtVerificationError(
+					"revoked",
+					`JWT for subject ${sub} predates the subject revocation watermark`,
 				);
 				emitRejection(logger, err, payload, header);
 				throw err;

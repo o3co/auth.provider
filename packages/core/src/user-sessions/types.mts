@@ -183,6 +183,71 @@ export interface SessionFederationIndex {
 	removeBySid(sid: string): Promise<void>;
 }
 
+/**
+ * Subject-keyed index of the session ids belonging to one principal (#296).
+ *
+ * Every other index here is keyed by `sid` — they answer "what does this
+ * session own?". This one answers the inverse, "what sessions does this
+ * subject have?", which is the question a credential change asks: the Store
+ * has just written a new password and every session established with the old
+ * one has to go, without the caller knowing a single sid.
+ *
+ * `UserSessionStore` cannot answer it — it is `create` / `get(sid)` /
+ * `delete(sid)` — so without this index `revokeAllForSubject` has nothing to
+ * enumerate.
+ *
+ * Mutability: append-only per (subject, sid), idempotent on duplicates.
+ * Per-member removal (`removeSid`) is exposed because a single session ending
+ * must not erase the subject's other sessions — unlike the sid-keyed indexes,
+ * where the whole key dies with the session.
+ *
+ * TTL contract: every `addSid` MUST be called with the session's `expiresAt`,
+ * so an abandoned session ages out of the index rather than accumulating
+ * against a long-lived user.
+ */
+export interface SubjectSessionIndex {
+	readonly kind: string;
+	/**
+	 * Expiry encoding: `Date` per A4 two-tier design — see {@link UserSession}
+	 * for rationale.
+	 */
+	addSid(subject: string, sid: string, expiresAt: Date): Promise<void>;
+	listSids(subject: string): Promise<ReadonlyArray<string>>;
+	/** Remove one session from the subject's set, leaving the others. */
+	removeSid(subject: string, sid: string): Promise<void>;
+	/** Remove the whole set — the subject has no live sessions left. */
+	removeBySubject(subject: string): Promise<void>;
+}
+
+/**
+ * Per-subject not-before watermark for issued access tokens (#296).
+ *
+ * A credential change has to invalidate outstanding access tokens, and
+ * `AccessTokenDenylist` cannot express that: it is `add(jti)` / `has(jti)`,
+ * and the jtis a subject currently holds are not enumerable anywhere. A
+ * watermark inverts the problem — instead of naming every token, it names the
+ * moment before which none of them count.
+ *
+ * The comparison is against the token's `iat`, and it is deliberately
+ * inclusive (`iat <= watermark` is revoked). `iat` is second-truncated
+ * (`generateToken` floors `Date.now() / 1000`) and a multi-replica deployment
+ * has independent clocks, so a token minted a few hundred milliseconds before
+ * the reset routinely lands in the same second as the watermark. Killing a
+ * token minted just *after* the reset costs the client one retry; letting one
+ * from just *before* survive is the vulnerability this exists to close.
+ *
+ * TTL contract: `revokeBefore` MUST be called with an `expiresAt` at least as
+ * far out as the longest-lived access token that could still be presented.
+ * Refresh tokens are handled separately by family revocation, so the watermark
+ * does not need to outlive them.
+ */
+export interface SubjectRevocation {
+	readonly kind: string;
+	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
+	/** The watermark, or `null` when this subject has none in force. */
+	revokedBefore(subject: string): Promise<Date | null>;
+}
+
 // ---------------------------------------------------------------------------
 // AdapterFactory aliases (Theme C: composition-root, throw-on-duplicate)
 // ---------------------------------------------------------------------------
@@ -191,6 +256,8 @@ export type UserSessionStoreFactory = AdapterFactory<UserSessionStore>;
 export type SessionRPRegistryFactory = AdapterFactory<SessionRPRegistry>;
 export type SessionFamilyIndexFactory = AdapterFactory<SessionFamilyIndex>;
 export type SessionFederationIndexFactory = AdapterFactory<SessionFederationIndex>;
+export type SubjectSessionIndexFactory = AdapterFactory<SubjectSessionIndex>;
+export type SubjectRevocationFactory = AdapterFactory<SubjectRevocation>;
 
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge (4 slots, all optional)
@@ -202,6 +269,8 @@ declare module "@o3co/auth-provider-core" {
 		readonly sessionRPRegistry?: SessionRPRegistry;
 		readonly sessionFamilyIndex?: SessionFamilyIndex;
 		readonly sessionFederationIndex?: SessionFederationIndex;
+		readonly subjectSessionIndex?: SubjectSessionIndex;
+		readonly subjectRevocation?: SubjectRevocation;
 	}
 }
 

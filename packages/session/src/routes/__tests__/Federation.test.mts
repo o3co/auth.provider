@@ -17,6 +17,7 @@
 import type {
 	FederationTokenStore,
 	SessionFederationIndex,
+	SubjectSessionIndex,
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -199,6 +200,24 @@ function makeSessionFederationIndex(
 	} as SessionFederationIndex;
 }
 
+/** #296 — subject-keyed index of live sessions, written on federated login. */
+function makeSubjectSessionIndex(override?: Partial<SubjectSessionIndex>): SubjectSessionIndex & {
+	addSid: ReturnType<typeof vi.fn>;
+	removeSid: ReturnType<typeof vi.fn>;
+} {
+	return {
+		kind: "memory",
+		addSid: vi.fn(async () => {}),
+		listSids: vi.fn(async () => []),
+		removeSid: vi.fn(async () => {}),
+		removeBySubject: vi.fn(async () => {}),
+		...override,
+	} as SubjectSessionIndex & {
+		addSid: ReturnType<typeof vi.fn>;
+		removeSid: ReturnType<typeof vi.fn>;
+	};
+}
+
 function makeFederationTokenStore(): FederationTokenStore & {
 	attach: ReturnType<typeof vi.fn>;
 	delete: ReturnType<typeof vi.fn>;
@@ -245,6 +264,7 @@ function buildStatelessApp({
 	userRepository?: UserRepository;
 	userSessionStore?: UserSessionStore;
 	sessionFederationIndex?: SessionFederationIndex;
+	subjectSessionIndex?: SubjectSessionIndex;
 	federationTokenStore?: FederationTokenStore;
 }) {
 	const store: SessionStore = new Map();
@@ -289,6 +309,7 @@ function buildCallbackApp({
 	userRepository,
 	userSessionStore,
 	sessionFederationIndex,
+	subjectSessionIndex,
 	federationTokenStore,
 	saveInterceptor,
 }: {
@@ -299,6 +320,7 @@ function buildCallbackApp({
 	userRepository?: UserRepository;
 	userSessionStore?: UserSessionStore;
 	sessionFederationIndex?: SessionFederationIndex;
+	subjectSessionIndex?: SubjectSessionIndex;
 	federationTokenStore?: FederationTokenStore;
 	/** Optional middleware inserted AFTER session shim to intercept req.session.save. */
 	saveInterceptor?: express.RequestHandler;
@@ -324,6 +346,7 @@ function buildCallbackApp({
 			userRepository: userRepository ?? makeUserRepository(),
 			userSessionStore: userSessionStore ?? makeUserSessionStore(),
 			sessionFederationIndex: sessionFederationIndex ?? makeSessionFederationIndex(),
+			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
 		}),
 	);
@@ -1522,5 +1545,198 @@ describe("Federation routes", () => {
 				expect(provider.exchangeCode).toHaveBeenCalledOnce();
 			});
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #296 — subject-keyed session index
+//
+// The index is what `revokeAllForSubject` enumerates after a credential change.
+// Two failure modes matter and they are not symmetric: a MISSING entry is a
+// live session a password reset will never find, while an ORPHAN entry only
+// costs one redundant cascade (`cascadeLogout` on a dead sid is idempotent).
+// That asymmetry is why the write stays immediately after `create` — the
+// earliest point at which a session exists — and every rollback path that
+// deletes the session compensates by removing the entry.
+// ---------------------------------------------------------------------------
+
+describe("federation login: subject session index (#296)", () => {
+	it("records the sid against the subject on a successful federated login", async () => {
+		const providers = new Map([["test", makeFakeProvider()]]);
+		const uss = makeUserSessionStore();
+		const ssi = makeSubjectSessionIndex();
+
+		const { app } = buildCallbackApp({
+			providers,
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userSessionStore: uss,
+			subjectSessionIndex: ssi,
+		});
+		const agent = await plantAndGetAgent(app);
+
+		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+		expect(res.status).toBe(302);
+
+		expect(ssi.addSid).toHaveBeenCalledOnce();
+		const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Record<
+			string,
+			unknown
+		>;
+		const [sub, sid, expiresAt] = ssi.addSid.mock.calls[0] as [string, string, Date];
+		expect(sub).toBe(createArg.sub);
+		expect(sid).toBe(createArg.sid);
+		expect(expiresAt).toEqual(createArg.expiresAt);
+	});
+
+	it("does not deny a legitimate login when the index write fails", async () => {
+		// Best-effort by design: refusing the login would turn an index outage
+		// into an authentication outage. The cost is one session this deployment
+		// cannot subject-revoke, which is why it is logged rather than swallowed.
+		const providers = new Map([["test", makeFakeProvider()]]);
+		const ssi = makeSubjectSessionIndex({
+			addSid: vi.fn(async () => {
+				throw new Error("index store down");
+			}),
+		});
+
+		const { app } = buildCallbackApp({
+			providers,
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			subjectSessionIndex: ssi,
+		});
+		const agent = await plantAndGetAgent(app);
+
+		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+		expect(res.status).toBe(302);
+	});
+
+	it("removes the entry when addFederation fails and the session is rolled back", async () => {
+		const providers = new Map([["test", makeFakeProvider()]]);
+		const uss = makeUserSessionStore();
+		const ssi = makeSubjectSessionIndex();
+		const sfi = makeSessionFederationIndex({
+			addFederation: vi.fn(async () => {
+				throw new Error("redis blip");
+			}),
+		});
+
+		const { app } = buildCallbackApp({
+			providers,
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userSessionStore: uss,
+			sessionFederationIndex: sfi,
+			subjectSessionIndex: ssi,
+		});
+		const agent = await plantAndGetAgent(app);
+
+		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+		expect(res.status).toBe(503);
+		expect(uss.delete).toHaveBeenCalledOnce();
+		expect(ssi.removeSid).toHaveBeenCalledOnce();
+		const [, rolledBackSid] = ssi.removeSid.mock.calls[0] as [string, string];
+		expect(rolledBackSid).toBe(ssi.addSid.mock.calls[0][1]);
+	});
+
+	it("removes the entry when session regeneration fails", async () => {
+		const providers = new Map([["test", makeFakeProvider()]]);
+		const uss = makeUserSessionStore();
+		const ssi = makeSubjectSessionIndex();
+
+		const regenerateFailInterceptor: express.RequestHandler = (req, _res, next) => {
+			req.session.regenerate = (cb?: (err: unknown) => void) => {
+				cb?.(new Error("regenerate failed"));
+				return req.session;
+			};
+			next();
+		};
+
+		const { app } = buildCallbackApp({
+			providers,
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userSessionStore: uss,
+			subjectSessionIndex: ssi,
+			saveInterceptor: regenerateFailInterceptor,
+		});
+		const agent = await plantAndGetAgent(app);
+
+		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+		expect(res.status).toBe(500);
+		expect(uss.delete).toHaveBeenCalledOnce();
+		expect(ssi.removeSid).toHaveBeenCalledOnce();
+	});
+
+	it("removes the entry when post-regenerate work fails", async () => {
+		const providers = new Map([["test", makeFakeProvider()]]);
+		const uss = makeUserSessionStore();
+		const ssi = makeSubjectSessionIndex();
+
+		// Fail the second save — the post-regenerate one — to reach the catch
+		// block that unwinds every store, mirroring the A4-4 interceptor above.
+		const saveFailInterceptor: express.RequestHandler = (req, _res, next) => {
+			let saveCalls = 0;
+
+			function patchSave(session: import("express-session").Session) {
+				const orig = session.save.bind(session);
+				session.save = (cb?: (err: unknown) => void) => {
+					saveCalls++;
+					if (saveCalls === 2 && typeof cb === "function") {
+						cb(new Error("session save failed"));
+						return session;
+					}
+					return orig(cb);
+				};
+			}
+
+			patchSave(req.session);
+			const origRegenerate = req.session.regenerate.bind(req.session);
+			req.session.regenerate = (cb?: (err: unknown) => void) =>
+				origRegenerate((err: unknown) => {
+					patchSave(req.session);
+					cb?.(err);
+				});
+
+			next();
+		};
+
+		const { app } = buildCallbackApp({
+			providers,
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			userSessionStore: uss,
+			subjectSessionIndex: ssi,
+			saveInterceptor: saveFailInterceptor,
+		});
+		const agent = await plantAndGetAgent(app);
+
+		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+		expect(res.status).toBe(500);
+		expect(uss.delete).toHaveBeenCalledOnce();
+		expect(ssi.removeSid).toHaveBeenCalledOnce();
+	});
+
+	it("does not fail the rollback when removeSid itself throws", async () => {
+		// The compensation is best-effort like every other rollback step here:
+		// the caller's error is the one that must reach them.
+		const providers = new Map([["test", makeFakeProvider()]]);
+		const ssi = makeSubjectSessionIndex({
+			removeSid: vi.fn(async () => {
+				throw new Error("index store down");
+			}),
+		});
+		const sfi = makeSessionFederationIndex({
+			addFederation: vi.fn(async () => {
+				throw new Error("redis blip");
+			}),
+		});
+
+		const { app } = buildCallbackApp({
+			providers,
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			sessionFederationIndex: sfi,
+			subjectSessionIndex: ssi,
+		});
+		const agent = await plantAndGetAgent(app);
+
+		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+		expect(res.status).toBe(503);
 	});
 });

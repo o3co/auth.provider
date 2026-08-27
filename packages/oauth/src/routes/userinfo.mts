@@ -20,6 +20,7 @@ import {
 	type KeyStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
+	type SubjectRevocation,
 	type UserSessionStore,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -38,6 +39,13 @@ export interface UserinfoRouterOptions {
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	/** Wave 1 — RFC 7009: when wired, verifyJwt consults the denylist so revoked ATs respond 401. */
 	accessTokenDenylist?: AccessTokenDenylist;
+	/**
+	 * #296 — when wired, verifyJwt rejects an access token whose `iat` is at or
+	 * before this subject's revocation watermark. The subject-level companion to
+	 * `accessTokenDenylist`: the denylist revokes a named token, this revokes
+	 * every token a subject held as of a credential change.
+	 */
+	subjectRevocation?: SubjectRevocation;
 	/** Configured issuer — pinned by the SF-1 central verifier. */
 	issuer?: string;
 	/**
@@ -99,6 +107,8 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
 				...(opts.accessTokenDenylist ? { denylist: opts.accessTokenDenylist } : {}),
+				// #296: subject-level watermark, consulted alongside the jti denylist.
+				...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;

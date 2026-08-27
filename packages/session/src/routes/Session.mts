@@ -24,6 +24,7 @@ import {
 	errorEnvelope,
 	type Logger,
 	type RateLimiter,
+	type SubjectSessionIndex,
 	type User,
 	type UserRepository,
 	type UserSessionStore,
@@ -60,6 +61,7 @@ export const createRouter = (
 		userRepository,
 		config,
 		userSessionStore,
+		subjectSessionIndex,
 		rateLimiter,
 		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
@@ -69,6 +71,15 @@ export const createRouter = (
 		userRepository: UserRepository;
 		config: AppConfig;
 		userSessionStore?: UserSessionStore;
+		/**
+		 * Subject-keyed index of live sessions (#296).
+		 *
+		 * Written on every login so a credential change can enumerate what to
+		 * revoke. Without it `revokeAllForSubject` has nothing to find and the
+		 * whole mechanism is inert, which is why its absence is reported rather
+		 * than assumed.
+		 */
+		subjectSessionIndex?: SubjectSessionIndex;
 		/**
 		 * Shared rate limiter for the login brute-force guard.
 		 *
@@ -267,13 +278,33 @@ export const createRouter = (
 					const now = new Date();
 					sid = randomUUID();
 					try {
+						const expiresAt = new Date(now.getTime() + sessionTtlMs);
 						await userSessionStore.create({
 							sid,
 							sub: user.id,
 							authTime: now,
-							expiresAt: new Date(now.getTime() + sessionTtlMs),
+							expiresAt,
 							claims,
 						});
+						// #296: record the session against its subject so a later
+						// credential change can find it. Best-effort and AFTER the
+						// session exists: a failure here must not deny a legitimate
+						// login, and the cost is that this one session is missed by
+						// `revokeAllForSubject` — logged so it is not silent.
+						//
+						// Written at the earliest point the session exists rather than
+						// after the regeneration below, because the two failure modes
+						// are not symmetric: a missing entry is a live session a
+						// credential change will never find, while an orphan entry
+						// costs one redundant cascade that `cascadeLogout` absorbs
+						// idempotently. The regeneration rollback compensates.
+						if (subjectSessionIndex) {
+							try {
+								await subjectSessionIndex.addSid(user.id, sid, expiresAt);
+							} catch (err) {
+								logger.error({ err, sub: user.id, sid }, "subject_session_index_write_failed");
+							}
+						}
 					} catch {
 						// Fail-closed: store unavailable — return controlled 503 JSON rather
 						// than an unhandled rejection hitting Express's default HTML error
@@ -293,6 +324,12 @@ export const createRouter = (
 						// primary error is already being returned to the caller.
 						if (sid && userSessionStore) {
 							userSessionStore.delete(sid).catch(() => {
+								/* best-effort cleanup */
+							});
+							// #296: the session is gone, so its subject-index entry must
+							// go too — otherwise `revokeAllForSubject` would enumerate a
+							// sid that no longer exists.
+							subjectSessionIndex?.removeSid(user.id, sid).catch(() => {
 								/* best-effort cleanup */
 							});
 						}

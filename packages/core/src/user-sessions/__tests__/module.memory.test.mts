@@ -33,9 +33,13 @@ describe("memorySessionStoresModule", () => {
 		expect(typeof provides.sessionRPRegistry).toBe("function");
 		expect(typeof provides.sessionFamilyIndex).toBe("function");
 		expect(typeof provides.sessionFederationIndex).toBe("function");
+		// #296 — bundled here so a single-node deployment gets subject-level
+		// revocation by installing the module it already installs.
+		expect(typeof provides.subjectSessionIndex).toBe("function");
+		expect(typeof provides.subjectRevocation).toBe("function");
 	});
 
-	it("createApp wires all 4 components into ComponentMap", async () => {
+	it("createApp wires all 6 components into ComponentMap", async () => {
 		// Use a no-op route contributor to force the boot planner to materialise
 		// the module graph (requires the modules to be active). Components are
 		// read from handle.components after boot completes.
@@ -46,6 +50,8 @@ describe("memorySessionStoresModule", () => {
 				"sessionRPRegistry",
 				"sessionFamilyIndex",
 				"sessionFederationIndex",
+				"subjectSessionIndex",
+				"subjectRevocation",
 			] as never,
 			contributes: {
 				routes: [
@@ -68,6 +74,11 @@ describe("memorySessionStoresModule", () => {
 		expect((components.sessionRPRegistry as { kind: string }).kind).toBe("memory");
 		expect((components.sessionFamilyIndex as { kind: string }).kind).toBe("memory");
 		expect((components.sessionFederationIndex as { kind: string }).kind).toBe("memory");
+		// #296 — without these two slots `revokeAllForSubject` reports both as
+		// unavailable and revokes nothing, so the bundle providing them is part
+		// of the contract, not an implementation detail.
+		expect((components.subjectSessionIndex as { kind: string }).kind).toBe("memory");
+		expect((components.subjectRevocation as { kind: string }).kind).toBe("memory");
 
 		await handle.dispose();
 	});

@@ -112,7 +112,7 @@ export const sessionModule = defineModule<
 	| "sessionFederationIndex"
 	| "federationProviders"
 	| "federationRedirectPolicyResolver",
-	"logger" | "rateLimiter" | "auditSink"
+	"logger" | "rateLimiter" | "auditSink" | "subjectSessionIndex"
 >({
 	name: "session",
 	configSchema: sessionConfigSchema,
@@ -131,7 +131,10 @@ export const sessionModule = defineModule<
 	// `auditSink` is optional for the same reason the oauth module treats it so:
 	// no events are emitted when absent (#325 — the login guard now emits
 	// `rate_limit.unavailable` on a limiter outage, like the OAuth endpoints).
-	optional: ["logger", "rateLimiter", "auditSink"],
+	// #296: `subjectSessionIndex` is optional so a composition that has not
+	// adopted subject-level revocation still boots; `revokeAllForSubject` then
+	// reports the capability as unavailable rather than silently doing nothing.
+	optional: ["logger", "rateLimiter", "auditSink", "subjectSessionIndex"],
 	contributes: {
 		routes: [
 			(deps) => {
@@ -145,6 +148,7 @@ export const sessionModule = defineModule<
 						userSessionStore: deps.userSessionStore,
 						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
+						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						sessionTtlMs: config.session.maxAge,
 						logger: deps.logger ?? consoleLogger,
 					}),
@@ -172,6 +176,7 @@ export const sessionModule = defineModule<
 						userRepository: deps.userRepository,
 						userSessionStore: deps.userSessionStore,
 						sessionFederationIndex: deps.sessionFederationIndex,
+						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: config.session.maxAge,
 						logger: deps.logger ?? consoleLogger,

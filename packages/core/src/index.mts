@@ -409,8 +409,20 @@ export {
 export { createInMemorySessionFamilyIndex } from "./user-sessions/memory/sessionFamilyIndex.mjs";
 export { createInMemorySessionFederationIndex } from "./user-sessions/memory/sessionFederationIndex.mjs";
 export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
+// #296: subject-keyed session index + per-subject access-token watermark, and
+// the orchestrator a credential-change flow calls after writing the new secret.
+export { createInMemorySubjectRevocation } from "./user-sessions/memory/subjectRevocation.mjs";
+export { createInMemorySubjectSessionIndex } from "./user-sessions/memory/subjectSessionIndex.mjs";
 export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
 export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
+export {
+	type CascadeSession,
+	type RevokeAllForSubjectCapability,
+	type RevokeAllForSubjectFailure,
+	type RevokeAllForSubjectOptions,
+	type RevokeAllForSubjectResult,
+	revokeAllForSubject,
+} from "./user-sessions/revokeAllForSubject.mjs";
 // ---------------------------------------------------------------------------
 // A4 user-sessions (post v0.5.0 redesign): 4-way decomposition.
 // Per spec §5.1-§5.7, §7.1, §8.1.
@@ -427,6 +439,10 @@ export type {
 	SessionFederationIndexFactory,
 	SessionRPRegistry,
 	SessionRPRegistryFactory,
+	SubjectRevocation,
+	SubjectRevocationFactory,
+	SubjectSessionIndex,
+	SubjectSessionIndexFactory,
 	UserSession,
 	UserSessionClaims,
 	UserSessionStore,

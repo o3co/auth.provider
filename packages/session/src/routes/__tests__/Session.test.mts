@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { AppConfig, UserRepository, UserSessionStore } from "@o3co/auth-provider-core";
+import type {
+	AppConfig,
+	SubjectSessionIndex,
+	UserRepository,
+	UserSessionStore,
+} from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -89,6 +94,7 @@ function buildApp(
 	opts: {
 		userRepository?: UserRepository;
 		userSessionStore?: UserSessionStore;
+		subjectSessionIndex?: SubjectSessionIndex;
 		sessionTtlMs?: number;
 		regenerateError?: Error;
 		destroyError?: Error;
@@ -105,6 +111,7 @@ function buildApp(
 			authenticateByToken: vi.fn(),
 		} as unknown as UserRepository,
 		userSessionStore,
+		subjectSessionIndex,
 		sessionTtlMs,
 		regenerateError,
 		destroyError,
@@ -152,6 +159,7 @@ function buildApp(
 		userRepository,
 		config,
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
+		...(subjectSessionIndex !== undefined ? { subjectSessionIndex } : {}),
 		...(sessionTtlMs !== undefined ? { sessionTtlMs } : {}),
 	});
 
@@ -597,5 +605,129 @@ describe("Session routes — POST /session/login", () => {
 			const setCookie = (res.headers["set-cookie"] ?? []) as unknown as string[];
 			expect(setCookie.some((c) => c.startsWith(`${csrf.cookieName}=`))).toBe(true);
 		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #296 — subject-keyed session index on local login
+//
+// `revokeAllForSubject` enumerates this index after a credential change, so a
+// session that never lands in it is a session a password reset cannot kill.
+// That is why the write happens as soon as the session exists and why the
+// regeneration rollback removes it again.
+// ---------------------------------------------------------------------------
+
+function makeSubjectSessionIndex(override?: Partial<SubjectSessionIndex>): SubjectSessionIndex & {
+	addSid: ReturnType<typeof vi.fn>;
+	removeSid: ReturnType<typeof vi.fn>;
+} {
+	return {
+		kind: "memory",
+		addSid: vi.fn(async () => {}),
+		listSids: vi.fn(async () => []),
+		removeSid: vi.fn(async () => {}),
+		removeBySubject: vi.fn(async () => {}),
+		...override,
+	} as SubjectSessionIndex & {
+		addSid: ReturnType<typeof vi.fn>;
+		removeSid: ReturnType<typeof vi.fn>;
+	};
+}
+
+describe("Session routes — subject session index (#296)", () => {
+	it("records the sid against the subject on a successful login", async () => {
+		const index = makeSubjectSessionIndex();
+		const { app } = buildApp({
+			userSessionStore: makeUserSessionStore(),
+			subjectSessionIndex: index,
+			sessionTtlMs: 3600_000,
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(200);
+		expect(index.addSid).toHaveBeenCalledOnce();
+		const [sub, sid, expiresAt] = index.addSid.mock.calls[0] as [string, string, Date];
+		expect(sub).toBe("u-1");
+		expect(typeof sid).toBe("string");
+		// The TTL contract: the entry ages out with the session it names, so an
+		// abandoned session cannot accumulate against a long-lived user.
+		expect(expiresAt).toBeInstanceOf(Date);
+	});
+
+	it("does not deny a legitimate login when the index write fails", async () => {
+		// An index outage must not become an authentication outage. The cost is
+		// one session this deployment cannot subject-revoke, so it is logged.
+		const index = makeSubjectSessionIndex({
+			addSid: vi.fn(async () => {
+				throw new Error("index store down");
+			}),
+		});
+		const { app } = buildApp({
+			userSessionStore: makeUserSessionStore(),
+			subjectSessionIndex: index,
+			sessionTtlMs: 3600_000,
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(200);
+	});
+
+	it("removes the entry when session regeneration fails and the session is rolled back", async () => {
+		const index = makeSubjectSessionIndex();
+		const { app } = buildApp({
+			userSessionStore: makeUserSessionStore(),
+			subjectSessionIndex: index,
+			sessionTtlMs: 3600_000,
+			regenerateError: new Error("regenerate failed"),
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(500);
+		expect(index.addSid).toHaveBeenCalledOnce();
+		expect(index.removeSid).toHaveBeenCalledOnce();
+		const [, removedSid] = index.removeSid.mock.calls[0] as [string, string];
+		expect(removedSid).toBe(index.addSid.mock.calls[0][1]);
+	});
+
+	it("survives a rollback whose removeSid itself throws", async () => {
+		const index = makeSubjectSessionIndex({
+			removeSid: vi.fn(async () => {
+				throw new Error("index store down");
+			}),
+		});
+		const { app } = buildApp({
+			userSessionStore: makeUserSessionStore(),
+			subjectSessionIndex: index,
+			sessionTtlMs: 3600_000,
+			regenerateError: new Error("regenerate failed"),
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(500);
+	});
+
+	it("logs in normally when no index is wired", async () => {
+		const { app } = buildApp({
+			userSessionStore: makeUserSessionStore(),
+			sessionTtlMs: 3600_000,
+		});
+
+		const res = await loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+		expect(res.status).toBe(200);
 	});
 });
