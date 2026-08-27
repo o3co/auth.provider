@@ -509,6 +509,7 @@ export type {
 	RefreshTokenFamilyRotation,
 	RefreshTokenFamilyRotationOutcome,
 	RefreshTokenFamilyStore,
+	RefreshTokenFamilyUpdateDecision,
 	RefreshTokenFamilyUpdateResult,
 } from "./refresh-token-family/types.mjs";
 

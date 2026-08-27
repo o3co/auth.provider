@@ -39,20 +39,67 @@ export interface RefreshTokenFamily {
 }
 
 /**
+ * What an updater tells the adapter to do, and what it wants reported back.
+ *
+ * This replaces the earlier `RefreshTokenFamily | null` return (#274). `null`
+ * conflated two unrelated things — "write nothing" and "the caller's
+ * precondition failed" — so the only way to communicate *why* a call ended
+ * was a closure-captured variable read after the fact. That worked while
+ * every rejection also aborted the write. It stops working the moment a
+ * rejection needs to COMMIT something: a committed replay-revocation and a
+ * committed ordinary rotation are indistinguishable at the result, and the
+ * closure cannot disambiguate them without the adapter promising exactly-once
+ * updater invocation, which the CAS retry contract explicitly refuses to.
+ *
+ * So the decision is a third state rather than an overloaded `null`:
+ *
+ * - `{ action: "commit", family }` — persist `family`.
+ * - `{ action: "commit", family, reason }` — persist `family`, and hand
+ *   `reason` back to the caller so it can classify the write as something
+ *   other than the happy path.
+ * - `{ action: "abort", reason? }` — write nothing.
+ *
+ * `reason` is an **opaque, caller-defined** string that the adapter stores
+ * nowhere and interprets never — it only echoes it on the matching
+ * `RefreshTokenFamilyUpdateResult`. Keeping it opaque is what preserves A3
+ * §5.1's rule that the adapter is a storage primitive and the rotation
+ * ceremony is classified in the wrapper layer.
+ *
+ * Per A3 §5.1 + #274.
+ */
+export type RefreshTokenFamilyUpdateDecision =
+	| {
+			readonly action: "commit";
+			readonly family: RefreshTokenFamily;
+			readonly reason?: string;
+	  }
+	| { readonly action: "abort"; readonly reason?: string };
+
+/**
  * Result of a `RefreshTokenFamilyStore.updateFamily` call.
  *
  * - `committed`: CAS commit succeeded. `family` is the newly persisted state.
+ *   `reason` echoes the committing decision's `reason`, verbatim.
  * - `not-found`: the family does not exist (or expired). The updater was
- *   NOT invoked.
- * - `aborted`: the updater returned null (caller signalled no-op). No state
- *   change.
+ *   NOT invoked, so there is no `reason` to echo.
+ * - `aborted`: the updater returned `{ action: "abort" }`. No state change.
+ *   `reason` echoes that decision's `reason`, verbatim.
  *
- * Per A3 §5.1.
+ * When the adapter retried the CAS, the echoed `reason` belongs to the
+ * **decision that actually settled the call** — the committing invocation, or
+ * the aborting one. That is the property the closure-captured-variable
+ * pattern could not guarantee.
+ *
+ * Per A3 §5.1 + #274.
  */
 export type RefreshTokenFamilyUpdateResult =
-	| { readonly outcome: "committed"; readonly family: RefreshTokenFamily }
+	| {
+			readonly outcome: "committed";
+			readonly family: RefreshTokenFamily;
+			readonly reason?: string;
+	  }
 	| { readonly outcome: "not-found" }
-	| { readonly outcome: "aborted" };
+	| { readonly outcome: "aborted"; readonly reason?: string };
 
 /**
  * Storage primitive for refresh-token families.
@@ -101,14 +148,15 @@ export interface RefreshTokenFamilyStore {
 	 * Adapter performs:
 	 *   1. Read current family state (or null if non-existent).
 	 *   2. Invoke `updater(current)`.
-	 *   3. If updater returns a new RefreshTokenFamily, attempt atomic CAS
-	 *      commit using an adapter-internal version token (NOT exposed in
+	 *   3. If the decision is `{ action: "commit", family }`, attempt atomic
+	 *      CAS commit using an adapter-internal version token (NOT exposed in
 	 *      RefreshTokenFamily — adapters may use a separate version field,
 	 *      ETag, Redis WATCH, or any backend-native CAS primitive).
 	 *   4. On CAS conflict, retry by re-reading state and re-invoking updater
 	 *      up to a bounded retry limit; on exhaustion, throws
 	 *      `RefreshTokenStorageError({ reason: "conflict-exhausted" })`.
-	 *   5. If updater returns null, abort without state change (no retry).
+	 *   5. If the decision is `{ action: "abort" }`, abort without state
+	 *      change (no retry).
 	 *
 	 * Updater contract (NORMATIVE):
 	 *   - Updater is invoked with the current RefreshTokenFamily value (NEVER
@@ -120,14 +168,19 @@ export interface RefreshTokenFamilyStore {
 	 *   - Updater MUST NOT mutate the input RefreshTokenFamily (it is
 	 *     `readonly` at the type level; runtime adapters MAY freeze it
 	 *     additionally as defence-in-depth).
-	 *   - Updater MUST return either a new RefreshTokenFamily (commit) or
-	 *     null (abort).
-	 *   - Updater MAY use a closure-captured variable to communicate the
-	 *     abort reason to the caller; the closure is reset at the top of
-	 *     each updater invocation. This is the wrapper pattern used by
-	 *     `createRefreshTokenFamilyRotation` to translate "aborted"
-	 *     results into "replayed" or "revoked" outcomes.
-	 *   - Updater MUST NOT return a RefreshTokenFamily whose `expiresAtMs` is
+	 *   - Updater MUST return a {@link RefreshTokenFamilyUpdateDecision}:
+	 *     `{ action: "commit", family, reason? }` or
+	 *     `{ action: "abort", reason? }`. Returning a bare
+	 *     `RefreshTokenFamily`, or `null`, is the pre-#274 shape and is no
+	 *     longer accepted.
+	 *   - A decision's `reason` is opaque to the adapter. The adapter MUST
+	 *     echo the settling decision's `reason` on the returned result and
+	 *     MUST NOT interpret, validate, or persist it. This is how a caller
+	 *     classifies an outcome **inside** the same atomic operation — the
+	 *     replacement for the pre-#274 closure-captured-variable pattern,
+	 *     which could not describe a commit that is nevertheless a rejection
+	 *     (see `createRefreshTokenFamilyRotation`, #274).
+	 *   - Updater MUST NOT commit a RefreshTokenFamily whose `expiresAtMs` is
 	 *     `<= now()`. Both adapters fail-closed by throwing
 	 *     `RefreshTokenStorageError({ reason: "expired-at-issue" })` —
 	 *     symmetric with `registerFamily` and prevents committing a
@@ -135,17 +188,18 @@ export interface RefreshTokenFamilyStore {
 	 *     should compute the new `expiresAtMs` from a forward window.
 	 *
 	 * Return value:
-	 *   - `{ outcome: "committed", family }` — CAS succeeded; family is the
-	 *     newly-persisted state.
+	 *   - `{ outcome: "committed", family, reason? }` — CAS succeeded; family
+	 *     is the newly-persisted state.
 	 *   - `{ outcome: "not-found" }` — family did not exist; updater not
 	 *     invoked.
-	 *   - `{ outcome: "aborted" }` — updater returned null; no state change.
+	 *   - `{ outcome: "aborted", reason? }` — updater aborted; no state
+	 *     change.
 	 *
-	 * Per A3 §5.1.
+	 * Per A3 §5.1 + #274.
 	 */
 	updateFamily(
 		familyId: string,
-		updater: (current: RefreshTokenFamily) => RefreshTokenFamily | null,
+		updater: (current: RefreshTokenFamily) => RefreshTokenFamilyUpdateDecision,
 	): Promise<RefreshTokenFamilyUpdateResult>;
 }
 
@@ -176,8 +230,26 @@ export interface RefreshTokenFamilyStore {
  * - `replayed`: family exists, not revoked, but previousJti did NOT match
  *   the active jti (e.g., previous jti was already rotated out). Caller
  *   MUST reject and treat as a replay-attack audit signal.
+ *
+ *   `familyRevoked: true` states that the implementation ALREADY revoked the
+ *   family, in the same atomic store operation that detected the replay
+ *   (#274). RFC 6819 §5.2.2.3 requires the whole family to die on replay, and
+ *   doing it as a second write left a window in which a sibling holding the
+ *   still-active token could rotate and receive tokens. An implementation
+ *   that can revoke atomically SHOULD set this flag; the shipped
+ *   `createRefreshTokenFamilyRotation` always does.
+ *
+ *   The field is **optional and fail-closed by absence**: a custom rotation
+ *   implementation that predates #274 returns a bare `{ outcome: "replayed" }`,
+ *   and a caller seeing no `familyRevoked: true` MUST perform the revocation
+ *   itself rather than assume it happened. Optional rather than required so
+ *   such implementations (and existing test stubs) keep compiling — the same
+ *   compatibility choice made for `cappedExpiresAtMs`.
+ *
  * - `revoked`: family exists but its `revoked` flag is set. Caller MUST
- *   reject and treat as a logout-cascade signal.
+ *   reject and treat as a logout-cascade signal. Note that after #274 this
+ *   is also what a sibling redemption sees once a replay has revoked the
+ *   family.
  * - `unknown_family`: no family record matches `family_id`. The grant
  *   handler consults `oauth.refreshToken.unknownFamilyPolicy`:
  *   - `"reject"` (default, safe-by-default in v0.5.1+): returns
@@ -193,7 +265,7 @@ export interface RefreshTokenFamilyStore {
  */
 export type RefreshTokenFamilyRotationOutcome =
 	| { readonly outcome: "rotated"; readonly cappedExpiresAtMs?: number }
-	| { readonly outcome: "replayed" }
+	| { readonly outcome: "replayed"; readonly familyRevoked?: boolean }
 	| { readonly outcome: "revoked" }
 	| { readonly outcome: "unknown_family" };
 
@@ -233,7 +305,16 @@ export interface RefreshTokenFamilyRotation {
 	 * exhaustion) propagate as native errors / `RefreshTokenStorageError(
 	 * { reason: "conflict-exhausted" })`.
 	 *
-	 * Per A3 §5.2.
+	 * Replay handling (NORMATIVE, #274): an implementation that returns
+	 * `replayed` SHOULD have already revoked the family, in the same atomic
+	 * store operation that detected the replay, and MUST then set
+	 * `familyRevoked: true`. Detecting a replay and revoking the family as two
+	 * separate writes leaves a window in which a concurrent sibling redeems
+	 * the still-active token successfully — the defect this contract exists to
+	 * prevent. An implementation that genuinely cannot revoke atomically omits
+	 * the flag, and the caller falls back to revoking separately.
+	 *
+	 * Per A3 §5.2 + #274.
 	 */
 	rotate(
 		previousJti: string,

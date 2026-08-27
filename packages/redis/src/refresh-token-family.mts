@@ -116,6 +116,24 @@ const deserialize = (raw: string): RefreshTokenFamily => {
  *   - updateFamily uses single-key WATCH/GET/MULTI/SET/EXEC — the canonical
  *     Redis CAS primitive. Single-key only (not a multi-key transaction).
  *
+ * What that buys the caller (#274): the decision the updater made is applied
+ * to EXACTLY the state it inspected, or not at all. If any other connection
+ * touches the key between the `WATCH` and the `EXEC`, Redis aborts the
+ * transaction, `exec()` answers `null`, and the loop re-reads and re-decides.
+ * A caller can therefore fuse "detect a condition" and "write a response to
+ * it" into one indivisible operation by having the updater commit rather than
+ * abort — which is how refresh-replay detection and family revocation stopped
+ * being two racing writes.
+ *
+ * Why not Lua, when `ratelimit`'s `incrementWithTtl` and the federation lock's
+ * compare-and-delete are Lua scripts: those express their whole decision in
+ * Redis primitives, so it can run server-side. `updateFamily` takes a
+ * JavaScript updater, because A3 §5.1 deliberately keeps the store a dumb
+ * storage primitive and classifies the rotation ceremony in the wrapper layer
+ * (shared with the in-memory adapter). A Lua rewrite would mean moving that
+ * ceremony into every adapter. WATCH/MULTI/EXEC gives the same indivisibility
+ * for a decision that has to be made in the client.
+ *
  * Connection isolation: WATCH is connection-scoped in Redis, so each
  * `updateFamily` call obtains its own connection via `client.duplicate()`
  * (disposed via `await using` on function exit). Within that connection
@@ -199,13 +217,17 @@ export function createRedisRefreshTokenFamilyStore(
 					...deserialize(raw),
 					expiresAtMs: Date.now() + pttl,
 				});
-				const next = updater(current);
+				const decision = updater(current);
 
-				if (next === null) {
+				if (decision.action === "abort") {
 					await conn.unwatch();
-					return { outcome: "aborted" };
+					// #274: `reason` is echoed verbatim and interpreted nowhere in
+					// this adapter — classification belongs to the wrapper layer
+					// (A3 §5.1).
+					return { outcome: "aborted", reason: decision.reason };
 				}
 
+				const next = decision.family;
 				const newTtlMs = next.expiresAtMs - Date.now();
 				if (newTtlMs <= 0) {
 					// Updater returned past expiresAtMs — fail-closed parity with
@@ -243,7 +265,12 @@ export function createRedisRefreshTokenFamilyStore(
 					...next,
 					expiresAtMs: Date.now() + newTtlMs,
 				});
-				return { outcome: "committed", family: committed };
+				// #274: echo the reason from the decision that actually WON the
+				// CAS. On a retry the earlier invocations' reasons are discarded
+				// along with their (failed) commits — which is the whole point of
+				// carrying the reason on the decision instead of in a closure the
+				// caller reads after the fact.
+				return { outcome: "committed", family: committed, reason: decision.reason };
 			}
 
 			throw new RefreshTokenStorageError({ reason: "conflict-exhausted" });

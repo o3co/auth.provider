@@ -63,7 +63,10 @@ export function runRefreshTokenFamilyStoreContract(
 			const store = await factory();
 			const fam = FAMILY();
 			await store.registerFamily(fam);
-			await store.updateFamily(fam.familyId, (current) => ({ ...current, revoked: true }));
+			await store.updateFamily(fam.familyId, (current) => ({
+				action: "commit",
+				family: { ...current, revoked: true },
+			}));
 			await expect(store.registerFamily(fam)).rejects.toMatchObject({
 				name: "RefreshTokenStorageError",
 				reason: "duplicate-family",
@@ -89,20 +92,68 @@ export function runRefreshTokenFamilyStoreContract(
 			let updaterCalled = false;
 			const result = await store.updateFamily("ghost-id", (cur) => {
 				updaterCalled = true;
-				return cur;
+				return { action: "commit", family: cur };
 			});
 			expect(result.outcome).toBe("not-found");
 			expect(updaterCalled).toBe(false);
 		});
 
-		it("updateFamily returns aborted when updater returns null", async () => {
+		it('updateFamily returns aborted when the updater decides { action: "abort" }', async () => {
 			const store = await factory();
 			const fam = FAMILY();
 			await store.registerFamily(fam);
-			const result = await store.updateFamily(fam.familyId, () => null);
+			const result = await store.updateFamily(fam.familyId, () => ({ action: "abort" }));
 			expect(result.outcome).toBe("aborted");
 			const after = await store.findFamily(fam.familyId);
 			expect(after?.activeJti).toBe(fam.activeJti); // unchanged
+		});
+
+		// #274: a decision carries an opaque `reason` back to the caller so a
+		// wrapper can classify an outcome from INSIDE the atomic operation.
+		// Without it, "committed" cannot distinguish an ordinary rotation from
+		// a commit that exists to reject the request (a replay revocation),
+		// and the only alternative — a closure variable read after the call —
+		// is unsound under the CAS retry contract.
+		it("updateFamily echoes the aborting decision's reason verbatim", async () => {
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+			const result = await store.updateFamily(fam.familyId, () => ({
+				action: "abort",
+				reason: "caller-specific-abort",
+			}));
+			expect(result).toMatchObject({ outcome: "aborted", reason: "caller-specific-abort" });
+		});
+
+		it("updateFamily echoes the committing decision's reason verbatim", async () => {
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+			const result = await store.updateFamily(fam.familyId, (current) => ({
+				action: "commit",
+				family: { ...current, revoked: true },
+				reason: "caller-specific-commit",
+			}));
+			expect(result).toMatchObject({ outcome: "committed", reason: "caller-specific-commit" });
+			// The reason is transport, not state: it must not be persisted.
+			const after = await store.findFamily(fam.familyId);
+			expect(after).not.toHaveProperty("reason");
+			expect(after?.revoked).toBe(true);
+		});
+
+		it("updateFamily omits reason when the decision carried none", async () => {
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+			const committed = await store.updateFamily(fam.familyId, (current) => ({
+				action: "commit",
+				family: { ...current, activeJti: "jti-no-reason" },
+			}));
+			expect(committed.outcome).toBe("committed");
+			if (committed.outcome === "committed") expect(committed.reason).toBeUndefined();
+			const aborted = await store.updateFamily(fam.familyId, () => ({ action: "abort" }));
+			expect(aborted.outcome).toBe("aborted");
+			if (aborted.outcome === "aborted") expect(aborted.reason).toBeUndefined();
 		});
 
 		it("updateFamily returns committed with the new family on commit", async () => {
@@ -110,8 +161,8 @@ export function runRefreshTokenFamilyStoreContract(
 			const fam = FAMILY();
 			await store.registerFamily(fam);
 			const result = await store.updateFamily(fam.familyId, (current) => ({
-				...current,
-				activeJti: "jti-rotated",
+				action: "commit",
+				family: { ...current, activeJti: "jti-rotated" },
 			}));
 			expect(result.outcome).toBe("committed");
 			if (result.outcome === "committed") {
@@ -125,7 +176,10 @@ export function runRefreshTokenFamilyStoreContract(
 			const store = await factory();
 			const fam = FAMILY();
 			await store.registerFamily(fam);
-			await store.updateFamily(fam.familyId, (current) => ({ ...current, revoked: true }));
+			await store.updateFamily(fam.familyId, (current) => ({
+				action: "commit",
+				family: { ...current, revoked: true },
+			}));
 			const after = await store.findFamily(fam.familyId);
 			expect(after?.revoked).toBe(true);
 		});
@@ -143,7 +197,10 @@ export function runRefreshTokenFamilyStoreContract(
 			const fam = FAMILY({ expiresAtMs: Date.now() + 50 });
 			await store.registerFamily(fam);
 			await new Promise((r) => setTimeout(r, 100));
-			const result = await store.updateFamily(fam.familyId, (cur) => cur);
+			const result = await store.updateFamily(fam.familyId, (cur) => ({
+				action: "commit",
+				family: cur,
+			}));
 			expect(result.outcome).toBe("not-found");
 		});
 
@@ -158,8 +215,8 @@ export function runRefreshTokenFamilyStoreContract(
 			await store.registerFamily(fam);
 			await expect(
 				store.updateFamily(fam.familyId, (current) => ({
-					...current,
-					expiresAtMs: Date.now() - 1,
+					action: "commit",
+					family: { ...current, expiresAtMs: Date.now() - 1 },
 				})),
 			).rejects.toMatchObject({
 				name: "RefreshTokenStorageError",
@@ -198,8 +255,9 @@ export function runRefreshTokenFamilyStoreContract(
 			const settled = await Promise.allSettled(
 				Array.from({ length: N }, (_, i) =>
 					store.updateFamily(fam.familyId, (current) => {
-						if (current.activeJti !== "jti-0") return null; // abort: precondition lost
-						return { ...current, activeJti: `jti-${i + 1}` };
+						// abort: precondition lost
+						if (current.activeJti !== "jti-0") return { action: "abort" };
+						return { action: "commit", family: { ...current, activeJti: `jti-${i + 1}` } };
 					}),
 				),
 			);
