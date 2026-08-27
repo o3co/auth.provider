@@ -471,11 +471,19 @@ export const CoreConfigSchema = z.object({
 		// REFRESH-token revocation is unaffected by this key in either mode — it
 		// runs off `refreshTokenFamilyRevocation` and never needed a denylist.
 		//
-		// `.optional()` with a code-side default of `"denylist"` (see
-		// `resolveAccessTokenRevocationMode`), not a HOCON-only default: an
-		// embedder hand-building a config object must not fall into the silent
-		// no-op by omission. The HOCON layer carries the same literal so the key
-		// is discoverable in `reference.conf`.
+		// `.optional()` with NO default here, in the schema or in code:
+		// `readAccessTokenRevocationMode` reports omission as `undefined` and
+		// leaves the resolution to the two layers that consume it, because they
+		// are asking different questions. The boot validator asks whether a
+		// composition may run and reads omission as `"denylist"`, so an embedder
+		// hand-building a config cannot fall into the silent no-op by leaving the
+		// key out. The revocation router asks what to answer given what it was
+		// handed, and with no denylist reports `unsupported_token_type`. A single
+		// baked-in default would have to pick one and be wrong at the other.
+		//
+		// `reference.conf` still carries the literal `"denylist"` — not as the
+		// source of the default, but so the key is discoverable and greppable
+		// where operators read configuration.
 		revocation: z
 			.object({
 				accessToken: z.enum(["denylist", "unsupported"]),

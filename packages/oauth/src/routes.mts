@@ -739,11 +739,18 @@ export const createOAuthRouter = async (
 	// RFC 7009 — Token Revocation endpoint. Always mounted; what it does with
 	// an ACCESS token comes from `oauth.revocation.accessToken` (#277).
 	//
-	// In the default `"denylist"` mode `createRevokeRouter` THROWS when
-	// `accessTokenDenylist` is absent, which surfaces as a boot failure rather
-	// than a route that answers 200 to every revocation. Core's boot validator
-	// catches the same condition earlier (step 13.9), so this throw is the
-	// backstop for composition roots that build the router directly.
+	// `readAccessTokenRevocationMode` reports an UNDECLARED key as `undefined`
+	// rather than defaulting it here, which hands `createRevokeRouter` two
+	// distinguishable cases:
+	//   - declared `"denylist"` with no `accessTokenDenylist` → it THROWS, and a
+	//     deployment claiming a capability it cannot perform fails to build.
+	//   - undeclared with no denylist → it reports `unsupported_token_type`
+	//     rather than a 200 that revokes nothing.
+	// Whether the second case should have been allowed to boot at all is core's
+	// boot validator's call (step 13.9), which reads omission as `"denylist"`
+	// and refuses the composition — so through `createApp` that case never
+	// reaches here, and this layer covers composition roots that call
+	// `createOAuthRouter` directly.
 	//
 	// Refresh-token revocation is independent of the mode and of the denylist.
 	router.use(

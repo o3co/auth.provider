@@ -98,10 +98,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const rateLimiterAdapter = config.rateLimiter?.adapter ?? "memory";
 	const userSessionStoresAdapter = config.userSessionStores?.adapter ?? "memory";
 	// #277: the RFC 7009 access-token denylist. Unlike the switches above there
-	// is no "no denylist" branch — `oauthModule` mounts `/oauth/revoke`, and a
-	// composition that mounts it without a denylist is refused by core's boot
-	// validator, because the endpoint would answer 200 while the token kept
-	// working. The switch is only over WHICH denylist.
+	// is no "no denylist" branch — `oauthModule` reads the `accessTokenDenylist`
+	// slot because it mounts `/oauth/revoke`, and core's boot validator refuses
+	// a composition that reads the slot with nothing filling it, since the
+	// endpoint would answer 200 while the token kept working. The switch here is
+	// only over WHICH denylist.
 	const accessTokenDenylistAdapter = config.accessTokenDenylist?.adapter ?? "memory";
 
 	// OR-9: effective code-repo adapter. `oauth.code.adapter` is the

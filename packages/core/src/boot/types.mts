@@ -1000,13 +1000,16 @@ export interface ReplicaUnsafeAdapterDetails {
 }
 
 /**
- * The composition reads the `accessTokenDenylist` slot — i.e. it serves the
- * RFC 7009 revocation endpoint — while `oauth.revocation.accessToken` is
- * `"denylist"` and nothing provides one (#277).
+ * The composition reads the `accessTokenDenylist` slot while
+ * `oauth.revocation.accessToken` is `"denylist"` — either stated, or absent,
+ * which `checkAccessTokenRevocationWiring` reads the same way — and nothing
+ * provides one (#277).
  *
  * `consumedBy` names every module that declared the slot, because that is the
- * evidence for the diagnosis: those modules are why core believes access-token
- * revocation is reachable in this app.
+ * evidence for the diagnosis rather than a detail of it: reading the slot is
+ * what core takes as the statement that denylist-backed access-token
+ * revocation is part of this app's surface, since it cannot see route mounts
+ * at this stage.
  */
 export interface AccessTokenRevocationUnenforceableDetails {
 	readonly reason: "access-token-revocation-unenforceable";
