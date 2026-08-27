@@ -15,6 +15,7 @@
  */
 
 import type { SessionRPRegistryClient } from "../clients.mjs";
+import { assertPositiveInteger } from "./validate.mjs";
 
 export interface RedisSidHashOptions {
 	readonly client: SessionRPRegistryClient;
@@ -22,6 +23,9 @@ export interface RedisSidHashOptions {
 	/**
 	 * Fields requested per `HSCAN` round-trip. A hint to Redis, not a hard
 	 * limit on a page's size. Default 100.
+	 *
+	 * Must be a positive integer — Redis refuses a non-positive `COUNT`.
+	 * Validated at construction rather than discovered mid-logout.
 	 */
 	readonly scanCount?: number;
 }
@@ -71,6 +75,7 @@ export interface RedisSidHash {
 export function createRedisSidHash(opts: RedisSidHashOptions): RedisSidHash {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
 	const scanCount = opts.scanCount ?? DEFAULT_SCAN_COUNT;
+	assertPositiveInteger(scanCount, "createRedisSidHash: scanCount");
 	return {
 		async setField(sid, id, jsonValue, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();

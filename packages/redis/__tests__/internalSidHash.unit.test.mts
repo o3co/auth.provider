@@ -111,3 +111,19 @@ describe("#291 — createRedisSidHash.removeBySid uses UNLINK", () => {
 		expect(client.unlink).toHaveBeenCalledWith("t:sid-1");
 	});
 });
+
+// Copilot review on PR #352, swept from the `pageSize` hole in the sorted-set
+// helper. `scanCount` cannot loop forever here — it is an `HSCAN COUNT` hint,
+// and Redis rejects a non-positive one — but a command the server refuses on
+// the logout path is no better than a hang. Same construction-time guard.
+describe("#291 — createRedisSidHash validates scanCount at construction", () => {
+	it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("rejects %p", (scanCount) => {
+		expect(() =>
+			createRedisSidHash({ client: createClient([]), keyPrefix: "t:", scanCount }),
+		).toThrow(/scanCount must be a positive integer/);
+	});
+
+	it("accepts an omitted scanCount (defaults to 100)", () => {
+		expect(() => createRedisSidHash({ client: createClient([]), keyPrefix: "t:" })).not.toThrow();
+	});
+});

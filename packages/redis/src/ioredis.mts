@@ -83,6 +83,43 @@ const LUA_COMPARE_AND_DELETE_SHA = createHash("sha1").update(LUA_COMPARE_AND_DEL
 let scriptCached = false;
 
 /**
+ * Surface per-command failures from a `MULTI`/`EXEC` reply.
+ *
+ * ioredis resolves `exec()` with one `[error, result]` tuple per queued
+ * command and **does not reject** when one of them failed — `EXEC` itself
+ * succeeded, after all. Every pipeline in this file used to discard that reply,
+ * so a `PEXPIRE … NX/GT` refused by an older or misconfigured Redis left the
+ * key with no TTL at all while the caller was told the write went through. That
+ * is the same shape as the bug #269 paid for with the rate limiter: an expiry
+ * that silently never got set, on a key nothing revisits.
+ *
+ * `null` is not a failure and is passed through unchanged: it is the
+ * WATCH-abort signal, which `refresh-token-family`'s CAS loop reads as
+ * "conflict, retry". Turning that into a throw would break refresh-token
+ * rotation under contention.
+ *
+ * The first failure wins — the reply is reported through `cause`, so the
+ * driver's own message ("WRONGTYPE …", "OOM …") survives for the operator.
+ */
+function assertPipelineSucceeded(reply: unknown[] | null, operation: string): unknown[] | null {
+	if (reply === null) return null;
+	for (const entry of reply) {
+		// ioredis tuple shape; a wrapper returning bare results simply has no
+		// error slot to find, which is correct rather than silently lenient.
+		const err = Array.isArray(entry) ? entry[0] : null;
+		if (err) {
+			throw new Error(
+				`${operation}: a queued command failed inside MULTI/EXEC — ${String(
+					err instanceof Error ? err.message : err,
+				)}`,
+				{ cause: err },
+			);
+		}
+	}
+	return reply;
+}
+
+/**
  * Wrap a single ioredis connection into the 9 typed client wrappers
  * needed by `@o3co/auth-provider-redis` adapters. Production consumers
  * use this factory in their composition root and spread the result into
@@ -213,7 +250,10 @@ export function makeIoredisClients(
 				p.set(k, v, "PX", ttl);
 				return m;
 			},
-			exec: async () => p.exec(),
+			// `null` survives as the WATCH-abort signal `updateFamily` retries on;
+			// a queued SET that failed must not be reported as a committed
+			// rotation.
+			exec: async () => assertPipelineSucceeded(await p.exec(), "refreshTokenFamilyClient.exec"),
 		};
 		return m;
 	};
@@ -256,7 +296,7 @@ export function makeIoredisClients(
 				p.pexpireat(k, ms, "GT");
 				return m;
 			},
-			exec: async () => p.exec(),
+			exec: async () => assertPipelineSucceeded(await p.exec(), "sessionRPRegistryClient.exec"),
 		};
 		return m;
 	};
@@ -305,7 +345,7 @@ export function makeIoredisClients(
 				else p.zadd(k, e.score, e.value);
 				return m;
 			},
-			exec: async () => p.exec(),
+			exec: async () => assertPipelineSucceeded(await p.exec(), "sessionSidSortedSetClient.exec"),
 		};
 		return m;
 	};
@@ -337,7 +377,7 @@ export function makeIoredisClients(
 			cond === "NX"
 				? io.set(k, v, "PX", ttl, "NX")
 				: io.set(k, v, "PX", ttl)) as FederationTokenStoreClient["set"],
-		del: (...keys) => io.del(...keys),
+		del: (k) => io.del(k),
 		unlink: (...keys) => io.unlink(...keys),
 		// #291: SADD and its expiry in one MULTI/EXEC, so the pair cannot come
 		// apart and strand the index key with no TTL. `PEXPIRE … NX` +
@@ -347,7 +387,16 @@ export function makeIoredisClients(
 		// this package pins 7.2 LTS. MULTI rather than Lua because every command
 		// touches the same single key, which keeps it valid on Cluster too.
 		sAddWithTtl: async (key, member, ttlMs) => {
-			await io.multi().sadd(key, member).pexpire(key, ttlMs, "NX").pexpire(key, ttlMs, "GT").exec();
+			// EXEC succeeding does not mean the queued commands did — inspect the
+			// reply, or a refused PEXPIRE silently voids the atomic-TTL guarantee
+			// this method's contract makes.
+			const reply = await io
+				.multi()
+				.sadd(key, member)
+				.pexpire(key, ttlMs, "NX")
+				.pexpire(key, ttlMs, "GT")
+				.exec();
+			assertPipelineSucceeded(reply, "federationTokenStoreClient.sAddWithTtl");
 		},
 		sRem: (key, member) => io.srem(key, member) as Promise<number>,
 		sScanIterator: (key, opts) =>

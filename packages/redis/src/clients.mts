@@ -79,6 +79,20 @@ export interface ReplaySeenSetClient {
  */
 export interface RefreshTokenFamilyMultiClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): RefreshTokenFamilyMultiClient;
+	/**
+	 * Execute the queued commands.
+	 *
+	 * **MUST reject when any queued command failed.** A driver that reports
+	 * per-command errors inside the reply — ioredis resolves with one
+	 * `[error, result]` tuple per command and does not reject, because `EXEC`
+	 * itself succeeded — has to be adapted here, or a refused write is handed
+	 * to the caller as a success. The pipelines in this package pair a mutation
+	 * with the expiry that bounds it, so a swallowed failure is a key stranded
+	 * with no TTL: the shape #269 already paid for once.
+	 *
+	 * Resolving with `null` is **not** a failure: it is the WATCH-abort signal,
+	 * which the refresh-token-family CAS loop reads as "conflict, retry".
+	 */
 	exec(): Promise<unknown[] | null>;
 }
 
@@ -156,6 +170,20 @@ export interface SessionRPRegistryMultiClient {
 	 * Requires Redis 7.0+. v0.5.1 pins the floor to Redis 7.2 LTS.
 	 */
 	pExpireGT(key: string, msTimestamp: number): SessionRPRegistryMultiClient;
+	/**
+	 * Execute the queued commands.
+	 *
+	 * **MUST reject when any queued command failed.** A driver that reports
+	 * per-command errors inside the reply — ioredis resolves with one
+	 * `[error, result]` tuple per command and does not reject, because `EXEC`
+	 * itself succeeded — has to be adapted here, or a refused write is handed
+	 * to the caller as a success. The pipelines in this package pair a mutation
+	 * with the expiry that bounds it, so a swallowed failure is a key stranded
+	 * with no TTL: the shape #269 already paid for once.
+	 *
+	 * Resolving with `null` is **not** a failure: it is the WATCH-abort signal,
+	 * which the refresh-token-family CAS loop reads as "conflict, retry".
+	 */
 	exec(): Promise<unknown[] | null>;
 }
 
@@ -222,6 +250,20 @@ export interface SessionSidSortedSetMultiClient {
 		entry: { score: number; value: string },
 		opts?: { NX: true },
 	): SessionSidSortedSetMultiClient;
+	/**
+	 * Execute the queued commands.
+	 *
+	 * **MUST reject when any queued command failed.** A driver that reports
+	 * per-command errors inside the reply — ioredis resolves with one
+	 * `[error, result]` tuple per command and does not reject, because `EXEC`
+	 * itself succeeded — has to be adapted here, or a refused write is handed
+	 * to the caller as a success. The pipelines in this package pair a mutation
+	 * with the expiry that bounds it, so a swallowed failure is a key stranded
+	 * with no TTL: the shape #269 already paid for once.
+	 *
+	 * Resolving with `null` is **not** a failure: it is the WATCH-abort signal,
+	 * which the refresh-token-family CAS loop reads as "conflict, retry".
+	 */
 	exec(): Promise<unknown[] | null>;
 }
 
@@ -272,7 +314,18 @@ export interface FederationTokenStoreClient {
 	get(key: string): Promise<string | null>;
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
-	del(...keys: string[]): Promise<number>;
+	/**
+	 * Remove one key (Redis `DEL`).
+	 *
+	 * Single-key by signature, not just by convention: the two callers left —
+	 * `delete(sid, name)` and the corrupt-envelope self-heal in `get` — each
+	 * remove exactly one small string, where `DEL`'s inline free costs nothing.
+	 * Everything that removes more than one key at a time goes through `unlink`
+	 * below. A variadic `del` would leave the choice open at each call site,
+	 * which is how the batched removal came to block the shared connection in
+	 * the first place (#291).
+	 */
+	del(key: string): Promise<number>;
 	/**
 	 * Remove `keys`, reclaiming their memory on a background thread (Redis
 	 * `UNLINK`).

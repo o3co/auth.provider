@@ -141,6 +141,17 @@ describe("createRedisSidSet", () => {
 		expect(await collect(s.members("sid-paged"))).toEqual([...expected].sort());
 	});
 
+	// Copilot review on PR #352. The unit tests assert this against a fake, so
+	// they only prove we handle the reply shape we assumed. This proves the
+	// assumption: a real Redis answers EXEC successfully while reporting
+	// WRONGTYPE for the queued SADD, and ioredis resolves rather than rejects.
+	// Without the reply check the caller would be told the index write landed.
+	it("add surfaces a queued command's failure instead of reporting success", async () => {
+		const s = createRedisSidSet({ client, keyPrefix: prefix("wrongtype") });
+		await raw.set(`${prefix("wrongtype")}sid-1`, "not-a-set");
+		await expect(s.add("sid-1", "google", HOUR_MS)).rejects.toThrow(/WRONGTYPE/);
+	});
+
 	it("100 parallel adds of the same member converge to one entry", async () => {
 		const s = createRedisSidSet({ client, keyPrefix: prefix("conc-same") });
 		await Promise.all(Array.from({ length: 100 }, () => s.add("sid-c", "google", HOUR_MS)));

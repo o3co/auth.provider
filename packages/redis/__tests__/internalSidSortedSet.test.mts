@@ -17,8 +17,9 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { SessionSidSortedSetClient, SessionSidSortedSetMultiClient } from "../src/clients.mjs";
+import type { SessionSidSortedSetClient } from "../src/clients.mjs";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
+import { makeIoredisClients } from "../src/ioredis.mjs";
 
 let container: StartedTestContainer;
 let raw: Redis;
@@ -30,7 +31,8 @@ beforeAll(async () => {
 		.withStartupTimeout(60_000)
 		.start();
 	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-	client = makeWrapper(raw);
+	// The shipped wrapper — see the note in `internalSidHash.test.mts`.
+	client = makeIoredisClients(raw).sessionFamilyIndexClient;
 }, 90_000);
 
 afterAll(async () => {
@@ -268,44 +270,3 @@ describe("createRedisSidSortedSet", () => {
 		});
 	});
 });
-
-function makeWrapper(io: Redis): SessionSidSortedSetClient {
-	const buildMulti = (): SessionSidSortedSetMultiClient => {
-		const p = io.multi();
-		const m: SessionSidSortedSetMultiClient = {
-			pExpireAt: (k, ms) => {
-				p.pexpireat(k, ms);
-				return m;
-			},
-			pExpireGT: (k, ms) => {
-				p.pexpireat(k, ms, "NX");
-				p.pexpireat(k, ms, "GT");
-				return m;
-			},
-			zAdd: (k, e, opts) => {
-				if (opts?.NX) p.zadd(k, "NX", e.score, e.value);
-				else p.zadd(k, e.score, e.value);
-				return m;
-			},
-			exec: async () => p.exec(),
-		};
-		return m;
-	};
-
-	return {
-		unlink: (k) => io.unlink(k),
-		multi: () => buildMulti(),
-		pExpireAt: (k, ms) => io.pexpireat(k, ms),
-		pExpireGT: async (k, ms) => {
-			const nx = await io.pexpireat(k, ms, "NX");
-			if (nx === 1) return nx;
-			return io.pexpireat(k, ms, "GT");
-		},
-		zAdd: (k, e, opts) =>
-			opts?.NX
-				? (io.zadd(k, "NX", e.score, e.value) as Promise<unknown> as Promise<number>)
-				: (io.zadd(k, e.score, e.value) as Promise<unknown> as Promise<number>),
-		zRange: (k, s, e) => io.zrange(k, s, e),
-		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
-	};
-}

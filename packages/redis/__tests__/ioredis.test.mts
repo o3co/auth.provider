@@ -228,3 +228,101 @@ describe("makeIoredisClients refreshTokenFamilyClient.duplicate", () => {
 		expect(dup.disconnect).toHaveBeenCalledTimes(1);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Copilot review on PR #352 — MULTI/EXEC per-command errors must not be
+// swallowed.
+//
+// ioredis resolves `exec()` with a `[error, result]` tuple per queued command
+// and does NOT reject when one of them failed. Every pipeline in this file used
+// to discard that reply, so a `PEXPIRE … NX/GT` rejected by an older or
+// misconfigured Redis left the key with no TTL while the caller was told the
+// write succeeded — the exact failure mode the atomic-TTL contract exists to
+// rule out, and the one #269 already paid for once with the rate limiter.
+//
+// `null` is different and must stay: it is the WATCH-abort signal
+// `refresh-token-family`'s CAS loop reads as "conflict, retry".
+// ---------------------------------------------------------------------------
+
+/** A chainable ioredis pipeline stub whose `exec()` resolves to `reply`. */
+function makeFakePipeline(reply: unknown) {
+	const pipeline: Record<string, unknown> = {
+		exec: vi.fn(async () => reply),
+	};
+	for (const cmd of ["sadd", "pexpire", "hset", "pexpireat", "zadd", "set"]) {
+		pipeline[cmd] = vi.fn(() => pipeline);
+	}
+	return pipeline;
+}
+
+const WRONGTYPE = new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
+
+describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
+	it("sAddWithTtl rejects when a queued command failed", async () => {
+		const io = makeFakeIoredis({
+			multi: vi.fn(() => makeFakePipeline([[WRONGTYPE, null]])) as never,
+		});
+		await expect(
+			makeIoredisClients(io).federationTokenStoreClient.sAddWithTtl("k", "m", 1000),
+		).rejects.toThrow(/WRONGTYPE/);
+	});
+
+	it("sAddWithTtl resolves when every queued command succeeded", async () => {
+		const io = makeFakeIoredis({
+			multi: vi.fn(() =>
+				makeFakePipeline([
+					[null, 1],
+					[null, 1],
+					[null, 0],
+				]),
+			) as never,
+		});
+		await expect(
+			makeIoredisClients(io).federationTokenStoreClient.sAddWithTtl("k", "m", 1000),
+		).resolves.toBeUndefined();
+	});
+
+	it("sessionRPRegistryClient.multi().exec() rejects on a failed queued command", async () => {
+		const io = makeFakeIoredis({
+			multi: vi.fn(() =>
+				makeFakePipeline([
+					[null, 1],
+					[WRONGTYPE, null],
+				]),
+			) as never,
+		});
+		const p = makeIoredisClients(io).sessionRPRegistryClient.multi();
+		p.hSet("k", "f", "v").pExpireGT("k", Date.now() + 1000);
+		await expect(p.exec()).rejects.toThrow(/WRONGTYPE/);
+	});
+
+	it("sessionFamilyIndexClient.multi().exec() rejects on a failed queued command", async () => {
+		const io = makeFakeIoredis({
+			multi: vi.fn(() => makeFakePipeline([[WRONGTYPE, null]])) as never,
+		});
+		const p = makeIoredisClients(io).sessionFamilyIndexClient.multi();
+		p.zAdd("k", { score: 1, value: "m" }, { NX: true });
+		await expect(p.exec()).rejects.toThrow(/WRONGTYPE/);
+	});
+
+	it("refreshTokenFamilyClient.multi().exec() rejects on a failed queued command", async () => {
+		// The CAS loop reports `committed` on a non-null reply. A silently
+		// failed SET would be reported as a successful rotation.
+		const io = makeFakeIoredis({
+			multi: vi.fn(() => makeFakePipeline([[new Error("OOM command not allowed"), null]])) as never,
+		});
+		const p = makeIoredisClients(io).refreshTokenFamilyClient.multi();
+		p.set("k", "v", "PX", 1000);
+		await expect(p.exec()).rejects.toThrow(/OOM/);
+	});
+
+	it("refreshTokenFamilyClient.multi().exec() still returns null for a WATCH abort", async () => {
+		// Load-bearing: `updateFamily` reads null as "CAS conflict, retry".
+		// Turning it into a throw would break refresh-token rotation under
+		// contention.
+		const io = makeFakeIoredis({ multi: vi.fn(() => makeFakePipeline(null)) as never });
+		const p = makeIoredisClients(io).refreshTokenFamilyClient.multi();
+		p.set("k", "v", "PX", 1000);
+		await expect(p.exec()).resolves.toBeNull();
+	});
+});
