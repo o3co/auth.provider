@@ -58,15 +58,31 @@ function hexByteLength(value: string): number | undefined {
  * alphabet — so `Buffer.from("not a secret!!", "base64").length` answers for a
  * string that is not base64 at all, and answers *small*, which would reject
  * perfectly good passphrases.
+ *
+ * Padding is held to the same standard as the alphabet. An encoder emits zero,
+ * one or two `=`, and only where the body length calls for it: one after a
+ * 3-character final group, two after a 2-character one. `"abcd===="` and
+ * `"abcd="` are therefore not base64 at all, and this returns undefined for
+ * them so `measureSecretEntropyBytes` falls back to the raw-bytes reading.
+ * Trimming any run of `=` would instead turn a passphrase that merely ends in
+ * equals signs into a "valid" base64 body and score it three-quarters of its
+ * real length — fail-closed, but a usability trap with no security to show
+ * for it.
  */
 function base64ByteLength(value: string): number | undefined {
-	const body = value.replace(/=+$/, "");
+	// Count the trailing '=' run without assuming it is well-formed.
+	const padding = value.length - value.replace(/=+$/, "").length;
+	if (padding > 2) return undefined;
+	const body = value.slice(0, value.length - padding);
 	if (body.length === 0) return undefined;
 	// Standard (`+/`) and URL-safe (`-_`) alphabets; a value mixing the two is
 	// not a valid encoding in either.
 	if (!/^[A-Za-z0-9+/]+$/.test(body) && !/^[A-Za-z0-9_-]+$/.test(body)) return undefined;
+	const remainder = body.length % 4;
 	// No base64 encoding produces a body of length ≡ 1 (mod 4).
-	if (body.length % 4 === 1) return undefined;
+	if (remainder === 1) return undefined;
+	// When padding is present it must bring the total to a multiple of 4.
+	if (padding > 0 && remainder !== 4 - padding) return undefined;
 	return Math.floor((body.length * 3) / 4);
 }
 
