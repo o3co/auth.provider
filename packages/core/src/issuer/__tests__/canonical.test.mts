@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { checkCanonicalIssuer, isCanonicalIssuer } from "#/issuer/canonical.mjs";
+import {
+	checkCanonicalIssuer,
+	describeIssuerRejection,
+	type IssuerRejection,
+	isCanonicalIssuer,
+} from "#/issuer/canonical.mjs";
 
 describe("checkCanonicalIssuer", () => {
 	it.each([
@@ -46,5 +51,34 @@ describe("checkCanonicalIssuer", () => {
 	])("rejects %j as %s", (value, reason) => {
 		expect(checkCanonicalIssuer(value)).toBe(reason);
 		expect(isCanonicalIssuer(value)).toBe(false);
+	});
+});
+
+describe("describeIssuerRejection", () => {
+	// Every rejection reaches an operator as a boot-failure message, so each one
+	// has to say something specific about what is wrong with the value.
+	const reasons: IssuerRejection[] = [
+		"not-a-string",
+		"empty",
+		"not-absolute-url",
+		"unsupported-scheme",
+		"insecure-scheme",
+		"has-query",
+		"has-fragment",
+		"has-credentials",
+	];
+
+	it.each(reasons)("explains %s", (reason) => {
+		const message = describeIssuerRejection(reason);
+		expect(message).toMatch(/^must /);
+	});
+
+	it("gives every reason a distinct explanation", () => {
+		const messages = reasons.map(describeIssuerRejection);
+		expect(new Set(messages).size).toBe(reasons.length);
+	});
+
+	it("names the loopback exception when https is missing", () => {
+		expect(describeIssuerRejection("insecure-scheme")).toContain("localhost");
 	});
 });
