@@ -59,19 +59,26 @@ export interface Client {
 	/**
 	 * Grant types this client is explicitly permitted to use.
 	 *
-	 * Consumed only by grant handlers that opt in to this gate. As of
-	 * Wave 1, only `client_credentials` consults the field:
+	 * Enforced **centrally** by `isGrantTypeAllowed` — once at `/oauth/token`
+	 * grant dispatch, before the concrete handler runs, and at `/authorize`
+	 * against `authorization_code` — so every current and future grant
+	 * inherits the check rather than opting in (#268). The central rule:
 	 *
-	 * - `undefined` (absent) → the grant is denied. Existing clients that
-	 *   omit this field cannot redeem `client_credentials`, preventing
-	 *   accidental machine-to-machine access on legacy registrations.
-	 * - `[]` (empty) → the grant is also denied (no grant_type can match
-	 *   an empty allowlist).
-	 * - non-empty array → the grant is allowed iff its `grant_type` string
-	 *   appears in the list.
+	 * - `undefined` (absent) → **no restriction**. Absence means the
+	 *   registration declared no policy, not that it declared an empty one;
+	 *   denying here would revoke every grant from every registration written
+	 *   before this field existed.
+	 * - `[]` (empty) → every grant is denied. An empty allowlist names no
+	 *   grant type, so none can match it.
+	 * - non-empty array → a grant is allowed iff its `grant_type` string
+	 *   appears in the list, compared exactly.
 	 *
-	 * Other grants (`authorization_code`, `refresh_token`) ignore this
-	 * field; they continue to work for clients with or without it.
+	 * Two grants layer a **stricter** rule on top and deny by absence, so
+	 * that machine-to-machine access is never acquired by omission:
+	 * `client_credentials` (`grants/clientCredentials.mts`) and the WebAuthn
+	 * grant (`@o3co/auth-provider-webauthn`). The rules compose to the
+	 * stricter of the pair — either can reject, and only the absent case
+	 * distinguishes them.
 	 */
 	readonly allowedGrantTypes?: readonly string[];
 	// NEW (TODO-F-5): Logout metadata.

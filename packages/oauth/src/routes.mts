@@ -30,6 +30,7 @@ import {
 	formatObject,
 	type GrantHandlerResolver,
 	type GrantPolicyHook,
+	isGrantTypeAllowed,
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
@@ -302,6 +303,40 @@ export const createOAuthRouter = async (
 							}
 						: null,
 				};
+				// Shared grant-dispatch allowedGrantTypes enforcement (#268).
+				// Mounted at dispatch for the same reason as the sender-constraint
+				// check below: it runs once for every grant_type before the
+				// concrete handler, so every grant — including one registered
+				// later through `GrantFactory` — inherits it without opting in.
+				// Enforcement used to be per-handler, and only `client_credentials`
+				// and the WebAuthn grant had opted in, which meant a client
+				// registered for one grant could exercise all the others and the
+				// registration's restriction was void.
+				//
+				// Absence of the field is "no policy declared", not "deny": the
+				// grants that ignored it predate it, so denying here would revoke
+				// every grant from every registration written before it existed.
+				// `client_credentials` and WebAuthn keep their stricter
+				// deny-by-absence rule on top, so machine-to-machine access is
+				// still never acquired by omission.
+				//
+				// RFC 6749 §5.2 `unauthorized_client`: "The authenticated client is
+				// not authorized to use this authorization grant type."
+				if (!isGrantTypeAllowed(ctx.authenticatedClient?.allowedGrantTypes, grant_type)) {
+					await emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "token.issued.failure",
+						clientId: req.oauthClient?.clientId,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { reason: "grant_type_not_allowed", grant_type },
+					});
+					return res.status(400).json({
+						error: "unauthorized_client",
+						error_description: `client is not authorized for grant_type "${grant_type}"`,
+					});
+				}
+
 				// Shared grant-dispatch senderConstrained enforcement (Wave 2
 				// Token-binding Cluster spec §4.8 step 2). This runs once for
 				// every grant_type before the concrete handler, so custom
@@ -685,6 +720,28 @@ export const createOAuthRouter = async (
 						redirect_uri,
 						"unsupported_response_type",
 						`response_type "${responseType}" is not supported`,
+						toStr(state),
+					);
+				}
+
+				// #268: the code flow leads to `grant_type=authorization_code` at
+				// the token endpoint, so a client not registered for it must be
+				// turned away here rather than after the user has authenticated
+				// and a code has been minted. `redirect_uri` is validated above,
+				// so RFC 6749 §4.1.2.1 puts this error in the redirect.
+				if (!isGrantTypeAllowed(client.allowedGrantTypes, "authorization_code")) {
+					await emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "token.issued.failure",
+						clientId: client_id,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { reason: "grant_type_not_allowed", grant_type: "authorization_code" },
+					});
+					return redirectError(
+						redirect_uri,
+						"unauthorized_client",
+						"client is not authorized for the authorization_code grant",
 						toStr(state),
 					);
 				}
