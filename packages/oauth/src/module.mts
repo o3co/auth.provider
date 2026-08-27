@@ -21,6 +21,7 @@ import {
 	type FederationProviderHandle,
 	type Module,
 	type ProviderDeps,
+	readAccessTokenRevocationMode,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -198,6 +199,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			// concern owned by the core jwksModule, so a provider can publish
 			// verification keys without the full OAuth grant suite and the advertised
 			// URI never drifts from the registered JWKS route. See core/src/jwks/.
+			//
+			// The same ownership rule places the token-binding metadata elsewhere:
+			// `dpop_signing_alg_values_supported` (RFC 9449 §5.1) comes from
+			// `@o3co/auth-provider-dpop` and `tls_client_certificate_bound_access_tokens`
+			// (RFC 8705 §3.3) from `@o3co/auth-provider-mtls`, each read off the same
+			// config the mechanism itself is constructed from (#283).
 			discoveryMetadata: [
 				(
 					deps: ProviderDeps<
@@ -227,6 +234,65 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						!!deps.sessionFederationIndex &&
 						!!deps.federationTokenStore &&
 						!!deps.refreshTokenFamilyRevocation;
+					// #283: `POST /oauth/revoke` is mounted unconditionally by
+					// `createOAuthRouter`, but "mounted" and "can revoke something" are
+					// different claims — the whole point of #277. The gate is therefore
+					// "can this endpoint revoke ANYTHING", and it takes both arms of that
+					// question at their real resolution rules.
+					//
+					// The REFRESH arm is pure wiring: `tryRevokeRefreshToken` returns
+					// immediately without a `refreshTokenFamilyRevocation`, and the #277
+					// mode never touches this path.
+					const revokesRefreshTokens = !!deps.refreshTokenFamilyRevocation;
+					// The ACCESS arm is wiring AND the declaration. A denylist sitting in
+					// the component map is not the capability: `createRevokeRouter`
+					// resolves `opts.accessTokenRevocation ?? (denylist ? …)`, so an
+					// explicit `"unsupported"` turns the access path off however the
+					// composition is wired, and the endpoint answers
+					// `unsupported_token_type` instead. Reading the same
+					// `readAccessTokenRevocationMode` helper the router reads — rather
+					// than re-deriving the rule — is what keeps the two from drifting.
+					// An UNDECLARED key reports `undefined`, which both consuming layers
+					// (core's boot validator, the router) read as `"denylist"`, so only a
+					// literal `"unsupported"` disables this arm.
+					const revokesAccessTokens =
+						!!deps.accessTokenDenylist &&
+						readAccessTokenRevocationMode(deps.config) !== "unsupported";
+					// Either arm is enough. RFC 7009 §2.2.1 defines
+					// `unsupported_token_type` precisely so an AS may revoke one token
+					// type and not the other, so "refresh tokens only" is a revocation
+					// endpoint, not a broken one — and the client most in need of finding
+					// it (revoking an RT at logout) is served by the arm that still works.
+					// Withholding the URL would leave that client unable to revoke
+					// anything at all, which is strictly worse than letting it learn the
+					// access-token half from the endpoint's own spec-defined error.
+					//
+					// With NEITHER arm the endpoint still answers RFC 7009's mandatory
+					// 200 and nothing happens; advertising that is the #277 failure
+					// restated as metadata, so it stays unadvertised.
+					//
+					// WHICH token types it revokes is still not advertised: RFC 7009 /
+					// RFC 8414 define no per-token-type metadata field, and inventing one
+					// would put a non-standard claim in a standard document. The
+					// access-token answer lives at the endpoint.
+					const revocationSupported = revokesRefreshTokens || revokesAccessTokens;
+					// #283: RFC 8414 §2 says an OMITTED `grant_types_supported` means
+					// `["authorization_code", "implicit"]` — so saying nothing advertised
+					// an implicit flow this AS has never implemented, while hiding the
+					// grants it does implement (client_credentials, token-exchange,
+					// webauthn, …). Read straight off the resolver `/oauth/token`
+					// dispatches against, which is also what `allowedGrantTypes` is
+					// checked against at dispatch (#312 / #326): a hand-maintained list
+					// would drift the moment a grant module is added, removed, or gated
+					// off by `oauth.grants.<name>.enabled`.
+					//
+					// Empty is a legitimate answer (a composition with no grant module
+					// registered), and emitting `[]` is still strictly better than
+					// omitting the field: it says "no grant types", where omission would
+					// assert two.
+					const grantTypesSupported = [...deps.grantHandlerResolver.entries()].map(
+						([grantType]) => grantType,
+					);
 					return {
 						// oauth owns the authorization-server surface, so it is the
 						// provider root: this is the explicit signal that core should
@@ -239,6 +305,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							token_endpoint: "/oauth/token",
 							userinfo_endpoint: "/oauth/userinfo",
 							introspection_endpoint: "/oauth/introspect",
+							...(revocationSupported ? { revocation_endpoint: "/oauth/revoke" } : {}),
 							...(logoutSupported ? { end_session_endpoint: "/oauth/logout" } : {}),
 						},
 						metadata: {
@@ -246,16 +313,51 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							subject_types_supported: ["public"],
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
 							scopes_supported: ["openid", "profile", "email", "groups"],
+							grant_types_supported: grantTypesSupported,
 							token_endpoint_auth_methods_supported: [
 								"client_secret_basic",
 								"client_secret_post",
 								"none",
 							],
-							// #273: S256 only, and now actually true — PKCE is
-							// mandatory and no server-wide setting admits `plain`.
-							// A client carrying `allowPlainPkce` is a named
-							// exception, not a server capability, so it is
-							// deliberately not advertised here.
+							// RFC 8414 §2: an omitted `*_endpoint_auth_methods_supported`
+							// means `["client_secret_basic"]`, which understates both
+							// endpoints. They differ from each other on purpose —
+							// `/oauth/introspect` builds its client-auth middleware WITHOUT
+							// `allowPublicClients` (RFC 7662 §2.1: a client_id is not a
+							// secret, so a public client must not be able to query token
+							// metadata), while `/oauth/revoke` sets it (RFC 7009 §2.1: a
+							// public client may revoke its own tokens).
+							introspection_endpoint_auth_methods_supported: [
+								"client_secret_basic",
+								"client_secret_post",
+							],
+							...(revocationSupported
+								? {
+										revocation_endpoint_auth_methods_supported: [
+											"client_secret_basic",
+											"client_secret_post",
+											"none",
+										],
+									}
+								: {}),
+							// #273 + #283: S256 only, and since #273 that is simply true —
+							// PKCE is mandatory for every authorization-code client and
+							// `ResolvedPkceOptions.supportedMethods` is `["S256"]` with no
+							// operator knob that can widen it.
+							//
+							// `plain` is reachable only through a client registration
+							// carrying `allowPlainPkce: true` (`pkceMethodsForClient`), and
+							// that is exactly why it stays out of this array.
+							// `code_challenge_methods_supported` is SERVER-WIDE metadata
+							// (RFC 8414 §2 / RFC 7636 §4.4): every client that reads it
+							// concludes "I may use any of these". A per-client exception
+							// does not belong in a server-wide array in EITHER direction —
+							// listing `plain` tells the clients that cannot use it that they
+							// can, and the one client the operator named in its registration
+							// does not need discovery to find out.
+							//
+							// So the advertised set is what EVERY authorization-code client
+							// may use and the AS always accepts, which is exactly `S256`.
 							code_challenge_methods_supported: ["S256"],
 							...(logoutSupported
 								? {

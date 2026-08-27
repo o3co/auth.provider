@@ -156,6 +156,33 @@ export const mtlsModule = defineModule<"config", "logger">({
 	requires: ["config"],
 	optional: ["logger"],
 	contributes: {
+		// RFC 8705 §3.3 authorization-server metadata (#283). When enabled, this
+		// module binds the issued access token to the client certificate
+		// (`cnf["x5t#S256"]`), and a client has no other way to discover that the
+		// AS will do so.
+		//
+		// Not gated on `source`: #280 made the certificate come from the TLS layer
+		// by default and put a trusted-proxy allowlist behind the forwarded-header
+		// path, but both paths produce the same confirmation claim on the same
+		// token. The RFC 8705 §3.3 flag describes the TOKEN, not the transport the
+		// certificate arrived over.
+		//
+		// Absent (rather than `false`) when disabled — RFC 8705 §3.3 already
+		// defines omission as `false`, and an omitted field cannot collide with
+		// another contributor's value in core's aggregator.
+		//
+		// This is deliberately the ONLY field contributed: this package implements
+		// RFC 8705 §3 token binding, NOT §2 mTLS client authentication, so
+		// `tls_client_auth` / `self_signed_tls_client_auth` must never appear in
+		// `token_endpoint_auth_methods_supported` — the token endpoint does not
+		// accept a certificate as a client credential.
+		discoveryMetadata: [
+			(deps) => {
+				const mtls = (deps.config as { oauth?: { mtls?: { enabled?: unknown } } }).oauth?.mtls;
+				if (mtls?.enabled !== true) return {};
+				return { metadata: { tls_client_certificate_bound_access_tokens: true } };
+			},
+		],
 		tokenBindingMechanisms: [
 			(deps) => {
 				const mtlsConfig = (deps.config as { oauth?: { mtls?: { enabled?: unknown } } }).oauth

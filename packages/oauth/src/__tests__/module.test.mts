@@ -41,6 +41,7 @@ import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
+import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs
@@ -369,11 +370,20 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		await handle.dispose();
 	});
 
-	it("aggregated discovery document matches the pre-refactor golden field set (no-logout composition)", async () => {
-		// Equivalence guard for the oauth-owned → aggregator migration: with oauth
-		// + jwks + issuer (and no session stores → logout omitted), the assembled
-		// `/.well-known/openid-configuration` must carry exactly the fields the
-		// legacy oauth-owned `OpenidConfiguration.createRouter` produced.
+	it("aggregated discovery document matches the golden field set (no-logout composition)", async () => {
+		// Whole-document guard: with oauth + jwks + issuer (and no session stores →
+		// logout omitted), the assembled `/.well-known/openid-configuration`
+		// carries EXACTLY these fields. `toEqual` is the point — a field added by
+		// a future contribution has to be argued for here rather than appearing in
+		// the served document unnoticed.
+		//
+		// #283 changed this set: `grant_types_supported`, `revocation_endpoint` +
+		// its auth methods, and `introspection_endpoint_auth_methods_supported`
+		// are new. `grant_types_supported` is `[]` because this composition
+		// registers no grant module at all — POST /oauth/token would answer
+		// `unsupported_grant_type` for every value, and that is what the empty
+		// array says. Omitting the field would instead have claimed
+		// `authorization_code` + `implicit` (RFC 8414 §2's default).
 		const config = issuerConfig();
 		const handle = await createTestApp({
 			modules: [
@@ -399,14 +409,103 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 			userinfo_endpoint: `${iss}/oauth/userinfo`,
 			jwks_uri: `${iss}/.well-known/jwks.json`,
 			introspection_endpoint: `${iss}/oauth/introspect`,
+			// #283: /oauth/revoke is always mounted, and this composition wires the
+			// memory denylist, so it can actually revoke something.
+			revocation_endpoint: `${iss}/oauth/revoke`,
 			response_types_supported: ["code"],
 			subject_types_supported: ["public"],
 			// keyStoreModule signs HS256, so the aggregator advertises exactly that.
 			id_token_signing_alg_values_supported: ["HS256"],
 			scopes_supported: ["openid", "profile", "email", "groups"],
+			grant_types_supported: [],
 			token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
+			introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+			revocation_endpoint_auth_methods_supported: [
+				"client_secret_basic",
+				"client_secret_post",
+				"none",
+			],
 			code_challenge_methods_supported: ["S256"],
 		});
+		await handle.dispose();
+	});
+
+	it('omits revocation_endpoint end-to-end under oauth.revocation.accessToken = "unsupported" with no other revocation capability', async () => {
+		// The composition #277 made legal: declaring the access-token capability
+		// absent is what lets a deployment boot with no `accessTokenDenylist`
+		// (core's step 13.9 returns early on `"unsupported"`). With no
+		// `refreshTokenFamilyRevocation` either, `POST /oauth/revoke` is mounted
+		// and revokes nothing, so the served document must not name it.
+		//
+		// End-to-end rather than unit-only because the value of this case is that
+		// the same config both survives the boot validator AND produces a document
+		// without the endpoint — two layers reading the one #277 key the same way.
+		const base = issuerConfig();
+		const config = {
+			...base,
+			oauth: { ...base.oauth, revocation: { accessToken: "unsupported" } },
+		} as ReturnType<typeof makeValidAppConfig>;
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				// Deliberately no memoryAccessTokenDenylistModule — that is the point.
+				jwksModule,
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const { status, body } = await request(app).get("/.well-known/openid-configuration");
+		expect(status).toBe(200);
+		expect(body).not.toHaveProperty("revocation_endpoint");
+		expect(body).not.toHaveProperty("revocation_endpoint_auth_methods_supported");
+		// The rest of the document is unaffected — this gate is narrow.
+		expect(body.introspection_endpoint).toBe("https://auth.example.com/oauth/introspect");
+		await handle.dispose();
+	});
+
+	it("advertises exactly the grant types the config actually enabled (#283)", async () => {
+		// End-to-end guard on the anti-drift property: `grant_types_supported` is
+		// read off the same `grantHandlerResolver` `/oauth/token` dispatches
+		// against, so a grant gated off by `oauth.grants.<name>.enabled` cannot be
+		// advertised, and one gated on cannot be missed.
+		const base = issuerConfig();
+		const config = {
+			...base,
+			oauth: {
+				...base.oauth,
+				grants: {
+					...base.oauth.grants,
+					authorization_code: { enabled: true },
+					refresh_token: { enabled: true },
+					// Left off on purpose — it must not appear below.
+					client_credentials: { enabled: false },
+				},
+			},
+		} as ReturnType<typeof makeValidAppConfig>;
+		const handle = await createTestApp({
+			modules: [
+				oauthModule({ config }),
+				oauthAuthorizationModule({ config }),
+				memoryAccessTokenDenylistModule,
+				jwksModule,
+				clientRepositoryModule,
+				codeRepositoryModule,
+				keyStoreModule,
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const { body } = await request(app).get("/.well-known/openid-configuration");
+		expect(body.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
+		expect(body.grant_types_supported).not.toContain("client_credentials");
+		// RFC 8414 §2's omitted-default was `["authorization_code", "implicit"]`.
+		// The field exists precisely so `implicit` stops being implied.
+		expect(body.grant_types_supported).not.toContain("implicit");
 		await handle.dispose();
 	});
 
