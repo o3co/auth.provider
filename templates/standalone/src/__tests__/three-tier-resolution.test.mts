@@ -119,6 +119,46 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
 	});
 
+	// #287 — the audit trail as the shipped artifact resolves it. The section is
+	// declared in core's schema for a load-bearing reason: `AppConfigSchema` is
+	// a plain `z.object` and strips what it does not declare, so an undeclared
+	// `audit` block would vanish between `parseFile` and `buildModules` and the
+	// sink selector would read `undefined` while the config sat in the file
+	// looking effective. These assertions run the real three-tier merge, so they
+	// fail if either layer stops carrying the key.
+	describe("#287: the audit sink as the shipped artifact resolves it", () => {
+		it("resolves audit.sink.type to the template's logger sink with nothing set", () => {
+			const config = buildResolvedConfig("production");
+			expect(config.audit?.sink.type).toBe("logger");
+		});
+
+		it("wires exactly one auditSink provider for that resolved config", () => {
+			const modules = buildModules(buildResolvedConfig("production"));
+			const providers = modules.filter((m) => Object.keys(m.provides ?? {}).includes("auditSink"));
+			expect(providers).toHaveLength(1);
+		});
+
+		it("lets an operator select core's built-in console sink by env var", () => {
+			// The env-override line has to be repeated at the template layer or
+			// the literal `"logger"` shadows reference.conf's substitution — the
+			// same precedence rule the grant tests above pin.
+			const config = buildResolvedConfig("production", { AUDIT_SINK_TYPE: "console" });
+			expect(config.audit?.sink.type).toBe("console");
+		});
+
+		it("reference.conf's own default is a sink, not a drop", () => {
+			// A consumer that resolves against reference.conf alone still lands on
+			// a sink. #304's sink policy is stdout JSON, never "none", and the
+			// library layer has to hold that on its own — a composition root that
+			// forgets to override it must not thereby lose its audit trail.
+			const referenceOnly = validate(
+				parseFile(resolveLibraryReferenceConfPath(), { env: testEnv }),
+				AppConfigSchema,
+			);
+			expect(referenceOnly.audit?.sink.type).toBe("console");
+		});
+	});
+
 	// #277 — this is the shape the umbrella E2E (o3co/auth) boots: the shipped
 	// application.conf, `DEPLOYMENT_MODE=multi`, and one shared ioredis socket.
 	// The assertions below are what keep that stack booting: a memory denylist
