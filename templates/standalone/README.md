@@ -104,7 +104,8 @@ fail fast rather than silently falling back to defaults.
 | `HTTP_PORT` | `3000` | Port the server listens on |
 | `HTTP_TRUST_PROXY` | `false` | Express `trust proxy`: `false`, an address/CIDR list (`10.0.0.0/8,loopback`), a hop count (`1`), or `true`. **Required behind a load balancer** — otherwise every IP-keyed rate limit shares one bucket across all users. Prefer naming the proxy over `true`. See [Multi-replica deployments](#multi-replica-deployments) |
 | `HTTP_READINESS_TIMEOUT_MS` | `1000` | Per-probe deadline for `/readyz` (see [Health endpoints](#health-endpoints)) |
-| `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent` |
+| `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent`. Does **not** gate the audit trail — see [Audit trail](#audit-trail) |
+| `AUDIT_SINK_TYPE` | `logger` | Where security events go: `logger` (pino-enveloped NDJSON on stdout) or `console` (bare event JSON). There is no `none`. See [Audit trail](#audit-trail) |
 
 ### OAuth JWT
 
@@ -468,6 +469,58 @@ Alert on the name, not on the message text.
 To swap the backend, replace `createAppLogger` in `src/logger.mts`. Anything
 satisfying core's `Logger` works — the interface has pino's two-overload call
 shape, so a pino-compatible logger needs no adapter.
+
+### Audit trail
+
+Security-relevant events — who authenticated, what was issued, what was refused,
+and when the rate limiter could not answer — go to the sink named by
+`audit.sink.type` (env `AUDIT_SINK_TYPE`). The template ships `"logger"`, which
+writes one event per line through the same pino stream as everything else:
+
+```json
+{"level":30,"time":1787841564013,"name":"audit","audit":{"timestamp":"2026-08-27T14:39:24.013Z","type":"token.issued.failure","ip":"203.0.113.7","details":{"reason":"unsupported_grant_type"}},"msg":"token.issued.failure"}
+```
+
+One output style, so an aggregator ingests application logs and audit events
+through one parser and separates them on `name` (`"provider"` vs `"audit"`).
+The event type is also the message, so alert on the name — `authorize.rejected`,
+`token.issued.failure`, `rate_limit.unavailable` — the same way you would on
+`session_store_redis_error`.
+
+`AUDIT_SINK_TYPE=console` selects core's built-in sink instead: the bare event
+as one JSON object per line, with no log envelope, for a pipeline that wants the
+event and nothing else.
+
+**`LOG_LEVEL` does not gate the audit trail.** The audit stream's level is fixed
+at `info`. `warn` is an ordinary production setting and `silent` a legitimate
+one, and either silencing this would delete the record of every authentication
+and issuance while looking like a logging preference. Where audit events go is
+chosen by `audit.sink.type` — and that selector has **no `"none"`**. An unknown
+type fails boot naming the sinks that are registered, rather than producing a
+deployment with no audit trail.
+
+To point it at a real sink — SIEM, log pipeline, message bus — register a
+builder in `auditSinkModule` (`src/modules.mts`) and name it in config; its
+options ride along in the same block:
+
+```ts
+factory.register("splunk-hec", (cfg) => createSplunkSink(cfg));
+```
+
+```hocon
+audit {
+  sink {
+    type = "splunk-hec"
+    splunk-hec { endpoint = ${?SPLUNK_HEC_URL}, token = ${?SPLUNK_HEC_TOKEN} }
+  }
+}
+```
+
+Sinks are fire-and-forget by contract: core dispatches without awaiting and
+swallows rejections, so a slow or failing sink cannot add latency to — or
+fail — an auth flow. The flip side is that a sink which cannot deliver drops
+events silently, and those drops are not counted yet — see **Not published
+yet** under Metrics below.
 
 ### Metrics
 

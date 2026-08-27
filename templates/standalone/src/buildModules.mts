@@ -37,6 +37,7 @@ import {
 } from "@o3co/auth-provider-redis";
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import {
+	auditSinkModule,
 	federationTokenStoreModule,
 	googleFederationConfigModule,
 	inMemoryCodeRepositoryModule,
@@ -67,6 +68,18 @@ export interface BuildModulesOverrides {
 	 * is dropped from the manifest unless the override list includes it.
 	 */
 	readonly refreshTokenFamilyModules?: readonly Module[];
+	/**
+	 * #287: override the module filling the `auditSink` slot. Tests substitute
+	 * a sink they can assert on; the default writes the audit trail to stdout
+	 * and is what a deployment gets.
+	 *
+	 * The override REPLACES the default — it does not add a second provider,
+	 * which would be a boot-time slot collision. There is intentionally no way
+	 * to pass "no audit sink": #304's sink policy is that the trail is always
+	 * wired, and a composition that genuinely wants events discarded says so by
+	 * providing a sink that discards them.
+	 */
+	readonly auditSinkModule?: Module;
 }
 
 /**
@@ -196,6 +209,13 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...(googleEnabled ? [googleFederationModule, googleFederationConfigModule] : []),
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
+		// #287: the audit sink, always wired. Unlike every switch above there is
+		// no "off" branch — the routes' security events (`token.issued.failure`,
+		// `authorize.rejected`, `rate_limit.unavailable`, …) went nowhere in the
+		// shipped artifact because the slot was empty and `emitAuditEvent`
+		// no-ops when it is. Which sink is a config question
+		// (`audit.sink.type`); whether there is one is not.
+		overrides.auditSinkModule ?? auditSinkModule,
 		// Shared ioredis clients — only when at least one consumer adapter
 		// actually needs Redis. Memory-only deployments skip this so they
 		// don't open an unused socket.

@@ -17,6 +17,7 @@ import path from "node:path";
 import {
 	type AppConfig,
 	consoleLogger,
+	createAuditSinkFactory,
 	createFederationTokenStoreFactory,
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
@@ -29,6 +30,7 @@ import {
 	type Logger,
 	type Module,
 	type ReadinessRegistrar,
+	registerBuiltinAuditSinks,
 	registerBuiltinFederationTokenStores,
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
@@ -47,6 +49,7 @@ import { extractFederationSection } from "@o3co/auth-provider-session";
 // permissive about CJS interop). Standalone production source is built
 // with strict nodenext, so the named import is the right shape here.
 import { Redis } from "ioredis";
+import { createAuditLogger, createLoggerAuditSink } from "./logger.mjs";
 
 /**
  * Helper: turn a v0.4.x { type, [type]: {...} } adapter-config slice into the
@@ -217,6 +220,66 @@ export const federationTokenStoreModule: Module = defineModule({
 				}
 			).federationTokenStore;
 			return factory.create(slice ? flattenAdapterConfig(slice) : { type: "memory" });
+		},
+	},
+});
+
+/**
+ * Audit-sink module — fills the `auditSink` slot every route that emits a
+ * security event reads (#287).
+ *
+ * The slot is `optional` on `oauthModule`, `sessionModule` and `webauthnModule`,
+ * and `emitAuditEvent` is a no-op when it is empty. That combination is why the
+ * gap was invisible: the scaffold wired no sink, so `token.issued.failure`,
+ * `authorize.rejected` / `authorize.granted`, `logout.cascade_failed` and the
+ * shared rate-limit guard's `rate_limit.unavailable` were all discarded by the
+ * deployable artifact, with nothing failing and nothing warning. This module is
+ * always in the manifest for that reason — there is no "no audit sink" branch,
+ * the way there is a memory/redis branch for the state stores.
+ *
+ * Two sink kinds are registered:
+ *
+ * - `"logger"` (the template's default) — one NDJSON line per event on stdout,
+ *   in the same pino envelope as every other line this template emits, on a
+ *   stream named `audit` whose level is fixed. See `createAuditLogger`.
+ * - `"console"` — core's built-in, from `registerBuiltinAuditSinks`: the bare
+ *   event as one JSON object per line on stdout, with no log envelope. For a
+ *   pipeline that wants the event and nothing else.
+ *
+ * A deployment with a real sink (SIEM, log pipeline, message bus) registers its
+ * builder here and names it in `audit.sink.type`; its options ride along in the
+ * same config block (`flattenAdapterConfig` unwraps `sink { type = "x", x { … } }`).
+ *
+ * One thing to know before writing such a builder: `createAuditSinkFactory()`
+ * takes no `BuilderContext`, so a sink builder receives `{}` and the
+ * `ctx.lifecycle?.register(…)` / `ctx.readiness?.register(…)` calls that
+ * CONTRIBUTING.md requires of a builder opening a connection are silent no-ops
+ * here. A sink holding a socket must own its cleanup another way until that
+ * factory takes a context.
+ *
+ * There is deliberately no `"none"`. An unknown type — including the `"none"`
+ * an operator might reasonably guess at — fails boot naming the sinks that
+ * exist, rather than producing a deployment with no audit trail (#304).
+ */
+export const auditSinkModule: Module = defineModule({
+	name: "standalone:audit-sink",
+	requires: ["config"] as const,
+	provides: {
+		auditSink: async ({ config }) => {
+			const factory = createAuditSinkFactory();
+			registerBuiltinAuditSinks(factory);
+			factory.register("logger", () => createLoggerAuditSink(createAuditLogger()));
+			const slice = (config as AppConfig).audit?.sink;
+			// Absence lands on the default sink rather than on `undefined`: a
+			// config that says nothing about auditing is not a config asking for
+			// the events to be dropped. The literal default lives in HOCON
+			// (`reference.conf` / `application.conf`); this is the floor under a
+			// hand-built config that never met either.
+			return factory.create(
+				slice
+					? flattenAdapterConfig(slice as { type: string } & Record<string, unknown>)
+					: { type: "logger" },
+			);
 		},
 	},
 });

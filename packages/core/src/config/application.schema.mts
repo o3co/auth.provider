@@ -854,6 +854,31 @@ export const fullSectionsSchema = z.object({
 	cors: z.object({
 		allowedOrigins: z.array(z.string()),
 	}),
+	// #287 / #304: where security-relevant audit events go. `type` selects a
+	// builder in the composition root's `AuditSinkFactory`, so it stays an open
+	// string rather than an enum — `registerBuiltinAuditSinks` ships `console`,
+	// and a deployment that registers its own sink must not need a schema
+	// change in this package to name it. Sub-keys pass through for the same
+	// reason: an out-of-tree sink's options are its own.
+	//
+	// This section MUST be declared here even though nothing in core reads it.
+	// `AppConfigSchema` strips undeclared top-level keys, so an operator's
+	// `audit { … }` block would vanish between `parseFile` and the composition
+	// root — the sink selector would silently read `undefined` while the
+	// configuration sat in the file looking effective.
+	//
+	// `.optional()` because a hand-built config is not forced to restate it;
+	// the safe default (a sink, never "none" — #304's sink policy) is the
+	// composition root's job, and the literal lives in `reference.conf`.
+	audit: z
+		.object({
+			sink: z
+				.object({
+					type: z.string(),
+				})
+				.passthrough(),
+		})
+		.optional(),
 	// D-2 v2: connection-config for the standalone refresh-token-family
 	// client. Defaults live in HOCON (`reference.conf`) per ADR — no
 	// `.default()` here. Module-internal config (`keyPrefix`, `casRetryLimit`)
