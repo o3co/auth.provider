@@ -870,62 +870,27 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Codex Round 2 P1-2: allowedGrantTypes enforcement for authenticated clients
+// Codex Round 2 P1-2 → #326: allowedGrantTypes strictness for authenticated
+// clients is declared on the handler contract and enforced at /token dispatch
 // ---------------------------------------------------------------------------
 
-describe("createWebAuthnGrant — allowedGrantTypes enforcement (Codex Round 2 P1-2)", () => {
+describe("createWebAuthnGrant — allowedGrantTypes strictness (Codex Round 2 P1-2 / #326)", () => {
 	beforeEach(() => vi.clearAllMocks());
 
-	it("returns 400 unauthorized_client when authenticated client lacks WEBAUTHN_GRANT_TYPE in allowedGrantTypes", async () => {
+	it("declares requiresExplicitGrantAllowlist: true on the handler contract (#326)", () => {
+		// The allowedGrantTypes gate for authenticated clients (deny-by-absence
+		// included — Codex Round 2 P1-2) moved out of this handler and onto the
+		// shared /token dispatch in @o3co/auth-provider-oauth: the handler
+		// declares strictness, dispatch enforces it together with the base
+		// allowedGrantTypes rule before `handle` runs, and skips it when no
+		// client is authenticated (the passkey IS the auth event). This pin
+		// keeps the declaration from silently disappearing; the dispatch
+		// behavior is pinned in the oauth package's
+		// `allowedGrantTypes.enforcement.test.mts`.
 		const store = createMemoryWebAuthnCredentialStore();
-		await store.registerCredential(makeCredential());
+		const handler = createWebAuthnGrant(makeBaseDeps(store));
 
-		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
-
-		const deps = makeBaseDeps(store);
-		const handler = createWebAuthnGrant(deps);
-
-		const assertion = makeAssertionResponse();
-		const { result } = await handler.handle(
-			makeCtx(
-				{ assertion },
-				{
-					clientId: "my-app",
-					tokenEndpointAuthMethod: "none",
-					allowedGrantTypes: ["authorization_code"], // no webauthn
-					allowedAudiences: ["https://rs.example"],
-				},
-			),
-		);
-
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("unauthorized_client");
-	});
-
-	it("returns 400 unauthorized_client when authenticated client has empty allowedGrantTypes", async () => {
-		const store = createMemoryWebAuthnCredentialStore();
-		await store.registerCredential(makeCredential());
-
-		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
-
-		const deps = makeBaseDeps(store);
-		const handler = createWebAuthnGrant(deps);
-
-		const assertion = makeAssertionResponse();
-		const { result } = await handler.handle(
-			makeCtx(
-				{ assertion },
-				{
-					clientId: "my-app",
-					tokenEndpointAuthMethod: "none",
-					allowedGrantTypes: [], // empty list → deny-by-absence
-					allowedAudiences: ["https://rs.example"],
-				},
-			),
-		);
-
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("unauthorized_client");
+		expect(handler.requiresExplicitGrantAllowlist).toBe(true);
 	});
 
 	it("allows null authenticatedClient — no allowedGrantTypes check when no client is authenticated", async () => {

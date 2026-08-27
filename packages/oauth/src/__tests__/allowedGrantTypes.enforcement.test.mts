@@ -40,6 +40,7 @@ import { createOAuthRouter } from "#/routes.mjs";
 
 const CLIENT_ID = "client-a";
 const CLIENT_SECRET = "secret-a";
+const STRICT_GRANT_TYPE = "urn:test:strict";
 const REDIRECT_URI = "https://app.example/cb";
 const BASIC = `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString("base64")}`;
 
@@ -55,6 +56,23 @@ const config = {
  * makes "reached it" and "was turned away" unambiguous.
  */
 const alwaysGrant = (): GrantHandler => ({
+	async handle() {
+		return {
+			result: {
+				status: 200,
+				tokens: { access_token: "at", token_type: "Bearer", expires_in: 300 },
+			},
+		};
+	},
+});
+
+/**
+ * The same stub, but declaring `requiresExplicitGrantAllowlist` (#326) —
+ * the contract `client_credentials` and the WebAuthn grant ship with. These
+ * tests never reach `handle` on the absent-allowlist path; that is the point.
+ */
+const strictGrant = (): GrantHandler => ({
+	requiresExplicitGrantAllowlist: true,
 	async handle() {
 		return {
 			result: {
@@ -90,6 +108,7 @@ const makeApp = async (allowedGrantTypes: readonly string[] | undefined) => {
 	const registry = new GrantRegistry();
 	registry.register("refresh_token", alwaysGrant());
 	registry.register("authorization_code", alwaysGrant());
+	registry.register(STRICT_GRANT_TYPE, strictGrant());
 
 	const { router } = await createOAuthRouter(express, {
 		registry,
@@ -160,6 +179,50 @@ describe("allowedGrantTypes — central /oauth/token enforcement (#268)", () => 
 		const res = await tokenRequest(app, "authorization_code");
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unauthorized_client");
+	});
+});
+
+describe("requiresExplicitGrantAllowlist — deny-by-absence at dispatch (#326)", () => {
+	it("refuses a strict grant when the client declared no allowlist", async () => {
+		// The base rule admits an absent allowlist; the flag composes the
+		// stricter rule on top so the grant is never acquired by omission.
+		const app = await makeApp(undefined);
+		const res = await tokenRequest(app, STRICT_GRANT_TYPE);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+		// Wire-format pin: the deleted per-grant checks emitted exactly this
+		// description (no `grant_type "…"` quoting); the central strict rule
+		// must keep the historical shape.
+		expect(res.body.error_description).toBe(`client is not authorized for ${STRICT_GRANT_TYPE}`);
+	});
+
+	it("still applies the base rule when the allowlist is declared but excludes the grant", async () => {
+		const app = await makeApp(["refresh_token"]);
+		const res = await tokenRequest(app, STRICT_GRANT_TYPE);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+	});
+
+	it("refuses a strict grant on an empty allowlist (base rule, unchanged)", async () => {
+		const app = await makeApp([]);
+		const res = await tokenRequest(app, STRICT_GRANT_TYPE);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+	});
+
+	it("admits a strict grant the client explicitly registered for", async () => {
+		const app = await makeApp([STRICT_GRANT_TYPE]);
+		const res = await tokenRequest(app, STRICT_GRANT_TYPE);
+		expect(res.status).toBe(200);
+	});
+
+	it("does not tighten non-strict grants — absence still admits them", async () => {
+		// The flag is per-handler: a handler that does not declare it keeps the
+		// base "absence is unrestricted" semantics, so pre-existing
+		// registrations keep working.
+		const app = await makeApp(undefined);
+		const res = await tokenRequest(app, "refresh_token");
+		expect(res.status).toBe(200);
 	});
 });
 

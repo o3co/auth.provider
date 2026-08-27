@@ -29,11 +29,13 @@
  *     therefore denies everything, which is what "this client may use no
  *     grant type" has always meant for this field.
  *
- * Individual grants MAY layer a stricter rule on top. `client_credentials`
- * and the WebAuthn grant both deny by absence, deliberately, so that
- * machine-to-machine access is never acquired by omission. The two rules
- * compose to the stricter of the pair, because either can reject and only
- * the absent case distinguishes them.
+ * A grant MAY declare a stricter rule via
+ * `GrantHandler.requiresExplicitGrantAllowlist` (#326): dispatch then denies
+ * by absence for that grant — deliberately, so that machine-to-machine
+ * access is never acquired by omission. `client_credentials` and the
+ * WebAuthn grant declare it. The two rules compose to the stricter of the
+ * pair, because either can reject and only the absent case distinguishes
+ * them; both are enforced at dispatch, next to each other.
  *
  * Exact string comparison: `grant_type` is case-sensitive, and extension
  * grants are URIs (RFC 6749 §4.5), where a prefix or case-folded match would

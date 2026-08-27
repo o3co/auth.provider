@@ -151,6 +151,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 
 
+### Changed
+
+- **`allowedGrantTypes` deny-by-absence is declared on the grant contract instead of hand-rolled per handler (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`, `@o3co/auth-provider-webauthn`).** After #268 centralized the base allowlist rule at `/token` dispatch, the stricter deny-by-absence rule still lived as private `.includes` checks inside `client_credentials` and the WebAuthn grant — the next machine-to-machine grant had to know that folklore to stay safe, and omitting it produced a silently weaker grant (#326, the bug class #312 fixed).
+
+  `GrantHandler` gains an optional **`requiresExplicitGrantAllowlist`** flag. A handler that declares it opts into deny-by-absence, enforced at dispatch immediately before the handler runs — next to the base rule, so both compose in one place — and skipped when no client is authenticated (WebAuthn's passkey-is-the-auth-event mode; `client_credentials` keeps rejecting a missing client itself with `invalid_client`). Both grants now declare the flag and their in-handler checks are deleted. The denial keeps the exact wire shape the handlers emitted: `400` `unauthorized_client`, `client is not authorized for <grant_type>`.
+
+  Pure refactor with one corner-case exception: a **public** client (`tokenEndpointAuthMethod: "none"`) calling `client_credentials` **without** a declared `allowedGrantTypes` now gets `unauthorized_client` (the allowlist denial, which dispatch raises first) where it previously got `invalid_client` (the handler's confidential-client rejection, which used to run first). Both are 400 denials; no request is newly allowed or newly denied. Custom grants that need deny-by-absence should declare the flag instead of re-implementing the check.
+
 ### Fixed
 
 - **The Redis rate limiter's increment and expiry are now one atomic operation — a failed `EXPIRE` no longer 429s a client forever (`@o3co/auth-provider-redis`).** `check` ran `INCR`, then a separate `EXPIRE` **only when the count came back as 1**. A process death or an `EXPIRE` error in between left the key with no TTL at all, so its counter never reset: every later window saw a count above the limit and that key's client was rate-limited permanently. `failMode` could not rescue it either — the check itself succeeded, it just kept answering "denied" — so the deployment had a silently, indefinitely blocked client and a limiter that looked healthy.

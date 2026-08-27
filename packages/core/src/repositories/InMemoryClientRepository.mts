@@ -67,8 +67,9 @@ export const ClientEntrySchema = z
 		allowedScopes: z.array(z.string()).default([]),
 		allowedAudiences: z.array(z.string()).default([]),
 		// Wave 1 §3.4.1: per-client grant type allowlist. Absent means no restriction on
-		// existing grants (authorization_code, refresh_token). client_credentials is gated
-		// by deny-by-absence — see createClientCredentialsGrant handler.
+		// existing grants (authorization_code, refresh_token). Grants that declare
+		// `requiresExplicitGrantAllowlist` (client_credentials, WebAuthn) are gated by
+		// deny-by-absence at /token dispatch (#326).
 		allowedGrantTypes: z.array(z.string()).optional(),
 		// NEW (TODO-F-5): Logout metadata.
 		// Use httpUrlSchema (not z.string().url()) for fields that end up in iframe src

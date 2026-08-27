@@ -29,6 +29,7 @@ import {
 	type FederationTokenStore,
 	formatObject,
 	type GrantHandlerResolver,
+	type GrantHandlerResult,
 	type GrantPolicyHook,
 	isEmailVerified,
 	isGrantTypeAllowed,
@@ -331,9 +332,10 @@ export const createOAuthRouter = async (
 				// Absence of the field is "no policy declared", not "deny": the
 				// grants that ignored it predate it, so denying here would revoke
 				// every grant from every registration written before it existed.
-				// `client_credentials` and WebAuthn keep their stricter
-				// deny-by-absence rule on top, so machine-to-machine access is
-				// still never acquired by omission.
+				// Handlers that declare `requiresExplicitGrantAllowlist` compose a
+				// stricter deny-by-absence rule on top (#326, enforced just before
+				// the handler runs below), so machine-to-machine access is still
+				// never acquired by omission.
 				//
 				// RFC 6749 §5.2 `unauthorized_client`: "The authenticated client is
 				// not authorized to use this authorization grant type."
@@ -423,7 +425,43 @@ export const createOAuthRouter = async (
 							);
 					}
 				}
-				const { result, sessionMutation } = await handler.handle(ctx);
+				// #326: deny-by-absence for handlers that declare
+				// `requiresExplicitGrantAllowlist`. The base check above admits an
+				// absent allowlist ("no policy declared"); a strict handler refuses
+				// exactly that case, so the grant is never acquired by omission.
+				// Enforcement used to be hand-rolled inside `client_credentials`
+				// and the WebAuthn grant — the next machine-to-machine grant had
+				// to know that folklore to stay safe. The flag makes strictness a
+				// property of the handler contract and this the single place both
+				// rules compose.
+				//
+				// Three deliberate shape choices keep the refactor observable-
+				// semantics-preserving:
+				// - Position: after the sender-constraint gate, immediately before
+				//   the handler — exactly where the deleted per-grant checks ran —
+				//   so no dispatch-level rule changes relative order.
+				// - Skip when `authenticatedClient` is null: the deleted checks
+				//   never fired without a client (client_credentials rejects null
+				//   itself with `invalid_client`; WebAuthn deliberately serves
+				//   unauthenticated passkey callers).
+				// - The denial is threaded through the shared result path below
+				//   (not an early `res.json`), and its description keeps the
+				//   per-grant wire format `client is not authorized for <type>`
+				//   (the base check above quotes the type; the deleted checks did
+				//   not), so response body and audit emission stay byte-identical.
+				const strictAllowlistDenial: GrantHandlerResult | null =
+					handler.requiresExplicitGrantAllowlist === true &&
+					ctx.authenticatedClient !== null &&
+					ctx.authenticatedClient.allowedGrantTypes === undefined
+						? {
+								result: {
+									status: 400,
+									error: "unauthorized_client",
+									errorDescription: `client is not authorized for ${grant_type}`,
+								},
+							}
+						: null;
+				const { result, sessionMutation } = strictAllowlistDenial ?? (await handler.handle(ctx));
 
 				if (sessionMutation?.clear) {
 					for (const key of sessionMutation.clear) {

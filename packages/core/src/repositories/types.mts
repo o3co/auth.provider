@@ -73,12 +73,14 @@ export interface Client {
 	 * - non-empty array → a grant is allowed iff its `grant_type` string
 	 *   appears in the list, compared exactly.
 	 *
-	 * Two grants layer a **stricter** rule on top and deny by absence, so
-	 * that machine-to-machine access is never acquired by omission:
-	 * `client_credentials` (`grants/clientCredentials.mts`) and the WebAuthn
-	 * grant (`@o3co/auth-provider-webauthn`). The rules compose to the
-	 * stricter of the pair — either can reject, and only the absent case
-	 * distinguishes them.
+	 * A grant handler that declares `requiresExplicitGrantAllowlist` on its
+	 * `GrantHandler` contract composes a **stricter** rule on top: dispatch
+	 * denies by absence for that grant, so machine-to-machine access is
+	 * never acquired by omission (#326). `client_credentials`
+	 * (`grants/clientCredentials.mts`) and the WebAuthn grant
+	 * (`@o3co/auth-provider-webauthn`) declare it. Both rules are enforced
+	 * at dispatch — either can reject, and only the absent case
+	 * distinguishes them; no handler carries its own copy of the check.
 	 */
 	readonly allowedGrantTypes?: readonly string[];
 	// NEW (TODO-F-5): Logout metadata.

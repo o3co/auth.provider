@@ -83,34 +83,17 @@ describe("createClientCredentialsGrant — gates", () => {
 		expect("errorDescription" in result && result.errorDescription).toContain("confidential");
 	});
 
-	it("returns 400 unauthorized_client when allowedGrantTypes is absent (deny-by-absence)", async () => {
+	it("declares requiresExplicitGrantAllowlist: true on the handler contract (#326)", () => {
+		// The allowedGrantTypes gate (deny-by-absence included) moved out of
+		// this handler and onto the shared `/token` dispatch: the handler
+		// declares strictness, `routes.mts` enforces it together with the base
+		// rule before `handle` runs. This pin is what keeps the declaration
+		// from silently disappearing; the enforcement itself is pinned at
+		// dispatch level in `allowedGrantTypes.enforcement.test.mts` and, for
+		// this concrete grant, in `clientCredentials.integration.test.mts`.
 		const handler = createClientCredentialsGrant(baseDeps);
-		const client = makeClient({ allowedGrantTypes: undefined });
 
-		const { result } = await handler.handle(makeCtx(client));
-
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("unauthorized_client");
-	});
-
-	it("returns 400 unauthorized_client when allowedGrantTypes is empty (deny on empty)", async () => {
-		const handler = createClientCredentialsGrant(baseDeps);
-		const client = makeClient({ allowedGrantTypes: [] });
-
-		const { result } = await handler.handle(makeCtx(client));
-
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("unauthorized_client");
-	});
-
-	it("returns 400 unauthorized_client when allowedGrantTypes excludes client_credentials", async () => {
-		const handler = createClientCredentialsGrant(baseDeps);
-		const client = makeClient({ allowedGrantTypes: ["authorization_code"] });
-
-		const { result } = await handler.handle(makeCtx(client));
-
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("unauthorized_client");
+		expect(handler.requiresExplicitGrantAllowlist).toBe(true);
 	});
 });
 
