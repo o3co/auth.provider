@@ -47,7 +47,6 @@ const makeConfig = (oauthOverrides: Record<string, unknown>): AppConfig =>
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
-			authorize: { allowUnmarkedClients: false },
 			// `dual` so requests without `openid` reach the branch under test
 			// instead of tripping the IH-6 gate first.
 			oidcMode: "dual",

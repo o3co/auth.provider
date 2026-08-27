@@ -144,6 +144,32 @@ const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
 	},
 ];
 
+/**
+ * Fields removed from `oauth.authorize`. Same mechanism and rationale as
+ * `REMOVED_REFRESH_TOKEN_FIELDS` above — detected on the raw input so the
+ * operator gets a targeted boot error instead of Zod silently stripping a
+ * config line they believe is load-bearing. `reference.conf` deliberately
+ * keeps the `${?OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS}` substitution as a
+ * tombstone, so a still-exported env var reaches this check too.
+ */
+const REMOVED_AUTHORIZE_FIELDS: ReadonlyArray<{
+	name: string;
+	removedIn: string;
+	note: string;
+}> = [
+	{
+		name: "allowUnmarkedClients",
+		removedIn: "this release (#330)",
+		note:
+			"The one-time migration flag for the /authorize first-party invariant (#316/#317) is " +
+			"gone: a client whose registration does not carry `firstParty: true` is now always " +
+			"refused, whatever this key is set to. Mark every client you operate with " +
+			"`firstParty: true` (only ones you would trust to receive a user's identity without " +
+			"the user being asked), then delete this key and the " +
+			"OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS environment variable.",
+	},
+];
+
 const jwtSchemaBase = z.object({
 	// The issuer is a property of the deployment, not of a request. It is
 	// REQUIRED: `/oauth/token` used to fall back to `req.get("host")` when this
@@ -253,6 +279,30 @@ const refreshTokenSchema = z.preprocess((raw, ctx) => {
 }, refreshTokenSchemaBase);
 
 /**
+ * `oauth.authorize` holds no live keys anymore — it exists only to retire
+ * `allowUnmarkedClients` loudly (#330). Optional because nothing requires the
+ * section; the empty-object case is what `reference.conf` yields when the
+ * tombstone env substitution resolves to nothing.
+ */
+const authorizeSchema = z.preprocess((raw, ctx) => {
+	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+		const rawObj = raw as Record<string, unknown>;
+		for (const removed of REMOVED_AUTHORIZE_FIELDS) {
+			if (removed.name in rawObj) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message:
+						`oauth.authorize.${removed.name} was removed in ${removed.removedIn}; see CHANGELOG. ` +
+						`${removed.note} Remove this field from your config.`,
+					path: [removed.name],
+				});
+			}
+		}
+	}
+	return raw;
+}, z.object({}).optional());
+
+/**
  * Env-var-safe boolean coercion for `enabled` fields.
  *
  * z.coerce.boolean() calls JavaScript's Boolean(value), so any non-empty string
@@ -329,21 +379,13 @@ export const CoreConfigSchema = z.object({
 		// the field. The verification *flow* stays with the Store; this is only
 		// a gate on what this library issues.
 		requireEmailVerified: z.boolean().optional(),
-		// #267: `/authorize` refuses a client not marked `firstParty: true`.
-		// This escape hatch admits unmarked clients with a per-client warning,
-		// for a deployment still migrating its client records.
-		//
-		// REQUIRED, with **no literal default in `reference.conf`** — only an
-		// env substitution. Client records are runtime data that core cannot
-		// enumerate (`ClientRepository` exposes `findById` / `authenticate`
-		// only), so there is no boot check that could tell an operator their
-		// clients are unmarked. Shipping a default would therefore mean a green
-		// deploy followed by every login failing at request time. Requiring the
-		// key turns that into a boot failure the operator must read about and
-		// answer deliberately — the same shape `oauth.jwt.issuer` takes (#266).
-		authorize: z.object({
-			allowUnmarkedClients: z.boolean(),
-		}),
+		// #267: `/authorize` refuses a client not marked `firstParty: true` —
+		// one with no `firstParty` field and one carrying an explicit `false`
+		// alike. The `allowUnmarkedClients` migration escape hatch that
+		// admitted unmarked registrations (#317) was removed in #330; the
+		// section survives only as the tombstone that rejects a config still
+		// setting the key (see `REMOVED_AUTHORIZE_FIELDS`).
+		authorize: authorizeSchema,
 		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
 		// repository. Multi-replica deployments MUST set this to `"redis"`;
 		// the in-memory variant loses codes on restart and across replicas.

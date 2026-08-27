@@ -18,9 +18,9 @@
 #   client `firstParty: true` only if you would be comfortable with it
 #   receiving the user's identity without the user being asked.
 #
-#   A client without it is refused at `/authorize`. While migrating existing
-#   registrations, set `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS=true` to admit
-#   them with a per-client warning.
+#   A client without it is refused at `/authorize`, as is one carrying an
+#   explicit `firstParty: false`. There is no opt-out: mark every client you
+#   operate before pointing it at `/authorize`.
 
 my-app:
   tokenEndpointAuthMethod: "client_secret_basic"

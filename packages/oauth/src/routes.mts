@@ -133,9 +133,9 @@ export const createOAuthRouter = async (
 	// #328: every `oauth.*` knob this router consumes is resolved exactly once,
 	// here, at router composition. `resolveOAuthOptions` owns the defensive
 	// reads for hand-built configs that never passed the zod schema — see its
-	// JSDoc for the per-field defaults (which are unchanged: strict `=== true`
-	// opt-ins for #267 `allowUnmarkedClients` and #297 `requireEmailVerified`,
-	// SF-1 `legacyTypAccept` left optional for sub-routers to default). The
+	// JSDoc for the per-field defaults (which are unchanged: the strict
+	// `=== true` opt-in for #297 `requireEmailVerified`, SF-1
+	// `legacyTypAccept` left optional for sub-routers to default). The
 	// /authorize handler receives the whole object (routes/authorize.mts).
 	const options = resolveOAuthOptions(config, logger);
 	// #266: `iss` is a property of the deployment, never of a request. The token

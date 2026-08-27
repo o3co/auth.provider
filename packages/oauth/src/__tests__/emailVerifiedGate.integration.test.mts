@@ -46,7 +46,6 @@ const makeConfig = (requireEmailVerified: boolean): AppConfig =>
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
-			authorize: { allowUnmarkedClients: false },
 			requireEmailVerified,
 			grants: { authorization_code: { pkce: { requireS256: false } } },
 		},

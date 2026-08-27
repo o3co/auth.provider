@@ -23,8 +23,11 @@
  * vector.
  *
  * These tests pin the invariant: a client reaching `/authorize` must be
- * marked `firstParty: true`, unless the deployment has explicitly declared it
- * is still migrating.
+ * marked `firstParty: true`. The one-time migration flag that admitted
+ * unmarked registrations (`oauth.authorize.allowUnmarkedClients`, #317) was
+ * removed in #330 — a config still carrying it must have no effect here (the
+ * schema rejects it at boot; hand-built configs bypass the schema, so the
+ * handler must not read it either).
  *
  * They do NOT pin "forced navigation is impossible" — it is not. A client
  * genuinely marked first-party still mints a code on a forced top-level
@@ -49,12 +52,15 @@ import { createOAuthRouter } from "#/routes.mjs";
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
 
-const makeConfig = (allowUnmarkedClients: boolean): AppConfig =>
+const makeConfig = (staleAllowUnmarkedClients: boolean): AppConfig =>
 	({
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
-			authorize: { allowUnmarkedClients },
+			// #330: the flag is removed. A schema-validated config can no longer
+			// carry it, but a hand-built one can — injecting it here pins that
+			// the stale key is inert rather than merely absent from fixtures.
+			...(staleAllowUnmarkedClients ? { authorize: { allowUnmarkedClients: true } } : {}),
 			grants: { authorization_code: { pkce: { requireS256: false } } },
 		},
 		rateLimit: { failMode: "open" as const },
@@ -71,7 +77,8 @@ const alwaysGrant = (): GrantHandler => ({
 
 const makeApp = async (opts: {
 	firstParty?: boolean;
-	allowUnmarkedClients?: boolean;
+	/** Injects the REMOVED `oauth.authorize.allowUnmarkedClients: true` (#330). */
+	staleAllowUnmarkedClients?: boolean;
 	warn?: ReturnType<typeof vi.fn>;
 }) => {
 	const record = {
@@ -98,7 +105,7 @@ const makeApp = async (opts: {
 
 	const { router } = await createOAuthRouter(express, {
 		registry,
-		config: makeConfig(opts.allowUnmarkedClients ?? false),
+		config: makeConfig(opts.staleAllowUnmarkedClients ?? false),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -180,40 +187,25 @@ describe("/authorize first-party invariant (#267)", () => {
 	});
 });
 
-describe("/authorize first-party invariant — migration opt-in (#267)", () => {
-	it("admits an unmarked client when the deployment declared it is migrating", async () => {
-		const app = await makeApp({ firstParty: undefined, allowUnmarkedClients: true });
-		expect(errorOf(await authorize(app))).not.toBe("unauthorized_client");
-	});
-
-	it("warns when it admits an unmarked client, naming it", async () => {
-		const warn = vi.fn();
-		const app = await makeApp({
-			firstParty: undefined,
-			allowUnmarkedClients: true,
-			warn,
-		});
-		await authorize(app);
-		expect(warn).toHaveBeenCalledWith(
-			expect.objectContaining({ clientId: CLIENT_ID }),
-			"authorize_client_not_marked_first_party",
-		);
-	});
-
-	it("still refuses a client explicitly marked NOT first-party", async () => {
-		// The flag is `allowUnmarkedClients`, and `firstParty: false` is not
-		// unmarked — it is a deliberate statement that this client must never
-		// receive a silent code. Admitting it during migration would weaken the
-		// invariant exactly where the operator was most explicit about it.
-		const warn = vi.fn();
-		const app = await makeApp({ firstParty: false, allowUnmarkedClients: true, warn });
+describe("/authorize first-party invariant — the migration flag is removed (#330)", () => {
+	it("refuses an unmarked client even when a config still carries the removed flag", async () => {
+		// A schema-validated config cannot reach here with the key (the schema
+		// rejects it at boot); a hand-built config can, and it must be inert —
+		// post-removal behavior is the strict endstate, unconditionally.
+		const app = await makeApp({ firstParty: undefined, staleAllowUnmarkedClients: true });
 		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
 	});
 
-	it("does not warn about a client that is explicitly not first-party", async () => {
-		// `authorize_client_not_marked_first_party` would be a lie: it is marked.
+	it("emits no admission warning — the migration code path is gone, not just off", async () => {
+		// `authorize_client_not_marked_first_party` was the per-admission log of
+		// the migration window. With no admission left there is nothing to warn
+		// about; the refusal is what surfaces (audit `client_not_first_party`).
 		const warn = vi.fn();
-		const app = await makeApp({ firstParty: false, allowUnmarkedClients: true, warn });
+		const app = await makeApp({
+			firstParty: undefined,
+			staleAllowUnmarkedClients: true,
+			warn,
+		});
 		await authorize(app);
 		expect(warn).not.toHaveBeenCalledWith(
 			expect.anything(),
@@ -221,13 +213,15 @@ describe("/authorize first-party invariant — migration opt-in (#267)", () => {
 		);
 	});
 
-	it("still admits a marked client without warning under the opt-in", async () => {
-		const warn = vi.fn();
-		const app = await makeApp({ firstParty: true, allowUnmarkedClients: true, warn });
-		await authorize(app);
-		expect(warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"authorize_client_not_marked_first_party",
-		);
+	it("refuses a client explicitly marked NOT first-party regardless of the stale flag", async () => {
+		// `firstParty: false` was refused even during the migration window
+		// (#317); the removal must not accidentally weaken that.
+		const app = await makeApp({ firstParty: false, staleAllowUnmarkedClients: true });
+		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
+	});
+
+	it("still admits a marked client when the stale flag is present", async () => {
+		const app = await makeApp({ firstParty: true, staleAllowUnmarkedClients: true });
+		expect(errorOf(await authorize(app))).not.toBe("unauthorized_client");
 	});
 });

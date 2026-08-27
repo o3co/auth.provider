@@ -27,9 +27,7 @@ my-app:
 
 **What this does not do.** It does not make `/authorize` safe against forced navigation for a client that *is* first-party — that remains the accepted model here. What it prevents is a client that should never have been trusted with a silent code being registered into that position by accident. The step that changes the former is a consent screen, tracked separately.
 
-**Migrating.** Existing registrations predate the field, so they are all unmarked. Set `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS=true` to keep admitting them while you work through them — each admission logs `authorize_client_not_marked_first_party` with the client id, so the remaining work shows up in your logs rather than only in a config file. Set it back to `false` when the list is empty.
-
-The flag admits clients with **no** `firstParty` field. A client carrying `firstParty: false` stays refused even during migration: that is a deliberate statement that it must never receive a silent code, and the migration window is exactly where weakening it would be least noticed.
+**Migrating.** Registrations that predate the field are refused at `/authorize` until you mark them — a client with no `firstParty` field and one carrying an explicit `false` are treated alike. Mark every client you operate before pointing it at `/authorize`; there is no admit-with-warning window. The one-time `oauth.authorize.allowUnmarkedClients` migration flag was removed before it ever shipped in a release, and a config or environment still setting it (`OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) fails at boot with migration instructions rather than being silently ignored.
 
 ## Multi-replica deployments
 
@@ -101,7 +99,6 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_SECRET` | — | Signing secret (HMAC algorithms) |
 | `OAUTH_JWT_ISSUER` | **(required)** | Canonical issuer URL stamped as `iss` on every token. Must be absolute `https` (`http` only for a loopback host), with no query or fragment. Boot fails when unset — it is never derived from the `Host` header. |
 | `OAUTH_REQUIRE_EMAIL_VERIFIED` | `false` | Refuse to issue tokens for a user until the Store publishes `emailVerified: true`. Enforced at `/authorize` and on the `session` grant. Verification itself is the Store's job — this only reads the result. |
-| `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` | `false` | Admit clients not marked `firstParty: true` at `/authorize`, with a per-client warning. For migrating existing registrations only — see [First-party clients](#first-party-clients). |
 | `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM-encoded private key (asymmetric algorithms) |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | Path to PEM private key file |
