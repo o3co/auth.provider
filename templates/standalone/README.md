@@ -98,6 +98,7 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_ALGORITHM` | `HS256` | JWT signing algorithm (e.g. `RS256`, `ES256`) |
 | `OAUTH_JWT_SECRET` | — | Signing secret (HMAC algorithms) |
 | `OAUTH_JWT_ISSUER` | **(required)** | Canonical issuer URL stamped as `iss` on every token. Must be absolute `https` (`http` only for a loopback host), with no query or fragment. Boot fails when unset — it is never derived from the `Host` header. |
+| `OAUTH_REQUIRE_EMAIL_VERIFIED` | `false` | Refuse to issue tokens for a user until the Store publishes `emailVerified: true`. Enforced at `/authorize` and on the `session` grant. Verification itself is the Store's job — this only reads the result. |
 | `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` | `false` | Admit clients not marked `firstParty: true` at `/authorize`, with a per-client warning. For migrating existing registrations only — see [First-party clients](#first-party-clients). |
 | `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM-encoded private key (asymmetric algorithms) |

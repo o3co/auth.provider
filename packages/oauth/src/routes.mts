@@ -30,6 +30,7 @@ import {
 	formatObject,
 	type GrantHandlerResolver,
 	type GrantPolicyHook,
+	isEmailVerified,
 	isGrantTypeAllowed,
 	JwtVerificationError,
 	type KeyStore,
@@ -161,6 +162,11 @@ export const createOAuthRouter = async (
 	// answered it deliberately. The defensive cast is for hand-built configs
 	// that never passed the schema — same treatment `legacyTypAccept` gets
 	// above, and the safe reading of an absent value is `false` (enforce).
+	// #297: gate token issuance on Store-published email verification. Off
+	// unless the deployment opted in; the defensive read matches the treatment
+	// the sibling flags get, for hand-built configs that never met the schema.
+	const requireEmailVerified =
+		(config as { oauth?: { requireEmailVerified?: boolean } }).oauth?.requireEmailVerified === true;
 	const allowUnmarkedClients =
 		(config as { oauth?: { authorize?: { allowUnmarkedClients?: boolean } } }).oauth?.authorize
 			?.allowUnmarkedClients === true;
@@ -792,6 +798,35 @@ export const createOAuthRouter = async (
 					logger.warn(
 						{ clientId: client_id, reason: "not_marked_first_party" },
 						"authorize_client_not_marked_first_party",
+					);
+				}
+
+				// #297: refuse before a code is minted when the deployment requires
+				// a verified email and the Store has not published one for this
+				// user. `/authorize` and the `session` grant are the two points
+				// that hold the user's session at issuance; `refresh_token` and
+				// token-exchange derive from an artifact that already passed this
+				// gate, so re-checking there would revoke a session mid-life on a
+				// Store hiccup rather than gate its creation.
+				//
+				// `access_denied` is the RFC 6749 §4.1.2.1 code for "the resource
+				// owner or authorization server denied the request", which is
+				// exactly what this is — and unlike `invalid_request` it does not
+				// suggest the client sent something malformed.
+				if (requireEmailVerified && !isEmailVerified(req.session.user)) {
+					await emitAuditEvent(auditSink, {
+						timestamp: new Date(),
+						type: "token.issued.failure",
+						clientId: client_id,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { reason: "email_not_verified" },
+					});
+					return redirectError(
+						redirect_uri,
+						"access_denied",
+						"email address is not verified",
+						toStr(state),
 					);
 				}
 

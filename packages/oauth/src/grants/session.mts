@@ -21,6 +21,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	isEmailVerified,
 } from "@o3co/auth-provider-core";
 
 /**
@@ -74,6 +75,29 @@ export const createSessionGrant = (
 						status: 401,
 						error: "unauthorized",
 						errorDescription: "session is not authenticated",
+					},
+				};
+			}
+
+			// #297: this grant mints a token straight from the browser session, so
+			// it is the second point (with `/authorize`) that holds the user at
+			// issuance and therefore the second the gate has to cover. Without it
+			// a deployment requiring a verified email would find `/authorize`
+			// gated and this path wide open.
+			//
+			// `invalid_grant` rather than `access_denied`: RFC 6749 §5.2 does not
+			// define the latter for the token endpoint, and the session is
+			// precisely the grant that cannot be honoured.
+			if (
+				(config as { oauth?: { requireEmailVerified?: boolean } }).oauth?.requireEmailVerified ===
+					true &&
+				!isEmailVerified(session.user)
+			) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "email address is not verified",
 					},
 				};
 			}

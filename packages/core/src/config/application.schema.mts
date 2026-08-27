@@ -322,6 +322,13 @@ export const CoreConfigSchema = z.object({
 		// requests that omit `openid` unless operators explicitly choose dual
 		// OAuth/OIDC mode. Shape-only; default lives in HOCON.
 		oidcMode: z.enum(["oidc-required", "dual"]),
+		// #297: require a Store-published verified email before issuing tokens
+		// for an end-user subject. Optional and off by default — `emailVerified`
+		// is Store data that many Stores simply do not model, so defaulting this
+		// on would refuse every user of every deployment that has not adopted
+		// the field. The verification *flow* stays with the Store; this is only
+		// a gate on what this library issues.
+		requireEmailVerified: z.boolean().optional(),
 		// #267: `/authorize` refuses a client not marked `firstParty: true`.
 		// This escape hatch admits unmarked clients with a per-client warning,
 		// for a deployment still migrating its client records.
