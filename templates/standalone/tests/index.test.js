@@ -29,6 +29,23 @@ const client = axios.create({
 
 const _extractCookies = (res) => (res.headers["set-cookie"] ?? []).join("; ");
 
+/**
+ * The server's own origin, as a browser would report it.
+ *
+ * Since #272 `POST /session/login` and `POST /session/logout` reject a request
+ * that carries neither a same-origin `Origin`/`Referer` nor a valid
+ * double-submit CSRF token. A browser sets `Origin` on its own; a scripted
+ * client like this one has to say it.
+ */
+const SERVER_ORIGIN = new URL(BASE_URL).origin;
+
+/** POST to a state-changing session route the way a same-origin browser would. */
+const sessionPost = (path, data, config = {}) =>
+	client.post(path, data, {
+		...config,
+		headers: { Origin: SERVER_ORIGIN, ...(config.headers ?? {}) },
+	});
+
 describe("POST /oauth/introspect", () => {
 	// Helper: self-introspect sends the token as both Bearer credential and body parameter
 	const selfIntrospect = (token, contentType = "application/json") => {
@@ -109,12 +126,12 @@ describe("POST /oauth/introspect", () => {
 
 describe("POST /session/login", () => {
 	it("returns 400 when no credentials are provided", async () => {
-		const res = await client.post("/session/login", {});
+		const res = await sessionPost("/session/login", {});
 		expect(res.status).toBe(400);
 	});
 
 	it("returns 400 when redirect_to has an invalid scheme", async () => {
-		const res = await client.post("/session/login", {
+		const res = await sessionPost("/session/login", {
 			username: "testuser",
 			password: "testpass",
 			redirect_to: "javascript:alert(1)",
@@ -124,7 +141,7 @@ describe("POST /session/login", () => {
 	});
 
 	it("returns 400 when redirect_to is not a valid URL", async () => {
-		const res = await client.post("/session/login", {
+		const res = await sessionPost("/session/login", {
 			username: "testuser",
 			password: "testpass",
 			redirect_to: "not-a-url",
@@ -134,7 +151,7 @@ describe("POST /session/login", () => {
 	});
 
 	it("returns 400 when redirect_to exceeds 2048 characters", async () => {
-		const res = await client.post("/session/login", {
+		const res = await sessionPost("/session/login", {
 			username: "testuser",
 			password: "testpass",
 			redirect_to: `https://example.com/${"a".repeat(2048)}`,
@@ -147,13 +164,60 @@ describe("POST /session/login", () => {
 		// redirect_to validation runs before authentication, so even with
 		// invalid credentials, a valid redirect_to should not cause a 400
 		// with error: "invalid_redirect". It should fail with 401 (auth failure).
-		const res = await client.post("/session/login", {
+		const res = await sessionPost("/session/login", {
 			username: "testuser",
 			password: "testpass",
 			redirect_to: "http://localhost:3000/oauth/authorize",
 		});
 		expect(res.status).not.toBe(400);
 		expect(res.data.error).not.toBe("invalid_redirect");
+	});
+});
+
+describe("CSRF on the state-changing session routes (#272)", () => {
+	it("rejects a login carrying neither an origin signal nor a token", async () => {
+		// The bypass this replaced: omitting `Origin` skipped the check entirely.
+		const res = await client.post("/session/login", {
+			username: "testuser",
+			password: "testpass",
+		});
+		expect(res.status).toBe(403);
+		expect(res.data.error).toBe("access_denied");
+	});
+
+	it("rejects a logout carrying neither an origin signal nor a token", async () => {
+		const res = await client.post("/session/logout", {});
+		expect(res.status).toBe(403);
+		expect(res.data.error).toBe("access_denied");
+	});
+
+	it("rejects a login from a foreign origin", async () => {
+		const res = await client.post(
+			"/session/login",
+			{ username: "testuser", password: "testpass" },
+			{ headers: { Origin: "https://evil.example.com" } },
+		);
+		expect(res.status).toBe(403);
+	});
+
+	it("accepts a header-less client that presents a token from GET /session/csrf", async () => {
+		const issued = await client.get("/session/csrf");
+		expect(issued.status).toBe(200);
+		expect(typeof issued.data.csrf_token).toBe("string");
+
+		const res = await client.post(
+			"/session/login",
+			{ username: "testuser", password: "testpass" },
+			{
+				headers: {
+					Cookie: _extractCookies(issued).split(";")[0],
+					[issued.data.header_name]: issued.data.csrf_token,
+				},
+			},
+		);
+		// Credentials are still wrong in this environment — the point is that the
+		// request got past the CSRF guard rather than stopping at 403.
+		expect(res.status).not.toBe(403);
 	});
 });
 

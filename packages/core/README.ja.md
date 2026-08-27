@@ -32,12 +32,13 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `oauth.accessToken.expiresIn` | アクセストークンの有効期間 |
 | `oauth.refreshToken.expiresIn` | リフレッシュトークンの有効期間 |
 | `oauth.grants` | グラントタイプごとの設定（`session`、`authorization`、`refresh_token`、カスタムキー） |
-| `session` | Express セッション設定 — secret、maxAge、secure、sameSite、domain、storage |
+| `session` | Express セッション設定 — secret、maxAge、secure、sameSite、domain、storage、csrf |
+| `session.csrf` | 状態変更する session ルートの CSRF ポリシー — `trustedOrigins`、`ttlSeconds`（#272） |
 | `rateLimit` | `login`、`token`、`authorize` エンドポイントのレート制限設定 |
 | `federations` | フェデレーションプロバイダー — `z.record(string, { enabled, type?, ...passthrough })`。組み込みタイプ: `"google"`, `"github"`。 |
 | `repositories` | client、user、code の Repository 設定 |
 | `endpoints` | `login`、`client`、`authCallback` ルートのパスオーバーライド |
-| `cors.allowedOrigins` | CORS 許可オリジン |
+| `cors.allowedOrigins` | CORS 許可オリジン。#272 以降、CSRF の信頼は**与えない**（`session.csrf.trustedOrigins` を使う）。 |
 
 ### グラントシステム
 

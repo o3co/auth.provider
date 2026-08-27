@@ -37,12 +37,26 @@ const Module。`/session` 配下に 2 つの route bundle を contribute する:
 
 | メソッド | パス | 説明 |
 | --- | --- | --- |
+| GET | /session/csrf | double-submit CSRF トークンの発行 |
 | POST | /session/login | ユーザー名 / パスワードログイン |
 | POST | /session/logout | セッションログアウト |
 | GET | /session/oauth/federation/:name | OAuth フェデレーションフロー開始 |
 | GET | /session/oauth/federation/:name/callback | フェデレーションコールバック |
 
 `:name` パスパラメーターは `config.federations` のキー（例: `google`、`github`、`google-work`）に対応する。未知の名前は `404` を返す。
+
+#### 状態変更ルートの CSRF 対策（#272）
+
+`POST /session/login` と `POST /session/logout` は、**same-origin（もしくは明示的に信頼した）`Origin` / `Referer`**、**または** 有効な double-submit CSRF トークンのいずれかを伴うリクエストを受理する。どちらも無いリクエストは `403 access_denied` で拒否する。以前は `Origin` ヘッダーが無いとチェック自体がスキップされていた。
+
+- **ブラウザ** 側の変更は不要。same-origin の `fetch` / form post ではブラウザが `Origin` を付けるため、それだけで通る。
+- **ヘッダーを持たないクライアント**（curl、サーバーサイドのエージェント、テストハーネス）は `GET /session/csrf` を呼ぶ。JS から読める `<session.name>.csrf` cookie がセットされ、同じ値が `csrf_token` として返る。cookie と、`x-csrf-token` ヘッダーまたは `csrf_token` フォームフィールドの両方を送り返す。
+- **foreign な `Origin`** はトークンがあっても拒否する。クロスサイトリクエストであることの積極的な証拠だから。
+- ログイン成功時には **新しい** CSRF cookie を返すため、後続の logout に追加のラウンドトリップは要らない。
+
+トークンは乱数 nonce と有効期限に対する署名付きの HMAC（ステートレス）で、鍵は `session.secret` の HKDF 展開。親ドメインの cookie を書けるサブドメインでも偽造はできない。クロスオリジンのログイン UI は `session.csrf.trustedOrigins` に自身の origin を列挙する。`cors.allowedOrigins` は CSRF 信頼を与えなくなった。
+
+`checkRequestOrigin`、`createCsrfProtection`、`createCsrfProtectionFromConfig`、`createCsrfGuard`、`createCsrfIssueHandler` を export しているので、独自のログインページや独自ルートを持つ composition でも同じ仕組みを使える。
 
 `requires`: `userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`（兄弟ストア）、加えて per-federation modules が contribute する内容を boot planner が集約する synthetic key `federationProviders` と `federationRedirectPolicyResolver`。フェデレーションモジュールの実装例は [`@o3co/auth-provider-federation-google`](../federation-google/README.md) を参照。
 

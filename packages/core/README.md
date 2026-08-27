@@ -32,12 +32,13 @@ Top-level fields:
 | `oauth.accessToken.expiresIn` | Access token lifetime |
 | `oauth.refreshToken.expiresIn` | Refresh token lifetime |
 | `oauth.grants` | Per-grant-type config (`session`, `authorization`, `refresh_token`, and custom keys) |
-| `session` | Express session — secret, maxAge, secure, sameSite, domain, storage |
+| `session` | Express session — secret, maxAge, secure, sameSite, domain, storage, csrf |
+| `session.csrf` | CSRF policy for the state-changing session routes — `trustedOrigins`, `ttlSeconds` (#272) |
 | `rateLimit` | Rate limit config for `login`, `token`, and `authorize` endpoints |
 | `federations` | Federation providers — `z.record(string, { enabled, type?, ...passthrough })`. Built-in types: `"google"`, `"github"`. |
 | `repositories` | Repository config for clients, users, and codes |
 | `endpoints` | Path overrides for `login`, `client`, and `authCallback` routes |
-| `cors.allowedOrigins` | CORS allowed origins |
+| `cors.allowedOrigins` | CORS allowed origins. Since #272 this does **not** grant CSRF trust — use `session.csrf.trustedOrigins`. |
 
 ### Grant System
 

@@ -43,12 +43,42 @@ Const Module. Contributes two route bundles, both mounted at `/session`:
 
 | Method | Path                                              | Description                     |
 |--------|---------------------------------------------------|---------------------------------|
+| GET    | /session/csrf                                     | Issue a double-submit CSRF token |
 | POST   | /session/login                                    | Username / password login       |
 | POST   | /session/logout                                   | Session logout                  |
 | GET    | /session/oauth/federation/:name                   | Initiate OAuth federation flow  |
 | GET    | /session/oauth/federation/:name/callback          | Federation callback             |
 
 The `:name` path parameter corresponds to the federation key in `config.federations` (e.g. `google`, `github`, `google-work`). Unknown names return `404`.
+
+#### CSRF on the state-changing routes (#272)
+
+`POST /session/login` and `POST /session/logout` accept a request that carries
+**either** a same-origin (or explicitly trusted) `Origin` / `Referer`, **or** a
+valid double-submit CSRF token. A request carrying neither is rejected with
+`403 access_denied` — previously a missing `Origin` header skipped the check
+entirely.
+
+- **Browsers** need no change: the browser sets `Origin` on a same-origin
+  `fetch` / form post, and that satisfies the check on its own.
+- **Header-less clients** (curl, server-side agents, test harnesses) call
+  `GET /session/csrf`, which sets a JS-readable `<session.name>.csrf` cookie
+  and returns the same value as `csrf_token`. Send both back: the cookie plus
+  either an `x-csrf-token` header or a `csrf_token` form field.
+- A **foreign** `Origin` is rejected even when a token is present, since it is
+  positive evidence of a cross-site request.
+- A successful login returns a **fresh** CSRF cookie, so the follow-up logout
+  needs no extra round trip.
+
+The token is a signed, stateless HMAC over a random nonce and an expiry, keyed
+by an HKDF expansion of `session.secret` — a subdomain able to write the
+parent-domain cookie still cannot forge one. Cross-origin login UIs list their
+origin on `session.csrf.trustedOrigins`; `cors.allowedOrigins` no longer grants
+CSRF trust.
+
+`checkRequestOrigin`, `createCsrfProtection`, `createCsrfProtectionFromConfig`,
+`createCsrfGuard` and `createCsrfIssueHandler` are exported for compositions
+that mount their own login page or protect their own routes.
 
 `requires`: `userRepository`, `userSessionStore`, `federationTokenStore`,
 `sessionFederationIndex` (sibling stores), plus the synthetic keys

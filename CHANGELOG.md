@@ -115,6 +115,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   A deployment where the **auth provider itself terminates TLS** should now *remove* `source` and make sure the listener runs with `requestCert: true`; the new default is the shape it wanted all along. A deployment with `mtlsModule` disabled (the default) is unaffected.
 
+- **Breaking: the session routes' CSRF check no longer falls open when `Origin` is absent, and there is now an anti-CSRF token (`@o3co/auth-provider-session`, `@o3co/auth-provider-core`).** The guard on `POST /session/login` and `POST /session/logout` read `Origin` and called `next()` when it was missing. Omitting one header was therefore a complete bypass of the only check on either route, and there was no token to fall back on. The list it compared against was `cors.allowedOrigins` — a resource-sharing policy doing duty as a trust policy (#272).
+
+  `sameSite=lax` covers session-riding, which is why this was not worse than it was. It does not cover **login CSRF**: forcing a victim's browser to authenticate into an attacker-controlled account needs none of the victim's cookies, and once they are silently logged in as the attacker, everything they do next lands in the attacker's account.
+
+  Two independent arms replace the single check, in a new `@o3co/auth-provider-session` module (`csrf.mts`):
+
+  - **A signed double-submit token.** `GET /session/csrf` (new, unauthenticated) sets a JS-readable `<session.name>.csrf` cookie and returns the same value as `csrf_token`; the client echoes it in an `x-csrf-token` header or a `csrf_token` form field. The pair is compared in constant time. The token is *signed* — an HMAC over a random nonce and an expiry, keyed by an HKDF expansion of `session.secret` — rather than an opaque random value, because a plain double-submit trusts whatever is in the cookie and a sibling subdomain able to write a parent-domain cookie can supply that. It is stateless on purpose: `/session/login` is reached *before* there is a session to bind to, and under `saveUninitialized: false` an anonymous visitor has no stable session id to key against either.
+  - **A strict same-origin `Origin` / `Referer` check** with its own trust list, `session.csrf.trustedOrigins` (new, default `[]`).
+
+  **The acceptance rule**: a request is accepted when it carries **either** a same-origin (or trusted) origin signal **or** a valid token, and rejected with `403 access_denied` when it carries neither. Two deliberate asymmetries in it: a **foreign** `Origin` is rejected even when a valid token is present — it is positive evidence that a browser made this request from another site, the pre-fix guard already rejected it, and a security fix must not hand that back — and a header that is present but does not parse (`Origin: null` from a sandboxed frame, a relative `Referer`) counts as foreign rather than absent. A request with no origin signal at all is the header-less API client, and that is the case the token arm exists for.
+
+  A successful login now returns a **fresh** CSRF cookie, so a follow-up `/session/logout` needs no extra round trip.
+
+  **Migration.**
+
+  - **Browsers need no change.** A same-origin `fetch` or form post carries `Origin`, and that satisfies the check on its own.
+  - **Scripted clients (curl, server-side agents, E2E harnesses) do.** Either send `Origin: <the server's own origin>` — the same value a browser would — or call `GET /session/csrf` and send the returned token back as both the cookie and the header. Sending neither is now a `403`.
+  - **`cors.allowedOrigins` no longer grants CSRF trust.** A deployment whose login UI is served from a different origin than the provider must list those origins under `session.csrf.trustedOrigins`; that key is now the only config that widens the origin arm. `cors.allowedOrigins` is otherwise unchanged.
+  - **Behind a TLS-terminating proxy, `http.trustProxy` must be set.** Without it `req.protocol` reads `http` while the browser sends `Origin: https://…`, and every request fails the origin arm. This was equally true of the pre-fix check, but it fails more visibly now that absence no longer passes.
+  - The CSRF cookie name is derived as `<session.name>.csrf` rather than configured separately, so it inherits whatever prefix the session cookie carries — including `__Host-`, whose boot guard already refuses a combination browsers would reject. `SESSION_CSRF_TTL_SECONDS` (default `7200`) sets the token lifetime.
+
+  New config: `session.csrf.trustedOrigins`, `session.csrf.ttlSeconds` (the `session.csrf` section is optional in the schema — every value has a code-side default, so a hand-built config need not restate it). New exports from `@o3co/auth-provider-session`: `createCsrfProtection`, `createCsrfProtectionFromConfig`, `createCsrfGuard`, `createCsrfIssueHandler`, `checkRequestOrigin`, the `DEFAULT_CSRF_*` constants, and the `CsrfProtection` / `CsrfProtectionOptions` / `CsrfGuardOptions` / `CsrfCookieAttributes` / `CsrfTokenVerdict` / `CsrfOriginVerdict` / `SessionCsrfConfigSlice` types. `createRouter` gains an optional `csrf` slot so a composition root can share one instance with routes this package does not own.
+
+  **What this does not do:** it does not add a CSRF token to `/oauth/authorize`, for the reason recorded in the `firstParty` entry below — that endpoint is legitimately entered cross-site.
+
 - **`/authorize` refuses a client not marked `firstParty: true` (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `GET /authorize` issued an authorization code the moment `req.session.isAuthenticated` was true — no consent step, no approval, nothing asked of the user. A page you do not control could force a top-level navigation to `/authorize?client_id=X&redirect_uri=…&code_challenge=<theirs>`; a logged-in victim's browser minted a code bound to *their* session, delivered it to X's registered `redirect_uri`, and whoever chose the `code_challenge` redeemed it for tokens carrying the victim's identity.
 
   That model is coherent for a pure first-party OP — one where every registered client is operated by you — and coherent nowhere else. The library assumed it and never said so, so registering a single semi-trusted client silently turned the endpoint into an account-linking vector (#267).

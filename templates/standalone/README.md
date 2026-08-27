@@ -130,6 +130,7 @@ fail fast rather than silently falling back to defaults.
 | `SESSION_SECURE` | `true` | Set `Secure` flag on session cookie |
 | `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`) |
 | `SESSION_DOMAIN` | — | Cookie domain (unset by default) |
+| `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds |
 | `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory` |
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |
@@ -138,6 +139,24 @@ If you set `SESSION_SECURE=false` for local HTTP development or set `SESSION_DOM
 for shared-domain cookies, also set `SESSION_NAME` to a non-`__Host-` value such as
 `auth.sid`. The server fails fast when a `__Host-` cookie name is combined with
 attributes that browsers reject for that prefix.
+
+#### CSRF on `/session/login` and `/session/logout`
+
+Both routes accept a request carrying **either** a same-origin (or trusted)
+`Origin` / `Referer`, **or** a valid double-submit CSRF token, and reject one
+carrying neither (#272). Browsers satisfy this automatically; a scripted client
+calls `GET /session/csrf` first and sends the returned `csrf_token` back as
+both the `<SESSION_NAME>.csrf` cookie and an `x-csrf-token` header (or a
+`csrf_token` form field).
+
+Two configuration notes:
+
+- Behind a TLS-terminating proxy, set `HTTP_TRUST_PROXY=true`. Without it
+  `req.protocol` reads `http` while the browser sends `Origin: https://…`, and
+  the origin arm rejects every request.
+- If your login UI is served from a **different origin** than the provider,
+  list that origin under `session.csrf.trustedOrigins` in your HOCON config.
+  `cors.allowedOrigins` no longer confers CSRF trust.
 
 ### Google Federation
 

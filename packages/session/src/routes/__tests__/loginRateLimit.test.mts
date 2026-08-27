@@ -37,13 +37,31 @@ import type {
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { createCsrfProtection } from "../../csrf.mjs";
 import { createRouter } from "../Session.mjs";
 
 const stubConfig = {
 	cors: { allowedOrigins: [] },
-	session: { domain: null, maxAge: 86400_000 },
+	session: {
+		secret: "test-session-secret",
+		name: "auth.session",
+		secure: false,
+		sameSite: "lax",
+		domain: null,
+		maxAge: 86400_000,
+	},
 	rateLimit: { login: { windowMs: 900_000, limit: 20 }, failMode: "closed" },
 } as unknown as AppConfig;
+
+/**
+ * Since #272 the CSRF guard runs ahead of the rate-limit guard, so every
+ * request here has to clear it or these tests measure the wrong 403.
+ */
+const csrf = createCsrfProtection({
+	secret: "test-session-secret",
+	cookieName: "auth.session.csrf",
+});
+const csrfToken = csrf.mint();
 
 const userRepository = {
 	authenticate: vi.fn().mockResolvedValue({ id: "u-1", username: "alice" }),
@@ -98,7 +116,12 @@ const makeApp = (
 };
 
 const login = (app: express.Express) =>
-	request(app).post("/session/login").type("json").send({ username: "alice", password: "pw" });
+	request(app)
+		.post("/session/login")
+		.set("Cookie", `${csrf.cookieName}=${csrfToken}`)
+		.set(csrf.headerName, csrfToken)
+		.type("json")
+		.send({ username: "alice", password: "pw" });
 
 describe("/session/login rate limiting — shared limiter (#270)", () => {
 	it("consults the injected RateLimiter rather than a per-process store", async () => {

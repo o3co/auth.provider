@@ -29,6 +29,13 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { NextFunction, Request, RequestHandler, Response, Router } from "express";
+import {
+	type CsrfProtection,
+	createCsrfGuard,
+	createCsrfIssueHandler,
+	createCsrfProtectionFromConfig,
+	type SessionCsrfConfigSlice,
+} from "../csrf.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 
 declare module "express-session" {
@@ -57,6 +64,7 @@ export const createRouter = (
 		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		logger = consoleLogger,
+		csrf,
 	}: {
 		userRepository: UserRepository;
 		config: AppConfig;
@@ -87,24 +95,35 @@ export const createRouter = (
 		/** Session TTL in milliseconds. Default: 24h. */
 		sessionTtlMs?: number;
 		logger?: Logger;
+		/**
+		 * CSRF mechanism for the state-changing session routes (#272).
+		 *
+		 * Built from the `session` config slice when omitted. Inject one to
+		 * share a single instance with routes this router does not own — the
+		 * token is signed, not stored, so two instances built from the same
+		 * secret already accept each other's tokens; the slot exists so a
+		 * composition root can also *issue* tokens from its own pages.
+		 */
+		csrf?: CsrfProtection;
 	},
 ): Router => {
 	const router = express.Router();
 
-	const allowedOrigins = config.cors.allowedOrigins;
-	const verifyCsrfOrigin = (req: Request, res: Response, next: NextFunction): void => {
-		const origin = req.get("origin");
-		if (!origin) {
-			next();
-			return;
-		}
-		const serverOrigin = `${req.protocol}://${req.get("host")}`;
-		if (origin !== serverOrigin && !allowedOrigins.includes(origin)) {
-			res.status(403).json(errorEnvelope("access_denied", "CSRF origin check failed"));
-			return;
-		}
-		next();
-	};
+	// #272: the previous guard read `Origin`, and called `next()` when it was
+	// absent. `sameSite=lax` covers session-riding, but login CSRF — forcing a
+	// victim's browser to authenticate into an attacker-controlled account —
+	// needs none of the victim's cookies, so "no Origin header" was a complete
+	// bypass of the only check on the route. The trust list was
+	// `cors.allowedOrigins`, which answers a different question; CSRF trust is
+	// now stated on `session.csrf.trustedOrigins`. See `../csrf.mjs` for the
+	// acceptance rule.
+	const sessionSlice = config.session as unknown as SessionCsrfConfigSlice;
+	const csrfProtection = csrf ?? createCsrfProtectionFromConfig(sessionSlice);
+	const verifyCsrf = createCsrfGuard({
+		csrf: csrfProtection,
+		trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],
+		logger,
+	});
 
 	// The login guard now runs on the same `RateLimiter` component the OAuth
 	// endpoints use, so a deployment that wires the Redis adapter gets one
@@ -161,9 +180,12 @@ export const createRouter = (
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
+		// Where a browser gets its first token. Safe method, so it is not itself
+		// behind the guard — it mints material, it does not act on any.
+		.get("/csrf", createCsrfIssueHandler(csrfProtection))
 		.post(
 			"/login",
-			verifyCsrfOrigin,
+			verifyCsrf,
 			loginRateLimit,
 			(req: Request, res: Response, next: NextFunction): void => {
 				const { redirect_to } = req.body;
@@ -287,11 +309,15 @@ export const createRouter = (
 					if (sid) {
 						req.session.sid = sid;
 					}
+					// The caller is now on a regenerated session; hand it a fresh
+					// token in the same response so the follow-up `/session/logout`
+					// does not need another round trip to `/session/csrf`.
+					csrfProtection.issue(res);
 					return res.status(200).json({ message: "Logged in successfully" });
 				});
 			},
 		)
-		.post("/logout", verifyCsrfOrigin, (req: Request, res: Response) => {
+		.post("/logout", verifyCsrf, (req: Request, res: Response) => {
 			req.session.destroy((err: Error | null) => {
 				if (err) {
 					return res.status(500).json(errorEnvelope("server_error", "Session destroy failed"));
