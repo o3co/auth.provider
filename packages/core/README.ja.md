@@ -27,7 +27,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | フィールド | 説明 |
 | --- | --- |
 | `http.port` | HTTP リッスンポート |
-| `http.trustProxy` | Express の trust proxy 設定 |
+| `http.trustProxy` | Express の `trust proxy` 設定: `false` / アドレスリスト（IP、CIDR レンジ、名前付きレンジ `loopback` / `linklocal` / `uniquelocal`）/ ホップ数 / `true`。エントリは boot 時に検証される。`true` はプロセスに到達できる誰からの forwarded アドレスも信じるため、プロキシを明示することを推奨 |
 | `oauth.jwt` | JWT 署名設定 — issuer、signingKey（provider + プロバイダーごとのサブセクション） |
 | `oauth.accessToken.expiresIn` | アクセストークンの有効期間 |
 | `oauth.refreshToken.expiresIn` | リフレッシュトークンの有効期間 |

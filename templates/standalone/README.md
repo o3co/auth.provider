@@ -33,7 +33,20 @@ my-app:
 
 When running multiple instances of the standalone server behind a load balancer, point `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` at a **shared** Redis 7.2+ instance. Without a shared Redis URL, every replica holds refresh-token families in its own connection (and any local-only Redis), so a refresh request that lands on a replica that did not issue the token returns `invalid_grant` on every other request in a round-robin LB.
 
-**Set `HTTP_TRUST_PROXY=true` behind a load balancer.** It defaults to `false`, which makes `req.ip` the *load balancer's* address rather than the client's. Every rate limit keyed by IP — the OAuth endpoint limiters and the `POST /session/login` brute-force guard — then shares **one bucket across all users**: the first 20 login attempts from anyone exhaust the window and every subsequent user gets `429`. The failure reads like an attack rather than a misconfiguration, which is what makes it expensive to diagnose at 3am. Set it whenever anything terminates TLS or proxies in front of this service, and make sure that hop is the one setting `X-Forwarded-For`.
+**Set `HTTP_TRUST_PROXY` to your proxy's address behind a load balancer.** It defaults to `false`, which makes `req.ip` the *load balancer's* address rather than the client's. Every rate limit keyed by IP — the OAuth endpoint limiters and the `POST /session/login` brute-force guard — then shares **one bucket across all users**: the first 20 login attempts from anyone exhaust the window and every subsequent user gets `429`. The failure reads like an attack rather than a misconfiguration, which is what makes it expensive to diagnose at 3am. Set it whenever anything terminates TLS or proxies in front of this service, and make sure that hop is the one setting `X-Forwarded-For`.
+
+Since #292 it takes four shapes, all of them Express's own:
+
+| Value | Meaning |
+|---|---|
+| `false` (default) | Trust nothing; `req.ip` is the socket peer |
+| `10.0.0.0/8,192.168.0.0/16` | Trust exactly these hops. IP literals, CIDR ranges, or the named ranges `loopback` / `linklocal` / `uniquelocal`. Comma-separate for the env var |
+| `1` | Trust that many hops back from the socket peer |
+| `true` | Trust every hop — the leftmost `X-Forwarded-For` entry, from whoever opened the connection |
+
+**Prefer the address list.** `true` believes a forwarded client address from anyone who can reach this process; a client that routes to it directly, or through one hop more than you accounted for, then chooses its own `req.ip` and with it any rate-limit identity keyed on it. Entries are validated at boot, so a hostname or a typo'd range fails loudly instead of becoming a rule that never matches.
+
+An allowlist is a network control, not a cryptographic one. The edge must also **strip** inbound `X-Forwarded-*` headers rather than appending to them, and the hop between it and this process must not be reachable by anyone able to spoof a source address.
 
 **Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. Since #270 the login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; both adapters seed their own `limits.login` from it, so there is nothing to restate.
 
@@ -89,7 +102,7 @@ fail fast rather than silently falling back to defaults.
 | Variable | Default | Description |
 |---|---|---|
 | `HTTP_PORT` | `3000` | Port the server listens on |
-| `HTTP_TRUST_PROXY` | `false` | Set to `true` when running behind a reverse proxy. **Required behind a load balancer** — otherwise every IP-keyed rate limit shares one bucket across all users. See [Multi-replica deployments](#multi-replica-deployments) |
+| `HTTP_TRUST_PROXY` | `false` | Express `trust proxy`: `false`, an address/CIDR list (`10.0.0.0/8,loopback`), a hop count (`1`), or `true`. **Required behind a load balancer** — otherwise every IP-keyed rate limit shares one bucket across all users. Prefer naming the proxy over `true`. See [Multi-replica deployments](#multi-replica-deployments) |
 | `HTTP_READINESS_TIMEOUT_MS` | `1000` | Per-probe deadline for `/readyz` (see [Health endpoints](#health-endpoints)) |
 | `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent` |
 
@@ -176,9 +189,10 @@ both the `<SESSION_NAME>.csrf` cookie and an `x-csrf-token` header (or a
 
 Two configuration notes:
 
-- Behind a TLS-terminating proxy, set `HTTP_TRUST_PROXY=true`. Without it
-  `req.protocol` reads `http` while the browser sends `Origin: https://…`, and
-  the origin arm rejects every request.
+- Behind a TLS-terminating proxy, set `HTTP_TRUST_PROXY` (to the proxy's
+  address or CIDR range, not `true`). Without it `req.protocol` reads `http`
+  while the browser sends `Origin: https://…`, and the origin arm rejects every
+  request.
 - If your login UI is served from a **different origin** than the provider,
   list that origin under `session.csrf.trustedOrigins` in your HOCON config.
   `cors.allowedOrigins` no longer confers CSRF trust.

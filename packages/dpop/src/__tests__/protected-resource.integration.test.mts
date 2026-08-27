@@ -84,28 +84,37 @@ describe("DPoP at a protected resource (#264)", () => {
 		key = await makeClientKey();
 		accessToken = await mintBoundAccessToken(key.jkt);
 
-		const mechanism = createDPoPMechanism({
-			replayStore: createMemoryDPoPReplayStore(),
-			iatWindowSeconds: 60,
-		});
-
 		const app = express();
-		app.use(protectedResourceBindingMw({ mechanisms: [mechanism] }));
-		app.get(RESOURCE_PATH, (req, res) => {
-			res.status(200).json({ binding: req.tokenBinding ?? null });
-		});
 
 		// The proof's `htu` must name the URL the request actually reaches, so
 		// the server is started here and reused for every request in the test
 		// rather than letting supertest bind a fresh ephemeral port per call.
 		// Otherwise the positive case could only ever assert "401 or 200", which
 		// would pass just as happily if enforcement were broken.
+		//
+		// Listening comes BEFORE the middleware is mounted because since #292
+		// the mechanism is built from the deployment's canonical issuer, and
+		// here that issuer is the ephemeral origin the listener just claimed.
+		// Express consults its router per request, so middleware registered
+		// after `listen()` — but before any request is made — is in place for
+		// every call these tests issue.
 		server = await new Promise<Server>((resolve) => {
 			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
 		});
 		const address = server.address();
 		const port = typeof address === "object" && address !== null ? address.port : 0;
 		htu = `http://127.0.0.1:${port}${RESOURCE_PATH}`;
+
+		const mechanism = createDPoPMechanism({
+			issuer: `http://127.0.0.1:${port}`,
+			replayStore: createMemoryDPoPReplayStore(),
+			iatWindowSeconds: 60,
+		});
+
+		app.use(protectedResourceBindingMw({ mechanisms: [mechanism] }));
+		app.get(RESOURCE_PATH, (req, res) => {
+			res.status(200).json({ binding: req.tokenBinding ?? null });
+		});
 	});
 
 	afterEach(async () => {

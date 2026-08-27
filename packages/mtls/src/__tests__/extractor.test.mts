@@ -464,6 +464,34 @@ describe("createMtlsMechanism — trusted-proxy allowlist for the header source 
 		);
 	});
 
+	it("accepts the forwarded certificate when the peer falls inside an allowlisted CIDR range", async () => {
+		// #292 widened the shared vocabulary to ranges. A pod CIDR is the shape
+		// an operator actually has: the ingress replica's address is assigned
+		// per-restart, so enumerating literals is not an option.
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.0/8"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		const result = await mech.extract(
+			makeReq({ "x-forwarded-client-cert": LEAF_PEM }, "10.42.7.3") as Request,
+		);
+		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
+	});
+
+	it("rejects a peer outside an allowlisted CIDR range", async () => {
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.0/8"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		await expect(
+			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }, "11.42.7.3") as Request),
+		).rejects.toMatchObject({ reason: "untrusted_proxy" });
+	});
+
 	it("propagates an invalid trustedProxies entry as a boot failure", () => {
 		expect(() =>
 			createMtlsMechanism({
@@ -471,7 +499,17 @@ describe("createMtlsMechanism — trusted-proxy allowlist for the header source 
 				trustedProxies: ["proxy.internal"],
 				mode: "self-signed",
 			}),
-		).toThrow(/not a valid IP address/i);
+		).toThrow(/not an IP address, a CIDR range/i);
+	});
+
+	it("names the config key in a boot failure so the operator can find the entry", () => {
+		expect(() =>
+			createMtlsMechanism({
+				source: "header",
+				trustedProxies: ["loopback", "proxy.internal"],
+				mode: "self-signed",
+			}),
+		).toThrow(/trusted-proxies\[1\]/);
 	});
 });
 

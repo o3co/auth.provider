@@ -26,7 +26,9 @@
  *   Step 5:  alg whitelist               (after parseProof, uses proof.alg)
  *   Step 8:  Signature verification      (importJWK + jwtVerify)
  *   Step 10: htm match
- *   Step 11: htu match (both sides normalized)
+ *   Step 11: htu match (both sides normalized). The expected URL's origin is
+ *            the configured `oauth.jwt.issuer`, never the request's forwarded
+ *            protocol / Host (#292).
  *   Step 12: iat window
  *   Step 14: Replay check (atomic seen) — wrapped so transport faults
  *            surface as `replay_store_unavailable` audit signal rather
@@ -39,10 +41,12 @@
  * Per Wave 2 Phase 2 spec §6 + §8 factory contract.
  */
 
-import type {
-	Logger,
-	TokenBindingExtractContext,
-	TokenBindingMechanism,
+import {
+	checkCanonicalIssuer,
+	describeIssuerRejection,
+	type Logger,
+	type TokenBindingExtractContext,
+	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
 import { importJWK, jwtVerify } from "jose";
@@ -57,6 +61,22 @@ import type { DPoPReplayStore } from "./replay-store.mjs";
 // ---------------------------------------------------------------------------
 
 export interface DPoPMechanismOptions {
+	/**
+	 * The deployment's canonical issuer — `oauth.jwt.issuer`. Its **origin**
+	 * (scheme, host, port) is the authority half of the `htu` every proof is
+	 * checked against.
+	 *
+	 * Required, and required to be a canonical issuer URL (#292). Before that
+	 * the expected `htu` was reconstructed from `req.protocol` and the `Host`
+	 * header, both of which `X-Forwarded-Proto` / `X-Forwarded-Host` rewrite
+	 * whenever Express `trust proxy` is on — so a caller who could reach the
+	 * process past the edge chose the value its own proof had to match, and
+	 * satisfied both halves of the comparison at once. The issuer is a property
+	 * of the deployment and cannot be moved by a request, which is the whole
+	 * reason it is the right source. Same reasoning as #266/#307, which stopped
+	 * deriving `iss` from `Host`.
+	 */
+	readonly issuer: string;
 	/** Replay protection store. */
 	readonly replayStore: DPoPReplayStore;
 	/**
@@ -112,14 +132,32 @@ const DEFAULT_REPLAY_TTL_SECONDS = 300;
 // ---------------------------------------------------------------------------
 
 /**
- * Reconstruct the effective request URL for htu comparison. Includes the
- * query string so `normalizeHtu` can strip it uniformly from both sides.
+ * Build the effective request URL for htu comparison: the deployment's
+ * **configured** origin plus the path the request actually reached.
+ *
+ * The origin is fixed at construction from `oauth.jwt.issuer` and is
+ * deliberately not derived from the request. `req.protocol` and `req.get("host")`
+ * read `X-Forwarded-Proto` / `X-Forwarded-Host` under Express `trust proxy`,
+ * so reconstructing from them let the caller pick the value its own proof had
+ * to match (#292).
+ *
+ * The path still comes from `req.originalUrl` — the AS serves whatever path it
+ * is mounted at, and the query string rides along because `normalizeHtu`
+ * strips it uniformly from both sides.
+ *
+ * String concatenation, never `new URL(path, origin)`: a request target of
+ * `//evil.example/token` resolves *relative to* an origin as a
+ * protocol-relative URL and would move the host, which is the same spoof
+ * arriving through a different door. Concatenated onto an absolute origin the
+ * WHATWG parser reads it as the path it is.
  */
-const buildRequestUrl = (req: Request): string => {
-	const proto = req.protocol;
-	const host = req.get("host") ?? "";
-	// req.originalUrl includes query string; normalizeHtu strips it.
-	return `${proto}://${host}${req.originalUrl}`;
+const buildRequestUrl = (issuerOrigin: string, req: Request): string => {
+	const target = req.originalUrl;
+	// Express reports an origin-form target, which always starts with `/`. An
+	// absolute-form target (`GET http://x/ HTTP/1.1`, legal per RFC 9112 §3.2)
+	// would not, and must not be spliced into the authority position.
+	const path = target.startsWith("/") ? target : `/${target}`;
+	return `${issuerOrigin}${path}`;
 };
 
 // ---------------------------------------------------------------------------
@@ -140,6 +178,27 @@ const buildRequestUrl = (req: Request): string => {
  * Per Wave 2 Phase 2 spec §8 (factory contract) + §6 (validation sequence).
  */
 export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBindingMechanism => {
+	// #292: the expected `htu` comes from the deployment's identity, not from
+	// the request. Validate it here rather than at first use — a mechanism that
+	// cannot name its own origin would otherwise fail every proof at runtime
+	// with `htu_mismatch`, which reads as a client bug rather than a
+	// misconfiguration.
+	const issuerRejection = checkCanonicalIssuer(options.issuer);
+	if (issuerRejection !== null) {
+		throw new Error(
+			`createDPoPMechanism: issuer ${describeIssuerRejection(issuerRejection)}. It is the ` +
+				"deployment's canonical issuer (config `oauth.jwt.issuer`), and its origin is what " +
+				"every DPoP proof's `htu` is checked against — reconstructing that origin from " +
+				"`req.protocol` and the `Host` header would let a caller behind a trusted proxy " +
+				"choose the value its own proof has to match (o3co/auth.provider#292).",
+		);
+	}
+	// `URL.origin` is scheme + host + port with the default port elided —
+	// exactly the authority half `normalizeHtu` canonicalizes to. Any path
+	// prefix on the issuer is dropped on purpose: the path belongs to the
+	// request, which `req.originalUrl` already reports including that prefix.
+	const issuerOrigin = new URL(options.issuer).origin;
+
 	const algWhitelist = options.algWhitelist ?? DEFAULT_ALG_WHITELIST;
 	const iatWindowSeconds = options.iatWindowSeconds ?? DEFAULT_IAT_WINDOW_SECONDS;
 	const replayTtlSeconds = options.replayTtlSeconds ?? DEFAULT_REPLAY_TTL_SECONDS;
@@ -231,7 +290,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			let expectedHtu: string;
 			let presentedHtu: string;
 			try {
-				expectedHtu = normalizeHtu(buildRequestUrl(req));
+				expectedHtu = normalizeHtu(buildRequestUrl(issuerOrigin, req));
 				presentedHtu = normalizeHtu(proof.claims.htu);
 			} catch (err) {
 				throw new DPoPError(

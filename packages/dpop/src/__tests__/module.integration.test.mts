@@ -74,12 +74,20 @@ const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 /**
- * Mint a valid DPoP proof for POST http://as.example/oauth/token.
+ * The deployment's canonical issuer, as `makeValidCoreConfig` sets it. Since
+ * #292 the expected `htu` is built from THIS, not from the request — so the
+ * proof names it even though supertest speaks plain http to an ephemeral port
+ * and the requests below send a `Host` header saying something else entirely.
+ * That divergence is the point: it is what the old reconstruction trusted.
+ */
+const ISSUER_ORIGIN = "https://auth.test";
+
+/**
+ * Mint a valid DPoP proof for `POST <issuer origin>/oauth/token`.
  *
- * supertest binds to http (not https). The request is sent with
- * `Host: as.example`, so the verifier's buildRequestUrl yields
- * `http://as.example/oauth/token` — the `htu` below must match exactly
- * (after normalizeHtu strips query/fragment and lowercases scheme+host).
+ * The path still comes from the request (`req.originalUrl`); only the origin
+ * is configuration. `normalizeHtu` strips query/fragment and lowercases
+ * scheme + host on both sides before comparing.
  */
 const mintProof = async () => {
 	const { publicKey, privateKey } = await generateKeyPair("ES256");
@@ -87,7 +95,7 @@ const mintProof = async () => {
 	const jkt = await computeJkt(jwk);
 	const proof = await new SignJWT({
 		htm: "POST",
-		htu: "http://as.example/oauth/token",
+		htu: `${ISSUER_ORIGIN}/oauth/token`,
 		iat: Math.floor(Date.now() / 1000),
 		jti: crypto.randomUUID(),
 	})
@@ -108,6 +116,17 @@ const makeTokenBindingObserver =
 		received.tokenBinding = (req as any).tokenBinding;
 		res.status(200).json({ ok: true });
 	};
+
+/**
+ * Invoke the module's contributed mechanism factory directly, the way the boot
+ * planner does. Used for the boot-time guards, which have to be reached
+ * without `createApp` first rejecting the config for the same reason.
+ */
+const buildMechanism = (config: unknown) => {
+	const factory = dpopModule.contributes?.tokenBindingMechanisms?.[0];
+	if (factory === undefined) throw new Error("dpopModule contributes no mechanism factory");
+	return factory({ config } as never);
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -190,7 +209,10 @@ describe("dpopModule — integration via createApp", () => {
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("DPoP", proof)
-			.set("Host", "as.example")
+			// A Host header that is NOT the issuer. Before #292 this decided
+			// what the proof had to match; now it is ignored, and the request
+			// succeeds anyway.
+			.set("Host", "attacker.example")
 			.send({});
 
 		expect(res.status).toBe(200);
@@ -301,7 +323,10 @@ describe("dpopModule — integration via createApp", () => {
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("DPoP", proof)
-			.set("Host", "as.example")
+			// A Host header that is NOT the issuer. Before #292 this decided
+			// what the proof had to match; now it is ignored, and the request
+			// succeeds anyway.
+			.set("Host", "attacker.example")
 			.send({});
 
 		expect(res.status).toBe(200);
@@ -386,5 +411,32 @@ describe("dpopModule — integration via createApp", () => {
 		expect(received.tokenBinding).toBeUndefined();
 
 		await handle.dispose();
+	});
+
+	it("refuses to build a mechanism when no canonical issuer is configured (#292)", () => {
+		// The origin every proof's `htu` is checked against is the deployment's
+		// own. Without one the AS would have to rebuild it from the request's
+		// forwarded headers — the reconstruction #292 removed — so refuse to
+		// construct rather than run with a binding the caller controls both
+		// sides of.
+		//
+		// Exercised through the contributed factory rather than `createApp`,
+		// because `createApp` parses `CoreConfigSchema` first and would reject
+		// the config before the module is reached. This guard is what protects
+		// a composition root that builds the mechanism itself.
+		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
+		const oauth = (boot.config as { oauth: Record<string, unknown> }).oauth;
+		delete oauth.jwt;
+
+		expect(() => buildMechanism(boot.config)).toThrow(/oauth\.jwt\.issuer/);
+	});
+
+	it("refuses to build a mechanism when the issuer is a bare host rather than a URL (#292)", () => {
+		// The shape a `Host` header would have supplied. Deriving an origin
+		// from it is exactly what this change stopped doing.
+		const boot = makeBoot(true) as unknown as { config: Record<string, unknown> };
+		(boot.config as { oauth: { jwt: unknown } }).oauth.jwt = { issuer: "as.example:3000" };
+
+		expect(() => buildMechanism(boot.config)).toThrow(/issuer/i);
 	});
 });

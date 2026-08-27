@@ -37,6 +37,10 @@ import {
 	MIN_SECRET_ENTROPY_BYTES,
 	measureSecretEntropyBytes,
 } from "../keys/secretEntropy.mjs";
+import {
+	checkTrustedProxyEntry,
+	describeTrustedProxyEntryRejection,
+} from "../net/trusted-proxy.mjs";
 
 /**
  * Sanity ceiling for a duration expressed in whole seconds: one year.
@@ -327,6 +331,113 @@ const authorizeSchema = z.preprocess((raw, ctx) => {
 }, z.object({}).optional());
 
 /**
+ * Sanity ceiling for `http.trustProxy` expressed as a hop count.
+ *
+ * A typo guard, not a policy: no HTTP path has 256 reverse proxies in front of
+ * it, and a large number written to mean "trust everything" produces exactly
+ * the blanket trust `true` expresses — except silently, and without the
+ * operator having decided it. Making them write `true` keeps that decision
+ * visible in the config.
+ */
+const MAX_TRUST_PROXY_HOPS = 255;
+
+/**
+ * A decimal integer, optionally signed and optionally fractional — the shapes
+ * an environment variable can carry that are meant as a hop count. Anything
+ * else (`10.0.0.7`, `loopback`) has more than one dot or a non-digit and falls
+ * through to the address-list reading. `-1` and `1.5` are matched deliberately
+ * so they are rejected as bad hop counts rather than silently reinterpreted as
+ * one-entry address lists.
+ */
+const NUMERIC_STRING = /^-?[0-9]+(\.[0-9]+)?$/;
+
+/**
+ * Normalise whatever the config source produced into one of the three
+ * `trust proxy` shapes Express accepts.
+ *
+ * HOCON substitutes `${?HTTP_TRUST_PROXY}` as a **string**, always — the only
+ * reason the pre-#292 `z.boolean()` worked is that `@o3co/ts.hocon`'s Zod
+ * bridge coerces for a bare boolean leaf. A union gives the bridge nothing to
+ * coerce towards, so the mapping has to live here. Without it the sole
+ * documented override surface (the env var) could not express a list at all.
+ */
+const normalizeTrustProxy = (raw: unknown): unknown => {
+	if (Array.isArray(raw)) {
+		return raw.map((entry) => (typeof entry === "string" ? entry.trim() : entry));
+	}
+	if (typeof raw !== "string") return raw;
+
+	const value = raw.trim();
+	// An exported-but-empty variable is the .env / compose / ConfigMap shape
+	// that arrives as "". Fail closed rather than guessing at a policy.
+	if (value === "") return false;
+
+	const lower = value.toLowerCase();
+	if (lower === "true") return true;
+	if (lower === "false") return false;
+	if (NUMERIC_STRING.test(value)) return Number(value);
+
+	// A trailing comma is the ordinary list typo; dropping the empty tail is
+	// friendlier than reporting an "empty entry" the operator never wrote.
+	return value
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry !== "");
+};
+
+/**
+ * `http.trustProxy` — handed straight to Express's `trust proxy`.
+ *
+ * Boolean-only until #292, which meant the only way to accept `X-Forwarded-For`
+ * at all was `true`: trust the leftmost forwarded entry from **whoever opened
+ * the connection**. Anyone able to reach the process directly, or through one
+ * more hop than the deployment accounted for, could then choose `req.ip` and
+ * forge a rate-limit identity.
+ *
+ * The four accepted shapes are Express's own:
+ *
+ *   - `false` — trust nothing; `req.ip` is the socket peer. The default.
+ *   - `true` — trust every hop. Still available, still blanket, and correct
+ *     only when nothing but the proxy can route to this process.
+ *   - a **hop count** — trust that many hops back from the socket peer.
+ *   - an **address list** — IP literals, CIDR ranges, or the named ranges
+ *     (`loopback`, `linklocal`, `uniquelocal`). The only shape that expresses
+ *     *which* hop is trusted.
+ *
+ * Entries are validated against the shared vocabulary in `../net/trusted-proxy`
+ * — the same one `@o3co/auth-provider-mtls` matches its `trusted-proxies`
+ * allowlist with — so a typo fails at boot naming its index, rather than
+ * becoming a policy that silently never matches.
+ */
+const trustProxySchema = z
+	.preprocess(
+		normalizeTrustProxy,
+		z.union([
+			z.boolean(),
+			z.number().int().min(0).max(MAX_TRUST_PROXY_HOPS),
+			z
+				.array(z.string())
+				.min(
+					1,
+					"must list at least one address, CIDR range, or named range — use `false` to trust no forwarding hop",
+				),
+		]),
+	)
+	.superRefine((value, ctx) => {
+		if (!Array.isArray(value)) return;
+		value.forEach((entry, index) => {
+			const rejection = checkTrustedProxyEntry(entry);
+			if (rejection !== null) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `http.trustProxy[${index}] ${describeTrustedProxyEntryRejection(rejection)}`,
+					path: [index],
+				});
+			}
+		});
+	});
+
+/**
  * Env-var-safe boolean coercion for `enabled` fields.
  *
  * z.coerce.boolean() calls JavaScript's Boolean(value), so any non-empty string
@@ -360,7 +471,8 @@ const coerceBooleanFromEnv = z.preprocess((val) => {
 export const CoreConfigSchema = z.object({
 	http: z.object({
 		port: z.coerce.number(),
-		trustProxy: z.boolean(),
+		// #292: boolean | hop count | address list. See `trustProxySchema`.
+		trustProxy: trustProxySchema,
 		// Per-probe deadline for the readiness endpoint. Must stay well under
 		// the orchestrator's probe timeout, or a partitioned dependency reads
 		// as a slow replica rather than an unready one. Shape-only; default

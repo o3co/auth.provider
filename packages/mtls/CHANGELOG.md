@@ -4,6 +4,28 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### Added — `trusted-proxies` accepts CIDR ranges (#292)
+
+- **`oauth.mtls.trusted-proxies` now takes CIDR ranges** (`10.0.0.0/8`,
+  `fc00::/7`) and the `linklocal` / `uniquelocal` named ranges alongside the
+  existing IP literals and `loopback`. The boot-time rejection that pointed at
+  this issue is removed. A pod network is the shape operators actually have —
+  the ingress replica's address is reassigned on every restart, so enumerating
+  literals was not an option.
+
+- **The matcher itself moved to `@o3co/auth-provider-core`**
+  (`createTrustedProxyMatcher`). `src/proxy.mts` is gone; this package consumes
+  core's, which is the same definition `http.trustProxy` validates against, so
+  the two keys cannot drift into different dialects. Nothing exported from this
+  package changed — the matcher was always internal.
+
+  The two keys remain deliberately separate values: `http.trustProxy` decides
+  whether `X-Forwarded-For` may rewrite `req.ip`, and turning that on must not
+  silently start accepting forwarded client certificates. They share a
+  vocabulary, not a setting. Matching is still against
+  `req.socket.remoteAddress`, never `req.ip`.
+
+
 ### BREAKING — the certificate now comes from the TLS layer by default (#280)
 
 - **`oauth.mtls.source` defaults to `"tls-layer"`, was `"header"`.** Enabling
@@ -22,10 +44,12 @@ All notable changes to this package will be documented in this file.
   `MtlsReasonCode` variant) and logged as `mtls_untrusted_proxy_rejected` with
   the observed peer address.
 
-  Entries are the `"loopback"` keyword (`127.0.0.0/8` + `::1`) or IPv4 / IPv6
+  Entries were the `"loopback"` keyword (`127.0.0.0/8` + `::1`) or IPv4 / IPv6
   literals; an IPv4 entry also matches the IPv4-mapped form a dual-stack
-  listener reports. CIDR ranges are rejected at boot rather than silently never
-  matching — that vocabulary lands with #292.
+  listener reports. CIDR ranges were rejected at boot rather than silently never
+  matching — #292 landed that vocabulary in the same release, so see the entry
+  above: ranges and the `linklocal` / `uniquelocal` named ranges are accepted
+  now.
 
   Matched against `req.socket.remoteAddress`, never `req.ip`: `req.ip` is
   rewritten from `X-Forwarded-For` whenever Express `trust proxy` is on, so
