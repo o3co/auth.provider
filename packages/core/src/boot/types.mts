@@ -628,7 +628,7 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 23 literals, Per A2-β §6.1
+// BootErrorReason — 25 literals, Per A2-β §6.1 (+ #271)
 // ---------------------------------------------------------------------------
 
 /**
@@ -664,10 +664,11 @@ export type BootErrorReason =
 	| "grant-policy-without-issuer"
 	| "mfa-partial-wiring"
 	| "federation-stores-incomplete"
-	| "discovery-document-invalid";
+	| "discovery-document-invalid"
+	| "replica-unsafe-adapter";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — 23 total, Per A2-β §6.1
+// Per-reason *Details interfaces — 25 total, Per A2-β §6.1 (+ #271)
 // ---------------------------------------------------------------------------
 
 /** Per A2-β §6.1. */
@@ -987,6 +988,17 @@ export interface DiscoveryDocumentInvalidDetails {
 }
 
 /**
+ * A composition holds state in this process's memory that a multi-replica
+ * deployment must share, while `deployment.mode` says `"multi"` (#271).
+ * `modules` names every offending module rather than the first, so one boot
+ * attempt tells the operator everything they have to change.
+ */
+export interface ReplicaUnsafeAdapterDetails {
+	readonly reason: "replica-unsafe-adapter";
+	readonly modules: readonly string[];
+}
+
+/**
  * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
@@ -1018,7 +1030,8 @@ export type BootErrorDetails =
 	| GrantPolicyWithoutIssuerDetails
 	| MfaPartialWiringDetails
 	| FederationStoresIncompleteDetails
-	| DiscoveryDocumentInvalidDetails;
+	| DiscoveryDocumentInvalidDetails
+	| ReplicaUnsafeAdapterDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

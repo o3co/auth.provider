@@ -17,6 +17,10 @@ When running multiple instances of the standalone server behind a load balancer,
 
 **Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. Since #270 the login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; both adapters seed their own `limits.login` from it, so there is nothing to restate.
 
+**Set `DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, DPoP proof-replay detection forking. With the mode unset you get one `replica_unsafe_adapters` warning at boot instead; with `DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica.
+
+Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
+
 Other multi-replica considerations covered by the default modules:
 
 - The session store is wired via `redisSessionStoresModule`; set the corresponding session-store Redis URL (per `session.storage.redis.url`).

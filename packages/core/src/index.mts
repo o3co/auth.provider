@@ -71,7 +71,14 @@ export type {
 	UnknownContributionKindDetails,
 } from "./boot/index.mjs";
 // Boot planner — BootError catalogue. `createApp` is exported above (via app.mjs).
-export { BootError } from "./boot/index.mjs";
+// #271: replica-safety guard, exported so a custom composition root can run
+// the same check and so the module set is greppable from a deployment's tests.
+export {
+	BootError,
+	type CheckReplicaSafetyInput,
+	checkReplicaSafety,
+	REPLICA_UNSAFE_MODULES,
+} from "./boot/index.mjs";
 // Configuration
 export {
 	type AppConfig,

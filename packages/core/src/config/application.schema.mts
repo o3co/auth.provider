@@ -507,6 +507,22 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
+	// #271: how many replicas this deployment runs. Read only by the boot
+	// replica-safety guard (`checkReplicaSafety`).
+	//
+	// Deliberately `.optional()` with **no HOCON literal default**, because
+	// "unset" is a meaningful third state and a baked-in `"single"` would make
+	// it unreachable:
+	//   - `"multi"`  → boot fails if any in-memory shared store is wired
+	//   - `"single"` → the operator has declared one replica; silent
+	//   - unset      → nothing declared; one consolidated warning naming what
+	//                  is in memory and what it costs when scaled
+	// Same reasoning as `oauth.code.adapter` above, for a different key.
+	deployment: z
+		.object({
+			mode: z.enum(["single", "multi"]).optional(),
+		})
+		.optional(),
 	// Wave 5d (IH-14 + OR-M1): adapter switch for the rate limiter. Default
 	// `"memory"` lives in HOCON. Since #270 this one component serves BOTH
 	// the OAuth endpoints and `/session/login`, so `"redis"` is what makes
