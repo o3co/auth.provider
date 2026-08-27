@@ -266,6 +266,33 @@ if (supportsClaimMapping(provider)) {
 }
 ```
 
+#### Claim precedence: local wins, federated is namespaced
+
+What `mapClaims` returns is an **assertion by an upstream IdP**, not a fact about this deployment. The federation callback route therefore never merges it into the session's claims envelope. It applies one rule (#279):
+
+- **The local record is authoritative.** Any claim `extractUserClaims` read off the `User` stands; a federated value never replaces it.
+- **Three claims may fill a gap** — `email`, `name`, `picture` (`PROMOTABLE_FEDERATED_CLAIMS`), and only where the local record left the field absent, and only when the federated value is a string.
+- **Everything else is namespaced** under `claims.federated[<providerName>]`, verbatim and complete — including values that were also promoted and values that lost to a local claim.
+
+So an IdP cannot contribute `groups` (nor a `roles` / `scope` / `permissions` an adapter invents): those reach `claims.federated[<providerName>]` and nothing else. `filterClaimsByScope` never emits provider-specific claims, so nothing under the namespace can appear in an id_token or `/userinfo` response by accident.
+
+`emailVerified` is excluded from promotion for the same reason. Since #297 it is Store-owned state that `oauth.requireEmailVerified` can read as a gate on token issuance, and an upstream IdP verifies an address *it* controls — the `provider:sub` linkage never forces that to be the local account's address. A deployment that wants to act on the assertion reads `claims.federated[<providerName>].emailVerified` and publishes the result on the `User`, which is where #297 put the field.
+
+```ts
+// user: { id, username, email: "alice@corp.example", groups: ["staff"] }
+// mapClaims → { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] }
+{
+  email: "alice@corp.example",          // local wins
+  groups: ["staff"],                    // federated groups cannot reach here
+  picture: "https://…",                 // gap filled
+  federated: {
+    google: { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] },
+  },
+}
+```
+
+The merge is exported as `mergeFederatedClaims` for consumers that build a claims envelope of their own.
+
 ---
 
 ### `SupportsRefresh` (optional capability)

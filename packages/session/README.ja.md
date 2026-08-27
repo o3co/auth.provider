@@ -226,6 +226,33 @@ if (supportsClaimMapping(provider)) {
 }
 ```
 
+#### クレームの優先順位: ローカルが勝ち、federated は名前空間に隔離される
+
+`mapClaims` の戻り値は上流 IdP による**主張**であって、この deployment にとっての事実ではない。federation callback route はそれをセッションのクレーム envelope にマージしない。適用されるルールは 1 つだけ (#279):
+
+- **ローカルレコードが権威**。`extractUserClaims` が `User` から読んだクレームは federated 値に置き換えられない。
+- **ギャップを埋められるのは 3 つだけ** — `email` / `name` / `picture` (`PROMOTABLE_FEDERATED_CLAIMS`)。ローカルレコードがその項目を持たず、かつ federated 値が string の場合に限る。
+- **それ以外はすべて名前空間へ**。`claims.federated[<providerName>]` に、昇格した値も・ローカルに負けた値も含めて完全な形で記録される。
+
+したがって IdP は `groups`（adapter が勝手に生やした `roles` / `scope` / `permissions` も同様）を提供できない。それらは `claims.federated[<providerName>]` にのみ到達する。`filterClaimsByScope` は provider 固有クレームを一切出力しないため、名前空間配下の値が id_token や `/userinfo` に紛れ込むこともない。
+
+`emailVerified` が昇格対象から外れているのも同じ理由による。#297 以降これは Store 所有の状態であり、`oauth.requireEmailVerified` がトークン発行のゲートとして読む。上流 IdP が検証しているのは *IdP 自身が管理するアドレス*であって、`provider:sub` によるリンクはそれがローカルアカウントのアドレスと一致することを保証しない。IdP の主張を採用したい deployment は `claims.federated[<providerName>].emailVerified` を読み、その結果を `User` に publish する — #297 がこのフィールドを置いた場所がそこだからである。
+
+```ts
+// user: { id, username, email: "alice@corp.example", groups: ["staff"] }
+// mapClaims → { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] }
+{
+  email: "alice@corp.example",          // ローカルが勝つ
+  groups: ["staff"],                    // federated groups はここに到達できない
+  picture: "https://…",                 // ギャップを埋めた
+  federated: {
+    google: { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] },
+  },
+}
+```
+
+このマージ処理は `mergeFederatedClaims` として export されている。独自にクレーム envelope を組み立てる consumer はこれを使える。
+
 ---
 
 ### `SupportsRefresh` (オプショナル capability)

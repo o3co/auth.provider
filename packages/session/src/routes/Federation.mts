@@ -25,6 +25,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
 import { type FederationProvider, supportsClaimMapping } from "../federations/types.mjs";
@@ -315,11 +316,15 @@ export const createRouter = (
 				});
 			}
 
-			// Build claims: user base claims merged with provider-specific mapped claims
-			const claims = {
-				...extractUserClaims(user),
-				...(supportsClaimMapping(provider) ? provider.mapClaims(profile) : {}),
-			};
+			// Build claims. The local record is authoritative; the provider's mapped
+			// claims may fill a promotable field it left absent, and are otherwise
+			// recorded under `claims.federated[<provider>]` rather than merged into
+			// the envelope this deployment authorizes on (#279).
+			const claims = mergeFederatedClaims({
+				localClaims: extractUserClaims(user),
+				providerName: provider.name,
+				mappedClaims: supportsClaimMapping(provider) ? provider.mapClaims(profile) : undefined,
+			});
 
 			const sid = randomUUID();
 			// Rebind: from this point onward, every log call carries `provider` AND `sid`.

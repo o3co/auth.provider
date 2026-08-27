@@ -38,6 +38,13 @@ export {
 	DEFAULT_CSRF_TTL_SECONDS,
 	MAX_CSRF_TTL_SECONDS,
 } from "./csrf.mjs";
+// #279 — federated claims never outrank local ones; see claim-precedence.mts.
+export type { FederatedClaimsNamespace } from "./federations/claim-precedence.mjs";
+export {
+	FEDERATED_CLAIMS_KEY,
+	mergeFederatedClaims,
+	PROMOTABLE_FEDERATED_CLAIMS,
+} from "./federations/claim-precedence.mjs";
 export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect, validateRedirect } from "./federations/helpers.mjs";

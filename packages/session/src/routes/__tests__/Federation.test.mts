@@ -808,8 +808,8 @@ describe("Federation routes", () => {
 			expect(uss.delete).toHaveBeenCalledOnce();
 		});
 
-		// Test 13 — SupportsClaimMapping: mapClaims merged into UserSession.claims
-		it("SupportsClaimMapping: mapClaims output is merged into UserSession.claims", async () => {
+		// Test 13 — SupportsClaimMapping: mapClaims is namespaced, local claims win (#279)
+		it("SupportsClaimMapping: local claims win and the mapped snapshot is namespaced", async () => {
 			const mapClaimsMock = vi.fn(() => ({
 				email: "mapped@example.com",
 				name: "Mapped Name",
@@ -845,10 +845,117 @@ describe("Federation routes", () => {
 			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
 				claims: Record<string, unknown>;
 			};
-			// mapClaims values override extractUserClaims for shared keys
-			expect(createArg.claims.email).toBe("mapped@example.com");
-			expect(createArg.claims.name).toBe("Mapped Name");
+			// #279: the local record is authoritative for what it declares …
+			expect(createArg.claims.email).toBe("user@example.com");
+			expect(createArg.claims.name).toBe("Alice");
+			// … and federation fills only what it left absent.
 			expect(createArg.claims.picture).toBe("https://cdn.example.com/pic.jpg");
+			// The IdP's assertion is kept verbatim, out of the envelope.
+			expect(createArg.claims.federated).toEqual({
+				test: {
+					email: "mapped@example.com",
+					name: "Mapped Name",
+					picture: "https://cdn.example.com/pic.jpg",
+				},
+			});
+		});
+
+		// #279 — a federated provider must not be able to grant local authorization.
+		it("never lets mapClaims write an authorization-bearing claim", async () => {
+			const mapClaimsMock = vi.fn(() => ({
+				groups: ["admin"],
+				roles: ["superuser"],
+				scope: "admin",
+			}));
+			const provider: FederationProvider & { mapClaims: typeof mapClaimsMock } = {
+				...makeFakeProvider(),
+				mapClaims: mapClaimsMock,
+			};
+			const providers = new Map<string, FederationProvider>([["test", provider]]);
+
+			// The local record carries no groups at all — the escalation this closes
+			// is not "overwrite", it is "grant from nothing".
+			const repo = makeUserRepository({ id: "user-1", username: "alice" });
+			const uss = makeUserSessionStore();
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userRepository: repo,
+				userSessionStore: uss,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+
+			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+				claims: Record<string, unknown>;
+			};
+			expect(createArg.claims.groups).toBeUndefined();
+			expect(createArg.claims.roles).toBeUndefined();
+			expect(createArg.claims.scope).toBeUndefined();
+			expect(createArg.claims.federated).toEqual({
+				test: { groups: ["admin"], roles: ["superuser"], scope: "admin" },
+			});
+		});
+
+		// #279 + #297 — an upstream assertion of verification is not local verification.
+		it("never lets mapClaims set emailVerified", async () => {
+			const mapClaimsMock = vi.fn(() => ({
+				email: "attacker@idp.example.com",
+				emailVerified: true,
+			}));
+			const provider: FederationProvider & { mapClaims: typeof mapClaimsMock } = {
+				...makeFakeProvider(),
+				mapClaims: mapClaimsMock,
+			};
+			const providers = new Map<string, FederationProvider>([["test", provider]]);
+
+			const repo = makeUserRepository({
+				id: "user-1",
+				username: "alice",
+				email: "user@example.com",
+				emailVerified: false,
+			});
+			const uss = makeUserSessionStore();
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userRepository: repo,
+				userSessionStore: uss,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+
+			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+				claims: Record<string, unknown>;
+			};
+			expect(createArg.claims.emailVerified).toBe(false);
+			expect(createArg.claims.email).toBe("user@example.com");
+		});
+
+		// A provider without mapClaims must not gain a `federated` key.
+		it("writes no federated namespace for a provider without mapClaims", async () => {
+			const providers = new Map([["test", makeFakeProvider()]]);
+			const repo = makeUserRepository({ id: "user-1", username: "alice", groups: ["staff"] });
+			const uss = makeUserSessionStore();
+
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userRepository: repo,
+				userSessionStore: uss,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+
+			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+				claims: Record<string, unknown>;
+			};
+			expect(createArg.claims).toEqual({ groups: ["staff"] });
 		});
 
 		// Regression: exchangeCode must receive the configured redirectUri, not ""
