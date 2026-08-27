@@ -32,7 +32,7 @@ import {
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
 import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
-import { pkceMethodsForClient } from "./pkce.mjs";
+import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
 export const createAuthorizationGrant = (
 	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
@@ -201,16 +201,22 @@ export const createAuthorizationGrant = (
 			// code carrying neither challenge nor method is unredeemable — by a
 			// confidential client too. `/authorize` no longer mints one, so
 			// reaching here means a code issued before the upgrade or by a
-			// custom CodeRepository. `pkce.required` is `true` by construction
-			// (see ResolvedPkceOptions); it is read rather than assumed so this
-			// endpoint demonstrably consults the same object `/authorize` does.
+			// custom CodeRepository.
+			//
+			// Unconditional, deliberately. `ResolvedPkceOptions.required` is the
+			// literal `true`, so gating this on it would be a branch that cannot
+			// take its other path — dead code reading as though PKCE were still
+			// switchable here. The type is the guarantee; the runtime read that
+			// ties this endpoint to `/authorize` is `pkceMethodsForClient(pkce, …)`
+			// below, which consults the very object `/authorize` consults.
 			//
 			// Ordered AFTER the corrupt-shape guard above on purpose: a record
 			// that carries a challenge but no method is a storage defect, not a
 			// client that skipped PKCE, and it keeps its own `invalid_grant` /
 			// "invalid code" answer rather than being relabelled as a missing
 			// challenge the client never actually omitted.
-			if (pkce.required && !codeData.code_challenge_method) {
+			const challengeMethod = codeData.code_challenge_method;
+			if (!challengeMethod) {
 				return {
 					result: {
 						status: 400,
@@ -220,106 +226,91 @@ export const createAuthorizationGrant = (
 				};
 			}
 
-			// Validate code_verifier using code data from repository
-			if (codeData.code_challenge_method) {
-				// SF-3 (v0.5.1): a code record with `code_challenge_method` set
-				// but no `code_challenge` is structurally invalid — the two are a
-				// pair persisted together at /authorize. Pre-SF-3 this state was
-				// silently accepted because `verifier !== undefined` is always
-				// true (the comparison "passed" for the wrong reason). Now that
-				// `constantTimeStringEqual` requires both arguments to be
-				// strings, the malformed shape is rejected explicitly. Reject as
-				// invalid_request; the code is consumed already so no replay risk.
-				if (typeof codeData.code_challenge !== "string") {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "code_challenge missing on code record",
-						},
-					};
-				}
-				// #273: the method must be one THIS client may use — `S256`,
-				// plus `plain` only for a registration that opted in. Same
-				// `pkceMethodsForClient` call `/authorize` made when it minted
-				// the code, against the same registration, so a code this AS
-				// issued is never refused here for its method.
-				if (
-					!pkceMethodsForClient(pkce, ctx.authenticatedClient).includes(
-						codeData.code_challenge_method,
-					)
-				) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: `code_challenge_method "${codeData.code_challenge_method}" is not supported`,
-						},
-					};
-				}
+			// Validate code_verifier against the code record. Unconditional and
+			// un-nested: this used to sit inside `if (codeData.code_challenge_method)`,
+			// the shape from when PKCE was optional and a code could legitimately
+			// carry no method. The mandatory check above returns for exactly that
+			// case now, so the wrapper could never take its false path.
+			//
+			// SF-3 (v0.5.1): a code record with `code_challenge_method` set
+			// but no `code_challenge` is structurally invalid — the two are a
+			// pair persisted together at /authorize. Pre-SF-3 this state was
+			// silently accepted because `verifier !== undefined` is always
+			// true (the comparison "passed" for the wrong reason). Now that
+			// `constantTimeStringEqual` requires both arguments to be
+			// strings, the malformed shape is rejected explicitly. Reject as
+			// invalid_request; the code is consumed already so no replay risk.
+			if (typeof codeData.code_challenge !== "string") {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "code_challenge missing on code record",
+					},
+				};
+			}
+			// #273: the method must be one THIS client may use — `S256`,
+			// plus `plain` only for a registration that opted in. Same
+			// `pkceMethodsForClient` call `/authorize` made when it minted
+			// the code, against the same registration, so a code this AS
+			// issued is never refused here for its method.
+			if (!pkceMethodsForClient(pkce, ctx.authenticatedClient).includes(challengeMethod)) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: `code_challenge_method "${challengeMethod}" is not supported`,
+					},
+				};
+			}
 
-				if (!code_verifier) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "code_verifier required",
-						},
-					};
-				}
-				// RFC 7636: must be 43-128 characters, unreserved characters only
-				if (!/^[A-Za-z0-9\-._~]{43,128}$/.test(code_verifier)) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "invalid code_verifier format",
-						},
-					};
-				}
-				switch (codeData.code_challenge_method) {
-					case "S256": {
-						const hash = crypto.createHash("sha256").update(code_verifier).digest();
-						const base64url = hash.toString("base64url");
-						// SF-3 + MIN-4 (v0.5.1): timing-safe compare. Replaces a
-						// short-circuit `!==` whose per-byte timing leaked progress
-						// of a candidate verifier against the stored challenge —
-						// see RFC 7636 §4.1 + OAuth 2.1 BCP §4.5.
-						if (!constantTimeStringEqual(base64url, codeData.code_challenge)) {
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "invalid code_verifier",
-								},
-							};
-						}
-						break;
-					}
-					case "plain":
-						// SF-3 + MIN-4 (v0.5.1): timing-safe compare on the plain
-						// branch as well — the same timing-leak applies regardless
-						// of whether the stored value is a challenge digest (S256)
-						// or the raw verifier (plain).
-						if (!constantTimeStringEqual(code_verifier, codeData.code_challenge)) {
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "invalid code_verifier",
-								},
-							};
-						}
-						break;
-					default:
-						return {
-							result: {
-								status: 400,
-								error: "invalid_request",
-								errorDescription: "invalid code_challenge_method",
-							},
-						};
-				}
+			if (!code_verifier) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "code_verifier required",
+					},
+				};
+			}
+			// RFC 7636: must be 43-128 characters, unreserved characters only
+			if (!/^[A-Za-z0-9\-._~]{43,128}$/.test(code_verifier)) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "invalid code_verifier format",
+					},
+				};
+			}
+			// #273: `pkceMethodsForClient` admits exactly `S256` and `plain`,
+			// and the allowlist check above already refused anything else —
+			// against a frozen constant in `grants/pkce.mts`, not an
+			// operator-supplied list. So this is a two-way choice, not a
+			// switch with a `default` guard against operator/switch
+			// divergence: that divergence used to be reachable through the
+			// `pkce.supportedMethods` knob, and #273 removed the knob.
+			// `pkce.test.mts` pins the admissible set to exactly these two,
+			// so growing it without revisiting this comparison fails there.
+			//
+			// For `S256` the stored challenge is the digest of the verifier;
+			// for `plain` it is the verifier itself (RFC 7636 §4.2).
+			const expectedChallenge =
+				challengeMethod === PKCE_METHOD_S256
+					? crypto.createHash("sha256").update(code_verifier).digest("base64url")
+					: code_verifier;
+			// SF-3 + MIN-4 (v0.5.1): timing-safe compare, on both methods —
+			// a short-circuit `!==` leaks per-byte progress of a candidate
+			// verifier against the stored challenge (RFC 7636 §4.1, OAuth 2.1
+			// BCP §4.5). One call site now instead of two identical ones.
+			if (!constantTimeStringEqual(expectedChallenge, codeData.code_challenge)) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "invalid code_verifier",
+					},
+				};
 			}
 
 			// TODO-F-3: sid from the code record — written at /authorize time by the

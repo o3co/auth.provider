@@ -38,7 +38,6 @@ export const PKCE_METHOD_PLAIN = "plain";
 export const PKCE_METHOD_ABSENT_DEFAULT = PKCE_METHOD_PLAIN;
 
 const S256_ONLY: readonly string[] = Object.freeze([PKCE_METHOD_S256]);
-const S256_AND_PLAIN: readonly string[] = Object.freeze([PKCE_METHOD_S256, PKCE_METHOD_PLAIN]);
 
 /**
  * The resolved PKCE policy — the ONE object `/authorize` (through
@@ -112,16 +111,15 @@ export interface PkceClientView {
 export const pkceMethodsForClient = (
 	policy: ResolvedPkceOptions,
 	client: PkceClientView | null | undefined,
-): readonly string[] => {
-	if (client?.allowPlainPkce !== true) return policy.supportedMethods;
-	// The opt-in is additive, and `plain` is the only thing it can add. The
-	// `includes` guard keeps the result stable if the baseline ever grows.
-	return policy.supportedMethods.includes(PKCE_METHOD_PLAIN)
-		? policy.supportedMethods
-		: policy.supportedMethods === S256_ONLY
-			? S256_AND_PLAIN
-			: Object.freeze([...policy.supportedMethods, PKCE_METHOD_PLAIN]);
-};
+): readonly string[] =>
+	// The opt-in is additive: it appends `plain` to whatever baseline the
+	// policy admits, so the widening stays correct if that baseline ever
+	// changes. Derived from `policy` on both paths rather than returning a
+	// second module constant — that is what makes "/authorize and /token read
+	// one object" true of the widened list as well as the baseline.
+	client?.allowPlainPkce === true
+		? Object.freeze([...policy.supportedMethods, PKCE_METHOD_PLAIN])
+		: policy.supportedMethods;
 
 /**
  * The `pkce` config blocks already reported, keyed by the identity of the
