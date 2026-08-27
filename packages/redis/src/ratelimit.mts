@@ -19,13 +19,28 @@ interface RedisRateLimiterConfig {
 	client?: RateLimiterClient;
 }
 
+/**
+ * Whether a value is usable as a `limit` or `windowSeconds`.
+ *
+ * Both must be positive integers, and the check lives here rather than only in
+ * `rateLimitSpecSchema` because `redisRateLimiterBuilder` accepts a config
+ * object that never passed the schema. A `windowSeconds` of 0 would reach
+ * `EXPIRE key 0`, which *deletes* the key — every request would then see a
+ * count of 1 and the limiter would silently never limit anything. A
+ * non-positive `limit` denies every request instead. Neither can be what the
+ * operator meant, so a spec carrying one is dropped and the caller falls back
+ * to `defaultLimit`.
+ */
+const isPositiveInteger = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value) && value > 0;
+
 function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
 	if (raw == null || typeof raw !== "object") return {};
 	const result: Record<string, RateLimitSpec> = {};
 	for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
 		if (v && typeof v === "object" && "limit" in v && "windowSeconds" in v) {
 			const spec = v as { limit: unknown; windowSeconds: unknown };
-			if (typeof spec.limit === "number" && typeof spec.windowSeconds === "number") {
+			if (isPositiveInteger(spec.limit) && isPositiveInteger(spec.windowSeconds)) {
 				result[k] = { limit: spec.limit, windowSeconds: spec.windowSeconds };
 			}
 		}
@@ -45,24 +60,38 @@ interface CreateRedisRateLimiterOptions {
 }
 
 /**
- * Redis-backed RateLimiter. Atomic INCR with TTL set on first hit. Consumer
- * passes their own redis client because RateLimiter has no dispose
+ * Redis-backed RateLimiter. One atomic increment-and-expire per check, via
+ * `RateLimiterClient.incrementWithTtl`.
+ *
+ * It used to be `INCR` followed by a separate `EXPIRE`, issued only when the
+ * count came back as 1. A process death or an `EXPIRE` error in between left
+ * the key with no TTL, so its counter never reset and every later window saw a
+ * count above the limit — that client was 429'd permanently, and `failMode`
+ * never engaged because the check kept succeeding, it just kept answering
+ * "denied" (#269).
+ *
+ * Consumer passes their own redis client because RateLimiter has no dispose
  * lifecycle hook — client lifetime lives in the composition root alongside
  * other redis users.
  */
 export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
 	const limits = normalizeLimits(opts.limits);
-	const defaultLimit: RateLimitSpec = opts.defaultLimit ?? { limit: 60, windowSeconds: 60 };
+	// `defaultLimit` gets the same screening as the per-prefix specs: it is the
+	// fallback every unmatched key lands on, so a bad one is worse, not better.
+	const providedDefault = opts.defaultLimit;
+	const defaultLimit: RateLimitSpec =
+		providedDefault !== undefined &&
+		isPositiveInteger(providedDefault.limit) &&
+		isPositiveInteger(providedDefault.windowSeconds)
+			? providedDefault
+			: { limit: 60, windowSeconds: 60 };
 	const client = opts.client;
 
 	return {
 		kind: "redis",
 		async check(key) {
 			const spec = limits[keyPrefix(key)] ?? defaultLimit;
-			const count = await client.incr(key);
-			if (count === 1) {
-				await client.expire(key, spec.windowSeconds);
-			}
+			const count = await client.incrementWithTtl(key, spec.windowSeconds);
 			if (count > spec.limit) {
 				return {
 					allowed: false,

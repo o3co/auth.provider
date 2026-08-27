@@ -251,12 +251,46 @@ export interface FederationTokenStoreClient {
 // --- RateLimiterClient -----------------------------------------------------
 
 /**
- * Backing client for RateLimiter adapters. Declares only `incr` and `expire`
- * — the two methods `createRedisRateLimiter` consumes.
+ * Backing client for RateLimiter adapters. Declares one method, because the
+ * increment and its expiry have to happen together (#269).
+ *
+ * This used to be `incr` + `expire`, with the limiter calling `expire` only
+ * when `incr` returned 1. A process death or an `expire` error in between left
+ * the key with **no TTL at all**, so it never reset: every later window saw a
+ * count above the limit and that key's client was 429'd permanently. The
+ * `failMode` policy could not save it either — the check itself succeeded, it
+ * just kept answering "denied".
+ *
+ * Collapsing the pair into one method moves atomicity from the caller's
+ * discipline into the contract, where an implementation cannot get it wrong by
+ * omission.
  */
 export interface RateLimiterClient {
-	incr(key: string): Promise<number>;
-	expire(key: string, seconds: number): Promise<number>;
+	/**
+	 * Increment `key`'s counter and return the new value, ensuring the key
+	 * carries a TTL — **atomically**, as one indivisible operation.
+	 *
+	 * Required behaviour:
+	 *
+	 *   - increment the counter, creating the key at 1 when absent
+	 *   - if the key has no expiry, set it to `ttlSeconds`
+	 *   - if the key already has one, leave it alone: the window starts at the
+	 *     first request, and refreshing it on every hit would let a steady
+	 *     stream of traffic hold a counter open indefinitely
+	 *   - return the post-increment count
+	 *
+	 * Setting the expiry when it is *missing* rather than only when the count
+	 * is 1 is what repairs a key already stranded without one — a count-based
+	 * guard never fires for such a key, because its count never returns to 1.
+	 *
+	 * Lua is the obvious implementation (see `makeIoredisClients`) but is not
+	 * required; anything indivisible satisfies the contract.
+	 *
+	 * @param ttlSeconds Window length. Always a positive integer — callers
+	 *   reject non-positive specs, because `EXPIRE key 0` deletes the key and
+	 *   would turn the limiter into a no-op.
+	 */
+	incrementWithTtl(key: string, ttlSeconds: number): Promise<number>;
 }
 
 // --- CodeRepositoryClient --------------------------------------------------

@@ -68,6 +68,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **The Redis rate limiter's increment and expiry are now one atomic operation — a failed `EXPIRE` no longer 429s a client forever (`@o3co/auth-provider-redis`).** `check` ran `INCR`, then a separate `EXPIRE` **only when the count came back as 1**. A process death or an `EXPIRE` error in between left the key with no TTL at all, so its counter never reset: every later window saw a count above the limit and that key's client was rate-limited permanently. `failMode` could not rescue it either — the check itself succeeded, it just kept answering "denied" — so the deployment had a silently, indefinitely blocked client and a limiter that looked healthy.
+
+  `RateLimiterClient`'s `incr` + `expire` pair collapses into a single `incrementWithTtl(key, ttlSeconds)`, moving atomicity out of the caller's discipline and into the contract, where an implementation cannot get it wrong by omission. The ioredis client implements it with a Lua script, alongside the compare-and-delete script already in that file:
+
+  ```lua
+  local count = redis.call('INCR', KEYS[1])
+  if redis.call('TTL', KEYS[1]) < 0 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+  end
+  return count
+  ```
+
+  The expiry is established whenever the key has **none**, rather than only on the first hit. That is what **repairs** a key already stranded without a TTL by the previous implementation — a count-based guard never fires for one, because its count never returns to 1 — so a deployment upgrading into this fix unsticks its blocked clients within one window instead of needing the keys deleted by hand. An existing expiry is left alone, so a steady stream of requests cannot hold a window open by refreshing it. `TTL < 0` rather than `EXPIRE ... NX` because the NX flag is Redis 7.0+ and this package runs against whatever Redis the consumer has.
+
+  The check also costs **one** round trip now instead of two on a window's first request.
+
+  Adjacent hardening in the same function: `limit` and `windowSeconds` are screened as positive integers, and a spec failing that falls back to `defaultLimit`. `rateLimitSpecSchema` already required it, but `redisRateLimiterBuilder` accepts a config object that never passed the schema — and `windowSeconds: 0` reaches `EXPIRE key 0`, which *deletes* the key, so every request would see a count of 1 and the limiter would silently never limit anything. `defaultLimit` is screened the same way, being the fallback every unmatched key lands on.
+
+  **Migration:** breaking for anyone with a **custom** `RateLimiterClient` implementation — implement `incrementWithTtl` in place of `incr`/`expire`. The contract requires the operation to be indivisible but not to use Lua; `SET key 0 EX ttl NX` followed by `INCR`, or a `WATCH`/`MULTI` transaction, satisfies it equally. Deployments using the bundled ioredis client (`makeIoredisClients`) need no change.
+
 - **A Redis blip no longer crashes the process — the node-redis session client and every duplicated ioredis connection now have `error` listeners (`@o3co/auth-provider-session`, `@o3co/auth-provider-redis`).** node-redis emits `error` on socket failures even while it is happily auto-reconnecting, and an EventEmitter `error` with no listener throws. The session store's client was created and connected with no listener anywhere, and `session.storage.type = "redis"` is the shipped default — so a Redis failover or maintenance blip took down the identity provider, and the restart reconnected into the same flapping Redis. The listener is now attached **before** `connect()`, since a connection failing during the handshake emits while `connect()` is still in flight.
 
   The same crash class was open on a hotter path. `refreshTokenFamilyClient.duplicate()` opens a fresh ioredis connection per refresh rotation, and ioredis `duplicate()` copies options but **not** event listeners — every duplicate started with zero `error` listeners. Those connections never leave the wrapper, so `makeIoredisClients` now attaches the listener itself; the connection the caller passes in stays the caller's to instrument.
