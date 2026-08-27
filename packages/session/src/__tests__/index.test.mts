@@ -80,4 +80,19 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		const mod = await import("#/index.mjs");
 		expect((mod as Record<string, unknown>).SetupPassportContext).toBeUndefined();
 	});
+
+	// #279 — the federated claim precedence rule is part of the public surface so
+	// a deployment can assert on it (and on the promotable set) from its own tests.
+	it("exports the federated claim precedence surface", async () => {
+		const mod = await import("#/index.mjs");
+		expect(typeof (mod as { mergeFederatedClaims?: unknown }).mergeFederatedClaims).toBe(
+			"function",
+		);
+		expect((mod as { FEDERATED_CLAIMS_KEY?: unknown }).FEDERATED_CLAIMS_KEY).toBe("federated");
+		expect((mod as { PROMOTABLE_FEDERATED_CLAIMS?: unknown }).PROMOTABLE_FEDERATED_CLAIMS).toEqual([
+			"email",
+			"name",
+			"picture",
+		]);
+	});
 });
