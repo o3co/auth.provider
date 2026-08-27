@@ -45,7 +45,12 @@ export interface GithubProviderConfig {
 	clientId: string;
 	clientSecret: string;
 	callbackURL: string;
-	/** Cookie / session domain used to validate redirect URLs (e.g. ".example.com"). Optional. */
+	/**
+	 * Exact URLs a consumer-supplied `redirect_to` may name. Absent or empty
+	 * means no `redirect_to` is accepted at all — see `createFederationRedirectPolicy`.
+	 */
+	redirectAllowlist?: readonly string[];
+	/** Cookie / session domain; every non-loopback `redirectAllowlist` entry must be inside it. Optional. */
 	sessionDomain?: string;
 	/** URL of the auth-callback page (used to build the post-login redirect). Optional. */
 	authCallbackUrl?: string;

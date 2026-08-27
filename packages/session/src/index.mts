@@ -47,15 +47,26 @@ export {
 } from "./federations/claim-precedence.mjs";
 export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
-export { resolveCallbackRedirect, validateRedirect } from "./federations/helpers.mjs";
+export { resolveCallbackRedirect } from "./federations/helpers.mjs";
 export { codeChallenge } from "./federations/pkce.mjs";
 // A5 redirect-policy split (per A5 §5.2/§5.3/§9)
 export type {
 	FederationRedirectPolicy,
 	FederationRedirectPolicyConfig,
 	FederationRedirectPolicyFactory,
+	RedirectRejection,
 } from "./federations/redirect-policy.mjs";
-export { createFederationRedirectPolicy } from "./federations/redirect-policy.mjs";
+// `validateRedirect` is deliberately NOT exported: the standalone helper
+// derived its answer from `sessionDomain` alone and accepted every http(s) URL
+// when that was unset (#278). Redirect validation now exists only as a policy
+// built from an allowlist. The pieces below are exported so a custom policy can
+// reuse the same rules and rejection vocabulary instead of inventing its own.
+export {
+	createFederationRedirectPolicy,
+	describeRedirectRejection,
+	isLoopbackHostname,
+	MAX_REDIRECT_URL_LENGTH,
+} from "./federations/redirect-policy.mjs";
 export type {
 	EndSessionRequest,
 	EndSessionResult,

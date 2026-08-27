@@ -436,6 +436,57 @@ federations {
 
 Mixed shape — top-level fields alongside a nested sub-section — is rejected with a clear error at startup.
 
+### Redirect allowlist (`redirectAllowlist`)
+
+`GET /session/oauth/federation/:name` accepts a `redirect_to` query parameter
+naming where the browser lands after the callback. Every value it may name has
+to be listed:
+
+```hocon
+federations {
+  google {
+    enabled = true
+    # …credentials…
+
+    redirectAllowlist = [
+      "https://app.example.com/welcome"
+      "https://app.example.com/account/linked"
+      "http://localhost:5173/welcome"      # local dev front-end
+    ]
+
+    sessionDomain    = ".example.com"
+    authCallbackUrl  = "https://app.example.com/auth/callback"
+    clientUrl        = "https://app.example.com/"
+  }
+}
+```
+
+Four rules are worth knowing before writing the list:
+
+- **Matching is exact.** Scheme, host, port, path, query and fragment all
+  count. Only case, the default port, `..` segments and percent-encoding are
+  normalized away. There is no wildcard, prefix or subdomain matching — an
+  entry does not admit its own siblings, and a target that carries dynamic
+  query parameters cannot be listed as a family. Make it a fixed path and carry
+  the variable part in the session.
+- **An absent or empty list refuses every `redirect_to`.** That is the right
+  setting for a deployment that does not use the parameter; it is not a way to
+  allow everything. Before #278 an unset allowlist accepted any http(s) URL,
+  which made the endpoint an open redirect — nothing falls back to that now.
+- **`https` is required, except on loopback.** `localhost`, `127.0.0.0/8` and
+  `[::1]` may use `http://`, which is what lets a local development front-end
+  and a native client's loopback listener work without a certificate. The port
+  is still matched, so list the port the client binds — RFC 8252 §7.3's
+  port-agnostic loopback comparison is not implemented here.
+- **`sessionDomain`, when set, constrains the list itself.** Every non-loopback
+  entry must be inside it, checked when the policy is built, so an entry outside
+  it fails startup rather than sitting in the config looking effective. Unset
+  `sessionDomain` if a cross-domain redirect target is genuinely intended.
+
+`authCallbackUrl` and `clientUrl` are read by `resolveCallbackRedirect`, not by
+the allowlist: the former is the bridge page a `redirect_to` is handed to, the
+latter the fallback for a callback that carries none.
+
 ### Custom federation provider
 
 Custom federations are added by writing a per-federation `defineModule(...)`

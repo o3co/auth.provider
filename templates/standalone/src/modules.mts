@@ -413,12 +413,43 @@ function getOrCreateClients(
 }
 
 /**
+ * Reads an optional string field off a federation slice.
+ *
+ * A field the operator did not set stays absent rather than becoming
+ * `undefined`, so `"sessionDomain" in config` still distinguishes the two. A
+ * field that is present but not a string throws: HOCON hands through whatever
+ * shape the file holds, and silently ignoring `sessionDomain = 42` would leave
+ * the redirect policy running with one fewer constraint than the operator
+ * wrote down.
+ */
+function optionalString(
+	slice: Record<string, unknown>,
+	field: string,
+): Record<string, string> | Record<string, never> {
+	const value = slice[field];
+	if (value === undefined || value === null) return {};
+	if (typeof value !== "string") {
+		throw new Error(`federations.google.${field} must be a string when present`);
+	}
+	return { [field]: value };
+}
+
+/**
  * Google federation config bridge — supplies the typed `googleFederationConfig`
  * ComponentMap slot from the `config.federations.google` slice.
  *
  * Per `@o3co/auth-provider-federation-google` README. Per-federation modules
  * (Phase 7 A5) consume this slot; the bridge is the standalone composition
  * root's responsibility because the slot's content is consumer-specific.
+ *
+ * #278: this used to return `{ clientId, clientSecret, callbackURL }` and stop
+ * there, dropping `redirectAllowlist` / `sessionDomain` / `authCallbackUrl` /
+ * `clientUrl` on the floor. Nothing complained — `googleFederationModule` hands
+ * this same object to `createFederationRedirectPolicy`, so the redirect policy
+ * was built from a config with none of the fields it reads, and a deployment
+ * that had configured them ran as though it had not. The generated app is the
+ * shape most operators start from, so the safe path has to be the one that
+ * works by filling in the config file.
  */
 export const googleFederationConfigModule: Module = defineModule({
 	name: "standalone:google-federation-config",
@@ -443,7 +474,33 @@ export const googleFederationConfigModule: Module = defineModule({
 					"federations.google requires clientId, clientSecret, callbackURL when enabled",
 				);
 			}
-			return { clientId, clientSecret, callbackURL };
+
+			// The allowlist is checked for shape here and for content by
+			// `createFederationRedirectPolicy`, which owns the URL rules. This
+			// only has to establish that HOCON produced a list of strings —
+			// `redirectAllowlist = "https://…"` (a bare string, the natural typo)
+			// would otherwise reach the policy as a config it cannot read.
+			const rawAllowlist = slice.redirectAllowlist;
+			let redirectAllowlist: Record<string, readonly string[]> | Record<string, never> = {};
+			if (rawAllowlist !== undefined && rawAllowlist !== null) {
+				if (!Array.isArray(rawAllowlist) || rawAllowlist.some((e) => typeof e !== "string")) {
+					throw new Error(
+						"federations.google.redirectAllowlist must be a list of URL strings, " +
+							'e.g. ["https://app.example.com/welcome"]',
+					);
+				}
+				redirectAllowlist = { redirectAllowlist: rawAllowlist as readonly string[] };
+			}
+
+			return {
+				clientId,
+				clientSecret,
+				callbackURL,
+				...redirectAllowlist,
+				...optionalString(slice, "sessionDomain"),
+				...optionalString(slice, "authCallbackUrl"),
+				...optionalString(slice, "clientUrl"),
+			};
 		},
 	},
 });
