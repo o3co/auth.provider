@@ -200,6 +200,27 @@ describe("/authorize first-party invariant — migration opt-in (#267)", () => {
 		);
 	});
 
+	it("still refuses a client explicitly marked NOT first-party", async () => {
+		// The flag is `allowUnmarkedClients`, and `firstParty: false` is not
+		// unmarked — it is a deliberate statement that this client must never
+		// receive a silent code. Admitting it during migration would weaken the
+		// invariant exactly where the operator was most explicit about it.
+		const warn = vi.fn();
+		const app = await makeApp({ firstParty: false, allowUnmarkedClients: true, warn });
+		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
+	});
+
+	it("does not warn about a client that is explicitly not first-party", async () => {
+		// `authorize_client_not_marked_first_party` would be a lie: it is marked.
+		const warn = vi.fn();
+		const app = await makeApp({ firstParty: false, allowUnmarkedClients: true, warn });
+		await authorize(app);
+		expect(warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"authorize_client_not_marked_first_party",
+		);
+	});
+
 	it("still admits a marked client without warning under the opt-in", async () => {
 		const warn = vi.fn();
 		const app = await makeApp({ firstParty: true, allowUnmarkedClients: true, warn });
