@@ -262,9 +262,20 @@ export function makeIoredisClients(
 	};
 
 	const sessionRPRegistryClient: SessionRPRegistryClient = {
-		del: (k) => io.del(k),
+		unlink: (k) => io.unlink(k),
 		hSet: (k, f, v) => io.hset(k, f, v) as Promise<number>,
-		hVals: (k) => io.hvals(k),
+		// `hscanStream` emits a flat `[field, value, field, value, …]` array per
+		// cursor; re-pair it so callers never see the flattening (#291).
+		hScanIterator: (key, opts) =>
+			(async function* () {
+				const stream = io.hscanStream(key, { count: opts?.COUNT });
+				for await (const flat of stream) {
+					const pairs = flat as string[];
+					for (let i = 0; i + 1 < pairs.length; i += 2) {
+						yield [pairs[i] as string, pairs[i + 1] as string] as const;
+					}
+				}
+			})(),
 		multi: () => buildRPRegistryMulti(io.multi()),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
 		// Returns 1 when either NX (first-write) or GT (raise) sets the TTL,
@@ -300,7 +311,7 @@ export function makeIoredisClients(
 	};
 
 	const sortedSetClient: SessionSidSortedSetClient = {
-		del: (k) => io.del(k),
+		unlink: (k) => io.unlink(k),
 		multi: () => buildSortedSetMulti(io.multi()),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
 		// See sessionRPRegistryClient.pExpireGT above for return-value rationale.
@@ -327,6 +338,25 @@ export function makeIoredisClients(
 				? io.set(k, v, "PX", ttl, "NX")
 				: io.set(k, v, "PX", ttl)) as FederationTokenStoreClient["set"],
 		del: (...keys) => io.del(...keys),
+		unlink: (...keys) => io.unlink(...keys),
+		// #291: SADD and its expiry in one MULTI/EXEC, so the pair cannot come
+		// apart and strand the index key with no TTL. `PEXPIRE … NX` +
+		// `PEXPIRE … GT` is the D-10 pair: NX bootstraps the TTL (a bare GT
+		// no-ops on a key Redis considers infinite-TTL), GT then raises it
+		// without ever truncating a further deadline. Both flags are Redis 7.0+;
+		// this package pins 7.2 LTS. MULTI rather than Lua because every command
+		// touches the same single key, which keeps it valid on Cluster too.
+		sAddWithTtl: async (key, member, ttlMs) => {
+			await io.multi().sadd(key, member).pexpire(key, ttlMs, "NX").pexpire(key, ttlMs, "GT").exec();
+		},
+		sRem: (key, member) => io.srem(key, member) as Promise<number>,
+		sScanIterator: (key, opts) =>
+			(async function* () {
+				const stream = io.sscanStream(key, { count: opts?.COUNT });
+				for await (const batch of stream) {
+					for (const member of batch as string[]) yield member;
+				}
+			})(),
 		scanIterator: ({ MATCH, COUNT }) =>
 			(async function* () {
 				const stream = io.scanStream({ match: MATCH, count: COUNT });

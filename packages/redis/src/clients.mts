@@ -164,9 +164,27 @@ export interface SessionRPRegistryMultiClient {
  * multi pipeline that `createRedisSidHash` consumes.
  */
 export interface SessionRPRegistryClient {
-	del(key: string): Promise<number>;
+	/**
+	 * Remove the key, reclaiming its memory on a background thread (Redis
+	 * `UNLINK`). This key holds every relying party registered against one
+	 * session and is deleted during logout; `DEL` would free all of them
+	 * inline on the connection every other adapter shares (#291).
+	 */
+	unlink(key: string): Promise<number>;
 	hSet(key: string, field: string, value: string): Promise<number>;
-	hVals(key: string): Promise<string[]>;
+	/**
+	 * Cursor-based iteration over the hash's field/value pairs (Redis
+	 * `HSCAN`), yielding one pair at a time.
+	 *
+	 * Replaces `hVals`, whose reply size was bounded by nothing but how many
+	 * relying parties a session had accumulated (#291). `HSCAN` guarantees
+	 * that a field present for the whole iteration is returned at least once,
+	 * so a field may be yielded more than once and consumers must de-duplicate.
+	 */
+	hScanIterator(
+		key: string,
+		opts?: { COUNT?: number },
+	): AsyncIterable<readonly [field: string, value: string]>;
 	multi(): SessionRPRegistryMultiClient;
 	pExpireAt(key: string, msTimestamp: number): Promise<number>;
 	/** Non-pipeline variant of `pExpireGT`. See multi-client for semantics. */
@@ -213,12 +231,24 @@ export interface SessionSidSortedSetMultiClient {
  * slot identities in ComponentMap).
  */
 export interface SessionSidSortedSetClient {
-	del(key: string): Promise<number>;
+	/**
+	 * Remove the key, reclaiming its memory on a background thread (Redis
+	 * `UNLINK`). This key holds every refresh-token family (or federation)
+	 * linked to one session and is deleted during logout; `DEL` would free all
+	 * of them inline on the connection every other adapter shares (#291).
+	 */
+	unlink(key: string): Promise<number>;
 	multi(): SessionSidSortedSetMultiClient;
 	pExpireAt(key: string, msTimestamp: number): Promise<number>;
 	/** Non-pipeline variant of `pExpireGT`. See multi-client for semantics. */
 	pExpireGT(key: string, msTimestamp: number): Promise<number>;
 	zAdd(key: string, entry: { score: number; value: string }, opts?: { NX: true }): Promise<number>;
+	/**
+	 * Members between the two inclusive ranks, in ascending score order.
+	 *
+	 * Callers page by rank rather than passing `0, -1`: the reply size of a
+	 * whole-set read grows with how heavily linked the session is (#291).
+	 */
 	zRange(key: string, start: number, stop: number): Promise<string[]>;
 	zRem(key: string, member: string): Promise<number>;
 }
@@ -228,9 +258,11 @@ export interface SessionSidSortedSetClient {
 /**
  * Backing client for FederationTokenStore adapters. Declares `get`, `set`
  * (two overloads: PX form, and PX+NX form for atomic insert-only),
- * variadic `del`, `scanIterator` for the cursor-based key scan used by
- * `removeBySid`, and `compareAndDelete` for atomic advisory-lock
- * release.
+ * single-key `del`, variadic `unlink` for the batched removal in
+ * `removeBySid`, the SET primitives backing the per-session key index
+ * (`sAddWithTtl` / `sRem` / `sScanIterator`), `scanIterator` for the legacy
+ * keyspace-scan migration fallback, and `compareAndDelete` for atomic
+ * advisory-lock release.
  *
  * The plain-PX `set` overload always succeeds with `"OK"` per Redis
  * `SET key value PX ms` protocol; the PX+NX overload returns `"OK"` on
@@ -241,6 +273,54 @@ export interface FederationTokenStoreClient {
 	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
 	set(key: string, value: string, mode: "PX", ttlMs: number, condition: "NX"): Promise<"OK" | null>;
 	del(...keys: string[]): Promise<number>;
+	/**
+	 * Remove `keys`, reclaiming their memory on a background thread (Redis
+	 * `UNLINK`).
+	 *
+	 * `removeBySid` deletes a whole session's federation records at once, on
+	 * the connection every other adapter in this package shares. `DEL` frees
+	 * every value inline, so that batch is time the server spends serving
+	 * nobody — a latency spike on an end-user logout, paid by every other
+	 * caller on the socket. `UNLINK` returns as soon as the keys are
+	 * unreferenced.
+	 */
+	unlink(...keys: string[]): Promise<number>;
+	/**
+	 * Add `member` to the SET at `key` and ensure the key expires no earlier
+	 * than `ttlMs` from now — **atomically**, as one indivisible operation.
+	 *
+	 * The pair must not be separable, for the reason `RateLimiterClient`
+	 * documents at length below: a process death between the add and the
+	 * expiry leaves the key with **no TTL at all**, and this key is a session's
+	 * federation index — a persistent one outlives the session it describes and
+	 * accumulates forever.
+	 *
+	 * Required expiry behaviour, matching the `PEXPIRE … NX` + `PEXPIRE … GT`
+	 * pair the sid-keyed session adapters use (D-10):
+	 *   - key has no TTL → set it (first-write bootstrap; a bare `GT` no-ops
+	 *     here, because Redis treats a non-volatile key as infinite-TTL)
+	 *   - key has a nearer TTL → raise it
+	 *   - key has a further TTL → leave it alone
+	 *
+	 * The index must outlive every envelope it points at, and every envelope
+	 * write resets that envelope's expiry to `ttlMs` from now, so the newest
+	 * write always carries the furthest deadline.
+	 *
+	 * @param ttlMs Relative expiry in milliseconds — the store's configured
+	 *   TTL, not the access token's expiry.
+	 */
+	sAddWithTtl(key: string, member: string, ttlMs: number): Promise<void>;
+	/** Remove one member from the SET at `key` (Redis `SREM`). */
+	sRem(key: string, member: string): Promise<number>;
+	/**
+	 * Cursor-based iteration over the members of the SET at `key`
+	 * (Redis `SSCAN`), so a session linked to many federations is read in
+	 * bounded pages rather than as one unbounded `SMEMBERS` reply.
+	 *
+	 * `SSCAN` guarantees that a member present for the whole iteration is
+	 * returned at least once — consumers must tolerate duplicates.
+	 */
+	sScanIterator(key: string, opts?: { COUNT?: number }): AsyncIterable<string>;
 	scanIterator(opts: { MATCH: string; COUNT?: number }): AsyncIterable<string>;
 	/**
 	 * Atomically compare the value stored at `key` to `expectedValue` and

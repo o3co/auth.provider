@@ -44,9 +44,13 @@ function createMockClient(values: string[]): SessionRPRegistryClient {
 		exec: vi.fn(async () => []),
 	};
 	return {
-		del: vi.fn(async () => 0),
+		unlink: vi.fn(async () => 0),
 		hSet: vi.fn(async () => 1),
-		hVals: vi.fn(async () => values),
+		hScanIterator: vi.fn(() =>
+			(async function* () {
+				for (const [i, value] of values.entries()) yield [`field-${i}`, value] as const;
+			})(),
+		),
 		multi: vi.fn(() => multi),
 		pExpireAt: vi.fn(async () => 1),
 		pExpireGT: vi.fn(async () => 1),

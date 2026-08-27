@@ -49,6 +49,10 @@ describe("redisFederationTokenStoreBuilder", () => {
 			get: () => null,
 			set: () => null,
 			del: () => 0,
+			unlink: () => 0,
+			sAddWithTtl: async () => {},
+			sRem: async () => 0,
+			sScanIterator: () => [],
 			scanIterator: () => [],
 			compareAndDelete: async () => false,
 		};
@@ -65,6 +69,10 @@ describe("redisFederationTokenStoreBuilder", () => {
 			get: () => null,
 			set: () => null,
 			del: () => 0,
+			unlink: () => 0,
+			sAddWithTtl: async () => {},
+			sRem: async () => 0,
+			sScanIterator: () => [],
 			scanIterator: () => [],
 			compareAndDelete: async () => false,
 		};

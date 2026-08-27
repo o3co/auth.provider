@@ -98,6 +98,48 @@ The Module pattern is canonical for v0.5.0+; the AdapterFactory pattern
 remains supported for HOCON-config-driven backend selection in the
 standalone template and similar deployments.
 
+## Logout does not scan the keyspace
+
+Every store a logout touches is keyed by `sid`, so removing a session is a
+handful of named keys rather than a search:
+
+| Key | Type | Holds |
+| --- | --- | --- |
+| `${keyPrefix}${sid}:${federationName}` | string | one federation token envelope |
+| `${keyPrefix}idx:${sid}` | **set** | the federation names attached to `${sid}` |
+| `${keyPrefix}lock:${sid}:${federationName}` | string | the advisory lock |
+
+The index (`idx:`) is what makes `FederationTokenStore.removeBySid` cost
+O(that session's federations). Before v0.10 it was a
+`SCAN MATCH ${keyPrefix}${sid}:*` over the entire database — O(keys in Redis),
+on an end-user action, on the connection every other adapter here shares
+(#291). Reads are paged (`SSCAN`, `HSCAN`, `ZRANGE` by rank) so no single
+command's reply grows with how heavily linked a session is, and removals use
+`UNLINK` so the shared connection is not blocked while Redis frees the values.
+
+### `scanFallback` — a migration flag, not a tuning knob
+
+Records written before v0.10 have no index entry. An index-only `removeBySid`
+would walk past them and leave a logged-out session's **upstream IdP refresh
+tokens** in Redis until the store TTL expired them. So `scanFallback` (option
+on the builder, `redisFederationTokenStore.scanFallback` in the module config)
+keeps the old pattern scan running after the index-driven removal.
+
+- **Default `true`.** An upgrade that changes no configuration must not
+  silently orphan tokens.
+- **What it costs while on:** one keyspace scan per `removeBySid` — the
+  O(keyspace) work #291 is about. The index-driven removal runs first
+  regardless, so the deletes are always bounded; the scan is a safety net, not
+  the mechanism.
+- **When to set it to `false`:** once no session predating the upgrade can
+  still exist — that is, once `ttl` (default 24 h) has elapsed since the last
+  replica running the previous release stopped writing. A deployment whose
+  Redis held no federation records before the upgrade can set it to `false`
+  immediately.
+- **When it goes away:** the flag and the scan path are removed together in the
+  release after next, and `scanIterator` leaves `FederationTokenStoreClient`
+  with them.
+
 ## Internal helpers
 
 `src/internal/lock.mts` (`createRedisLock`) and `src/internal/crypto.mts`
@@ -106,3 +148,8 @@ The lock embeds federation-tokens-specific options (`{ sid,
 federationName }`) in `AcquireLockOptions` and is not currently
 backend-agnostic; a public generic-lock API is on the roadmap for
 v0.6+.
+
+`src/internal/redisSidHash.mts`, `redisSidSortedSet.mts` and `redisSidSet.mts`
+are the three sid-keyed structures the session and federation adapters are
+built from — same `${keyPrefix}${sid}` layout and TTL contract, different Redis
+type (HASH / ZSET / SET).

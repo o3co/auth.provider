@@ -153,6 +153,16 @@ describe("createRedisSidSortedSet", () => {
 		expect(await z.list("sid-conc-same")).toEqual(["m-shared"]);
 	});
 
+	// #291: `list` pages by rank instead of `ZRANGE key 0 -1`. Insertion order
+	// is the load-bearing part (A4 §5.4) and must survive the page boundaries.
+	it("list returns every member, in insertion order, across several rank pages", async () => {
+		const z = createRedisSidSortedSet({ client, keyPrefix: prefix("paged"), pageSize: 25 });
+		const expiresAt = FUTURE();
+		const members = Array.from({ length: 260 }, (_, i) => `m-${String(i).padStart(3, "0")}`);
+		for (const m of members) await z.add("sid-paged", m, expiresAt);
+		expect(await z.list("sid-paged")).toEqual(members);
+	});
+
 	// OR-8 RED tests — `_insertionCounter` monotonic across restart.
 	describe("OR-8: _insertionCounter restart-monotonicity", () => {
 		it("RED-1: two add() calls with same expiresAt — second member sorts after first in list()", async () => {
@@ -283,7 +293,7 @@ function makeWrapper(io: Redis): SessionSidSortedSetClient {
 	};
 
 	return {
-		del: (k) => io.del(k),
+		unlink: (k) => io.unlink(k),
 		multi: () => buildMulti(),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
 		pExpireGT: async (k, ms) => {
