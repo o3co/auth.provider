@@ -77,6 +77,11 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 					source: "header",
 					"cert-header": "x-forwarded-client-cert",
 					"cert-header-dialect": "plain-pem",
+					// #280: the header source is only accepted from an
+					// allowlisted peer. supertest dials the ephemeral listener
+					// over loopback, which is what the app observes as the
+					// forwarding hop here.
+					"trusted-proxies": ["loopback"],
 					mode: "self-signed",
 					"trusted-cas": [],
 				},

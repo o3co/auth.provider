@@ -29,13 +29,26 @@ await createApp({
 ```
 
 ```hocon
-# application.conf — opt in to mTLS at the AS
+# application.conf — opt in to mTLS at the AS.
+# The AS terminates TLS itself: the certificate comes from the handshake.
 oauth.mtls {
   enabled = true
-  source = "header"                              # or "tls-layer"
+  mode = "self-signed"                           # or "pki" (see PKI Mode Scope)
+  # source defaults to "tls-layer" — nothing else to set.
+}
+```
+
+Behind a TLS-terminating reverse proxy, the certificate arrives in a header
+instead, and the proxy must be named explicitly:
+
+```hocon
+oauth.mtls {
+  enabled = true
+  source = "header"
   cert-header = "x-forwarded-client-cert"
   cert-header-dialect = "envoy"                  # or "plain-pem"
-  mode = "self-signed"                           # or "pki" (see PKI Mode Scope)
+  trusted-proxies = ["loopback"]                 # REQUIRED for source = "header"
+  mode = "self-signed"
 }
 ```
 
@@ -64,18 +77,37 @@ The key is declared by core's bundled config schema (single source of truth). It
 
 | `source` | Where the cert comes from | When to use |
 | --- | --- | --- |
-| `"header"` (default) | A forwarded-cert header set by a trusted reverse proxy (Envoy, nginx). Pair with `cert-header` + `cert-header-dialect`. | The auth provider sits behind a TLS-terminating proxy. **Common deployment shape.** |
-| `"tls-layer"` | `req.socket.getPeerCertificate()` — the live TLS handshake. Requires the auth provider's listener to be TLS-terminated with `requestCert = true`. | The auth provider terminates TLS itself (less common at scale; preferred for simple deployments where the AS is the edge). |
+| `"tls-layer"` (default) | `req.socket.getPeerCertificate()` — the live TLS handshake. Requires the auth provider's listener to be TLS-terminated with `requestCert = true`. | The auth provider terminates TLS itself. **This is the RFC 8705 §3 shape**: the certificate is proven by the handshake rather than asserted by a header, so there is nothing to forge. |
+| `"header"` | A forwarded-cert header set by a trusted reverse proxy (Envoy, nginx). Pair with `cert-header`, `cert-header-dialect`, and a **required** `trusted-proxies` allowlist. | The auth provider sits behind a TLS-terminating proxy. Common at scale, and safe only to the extent the proxy hop is. |
 
 ## Trusted-Proxy Security Guidance
 
-When `source = "header"`, the AS **trusts the reverse proxy** to:
+RFC 8705 §3 accepts a client certificate from the TLS layer, or from an **authenticated** trusted proxy. `source = "header"` is the second shape, and the word doing the work is *authenticated*.
+
+### `trusted-proxies` — required, and what it actually proves
+
+`source = "header"` requires a non-empty `oauth.mtls.trusted-proxies`; boot fails otherwise. A forwarded certificate header presented by any other peer is rejected with `400 invalid_certificate` (audit reason `untrusted_proxy`), and the observed peer address is logged as `mtls_untrusted_proxy_rejected` so a missing allowlist entry is distinguishable from an attack.
+
+```hocon
+oauth.mtls.trusted-proxies = ["loopback"]        # sidecar proxy on the same host / pod
+oauth.mtls.trusted-proxies = ["10.0.4.7", "10.0.4.8"]
+```
+
+Each entry is the `"loopback"` keyword (`127.0.0.0/8` + `::1`) or an IPv4 / IPv6 literal. An IPv4 entry also matches the IPv4-mapped form (`::ffff:10.0.4.7`) that a dual-stack listener reports. **CIDR ranges are not accepted yet** — they are rejected at boot rather than silently never matching; the shared trusted-proxy range vocabulary arrives with [#292](https://github.com/o3co/auth.provider/issues/292).
+
+The check runs against `req.socket.remoteAddress` — the peer that opened the connection — and deliberately **not** against `req.ip`, which `X-Forwarded-For` rewrites whenever Express `trust proxy` is on. Authenticating one header with another would prove nothing.
+
+For the same reason this list is **separate from `http.trustProxy`** and is not derived from it. `http.trustProxy` decides whether `X-Forwarded-For` may rewrite `req.ip` for rate limiting and URL reconstruction; turning that on must not silently start accepting forwarded client certificates.
+
+An address allowlist is a network-level control, not a cryptographic one. It is necessary, not sufficient.
+
+### What the proxy must still do
 
 1. **Terminate TLS and successfully authenticate the client cert.** The forwarded header MUST reflect a cert that the proxy already validated; the AS does not re-do the handshake.
-2. **Block any forwarded-cert header coming from upstream.** Anyone who can set `x-forwarded-client-cert` on a request to the AS impersonates any client at will. The proxy must **strip the header from incoming requests** before injecting its own value.
-3. **Connect to the AS over an authenticated channel** — TLS to the AS, network-segmented loopback / VPC, or both — so an attacker cannot bypass the proxy and reach the AS directly with a forged header.
+2. **Block any forwarded-cert header coming from upstream.** The proxy must **strip the header from incoming requests** before injecting its own value — otherwise a client simply asks the proxy to forward its forgery.
+3. **Reach the AS over a channel an attacker cannot occupy.** The allowlist authenticates a source address, and a source address is only as trustworthy as the network under it. Keep the proxy → AS hop on a segment where addresses cannot be spoofed or borrowed (loopback, a private VPC subnet), and prefer TLS on that hop as well.
 
-**Failure to enforce any of (2) or (3) is a complete bypass of the cert binding** — there is no in-package defense the AS can apply (we cannot distinguish a legitimate proxy-injected header from an attacker-injected one). The header dialect parsers reject obviously malformed input but offer **no security against a misconfigured deployment**.
+**Failure to enforce (1) or (2) is still a complete bypass of the cert binding**, and no allowlist can detect it — a legitimate proxy forwarding a header it should have stripped is indistinguishable from one forwarding a header it minted. The header dialect parsers reject obviously malformed input but offer **no security against a misconfigured proxy**.
 
 ### Sample reverse-proxy snippets
 
@@ -105,6 +137,8 @@ location / {
 
 `$ssl_client_escaped_cert` is the URL-encoded PEM of the validated client leaf cert. The `cert-header-dialect = "plain-pem"` parser auto-decodes the percent-encoding.
 
+Either way, add the address nginx or Envoy reaches the auth provider from to `oauth.mtls.trusted-proxies` — `"loopback"` when they share a host or pod, the pod / instance address otherwise.
+
 > **Note:** nginx does not emit Envoy-format XFCC. The Phase 3 `cert-header-dialect` enumeration is `"envoy" | "plain-pem"` — `"plain-pem"` is what nginx + similar minimal proxies should use, NOT an nginx-specific XFCC variant (which is out of scope for Stage 1).
 >
 > To strip any inbound header before nginx injects its own, add `proxy_set_header X-Forwarded-Client-Cert "";` to a higher-priority location, or use a sanitization filter on the upstream.
@@ -118,19 +152,21 @@ location / {
 For each presented chain `leaf → intermediate₁ → … → intermediateₙ → root`:
 
 1. Leaf cert validity window (`notBefore <= now <= notAfter`).
-2. Hop-by-hop walk with `fingerprint256` cycle detection.
-3. For each intermediate: validity window + `basicConstraints.CA === true` (RFC 5280 §4.2.1.9 — non-CA cannot sign certs).
-4. **Pair check at every hop**: `X509Certificate.checkIssued()` (DN / AKID / SKID match) **AND** `X509Certificate.verify(issuer.publicKey)` (cryptographic signature). Both required — `checkIssued` alone does NOT verify the signature (OpenSSL `X509_check_issued` documents this explicitly), so an attacker omitting or crafting AKID could otherwise mint a forged cert with matching DN.
-5. Anchor validity window.
+2. **Leaf certificate profile**: `basicConstraints.CA === false` (a CA certificate is not a client credential — binding a token to one binds it to an identity that can mint other identities), and, when `extendedKeyUsage` is present, it must include `clientAuth` or `anyExtendedKeyUsage` (RFC 5280 §4.2.1.12). A leaf with **no** EKU extension is accepted: §4.2.1.12 makes the extension a restriction, not a grant, so absence is unconstrained.
+3. Hop-by-hop walk with `fingerprint256` cycle detection.
+4. For each intermediate: validity window + `basicConstraints.CA === true` (RFC 5280 §4.2.1.9 — non-CA cannot sign certs).
+5. **Pair check at every hop**: `X509Certificate.checkIssued()` (DN / AKID / SKID match) **AND** `X509Certificate.verify(issuer.publicKey)` (cryptographic signature). Both required — `checkIssued` alone does NOT verify the signature (OpenSSL `X509_check_issued` documents this explicitly), so an attacker omitting or crafting AKID could otherwise mint a forged cert with matching DN.
+6. Anchor validity window, and `basicConstraints.CA === true` on the anchor itself — the anchor list is operator-supplied, and a paste error putting an end-entity certificate in it would otherwise terminate the walk successfully.
 
 ### Checks NOT performed (load-bearing scope-out)
 
 The narrow mode does **not** check:
 
+- **CRL / OCSP revocation** (RFC 5280 §6.3 + RFC 6960). **A revoked client certificate keeps binding tokens until it expires.** Rely on short cert lifetimes and key rotation. Tracked with the rest of this list in [#341](https://github.com/o3co/auth.provider/issues/341).
 - **Name constraints** (RFC 5280 §4.2.1.10) — CRITICAL extension. If a trust anchor carries `nameConstraints`, the chain walk does not enforce them.
 - **Policy constraints / policy mappings / inhibit-anyPolicy** (RFC 5280 §4.2.1.11–13).
 - **Full critical-extension handling** (RFC 5280 §6.1.2 requires every critical extension to be processed; narrow mode handles only the ones explicitly listed above).
-- **CRL / OCSP revocation** (RFC 5280 §6.3 + RFC 6960). Rely on short cert lifetimes and key rotation instead.
+- **`keyUsage` `keyCertSign` on issuers** (RFC 5280 §4.2.1.3). Node's `X509Certificate.keyUsage` returns *extended* key usage OIDs, not the `keyUsage` bit string, so this needs ASN.1 parsing of the DER.
 - **Path length constraints** (RFC 5280 §4.2.1.9 `pathLenConstraint`).
 - **Algorithm policy** (RFC 5280 §4.1.1.2 + §6.1.4). Falls through to Node's underlying signature verification, which honors the OS / OpenSSL configuration.
 
@@ -175,11 +211,13 @@ The parsing layer satisfies this SHOULD (everything routes through `node:crypto`
 
 ## Boot-time fail-loud invariants
 
-`mtlsModule` rejects two specific misconfigurations at boot rather than failing silently at runtime:
+`mtlsModule` rejects three specific misconfigurations at boot rather than failing silently at runtime:
 
-1. **`mode = "pki"` with an empty `trusted-cas`** — without trust anchors, chain validation cannot proceed. Failing boot directs the operator straight to the misconfig instead of either silently failing open (no validation) or failing closed on every request (no audit signal).
+1. **`source = "header"` with an empty `trusted-proxies`** — the forwarded header would then be the credential, accepted from anyone routable to the process. There is no safe default here: an empty list cannot mean "trust the usual proxies", and trusting none of them at runtime would fail every request with no boot signal. See [#280](https://github.com/o3co/auth.provider/issues/280).
 
-2. **`mode = "pki"` with `source = "tls-layer"`** — the narrow PKI mode requires the intermediate chain (e.g., the Envoy XFCC `Chain=` parameter). TLS-layer full-chain extraction is deferred. The combination would fail-open or fail-closed without operator visibility; rejecting at boot prevents the ambiguity. Use `source = "header"` with `cert-header-dialect = "envoy"` for PKI mode, or use `mode = "self-signed"` with `tls-layer` source.
+2. **`mode = "pki"` with an empty `trusted-cas`** — without trust anchors, chain validation cannot proceed. Failing boot directs the operator straight to the misconfig instead of either silently failing open (no validation) or failing closed on every request (no audit signal).
+
+3. **`mode = "pki"` with `source = "tls-layer"`** — the narrow PKI mode requires the intermediate chain (e.g., the Envoy XFCC `Chain=` parameter). TLS-layer full-chain extraction is deferred. The combination would fail-open or fail-closed without operator visibility; rejecting at boot prevents the ambiguity. Use `source = "header"` with `cert-header-dialect = "envoy"` and a `trusted-proxies` allowlist for PKI mode, or use `mode = "self-signed"` with the `tls-layer` source. Now that `tls-layer` is the default source this combination is easier to reach; lifting it is part of [#341](https://github.com/o3co/auth.provider/issues/341).
 
 ## Hash algorithm
 

@@ -53,6 +53,7 @@ describe("MtlsError", () => {
 			"chain_validation_failed",
 			"trusted_cas_unconfigured",
 			"tls_peer_unavailable",
+			"untrusted_proxy",
 		] as const;
 		for (const reason of reasons) {
 			const err = new MtlsError(reason, "test");

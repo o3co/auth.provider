@@ -30,7 +30,11 @@
  * mechanism has no consumer-wired dependencies (no replay store).
  *
  * Secure-default-opt-in: `oauth.mtls.enabled = false` in reference.conf.
- * Operators must explicitly set `enabled = true` to activate mTLS.
+ * Operators must explicitly set `enabled = true` to activate mTLS. Since
+ * issue #280 the same discipline applies to where the certificate comes from:
+ * `oauth.mtls.source` defaults to `"tls-layer"`, and the forwarded-header
+ * source additionally requires an explicit `oauth.mtls.trusted-proxies`
+ * allowlist.
  *
  * Per Wave 2 Phase 3 spec §10 (config) + §11 (module) + feedback_secure_default_opt_in.md.
  */
@@ -63,12 +67,26 @@ export const mtlsConfigSchema = z.object({
 			.object({
 				/** When false (default), mtlsModule contributes null — no mTLS middleware mounted. */
 				enabled: z.boolean().default(false),
-				/** Where the leaf cert comes from. */
-				source: z.enum(["header", "tls-layer"]).default("header"),
+				/**
+				 * Where the leaf cert comes from. Defaults to `"tls-layer"`
+				 * (issue #280): RFC 8705 §3 wants the certificate from the
+				 * transport, and a forwarded header only substitutes for it when
+				 * the forwarding hop is authenticated — which `"header"` now
+				 * requires via `trusted-proxies`.
+				 */
+				source: z.enum(["header", "tls-layer"]).default("tls-layer"),
 				/** Header name carrying the forwarded leaf cert (header source only). */
 				"cert-header": z.string().min(1).default("x-forwarded-client-cert"),
 				/** Dialect for the forwarded-cert header (header source only). */
 				"cert-header-dialect": z.enum(["envoy", "plain-pem"]).default("envoy"),
+				/**
+				 * Peer addresses allowed to forward a client certificate header
+				 * (header source only). Each entry is an IPv4 / IPv6 literal or
+				 * the `"loopback"` keyword. Empty by default — nothing is trusted
+				 * implicitly — and `source = "header"` with an empty list fails
+				 * boot.
+				 */
+				"trusted-proxies": z.array(z.string()).readonly().default([]),
 				/** Trust posture: "self-signed" accepts any well-formed cert; "pki" requires trusted-cas. */
 				mode: z.enum(["self-signed", "pki"]).default("self-signed"),
 				/** Trust anchors for mode = "pki". Each entry: literal PEM or "file:<path>". */
@@ -76,9 +94,10 @@ export const mtlsConfigSchema = z.object({
 			})
 			.default(() => ({
 				enabled: false,
-				source: "header" as const,
+				source: "tls-layer" as const,
 				"cert-header": "x-forwarded-client-cert",
 				"cert-header-dialect": "envoy" as const,
+				"trusted-proxies": [],
 				mode: "self-signed" as const,
 				"trusted-cas": [],
 			})),
@@ -99,7 +118,15 @@ export const mtlsConfigSchema = z.object({
  * for core to compose alongside any other binding-mechanism modules
  * (DPoP, future) under the unified `oauth.tokenBinding.dispatch-policy`.
  *
- * Boot-time fail-loud invariants (Phase 3 spec §11.2):
+ * Boot-time fail-loud invariants (Phase 3 spec §11.2, extended by issue #280):
+ *
+ *   0. `source === "header"` + empty `trusted-proxies` → throw. A forwarded
+ *      certificate header is an assertion made by whoever opened the
+ *      connection; without an allowlist naming which peers may make it, the
+ *      header is the credential and anyone routable to this process can mint
+ *      one. RFC 8705 §3 requires the certificate to come from the TLS layer or
+ *      from an authenticated trusted proxy — this is what makes the second
+ *      arm true.
  *
  *   1. `mode === "pki"` + empty `trusted-cas` → throw. Without trusted CAs,
  *      chain validation cannot proceed. Failing boot directs the operator
@@ -145,6 +172,7 @@ export const mtlsModule = defineModule<"config", "logger">({
 							source: "header" | "tls-layer";
 							"cert-header": string;
 							"cert-header-dialect": "envoy" | "plain-pem";
+							"trusted-proxies": readonly string[];
 							mode: "self-signed" | "pki";
 							"trusted-cas": readonly string[];
 						};
@@ -152,6 +180,23 @@ export const mtlsModule = defineModule<"config", "logger">({
 				};
 
 				const cfg = typedConfig.oauth.mtls;
+
+				// --- Boot-time fail-loud check 0: header source requires an
+				// explicit trusted-proxy allowlist (issue #280). ---
+				//
+				// Without it the forwarded header IS the credential: any client
+				// that can open a connection to this process can assert any
+				// certificate. Fail boot rather than run a deployment whose mTLS
+				// binding proves nothing.
+				if (cfg.source === "header" && (cfg["trusted-proxies"]?.length ?? 0) === 0) {
+					throw new Error(
+						'mtlsModule: config.oauth.mtls.source = "header" requires a non-empty ' +
+							"oauth.mtls.trusted-proxies allowlist. A forwarded client-certificate header " +
+							"is only evidence of a TLS handshake when the hop that forwarded it is " +
+							'authenticated. List the reverse proxy\'s peer address (or "loopback" for a ' +
+							'sidecar), or use source = "tls-layer" and terminate TLS at this process.',
+					);
+				}
 
 				// --- Boot-time fail-loud check 1: PKI mode requires trusted-cas. ---
 				if (cfg.mode === "pki" && cfg["trusted-cas"].length === 0) {
@@ -176,6 +221,7 @@ export const mtlsModule = defineModule<"config", "logger">({
 					source: cfg.source,
 					certHeader: cfg["cert-header"],
 					certHeaderDialect: cfg["cert-header-dialect"],
+					trustedProxies: cfg["trusted-proxies"],
 					mode: cfg.mode,
 					trustedCas: cfg["trusted-cas"],
 					logger: deps.logger,

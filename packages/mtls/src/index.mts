@@ -23,6 +23,10 @@
  *     directly.
  *   - `validateCertChain` — internal PKI helper; consumers configure
  *     `mode = "pki"` and `trusted-cas` rather than calling it.
+ *   - `createTrustedProxyMatcher` — internal; consumers configure
+ *     `trusted-proxies` rather than building a matcher themselves. Exporting
+ *     it would invite a second, subtly different notion of "trusted proxy"
+ *     alongside the one #292 is consolidating.
  *   - `pemToDer`, `derToPem` — internal codec; surface minimization.
  *
  * Per Wave 2 Phase 3 spec §5.1.
