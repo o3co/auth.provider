@@ -686,4 +686,35 @@ describe("InMemoryClientRepository", () => {
 			).toThrow();
 		});
 	});
+	describe("#316/#330: firstParty projection", () => {
+		const entry = {
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "secret",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+			firstParty: true,
+			// biome-ignore lint/suspicious/noExplicitAny: fixture shorthand, parsed by the schema at construction
+		} as any;
+
+		it("findById surfaces firstParty so /authorize can admit the client", async () => {
+			// Without the projection the marking is parsed and then dropped, so
+			// /authorize sees an unmarked client and rejects every request.
+			const repo = new InMemoryClientRepository(new Map([["first-party-rp", entry]]));
+			expect((await repo.findById("first-party-rp"))?.firstParty).toBe(true);
+		});
+
+		it("authenticate surfaces firstParty too", async () => {
+			const repo = new InMemoryClientRepository(new Map([["first-party-rp", entry]]));
+			expect((await repo.authenticate("first-party-rp", "secret"))?.firstParty).toBe(true);
+		});
+
+		it("omits the field entirely when unmarked", async () => {
+			const repo = new InMemoryClientRepository(
+				// biome-ignore lint/suspicious/noExplicitAny: fixture shorthand
+				new Map([["plain-rp", { ...entry, firstParty: undefined } as any]]),
+			);
+			const client = await repo.findById("plain-rp");
+			expect(client && "firstParty" in client).toBe(false);
+		});
+	});
 });

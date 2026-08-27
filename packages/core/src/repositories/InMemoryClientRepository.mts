@@ -88,6 +88,14 @@ export const ClientEntrySchema = z
 		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
 		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
 		allowedAzpForFederationToken: z.boolean().optional().default(false),
+		// #316: /authorize admits only `firstParty: true` clients, and #330 removed
+		// the migration flag that used to admit unmarked ones. This schema is
+		// `.strict()`, so without the key a YAML/static registration could neither
+		// carry the marking (unrecognized key → boot error) nor go without it
+		// (unmarked → every /authorize returns unauthorized_client): the file-backed
+		// adapters had no working configuration at all. Absent still means "not
+		// first-party" — the marking is deliberately opt-in.
+		firstParty: z.boolean().optional(),
 		// Wave 2 §4.8: per-client sender-constraint requirement.
 		// `methods` is `string().min(1)` so accidental empty kinds (typos
 		// or trailing-comma artifacts) cannot silently match a future
@@ -180,6 +188,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			...(entry.senderConstrained !== undefined && {
 				senderConstrained: entry.senderConstrained,
 			}),
+			...(entry.firstParty !== undefined && {
+				firstParty: entry.firstParty,
+			}),
 		};
 	}
 
@@ -234,6 +245,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
 			...(entry.senderConstrained !== undefined && {
 				senderConstrained: entry.senderConstrained,
+			}),
+			...(entry.firstParty !== undefined && {
+				firstParty: entry.firstParty,
 			}),
 		};
 	}
