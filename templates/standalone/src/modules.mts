@@ -327,6 +327,20 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.codeRepositoryClient;
 		},
+		// #277: access-token denylist client, off the same shared socket. A
+		// denylist is only worth having if every replica reads the same one —
+		// that is the entire reason `redisAccessTokenDenylistModule` exists — so
+		// it belongs on the connection the rest of the shared state already uses
+		// rather than opening a second one.
+		accessTokenDenylistClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.accessTokenDenylistClient;
+		},
 	},
 });
 

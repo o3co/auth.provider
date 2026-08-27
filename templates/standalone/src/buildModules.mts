@@ -19,6 +19,7 @@ import {
 	defaultRefreshTokenFamilyRotationModule,
 	jwksModule,
 	type Module,
+	memoryAccessTokenDenylistModule,
 	memoryRateLimiterModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
@@ -28,6 +29,7 @@ import {
 	oauthSessionModule,
 } from "@o3co/auth-provider-oauth";
 import {
+	redisAccessTokenDenylistModule,
 	redisCodeRepositoryModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
@@ -95,6 +97,12 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// single ioredis socket per replica. Memory-only deployments skip it.
 	const rateLimiterAdapter = config.rateLimiter?.adapter ?? "memory";
 	const userSessionStoresAdapter = config.userSessionStores?.adapter ?? "memory";
+	// #277: the RFC 7009 access-token denylist. Unlike the switches above there
+	// is no "no denylist" branch — `oauthModule` mounts `/oauth/revoke`, and a
+	// composition that mounts it without a denylist is refused by core's boot
+	// validator, because the endpoint would answer 200 while the token kept
+	// working. The switch is only over WHICH denylist.
+	const accessTokenDenylistAdapter = config.accessTokenDenylist?.adapter ?? "memory";
 
 	// OR-9: effective code-repo adapter. `oauth.code.adapter` is the
 	// authoritative switch; the legacy `repositories.code.type = "redis"`
@@ -131,7 +139,8 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		refreshTokenFamilyUsesRedis ||
 		rateLimiterAdapter === "redis" ||
 		userSessionStoresAdapter === "redis" ||
-		codeRepositoryAdapter === "redis";
+		codeRepositoryAdapter === "redis" ||
+		accessTokenDenylistAdapter === "redis";
 
 	// Federation-token store is always wired; only the 4 user-session
 	// stores switch on the adapter. Pre-Wave-5d the redis branch dropped
@@ -155,6 +164,15 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		codeRepositoryAdapter === "redis"
 			? [redisCodeRepositoryModule]
 			: [inMemoryCodeRepositoryModule];
+
+	// #277: mutually-exclusive denylist pair, same shape as the three switches
+	// above. The memory branch is a dev convenience and nothing more: it forks
+	// per replica, so `deployment.mode = "multi"` refuses it by name (see core's
+	// replica-safety guard). The template's own application.conf ships `"redis"`.
+	const accessTokenDenylistModules: Module[] =
+		accessTokenDenylistAdapter === "redis"
+			? [redisAccessTokenDenylistModule]
+			: [memoryAccessTokenDenylistModule];
 
 	return [
 		// D-5: sessionStoreModule wires the express-session middleware into the
@@ -192,6 +210,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...rateLimiterModules,
 		// OAuth code repository: redis (multi-replica) or memory (single-instance).
 		...codeRepositoryModules,
+		// RFC 7009 access-token denylist: redis (shared revocations) or memory
+		// (single-instance dev). Always wired — see the switch above.
+		...accessTokenDenylistModules,
 		// RT family store: redis by default (closes OR-1); override path
 		// swaps to `[memoryRefreshTokenFamilyStoreModule]` for unit tests.
 		...refreshTokenFamilyModules,

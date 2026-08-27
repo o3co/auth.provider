@@ -15,6 +15,12 @@
  */
 
 export {
+	createRedisAccessTokenDenylist,
+	type RedisAccessTokenDenylistOptions,
+	redisAccessTokenDenylistBuilder,
+	redisAccessTokenDenylistModule,
+} from "./access-token-denylist.mjs";
+export {
 	createRedisChallengeStore,
 	type RedisChallengeStoreOptions,
 	redisChallengeStoreBuilder,
@@ -28,6 +34,7 @@ export {
 // define their own contracts; do not implement these.
 // ---------------------------------------------------------------------------
 export type {
+	AccessTokenDenylistClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
 	DisposableRefreshTokenFamilyClient,

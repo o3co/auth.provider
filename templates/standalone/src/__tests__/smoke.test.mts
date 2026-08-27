@@ -448,6 +448,81 @@ describe("standalone smoke test", () => {
 		});
 	});
 
+	// #277: the scaffold used to wire NO access-token denylist, so the
+	// `/oauth/revoke` it shipped answered 200 for an access token and left the
+	// JWT working until expiry. The template now always wires one, and its own
+	// application.conf selects the Redis-backed adapter — the memory one forks
+	// per replica and `deployment.mode = "multi"` refuses it.
+	describe("#277: access-token denylist wiring", () => {
+		it("always wires a denylist, so /oauth/revoke can keep its promise", () => {
+			const modules = buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const providesDenylist = modules.filter((m) =>
+				Object.keys(m.provides ?? {}).includes("accessTokenDenylist"),
+			);
+			expect(providesDenylist).toHaveLength(1);
+		});
+
+		it("defaults to the memory denylist when no adapter is configured", () => {
+			const modules = buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("core-access-token-denylist-memory");
+			expect(names).not.toContain("redis-access-token-denylist");
+		});
+
+		it("switches to the Redis denylist when accessTokenDenylist.adapter = 'redis'", () => {
+			const redisDenylistConfig = {
+				...config,
+				accessTokenDenylist: { adapter: "redis" as const },
+			};
+			const modules = buildModules(redisDenylistConfig, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("redis-access-token-denylist");
+			expect(names).not.toContain("core-access-token-denylist-memory");
+			// The Redis branch must also pull in the shared ioredis socket, or the
+			// `accessTokenDenylistClient` slot has no provider and boot fails on a
+			// missing component instead of on the thing the operator changed.
+			expect(names).toContain("standalone:redis-clients");
+		});
+
+		it("the shipped application.conf selects the replica-safe adapter", () => {
+			// The template's own config is the artifact operators deploy. It runs
+			// with `deployment.mode = multi` in the umbrella E2E, which refuses
+			// every in-memory shared store — so shipping the memory denylist here
+			// would be a boot failure in the very stack that proves the scaffold
+			// works.
+			const conf = readFileSync(new URL("../../config/application.conf", import.meta.url), "utf8");
+			expect(conf).toMatch(/accessTokenDenylist\s*\{[\s\S]*?adapter\s*=\s*"redis"/);
+		});
+
+		it("keeps the composition boot-valid end to end", async () => {
+			// The core boot guard (#277 step 13.9) refuses a composition that reads
+			// the denylist slot without one. A scaffold that trips its own library's
+			// guard is not a scaffold.
+			const handle = await createApp({
+				modules: buildModules(config, {
+					keyStoreModule: testKeyStoreModule,
+					repositoriesModule: testRepositoriesModule,
+					refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+				}),
+				bootstrapComponents: { config, pathResolver: (s) => s },
+			});
+			handleRef = handle;
+			expect(handle).toBeDefined();
+		});
+	});
+
 	// OR-9 (Wave 5d): adapter switch for the OAuth code repository. Closes
 	// the deferred Phase 10 module-pattern wrapper for `codeRepository`. The
 	// memory branch wires `inMemoryCodeRepositoryModule`; the redis branch

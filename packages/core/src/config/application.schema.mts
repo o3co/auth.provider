@@ -457,6 +457,30 @@ export const CoreConfigSchema = z.object({
 				enabled: coerceBooleanFromEnv,
 			})
 			.optional(),
+		// #277: what `POST /oauth/revoke` promises for ACCESS tokens.
+		//
+		//   "denylist"    — revoking an access token adds its `jti` to the
+		//                   `accessTokenDenylist` component, which token
+		//                   verification consults. Boot refuses when the slot is
+		//                   unwired: the endpoint would answer RFC 7009's
+		//                   mandatory 200 while the JWT stayed valid until expiry.
+		//   "unsupported" — this deployment does not revoke access tokens.
+		//                   `token_type_hint = access_token` gets RFC 7009 §2.2.1
+		//                   `unsupported_token_type`, and no denylist is needed.
+		//
+		// REFRESH-token revocation is unaffected by this key in either mode — it
+		// runs off `refreshTokenFamilyRevocation` and never needed a denylist.
+		//
+		// `.optional()` with a code-side default of `"denylist"` (see
+		// `resolveAccessTokenRevocationMode`), not a HOCON-only default: an
+		// embedder hand-building a config object must not fall into the silent
+		// no-op by omission. The HOCON layer carries the same literal so the key
+		// is discoverable in `reference.conf`.
+		revocation: z
+			.object({
+				accessToken: z.enum(["denylist", "unsupported"]),
+			})
+			.optional(),
 		// Wave 2 cross-mechanism dispatch refactor: declared in core (single
 		// source of truth) because the dispatch-policy applies across ALL
 		// installed binding-mechanism modules (DPoP, mTLS, ...). Each module
@@ -477,6 +501,48 @@ export const CoreConfigSchema = z.object({
 });
 
 export type CoreConfig = z.infer<typeof CoreConfigSchema>;
+
+/**
+ * What `POST /oauth/revoke` does with an access token (#277).
+ *
+ * `"denylist"` requires an `accessTokenDenylist`; `"unsupported"` declares the
+ * capability absent so the endpoint says so on the wire instead of pretending.
+ */
+export type AccessTokenRevocationMode = "denylist" | "unsupported";
+
+/**
+ * Read `oauth.revocation.accessToken` off any config-shaped value, returning
+ * `undefined` when the operator has not declared one.
+ *
+ * Deliberately undefaulted. The two layers that consume this key resolve
+ * omission differently, and both are right:
+ *
+ * - The **boot validator** decides whether a composition may run at all, so
+ *   omission there means `"denylist"`. Every config written before #277 omits
+ *   the key, and those are exactly the deployments whose revocation endpoint
+ *   was answering 200 with nothing behind it. Defaulting to `"unsupported"`
+ *   would keep them booting and keep the promise broken.
+ * - The **revocation router** decides what to answer given what it was handed.
+ *   Handed no denylist and no declaration, it cannot revoke access tokens, and
+ *   `unsupported_token_type` is the honest answer. It never returns to a 200
+ *   that means nothing.
+ *
+ * A collapsed default would have to pick one of those and be wrong at the
+ * other layer, so the resolution stays at the call sites where the reasoning
+ * lives.
+ *
+ * Accepts `unknown` because both callers hold a config whose static type may
+ * predate the key: core's boot validator sees the freshly parsed value as
+ * `unknown`, and `packages/oauth` reads through its own options shape.
+ */
+export function readAccessTokenRevocationMode(
+	config: unknown,
+): AccessTokenRevocationMode | undefined {
+	const mode = (config as { oauth?: { revocation?: { accessToken?: unknown } } } | undefined)?.oauth
+		?.revocation?.accessToken;
+	if (mode === "unsupported" || mode === "denylist") return mode;
+	return undefined;
+}
 
 /**
  * Composes a config schema by merging module-specific schemas with the CoreConfigSchema.
@@ -732,6 +798,29 @@ export const fullSectionsSchema = z.object({
 	userSessionStores: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// #277: adapter switch for the RFC 7009 access-token denylist. Default
+	// `"memory"` lives in HOCON, matching `rateLimiter` / `userSessionStores`.
+	//
+	// `"memory"` forks per replica — a revocation served by one replica leaves
+	// the token working on the others — which is why
+	// `core-access-token-denylist-memory` is in the replica-safety guard's
+	// refused set. Anything running more than one replica needs `"redis"`, and
+	// `deployment.mode = "multi"` enforces that rather than trusting the reading.
+	accessTokenDenylist: z
+		.object({
+			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// #277: module-internal config for `redisAccessTokenDenylistModule`.
+	// Declared here for the same reason as `redisRefreshTokenFamilyStore` below:
+	// without a top-level entry, `AppConfigSchema.parse(...)` strips the key
+	// before the module's own `configSchema` ever sees the operator's override.
+	// Presence-only; the default lives in `reference.conf` and in the module.
+	redisAccessTokenDenylist: z
+		.object({
+			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 	// MIN-3 (v0.5.3): preserve the bundled Redis user-session namespace

@@ -89,12 +89,14 @@ export {
 } from "./boot/index.mjs";
 // Configuration
 export {
+	type AccessTokenRevocationMode,
 	type AppConfig,
 	AppConfigSchema,
 	type CoreConfig,
 	CoreConfigSchema,
 	composeConfigSchema,
 	fullSectionsSchema,
+	readAccessTokenRevocationMode,
 } from "./config/application.schema.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the

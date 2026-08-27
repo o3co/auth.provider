@@ -44,6 +44,23 @@ export interface ChallengeStoreClient {
 	del(key: string): Promise<number>;
 }
 
+// --- AccessTokenDenylistClient ---------------------------------------------
+
+/**
+ * Backing client for AccessTokenDenylist adapters (#277). Adapter
+ * implementations (`createRedisAccessTokenDenylist`) consume exactly these
+ * methods.
+ *
+ * `set` is the plain PX form with no `NX`: re-revoking a jti is idempotent and
+ * last-write-wins on the expiry, matching the memory adapter. That is also why
+ * this is a separate interface from {@link ReplaySeenSetClient}, whose whole
+ * contract turns on the `NX` return value.
+ */
+export interface AccessTokenDenylistClient {
+	set(key: string, value: string, mode: "PX", ttlMs: number): Promise<"OK">;
+	exists(key: string): Promise<number>;
+}
+
 // --- ReplaySeenSetClient ---------------------------------------------------
 
 /**
@@ -324,6 +341,7 @@ export interface CodeRepositoryClient {
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStoreClient?: ChallengeStoreClient;
+		readonly accessTokenDenylistClient?: AccessTokenDenylistClient;
 		readonly replaySeenSetClient?: ReplaySeenSetClient;
 		readonly refreshTokenFamilyClient?: RefreshTokenFamilyClient;
 		readonly userSessionStoreClient?: UserSessionStoreClient;

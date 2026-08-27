@@ -16,6 +16,7 @@
 
 import {
 	type AccessTokenDenylist,
+	type AccessTokenRevocationMode,
 	type ClientRepository,
 	type KeyStore,
 	type Logger,
@@ -35,6 +36,24 @@ export interface RevokeRouterOptions {
 	readonly keyStore: KeyStore;
 	readonly refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	readonly accessTokenDenylist?: AccessTokenDenylist;
+	/**
+	 * What this endpoint does with an ACCESS token (#277).
+	 *
+	 * Omitted, it follows what it was handed: `"denylist"` when an
+	 * `accessTokenDenylist` is present, `"unsupported"` when it is not. There is
+	 * no third behaviour, and in particular no "accept and do nothing".
+	 *
+	 * Stated as `"denylist"` with no denylist supplied, construction throws —
+	 * that is a deployment claiming a capability it cannot perform, and it is
+	 * fixable only where the composition is assembled.
+	 *
+	 * Whether *omitting* the declaration is itself acceptable is decided a layer
+	 * up: core's boot validator treats an undeclared
+	 * `oauth.revocation.accessToken` as `"denylist"` and refuses a composition
+	 * that has no denylist to back it, so a real deployment never reaches this
+	 * fallback by accident.
+	 */
+	readonly accessTokenRevocation?: AccessTokenRevocationMode;
 	readonly logger: Logger;
 	readonly issuer: string;
 }
@@ -60,7 +79,7 @@ export interface RevokeRouterOptions {
  * - Calls `refreshTokenFamilyRevocation.revokeFamily(familyId)`.
  * - When `refreshTokenFamilyRevocation` slot is unwired → silent 200.
  *
- * Access-token path:
+ * Access-token path (`accessTokenRevocation: "denylist"`):
  * - Verifies AT signature / type / issuer with `ignoreExpiration: true`
  *   (revoking an already-expired AT is also harmless).
  *
@@ -69,10 +88,35 @@ export interface RevokeRouterOptions {
  * (see `.github/workflows/ci.yml` step `Restrict ignoreExpiration use-site`).
  * - Extracts `jti`, `exp`, `client_id` (or `azp` fallback) from payload.
  * - Verifies client ownership; mismatch → silent 200.
- * - When `accessTokenDenylist` slot is wired: calls `denylist.add(jti, exp * 1000)`.
- * - When `accessTokenDenylist` slot is unwired: logs warn + silent 200.
+ * - Calls `denylist.add(jti, exp * 1000)`.
+ *
+ * Access-token path (`accessTokenRevocation: "unsupported"`):
+ * - `token_type_hint = access_token` → 400 `unsupported_token_type`
+ *   (RFC 7009 §2.2.1). Saying so is the honest answer; a 200 would claim a
+ *   revocation that never happened.
+ * - Unhinted requests fall back to the refresh-token path only, and still
+ *   answer 200 (§2.2 no-info-leak) whether or not the token was an RT.
+ *
+ * #277: there is no third state. Either a denylist backs the AT path, or the
+ * endpoint says the capability is absent — the "verify it, log a warning,
+ * answer 200" branch this file used to carry is gone, not relocated.
  */
 export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptions): Router {
+	// Undeclared → follow the wiring. Declared → honour it, and refuse the one
+	// combination that cannot be honoured.
+	const accessTokenRevocation: AccessTokenRevocationMode =
+		opts.accessTokenRevocation ?? (opts.accessTokenDenylist ? "denylist" : "unsupported");
+	if (accessTokenRevocation === "denylist" && !opts.accessTokenDenylist) {
+		throw new Error(
+			'createRevokeRouter: accessTokenRevocation is "denylist" but no `accessTokenDenylist` was ' +
+				"supplied. RFC 7009 requires POST /oauth/revoke to answer 200, so without a denylist an " +
+				"operator would be told an access token is revoked while it keeps verifying until it " +
+				'expires. Supply a denylist, or pass `accessTokenRevocation: "unsupported"` to have the ' +
+				"endpoint reject access-token revocation with unsupported_token_type. Refresh-token " +
+				"revocation needs no denylist and works in either mode.",
+		);
+	}
+
 	const router = express.Router();
 	router.use(express.urlencoded({ extended: false }));
 
@@ -122,6 +166,21 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 		//   supported token types.").
 		// "Fails to locate" = tryRevoke* returns false (wrong type / unverifiable).
 		// RFC 7009 §2.2: always 200 regardless of outcome.
+		if (accessTokenRevocation === "unsupported") {
+			// #277: the capability is declared absent. An explicit AT hint gets the
+			// RFC 7009 §2.2.1 answer for exactly this situation rather than a 200
+			// that means nothing. An unhinted request is still a legitimate
+			// cross-type search — the RT half of it works — so it runs and answers
+			// 200 either way, per §2.2's no-info-leak rule.
+			if (token_type_hint === "access_token") {
+				res.status(400).json({ error: "unsupported_token_type" });
+				return;
+			}
+			await tryRevokeRefreshToken(token, client.clientId, opts);
+			res.status(200).end();
+			return;
+		}
+
 		if (token_type_hint === "access_token") {
 			// Hint says AT — try AT first; if not found, fall back to RT.
 			await tryRevokeAccessToken(token, client.clientId, opts);
@@ -212,6 +271,13 @@ async function tryRevokeRefreshToken(
 /**
  * Attempt to revoke an access token by adding its jti to the denylist.
  *
+ * Only reached when `accessTokenRevocation` is `"denylist"`, which
+ * `createRevokeRouter` refuses to enter without a denylist (#277) — hence
+ * `denylist` below is a guaranteed value, not an optional one. The unwired
+ * branch this function used to carry was the silent no-op the issue was filed
+ * about; it is gone rather than moved, because there is no request-time
+ * recovery from it.
+ *
  * Always resolves (never throws) — failures are logged and swallowed.
  * `ignoreExpiration: true` is intentional and is the ONLY legitimate call site
  * for this option in production code (CI guardrail T7 enforces this).
@@ -221,11 +287,10 @@ async function tryRevokeAccessToken(
 	requestingClientId: string,
 	opts: RevokeRouterOptions,
 ): Promise<void> {
-	if (!opts.accessTokenDenylist) {
-		opts.logger.warn(
-			{ scope: "oauth.revoke.access" },
-			"AT revocation requested but accessTokenDenylist slot is unwired; no-op",
-		);
+	const denylist = opts.accessTokenDenylist;
+	if (!denylist) {
+		// Unreachable via createRevokeRouter, which refuses this composition at
+		// construction. Kept as a typed narrowing, not as a fallback behaviour.
 		return;
 	}
 	try {
@@ -277,7 +342,7 @@ async function tryRevokeAccessToken(
 			return;
 		}
 
-		await opts.accessTokenDenylist.add(jti, exp * 1000);
+		await denylist.add(jti, exp * 1000);
 	} catch {
 		// Invalid signature / wrong type / wrong issuer → silent 200.
 		opts.logger.debug({ scope: "oauth.revoke.access" }, "AT revoke skipped (verification failed)");

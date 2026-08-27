@@ -41,6 +41,8 @@ When running multiple instances of the standalone server behind a load balancer,
 
 Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
 
+**Access-token revocation needs a denylist, and the template ships one.** `POST /oauth/revoke` revokes an access token by writing its `jti` to the `accessTokenDenylist`, which token verification and introspection consult. Boot *fails* if the endpoint is mounted with no denylist behind it: RFC 7009 obliges the endpoint to answer `200`, so an unwired denylist would tell you a token is revoked while it keeps working until it expires. `accessTokenDenylist.adapter` defaults to `"redis"` here (`ACCESS_TOKEN_DENYLIST_ADAPTER=memory` for single-instance local work) and shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`, so it costs no extra connection. A deployment that genuinely does not revoke access tokens sets `OAUTH_REVOCATION_ACCESS_TOKEN=unsupported` instead; the endpoint then answers `unsupported_token_type` for `token_type_hint=access_token`. **Refresh-token revocation works in either case and never needed a denylist.**
+
 Other multi-replica considerations covered by the default modules:
 
 - The session store is wired via `redisSessionStoresModule`; set the corresponding session-store Redis URL (per `session.storage.redis.url`).
