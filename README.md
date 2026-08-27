@@ -71,6 +71,7 @@ pnpm build
 | `GET /oauth/authorize` | oauth | Authorization code flow (PKCE) |
 | `POST /oauth/introspect` | oauth | Token introspection (RFC 7662) |
 | `GET /.well-known/jwks.json` | core | JWKS endpoint (asymmetric algorithms only) |
+| `GET /session/csrf` | session | Issue a double-submit CSRF token |
 | `POST /session/login` | session | Local authentication |
 | `POST /session/logout` | session | Session destruction |
 | `GET /_healthcheck` | core | Health check |

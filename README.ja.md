@@ -62,6 +62,7 @@ pnpm build
 | `GET /oauth/authorize` | oauth | 認可コードフロー (PKCE) |
 | `POST /oauth/introspect` | oauth | トークンイントロスペクション (RFC 7662) |
 | `GET /.well-known/jwks.json` | core | JWKS エンドポイント (非対称アルゴリズムのみ) |
+| `GET /session/csrf` | session | double-submit CSRF トークンの発行 |
 | `POST /session/login` | session | ローカル認証 |
 | `POST /session/logout` | session | セッション破棄 |
 | `GET /_healthcheck` | core | ヘルスチェック |

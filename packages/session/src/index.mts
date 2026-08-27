@@ -14,6 +14,29 @@
  * limitations under the License.
  */
 
+// #272 — CSRF protection for the state-changing session routes. Exported so a
+// composition root can issue tokens from its own login page, or mount the same
+// guard on routes this package does not own.
+export type {
+	CsrfCookieAttributes,
+	CsrfGuardOptions,
+	CsrfOriginVerdict,
+	CsrfProtection,
+	CsrfProtectionOptions,
+	CsrfTokenVerdict,
+	SessionCsrfConfigSlice,
+} from "./csrf.mjs";
+export {
+	checkRequestOrigin,
+	createCsrfGuard,
+	createCsrfIssueHandler,
+	createCsrfProtection,
+	createCsrfProtectionFromConfig,
+	DEFAULT_CSRF_BODY_FIELD,
+	DEFAULT_CSRF_COOKIE_NAME,
+	DEFAULT_CSRF_HEADER_NAME,
+	DEFAULT_CSRF_TTL_SECONDS,
+} from "./csrf.mjs";
 export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect, validateRedirect } from "./federations/helpers.mjs";

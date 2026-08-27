@@ -18,6 +18,7 @@ import type { AppConfig, UserRepository, UserSessionStore } from "@o3co/auth-pro
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { createCsrfProtection } from "#/csrf.mjs";
 import { createRouter } from "#/routes/Session.mjs";
 
 /** Minimal AppConfig stub */
@@ -26,8 +27,36 @@ const stubConfig: AppConfig = {
 	rateLimit: {
 		login: { windowMs: 60_000, limit: 100 },
 	},
-	session: { domain: null },
+	session: {
+		secret: "test-session-secret",
+		name: "auth.session",
+		secure: false,
+		sameSite: "lax",
+		domain: null,
+	},
 } as unknown as AppConfig;
+
+/**
+ * A double-submit pair minted from the same secret and cookie name the router
+ * derives from `stubConfig`. Since #272 the state-changing session routes
+ * reject a request carrying neither an origin signal nor a token, and
+ * `supertest` sends no `Origin` — which is exactly the header-less API client
+ * the token arm exists to keep working.
+ */
+const csrf = createCsrfProtection({
+	secret: "test-session-secret",
+	cookieName: "auth.session.csrf",
+});
+const csrfToken = csrf.mint();
+
+const withCsrf = (test: request.Test): request.Test =>
+	test.set("Cookie", `${csrf.cookieName}=${csrfToken}`).set(csrf.headerName, csrfToken);
+
+const loginRequest = (app: express.Express): request.Test =>
+	withCsrf(request(app).post("/session/login"));
+
+const logoutRequest = (app: express.Express): request.Test =>
+	withCsrf(request(app).post("/session/logout"));
 
 /** In-memory UserSessionStore fake that exposes created sessions for assertions */
 function makeUserSessionStore(): UserSessionStore & { sessions: unknown[] } {
@@ -147,8 +176,7 @@ describe("Session routes — POST /session/login", () => {
 		it("returns 200 and sets isAuthenticated when credentials are valid", async () => {
 			const { app } = buildApp();
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=alice&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -173,8 +201,7 @@ describe("Session routes — POST /session/login", () => {
 				sessionTtlMs: 3600_000,
 			});
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=alice&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -221,8 +248,7 @@ describe("Session routes — POST /session/login", () => {
 				} as unknown as UserRepository,
 			});
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=bob&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -241,8 +267,7 @@ describe("Session routes — POST /session/login", () => {
 				} as unknown as UserRepository,
 			});
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=alice&password=wrong")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -258,8 +283,7 @@ describe("Session routes — POST /session/login", () => {
 		it("returns 400 with RFC 6749 error shape when username is missing", async () => {
 			const { app } = buildApp();
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -273,8 +297,7 @@ describe("Session routes — POST /session/login", () => {
 		it("returns 400 with RFC 6749 error shape when password is missing", async () => {
 			const { app } = buildApp();
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=alice")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -295,8 +318,7 @@ describe("Session routes — POST /session/login", () => {
 				} as unknown as UserRepository,
 			});
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=alice&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -330,8 +352,7 @@ describe("Session routes — POST /session/login", () => {
 				sessionTtlMs: 3600_000,
 			});
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=carol&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -346,8 +367,7 @@ describe("Session routes — POST /session/login", () => {
 		it("rejects non-string redirect_to with 400", async () => {
 			const { app } = buildApp();
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send({ username: "alice", password: "secret", redirect_to: ["array"] })
 				.set("Content-Type", "application/json");
 
@@ -358,8 +378,7 @@ describe("Session routes — POST /session/login", () => {
 		it("rejects non-http/https redirect_to scheme with 400", async () => {
 			const { app } = buildApp();
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send({ username: "alice", password: "secret", redirect_to: "ftp://evil.example.com/" })
 				.set("Content-Type", "application/json");
 
@@ -375,12 +394,14 @@ describe("Session routes — POST /session/login", () => {
 			const { app } = buildApp({
 				config: {
 					...stubConfig,
-					cors: { allowedOrigins: ["https://app.example.com"] },
-				} as AppConfig,
+					session: {
+						...(stubConfig.session as Record<string, unknown>),
+						csrf: { trustedOrigins: ["https://app.example.com"], ttlSeconds: 7200 },
+					},
+				} as unknown as AppConfig,
 			});
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.set("Origin", "https://evil.example.com")
 				.set("Content-Type", "application/x-www-form-urlencoded")
 				.send("username=alice&password=secret");
@@ -400,8 +421,7 @@ describe("Session routes — POST /session/login", () => {
 				regenerateError: new Error("regenerate failed"),
 			});
 
-			const res = await request(app)
-				.post("/session/login")
+			const res = await loginRequest(app)
 				.send("username=alice&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
@@ -418,7 +438,7 @@ describe("Session routes — POST /session/login", () => {
 				destroyError: new Error("destroy failed"),
 			});
 
-			const res = await request(app).post("/session/logout");
+			const res = await logoutRequest(app);
 
 			expect(res.status).toBe(500);
 			expect(res.body).toMatchObject({
@@ -426,6 +446,156 @@ describe("Session routes — POST /session/login", () => {
 				error_description: expect.any(String),
 			});
 			expect(res.body).not.toHaveProperty("message");
+		});
+	});
+
+	/**
+	 * Issue #272 — the old guard read `Origin` and called `next()` when it was
+	 * missing, so omitting the header skipped the check entirely. `sameSite=lax`
+	 * covers session-riding, but login CSRF (forcing a victim's browser to
+	 * authenticate as the attacker) needs no cookie of the victim's at all.
+	 */
+	describe("#272: CSRF acceptance rule", () => {
+		it("rejects a login carrying neither an origin signal nor a token", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app)
+				.post("/session/login")
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send("username=alice&password=secret");
+
+			expect(res.status).toBe(403);
+			expect(res.body).toMatchObject({ error: "access_denied" });
+		});
+
+		it("rejects a logout carrying neither an origin signal nor a token", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app).post("/session/logout");
+
+			expect(res.status).toBe(403);
+			expect(res.body).toMatchObject({ error: "access_denied" });
+		});
+
+		it("accepts a login presenting a valid double-submit token and no Origin", async () => {
+			const { app } = buildApp();
+
+			const res = await loginRequest(app)
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send("username=alice&password=secret");
+
+			expect(res.status).toBe(200);
+		});
+
+		it("accepts the token in the form body when the client cannot set headers", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app)
+				.post("/session/login")
+				.set("Cookie", `${csrf.cookieName}=${csrfToken}`)
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send(`username=alice&password=secret&csrf_token=${encodeURIComponent(csrfToken)}`);
+
+			expect(res.status).toBe(200);
+		});
+
+		it("accepts a same-origin browser login that carries no token", async () => {
+			const { app } = buildApp();
+			const server = app.listen(0);
+			try {
+				const address = server.address();
+				const port = typeof address === "object" && address !== null ? address.port : 0;
+
+				const res = await request(server)
+					.post("/session/login")
+					.set("Origin", `http://127.0.0.1:${port}`)
+					.set("Content-Type", "application/x-www-form-urlencoded")
+					.send("username=alice&password=secret");
+
+				expect(res.status).toBe(200);
+			} finally {
+				server.close();
+			}
+		});
+
+		it("no longer grants CSRF trust to cors.allowedOrigins", async () => {
+			// The CORS list is a resource-sharing policy; reusing it as the CSRF
+			// trust list conflated two decisions. Trust is now stated on
+			// `session.csrf.trustedOrigins`.
+			const { app } = buildApp({
+				config: {
+					...stubConfig,
+					cors: { allowedOrigins: ["https://app.example.com"] },
+				} as unknown as AppConfig,
+			});
+
+			const res = await request(app)
+				.post("/session/login")
+				.set("Origin", "https://app.example.com")
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send("username=alice&password=secret");
+
+			expect(res.status).toBe(403);
+		});
+
+		it("accepts an origin listed on session.csrf.trustedOrigins", async () => {
+			const { app } = buildApp({
+				config: {
+					...stubConfig,
+					session: {
+						...(stubConfig.session as Record<string, unknown>),
+						csrf: { trustedOrigins: ["https://app.example.com"], ttlSeconds: 7200 },
+					},
+				} as unknown as AppConfig,
+			});
+
+			const res = await request(app)
+				.post("/session/login")
+				.set("Origin", "https://app.example.com")
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send("username=alice&password=secret");
+
+			expect(res.status).toBe(200);
+		});
+
+		it("issues a token pair from GET /session/csrf", async () => {
+			const { app } = buildApp();
+
+			const res = await request(app).get("/session/csrf");
+
+			expect(res.status).toBe(200);
+			expect(res.body).toMatchObject({
+				csrf_token: expect.any(String),
+				cookie_name: "auth.session.csrf",
+				header_name: "x-csrf-token",
+			});
+
+			// The pair it hands out has to be one the login route accepts, or the
+			// endpoint is decoration.
+			const token = res.body.csrf_token as string;
+			const login = await request(app)
+				.post("/session/login")
+				.set("Cookie", `${res.body.cookie_name}=${encodeURIComponent(token)}`)
+				.set(res.body.header_name as string, token)
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send("username=alice&password=secret");
+
+			expect(login.status).toBe(200);
+		});
+
+		it("refreshes the CSRF cookie on a successful login", async () => {
+			// After `req.session.regenerate()` the client is on a new session; it
+			// gets a fresh token in the same response so the follow-up logout does
+			// not need another round trip.
+			const { app } = buildApp();
+
+			const res = await loginRequest(app)
+				.set("Content-Type", "application/x-www-form-urlencoded")
+				.send("username=alice&password=secret");
+
+			expect(res.status).toBe(200);
+			const setCookie = (res.headers["set-cookie"] ?? []) as unknown as string[];
+			expect(setCookie.some((c) => c.startsWith(`${csrf.cookieName}=`))).toBe(true);
 		});
 	});
 });

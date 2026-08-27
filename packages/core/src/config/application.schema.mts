@@ -481,6 +481,26 @@ export const fullSectionsSchema = z.object({
 		secure: z.boolean(),
 		sameSite: z.enum(["lax", "none", "strict"]),
 		domain: z.string().nullable(),
+		/**
+		 * #272 — CSRF policy for the state-changing session routes.
+		 *
+		 * `.optional()` on purpose: a deployment inheriting `reference.conf`
+		 * always has it, and every value has a code-side default, so a
+		 * hand-built config (tests, embedders composing their own object) is
+		 * not forced to restate a section it has no opinion about.
+		 *
+		 * `trustedOrigins` is NOT `cors.allowedOrigins`. "May this origin read
+		 * my responses" and "may this origin make me change state" are two
+		 * questions, and #272 was filed because one list was answering both.
+		 * Deployments whose login UI is served from a different origin than
+		 * the provider list those origins here — explicitly.
+		 */
+		csrf: z
+			.object({
+				trustedOrigins: z.array(z.string()),
+				ttlSeconds: z.coerce.number(),
+			})
+			.optional(),
 		storage: z
 			.object({
 				type: z.string(),

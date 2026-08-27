@@ -81,9 +81,19 @@ overlay の値は `application.conf` を上書きします。scaffold には
 | `SESSION_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
 | `SESSION_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`） |
 | `SESSION_DOMAIN` | — | Cookie ドメイン（デフォルト未設定） |
+| `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒） |
 | `SESSION_STORAGE_TYPE` | `redis` | セッションストアのバックエンド: `redis` または `memory` |
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | セッションストア用 Redis 接続 URL |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | セッションストア用 Redis パスワード |
+
+#### `/session/login` と `/session/logout` の CSRF 対策
+
+どちらのルートも、**same-origin（もしくは信頼した）`Origin` / `Referer`**、**または** 有効な double-submit CSRF トークンのいずれかを伴うリクエストのみ受理し、どちらも無いものは拒否する（#272）。ブラウザは自動的に条件を満たす。スクリプトのクライアントはまず `GET /session/csrf` を呼び、返ってきた `csrf_token` を `<SESSION_NAME>.csrf` cookie と `x-csrf-token` ヘッダー（または `csrf_token` フォームフィールド）の両方で送り返す。
+
+設定上の注意が 2 点:
+
+- TLS 終端プロキシの背後では `HTTP_TRUST_PROXY=true` を設定する。設定しないと `req.protocol` は `http` のままでブラウザは `Origin: https://…` を送るため、origin 側の判定が全リクエストを拒否する。
+- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON の `session.csrf.trustedOrigins` に列挙する。`cors.allowedOrigins` は CSRF 信頼を与えなくなった。
 
 ### Google フェデレーション
 
