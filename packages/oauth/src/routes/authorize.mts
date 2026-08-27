@@ -278,11 +278,12 @@ const checkPkce = (
 	codeChallengeMethod: unknown,
 ): { method: string } | null => {
 	// The resolved policy object — the SAME one the authorization grant reads
-	// at `/token`. `required` is `true` by construction (see
-	// `ResolvedPkceOptions`); it is read rather than assumed so both endpoints
-	// demonstrably consult one value.
+	// at `/token`. The challenge requirement is unconditional for the reason
+	// given there: `ResolvedPkceOptions.required` is the literal `true`, so
+	// gating on it would be a branch with no reachable other path. The shared
+	// runtime read is `pkceMethodsForClient(policy, client)` below.
 	const policy = ctx.opts.oauth.pkce;
-	if (policy.required && (typeof codeChallenge !== "string" || !codeChallenge)) {
+	if (typeof codeChallenge !== "string" || !codeChallenge) {
 		redirectError(ctx, "invalid_request", "code_challenge is required");
 		return null;
 	}
@@ -341,13 +342,19 @@ const checkPkce = (
  * single-valued too, but they are validated in the pre-redirect phase where
  * the correct answer is `400` JSON, not a redirect — a `redirect_uri` we
  * could not read is precisely one we must not redirect to (A-1).
+ *
+ * `nonce` is absent for a third reason: `checkNonce` already owns it, and has
+ * since IH-16 — it rejects a repeat with this exact message and then applies
+ * the length and character-set bounds. Listing it here as well would give one
+ * parameter two owners and make the check inside `checkNonce` unreachable,
+ * which is dead code rather than defence in depth. One owner per parameter;
+ * this gate is for the ones that had none.
  */
 const SINGLE_VALUED_QUERY_PARAMS = [
 	"scope",
 	"state",
 	"code_challenge",
 	"code_challenge_method",
-	"nonce",
 ] as const;
 
 /**
@@ -386,7 +393,11 @@ const checkSingleValuedParams = (ctx: AuthorizeContext): boolean => {
 const checkNonce = (ctx: AuthorizeContext): boolean => {
 	const nonceMaxLength = ctx.opts.oauth.nonceMaxLength;
 	if (ctx.req.query.nonce === undefined) return true;
-	// Reject non-string `nonce` (Copilot review on PR #126):
+	// Reject a `nonce` that is not a single string (Copilot review on
+	// PR #126). This is the sole owner of the rule for this
+	// parameter — `SINGLE_VALUED_QUERY_PARAMS` deliberately omits
+	// `nonce` so that this check stays reachable rather than
+	// becoming an unexercisable duplicate of the gate.
 	// Express + qs parses repeated `?nonce=a&nonce=b` as an
 	// array, which silently failed the previous
 	// `typeof === "string"` gate, causing the request to
@@ -397,14 +408,6 @@ const checkNonce = (ctx: AuthorizeContext): boolean => {
 	// `invalid_request` immediately so the failure is at the
 	// request boundary, not asynchronously at id_token
 	// validation time.
-	//
-	// `checkSingleValuedParams` now owns this rule for every
-	// single-valued parameter and emits the identical message,
-	// so in the current ordering this branch is unreachable.
-	// It stays as the TYPE-NARROWING site for the length and
-	// character-set checks below — and because a gate two
-	// steps away is the wrong thing to depend on for a
-	// security property this function can assert locally.
 	if (typeof ctx.req.query.nonce !== "string") {
 		redirectError(ctx, "invalid_request", "nonce must be a single string value");
 		return false;

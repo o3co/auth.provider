@@ -14,9 +14,6 @@
  * limitations under the License.
  */
 import crypto from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
 	type ClientRepository,
 	type CodeRepository,
@@ -446,24 +443,25 @@ describe("createAuthorizationGrant", () => {
 			expect(decoded.scope).toBeUndefined();
 		});
 
-		it("returns 400 when PKCE is required but code_verifier is missing", async () => {
+		it("returns 400 when the code carries a challenge but no code_verifier is sent", async () => {
+			// The body deliberately omits `code_verifier` — that is the whole
+			// point of this case, and asserting the errorDescription is what
+			// keeps it honest: a bare `status === 400` also passes when the
+			// request fails for an unrelated reason (a verifier that simply
+			// does not match, say), which is how this test briefly stopped
+			// testing anything at all.
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
 					code: "abc",
 					client_id: "client1",
 					redirect_uri: RP_URI,
-					code_challenge: "challenge",
+					code_challenge: S256_CHALLENGE,
 					code_challenge_method: "S256",
 				}),
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: {
-					code: "abc",
-					client_id: "client1",
-					redirect_uri: RP_URI,
-					code_verifier: CODE_VERIFIER,
-				},
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -473,6 +471,37 @@ describe("createAuthorizationGrant", () => {
 			const { result } = await handler.handle(ctx);
 
 			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
+			expect("errorDescription" in result && result.errorDescription).toBe(
+				"code_verifier required",
+			);
+		});
+
+		it("returns 400 when code_verifier is an empty string", async () => {
+			// `!code_verifier` covers empty-string as well as absent; an empty
+			// verifier must not reach the comparison.
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_challenge: S256_CHALLENGE,
+					code_challenge_method: "S256",
+				}),
+			);
+			const handler = createAuthorizationGrant(deps);
+			const { result } = await handler.handle({
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: "" },
+				session: { code: "abc", code_client_id: "client1" },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+
+			expect(result.status).toBe(400);
+			expect("errorDescription" in result && result.errorDescription).toBe(
+				"code_verifier required",
+			);
 		});
 
 		it("returns 400 when code_verifier has invalid format", async () => {
@@ -2280,33 +2309,23 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		);
 	});
 
-	it("cases every method pkceMethodsForClient can return, so the switch default is unreachable", () => {
-		// Pre-#273 this branch was reached by widening the operator-configured
-		// `supportedMethods` to a method the switch did not case on. #273
-		// removed that knob: the allowlist is now a frozen constant, so the
-		// `default` arm cannot be driven from a request at all and the runtime
-		// test that used to exercise it can no longer exist.
+	it("admits exactly the two methods the verifier comparison handles", () => {
+		// The comparison in `authorization.mts` is a two-way choice: digest the
+		// verifier for `S256`, compare it verbatim for `plain`. It used to be a
+		// `switch` with a `default` guarding against the operator-configured
+		// `supportedMethods` and the switch diverging — #273 removed that knob,
+		// so the guard became unreachable and the runtime test that drove it
+		// (by widening `supportedMethods` to include a bogus method) could no
+		// longer exist.
 		//
-		// The guard it protected is still worth pinning, so the invariant is
-		// asserted directly: every method the policy can admit must have a
-		// `case` in the verifier switch. Add a method to `pkceMethodsForClient`
-		// without casing it here and this fails — which is the divergence the
-		// `default` arm exists to catch.
-		const source = readFileSync(
-			resolve(dirname(fileURLToPath(import.meta.url)), "../grants/authorization.mts"),
-			"utf8",
-		);
-		const cased = new Set(
-			Array.from(source.matchAll(/case "([^"]+)":/g), (match) => match[1] as string),
-		);
+		// The invariant it protected is still worth pinning, so it is asserted
+		// where it actually lives: grow the admissible set without revisiting
+		// that comparison and this fails.
 		const policy = resolvePkceOptions(undefined);
 		const admissible = new Set([
 			...pkceMethodsForClient(policy, null),
 			...pkceMethodsForClient(policy, { allowPlainPkce: true }),
 		]);
-		expect(admissible.size).toBeGreaterThan(0);
-		for (const method of admissible) {
-			expect(cased).toContain(method);
-		}
+		expect([...admissible].sort()).toEqual(["S256", "plain"]);
 	});
 });

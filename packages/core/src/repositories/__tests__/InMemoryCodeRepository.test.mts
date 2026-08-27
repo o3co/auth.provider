@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
 import { InMemoryCodeRepository } from "#/repositories/InMemoryCodeRepository.mjs";
 
@@ -153,6 +153,46 @@ describe("InMemoryCodeRepository", () => {
 
 			const found = await repo.findByCode(created.code);
 			expect(found).toBeNull();
+		});
+
+		it("consumeByCode refuses an expired code, and burns it on the way out", async () => {
+			// The expiry checks on `findByCode` and `consumeByCode` are separate
+			// guards and only the former was pinned — but `consumeByCode` is the
+			// one `/token` calls, so it is the one that decides whether an
+			// expired authorization code is still redeemable. A code past its
+			// TTL must not be exchangeable for tokens no matter how it is
+			// presented.
+			repo = new InMemoryCodeRepository({ defaultExpiresIn: 0.05 }); // 50ms
+			const created = await repo.createCode(minimalParams);
+
+			await new Promise((r) => setTimeout(r, 100));
+
+			expect(await repo.consumeByCode(created.code)).toBeNull();
+			// Deleted before the expiry verdict, so a replay of an expired code
+			// is indistinguishable from a replay of a consumed one.
+			expect(await repo.consumeByCode(created.code)).toBeNull();
+		});
+
+		it("sweeps expired codes that were never presented", async () => {
+			// Codes that are minted and then abandoned — the user closes the tab
+			// — are never read again, so neither read-path guard ever runs on
+			// them and only the periodic sweep reclaims them. Without it the map
+			// grows for the life of the process, which is why this asserts on
+			// the map itself: "findByCode returns null" would pass whether or
+			// not the sweep exists, since that path filters by expiry anyway.
+			vi.useFakeTimers();
+			try {
+				repo = new InMemoryCodeRepository({ defaultExpiresIn: 1 });
+				await repo.createCode(minimalParams);
+				const stored = (repo as unknown as { codes: Map<string, unknown> }).codes;
+				expect(stored.size).toBe(1);
+
+				await vi.advanceTimersByTimeAsync(10_000);
+
+				expect(stored.size).toBe(0);
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 	});
 
