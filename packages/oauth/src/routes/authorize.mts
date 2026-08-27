@@ -286,9 +286,11 @@ const checkPkce = (
 		redirectError(ctx, "invalid_request", "code_challenge is required");
 		return null;
 	}
-	// `toStr` yields undefined for a repeated `?code_challenge_method=` too
-	// (Express surfaces it as an array), which then resolves as absent —
-	// i.e. as `plain` — and is refused unless this client opted in.
+	// `checkSingleValuedParams` already refused a repeated parameter, so
+	// `toStr` yielding undefined here means genuinely absent — which RFC 7636
+	// §4.3 defines as `plain`, and which is then refused unless this client
+	// opted in. (Before that gate existed, a repeat also landed here and was
+	// silently read as `plain`; see SINGLE_VALUED_QUERY_PARAMS.)
 	const requestedMethod = toStr(codeChallengeMethod);
 	const method = requestedMethod ?? PKCE_METHOD_ABSENT_DEFAULT;
 	if (!pkceMethodsForClient(policy, client).includes(method)) {
@@ -302,6 +304,66 @@ const checkPkce = (
 		return null;
 	}
 	return { method };
+};
+
+/**
+ * The `/authorize` query parameters RFC 6749 §3.1 defines as single-valued
+ * ("Request and response parameters MUST NOT be included more than once").
+ *
+ * Express + `qs` surfaces a repeated `?p=a&p=b` as an ARRAY (and `?p[k]=v` as
+ * an object), while every read in this file narrows a non-string to
+ * `undefined` — the same shape *absence* produces. Without this gate a
+ * repeated parameter is therefore read as "not sent", which is a different
+ * request from the one the client made, and in three places that difference
+ * was wrong rather than merely surprising:
+ *
+ * - **`code_challenge_method`** fell through to RFC 7636 §4.3's `plain`
+ *   default. A client the operator opted into `plain` (`allowPlainPkce`)
+ *   could downgrade its own S256 request by sending the parameter twice —
+ *   the AS minted a `plain` code, no S256 verifier was ever computed, and
+ *   nothing about the request looked malformed. That is the instance
+ *   Copilot flagged on #350.
+ * - **`scope`** became "no scope requested", which does not narrow — it
+ *   widens the grant to the client's entire registered allowlist.
+ * - **`state`** was dropped from the response, so the client's CSRF check
+ *   failed silently instead of the request failing loudly.
+ *
+ * Two parameters are deliberately NOT in the list:
+ *
+ * - `response_type` is already refused by `checkResponseTypeIsCode` with
+ *   `unsupported_response_type`, the code RFC 6749 §4.1.2.1 defines for it.
+ *   Sweeping it in here would replace a specific error with a generic one.
+ * - `resource` is defined as **repeatable** by RFC 8707 §2, so rejecting a
+ *   repeat would break a conformant client. `extractResourceParam` validates
+ *   its elements instead.
+ *
+ * `client_id` and `redirect_uri` are absent for a different reason: they are
+ * single-valued too, but they are validated in the pre-redirect phase where
+ * the correct answer is `400` JSON, not a redirect — a `redirect_uri` we
+ * could not read is precisely one we must not redirect to (A-1).
+ */
+const SINGLE_VALUED_QUERY_PARAMS = [
+	"scope",
+	"state",
+	"code_challenge",
+	"code_challenge_method",
+	"nonce",
+] as const;
+
+/**
+ * Refuses a repeated single-valued parameter at the request boundary, before
+ * any of it is interpreted. The message is per-parameter and matches the
+ * wording IH-16 already used for `nonce`, which this gate now owns for the
+ * whole class.
+ */
+const checkSingleValuedParams = (ctx: AuthorizeContext): boolean => {
+	for (const name of SINGLE_VALUED_QUERY_PARAMS) {
+		const value = ctx.req.query[name];
+		if (value === undefined || typeof value === "string") continue;
+		redirectError(ctx, "invalid_request", `${name} must be a single string value`);
+		return false;
+	}
+	return true;
 };
 
 // IH-16 (v0.5.1): bound the OIDC `nonce` query parameter BEFORE the
@@ -335,6 +397,14 @@ const checkNonce = (ctx: AuthorizeContext): boolean => {
 	// `invalid_request` immediately so the failure is at the
 	// request boundary, not asynchronously at id_token
 	// validation time.
+	//
+	// `checkSingleValuedParams` now owns this rule for every
+	// single-valued parameter and emits the identical message,
+	// so in the current ordering this branch is unreachable.
+	// It stays as the TYPE-NARROWING site for the length and
+	// character-set checks below — and because a gate two
+	// steps away is the wrong thing to depend on for a
+	// security property this function can assert locally.
 	if (typeof ctx.req.query.nonce !== "string") {
 		redirectError(ctx, "invalid_request", "nonce must be a single string value");
 		return false;
@@ -667,6 +737,12 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		};
 
 		if (!checkResponseTypeIsCode(ctx)) return;
+		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
+		// it is interpreted — a repeat read as absence is a different request
+		// from the one the client sent, and this runs ahead of the client-policy
+		// gates so a malformed request never reaches the repository or the
+		// policy hook.
+		if (!checkSingleValuedParams(ctx)) return;
 		if (!(await checkAuthorizationCodeGrantAllowed(ctx, client))) return;
 		if (!(await checkFirstPartyInvariant(ctx, client))) return;
 		if (!(await checkEmailVerified(ctx))) return;

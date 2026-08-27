@@ -266,10 +266,14 @@ describe("/authorize — PKCE required (#273)", () => {
 		expect(params.get("error_description")).toBe("code_challenge is required");
 	});
 
-	it("rejects a repeated code_challenge (array) — it is not a single string", async () => {
+	it("rejects a repeated code_challenge (array) as a repeat, not as absence", async () => {
+		// RFC 6749 §3.1 — see SINGLE_VALUED_QUERY_PARAMS. The message names the
+		// actual defect rather than reporting the parameter as missing.
 		const { app } = await makeApp({});
 		const res = await authorize(app, withoutPkce({ code_challenge: ["a", "b"] }));
-		expect(redirectParams(res).get("error_description")).toBe("code_challenge is required");
+		expect(redirectParams(res).get("error_description")).toBe(
+			"code_challenge must be a single string value",
+		);
 	});
 });
 
@@ -294,14 +298,17 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 		);
 	});
 
-	it("rejects a repeated method (array) the same way — it resolves as absent", async () => {
+	it("rejects a repeated method (array) as a repeat — it must not resolve as absent", async () => {
+		// Reading a repeat as absence meant falling through to RFC 7636 §4.3's
+		// `plain`, which an `allowPlainPkce` client could then use to downgrade
+		// its own S256 request. See SINGLE_VALUED_QUERY_PARAMS.
 		const { app } = await makeApp({});
 		const res = await authorize(app, {
 			...baseQuery,
 			code_challenge_method: ["S256", "S256"],
 		});
 		expect(redirectParams(res).get("error_description")).toBe(
-			'code_challenge_method is required and must be "S256"',
+			"code_challenge_method must be a single string value",
 		);
 	});
 

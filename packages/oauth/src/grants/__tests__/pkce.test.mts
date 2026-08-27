@@ -97,6 +97,79 @@ describe("resolvePkceOptions (#273)", () => {
 		resolvePkceOptions({}, logger);
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
+
+	// `resolveOAuthOptions` runs more than once per boot — `createOAuthRouter`
+	// resolves it for the routers and `createAuthorizationGrant` resolves it
+	// again for the token endpoint. That duplication is deliberate (it is what
+	// makes both endpoints read one policy) but it made the "your config is
+	// inert" line fire once per resolution instead of once per deployment.
+	describe("warns once per config, not once per resolution", () => {
+		it("emits a single warning however many times one config is resolved", () => {
+			const logger = makeLogger();
+			const pkceConfig = { requireS256: false };
+			resolvePkceOptions(pkceConfig, logger);
+			resolvePkceOptions(pkceConfig, logger);
+			resolvePkceOptions(pkceConfig, logger);
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+		});
+
+		it("still warns for a DIFFERENT config in the same process", () => {
+			// The reason this is not a module-level boolean: a process that
+			// composes several deployments — every test file in this package,
+			// and any embedder building more than one AS — would otherwise warn
+			// for the first stale config and go silent for every later one,
+			// which is worse than warning twice.
+			const logger = makeLogger();
+			resolvePkceOptions({ requireS256: false }, logger);
+			resolvePkceOptions({ defaultMethod: "plain" }, logger);
+			expect(logger.warn).toHaveBeenCalledTimes(2);
+			expect(logger.warn).toHaveBeenNthCalledWith(
+				1,
+				expect.objectContaining({ ignoredKeys: ["requireS256"] }),
+				"pkce_config_ignored_s256_is_mandatory",
+			);
+			expect(logger.warn).toHaveBeenNthCalledWith(
+				2,
+				expect.objectContaining({ ignoredKeys: ["defaultMethod"] }),
+				"pkce_config_ignored_s256_is_mandatory",
+			);
+		});
+
+		it("does not let one logger's suppression hide the config from another", () => {
+			// Two loggers, one config: the second resolution is genuinely the
+			// same deployment being resolved again, so silence is correct —
+			// this pins that the key is the CONFIG, not the logger.
+			const first = makeLogger();
+			const second = makeLogger();
+			const pkceConfig = { supportedMethods: ["plain"] };
+			resolvePkceOptions(pkceConfig, first);
+			resolvePkceOptions(pkceConfig, second);
+			expect(first.warn).toHaveBeenCalledTimes(1);
+			expect(second.warn).not.toHaveBeenCalled();
+		});
+
+		it("does not let a logger-less resolution consume the warning", () => {
+			// `grants/session.mts` resolves the same options object with no
+			// logger. If that call marked the config as reported, whether an
+			// operator ever saw the warning would depend on module construction
+			// order — silence for a real misconfiguration, intermittently.
+			const logger = makeLogger();
+			const pkceConfig = { requireS256: true };
+			resolvePkceOptions(pkceConfig);
+			resolvePkceOptions(pkceConfig, logger);
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+		});
+
+		it("resolves to the same policy whether or not it warned", () => {
+			// The guard must gate the log line and nothing else.
+			const pkceConfig = { requireS256: false };
+			const first = resolvePkceOptions(pkceConfig);
+			const second = resolvePkceOptions(pkceConfig);
+			expect(second).toEqual(first);
+			expect(second.required).toBe(true);
+			expect(second.supportedMethods).toEqual(["S256"]);
+		});
+	});
 });
 
 describe("pkceMethodsForClient (#273)", () => {

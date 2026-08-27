@@ -124,6 +124,34 @@ export const pkceMethodsForClient = (
 };
 
 /**
+ * The `pkce` config blocks already reported, keyed by the identity of the
+ * block itself.
+ *
+ * `resolveOAuthOptions` runs more than once per boot — `createOAuthRouter`
+ * resolves it for the routers and `createAuthorizationGrant` resolves it
+ * again for the token endpoint. That duplication is the whole point (it is
+ * what makes both endpoints read one policy), but it meant the "your config
+ * is inert" line fired once per *resolution* rather than once per
+ * deployment.
+ *
+ * A module-level boolean would fix the duplicate and break something worse: a
+ * process that composes several deployments — every test file in this
+ * package, and any embedder building more than one AS — would warn for the
+ * first stale config and then stay silent for every other one, so a genuinely
+ * misconfigured deployment could go unreported because an unrelated one was
+ * resolved first. Keying on the config object means "already reported THIS
+ * config", so one boot warns once and a second, differently-misconfigured
+ * config still warns.
+ *
+ * A `WeakSet` rather than a `Set` so a discarded config is collectable and a
+ * long-lived process composing many routers does not retain them; entries are
+ * only ever objects the caller already holds. It also needs no reset hook:
+ * test fixtures are distinct objects, so suites are isolated by construction
+ * rather than by remembering to clear shared state.
+ */
+const reportedPkceConfigs = new WeakSet<object>();
+
+/**
  * Keys that used to shape PKCE policy and no longer do. Order is the order
  * they are reported in, so the warning reads the same for a given config.
  */
@@ -148,10 +176,10 @@ const INERT_PKCE_KEYS: readonly string[] = Object.freeze([
  * than re-validating them. A config that still sets one is not a boot failure:
  * the stale value is inert and the resulting behaviour is strictly stronger
  * than what the operator asked for, so failing closed would take a deployment
- * down over a key that is now harmless. It is warned about instead, once, at
- * router composition — the same altitude `resolveOAuthOptions` resolves
- * everything else at, so an operator sees one boot-time line rather than one
- * per request.
+ * down over a key that is now harmless. It is warned about instead, once per
+ * config, at router composition — the same altitude `resolveOAuthOptions`
+ * resolves everything else at, so an operator sees one boot-time line rather
+ * than one per request or one per resolution (see `reportedPkceConfigs`).
  *
  * The previous `resolvePkceSupportedMethods` helper (TS-4) is gone with the
  * knob it validated: its whole job was to stop an operator-typed
@@ -162,11 +190,22 @@ export const resolvePkceOptions = (
 	pkceConfig: Record<string, unknown> | undefined,
 	logger?: Logger,
 ): ResolvedPkceOptions => {
-	if (pkceConfig) {
+	// `logger &&` is load-bearing, not a shortcut. Several call sites resolve
+	// without one — `grants/session.mts` reads its own knob through
+	// `resolveOAuthOptions(config)` — and marking the config there would let a
+	// logger-less resolution consume the single warning before the router's
+	// resolution ever got to emit it, purely on module construction order.
+	// Mark only when something was actually reported.
+	if (logger && pkceConfig && !reportedPkceConfigs.has(pkceConfig)) {
 		const ignoredKeys = INERT_PKCE_KEYS.filter((key) => pkceConfig[key] !== undefined);
 		if (ignoredKeys.length > 0) {
+			// Marked only on the branch that has something to report: a config
+			// with nothing stale in it stays unmarked, so an embedder that
+			// mutates a config between resolutions is still told when it
+			// becomes misconfigured.
+			reportedPkceConfigs.add(pkceConfig);
 			// Object-first call shape per the F5 D-4 Logger convention.
-			logger?.warn(
+			logger.warn(
 				{ ignoredKeys },
 				// The message names the outcome, not the keys, so an operator
 				// grepping logs for why `plain` stopped working finds it.
