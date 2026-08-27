@@ -575,21 +575,37 @@ export function assembleApp(
 	// Step 2: Construct router (§5.6 step 2).
 	const router: Router = RouterCtor();
 
-	// The OAuth surfaces that accept an access token as a credential, and so
-	// have to honour a token's `cnf` binding (#264). `/oauth/token` is
-	// deliberately absent: it authenticates a *client*, has no access token in
-	// play, and runs the token-endpoint binding profile above instead.
+	// The paths the protected-resource sender-constraint middleware (#264)
+	// must NOT run on. Everything else is guarded — the mount below is GLOBAL,
+	// not an allowlist of the surfaces that accept an access token. #308
+	// shipped the allowlist shape (four literal paths coupled to the bundled
+	// `oauthModule`'s mount points); #327 inverted it, because an allowlist
+	// has to be kept in sync with every module's mount points, so a module
+	// contributing a NEW token-accepting route shipped unguarded by default —
+	// the silent-downgrade failure #308 fixed, reintroduced at the extension
+	// seam. A global mount is safe because the middleware judges only requests
+	// that actually present an access token: it passes through requests with
+	// no Authorization header, non-token schemes (`Basic` client auth on the
+	// introspection endpoint, browser-redirect flows), tokens that do not
+	// decode as JWTs, and unbound tokens.
 	//
-	// `/oauth/federation` covers the whole federation sub-tree rather than the
-	// `:name/token` leaf, so a future bearer-authenticated federation route is
-	// guarded on arrival. The browser-redirect routes underneath it present no
-	// access-token scheme, so the middleware passes them straight through.
-	const PROTECTED_RESOURCE_PATHS = [
-		"/oauth/userinfo",
-		"/oauth/federation",
-		"/oauth/introspect",
-		"/oauth/logout",
-	];
+	// `/oauth/token` is deliberately exempt: it authenticates a *client*, has
+	// no access token in play, and runs the token-endpoint binding profile
+	// above instead. The exempt path is coupled to the bundled `oauthModule`'s
+	// mountPath the same way the `/oauth/token` mounts above and below are —
+	// see the NOTE on the `grantMiddleware` mount.
+	const SENDER_CONSTRAINT_EXEMPT_PATHS = ["/oauth/token"] as const;
+
+	// Prefix-segment, case-insensitive match — the same semantics an Express
+	// `router.use(path, ...)` mount applies (Express routers are
+	// case-insensitive by default), so exempting a path exempts exactly the
+	// sub-tree a literal mount on it would cover.
+	const isSenderConstraintExempt = (path: string): boolean => {
+		const lowered = path.toLowerCase();
+		return SENDER_CONSTRAINT_EXEMPT_PATHS.some(
+			(exempt) => lowered === exempt || lowered.startsWith(`${exempt}/`),
+		);
+	};
 
 	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
 	// collector and mount it on `/oauth/token` BEFORE any other grant
@@ -639,22 +655,29 @@ export function assembleApp(
 	// failure this exists to prevent. With no mechanisms the middleware admits
 	// every unbound token unchanged and refuses every bound one — fail closed.
 	//
-	// Same mountPath coupling to the bundled `oauthModule` as the block above.
+	// Mounted GLOBALLY, before every route contribution, so routes contributed
+	// by modules core has never heard of are guarded the moment they mount —
+	// see the exempt-list rationale above (#327).
 	const protectedResourceMechanisms: TokenBindingMechanism[] = [];
 	if (mechanismCollector !== undefined) {
 		for (const m of mechanismCollector.values()) {
 			if (m !== null) protectedResourceMechanisms.push(m);
 		}
 	}
-	router.use(
-		PROTECTED_RESOURCE_PATHS,
-		protectedResourceBindingMw({
-			mechanisms: protectedResourceMechanisms,
-			...(((frozen.components as Record<string, unknown>).logger as Logger | undefined)
-				? { logger: (frozen.components as Record<string, unknown>).logger as Logger }
-				: {}),
-		}),
-	);
+	const protectedResourceMw = protectedResourceBindingMw({
+		mechanisms: protectedResourceMechanisms,
+		...(((frozen.components as Record<string, unknown>).logger as Logger | undefined)
+			? { logger: (frozen.components as Record<string, unknown>).logger as Logger }
+			: {}),
+	});
+	router.use((req, res, next) => {
+		if (isSenderConstraintExempt(req.path)) {
+			next();
+			return;
+		}
+		// Returned so Express 5's router forwards a rejection to `next`.
+		return protectedResourceMw(req, res, next);
+	});
 
 	// Mount `grantMiddleware` contributions on `/oauth/token` AFTER the
 	// synthesized tokenBindingMw above. The bundled `oauthModule` contributes
