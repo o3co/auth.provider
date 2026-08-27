@@ -26,6 +26,7 @@ import {
 	type FederationProviderHandle,
 	type FederationTokenStore,
 	jwksModule,
+	memoryAccessTokenDenylistModule,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
@@ -208,6 +209,9 @@ describe("oauthModule — createTestApp boot failure", () => {
 			createTestApp({
 				modules: [
 					oauthModule({ config }),
+					// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+					// denylist behind it. Memory is right here — one process, one test.
+					memoryAccessTokenDenylistModule,
 					clientRepositoryModule,
 					codeRepositoryModule,
 					keyStoreModule,
@@ -236,6 +240,9 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -257,6 +264,9 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -284,6 +294,9 @@ describe("oauthModule — createTestApp route inspection", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -330,6 +343,9 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -362,6 +378,9 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -396,6 +415,9 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -456,6 +478,9 @@ describe("oauthModule — behavioral: rateLimiter + auditSink forwarding", () =>
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
@@ -624,6 +649,9 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				// Issuer is configured, so the discovery presence contract requires
 				// the JWKS-owning module to be co-installed (it contributes jwks_uri).
 				jwksModule,
@@ -737,6 +765,9 @@ describe("oauthModule — federation logout via typed deps", () => {
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,

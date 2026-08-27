@@ -628,13 +628,13 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 25 literals, Per A2-β §6.1 (+ #271)
+// BootErrorReason — 26 literals, Per A2-β §6.1 (+ #271, #277)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 24 reasons.
+ * exactly 26 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
  * federation-stores-incomplete) and the OIDC discovery aggregator
@@ -665,7 +665,8 @@ export type BootErrorReason =
 	| "mfa-partial-wiring"
 	| "federation-stores-incomplete"
 	| "discovery-document-invalid"
-	| "replica-unsafe-adapter";
+	| "replica-unsafe-adapter"
+	| "access-token-revocation-unenforceable";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — 25 total, Per A2-β §6.1 (+ #271)
@@ -999,6 +1000,21 @@ export interface ReplicaUnsafeAdapterDetails {
 }
 
 /**
+ * The composition reads the `accessTokenDenylist` slot — i.e. it serves the
+ * RFC 7009 revocation endpoint — while `oauth.revocation.accessToken` is
+ * `"denylist"` and nothing provides one (#277).
+ *
+ * `consumedBy` names every module that declared the slot, because that is the
+ * evidence for the diagnosis: those modules are why core believes access-token
+ * revocation is reachable in this app.
+ */
+export interface AccessTokenRevocationUnenforceableDetails {
+	readonly reason: "access-token-revocation-unenforceable";
+	/** Modules declaring `accessTokenDenylist` in `requires` / `optional`. */
+	readonly consumedBy: readonly string[];
+}
+
+/**
  * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
@@ -1031,7 +1047,8 @@ export type BootErrorDetails =
 	| MfaPartialWiringDetails
 	| FederationStoresIncompleteDetails
 	| DiscoveryDocumentInvalidDetails
-	| ReplicaUnsafeAdapterDetails;
+	| ReplicaUnsafeAdapterDetails
+	| AccessTokenRevocationUnenforceableDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

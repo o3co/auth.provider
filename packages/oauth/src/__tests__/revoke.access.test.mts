@@ -156,26 +156,62 @@ describe("POST /oauth/revoke — access token path", () => {
 		expect(res.status).toBe(200);
 	});
 
-	it("responds 200 and emits warn log when denylist slot is unwired", async () => {
-		const logger = createMockLogger();
+	// #277: the pre-fix behaviour of this branch was a warn-logged no-op — the
+	// client got RFC 7009's mandatory 200 and the token stayed valid until
+	// expiry. A warning emitted once per revocation attempt is not a signal an
+	// operator can act on mid-incident, so the branch is gone. What replaces it
+	// depends on whether the caller CLAIMED the capability.
+	it("refuses construction when denylist-backed AT revocation is claimed without a denylist", () => {
+		expect(() =>
+			createRevokeRouter(express, {
+				clientRepository,
+				keyStore,
+				refreshTokenFamilyRevocation: stubRevocation,
+				accessTokenRevocation: "denylist",
+				accessTokenDenylist: undefined,
+				logger: createMockLogger(),
+				issuer: ISSUER,
+			}),
+		).toThrow(/accessTokenDenylist/);
+	});
+
+	it("names the unsupported escape hatch in the construction failure", () => {
+		expect(() =>
+			createRevokeRouter(express, {
+				clientRepository,
+				keyStore,
+				accessTokenRevocation: "denylist",
+				accessTokenDenylist: undefined,
+				logger: createMockLogger(),
+				issuer: ISSUER,
+			}),
+		).toThrow(/unsupported/);
+	});
+
+	it("degrades to unsupported — never to a hollow 200 — when nothing was declared", async () => {
+		// An undeclared mode with no denylist follows the wiring: the endpoint
+		// cannot revoke access tokens, so it says so. Core's boot validator is
+		// what stops a real deployment from arriving here by omission; this is
+		// the direct-API caller's behaviour, and the point is that it is honest
+		// rather than silent.
 		const router = createRevokeRouter(express, {
 			clientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation: stubRevocation,
 			accessTokenDenylist: undefined,
-			logger,
+			logger: createMockLogger(),
 			issuer: ISSUER,
 		});
 		const localApp = express();
 		localApp.use("/oauth", router);
 		const at = await mintAccessToken({ jti: "j-4", clientId: CLIENT_ID });
-		await request(localApp)
+		const res = await request(localApp)
 			.post("/oauth/revoke")
 			.auth(CLIENT_ID, CLIENT_SECRET)
 			.type("form")
-			.send({ token: at })
-			.expect(200);
-		expect(logger.warn).toHaveBeenCalled();
+			.send({ token: at, token_type_hint: "access_token" });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unsupported_token_type");
 	});
 
 	it("fail-closed: AT with no client_id/azp/aud claim is NOT denylisted (Copilot review #2)", async () => {
@@ -265,6 +301,101 @@ describe("POST /oauth/revoke — C1: cross-type fallback (hint=access_token + RT
 		expect(res.status).toBe(200);
 		// Cross-type fallback: RT family must be revoked even though hint said AT
 		expect(revocations).toContain("fam-cross-1");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #277: accessTokenRevocation = "unsupported" — the declared-absent capability
+// ---------------------------------------------------------------------------
+
+describe('POST /oauth/revoke — accessTokenRevocation: "unsupported"', () => {
+	let revocations: string[];
+	let revocation: RefreshTokenFamilyRevocation;
+	let app: express.Express;
+
+	beforeEach(() => {
+		revocations = [];
+		revocation = {
+			revokeFamily: vi.fn(async (id: string) => {
+				revocations.push(id);
+			}),
+			isFamilyRevoked: vi.fn(async () => false),
+		};
+		app = express();
+		app.use(
+			"/oauth",
+			createRevokeRouter(express, {
+				clientRepository,
+				keyStore,
+				refreshTokenFamilyRevocation: revocation,
+				accessTokenRevocation: "unsupported",
+				// No denylist, and none needed: the deployment has declared it does
+				// not revoke access tokens.
+				logger: createMockLogger(),
+				issuer: ISSUER,
+			}),
+		);
+	});
+
+	it("constructs without a denylist", () => {
+		// Covered by the beforeEach not throwing; asserted explicitly so the
+		// reason this suite exists survives a refactor of the fixture.
+		expect(app).toBeDefined();
+	});
+
+	it("answers 400 unsupported_token_type for token_type_hint=access_token", async () => {
+		const at = await mintAccessToken({ jti: "j-unsup", clientId: CLIENT_ID });
+		const res = await request(app)
+			.post("/oauth/revoke")
+			.auth(CLIENT_ID, CLIENT_SECRET)
+			.type("form")
+			.send({ token: at, token_type_hint: "access_token" });
+		// RFC 7009 §2.2.1 — the server does not support revoking this token type.
+		// A 200 here would be the very lie #277 was filed about.
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unsupported_token_type");
+	});
+
+	it("still revokes refresh tokens with an explicit hint", async () => {
+		const rt = await mintRefreshTokenForCrossType({
+			familyId: "fam-unsup-1",
+			clientId: CLIENT_ID,
+		});
+		const res = await request(app)
+			.post("/oauth/revoke")
+			.auth(CLIENT_ID, CLIENT_SECRET)
+			.type("form")
+			.send({ token: rt, token_type_hint: "refresh_token" });
+		expect(res.status).toBe(200);
+		expect(revocations).toContain("fam-unsup-1");
+	});
+
+	it("still revokes refresh tokens with no hint at all", async () => {
+		const rt = await mintRefreshTokenForCrossType({
+			familyId: "fam-unsup-2",
+			clientId: CLIENT_ID,
+		});
+		const res = await request(app)
+			.post("/oauth/revoke")
+			.auth(CLIENT_ID, CLIENT_SECRET)
+			.type("form")
+			.send({ token: rt });
+		expect(res.status).toBe(200);
+		expect(revocations).toContain("fam-unsup-2");
+	});
+
+	it("answers 200 for an unhinted access token without pretending to revoke it", async () => {
+		// No hint means RFC 7009 §2.1 cross-type search, and the AT half of that
+		// search does not exist here. The response stays 200 (§2.2: the endpoint
+		// must not leak which tokens exist) and no revocation happens.
+		const at = await mintAccessToken({ jti: "j-unsup-2", clientId: CLIENT_ID });
+		const res = await request(app)
+			.post("/oauth/revoke")
+			.auth(CLIENT_ID, CLIENT_SECRET)
+			.type("form")
+			.send({ token: at });
+		expect(res.status).toBe(200);
+		expect(revocations).toEqual([]);
 	});
 });
 

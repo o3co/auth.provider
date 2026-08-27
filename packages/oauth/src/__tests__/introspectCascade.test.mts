@@ -23,6 +23,7 @@ import {
 	createSymmetricKeyStore,
 	defineModule,
 	jwksModule,
+	memoryAccessTokenDenylistModule,
 	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
 import { createTestApp, GrantRegistry, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
@@ -422,6 +423,9 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
 		const handle = await createTestApp({
 			modules: [
 				oauthModule({ config }),
+				// #277: oauthModule mounts /oauth/revoke, so the boot validator requires a
+				// denylist behind it. Memory is right here — one process, one test.
+				memoryAccessTokenDenylistModule,
 				// Issuer is configured, so the discovery presence contract requires
 				// the JWKS-owning module (contributes jwks_uri) to be co-installed.
 				jwksModule,

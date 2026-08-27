@@ -38,6 +38,7 @@ import {
 	type Logger,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
+	readAccessTokenRevocationMode,
 	type SenderConstraint,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
@@ -735,15 +736,23 @@ export const createOAuthRouter = async (
 		);
 	}
 
-	// RFC 7009 — Token Revocation endpoint.
-	// Always mounted. `accessTokenDenylist` is optional: when absent, AT
-	// revocation is a warn-logged no-op (RT revocation is unaffected).
+	// RFC 7009 — Token Revocation endpoint. Always mounted; what it does with
+	// an ACCESS token comes from `oauth.revocation.accessToken` (#277).
+	//
+	// In the default `"denylist"` mode `createRevokeRouter` THROWS when
+	// `accessTokenDenylist` is absent, which surfaces as a boot failure rather
+	// than a route that answers 200 to every revocation. Core's boot validator
+	// catches the same condition earlier (step 13.9), so this throw is the
+	// backstop for composition roots that build the router directly.
+	//
+	// Refresh-token revocation is independent of the mode and of the denylist.
 	router.use(
 		createRevokeRouter(express, {
 			clientRepository,
 			keyStore,
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
+			accessTokenRevocation: readAccessTokenRevocationMode(config),
 			logger,
 			issuer: canonicalIssuer,
 		}),

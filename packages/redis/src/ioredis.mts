@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { consoleLogger, type EventLogger } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import type {
+	AccessTokenDenylistClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
 	DisposableRefreshTokenFamilyClient,
@@ -127,6 +128,7 @@ export function makeIoredisClients(
 	options: IoredisClientsOptions = {},
 ): {
 	challengeStoreClient: ChallengeStoreClient;
+	accessTokenDenylistClient: AccessTokenDenylistClient;
 	replaySeenSetClient: ReplaySeenSetClient;
 	refreshTokenFamilyClient: RefreshTokenFamilyClient;
 	userSessionStoreClient: UserSessionStoreClient;
@@ -143,6 +145,13 @@ export function makeIoredisClients(
 		set: (k, v, _mode, ttl, _cond) => io.set(k, v, "PX", ttl, "NX") as Promise<"OK" | null>,
 		pttl: (k) => io.pttl(k),
 		del: (k) => io.del(k),
+	};
+
+	// #277: revoked access-token jtis. Plain PX SET (no NX) — re-revoking a jti
+	// is idempotent and last-write-wins on the expiry.
+	const accessTokenDenylistClient: AccessTokenDenylistClient = {
+		set: (k, v, _mode, ttlMs) => io.set(k, v, "PX", ttlMs) as Promise<"OK">,
+		exists: (k) => io.exists(k),
 	};
 
 	const replaySeenSetClient: ReplaySeenSetClient = {
@@ -367,6 +376,7 @@ export function makeIoredisClients(
 
 	return {
 		challengeStoreClient,
+		accessTokenDenylistClient,
 		replaySeenSetClient,
 		refreshTokenFamilyClient,
 		userSessionStoreClient,

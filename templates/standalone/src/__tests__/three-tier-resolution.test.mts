@@ -19,6 +19,7 @@ import { type AppConfig, AppConfigSchema } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
+import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 
 // config/ is two levels above this test file:
@@ -116,5 +117,66 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 			OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 		});
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
+	});
+
+	// #277 — this is the shape the umbrella E2E (o3co/auth) boots: the shipped
+	// application.conf, `DEPLOYMENT_MODE=multi`, and one shared ioredis socket.
+	// The assertions below are what keep that stack booting: a memory denylist
+	// under `multi` is refused by the replica-safety guard, and NO denylist is
+	// refused by the #277 guard, so the template has to land on "redis" without
+	// the deployment naming it.
+	describe("#277: access-token revocation as the shipped artifact resolves it", () => {
+		it("resolves accessTokenDenylist.adapter to redis with nothing set", () => {
+			const config = buildResolvedConfig("production");
+			expect(config.accessTokenDenylist?.adapter).toBe("redis");
+		});
+
+		it("resolves oauth.revocation.accessToken to denylist with nothing set", () => {
+			const config = buildResolvedConfig("production");
+			expect(config.oauth.revocation?.accessToken).toBe("denylist");
+		});
+
+		it("picks the replica-safe denylist module for that resolved config", () => {
+			const names = buildModules(buildResolvedConfig("production")).map((m) => m.name);
+			expect(names).toContain("redis-access-token-denylist");
+			expect(names).not.toContain("core-access-token-denylist-memory");
+		});
+
+		it("leaves nothing replica-unsafe under the umbrella E2E's environment", async () => {
+			// The environment `o3co/auth`'s tests/docker-compose.yml sets. Under
+			// `DEPLOYMENT_MODE=multi` the replica-safety guard fails boot naming
+			// every in-memory shared store, so the denylist this change adds has to
+			// come out of that environment as the Redis one — from the template's
+			// own config, since the compose file names no denylist variable.
+			// Asserted against the guard's own list rather than a module name, so a
+			// rename cannot quietly invalidate it.
+			const { REPLICA_UNSAFE_MODULES } = await import("@o3co/auth-provider-core");
+			const config = buildResolvedConfig("production", {
+				USER_SESSION_STORES_ADAPTER: "redis",
+				RATE_LIMITER_ADAPTER: "redis",
+				OAUTH_CODE_ADAPTER: "redis",
+			});
+			const names = buildModules(config).map((m) => m.name);
+			expect(names).toContain("redis-access-token-denylist");
+			for (const name of names) {
+				expect(REPLICA_UNSAFE_MODULES).not.toContain(name);
+			}
+		});
+
+		it("lets a single-instance deployment opt down to memory by env var", () => {
+			const config = buildResolvedConfig("production", {
+				ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
+			});
+			expect(config.accessTokenDenylist?.adapter).toBe("memory");
+			const names = buildModules(config).map((m) => m.name);
+			expect(names).toContain("core-access-token-denylist-memory");
+		});
+
+		it("lets a deployment declare access-token revocation unsupported by env var", () => {
+			const config = buildResolvedConfig("production", {
+				OAUTH_REVOCATION_ACCESS_TOKEN: "unsupported",
+			});
+			expect(config.oauth.revocation?.accessToken).toBe("unsupported");
+		});
 	});
 });

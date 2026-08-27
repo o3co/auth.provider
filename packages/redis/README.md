@@ -25,11 +25,15 @@ Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core
   custom `FederationTokenStoreClient` whose `compareAndDelete` uses an
   alternative atomic primitive (e.g., a Cluster-safe transaction).
 
-This package ships nine adapters covering every redis-backed component that
+This package ships ten adapters covering every redis-backed component that
 `@o3co/auth-provider-core` exposes as a typed slot:
 
 - `ChallengeStore` (challenges)
 - `ReplaySeenSet` (replay-seen-set)
+- `AccessTokenDenylist` (access-token-denylist) — the store behind RFC 7009
+  access-token revocation. The in-process alternative forks per replica, so a
+  token revoked on one replica keeps working on the others; core refuses that
+  one under `deployment.mode = "multi"` (#277)
 - `RefreshTokenFamilyStore` / `RefreshTokenFamilyRotation` /
   `RefreshTokenFamilyRevocation` (refresh-token-family)
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,

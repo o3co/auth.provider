@@ -30,7 +30,10 @@
 
 import { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
-import { composeConfigSchema } from "../config/application.schema.mjs";
+import {
+	composeConfigSchema,
+	readAccessTokenRevocationMode,
+} from "../config/application.schema.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
@@ -961,6 +964,76 @@ export function checkFederationStoresWiring(
 }
 
 // ---------------------------------------------------------------------------
+// Step 13.9 — Access-token revocation enforceability guard
+// Per issue #277.
+// ---------------------------------------------------------------------------
+
+/**
+ * `POST /oauth/revoke` MUST answer 200 for a well-formed request (RFC 7009
+ * §2.2), which makes the 200 the operator's only signal that anything
+ * happened. For access tokens the thing that happens is `accessTokenDenylist.add`;
+ * with no denylist wired the endpoint verified the token, logged a warning
+ * nobody reads mid-incident, and returned the same 200 while the JWT kept
+ * working everywhere until expiry.
+ *
+ * So: when this composition reads the `accessTokenDenylist` slot and
+ * `oauth.revocation.accessToken` is `"denylist"` (the default), the slot must
+ * be filled. Otherwise boot fails.
+ *
+ * **The trigger is slot consumption, not the route table.** Core cannot see
+ * that `packages/oauth` mounts `/oauth/revoke` — routes are factory-shaped and
+ * opaque until `applyContributions`. A module declaring `accessTokenDenylist`
+ * in `requires` / `optional` is the composition-level statement that
+ * denylist-backed access-token revocation is part of this app's surface, and it
+ * is observable here, at stage 1, before a single component is constructed.
+ * The approximation errs toward asking: a module that reads the slot for some
+ * other purpose still gets told to wire one or to declare the capability
+ * absent, and both answers are cheap.
+ *
+ * Deployments that genuinely do not revoke access tokens say so —
+ * `oauth.revocation.accessToken = "unsupported"` — and the endpoint then
+ * answers `unsupported_token_type` instead of a hollow 200.
+ *
+ * **Refresh-token revocation is out of scope in both modes.** It runs off
+ * `refreshTokenFamilyRevocation` and never needed a denylist; this guard must
+ * not be read as requiring one for `/oauth/revoke` as a whole.
+ */
+export function checkAccessTokenRevocationWiring(
+	modules: readonly NormalisedModule[],
+	config: unknown,
+	plannedKeys: ReadonlySet<string>,
+): void {
+	// Omission means `"denylist"` here — see `readAccessTokenRevocationMode`.
+	// Only an explicit `"unsupported"` excuses the missing slot.
+	if (readAccessTokenRevocationMode(config) === "unsupported") return;
+	if (plannedKeys.has("accessTokenDenylist")) return;
+
+	const consumedBy = modules
+		.filter(
+			(m) =>
+				(m.requires as readonly string[]).includes("accessTokenDenylist") ||
+				(m.optional as readonly string[]).includes("accessTokenDenylist"),
+		)
+		.map((m) => m.name);
+	if (consumedBy.length === 0) return;
+
+	throw new BootError({
+		stage: "validateManifests",
+		reason: "access-token-revocation-unenforceable",
+		message:
+			`oauth.revocation.accessToken is "denylist" (the default) and ${consumedBy.length === 1 ? `module "${consumedBy[0]}" reads` : `modules [${consumedBy.join(", ")}] read`} ` +
+			"the accessTokenDenylist slot, but nothing provides one. RFC 7009 revocation of an access " +
+			"token would answer 200 and leave the token valid until it expires. Wire a denylist " +
+			'(a shared one — `accessTokenDenylist.adapter = "redis"` in the standalone template; the ' +
+			"bundled memoryAccessTokenDenylistModule is single-replica only), or set " +
+			'`oauth.revocation.accessToken = "unsupported"` to have the endpoint reject access-token ' +
+			"revocation with unsupported_token_type. Refresh-token revocation needs no denylist and is " +
+			"unaffected either way.",
+		details: { reason: "access-token-revocation-unenforceable", consumedBy },
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Step 8 — Override target existence
 // Per A2-β §5.1 step 8.
 // ---------------------------------------------------------------------------
@@ -1456,6 +1529,11 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		// (see FEDERATION_REQUIRED_STORES for the authoritative list).
 		// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
 		checkFederationStoresWiring(parsedConfig as AppConfig, plannedKeys);
+
+		// Step 13.9: access-token revocation enforceability — a composition that
+		// reads the `accessTokenDenylist` slot must have one, unless it declares
+		// `oauth.revocation.accessToken = "unsupported"`. Per issue #277.
+		checkAccessTokenRevocationWiring(normalisedModules, parsedConfig, plannedKeys);
 	}
 
 	// Step 13.8: Replica-safety guard — state held in this process's memory
