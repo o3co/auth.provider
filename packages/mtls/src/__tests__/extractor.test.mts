@@ -41,9 +41,22 @@ const EXPECTED_LEAF_THUMBPRINT = createHash("sha256")
 	.digest("base64url")
 	.replace(/=+$/, "");
 
-/** Build a minimal Express-like Request stub. */
-const makeReq = (headers: Record<string, string | undefined>): Partial<Request> => ({
+/** The peer address every header-source test connects from unless it says otherwise. */
+const TRUSTED_PEER = "10.0.0.7";
+
+/**
+ * Build a minimal Express-like Request stub.
+ *
+ * `socket.remoteAddress` is part of the minimum since #280: the header source
+ * authenticates the forwarding proxy by its TCP peer address, so a stub
+ * without one is not a request the mechanism can accept.
+ */
+const makeReq = (
+	headers: Record<string, string | undefined>,
+	remoteAddress: string | undefined = TRUSTED_PEER,
+): Partial<Request> => ({
 	get: (name: string) => headers[name.toLowerCase()],
+	socket: { remoteAddress } as unknown as Request["socket"],
 });
 
 /**
@@ -62,6 +75,7 @@ describe("createMtlsMechanism — header source", () => {
 	it("returns null when the configured header is absent (ambient mechanism)", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeader: "x-forwarded-client-cert",
 			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
@@ -76,6 +90,7 @@ describe("createMtlsMechanism — header source", () => {
 		// presentation. Dispatch policy ("intent-explicit") relies on this flag.
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
 		});
@@ -86,6 +101,7 @@ describe("createMtlsMechanism — header source", () => {
 	it("extracts thumbprint from a plain-pem dialect header", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeader: "x-forwarded-client-cert",
 			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
@@ -99,6 +115,7 @@ describe("createMtlsMechanism — header source", () => {
 	it("extracts thumbprint from an envoy dialect XFCC header (URL-encoded Cert=)", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeader: "x-forwarded-client-cert",
 			certHeaderDialect: "envoy",
 			mode: "self-signed",
@@ -111,6 +128,7 @@ describe("createMtlsMechanism — header source", () => {
 	it("throws MtlsError(malformed_header) when the envoy XFCC lacks Cert=", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "envoy",
 			mode: "self-signed",
 		});
@@ -122,6 +140,7 @@ describe("createMtlsMechanism — header source", () => {
 	it("throws MtlsError(cert_decode_failed) when the PEM body is unparseable", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
 		});
@@ -139,6 +158,7 @@ describe("createMtlsMechanism — header source", () => {
 		// certHeader is optional; default per spec §10.1 + §10.2 schema default.
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
 		});
@@ -149,6 +169,7 @@ describe("createMtlsMechanism — header source", () => {
 	it("uses 'envoy' as the default dialect", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			mode: "self-signed",
 		});
 		const xfcc = `Cert=${encodeURIComponent(LEAF_PEM)}`;
@@ -192,6 +213,7 @@ describe("createMtlsMechanism — validity window (mode-agnostic)", () => {
 		vi.setSystemTime(new Date("1990-01-01T00:00:00Z"));
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
 		});
@@ -206,6 +228,7 @@ describe("createMtlsMechanism — validity window (mode-agnostic)", () => {
 		vi.setSystemTime(new Date("2126-01-01T00:00:00Z"));
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "plain-pem",
 			mode: "self-signed",
 		});
@@ -220,6 +243,7 @@ describe("createMtlsMechanism — validity window (mode-agnostic)", () => {
 		vi.setSystemTime(new Date("2126-01-01T00:00:00Z"));
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "envoy",
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
@@ -238,6 +262,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 		// emit a thumbprint.
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "envoy",
 			mode: "pki",
 			trustedCas: [LEAF_PEM], // intentionally wrong
@@ -251,6 +276,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 	it("PKI mode accepts a chain when trusted-cas contains the root (XFCC chain extracted)", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "envoy",
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
@@ -266,6 +292,7 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 		// → "no path to trust anchor" → chain_validation_failed.
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "plain-pem",
 			mode: "pki",
 			trustedCas: [ROOT_PEM],
@@ -273,6 +300,178 @@ describe("createMtlsMechanism — PKI mode (chain validation before thumbprint)"
 		await expect(
 			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }) as Request),
 		).rejects.toMatchObject({ reason: "chain_validation_failed" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #280 — the certificate must come from the TLS layer, or from an
+// authenticated trusted proxy (RFC 8705 §3).
+// ---------------------------------------------------------------------------
+
+describe("createMtlsMechanism — default certificate source (#280)", () => {
+	it("defaults to the TLS layer when `source` is omitted", async () => {
+		// The pre-#280 default was "header", which trusted a forwarded header
+		// from any peer that could reach the process. The certificate now comes
+		// from the transport by default; a forwarded header is opt-in.
+		const mech = createMtlsMechanism({ mode: "self-signed" });
+		const result = await mech.extract(makeReqWithTlsCert(LEAF_DER) as Request);
+		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
+	});
+
+	it("ignores a forwarded cert header entirely under the default source", async () => {
+		// A request carrying a forged header but no TLS-layer certificate is an
+		// unbound request, not an mTLS one. It must not throw either — the
+		// header is simply not this mechanism's input.
+		const mech = createMtlsMechanism({ mode: "self-signed" });
+		const req = {
+			get: (name: string) =>
+				name.toLowerCase() === "x-forwarded-client-cert" ? LEAF_PEM : undefined,
+			socket: { getPeerCertificate: () => ({}) } as unknown as Request["socket"],
+		} as Request;
+		expect(await mech.extract(req)).toBeNull();
+	});
+});
+
+describe("createMtlsMechanism — trusted-proxy allowlist for the header source (#280)", () => {
+	it("throws at construction when source === 'header' and no trustedProxies are configured", () => {
+		expect(() =>
+			createMtlsMechanism({
+				source: "header",
+				certHeaderDialect: "plain-pem",
+				mode: "self-signed",
+			}),
+		).toThrow(/trustedProxies/i);
+	});
+
+	it("throws at construction when source === 'header' and trustedProxies is empty", () => {
+		expect(() =>
+			createMtlsMechanism({
+				source: "header",
+				trustedProxies: [],
+				certHeaderDialect: "plain-pem",
+				mode: "self-signed",
+			}),
+		).toThrow(/trustedProxies/i);
+	});
+
+	it("accepts the forwarded certificate when the peer is an allowlisted proxy", async () => {
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.7"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		const result = await mech.extract(
+			makeReq({ "x-forwarded-client-cert": LEAF_PEM }, "10.0.0.7") as Request,
+		);
+		expect(result?.confirmation).toEqual({ "x5t#S256": EXPECTED_LEAF_THUMBPRINT });
+	});
+
+	it("rejects a forwarded certificate from a peer that is not an allowlisted proxy", async () => {
+		// The threat #280 closes: anyone who can open a connection to the app
+		// could previously assert any client identity by setting this header.
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.7"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		await expect(
+			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }, "203.0.113.9") as Request),
+		).rejects.toMatchObject({ reason: "untrusted_proxy" });
+	});
+
+	it("rejects rather than ignoring — a forged header must not silently downgrade to unbound", async () => {
+		// CONTRIBUTING.md §4: `extract` returns null only for ABSENCE. Present
+		// but unauthenticated material is invalid, and invalid material rejects
+		// the whole request instead of falling through to whatever else
+		// validates. Returning null here would let an attacker strip a binding
+		// off someone else's request by injecting a header.
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["loopback"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		await expect(
+			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }, "198.51.100.4") as Request),
+		).rejects.toBeInstanceOf(MtlsError);
+	});
+
+	it("returns null when an untrusted peer sends no certificate header at all", async () => {
+		// Absence stays absence regardless of who is connecting — an ordinary
+		// unbound request from a direct client must not become an error.
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.7"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		expect(await mech.extract(makeReq({}, "203.0.113.9") as Request)).toBeNull();
+	});
+
+	it("rejects when the peer address is unavailable", async () => {
+		// `remoteAddress` is undefined on a destroyed socket and on a
+		// Unix-domain listener. Neither can be proven to be the proxy.
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.7"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		const req = {
+			get: (name: string) =>
+				name.toLowerCase() === "x-forwarded-client-cert" ? LEAF_PEM : undefined,
+			socket: {} as unknown as Request["socket"],
+		} as Request;
+		await expect(mech.extract(req)).rejects.toMatchObject({ reason: "untrusted_proxy" });
+	});
+
+	it("checks the socket peer, never the X-Forwarded-For-derived req.ip", async () => {
+		// `req.ip` is attacker-controlled whenever Express `trust proxy` is on.
+		// A request whose `ip` claims to be the proxy but whose socket peer is
+		// not must still be rejected.
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.7"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+		});
+		const req = {
+			get: (name: string) =>
+				name.toLowerCase() === "x-forwarded-client-cert" ? LEAF_PEM : undefined,
+			ip: "10.0.0.7",
+			socket: { remoteAddress: "203.0.113.9" } as unknown as Request["socket"],
+		} as Request;
+		await expect(mech.extract(req)).rejects.toMatchObject({ reason: "untrusted_proxy" });
+	});
+
+	it("logs the rejection with the observed peer so the misconfiguration is diagnosable", async () => {
+		const warn = vi.fn();
+		const mech = createMtlsMechanism({
+			source: "header",
+			trustedProxies: ["10.0.0.7"],
+			certHeaderDialect: "plain-pem",
+			mode: "self-signed",
+			logger: { warn } as never,
+		});
+		await expect(
+			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }, "203.0.113.9") as Request),
+		).rejects.toThrow();
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ remoteAddress: "203.0.113.9" }),
+			"mtls_untrusted_proxy_rejected",
+		);
+	});
+
+	it("propagates an invalid trustedProxies entry as a boot failure", () => {
+		expect(() =>
+			createMtlsMechanism({
+				source: "header",
+				trustedProxies: ["proxy.internal"],
+				mode: "self-signed",
+			}),
+		).toThrow(/not a valid IP address/i);
 	});
 });
 
@@ -284,6 +483,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		expect(() =>
 			createMtlsMechanism({
 				source: "header",
+				trustedProxies: [TRUSTED_PEER],
 				mode: "pki",
 				// trustedCas omitted (defaults to undefined → effectively empty)
 			}),
@@ -309,6 +509,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		expect(() =>
 			createMtlsMechanism({
 				source: "header",
+				trustedProxies: [TRUSTED_PEER],
 				mode: "self-signed",
 			}),
 		).not.toThrow();
@@ -321,6 +522,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		const fileRef = `file:${join(fixturesDir, "root.pem")}`;
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "envoy",
 			mode: "pki",
 			trustedCas: [fileRef],
@@ -337,6 +539,7 @@ describe("createMtlsMechanism — boot-time validation", () => {
 		expect(() =>
 			createMtlsMechanism({
 				source: "header",
+				trustedProxies: [TRUSTED_PEER],
 				mode: "pki",
 				trustedCas: ["file:/nonexistent/path/to/ca.pem"],
 			}),
@@ -348,6 +551,7 @@ describe("MtlsError exposure", () => {
 	it("thrown errors are instances of MtlsError (so callers can narrow with instanceof)", async () => {
 		const mech = createMtlsMechanism({
 			source: "header",
+			trustedProxies: [TRUSTED_PEER],
 			certHeaderDialect: "envoy",
 			mode: "self-signed",
 		});

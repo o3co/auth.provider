@@ -86,6 +86,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Security
 
+- **BREAKING: mTLS takes the client certificate from the TLS layer by default, and the forwarded-header source now requires a trusted-proxy allowlist (`@o3co/auth-provider-mtls`).** Enabling mTLS meant `oauth.mtls.source = "header"`, which trusted an `X-Forwarded-Client-Cert` value from whoever opened the connection. Nothing proved the header came from the terminating proxy, so the header *was* the credential: anyone who could reach the process — directly, or through one extra hop the deployment did not account for — could assert any client identity and be issued a token bound to a certificate they do not hold. That defeats the entire point of sender-constraining a token. RFC 8705 §3 requires the certificate to come from the TLS layer, or from an **authenticated** trusted proxy, and only one of those two can be assumed (#280).
+
+  **`oauth.mtls.source` now defaults to `"tls-layer"`** — `req.socket.getPeerCertificate()`, the certificate the handshake actually proved. There is nothing to forge on that path.
+
+  **`source = "header"` requires the new `oauth.mtls.trusted-proxies`** (default `[]`), and boot fails when it is empty. At request time a forwarded certificate header from a peer outside the allowlist is refused with `400 invalid_certificate`, audit reason `untrusted_proxy`, and a `mtls_untrusted_proxy_rejected` log line carrying the observed peer address — so "my proxy is not in the list" and "someone is spoofing certificates" are distinguishable at 3am rather than both being silence. Entries are the `"loopback"` keyword (`127.0.0.0/8` + `::1`) or IPv4 / IPv6 literals, with an IPv4 entry also matching the IPv4-mapped form a dual-stack listener reports. CIDR ranges are **rejected at boot** rather than silently never matching; that vocabulary arrives with #292.
+
+  Two decisions inside that are easy to get backwards. The allowlist is matched against **`req.socket.remoteAddress`, never `req.ip`** — `req.ip` is rewritten from `X-Forwarded-For` whenever Express `trust proxy` is on, so authenticating the certificate header with it would be authenticating one header with another. And it is **a separate key from `http.trustProxy`, deliberately not derived from it**: `http.trustProxy` exists so `X-Forwarded-For` can rewrite `req.ip` for rate limiting, and turning that on must not silently begin accepting forwarded client certificates.
+
+  An untrusted header **rejects the request rather than being ignored**. Per CONTRIBUTING.md's mechanism contract, returning `null` means the signal is absent; a header that is present but unauthenticated is invalid material, and invalid material fails the request instead of downgrading it to unbound. The alternative would hand an attacker a way to strip a binding off someone else's request by injecting a header — the same no-downgrade rule PR #246 pinned for mixed DPoP / mTLS validity.
+
+  **`mode = "pki"` also gained the leaf-certificate profile checks the current implementation can express**: the leaf must carry `basicConstraints CA:FALSE` (a CA certificate is not a client credential — binding a token to one binds it to an identity that can mint others), and, when `extendedKeyUsage` is present, it must include `clientAuth`, which is what stops a server certificate being presented as a client credential. A leaf with **no** EKU is still accepted, because RFC 5280 §4.2.1.12 makes the extension a restriction rather than a grant. The terminal trust anchor must now itself be a CA, closing a paste error that previously terminated the chain walk successfully.
+
+  **Revocation is still not checked, and that is deliberate rather than overlooked.** No CRL (RFC 5280 §6.3) and no OCSP (RFC 6960): a revoked client certificate keeps binding tokens until it expires. Revocation needs a fetch path, a cache, and an operator-visible soft-fail / hard-fail policy — a change with its own blast radius, and one that does not belong bolted onto this one. It is tracked with the remaining RFC 5280 path-validation gaps (name constraints, critical-extension processing, issuer `keyCertSign`, `pathLenConstraint`, policy processing, algorithm policy) in #341. Until it ships the mitigation is unchanged and is stated in the package README: short certificate lifetimes, rotation, and a minimal `trusted-cas` set per RFC 8705 §7.4.
+
+  **Migration — a deployment terminating TLS at a proxy must configure two keys it previously did not need:**
+
+  ```hocon
+  oauth.mtls {
+    enabled = true
+    source = "header"                # previously the default; now explicit
+    cert-header-dialect = "envoy"    # or "plain-pem"
+    trusted-proxies = ["loopback"]   # NEW, required — see below
+  }
+  ```
+
+  `trusted-proxies` names the address the **proxy** reaches the auth provider from, as the auth provider observes it: `"loopback"` for a sidecar sharing a host or pod, otherwise the proxy's pod / instance address (list several when there are several). Get it wrong and every mTLS request fails closed with `invalid_certificate` and a log line naming the address it actually saw — check that line first. Ranges are not accepted yet, so a deployment whose proxy address is not stable must either pin it or wait for #292.
+
+  A deployment where the **auth provider itself terminates TLS** should now *remove* `source` and make sure the listener runs with `requestCert: true`; the new default is the shape it wanted all along. A deployment with `mtlsModule` disabled (the default) is unaffected.
+
 - **`/authorize` refuses a client not marked `firstParty: true` (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `GET /authorize` issued an authorization code the moment `req.session.isAuthenticated` was true — no consent step, no approval, nothing asked of the user. A page you do not control could force a top-level navigation to `/authorize?client_id=X&redirect_uri=…&code_challenge=<theirs>`; a logged-in victim's browser minted a code bound to *their* session, delivered it to X's registered `redirect_uri`, and whoever chose the `code_challenge` redeemed it for tokens carrying the victim's identity.
 
   That model is coherent for a pure first-party OP — one where every registered client is operated by you — and coherent nowhere else. The library assumed it and never said so, so registering a single semi-trusted client silently turned the endpoint into an account-linking vector (#267).

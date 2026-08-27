@@ -41,6 +41,22 @@ const attackerLeaf = loadCert("attacker-leaf.pem");
 
 const NOW = new Date("2026-06-01T00:00:00Z");
 
+/**
+ * A second, independent single-hop chain used only for the leaf-certificate
+ * profile checks (#280): one anchor and four leaves differing solely in
+ * `basicConstraints` / `extendedKeyUsage`. Kept separate from the chain above
+ * so those fixtures — and the AKID-serial nuance the forged-cert test depends
+ * on — stay exactly as they were. Minted with a 10-year window, so these tests
+ * read the real clock rather than `NOW` (which predates their `notBefore`).
+ */
+const extRoot = loadCert("ext-root.pem");
+const extLeafClientAuth = loadCert("ext-leaf-clientauth.pem");
+const extLeafServerAuth = loadCert("ext-leaf-serverauth.pem");
+const extLeafNoEku = loadCert("ext-leaf-no-eku.pem");
+const extLeafCaTrue = loadCert("ext-leaf-ca-true.pem");
+
+const EXT_NOW = new Date();
+
 describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 	it("accepts a well-formed chain: leaf → intermediate → root (trusted)", () => {
 		const result = validateCertChain(leaf, [intermediate], [root], NOW);
@@ -186,6 +202,25 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 		}
 	});
 
+	it("requires the terminal trust anchor to be a CA", () => {
+		// The anchor list is operator-supplied, so a paste error can put an
+		// end-entity certificate in it. Before #280 the walk terminated happily
+		// on any anchor that DN-matched and verified, which would accept a chain
+		// terminating at something that is not allowed to issue certificates.
+		// Forced with spies because a real non-CA anchor cannot have signed
+		// anything in the first place.
+		const subject = loadCert("attacker-leaf.pem");
+		const nonCaAnchor = loadCert("leaf.pem"); // ca === false
+		vi.spyOn(subject, "checkIssued").mockReturnValue(true);
+		vi.spyOn(subject, "verify").mockReturnValue(true);
+
+		const result = validateCertChain(subject, [], [nonCaAnchor], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toMatch(/trust anchor.*CA/i);
+		}
+	});
+
 	it("detects cycles via fingerprint set (defense against malicious chains)", () => {
 		// If the same cert appears twice in the chain walk, we'd loop forever
 		// without cycle detection. Force a cycle by listing `leaf` as its own
@@ -195,5 +230,63 @@ describe("validateCertChain — narrow PKI mode (spec §7.2)", () => {
 		// Either terminates with the legitimate trust anchor (cycle never triggers)
 		// or detects the cycle. Both are acceptable as long as the function returns.
 		expect(typeof result.ok).toBe("boolean");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #280 — leaf certificate profile checks
+// ---------------------------------------------------------------------------
+
+/**
+ * A chain that walks correctly still says nothing about whether the leaf is a
+ * *client* certificate. These pin the two properties the narrow mode can check
+ * from what `X509Certificate` exposes directly: `basicConstraints` and
+ * `extendedKeyUsage`.
+ */
+describe("validateCertChain — leaf certificate profile (#280)", () => {
+	it("accepts a leaf whose extendedKeyUsage includes clientAuth", () => {
+		const result = validateCertChain(extLeafClientAuth, [], [extRoot], EXT_NOW);
+		expect(result.ok).toBe(true);
+	});
+
+	it("rejects a leaf whose extendedKeyUsage is present but omits clientAuth", () => {
+		// A server certificate presented as a client credential. The chain is
+		// otherwise identical to the accepted case above, so this cannot pass
+		// or fail for any other reason.
+		const result = validateCertChain(extLeafServerAuth, [], [extRoot], EXT_NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toMatch(/clientAuth/i);
+		}
+	});
+
+	it("accepts a leaf with no extendedKeyUsage extension at all", () => {
+		// RFC 5280 §4.2.1.12: the extension constrains the certificate only when
+		// it is present. Absence means unconstrained, NOT "no permitted uses" —
+		// rejecting here would break every deployment whose private CA does not
+		// stamp an EKU, and would not be the RFC's reading.
+		const result = validateCertChain(extLeafNoEku, [], [extRoot], EXT_NOW);
+		expect(result.ok).toBe(true);
+	});
+
+	it("rejects a leaf carrying basicConstraints CA:TRUE", () => {
+		// A CA certificate is not a client credential. Binding a token to one
+		// would bind it to an identity that can also mint other identities.
+		const result = validateCertChain(extLeafCaTrue, [], [extRoot], EXT_NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toMatch(/CA/);
+		}
+	});
+
+	it("runs the profile checks before the chain walk, so the audit reason names the real problem", () => {
+		// With no usable anchor the walk would fail anyway — but with
+		// "no path to trust anchor", which sends an operator chasing their CA
+		// configuration instead of the certificate they actually issued.
+		const result = validateCertChain(extLeafServerAuth, [], [], EXT_NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toMatch(/clientAuth/i);
+		}
 	});
 });

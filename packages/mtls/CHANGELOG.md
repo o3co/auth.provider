@@ -4,6 +4,83 @@ All notable changes to this package will be documented in this file.
 
 ## [Unreleased]
 
+### BREAKING — the certificate now comes from the TLS layer by default (#280)
+
+- **`oauth.mtls.source` defaults to `"tls-layer"`, was `"header"`.** Enabling
+  mTLS used to mean trusting an `X-Forwarded-Client-Cert` value from whoever
+  opened the connection. The header was the credential and nothing proved it
+  came from a proxy, so anyone who could reach the process — directly, or
+  through an extra hop — could assert any client identity and mint a token
+  bound to a certificate they do not hold. RFC 8705 §3 requires the certificate
+  to come from the TLS layer or from an *authenticated* trusted proxy.
+
+- **`oauth.mtls.source = "header"` now requires `oauth.mtls.trusted-proxies`**
+  (new key, default `[]`). Boot fails with an operator-facing message when the
+  header source is selected with an empty list. At request time, a forwarded
+  certificate header from a peer outside the allowlist is rejected with
+  `400 invalid_certificate` (audit reason `untrusted_proxy`, new
+  `MtlsReasonCode` variant) and logged as `mtls_untrusted_proxy_rejected` with
+  the observed peer address.
+
+  Entries are the `"loopback"` keyword (`127.0.0.0/8` + `::1`) or IPv4 / IPv6
+  literals; an IPv4 entry also matches the IPv4-mapped form a dual-stack
+  listener reports. CIDR ranges are rejected at boot rather than silently never
+  matching — that vocabulary lands with #292.
+
+  Matched against `req.socket.remoteAddress`, never `req.ip`: `req.ip` is
+  rewritten from `X-Forwarded-For` whenever Express `trust proxy` is on, so
+  using it would authenticate one header with another. For the same reason the
+  list is separate from `http.trustProxy` and is not derived from it — enabling
+  `X-Forwarded-For` parsing for rate limiting must not silently start accepting
+  forwarded certificates.
+
+  The rejection is a **throw, not a `null`**. Per CONTRIBUTING.md §4 `null`
+  means the signal is absent; a header that is present but unauthenticated is
+  invalid material, and invalid material fails the request rather than
+  downgrading it to unbound. Returning `null` would hand an attacker a way to
+  strip a binding off someone else's request by injecting a header.
+
+  **Migration:** a deployment terminating TLS at a proxy must add
+  `oauth.mtls.source = "header"` (previously the default) **and**
+  `oauth.mtls.trusted-proxies` naming the address the proxy reaches the auth
+  provider from. A deployment where the auth provider terminates TLS itself
+  should drop `source` entirely and ensure the listener runs with
+  `requestCert: true`.
+
+### Added (#280)
+
+- **Leaf certificate profile checks in `mode = "pki"`.** The leaf must carry
+  `basicConstraints CA:FALSE` — a CA certificate is not a client credential,
+  and binding a token to one binds it to an identity that can mint other
+  identities — and, when `extendedKeyUsage` is present, it must include
+  `clientAuth` (or `anyExtendedKeyUsage`), which is what stops a server
+  certificate being presented as a client credential. A leaf with **no** EKU
+  extension is still accepted: RFC 5280 §4.2.1.12 makes the extension a
+  restriction rather than a grant, so absence is unconstrained.
+
+  These run before the chain walk, so a mis-issued certificate reports the
+  certificate as the problem instead of "no path to trust anchor".
+
+- **The terminal trust anchor must itself be a CA.** The anchor list is
+  operator-supplied; a paste error putting an end-entity certificate in it
+  previously terminated the walk successfully.
+
+- New `ext-*` test fixtures: a second single-hop chain whose leaves differ only
+  in `basicConstraints` / `extendedKeyUsage`, so a profile rejection cannot be
+  caused by anything else.
+
+### Known gap (#280 scope-out)
+
+- **Revocation is still not checked.** No CRL (RFC 5280 §6.3) and no OCSP
+  (RFC 6960): a revoked client certificate keeps binding tokens until it
+  expires. This was deliberately left out of #280 and is tracked, together with
+  the remaining RFC 5280 path-validation checks (name constraints, critical
+  extension processing, issuer `keyCertSign`, `pathLenConstraint`, policy
+  processing, algorithm policy), in
+  [#341](https://github.com/o3co/auth.provider/issues/341). Mitigation until
+  then: short certificate lifetimes, rotation, and a minimal `trusted-cas` set
+  per RFC 8705 §7.4.
+
 ### Changed (Wave 2 Phase 4 — 2026-05-20)
 
 - **README status line updated** to reflect Phase 3 completion — the

@@ -32,7 +32,15 @@ export type MtlsReasonCode =
 	| "cert_not_yet_valid"
 	| "chain_validation_failed"
 	| "trusted_cas_unconfigured"
-	| "tls_peer_unavailable";
+	| "tls_peer_unavailable"
+	/**
+	 * A forwarded-certificate header arrived on a connection whose peer is not
+	 * in `oauth.mtls.trusted-proxies` (issue #280). Either an attacker is
+	 * asserting a client identity by setting the header directly, or the
+	 * deployment's proxy address is missing from the allowlist — the audit
+	 * record carries the observed peer address so the two are separable.
+	 */
+	| "untrusted_proxy";
 
 /**
  * Thrown by the mTLS cert extraction and validation pipeline for any

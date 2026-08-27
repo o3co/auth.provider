@@ -18,10 +18,13 @@
  * `createMtlsMechanism` factory — implements the RFC 8705 §3 client-cert-bound
  * access-token mechanism as a `TokenBindingMechanism`.
  *
- * The returned mechanism's `extract(req)` executes the 7-step total-order
- * sequence specified in Wave 2 Phase 3 spec §6:
+ * The returned mechanism's `extract(req)` executes the total-order sequence
+ * specified in Wave 2 Phase 3 spec §6, with the source-authentication step
+ * added by issue #280:
  *
- *   1. Source resolve  (header or tls-layer)
+ *   1. Source resolve  (tls-layer by default, or header)
+ *   1b. Proxy authentication — header source only: the peer that opened the
+ *       connection must be in the configured trusted-proxy allowlist
  *   2. Dialect parse   (envoy XFCC / plain-PEM) — header source only
  *   3. PEM → DER       (header) / DER pluck (tls-layer)
  *   4. Validity window (notBefore <= now <= notAfter)
@@ -40,6 +43,7 @@ import { MtlsError } from "./errors.mjs";
 import { type CertHeaderDialect, parseEnvoyXfccHeader, parsePlainPemHeader } from "./headers.mjs";
 import { pemToDer } from "./pem.mjs";
 import { validateCertChain } from "./pki.mjs";
+import { createTrustedProxyMatcher } from "./proxy.mjs";
 import { computeCertThumbprint } from "./thumbprint.mjs";
 
 // ---------------------------------------------------------------------------
@@ -48,9 +52,23 @@ import { computeCertThumbprint } from "./thumbprint.mjs";
 
 /** Per Wave 2 Phase 3 spec §5.2. */
 export interface MtlsMechanismOptions {
-	readonly source: "header" | "tls-layer";
+	/**
+	 * Where the leaf certificate comes from. Defaults to `"tls-layer"` —
+	 * RFC 8705 §3 wants the certificate from the transport, and a forwarded
+	 * header is only equivalent when the forwarding hop is authenticated.
+	 *
+	 * `"header"` therefore requires a non-empty {@link trustedProxies}.
+	 */
+	readonly source?: "header" | "tls-layer";
 	readonly certHeader?: string;
 	readonly certHeaderDialect?: CertHeaderDialect;
+	/**
+	 * Peer addresses permitted to forward a client certificate header. Each
+	 * entry is an IPv4 / IPv6 literal or the `"loopback"` keyword; see
+	 * `proxy.mts`. Required (non-empty) when `source === "header"`, ignored
+	 * otherwise.
+	 */
+	readonly trustedProxies?: readonly string[];
 	readonly mode: "self-signed" | "pki";
 	readonly trustedCas?: readonly string[];
 	readonly logger?: Logger;
@@ -62,6 +80,19 @@ export interface MtlsMechanismOptions {
 
 const DEFAULT_CERT_HEADER = "x-forwarded-client-cert";
 const DEFAULT_DIALECT: CertHeaderDialect = "envoy";
+
+/**
+ * The certificate comes from the TLS layer unless the operator says otherwise
+ * (issue #280).
+ *
+ * The pre-#280 default was `"header"`, which meant enabling mTLS trusted an
+ * `X-Forwarded-Client-Cert` value from whoever opened the connection. Anyone
+ * who could reach the process could then assert any client identity — the
+ * header is the credential, and nothing proved it came from the proxy. RFC
+ * 8705 §3 requires the certificate to come from the TLS layer or from an
+ * authenticated trusted proxy, and only one of those two is safe to assume.
+ */
+const DEFAULT_SOURCE = "tls-layer" as const;
 
 // ---------------------------------------------------------------------------
 // Internal — minimal duck-typed shape for `req.socket.getPeerCertificate()`
@@ -82,6 +113,18 @@ const isTlsLikeSocket = (s: unknown): s is TlsLikeSocket =>
 	s !== null &&
 	typeof (s as { getPeerCertificate?: unknown }).getPeerCertificate === "function";
 
+/**
+ * The address of the peer that opened this connection.
+ *
+ * Deliberately `req.socket.remoteAddress` and never `req.ip`: `req.ip` is
+ * rewritten from `X-Forwarded-For` whenever Express `trust proxy` is on, so
+ * authenticating the forwarding hop with it would mean authenticating a header
+ * with another header. `undefined` (destroyed socket, Unix-domain listener) is
+ * carried through and treated as untrusted by the matcher.
+ */
+const peerAddressOf = (req: Request): string | undefined =>
+	(req.socket as { remoteAddress?: string } | undefined)?.remoteAddress;
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -99,6 +142,9 @@ const isTlsLikeSocket = (s: unknown): s is TlsLikeSocket =>
  * Boot-time checks (defense-in-depth for programmatic callers that bypass
  * `mtlsModule`):
  *
+ *   - `source === "header"` + empty `trustedProxies` → throw at construction
+ *     (issue #280 — a forwarded certificate is only evidence of anything when
+ *     the forwarding hop is authenticated).
  *   - `mode === "pki"` + empty `trustedCas` → throw at construction.
  *   - `mode === "pki"` + `source === "tls-layer"` → throw at construction
  *     (Codex Round 1 Important #1 fix — TLS-layer full-chain extraction
@@ -109,9 +155,32 @@ const isTlsLikeSocket = (s: unknown): s is TlsLikeSocket =>
 export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBindingMechanism => {
 	const certHeader = options.certHeader ?? DEFAULT_CERT_HEADER;
 	const dialect: CertHeaderDialect = options.certHeaderDialect ?? DEFAULT_DIALECT;
-	const { source, mode, logger } = options;
+	const { mode, logger } = options;
+	const source = options.source ?? DEFAULT_SOURCE;
 
 	// --- Boot-time validation (defense-in-depth; mtlsModule also enforces) ---
+
+	// Issue #280: the header source is an assertion made by whoever opened the
+	// connection. Without an allowlist naming which peers may make it, the
+	// header IS the credential and anyone routable to this process can mint one.
+	// Refuse to construct a mechanism that would accept it from anywhere.
+	if (source === "header" && (options.trustedProxies?.length ?? 0) === 0) {
+		throw new Error(
+			'createMtlsMechanism: source = "header" requires a non-empty trustedProxies allowlist. ' +
+				"A forwarded client-certificate header is only evidence of a TLS handshake when the " +
+				"hop that forwarded it is authenticated; without the allowlist any client that can " +
+				"reach this process could assert any certificate. List the reverse proxy's address " +
+				'(or "loopback" for a sidecar), or use source = "tls-layer".',
+		);
+	}
+
+	// Built once at construction so a malformed allowlist entry fails boot
+	// rather than every request. Empty in tls-layer mode, where it is unused.
+	const isTrustedProxy =
+		source === "header"
+			? createTrustedProxyMatcher(options.trustedProxies ?? [])
+			: () => false as boolean;
+
 	if (mode === "pki") {
 		const trustedCas = options.trustedCas;
 		if (!trustedCas || trustedCas.length === 0) {
@@ -125,7 +194,8 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				'createMtlsMechanism: mode = "pki" with source = "tls-layer" is not supported in Phase 3. ' +
 					"The narrow PKI mode requires the intermediate chain (e.g., the Envoy XFCC " +
 					"Chain= parameter); TLS-layer full-chain extraction is deferred. Use " +
-					'source = "header" with certHeaderDialect = "envoy" for PKI mode, or use ' +
+					'source = "header" with certHeaderDialect = "envoy" and a trustedProxies ' +
+					"allowlist for PKI mode, or use " +
 					'mode = "self-signed" with TLS-layer source.',
 			);
 		}
@@ -164,7 +234,34 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				const headerValue = req.get(certHeader);
 				if (headerValue === undefined) {
 					// Ambient — no cert presented at this hop. Skip downstream dispatch.
+					//
+					// Checked BEFORE the proxy allowlist on purpose: absence is
+					// absence no matter who is connecting, and an ordinary unbound
+					// request from a direct client must not become an error.
 					return null;
+				}
+
+				// --- Step 1b: Proxy authentication (issue #280) ---
+				//
+				// RFC 8705 §3 accepts a forwarded certificate only from an
+				// authenticated trusted proxy. The peer address of the open
+				// connection is the one thing on this request the sender cannot
+				// choose, so it is what the allowlist is checked against.
+				//
+				// This REJECTS rather than returning null. Per CONTRIBUTING.md §4,
+				// `null` means "absent"; a header that is present but came from
+				// somewhere it may not come from is invalid material, and invalid
+				// material fails the request instead of downgrading it to unbound —
+				// otherwise injecting this header would be a way to strip a binding
+				// off someone else's request.
+				const remoteAddress = peerAddressOf(req);
+				if (!isTrustedProxy(remoteAddress)) {
+					logger?.warn({ remoteAddress, certHeader }, "mtls_untrusted_proxy_rejected");
+					throw new MtlsError(
+						"untrusted_proxy",
+						`forwarded client certificate header "${certHeader}" arrived from a peer that is not in the trusted-proxy allowlist`,
+						{ remoteAddress },
+					);
 				}
 
 				// --- Step 2: Header dialect parse ---
