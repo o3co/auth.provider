@@ -36,6 +36,12 @@ import { createOAuthRouter } from "#/routes.mjs";
 // OR-5: `checkRateLimit` reads `config.rateLimit.failMode` in the catch
 // path. The mock config carries `failMode: "open"` to exercise the
 // default behavior; closed-mode tests below override `rateLimit` per-test.
+// #273: PKCE/S256 is mandatory at /authorize, so every request meant to
+// reach the hook under test carries a valid S256 challenge (RFC 7636
+// appendix-B example pair).
+const PKCE_S256_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const PKCE_CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+
 const mockConfig = {
 	oauth: {
 		jwt: { issuer: "https://auth.example" },
@@ -502,6 +508,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-42",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 			});
 
 			const ev = events.find((e) => e.type === "authorize.granted");
@@ -593,6 +601,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "read write",
 			});
 
@@ -628,6 +638,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "read",
 			});
 
@@ -657,6 +669,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "read",
 			});
 
@@ -691,6 +705,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "read",
 			});
 
@@ -722,6 +738,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "read",
 			});
 
@@ -757,6 +775,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "read",
 			});
 
@@ -770,6 +790,9 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				code: "code-xyz",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				// #273: a redeemable code always carries an S256 challenge.
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				grantedScope: ["read"],
 				sid: "test-sid-1",
 			};
@@ -796,6 +819,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 					code: "code-xyz",
 					client_id: "client-1",
 					redirect_uri: "https://example.test/cb",
+					code_verifier: PKCE_CODE_VERIFIER,
 				},
 				session: {
 					code: "code-xyz",
@@ -844,6 +868,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "read",
 			});
 

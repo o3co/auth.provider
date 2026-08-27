@@ -15,7 +15,7 @@
  */
 
 import type { Logger } from "@o3co/auth-provider-core";
-import { resolvePkceSupportedMethods } from "./grants/pkce.mjs";
+import { type ResolvedPkceOptions, resolvePkceOptions } from "./grants/pkce.mjs";
 
 /**
  * The `oauth.*` knobs the OAuth routers and grants consume, resolved once at
@@ -42,12 +42,13 @@ export interface ResolvedOAuthOptions {
 	readonly oidcMode: "oidc-required" | "dual";
 	/** #297: gate token issuance on Store-published email verification. */
 	readonly requireEmailVerified: boolean;
-	/** B-7/B-8: PKCE policy for the authorization-code flow. */
-	readonly pkce: {
-		readonly required: boolean;
-		readonly defaultMethod: string;
-		readonly supportedMethods: readonly string[];
-	};
+	/**
+	 * #273: the single PKCE policy for the authorization-code flow. `/authorize`
+	 * reads it from here; `/token` (the authorization grant) resolves the same
+	 * object from the same config, so the two endpoints cannot disagree about
+	 * whether a code they mint is redeemable. See `grants/pkce.mts`.
+	 */
+	readonly pkce: ResolvedPkceOptions;
 	/**
 	 * IH-16 (v0.5.1): ceiling for the OIDC `nonce` query parameter, operator-
 	 * tunable via `oauth.nonce.maxLength` (default in core HOCON, env-var
@@ -87,25 +88,26 @@ type OAuthConfigShape = {
  * through untouched — no coercion, no validation — so a config that lies about
  * its types behaves exactly as it did against the inline casts. Defaults:
  *
- * - boolean opt-ins (`requireEmailVerified`, `resourceIndicator.enabled`,
- *   `pkce.required`) enable only on literal `true` — the safe reading of an
- *   absent value is `false` (enforce/off);
+ * - boolean opt-ins (`requireEmailVerified`, `resourceIndicator.enabled`)
+ *   enable only on literal `true` — the safe reading of an absent value is
+ *   `false` (enforce/off);
  * - `oidcMode` falls back to `"oidc-required"`;
  * - `nonce.maxLength` falls back to `256`;
  * - `legacyTypAccept` stays `undefined` when absent (consumers default it);
- * - `pkce.defaultMethod` falls back to `"plain"`, and `supportedMethods` goes
- *   through `resolvePkceSupportedMethods` (TS-4 — per-element validation, see
- *   grants/pkce.mts for the rationale).
+ * - `pkce` is fixed policy, not a knob (#273): `resolvePkceOptions` returns
+ *   required + S256-only whatever the config says, and warns about the keys
+ *   that no longer do anything.
  *
- * The optional `logger` receives `resolvePkceSupportedMethods` misconfig
- * warnings. Resolution runs once at composition, so an operator now sees one
+ * The optional `logger` receives the `resolvePkceOptions` inert-config
+ * warning. Resolution runs once at composition, so an operator sees one
  * boot-time warning instead of one per `/authorize` request.
  */
 export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedOAuthOptions => {
 	const oauth = (config as { oauth?: OAuthConfigShape } | undefined)?.oauth;
 
-	// B-7/B-8: resolve PKCE config. `oauth.grants` is `z.object({}).passthrough()`
-	// in the schema, so even a schema-validated tree is untyped from here down.
+	// #273: read the pkce block only to report what is now inert in it.
+	// `oauth.grants` is `z.object({}).passthrough()` in the schema, so even a
+	// schema-validated tree is untyped from here down.
 	const authorizationConfig = oauth?.grants?.authorization_code;
 	const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
 
@@ -114,16 +116,7 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 		legacyTypAccept: oauth?.jwt?.legacyTypAccept,
 		oidcMode: oauth?.oidcMode ?? "oidc-required",
 		requireEmailVerified: oauth?.requireEmailVerified === true,
-		pkce: {
-			required: pkceConfig?.required === true,
-			defaultMethod:
-				typeof pkceConfig?.defaultMethod === "string" ? pkceConfig.defaultMethod : "plain",
-			// TS-4 (v0.5.1): per-element validation via `resolvePkceSupportedMethods`.
-			// See authorization.mts for the rationale — `Array.isArray + as string[]`
-			// silently accepted non-string operator-typed values. Forward the logger
-			// so the helper's misconfig warnings reach the operator.
-			supportedMethods: resolvePkceSupportedMethods(pkceConfig, logger),
-		},
+		pkce: resolvePkceOptions(pkceConfig, logger),
 		nonceMaxLength: oauth?.nonce?.maxLength ?? 256,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
 	};

@@ -42,6 +42,12 @@ import { createMockLogger } from "./_helpers/mockLogger.mjs";
 // Shared test-only stubs
 // ---------------------------------------------------------------------------
 
+// #273: PKCE/S256 is mandatory at /authorize for every client, so every
+// request meant to get past the PKCE gate carries a valid S256 pair. The
+// value is the RFC 7636 §4.4 appendix-B example challenge.
+const AUTHORIZE_CODE_VERIFIER = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+const AUTHORIZE_S256_CHALLENGE = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+
 const fakeClientRepository: ClientRepository = {
 	findById: async () => null,
 	authenticate: async () => null,
@@ -544,6 +550,9 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 			sid: "sid-wired",
 			client_id: "client1",
 			redirect_uri: "https://rp.example/cb",
+			// #273: a redeemable code always carries an S256 challenge.
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 		});
 
 		const deps: GrantDependencies & {
@@ -579,6 +588,7 @@ describe("createAuthorizationGrant — userSessionStore forwarding", () => {
 				code: "auth-code",
 				client_id: "client1",
 				redirect_uri: "https://rp.example/cb",
+				code_verifier: AUTHORIZE_CODE_VERIFIER,
 			},
 			session: {
 				code: "auth-code",
@@ -739,6 +749,8 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "openid profile",
 			nonce: "nonce-xyz",
 		});
@@ -762,6 +774,8 @@ describe("authorize persists OIDC round-trip state on code record (TODO-F-3)", (
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "openid profile",
 			// no nonce
 		});
@@ -787,6 +801,8 @@ describe("IH-6: /authorize openid scope gate", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			state: "state-missing-openid",
 			scope: "profile",
 		});
@@ -837,6 +853,8 @@ describe("IH-6: /authorize openid scope gate", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			state: "state-bypass",
 			scope: "openid profile",
 		});
@@ -870,6 +888,8 @@ describe("IH-6: /authorize openid scope gate", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "openid profile",
 		});
 
@@ -898,6 +918,8 @@ describe("IH-6: /authorize openid scope gate", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "profile",
 		});
 
@@ -926,6 +948,8 @@ describe("IH-6: /authorize openid scope gate", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "openid profile",
 		});
 
@@ -952,6 +976,8 @@ describe("IH-6: /authorize openid scope gate", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			state: "state-outside-scope",
 			scope: "email",
 		});
@@ -990,6 +1016,8 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "openid profile",
 			nonce,
 		});
@@ -1016,6 +1044,8 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "openid profile",
 			nonce,
 		});
@@ -1039,6 +1069,8 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				state: "client-state-xyz",
 				nonce: "a".repeat(257),
 			});
@@ -1065,6 +1097,8 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			nonce: "a\x00b",
 		});
 
@@ -1103,6 +1137,8 @@ describe("IH-16: /authorize nonce length + character-set validation", () => {
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				nonce: "a".repeat(11),
 			});
 		expect(res.status).toBe(302);
@@ -1145,6 +1181,8 @@ describe("D-1 / CR-2: /authorize binds identity to code record, not Express sess
 			response_type: "code",
 			client_id: "client-1",
 			redirect_uri: "https://example.test/cb",
+			code_challenge: AUTHORIZE_S256_CHALLENGE,
+			code_challenge_method: "S256",
 			scope: "openid profile",
 		});
 
@@ -1185,12 +1223,16 @@ describe("D-1 / CR-2: /authorize binds identity to code record, not Express sess
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "openid profile",
 			}),
 			request(app).get("/oauth/authorize").query({
 				response_type: "code",
 				client_id: "client-1",
 				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
 				scope: "openid profile",
 			}),
 		]);
@@ -1286,7 +1328,9 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		expect(location.origin + location.pathname).toBe("https://spa.example.test/cb");
 		expect(location.searchParams.get("error")).toBe("invalid_request");
 		expect(location.searchParams.get("error_description")).toBe(
-			"code_challenge is required for public clients",
+			// #273: same message for every client — the public-client special
+			// case became the universal rule.
+			"code_challenge is required",
 		);
 		expect(location.searchParams.get("state")).toBe("state-abc");
 	});
@@ -1306,15 +1350,19 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		const location = new URL(res.headers.location);
 		expect(location.searchParams.get("error")).toBe("invalid_request");
 		expect(location.searchParams.get("error_description")).toBe(
-			'code_challenge_method must be "S256" for public clients',
+			// #273: `plain` is refused for every client that has not been opted
+			// into it by registration — the message names the method it refused.
+			'code_challenge_method "plain" is not supported',
 		);
 		expect(location.searchParams.get("state")).toBe("state-plain");
 	});
 
 	it("rejects public client when code_challenge_method is omitted (defaults to plain) → invalid_request redirect", async () => {
-		// Omitting code_challenge_method MUST NOT silently fall back to the
-		// operator-configured `defaultMethod` for public clients. The check uses
-		// the raw query parameter so absence is rejected the same as `plain`.
+		// #273: RFC 7636 §4.3 makes an omitted method `plain`, and the resolver
+		// reads it that way rather than quietly upgrading it to S256 — so
+		// absence is refused exactly as an explicit `plain` is. (Pre-#273 this
+		// was a public-client-only rule guarding against the operator-
+		// configured `defaultMethod`; that knob is gone.)
 		const app = await buildPublicAuthorizeApp({});
 		const res = await request(app).get("/oauth/authorize").query({
 			response_type: "code",
@@ -1329,7 +1377,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		const location = new URL(res.headers.location);
 		expect(location.searchParams.get("error")).toBe("invalid_request");
 		expect(location.searchParams.get("error_description")).toBe(
-			'code_challenge_method must be "S256" for public clients',
+			'code_challenge_method is required and must be "S256"',
 		);
 	});
 

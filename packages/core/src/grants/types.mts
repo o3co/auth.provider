@@ -77,6 +77,14 @@ export interface AuthenticatedClient {
 	 * invoking the concrete grant handler.
 	 */
 	readonly senderConstrained?: SenderConstraint;
+	/**
+	 * Per-client opt-in for the RFC 7636 `plain` PKCE challenge method (#273).
+	 * The `/token` route propagates it from `req.oauthClient` so the
+	 * authorization-code grant applies the same per-client method list
+	 * `/authorize` applied when it minted the code. Semantics are documented
+	 * once, on `Client.allowPlainPkce` in `../repositories/types.mts`.
+	 */
+	readonly allowPlainPkce?: boolean;
 }
 
 /**

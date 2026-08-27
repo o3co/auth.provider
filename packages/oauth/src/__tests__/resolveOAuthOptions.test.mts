@@ -25,11 +25,7 @@ describe("resolveOAuthOptions", () => {
 				jwt: { issuer: "https://issuer.example", legacyTypAccept: true },
 				oidcMode: "dual",
 				requireEmailVerified: true,
-				grants: {
-					authorization_code: {
-						pkce: { required: true, defaultMethod: "S256", supportedMethods: ["S256"] },
-					},
-				},
+				grants: { authorization_code: {} },
 				nonce: { maxLength: 64 },
 				resourceIndicator: { enabled: true },
 			},
@@ -39,11 +35,7 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBe(true);
 		expect(options.oidcMode).toBe("dual");
 		expect(options.requireEmailVerified).toBe(true);
-		expect(options.pkce).toEqual({
-			required: true,
-			defaultMethod: "S256",
-			supportedMethods: ["S256"],
-		});
+		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(64);
 		expect(options.resourceIndicatorEnabled).toBe(true);
 	});
@@ -59,11 +51,8 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		expect(options.pkce).toEqual({
-			required: false,
-			defaultMethod: "plain",
-			supportedMethods: ["S256", "plain"],
-		});
+		// #273: fixed policy, not a knob — the same object whatever the config.
+		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(256);
 		expect(options.resourceIndicatorEnabled).toBe(false);
 	});
@@ -75,11 +64,8 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		expect(options.pkce).toEqual({
-			required: false,
-			defaultMethod: "plain",
-			supportedMethods: ["S256", "plain"],
-		});
+		// #273: fixed policy, not a knob — the same object whatever the config.
+		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(options.nonceMaxLength).toBe(256);
 		expect(options.resourceIndicatorEnabled).toBe(false);
 	});
@@ -91,13 +77,11 @@ describe("resolveOAuthOptions", () => {
 			oauth: {
 				requireEmailVerified: "true",
 				resourceIndicator: { enabled: "true" },
-				grants: { authorization_code: { pkce: { required: "true" } } },
 			},
 		});
 
 		expect(options.requireEmailVerified).toBe(false);
 		expect(options.resourceIndicatorEnabled).toBe(false);
-		expect(options.pkce.required).toBe(false);
 	});
 
 	it("does not resolve the removed oauth.authorize.allowUnmarkedClients (#330)", () => {
@@ -118,23 +102,25 @@ describe("resolveOAuthOptions", () => {
 		expect(resolveOAuthOptions({ oauth: { jwt: { issuer: "" } } }).issuer).toBe("");
 	});
 
-	it("filters non-string pkce supportedMethods and warns through the given logger", () => {
+	it("ignores every legacy pkce knob and warns through the given logger (#273)", () => {
 		const logger = createMockLogger();
 		const options = resolveOAuthOptions(
 			{
 				oauth: {
 					grants: {
-						authorization_code: { pkce: { supportedMethods: ["S256", 123, "plain"] } },
+						authorization_code: {
+							pkce: { requireS256: false, supportedMethods: ["S256", "plain"] },
+						},
 					},
 				},
 			},
 			logger,
 		);
 
-		expect(options.pkce.supportedMethods).toEqual(["S256", "plain"]);
+		expect(options.pkce).toEqual({ required: true, supportedMethods: ["S256"] });
 		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ removed: 1 }),
-			"pkce_supportedMethods_non_string_filtered",
+			expect.objectContaining({ ignoredKeys: ["requireS256", "supportedMethods"] }),
+			"pkce_config_ignored_s256_is_mandatory",
 		);
 	});
 });

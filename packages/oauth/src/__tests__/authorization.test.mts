@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 import crypto from "node:crypto";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	type ClientRepository,
 	type CodeRepository,
@@ -27,14 +30,24 @@ import {
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { pkceMethodsForClient, resolvePkceOptions } from "#/grants/pkce.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 // D-1 / v0.5.1: codeData must carry client_id and redirect_uri (required fields).
 // `body.redirect_uri` must match codeData.redirect_uri or /token rejects.
 const RP_URI = "https://rp.example/cb";
+
+// #273: PKCE is mandatory for every authorization-code client, so a redeemable
+// code record always carries an S256 challenge and every token request that is
+// meant to reach a non-PKCE branch has to present the matching verifier.
+const CODE_VERIFIER = "pkce-verifier".padEnd(43, "x");
+const S256_CHALLENGE = crypto.createHash("sha256").update(CODE_VERIFIER).digest("base64url");
+
 const validCode = {
 	client_id: "client1",
 	redirect_uri: RP_URI,
+	code_challenge: S256_CHALLENGE,
+	code_challenge_method: "S256",
 };
 
 // D-6 (v0.5.1): the authorization grant requires `ctx.authenticatedClient` to
@@ -124,7 +137,7 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue(null));
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "wrong-code", client_id: "client1" },
+				body: { code: "wrong-code", client_id: "client1", code_verifier: CODE_VERIFIER },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -140,7 +153,7 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue(null));
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "wrong-client" },
+				body: { code: "abc", client_id: "wrong-client", code_verifier: CODE_VERIFIER },
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -156,7 +169,12 @@ describe("createAuthorizationGrant", () => {
 			const deps = makeDeps(vi.fn().mockResolvedValue(null));
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -174,7 +192,12 @@ describe("createAuthorizationGrant", () => {
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -219,7 +242,12 @@ describe("createAuthorizationGrant", () => {
 			};
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -263,7 +291,12 @@ describe("createAuthorizationGrant", () => {
 			const handler = createAuthorizationGrant(deps);
 
 			const { result } = await handler.handle({
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -286,7 +319,12 @@ describe("createAuthorizationGrant", () => {
 			);
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -306,7 +344,12 @@ describe("createAuthorizationGrant", () => {
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -339,7 +382,12 @@ describe("createAuthorizationGrant", () => {
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -368,13 +416,20 @@ describe("createAuthorizationGrant", () => {
 					code: "abc",
 					client_id: "client1",
 					redirect_uri: RP_URI,
+					code_challenge: S256_CHALLENGE,
+					code_challenge_method: "S256",
 					sid: "test-sid-1",
 					grantedScope: [] as readonly string[],
 				}),
 			);
 			const handler = createAuthorizationGrant(deps);
 			const { result } = await handler.handle({
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: {
 					code: "abc",
 					code_client_id: "client1",
@@ -403,7 +458,12 @@ describe("createAuthorizationGrant", () => {
 			);
 			const handler = createAuthorizationGrant(deps);
 			const ctx: GrantContext = {
-				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
 				session: { code: "abc", code_client_id: "client1" },
 				issuer: "localhost",
 				metadata: { ip: "127.0.0.1" },
@@ -494,7 +554,36 @@ describe("createAuthorizationGrant", () => {
 			expect(result.status).toBe(200);
 		});
 
-		it("returns 200 when plain PKCE code_verifier matches challenge", async () => {
+		it("returns 200 when plain PKCE code_verifier matches challenge — opted-in client only", async () => {
+			// #273: `plain` is reachable ONLY through the client registration's
+			// `allowPlainPkce: true`. The grant reads it off the authenticated
+			// client, which is the same record /authorize consulted.
+			const verifier = "b".repeat(43);
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					sid: "test-sid-1",
+					code_challenge: verifier,
+					code_challenge_method: "plain",
+				}),
+			);
+			const handler = createAuthorizationGrant(deps);
+			const ctx: GrantContext = {
+				body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
+				session: { code: "abc", code_client_id: "client1" },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: { ...DEFAULT_AUTH_CLIENT, allowPlainPkce: true },
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(200);
+		});
+
+		it("returns 400 for the same plain code when the client has no opt-in (#273)", async () => {
 			const verifier = "b".repeat(43);
 			const deps = makeDeps(
 				vi.fn().mockResolvedValue({
@@ -517,106 +606,108 @@ describe("createAuthorizationGrant", () => {
 
 			const { result } = await handler.handle(ctx);
 
-			expect(result.status).toBe(200);
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_request");
 		});
 
-		describe("requireS256 config option (legacy)", () => {
-			const s256Config = {
-				oauth: {
-					jwt: { secret: "test-secret" },
-					accessToken: { expiresIn: 3600 },
-					refreshToken: { expiresIn: 86400 },
-					grants: {
-						session: { enabled: true },
-						authorization_code: {
-							enabled: true,
-							pkce: { requireS256: true },
+		// #273: the legacy `pkce.requireS256` boolean is gone. It was the only
+		// knob the TOKEN endpoint honoured, and /authorize ignored it — the
+		// divergence that could mint a code doomed at redemption. These tests
+		// pin that a config still setting it changes nothing in either
+		// direction: S256 is mandatory whatever it says.
+		describe("legacy pkce.requireS256 is inert (#273)", () => {
+			const legacyConfig = (requireS256: boolean) =>
+				({
+					oauth: {
+						jwt: { secret: "test-secret" },
+						accessToken: { expiresIn: 3600 },
+						refreshToken: { expiresIn: 86400 },
+						grants: {
+							session: { enabled: true },
+							authorization_code: { enabled: true, pkce: { requireS256 } },
+							refresh_token: { enabled: true },
 						},
-						refresh_token: { enabled: true },
 					},
-				},
-			} as unknown as GrantDependencies["config"];
+				}) as unknown as GrantDependencies["config"];
 
-			it("returns 400 when requireS256=true and plain method is used", async () => {
-				const verifier = "b".repeat(43);
-				const deps = {
-					config: s256Config,
-					keyStore: createSymmetricKeyStore("test-secret"),
-					codeRepository: {
-						consumeByCode: vi.fn().mockResolvedValue({
-							code: "abc",
+			const makeLegacyDeps = (requireS256: boolean, codeData: Record<string, unknown>) => ({
+				config: legacyConfig(requireS256),
+				keyStore: createSymmetricKeyStore("test-secret"),
+				codeRepository: {
+					consumeByCode: vi.fn().mockResolvedValue({ code: "abc", ...codeData }),
+					createCode: vi.fn(),
+					findByCode: vi.fn(),
+					removeByCode: vi.fn(),
+				} as unknown as CodeRepository,
+				clientRepository: mockClientRepository,
+			});
+
+			const legacyCtx = (verifier: string): GrantContext => ({
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: verifier,
+				},
+				session: { code: "abc", code_client_id: "client1" },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+
+			it.each([true, false])(
+				"rejects a plain code with requireS256=%s — the client has no opt-in",
+				async (requireS256) => {
+					const verifier = "b".repeat(43);
+					const handler = createAuthorizationGrant(
+						makeLegacyDeps(requireS256, {
 							client_id: "client1",
 							redirect_uri: RP_URI,
 							code_challenge: verifier,
 							code_challenge_method: "plain",
 						}),
-						createCode: vi.fn(),
-						findByCode: vi.fn(),
-						removeByCode: vi.fn(),
-					} as unknown as CodeRepository,
-					clientRepository: mockClientRepository,
-				};
-				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: {
-						code: "abc",
+					);
+
+					const { result } = await handler.handle(legacyCtx(verifier));
+
+					expect(result.status).toBe(400);
+					expect("error" in result && result.error).toBe("invalid_request");
+				},
+			);
+
+			it.each([true, false])("accepts an S256 code with requireS256=%s", async (requireS256) => {
+				const handler = createAuthorizationGrant(
+					makeLegacyDeps(requireS256, {
 						client_id: "client1",
 						redirect_uri: RP_URI,
-						code_verifier: verifier,
-					},
-					session: { code: "abc", code_client_id: "client1" },
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: DEFAULT_AUTH_CLIENT,
-				};
+						sid: "test-sid-1",
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
+					}),
+				);
 
-				const { result } = await handler.handle(ctx);
-
-				expect(result.status).toBe(400);
-				expect("error" in result && result.error).toBe("invalid_request");
-			});
-
-			it("returns 200 when requireS256=true and S256 method is used", async () => {
-				const verifier = "a".repeat(43);
-				const hash = crypto.createHash("sha256").update(verifier).digest();
-				const challenge = hash.toString("base64url");
-
-				const deps = {
-					config: s256Config,
-					keyStore: createSymmetricKeyStore("test-secret"),
-					codeRepository: {
-						consumeByCode: vi.fn().mockResolvedValue({
-							code: "abc",
-							client_id: "client1",
-							redirect_uri: RP_URI,
-							sid: "test-sid-1",
-							code_challenge: challenge,
-							code_challenge_method: "S256",
-						}),
-						createCode: vi.fn(),
-						findByCode: vi.fn(),
-						removeByCode: vi.fn(),
-					} as unknown as CodeRepository,
-					clientRepository: mockClientRepository,
-				};
-				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: {
-						code: "abc",
-						client_id: "client1",
-						redirect_uri: RP_URI,
-						code_verifier: verifier,
-					},
-					session: { code: "abc", code_client_id: "client1" },
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: DEFAULT_AUTH_CLIENT,
-				};
-
-				const { result } = await handler.handle(ctx);
+				const { result } = await handler.handle(legacyCtx(CODE_VERIFIER));
 
 				expect(result.status).toBe(200);
 			});
+
+			it.each([true, false])(
+				"rejects a PKCE-less code with requireS256=%s (was: redeemable)",
+				async (requireS256) => {
+					const handler = createAuthorizationGrant(
+						makeLegacyDeps(requireS256, {
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							sid: "test-sid-1",
+						}),
+					);
+
+					const { result } = await handler.handle(legacyCtx(CODE_VERIFIER));
+
+					expect(result.status).toBe(400);
+					expect("error" in result && result.error).toBe("invalid_request");
+				},
+			);
 		});
 
 		// A-2 redirect_uri binding — D-1 made redirect_uri a required field on
@@ -629,11 +720,18 @@ describe("createAuthorizationGrant", () => {
 						code: "abc",
 						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", redirect_uri: "https://evil.com/callback" },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: "https://evil.com/callback",
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -655,11 +753,17 @@ describe("createAuthorizationGrant", () => {
 						code: "abc",
 						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1" /* no redirect_uri */ },
+					body: {
+						code: "abc",
+						client_id: "client1" /* no redirect_uri */,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -682,11 +786,18 @@ describe("createAuthorizationGrant", () => {
 						sid: "test-sid-1",
 						client_id: "client1",
 						redirect_uri: "https://example.com/callback",
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", redirect_uri: "https://example.com/callback" },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: "https://example.com/callback",
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -715,7 +826,12 @@ describe("createAuthorizationGrant", () => {
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: { code: "abc", code_client_id: "client1" },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -743,7 +859,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", redirect_uri: RP_URI },
+					body: { code: "abc", redirect_uri: RP_URI, code_verifier: CODE_VERIFIER },
 					session: {},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -763,7 +879,7 @@ describe("createAuthorizationGrant", () => {
 				const deps = makeDeps(vi.fn().mockResolvedValue({ code: "abc", ...validCode }));
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", redirect_uri: RP_URI },
+					body: { code: "abc", redirect_uri: RP_URI, code_verifier: CODE_VERIFIER },
 					session: {},
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -785,7 +901,7 @@ describe("createAuthorizationGrant", () => {
 				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", redirect_uri: RP_URI },
+					body: { code: "abc", redirect_uri: RP_URI, code_verifier: CODE_VERIFIER },
 					session: { user: { id: "u1" } },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -796,7 +912,10 @@ describe("createAuthorizationGrant", () => {
 			});
 		});
 
-		describe("B-7/B-8: pkce supportedMethods, defaultMethod, required", () => {
+		// #273 replaced the B-7/B-8 knobs (supportedMethods / defaultMethod /
+		// required) with one fixed policy plus a per-client `plain` opt-in.
+		// What is pinned here is that no server-wide config can widen it.
+		describe("#273: PKCE policy is fixed, not configurable", () => {
 			function makePkceConfig(pkce: Record<string, unknown>) {
 				return {
 					oauth: {
@@ -813,110 +932,102 @@ describe("createAuthorizationGrant", () => {
 				} as unknown as GrantDependencies["config"];
 			}
 
-			it("returns 400 when code_challenge_method is not in supportedMethods", async () => {
-				const config = makePkceConfig({ supportedMethods: ["S256"] });
+			const makeConfiguredDeps = (
+				pkce: Record<string, unknown>,
+				codeData: Record<string, unknown>,
+			) => ({
+				config: makePkceConfig(pkce),
+				keyStore: createSymmetricKeyStore("test-secret"),
+				codeRepository: {
+					consumeByCode: vi.fn().mockResolvedValue({ code: "abc", ...codeData }),
+					createCode: vi.fn(),
+					findByCode: vi.fn(),
+					removeByCode: vi.fn(),
+				} as unknown as CodeRepository,
+				clientRepository: mockClientRepository,
+			});
+
+			const ctxFor = (
+				verifier: string,
+				authenticatedClient: GrantContext["authenticatedClient"] = DEFAULT_AUTH_CLIENT,
+			): GrantContext => ({
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: verifier,
+				},
+				session: { code: "abc", code_client_id: "client1" },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient,
+			});
+
+			it("refuses plain even when supportedMethods lists it", async () => {
 				const verifier = "b".repeat(43);
-				const deps = {
-					config,
-					keyStore: createSymmetricKeyStore("test-secret"),
-					codeRepository: {
-						consumeByCode: vi.fn().mockResolvedValue({
-							code: "abc",
+				const handler = createAuthorizationGrant(
+					makeConfiguredDeps(
+						{ supportedMethods: ["S256", "plain"], defaultMethod: "plain" },
+						{
 							client_id: "client1",
 							redirect_uri: RP_URI,
 							code_challenge: verifier,
 							code_challenge_method: "plain",
-						}),
-						createCode: vi.fn(),
-						findByCode: vi.fn(),
-						removeByCode: vi.fn(),
-					} as unknown as CodeRepository,
-					clientRepository: mockClientRepository,
-				};
-				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: {
-						code: "abc",
-						client_id: "client1",
-						redirect_uri: RP_URI,
-						code_verifier: verifier,
-					},
-					session: { code: "abc", code_client_id: "client1" },
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: DEFAULT_AUTH_CLIENT,
-				};
+						},
+					),
+				);
 
-				const { result } = await handler.handle(ctx);
+				const { result } = await handler.handle(ctxFor(verifier));
 
 				expect(result.status).toBe(400);
 				expect("error" in result && result.error).toBe("invalid_request");
 			});
 
-			it("returns 400 when pkce.required=true and code has no code_challenge_method", async () => {
-				const config = makePkceConfig({ required: true, supportedMethods: ["S256", "plain"] });
-				const deps = {
-					config,
-					keyStore: createSymmetricKeyStore("test-secret"),
-					codeRepository: {
-						consumeByCode: vi.fn().mockResolvedValue({
-							code: "abc",
-							client_id: "client1",
-							redirect_uri: RP_URI,
-							// no code_challenge_method
-						}),
-						createCode: vi.fn(),
-						findByCode: vi.fn(),
-						removeByCode: vi.fn(),
-					} as unknown as CodeRepository,
-					clientRepository: mockClientRepository,
-				};
-				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
-					session: { code: "abc", code_client_id: "client1" },
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: DEFAULT_AUTH_CLIENT,
-				};
-
-				const { result } = await handler.handle(ctx);
-
-				expect(result.status).toBe(400);
-				expect("error" in result && result.error).toBe("invalid_request");
-			});
-
-			it("returns 200 when pkce.required=false and code has no code_challenge_method", async () => {
-				const config = makePkceConfig({ required: false, supportedMethods: ["S256", "plain"] });
-				const deps = {
-					config,
-					keyStore: createSymmetricKeyStore("test-secret"),
-					codeRepository: {
-						consumeByCode: vi.fn().mockResolvedValue({
-							code: "abc",
+			it("still admits plain for a client that opted in, whatever the config says", async () => {
+				const verifier = "b".repeat(43);
+				const handler = createAuthorizationGrant(
+					makeConfiguredDeps(
+						{ supportedMethods: ["S256"] },
+						{
 							client_id: "client1",
 							redirect_uri: RP_URI,
 							sid: "test-sid-1",
-							// no code_challenge_method
-						}),
-						createCode: vi.fn(),
-						findByCode: vi.fn(),
-						removeByCode: vi.fn(),
-					} as unknown as CodeRepository,
-					clientRepository: mockClientRepository,
-				};
-				const handler = createAuthorizationGrant(deps);
-				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
-					session: { code: "abc", code_client_id: "client1" },
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: DEFAULT_AUTH_CLIENT,
-				};
+							code_challenge: verifier,
+							code_challenge_method: "plain",
+						},
+					),
+				);
 
-				const { result } = await handler.handle(ctx);
+				const { result } = await handler.handle(
+					ctxFor(verifier, { ...DEFAULT_AUTH_CLIENT, allowPlainPkce: true }),
+				);
 
 				expect(result.status).toBe(200);
+			});
+
+			it("refuses a code with no code_challenge_method whatever `required` says", async () => {
+				// Pre-#273 `required: false` (the default!) made this a 200 for a
+				// confidential client — PKCE was effectively optional.
+				for (const required of [true, false]) {
+					const handler = createAuthorizationGrant(
+						makeConfiguredDeps(
+							{ required, supportedMethods: ["S256", "plain"] },
+							{
+								client_id: "client1",
+								redirect_uri: RP_URI,
+								sid: "test-sid-1",
+							},
+						),
+					);
+
+					const { result } = await handler.handle(ctxFor(CODE_VERIFIER));
+
+					expect(result.status).toBe(400);
+					expect("error" in result && result.error).toBe("invalid_request");
+					expect("errorDescription" in result && result.errorDescription).toBe(
+						"PKCE is required but code was issued without code_challenge",
+					);
+				}
 			});
 		});
 
@@ -992,6 +1103,8 @@ describe("createAuthorizationGrant", () => {
 							code: "c1",
 							client_id: "client1",
 							redirect_uri: RP_URI,
+							code_challenge: S256_CHALLENGE,
+							code_challenge_method: "S256",
 							sid: "sid-1",
 							nonce: "client-nonce",
 							grantedScope: ["openid", "email"],
@@ -1003,7 +1116,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c1", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "c1",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: { code: "c1", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
@@ -1041,6 +1159,8 @@ describe("createAuthorizationGrant", () => {
 							code: "c-noiss",
 							client_id: "client1",
 							redirect_uri: RP_URI,
+							code_challenge: S256_CHALLENGE,
+							code_challenge_method: "S256",
 							sid: "sid-noiss",
 							grantedScope: ["openid", "email"],
 							nonce: "client-nonce",
@@ -1052,7 +1172,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c-noiss", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "c-noiss",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: { code: "c-noiss", code_client_id: "client1" },
 					// issuer intentionally omitted
 					metadata: { ip: "127.0.0.1" },
@@ -1079,6 +1204,8 @@ describe("createAuthorizationGrant", () => {
 							code: "c2",
 							client_id: "client1",
 							redirect_uri: RP_URI,
+							code_challenge: S256_CHALLENGE,
+							code_challenge_method: "S256",
 							sid: "sid-2",
 							grantedScope: ["profile", "email"],
 						}),
@@ -1089,7 +1216,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c2", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "c2",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: { code: "c2", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
@@ -1109,13 +1241,20 @@ describe("createAuthorizationGrant", () => {
 						code: "c3",
 						client_id: "client1",
 						redirect_uri: RP_URI,
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
 						sid: "sid-3",
 						grantedScope: ["openid"],
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "c3", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "c3",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: { code: "c3", code_client_id: "client1" },
 					issuer: "https://auth.example.com",
 					metadata: { ip: "127.0.0.1" },
@@ -1143,6 +1282,8 @@ describe("createAuthorizationGrant", () => {
 						code: "abc",
 						client_id: "client1",
 						redirect_uri: RP_URI,
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
 						sid: "test-sid-1",
 						// redirect_uri intentionally absent — pre-fix this is the Redis
 						// drop scenario where IH-4 vacuous-pass would skip the check.
@@ -1150,7 +1291,11 @@ describe("createAuthorizationGrant", () => {
 				);
 				const handler = createAuthorizationGrant(deps);
 				const ctx: GrantContext = {
-					body: { code: "abc", client_id: "client1" /* no redirect_uri */ },
+					body: {
+						code: "abc",
+						client_id: "client1" /* no redirect_uri */,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
@@ -1169,6 +1314,8 @@ describe("createAuthorizationGrant", () => {
 						code: "abc",
 						client_id: "client1",
 						redirect_uri: RP_URI,
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
 						sid: "test-sid-1",
 						// redirect_uri intentionally absent on the codeData side.
 					}),
@@ -1203,6 +1350,8 @@ describe("createAuthorizationGrant", () => {
 						sid: "test-sid-1",
 						client_id: "real-client",
 						redirect_uri: "https://rp.example/cb",
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
 					}),
 				);
 				const handler = createAuthorizationGrant(deps);
@@ -1237,7 +1386,12 @@ describe("createAuthorizationGrant", () => {
 				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1283,7 +1437,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1308,7 +1467,12 @@ describe("createAuthorizationGrant", () => {
 				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1359,7 +1523,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1404,7 +1573,12 @@ describe("createAuthorizationGrant", () => {
 				);
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1442,7 +1616,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1476,7 +1655,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1525,7 +1709,12 @@ describe("createAuthorizationGrant", () => {
 				};
 				const handler = createAuthorizationGrant(deps);
 				const { result } = await handler.handle({
-					body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
 					session: {
 						code: "abc",
 						code_client_id: "client1",
@@ -1596,7 +1785,12 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 
 		const handler = createAuthorizationGrant(deps);
 		const { result } = await handler.handle({
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			session: {
 				code: "abc",
 				code_client_id: "client1",
@@ -1668,7 +1862,12 @@ describe("CR-4 — TOCTOU re-check session before returning tokens", () => {
 		};
 		const handler = createAuthorizationGrant(deps);
 		const { result } = await handler.handle({
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			session: {
 				code: "abc",
 				code_client_id: "client1",
@@ -1750,7 +1949,12 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 
 		// No `user` key: the confidential-client /token request carries no cookie.
 		const { result } = await handler.handle({
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			session: { code: "abc", code_client_id: "client1" },
 			issuer: ISSUER,
 			metadata: { ip: "127.0.0.1" },
@@ -1783,7 +1987,12 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 		// Same-origin/BFF topology where /token does carry a cookie, and the
 		// browser session moved to a different user between /authorize and /token.
 		const { result } = await handler.handle({
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			session: { code: "abc", code_client_id: "client1", user: { id: "other-user" } },
 			issuer: ISSUER,
 			metadata: { ip: "127.0.0.1" },
@@ -1833,7 +2042,12 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 		};
 
 		const { result } = await createAuthorizationGrant(deps).handle({
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			session: { code: "abc", code_client_id: "client1" },
 			issuer: ISSUER,
 			metadata: { ip: "127.0.0.1" },
@@ -1875,7 +2089,12 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 		};
 
 		const { result } = await createAuthorizationGrant(deps).handle({
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			// A cookie IS present and names a different user — the BFF topology.
 			session: { code: "abc", code_client_id: "client1", user: { id: "cookie-user" } },
 			issuer: ISSUER,
@@ -1893,7 +2112,12 @@ describe("#259 — AT/RT subject derives from the code-bound UserSession", () =>
 		const handler = createAuthorizationGrant(deps);
 
 		const { result } = await handler.handle({
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			session: { code: "abc", code_client_id: "client1", user: { id: "u-legacy" } },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
@@ -1926,7 +2150,12 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		);
 		const handler = createAuthorizationGrant(deps);
 		const ctx: GrantContext = {
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI },
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
 			session: { code: "abc", code_client_id: "client1" },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
@@ -2019,6 +2248,9 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		// they differ. Pre-SF-3+MIN-4 the comparison was a short-circuit `!==`
 		// whose per-byte timing leaked progress against the stored challenge;
 		// constantTimeStringEqual replaces it on both S256 and plain branches.
+		// #273: reaching the plain branch at all now requires the client's
+		// `allowPlainPkce` opt-in — without it the method allowlist rejects
+		// first and this branch is never exercised.
 		const verifier = "a".repeat(43);
 		const challenge = "b".repeat(43);
 		const deps = makeDeps(
@@ -2036,7 +2268,7 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 			session: { code: "abc", code_client_id: "client1" },
 			issuer: "localhost",
 			metadata: { ip: "127.0.0.1" },
-			authenticatedClient: DEFAULT_AUTH_CLIENT,
+			authenticatedClient: { ...DEFAULT_AUTH_CLIENT, allowPlainPkce: true },
 		};
 
 		const { result } = await handler.handle(ctx);
@@ -2048,59 +2280,33 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		);
 	});
 
-	it("returns 400 invalid_request when code_challenge_method falls through the switch default (defense-in-depth)", async () => {
-		// The supportedMethods includes-check at the top of the PKCE block
-		// rejects unknown methods before the switch, so the `default` arm is
-		// structurally unreachable in production. We exercise it deliberately
-		// here by widening supportedMethods so includes() passes, then setting
-		// a method the switch doesn't case on. This pins the runtime guard
-		// that protects against future supportedMethods/switch divergence.
-		const config = {
-			oauth: {
-				jwt: { secret: "test-secret" },
-				accessToken: { expiresIn: 3600 },
-				refreshToken: { expiresIn: 86400 },
-				grants: {
-					authorization_code: {
-						enabled: true,
-						pkce: { supportedMethods: ["S256", "plain", "BOGUS"] },
-					},
-				},
-			},
-		} as unknown as GrantDependencies["config"];
-		const verifier = "a".repeat(43);
-		const deps = {
-			config,
-			keyStore: createSymmetricKeyStore("test-secret"),
-			codeRepository: {
-				consumeByCode: vi.fn().mockResolvedValue({
-					code: "abc",
-					client_id: "client1",
-					redirect_uri: RP_URI,
-					code_challenge: verifier,
-					code_challenge_method: "BOGUS",
-				}),
-				createCode: vi.fn(),
-				findByCode: vi.fn(),
-				removeByCode: vi.fn(),
-			} as unknown as CodeRepository,
-			clientRepository: mockClientRepository,
-		};
-		const handler = createAuthorizationGrant(deps);
-		const ctx: GrantContext = {
-			body: { code: "abc", client_id: "client1", redirect_uri: RP_URI, code_verifier: verifier },
-			session: { code: "abc", code_client_id: "client1" },
-			issuer: "localhost",
-			metadata: { ip: "127.0.0.1" },
-			authenticatedClient: DEFAULT_AUTH_CLIENT,
-		};
-
-		const { result } = await handler.handle(ctx);
-
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_request");
-		expect((result as { errorDescription?: string }).errorDescription).toBe(
-			"invalid code_challenge_method",
+	it("cases every method pkceMethodsForClient can return, so the switch default is unreachable", () => {
+		// Pre-#273 this branch was reached by widening the operator-configured
+		// `supportedMethods` to a method the switch did not case on. #273
+		// removed that knob: the allowlist is now a frozen constant, so the
+		// `default` arm cannot be driven from a request at all and the runtime
+		// test that used to exercise it can no longer exist.
+		//
+		// The guard it protected is still worth pinning, so the invariant is
+		// asserted directly: every method the policy can admit must have a
+		// `case` in the verifier switch. Add a method to `pkceMethodsForClient`
+		// without casing it here and this fails — which is the divergence the
+		// `default` arm exists to catch.
+		const source = readFileSync(
+			resolve(dirname(fileURLToPath(import.meta.url)), "../grants/authorization.mts"),
+			"utf8",
 		);
+		const cased = new Set(
+			Array.from(source.matchAll(/case "([^"]+)":/g), (match) => match[1] as string),
+		);
+		const policy = resolvePkceOptions(undefined);
+		const admissible = new Set([
+			...pkceMethodsForClient(policy, null),
+			...pkceMethodsForClient(policy, { allowPlainPkce: true }),
+		]);
+		expect(admissible.size).toBeGreaterThan(0);
+		for (const method of admissible) {
+			expect(cased).toContain(method);
+		}
 	});
 });

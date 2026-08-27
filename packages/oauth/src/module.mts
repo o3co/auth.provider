@@ -247,6 +247,11 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 								"client_secret_post",
 								"none",
 							],
+							// #273: S256 only, and now actually true — PKCE is
+							// mandatory and no server-wide setting admits `plain`.
+							// A client carrying `allowPlainPkce` is a named
+							// exception, not a server capability, so it is
+							// deliberately not advertised here.
 							code_challenge_methods_supported: ["S256"],
 							...(logoutSupported
 								? {

@@ -145,4 +145,38 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+
+	it("#273: accepts allowPlainPkce, the only route to the RFC 7636 plain method", () => {
+		// The schema is `.strict()`, so without the key a registration could
+		// not carry the opt-in at all — and there is deliberately no
+		// server-wide setting that admits `plain` instead.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			allowPlainPkce: true,
+		});
+		expect(result.success).toBe(true);
+		expect(result.success && result.data.allowPlainPkce).toBe(true);
+	});
+
+	it("#273: allowPlainPkce stays optional — absence means S256 only", () => {
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+		});
+		expect(result.success).toBe(true);
+		expect(result.success && result.data.allowPlainPkce).toBeUndefined();
+	});
+
+	it("#273: rejects a non-boolean allowPlainPkce", () => {
+		// A YAML `allowPlainPkce: "true"` must fail at boot rather than reach
+		// the policy site, where the strict `=== true` would silently ignore
+		// it and the operator would believe the exception was in force.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			allowPlainPkce: "true",
+		});
+		expect(result.success).toBe(false);
+	});
 });

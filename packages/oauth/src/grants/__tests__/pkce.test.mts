@@ -18,96 +18,132 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { resolvePkceSupportedMethods } from "#/grants/pkce.mjs";
+import {
+	PKCE_METHOD_ABSENT_DEFAULT,
+	pkceMethodsForClient,
+	resolvePkceOptions,
+} from "#/grants/pkce.mjs";
 
-describe("resolvePkceSupportedMethods (TS-4)", () => {
-	it("returns the valid string array unchanged", () => {
-		const result = resolvePkceSupportedMethods({ supportedMethods: ["S256", "plain"] });
-		expect(result).toEqual(["S256", "plain"]);
+const makeLogger = () => ({
+	trace: vi.fn(),
+	debug: vi.fn(),
+	info: vi.fn(),
+	warn: vi.fn(),
+	error: vi.fn(),
+	fatal: vi.fn(),
+	child: vi.fn(),
+});
+
+describe("resolvePkceOptions (#273)", () => {
+	it("resolves to required + S256-only when no pkce block is configured", () => {
+		expect(resolvePkceOptions(undefined)).toEqual({ required: true, supportedMethods: ["S256"] });
 	});
 
-	it("filters non-string elements and warns via the optional logger", () => {
-		const logger = {
-			trace: vi.fn(),
-			debug: vi.fn(),
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			fatal: vi.fn(),
-			child: vi.fn(),
-		};
-		const result = resolvePkceSupportedMethods(
-			{ supportedMethods: ["S256", 123, null, "plain"] },
+	it("resolves to the same object shape for an empty pkce block", () => {
+		expect(resolvePkceOptions({})).toEqual({ required: true, supportedMethods: ["S256"] });
+	});
+
+	it("returns a frozen supportedMethods list so a consumer cannot widen it in place", () => {
+		const { supportedMethods } = resolvePkceOptions(undefined);
+		expect(Object.isFrozen(supportedMethods)).toBe(true);
+	});
+
+	it("cannot be turned off: `required = false` is inert", () => {
+		expect(resolvePkceOptions({ required: false }).required).toBe(true);
+	});
+
+	it("cannot re-admit plain through the global supportedMethods allowlist", () => {
+		// Pre-#273 this list was the operator-facing knob and defaulted to
+		// ["S256","plain"]. `plain` is now reachable ONLY per client.
+		expect(resolvePkceOptions({ supportedMethods: ["S256", "plain"] }).supportedMethods).toEqual([
+			"S256",
+		]);
+		expect(resolvePkceOptions({ supportedMethods: ["plain"] }).supportedMethods).toEqual(["S256"]);
+	});
+
+	it("cannot re-admit plain through the legacy defaultMethod knob", () => {
+		expect(resolvePkceOptions({ defaultMethod: "plain" }).supportedMethods).toEqual(["S256"]);
+	});
+
+	it("ignores the legacy requireS256 boolean in both directions", () => {
+		expect(resolvePkceOptions({ requireS256: false })).toEqual({
+			required: true,
+			supportedMethods: ["S256"],
+		});
+		expect(resolvePkceOptions({ requireS256: true })).toEqual({
+			required: true,
+			supportedMethods: ["S256"],
+		});
+	});
+
+	it("warns once, naming every inert key, so an operator sees the config is dead", () => {
+		const logger = makeLogger();
+		resolvePkceOptions(
+			{ requireS256: false, required: false, defaultMethod: "plain", supportedMethods: ["plain"] },
 			logger,
 		);
-		expect(result).toEqual(["S256", "plain"]);
 		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				ignoredKeys: ["requireS256", "required", "defaultMethod", "supportedMethods"],
+			}),
+			"pkce_config_ignored_s256_is_mandatory",
+		);
 	});
 
-	it("does NOT warn when no filtering is needed (all elements are strings)", () => {
-		const logger = {
-			trace: vi.fn(),
-			debug: vi.fn(),
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			fatal: vi.fn(),
-			child: vi.fn(),
-		};
-		resolvePkceSupportedMethods({ supportedMethods: ["S256"] }, logger);
+	it("stays silent when the operator configured nothing", () => {
+		const logger = makeLogger();
+		resolvePkceOptions(undefined, logger);
+		resolvePkceOptions({}, logger);
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
+});
 
-	it("falls back to default when supportedMethods is the empty array literal — silently (operator may have intended `[]` as 'use defaults')", () => {
-		const logger = {
-			trace: vi.fn(),
-			debug: vi.fn(),
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			fatal: vi.fn(),
-			child: vi.fn(),
-		};
-		const result = resolvePkceSupportedMethods({ supportedMethods: [] }, logger);
-		expect(result).toEqual(["S256", "plain"]);
-		// Literal `[]` is treated as "no opinion → use defaults"; warning here
-		// would flood logs for operators who intentionally cleared the field.
-		expect(logger.warn).not.toHaveBeenCalled();
+describe("pkceMethodsForClient (#273)", () => {
+	// The policy both endpoints hand in — resolved from config, identical on
+	// each side. Taking it as a parameter (rather than closing over the
+	// constant) is what makes "/authorize and /token read the same object"
+	// checkable rather than asserted.
+	const policy = resolvePkceOptions(undefined);
+
+	it("gives S256 only to a client with no opt-in", () => {
+		expect(pkceMethodsForClient(policy, {})).toEqual(["S256"]);
 	});
 
-	it("falls back to default AND warns when all elements are non-string (filtered to empty)", () => {
-		// Without the warn, an operator typo like `supportedMethods = [123, null]`
-		// would silently disable their PKCE method allowlist and the helper
-		// would substitute defaults. The warn surfaces this misconfiguration.
-		const logger = {
-			trace: vi.fn(),
-			debug: vi.fn(),
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			fatal: vi.fn(),
-			child: vi.fn(),
-		};
-		const result = resolvePkceSupportedMethods({ supportedMethods: [123, null] }, logger);
-		expect(result).toEqual(["S256", "plain"]);
-		expect(logger.warn).toHaveBeenCalledTimes(1);
+	it("gives S256 only to a null / undefined client", () => {
+		expect(pkceMethodsForClient(policy, null)).toEqual(["S256"]);
+		expect(pkceMethodsForClient(policy, undefined)).toEqual(["S256"]);
 	});
 
-	it("falls back to default when supportedMethods is absent", () => {
-		const result = resolvePkceSupportedMethods({});
-		expect(result).toEqual(["S256", "plain"]);
+	it("returns the policy's own baseline list, not a copy of it", () => {
+		expect(pkceMethodsForClient(policy, null)).toBe(policy.supportedMethods);
 	});
 
-	it("falls back to default when supportedMethods is not an array (e.g. a string)", () => {
-		const result = resolvePkceSupportedMethods({
-			supportedMethods: "S256",
-		} as unknown as Record<string, unknown>);
-		expect(result).toEqual(["S256", "plain"]);
+	it("adds plain only on a literal `true` opt-in", () => {
+		expect(pkceMethodsForClient(policy, { allowPlainPkce: true })).toEqual(["S256", "plain"]);
 	});
 
-	it("falls back to default when pkceConfig itself is undefined", () => {
-		const result = resolvePkceSupportedMethods(undefined);
-		expect(result).toEqual(["S256", "plain"]);
+	it("does not widen on a truthy non-boolean (an uncoerced YAML/env string)", () => {
+		expect(
+			pkceMethodsForClient(policy, { allowPlainPkce: "true" } as unknown as {
+				allowPlainPkce?: boolean;
+			}),
+		).toEqual(["S256"]);
+	});
+
+	it("returns frozen lists", () => {
+		expect(Object.isFrozen(pkceMethodsForClient(policy, {}))).toBe(true);
+		expect(Object.isFrozen(pkceMethodsForClient(policy, { allowPlainPkce: true }))).toBe(true);
+	});
+});
+
+describe("PKCE_METHOD_ABSENT_DEFAULT", () => {
+	it("is RFC 7636 §4.3's `plain`, so an omitted method is refused unless plain is opted in", () => {
+		// The constant exists so both endpoints agree on what an absent
+		// `code_challenge_method` means. It must stay `plain`: reading absence
+		// as S256 would hash a verifier the client computed as a plain
+		// challenge and fail at redemption instead of at the request boundary.
+		expect(PKCE_METHOD_ABSENT_DEFAULT).toBe("plain");
 	});
 });
 

@@ -103,6 +103,9 @@ async function exchangeCodeWithoutCookie() {
 				client_id: CLIENT_ID,
 				redirect_uri: RP_URI,
 				sid: SID,
+				// #273: a redeemable code always carries an S256 challenge.
+				code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				code_challenge_method: "S256",
 				grantedScope: ["openid", "email"],
 			}),
 			createCode: vi.fn(),
@@ -127,7 +130,12 @@ async function exchangeCodeWithoutCookie() {
 	// The session object a back-channel /token call sees: the code correlation
 	// keys written at /authorize, and no `user` — there is no browser here.
 	return handler.handle({
-		body: { code: "the-code", client_id: CLIENT_ID, redirect_uri: RP_URI },
+		body: {
+			code: "the-code",
+			client_id: CLIENT_ID,
+			redirect_uri: RP_URI,
+			code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+		},
 		session: { code: "the-code", code_client_id: CLIENT_ID },
 		issuer: ISSUER,
 		metadata: { ip: "127.0.0.1" },

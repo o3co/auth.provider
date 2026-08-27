@@ -112,6 +112,9 @@ const authorizeUrl = (params: Record<string, string | string[]>) => {
 	qs.append("client_id", CLIENT_ID);
 	qs.append("redirect_uri", REDIRECT);
 	qs.append("scope", "openid");
+	// #273: PKCE/S256 is mandatory at /authorize for every client.
+	qs.append("code_challenge", "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+	qs.append("code_challenge_method", "S256");
 	for (const [k, v] of Object.entries(params)) {
 		for (const one of Array.isArray(v) ? v : [v]) qs.append(k, one);
 	}

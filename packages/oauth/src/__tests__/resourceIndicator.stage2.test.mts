@@ -180,6 +180,9 @@ function makeAuthzDeps(
 			consumeByCode: vi.fn().mockResolvedValue({
 				client_id: CLIENT_ID,
 				redirect_uri: RP_URI,
+				// #273: a redeemable code always carries an S256 challenge.
+				code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+				code_challenge_method: "S256",
 				...(grantedAudience !== undefined && { grantedAudience }),
 			}),
 			createCode: vi.fn(),
@@ -191,7 +194,12 @@ function makeAuthzDeps(
 }
 
 const makeAuthzCtx = (body: Record<string, unknown> = {}): GrantContext => ({
-	body: { code: "abc", redirect_uri: RP_URI, ...body },
+	body: {
+		code: "abc",
+		redirect_uri: RP_URI,
+		code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+		...body,
+	},
 	session: { user: { id: "u1" } },
 	issuer: "localhost",
 	metadata: { ip: "127.0.0.1" },

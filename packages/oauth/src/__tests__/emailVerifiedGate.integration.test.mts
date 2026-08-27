@@ -47,7 +47,7 @@ const makeConfig = (requireEmailVerified: boolean): AppConfig =>
 			jwt: { issuer: "https://issuer.example" },
 			accessToken: { expiresIn: 300 },
 			requireEmailVerified,
-			grants: { authorization_code: { pkce: { requireS256: false } } },
+			grants: { authorization_code: { enabled: true } },
 		},
 		rateLimit: { failMode: "open" as const },
 		endpoints: { login: { url: "/login" } },

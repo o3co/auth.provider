@@ -61,7 +61,7 @@ const makeConfig = (staleAllowUnmarkedClients: boolean): AppConfig =>
 			// carry it, but a hand-built one can — injecting it here pins that
 			// the stale key is inert rather than merely absent from fixtures.
 			...(staleAllowUnmarkedClients ? { authorize: { allowUnmarkedClients: true } } : {}),
-			grants: { authorization_code: { pkce: { requireS256: false } } },
+			grants: { authorization_code: { enabled: true } },
 		},
 		rateLimit: { failMode: "open" as const },
 		endpoints: { login: { url: "/login" } },

@@ -139,6 +139,32 @@ export interface Client {
 	 * with a silent code cannot be registered into that position by accident.
 	 */
 	readonly firstParty?: boolean;
+	/**
+	 * Whether this client may use the RFC 7636 `plain` PKCE challenge method
+	 * (#273).
+	 *
+	 * PKCE is mandatory for every authorization-code client and `S256` is the
+	 * only method the authorization server accepts — there is no server-wide
+	 * setting that admits `plain`, because a deployment-wide one would quietly
+	 * cover every client at once. This flag is the ONLY way to reach it, and it
+	 * is deliberately per client: admitting `plain` is a named exception for a
+	 * named registration, visible in the client record itself.
+	 *
+	 * `plain` stores the verifier as the challenge, so anything that can read
+	 * the authorization request (browser history, a proxy log, a referrer)
+	 * learns the verifier too and PKCE stops proving anything. Set this only
+	 * for a legacy client that genuinely cannot compute SHA-256, and treat it
+	 * as a migration deadline rather than a configuration.
+	 *
+	 * Absent and `false` are the same: S256 only. Like `firstParty`, the check
+	 * is a strict `=== true`, so an uncoerced `"true"` from YAML or an
+	 * environment variable does not widen the policy.
+	 *
+	 * Surfaces through `PublicClient` (via `Omit`) and `AuthenticatedClient`
+	 * (via the `/token` route's projection) so `/authorize` and `/token` read
+	 * the same value.
+	 */
+	readonly allowPlainPkce?: boolean;
 }
 
 /**
