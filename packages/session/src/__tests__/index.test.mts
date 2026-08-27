@@ -43,11 +43,31 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 
 	it("exports federation helper utilities for provider packages", async () => {
 		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { validateRedirect?: unknown }).validateRedirect).toBe("function");
 		expect(typeof (mod as { resolveCallbackRedirect?: unknown }).resolveCallbackRedirect).toBe(
 			"function",
 		);
 		expect(typeof (mod as { codeChallenge?: unknown }).codeChallenge).toBe("function");
+	});
+
+	it("does NOT export the standalone validateRedirect helper (#278)", async () => {
+		const mod = await import("#/index.mjs");
+		// It derived its answer from `sessionDomain` alone and accepted every
+		// http(s) URL when that was unset — an open redirect for any consumer
+		// wiring it directly. Redirect validation now exists only as a policy
+		// built from an allowlist, so there is no permissive shape left to reach.
+		expect((mod as Record<string, unknown>).validateRedirect).toBeUndefined();
+	});
+
+	it("exports the redirect-policy rules a custom policy needs to match", async () => {
+		const mod = await import("#/index.mjs");
+		expect(
+			typeof (mod as { createFederationRedirectPolicy?: unknown }).createFederationRedirectPolicy,
+		).toBe("function");
+		expect(typeof (mod as { describeRedirectRejection?: unknown }).describeRedirectRejection).toBe(
+			"function",
+		);
+		expect(typeof (mod as { isLoopbackHostname?: unknown }).isLoopbackHostname).toBe("function");
+		expect((mod as { MAX_REDIRECT_URL_LENGTH?: unknown }).MAX_REDIRECT_URL_LENGTH).toBe(2048);
 	});
 
 	it("does NOT export the deleted v0.4.x federation factory surface", async () => {

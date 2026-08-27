@@ -391,6 +391,38 @@ federations {
 
 トップレベルのフィールドとネストされたサブセクションを混在させた形式（mixed shape）は起動時に明確なエラーで拒否される。
 
+### リダイレクト許可リスト（`redirectAllowlist`）
+
+`GET /session/oauth/federation/:name` の `redirect_to` クエリパラメータが指定できる URL は、すべて列挙する必要がある。
+
+```hocon
+federations {
+  google {
+    enabled = true
+    # …credentials…
+
+    redirectAllowlist = [
+      "https://app.example.com/welcome"
+      "https://app.example.com/account/linked"
+      "http://localhost:5173/welcome"      # ローカル開発用フロントエンド
+    ]
+
+    sessionDomain    = ".example.com"
+    authCallbackUrl  = "https://app.example.com/auth/callback"
+    clientUrl        = "https://app.example.com/"
+  }
+}
+```
+
+リストを書く前に押さえておくべきルールは 4 つ:
+
+- **完全一致**。scheme / host / port / path / query / fragment のすべてが一致しなければならない。正規化されるのは大文字小文字・デフォルトポート・`..` セグメント・パーセントエンコーディングだけ。ワイルドカード・前方一致・サブドメイン一致は存在しない。動的なクエリパラメータを持つ遷移先はまとめて登録できないので、固定パスにして可変部分は session 側に持たせる。
+- **未設定または空のリストは、すべての `redirect_to` を拒否する**。`redirect_to` を使わないデプロイではそれが正しい設定であり、「全部許可」の意味ではない。#278 以前は未設定の許可リストが任意の http(s) URL を受け入れており、これがオープンリダイレクトになっていた。そのフォールバックはもう存在しない。
+- **https 必須。ただし loopback は例外**。`localhost` / `127.0.0.0/8` / `[::1]` は `http://` を使える。ローカル開発のフロントエンドやネイティブクライアントの loopback listener が証明書なしで動くのはこのため。ポートは一致判定に含まれるのでクライアントが bind するポートを明記すること（RFC 8252 §7.3 のポート非依存 loopback 比較は実装していない）。
+- **`sessionDomain` を設定した場合、リスト自体が制約を受ける**。loopback 以外のエントリはすべてその domain 配下でなければならず、policy 構築時に検証される。domain 外のエントリは「設定したつもりで効いていない」状態にならず起動時に失敗する。クロスドメインの遷移先が本当に必要なら `sessionDomain` を外す。
+
+`authCallbackUrl` と `clientUrl` は許可リストではなく `resolveCallbackRedirect` が読む。前者は `redirect_to` を引き渡すブリッジページ、後者は `redirect_to` を伴わないコールバックのフォールバック。
+
 ### カスタムフェデレーションプロバイダー
 
 カスタムフェデレーションは per-federation な `defineModule(...)` を書いて、`federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>`（redirect policy）の両方を contribute する。型付き ComponentMap config slot を伴う const-Module パターンが推奨形 — 実装例として [`@o3co/auth-provider-federation-google` の `google.mts`](../federation-google/src/google.mts) を参照。最小スケッチ:

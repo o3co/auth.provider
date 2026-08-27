@@ -169,6 +169,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   `Client` and `AuthenticatedClient` gain `allowPlainPkce?: boolean`, and the `/token` route projects it onto the authenticated client. A custom `ClientRepository` that does not surface the field simply never admits `plain` — the safe direction. `ClientEntrySchema` is `.strict()`, so the file-backed adapters accept the key too. The internal `resolvePkceSupportedMethods` helper is gone with the operator-typed allowlist it validated; `resolvePkceOptions`, `pkceMethodsForClient`, `PKCE_METHOD_S256`, `PKCE_METHOD_PLAIN` and `PKCE_METHOD_ABSENT_DEFAULT` replace it inside the oauth package.
 
+- **BREAKING: the federation redirect is an exact-match allowlist that fails closed, and the Google scaffold now actually delivers the fields it reads (`@o3co/auth-provider-session`, `@o3co/auth-provider-federation-google`, `@o3co/auth-provider-federation-github`, standalone template).** `GET /session/oauth/federation/:name?redirect_to=…` validated the target against `sessionDomain` — **if one was configured**. `sessionDomain` is optional and defaults to absent, so the shipped default accepted every absolute http(s) URL on the internet. Anyone could hand a victim a link that authenticated at the real IdP and then dropped the browser, freshly logged in, on a page of the attacker's choosing: a phishing landing page indistinguishable from the real login flow, and a redirect that carries whatever the callback appends (#278).
+
+  Compounding it, the standalone template's Google bridge returned `{ clientId, clientSecret, callbackURL }` and dropped `sessionDomain`, `authCallbackUrl` and `clientUrl` on the floor. `googleFederationModule` hands that same object to `createFederationRedirectPolicy`, so the policy was built from a config with **none** of the fields it reads. An operator who filled all three in got a deployment that behaved exactly as if they had not — the safe path was strictly harder to reach than the unsafe one, in the generated app most deployments start from.
+
+  **`federations.<name>.redirectAllowlist` (new) is now the authority, and an absent allowlist is the empty allowlist.** Nothing falls back to "any http(s) URL", because a fallback is how the permissive branch survived being written down as a rule in the first place. A deployment that never accepts `redirect_to` needs no configuration and keeps working; one that does must say which targets it means, and is told so by name (`reason: no-allowlist`) rather than by a silent refusal.
+
+  **Matching is exact** on the normalized URL: scheme and host case, the default port, `..` segments and percent-encoding are insignificant, and path, query, fragment and port are significant. There is no prefix, suffix, wildcard or subdomain matching — an entry does not admit its own siblings, so `https://app.example.com/dashboard` does not admit `…/dashboard?next=//evil.com`. The cost to operators is real and deliberate: a target carrying dynamic query parameters cannot be allowlisted as a family and has to become a fixed path with the variable part carried in the session.
+
+  **`http://` stays permitted on loopback** — `localhost`, `127.0.0.0/8`, `[::1]` — matching `checkSecureEndpoint` (#285) and `checkCanonicalIssuer` so operators meet one loopback policy across this repository rather than three. Native clients redirect to a loopback listener (RFC 8252 §7.3) and local development serves the consumer app over plain HTTP; neither can obtain a certificate, and loopback traffic never leaves the machine. The carve-out is about the **scheme only**: a loopback entry is still matched exactly, port included. RFC 8252 §7.3's port-agnostic loopback comparison is deliberately not implemented — `redirect_to` here is the consumer app's landing page, whose port a development or native setup knows in advance, so a port wildcard would widen the surface to buy nothing.
+
+  **`sessionDomain` survives as a narrowing check on the allowlist itself**, applied when the policy is constructed: a non-loopback entry outside the configured domain fails boot rather than sitting in the config looking effective. Dropping it instead would have silently widened what existing deployments accept, which a security fix must not do. Loopback entries are exempt — a native client's `http://127.0.0.1:PORT` can never be inside a cookie domain, and applying the domain check to it would make the carve-out unreachable for every deployment that sets `sessionDomain`.
+
+  **`validateRedirect` is removed from `@o3co/auth-provider-session`'s public surface.** It was the permissive shape, and leaving it exported would have left the open redirect one import away for any consumer wiring federation by hand. Redirect validation now exists only as a policy built from an allowlist. `resolveCallbackRedirect` is unchanged. New exports for anyone writing a custom `FederationRedirectPolicy`: `describeRedirectRejection`, `isLoopbackHostname`, `MAX_REDIRECT_URL_LENGTH`, and the `RedirectRejection` type — so a replacement policy reuses these rules and this rejection vocabulary rather than inventing a third dialect.
+
+  **Migration — a deployment that uses `redirect_to` must add one key per federation, or federation redirects stop working:**
+
+  ```hocon
+  federations.google {
+    enabled = true
+    # …credentials unchanged…
+
+    # NEW, required to accept `redirect_to` at all. Exact URLs, no wildcards.
+    redirectAllowlist = [
+      "https://app.example.com/welcome"
+      "https://app.example.com/account/linked"
+      "http://localhost:5173/welcome"    # loopback may use http
+    ]
+
+    sessionDomain   = ".example.com"                        # now reaches the policy
+    authCallbackUrl = "https://app.example.com/auth/callback"
+    clientUrl       = "https://app.example.com/"
+  }
+  ```
+
+  To build the list, take the `redirect_to` values the front-end actually sends — not the domains they live on. A refused request answers `400 invalid_redirect` with the reason spelled out (`no-allowlist`, `not-allowlisted`, `insecure-scheme`, `has-credentials`, …), so the first failure names what to fix.
+
+  **A deployment that never sends `redirect_to` needs no change** and is unaffected: the callback falls through to `clientUrl` exactly as before. **A deployment on the standalone template that had configured `sessionDomain` / `authCallbackUrl` / `clientUrl` should re-read them** — they were being discarded, so whatever behaviour it has today is the behaviour of a policy that never saw them, and they take effect for the first time with this release. In particular a `sessionDomain` that was set but ignored will now refuse an allowlist entry outside it at boot.
+
 - **BREAKING: mTLS takes the client certificate from the TLS layer by default, and the forwarded-header source now requires a trusted-proxy allowlist (`@o3co/auth-provider-mtls`).** Enabling mTLS meant `oauth.mtls.source = "header"`, which trusted an `X-Forwarded-Client-Cert` value from whoever opened the connection. Nothing proved the header came from the terminating proxy, so the header *was* the credential: anyone who could reach the process — directly, or through one extra hop the deployment did not account for — could assert any client identity and be issued a token bound to a certificate they do not hold. That defeats the entire point of sender-constraining a token. RFC 8705 §3 requires the certificate to come from the TLS layer, or from an **authenticated** trusted proxy, and only one of those two can be assumed (#280).
 
   **`oauth.mtls.source` now defaults to `"tls-layer"`** — `req.socket.getPeerCertificate()`, the certificate the handshake actually proved. There is nothing to forge on that path.

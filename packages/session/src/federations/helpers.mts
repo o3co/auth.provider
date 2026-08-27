@@ -21,68 +21,20 @@ import type { FederationResult } from "./types.mjs";
  * and callback redirect resolution.
  */
 export interface RedirectConfig {
+	/**
+	 * The exact redirect targets a consumer-supplied `redirect_to` may name.
+	 *
+	 * Read by `createFederationRedirectPolicy` (`redirect-policy.mts`), which
+	 * owns the matching rules and the fail-closed behaviour when this is absent
+	 * or empty. `validateRedirect` used to live here and derived its answer from
+	 * `sessionDomain` alone, which meant an unset `sessionDomain` accepted every
+	 * http(s) URL on earth (#278); it was removed rather than tightened so no
+	 * caller can reach the permissive shape.
+	 */
+	redirectAllowlist?: readonly string[];
 	sessionDomain?: string;
 	authCallbackUrl?: string;
 	clientUrl?: string;
-}
-
-/**
- * Validates that the given URL is acceptable as a post-login redirect target.
- *
- * Rules:
- * - Must be ≤ 2048 characters.
- * - Must be a valid absolute URL with http: or https: scheme.
- * - If `sessionDomain` is configured, the URL hostname must match or be a
- *   subdomain of the normalised domain (leading dot stripped).
- */
-export function validateRedirect(
-	url: string,
-	config: Pick<RedirectConfig, "sessionDomain">,
-): FederationResult<void> {
-	if (url.length > 2048) {
-		return {
-			ok: false,
-			status: 400,
-			error: "invalid_redirect",
-			errorDescription: "Invalid redirect_to",
-		};
-	}
-
-	let parsed: URL;
-	try {
-		parsed = new URL(url);
-	} catch {
-		return {
-			ok: false,
-			status: 400,
-			error: "invalid_redirect",
-			errorDescription: "Invalid redirect URL",
-		};
-	}
-
-	if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-		return {
-			ok: false,
-			status: 400,
-			error: "invalid_redirect",
-			errorDescription: "Invalid redirect URL scheme",
-		};
-	}
-
-	const cookieDomain = config.sessionDomain;
-	if (cookieDomain) {
-		const normalizedDomain = cookieDomain.replace(/^\./, "");
-		if (parsed.hostname !== normalizedDomain && !parsed.hostname.endsWith(`.${normalizedDomain}`)) {
-			return {
-				ok: false,
-				status: 400,
-				error: "invalid_redirect",
-				errorDescription: "Redirect domain not allowed",
-			};
-		}
-	}
-
-	return { ok: true, value: undefined };
 }
 
 /**
