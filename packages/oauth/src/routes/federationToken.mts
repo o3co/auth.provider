@@ -28,6 +28,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { emitAuditEvent, supportsLock, verifyJwt } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -188,18 +189,19 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		res.setHeader("Cache-Control", "no-store");
 		res.setHeader("Pragma", "no-cache");
 
-		// Step 1: Extract Bearer access_token from Authorization header.
-		const auth = req.headers.authorization;
-		if (!auth || !/^Bearer /i.test(auth)) {
+		// Step 1: Extract the access token from the Authorization header —
+		// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1). Scheme-vs-`cnf`
+		// agreement is enforced by `protectedResourceBindingMw` upstream.
+		const token = parseAccessTokenHeader(req.headers.authorization);
+		if (token === null) {
 			res.setHeader(
 				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="missing Bearer token"',
+				'Bearer error="invalid_token", error_description="missing access token"',
 			);
 			return res
 				.status(401)
-				.json({ error: "invalid_token", error_description: "missing Bearer token" });
+				.json({ error: "invalid_token", error_description: "missing access token" });
 		}
-		const token = auth.slice(auth.indexOf(" ") + 1);
 
 		// Step 2 + 3: SF-1 — alg / iss / typ (=at+jwt) + signature pinned by
 		// the central verifier. Audience is deferred — bearer-as-credential

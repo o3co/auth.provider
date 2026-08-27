@@ -31,6 +31,7 @@ import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { planDiscoveryRoute } from "../discovery/planRoute.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { protectedResourceBindingMw } from "../middleware/protectedResourceBinding.mjs";
 import {
 	type DispatchPolicy,
 	type TokenBindingMechanism,
@@ -574,6 +575,22 @@ export function assembleApp(
 	// Step 2: Construct router (§5.6 step 2).
 	const router: Router = RouterCtor();
 
+	// The OAuth surfaces that accept an access token as a credential, and so
+	// have to honour a token's `cnf` binding (#264). `/oauth/token` is
+	// deliberately absent: it authenticates a *client*, has no access token in
+	// play, and runs the token-endpoint binding profile above instead.
+	//
+	// `/oauth/federation` covers the whole federation sub-tree rather than the
+	// `:name/token` leaf, so a future bearer-authenticated federation route is
+	// guarded on arrival. The browser-redirect routes underneath it present no
+	// access-token scheme, so the middleware passes them straight through.
+	const PROTECTED_RESOURCE_PATHS = [
+		"/oauth/userinfo",
+		"/oauth/federation",
+		"/oauth/introspect",
+		"/oauth/logout",
+	];
+
 	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
 	// collector and mount it on `/oauth/token` BEFORE any other grant
 	// middleware. Multiple mechanism modules (DPoP, mTLS, ...) contribute
@@ -605,6 +622,39 @@ export function assembleApp(
 			router.use("/oauth/token", composed);
 		}
 	}
+
+	// Mount the protected-resource sender-constraint middleware (#264). The
+	// `/oauth/token` mount above establishes a binding so a grant can stamp it
+	// into the issued token's `cnf`; this one holds the other end of that
+	// promise, refusing a `cnf`-bearing token at the surfaces that accept an
+	// access token as a credential unless the matching proof-of-possession
+	// arrives with it. Without it a stolen DPoP- or mTLS-bound token replays
+	// as a plain Bearer and the binding buys nothing.
+	//
+	// Mounted UNCONDITIONALLY — deliberately unlike the `/oauth/token` mount
+	// above, which is skipped when no mechanisms are contributed. Access
+	// tokens outlive a config change, so a deployment that removes its DPoP
+	// module still has bound tokens in the wild; skipping the middleware there
+	// would make those tokens silently downgrade to Bearer, which is the exact
+	// failure this exists to prevent. With no mechanisms the middleware admits
+	// every unbound token unchanged and refuses every bound one — fail closed.
+	//
+	// Same mountPath coupling to the bundled `oauthModule` as the block above.
+	const protectedResourceMechanisms: TokenBindingMechanism[] = [];
+	if (mechanismCollector !== undefined) {
+		for (const m of mechanismCollector.values()) {
+			if (m !== null) protectedResourceMechanisms.push(m);
+		}
+	}
+	router.use(
+		PROTECTED_RESOURCE_PATHS,
+		protectedResourceBindingMw({
+			mechanisms: protectedResourceMechanisms,
+			...(((frozen.components as Record<string, unknown>).logger as Logger | undefined)
+				? { logger: (frozen.components as Record<string, unknown>).logger as Logger }
+				: {}),
+		}),
+	);
 
 	// Mount `grantMiddleware` contributions on `/oauth/token` AFTER the
 	// synthesized tokenBindingMw above. The bundled `oauthModule` contributes

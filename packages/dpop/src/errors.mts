@@ -36,7 +36,9 @@ export type DPoPReasonCode =
 	| "iat_out_of_window"
 	| "replay_detected"
 	| "replay_store_unavailable"
-	| "multiple_headers";
+	| "multiple_headers"
+	| "ath_missing"
+	| "ath_mismatch";
 
 /**
  * Thrown by `parseProof` and `verifyProof` for any DPoP validation failure.

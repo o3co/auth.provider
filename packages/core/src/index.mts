@@ -215,10 +215,16 @@ export type {
 	SupportsRevocation,
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
+// Middleware — protected-resource sender-constraint enforcement (RFC 9449 §7.1 / RFC 8705 §3)
+export {
+	type ProtectedResourceBindingOptions,
+	protectedResourceBindingMw,
+} from "./middleware/protectedResourceBinding.mjs";
 // Middleware — tokenBindingMw factory + plugin surface (Wave 2 Token-binding Cluster §4.7)
 export {
 	type DispatchPolicy,
 	isTokenBindingMw,
+	type TokenBindingExtractContext,
 	type TokenBindingMechanism,
 	type TokenBindingMiddlewareOptions,
 	tokenBindingMw,

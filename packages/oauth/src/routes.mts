@@ -44,6 +44,7 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import {
 	deriveAudienceFromResources,
 	extractResourceParam,
@@ -424,24 +425,28 @@ export const createOAuthRouter = async (
 			"/introspect",
 			async (req: Request, res: Response, next) => {
 				if (!(await checkRateLimit(req, res, "introspect"))) return;
-				const auth = req.headers.authorization;
-				if (auth?.startsWith("Bearer ")) {
-					const bearerToken = auth.slice(7);
+				// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
+				// access token used as the introspection credential. Which scheme a
+				// given token may use is enforced against its `cnf` by
+				// `protectedResourceBindingMw` upstream.
+				const credentialToken = parseAccessTokenHeader(req.headers.authorization);
+				if (credentialToken !== null) {
 					// Self-introspection pattern: RFC 7662 requires a valid credential to call introspect.
-					// When the caller uses their own token as the Bearer credential, the token in the
-					// request body must match that Bearer token. If they differ, return inactive (not 403)
-					// per RFC 7662 §2.2 — the server must not reveal whether the token exists.
-					if (req.body.token !== bearerToken) {
+					// When the caller uses their own access token as that credential, the token in the
+					// request body must match the one in the Authorization header. If they differ, return
+					// inactive (not 403) per RFC 7662 §2.2 — the server must not reveal whether the
+					// token exists.
+					if (req.body.token !== credentialToken) {
 						return res.status(200).json({ active: false });
 					}
 					try {
-						// SF-1: bearer self-intro — calling-client identity is not yet
+						// SF-1: token-as-credential self-intro — calling-client identity is not yet
 						// established (introspectClientAuthMw is skipped on this fall-
 						// through path), so audience pinning is deferred. alg / iss /
 						// typ + signature are still pinned by the central verifier.
 						// Wave 1 (C4): denylist consulted so revoked ATs cannot serve
 						// as their own introspection credential.
-						await verifyJwt(bearerToken, keyStore, {
+						await verifyJwt(credentialToken, keyStore, {
 							type: "access_token",
 							expectedIssuer: canonicalIssuer,
 							legacyTypAccept: legacyTypAcceptOpt ?? false,

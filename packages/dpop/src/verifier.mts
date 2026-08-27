@@ -39,9 +39,14 @@
  * Per Wave 2 Phase 2 spec §6 + §8 factory contract.
  */
 
-import type { Logger, TokenBindingMechanism } from "@o3co/auth-provider-core";
+import type {
+	Logger,
+	TokenBindingExtractContext,
+	TokenBindingMechanism,
+} from "@o3co/auth-provider-core";
 import type { Request } from "express";
 import { importJWK, jwtVerify } from "jose";
+import { athMatches } from "./ath.mjs";
 import { DPoPError } from "./errors.mjs";
 import { normalizeHtu } from "./htu-normalize.mjs";
 import { parseProof } from "./proof.mjs";
@@ -173,7 +178,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 		 */
 		intentExplicit: true,
 
-		extract: async (req: Request) => {
+		extract: async (req: Request, ctx?: TokenBindingExtractContext) => {
 			// Step 1 (spec §6): DPoP header presence.
 			const header = req.get("dpop");
 			if (header === undefined) {
@@ -253,6 +258,44 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 						drift,
 					},
 				);
+			}
+
+			// RFC 9449 §7.1: at a protected resource the proof MUST carry an
+			// `ath` binding it to the access token it accompanies. Without it,
+			// a proof captured alongside one request authorises any other
+			// stolen token presented with it — the `htm`/`htu`/`iat` checks
+			// above say nothing about *which* token the proof is for.
+			//
+			// Ordered BEFORE the replay check on purpose. A proof whose `ath`
+			// does not match is not a legitimate use of its `jti`, so it must
+			// not consume the replay slot: an attacker who intercepts a proof
+			// could otherwise burn its `jti` by submitting it with a
+			// mismatched token and have the client's own request rejected as
+			// a replay. Checking the pair's coherence first keeps the replay
+			// store recording only proofs that were actually honoured.
+			//
+			// `ctx` absent = the token-endpoint profile (§5), where no access
+			// token exists yet. A stray `ath` there is ignored rather than
+			// rejected: there is nothing for it to contradict, and failing the
+			// grant over a pointless claim would break clients for no gain.
+			if (ctx !== undefined) {
+				const { ath } = proof.claims;
+				if (ath === undefined) {
+					throw new DPoPError(
+						"ath_missing",
+						"DPoP proof presented at a protected resource has no ath claim",
+					);
+				}
+				if (!(await athMatches(ath, ctx.boundAccessToken))) {
+					// The presented and expected digests are deliberately NOT
+					// attached as detail: both are derivable from material the
+					// caller already holds, but echoing them turns the audit
+					// record into a confirmation oracle for token guesses.
+					throw new DPoPError(
+						"ath_mismatch",
+						"DPoP proof ath does not match the presented access token",
+					);
+				}
 			}
 
 			// Step 13 (spec §6): JKT — already computed by parseProof (Sub-PR 2a).

@@ -19,6 +19,40 @@ import type { Logger } from "../logging/Logger.mjs";
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
 
 /**
+ * Extra request-scope facts a mechanism needs when the material is
+ * presented at a **protected resource** rather than at the token endpoint.
+ *
+ * Passed only by {@link protectedResourceBindingMw}. The token-endpoint
+ * mount ({@link tokenBindingMw}) calls `extract` with one argument, so the
+ * parameter is optional and every pre-existing mechanism keeps compiling
+ * and behaving exactly as before.
+ *
+ * The context is what makes the protected-resource profile *explicit*. The
+ * alternative — letting a mechanism sniff the `Authorization` header and
+ * infer which profile it is in — would make RFC 9449 §7.1's `ath`
+ * requirement depend on the middleware happening to reject the wrong
+ * scheme first. Two checks in different files would then have to stay
+ * consistent for the binding to hold. Here the caller states the profile
+ * and the mechanism enforces it.
+ */
+export interface TokenBindingExtractContext {
+	/**
+	 * The access token presented on this request, verbatim as transmitted.
+	 *
+	 * A mechanism whose proof binds to the access token (DPoP, via the
+	 * RFC 9449 §4.2 `ath` claim) MUST verify that binding against this
+	 * value. A mechanism that binds only to transport material (mTLS)
+	 * ignores it.
+	 *
+	 * Not yet signature-verified when the mechanism runs — the endpoint
+	 * downstream does that. It does not need to be: `ath` is a hash of the
+	 * exact bytes presented, so a token that fails verification downstream
+	 * fails the request regardless of what its `ath` matched.
+	 */
+	readonly boundAccessToken: string;
+}
+
+/**
  * One concrete binding mechanism (DPoP, mTLS, etc.). See Wave 2
  * Token-binding Cluster spec §4.7.
  */
@@ -41,7 +75,7 @@ export interface TokenBindingMechanism {
 	 * `invalid_<kind>_proof` so infrastructure-layer codes (e.g. Node
 	 * `ECONNREFUSED`) do not leak through the public error envelope.
 	 */
-	extract(req: Request): Promise<TokenBinding | null>;
+	extract(req: Request, ctx?: TokenBindingExtractContext): Promise<TokenBinding | null>;
 }
 
 /**

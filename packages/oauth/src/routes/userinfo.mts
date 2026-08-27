@@ -24,6 +24,7 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -71,15 +72,17 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		res.setHeader("Cache-Control", "no-store");
 		res.setHeader("Pragma", "no-cache");
 
-		// RFC 6750 §2.1: Bearer token in Authorization header
-		const auth = req.headers.authorization;
-		if (!auth?.startsWith("Bearer ")) {
+		// RFC 6750 §2.1 (Bearer) / RFC 9449 §7.1 (DPoP): access token in the
+		// Authorization header. Which scheme a given token may use is enforced
+		// against its `cnf` by `protectedResourceBindingMw` upstream — accepting
+		// both here is what lets a DPoP-bound token reach this endpoint at all.
+		const token = parseAccessTokenHeader(req.headers.authorization);
+		if (token === null) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo"');
 			return res
 				.status(401)
-				.json({ error: "invalid_token", error_description: "missing Bearer token" });
+				.json({ error: "invalid_token", error_description: "missing access token" });
 		}
-		const token = auth.slice(7);
 
 		// SF-1: alg / iss / typ + signature pinned by the central verifier
 		// (typ: at+jwt is required per RFC 9068 since userinfo is an
