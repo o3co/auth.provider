@@ -180,6 +180,15 @@ export interface RefreshTokenFamilyStore {
 	 *     replacement for the pre-#274 closure-captured-variable pattern,
 	 *     which could not describe a commit that is nevertheless a rejection
 	 *     (see `createRefreshTokenFamilyRotation`, #274).
+	 *   - When the settling decision carried NO `reason`, the adapter MUST
+	 *     omit the key from the result rather than set it to `undefined`.
+	 *     The field is optional, so "absent" and "present but `undefined`"
+	 *     must not both occur: they are one value to the type and two to
+	 *     `"reason" in result`, `Object.keys`, `toStrictEqual`, and anything
+	 *     serialising the result. Use the exported {@link withReason} helper
+	 *     — `{ outcome: "aborted", ...withReason(decision.reason) }` — which
+	 *     is what both in-tree adapters do, so a third store stays
+	 *     substitutable for them.
 	 *   - Updater MUST NOT commit a RefreshTokenFamily whose `expiresAtMs` is
 	 *     `<= now()`. Both adapters fail-closed by throwing
 	 *     `RefreshTokenStorageError({ reason: "expired-at-issue" })` —

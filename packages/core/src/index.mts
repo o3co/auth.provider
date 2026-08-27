@@ -494,7 +494,7 @@ export {
 	defaultRefreshTokenFamilyRotationModule,
 	memoryRefreshTokenFamilyStoreModule,
 } from "./refresh-token-family/module.mjs";
-
+export { withReason } from "./refresh-token-family/reason.mjs";
 export {
 	createRefreshTokenFamilyRevocation,
 	type RefreshTokenFamilyRevocationDeps,
