@@ -20,6 +20,8 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				OAUTH_JWT_ISSUER: "https://auth.test",
+				// #267: required, and reference.conf ships no literal on purpose.
+				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 				SESSION_SECRET: "test-session-secret",
 			},
 		});
@@ -54,6 +56,8 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				OAUTH_JWT_ISSUER: "https://auth.test",
+				// #267: required, and reference.conf ships no literal on purpose.
+				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 				SESSION_SECRET: "test-session-secret",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_APP_BASE_URL: "http://localhost:8080",
@@ -84,6 +88,8 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				OAUTH_JWT_ISSUER: "https://auth.test",
+				// #267: required, and reference.conf ships no literal on purpose.
+				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 				SESSION_SECRET: "test-session-secret",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
@@ -98,6 +104,8 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				OAUTH_JWT_ISSUER: "https://auth.test",
+				// #267: required, and reference.conf ships no literal on purpose.
+				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 				SESSION_SECRET: "test-session-secret",
 			},
 		});
@@ -110,6 +118,8 @@ describe("provider config", () => {
 			env: {
 				OAUTH_JWT_SECRET: "test-secret",
 				OAUTH_JWT_ISSUER: "https://auth.test",
+				// #267: required, and reference.conf ships no literal on purpose.
+				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 				SESSION_SECRET: "test-session-secret",
 			},
 		});
@@ -124,6 +134,8 @@ describe("provider config", () => {
 				env: {
 					OAUTH_JWT_SECRET: "test-secret",
 					OAUTH_JWT_ISSUER: "https://auth.test",
+					// #267: required, and reference.conf ships no literal on purpose.
+					OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 					SESSION_SECRET: "test-session-secret",
 				},
 			}),
@@ -136,6 +148,8 @@ describe("provider config", () => {
 				env: {
 					OAUTH_JWT_SECRET: "test-secret",
 					OAUTH_JWT_ISSUER: "https://auth.test",
+					// #267: required, and reference.conf ships no literal on purpose.
+					OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
 					SESSION_SECRET: "test-session-secret",
 					MEMORY_RATE_LIMITER_MAX_BUCKETS: "123",
 				},

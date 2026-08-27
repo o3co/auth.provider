@@ -110,6 +110,31 @@ export interface Client {
 	 * projection).
 	 */
 	readonly senderConstrained?: SenderConstraint;
+	/**
+	 * Whether this client is first-party — i.e. operated by the same
+	 * organisation as this authorization server, and trusted to receive the
+	 * user's identity without the user being asked (#267).
+	 *
+	 * `GET /authorize` mints an authorization code as soon as the session is
+	 * authenticated, with no consent step. That is defensible in a pure
+	 * first-party OP and only there: a forced top-level navigation from an
+	 * attacker's page makes a logged-in victim's browser mint a code, bound to
+	 * the victim's session, delivered to the named client's registered
+	 * `redirect_uri`. Registering one semi-trusted client turns the endpoint
+	 * into an account-linking vector.
+	 *
+	 * So the assumption is now enforced rather than assumed: `/authorize`
+	 * refuses any client that is not `true` here. A deployment still migrating
+	 * its client records can set `oauth.authorize.allowUnmarkedClients = true`
+	 * to keep admitting unmarked ones, with a per-client warning.
+	 *
+	 * This does **not** make `/authorize` safe against forced navigation for a
+	 * client that *is* first-party — that is the accepted model, and the
+	 * user-interaction step which changes it is consent (#284). What the flag
+	 * closes is the escalation: a client that should never have been trusted
+	 * with a silent code cannot be registered into that position by accident.
+	 */
+	readonly firstParty?: boolean;
 }
 
 export interface User {

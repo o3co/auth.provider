@@ -9,9 +9,22 @@
 # Secret format (only for confidential clients — basic / post):
 #   - Plain text: "my-secret"
 #   - Bcrypt hash: "$2b$10$..." (generate with: node -e "require('bcrypt').hash('secret',10).then(console.log)")
+#
+# `firstParty` (#267): REQUIRED to be `true` for a client to use `/authorize`.
+#   `/authorize` mints a code as soon as the session is authenticated, with no
+#   consent step, so a forced top-level navigation from an attacker's page
+#   makes a logged-in user's browser mint one for whatever client is named.
+#   That is defensible for clients you operate and only for those. Mark a
+#   client `firstParty: true` only if you would be comfortable with it
+#   receiving the user's identity without the user being asked.
+#
+#   A client without it is refused at `/authorize`. While migrating existing
+#   registrations, set `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS=true` to admit
+#   them with a per-client warning.
 
 my-app:
   tokenEndpointAuthMethod: "client_secret_basic"
+  firstParty: true
   clientSecret: "$2b$10$REPLACE_WITH_BCRYPT_HASH"
   allowedRedirectUris:
     - "http://localhost:3000/callback"
@@ -22,6 +35,7 @@ my-app:
 # Public client example (e.g., a single-page app or mobile app):
 # my-spa:
 #   tokenEndpointAuthMethod: "none"
+#   firstParty: true
 #   # clientSecret MUST be absent for "none" clients.
 #   allowedRedirectUris:
 #     - "https://app.example/callback"

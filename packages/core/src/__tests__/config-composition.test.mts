@@ -43,6 +43,7 @@ const minimalCoreConfig = {
 		},
 		grants: {},
 		oidcMode: "oidc-required",
+		authorize: { allowUnmarkedClients: false },
 	},
 };
 
@@ -266,6 +267,7 @@ describe("AppConfigSchema backward compatibility", () => {
 					refresh_token: { enabled: true },
 				},
 				oidcMode: "oidc-required",
+				authorize: { allowUnmarkedClients: false },
 			},
 			session: {
 				secret: "session-secret",

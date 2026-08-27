@@ -72,6 +72,7 @@ const mockClientRepository: ClientRepository = {
 					clientId: TEST_CLIENT_ID,
 					tokenEndpointAuthMethod: "client_secret_basic",
 					allowedRedirectUris: ["https://rp.example/cb"],
+					firstParty: true,
 					allowedScopes: [],
 				}
 			: null,
@@ -81,6 +82,7 @@ const mockClientRepository: ClientRepository = {
 					clientId: TEST_CLIENT_ID,
 					tokenEndpointAuthMethod: "client_secret_basic",
 					allowedRedirectUris: ["https://rp.example/cb"],
+					firstParty: true,
 					allowedScopes: [],
 				}
 			: null,
@@ -445,6 +447,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				findById: async () => ({
 					clientId: "client-42",
 					allowedRedirectUris: ["https://example.test/cb"],
+					firstParty: true,
 					allowedScopes: ["read"],
 				}),
 				authenticate: async () => null,
@@ -505,6 +508,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				findById: async () => ({
 					clientId: "client-1",
 					allowedRedirectUris: ["https://example.test/cb"],
+					firstParty: true,
 					allowedScopes: opts.allowedScopes ?? ["read", "write"],
 				}),
 				authenticate: async () => null,
