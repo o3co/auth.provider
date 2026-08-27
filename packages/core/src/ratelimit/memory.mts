@@ -100,6 +100,7 @@ export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): Rate
 					allowed: true,
 					remaining: spec.limit - 1,
 					resetAt: new Date(fresh.resetAt),
+					limit: spec.limit,
 				};
 			}
 			if (bucket.count >= spec.limit) {
@@ -108,6 +109,7 @@ export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): Rate
 					remaining: 0,
 					resetAt: new Date(bucket.resetAt),
 					reason: `limit:${keyPrefix(key)}`,
+					limit: spec.limit,
 				};
 			}
 			bucket.count += 1;
@@ -115,6 +117,7 @@ export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): Rate
 				allowed: true,
 				remaining: spec.limit - bucket.count,
 				resetAt: new Date(bucket.resetAt),
+				limit: spec.limit,
 			};
 		},
 	};

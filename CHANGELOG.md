@@ -133,6 +133,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **The window and limit stay configured at `rateLimit.login`.** Adapters resolve a spec by key prefix from their own `limits` map, so a `login:` key would otherwise have fallen through to the adapter's `defaultLimit` of 60/60s — silently *weaker* than the documented 20 / 15 min, on the one endpoint whose job is resisting password guessing. Both bundled adapters now seed `limits.login` from `rateLimit.login` (`resolveLoginLimitSpec`, new export), keeping one source of truth rather than two numbers that must agree. An operator-declared `limits.login` still wins, and `reference.conf` documents the seeding beside both blocks.
 
+  `RateLimitDecision` gains an optional `limit` — the value the adapter actually applied — so the `RateLimit-Limit` header reports what was enforced rather than what the caller configured. The two differ whenever an operator declares `limits.login` on the adapter, which deliberately overrides the seed.
+
   **A composition that wires no limiter keeps its protection.** The router builds a private in-memory limiter with the same spec and logs `login_rate_limiter_not_shared`. Leaving the route unguarded would have turned weak protection into none; the warning states the weakness instead of implying safety. `RateLimit-*` response headers are preserved, since this route emitted them before.
 
   `createMemoryRateLimiter`, `DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS`, `MemoryRateLimiterOptions` and `resolveLoginLimitSpec` are now exported from core.

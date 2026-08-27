@@ -159,7 +159,15 @@ export const createRouter = (
 		// express-rate-limit (`standardHeaders: true`). The OAuth endpoints do
 		// not, but keeping behaviour on the route being changed matters more
 		// than matching routes that are not.
-		res.setHeader("RateLimit-Limit", String(loginLimitSpec.limit));
+		//
+		// The advertised limit is the one the adapter reports having *applied*,
+		// not the one configured here. They differ whenever an operator declares
+		// `limits.login` on the adapter — which deliberately overrides the value
+		// seeded from `rateLimit.login` — and a header advertising a limit no
+		// request is measured against is worse than no header. `decision.limit`
+		// is optional, so a custom adapter that does not report one falls back
+		// to the configured value.
+		res.setHeader("RateLimit-Limit", String(decision.limit ?? loginLimitSpec.limit));
 		if (decision.remaining !== undefined) {
 			res.setHeader("RateLimit-Remaining", String(Math.max(0, decision.remaining)));
 		}

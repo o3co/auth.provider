@@ -105,11 +105,13 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 					allowed: false,
 					remaining: 0,
 					reason: `limit:${keyPrefix(key)}`,
+					limit: spec.limit,
 				};
 			}
 			return {
 				allowed: true,
 				remaining: spec.limit - count,
+				limit: spec.limit,
 			};
 		},
 	};

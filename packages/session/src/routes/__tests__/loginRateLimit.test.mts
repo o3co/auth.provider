@@ -126,6 +126,23 @@ describe("/session/login rate limiting — shared limiter (#270)", () => {
 		expect(res.headers["ratelimit-reset"]).toBeDefined();
 	});
 
+	it("advertises the limit the adapter enforced, not the one configured here", async () => {
+		// An operator who declares `limits.login` on the adapter overrides the
+		// value seeded from `rateLimit.login`. A header advertising a limit no
+		// request is measured against is worse than no header at all.
+		const limiter = scriptedLimiter(() => ({ allowed: true, remaining: 4, limit: 5 }));
+		const res = await login(makeApp({ rateLimiter: limiter }));
+		expect(res.headers["ratelimit-limit"]).toBe("5");
+	});
+
+	it("falls back to the configured limit when the adapter reports none", async () => {
+		// `RateLimitDecision.limit` is optional so pre-existing custom adapters
+		// keep compiling.
+		const limiter = scriptedLimiter(() => ({ allowed: true, remaining: 4 }));
+		const res = await login(makeApp({ rateLimiter: limiter }));
+		expect(res.headers["ratelimit-limit"]).toBe("20");
+	});
+
 	it("sets Retry-After on a denial that carries a reset time", async () => {
 		const resetAt = new Date(Date.now() + 30_000);
 		const limiter = scriptedLimiter(() => ({ allowed: false, resetAt }));
