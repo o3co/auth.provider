@@ -14,12 +14,7 @@
  * limitations under the License.
  */
 
-import {
-	type ClientRepository,
-	createSymmetricKeyStore,
-	defineModule,
-	type GrantHandler,
-} from "@o3co/auth-provider-core";
+import { createSymmetricKeyStore, defineModule, type GrantHandler } from "@o3co/auth-provider-core";
 import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { oauthSessionModule } from "#/oauthSession.mjs";
@@ -27,19 +22,6 @@ import { oauthSessionModule } from "#/oauthSession.mjs";
 // ---------------------------------------------------------------------------
 // Shared test-only stubs
 // ---------------------------------------------------------------------------
-
-const fakeClientRepository: ClientRepository = {
-	findById: async () => null,
-	authenticate: async () => null,
-};
-
-/** Inline module that satisfies `requires: ["clientRepository"]`. */
-const clientRepositoryModule = defineModule({
-	name: "test:client-repository",
-	provides: {
-		clientRepository: () => fakeClientRepository,
-	},
-});
 
 /** Inline module that satisfies `requires: ["keyStore"]`. */
 const keyStoreModule = defineModule({
@@ -67,7 +49,7 @@ describe("oauthSessionModule", () => {
 			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: true } } },
 		};
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			modules: [oauthSessionModule({ config }), keyStoreModule],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(true);
@@ -81,7 +63,7 @@ describe("oauthSessionModule", () => {
 			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: false } } },
 		};
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			modules: [oauthSessionModule({ config }), keyStoreModule],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(false);
@@ -106,7 +88,7 @@ describe("oauthSessionModule", () => {
 			},
 		};
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			modules: [oauthSessionModule({ config }), keyStoreModule],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(false);
@@ -131,7 +113,7 @@ describe("oauthSessionModule", () => {
 			},
 		};
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			modules: [oauthSessionModule({ config }), keyStoreModule],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		expect(handle.inspect.grants.has("session")).toBe(true);
@@ -141,7 +123,7 @@ describe("oauthSessionModule", () => {
 	it("registered handler returns 401 for unauthenticated session", async () => {
 		const config = makeValidAppConfig();
 		const handle = await createTestApp({
-			modules: [oauthSessionModule({ config }), clientRepositoryModule, keyStoreModule],
+			modules: [oauthSessionModule({ config }), keyStoreModule],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
 		// TestInspect.grants is ReadonlyMap<string, unknown> because contributes-map.mts

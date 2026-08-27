@@ -51,7 +51,7 @@ function oauthModule(params: {
 
 ```typescript
 function oauthSessionModule(params: {
-  clientRepository: ClientRepository;
+  config: AppConfig;
 }): Module;
 ```
 

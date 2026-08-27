@@ -41,7 +41,9 @@ function isExplicitlyEnabled(value: unknown): boolean {
  * the boot planner registers automatically.
  *
  * Caller surface: `oauthSessionModule({ clientRepository })` → `oauthSessionModule({ config })`.
- * `clientRepository` and `keyStore` now flow through `requires` from the DI graph.
+ * `keyStore` flows through `requires` from the DI graph. `clientRepository` is
+ * no longer required at all: the grant authorizes against
+ * `ctx.authenticatedClient` (#295) and #331 dropped the unused dependency.
  *
  * Per the secure-default opt-in discipline (matches `oauthAuthorizationModule`):
  * the session grant registers only when `config.oauth.grants.session.enabled`
@@ -71,7 +73,7 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 		name: "oauth-session",
 		// `config` is required because createSessionGrant uses config.oauth.accessToken.expiresIn
 		// when building the token response for authenticated sessions.
-		requires: ["config", "clientRepository", "keyStore"],
+		requires: ["config", "keyStore"],
 		contributes: {
 			grants: {
 				session: (deps) => createSessionGrant(deps),
