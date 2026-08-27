@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`revokeAllForSubject(sub)` — kill every session and access token this server issued for one principal (`@o3co/auth-provider-core`, `@o3co/auth-provider-session`).** Password reset is a Store-owned flow: the Store issues the reset token, delivers it, and writes the new credential. What it cannot do from outside is invalidate what was already minted against the old one, and a "successful" reset that leaves old sessions and refresh families alive is not a reset (#296).
+
+  Two of the three things the issue asks for **could not be expressed** with the existing interfaces, which is why this adds stores rather than a function. `UserSessionStore` is `create` / `get(sid)` / `delete(sid)` — there is no subject→sessions index, so there was nothing to enumerate. `AccessTokenDenylist` is `add(jti)` / `has(jti)` — the jtis a subject currently holds are not enumerable anywhere, so "revoke their outstanding access tokens" had no expression at all.
+
+  **`SubjectSessionIndex`** answers the inverse of every other index here: not "what does this session own?" but "what sessions does this subject have?". It deliberately does **not** reuse `createMemorySidSortedSet`, despite the identical shape — that primitive keeps one expiry per *key*, correct for the sid-keyed indexes where every member shares a session's expiry, and wrong for a subject whose sessions expire at different times. Expiry is tracked per member, so a longer-lived session cannot keep an expired one listed and a shorter-lived one cannot evict a live one.
+
+  **`SubjectRevocation`** records a per-subject not-before watermark instead of naming tokens. `verifyJwt` rejects a token whose `iat` is at or before it. The comparison is **inclusive on purpose**: `iat` is second-truncated and a multi-replica deployment has independent clocks, so a token minted a few hundred milliseconds *before* the reset routinely lands in the watermark's second. Killing one minted just after costs a client one retry; letting one from just before survive is the vulnerability. It fails closed on a store error, matching the jti denylist.
+
+  **The watermark is written before any session is cascaded**, which is the difference between working and not. A refresh rotation or a concurrent login on another replica can mint a token *during* the cascade loop — its session was never in the enumerated list, and with the watermark written afterwards its `iat` would predate a line that did not yet exist. It is also the better partial-failure order: tokens dead with some sessions perhaps alive beats the reverse.
+
+  **`revokeAllForSubject` returns a structured result, never a bare success.** `sessionsRevoked`, `sessionsFailed`, `tokensRevoked`, and `unavailable` naming any capability that was not wired. The caller invokes this immediately after writing a new password, so a success while nothing was revoked would be the worst thing it could return. A failed cascade leaves its entry in the index — that entry is what a retry enumerates, and dropping it would strand a live session.
+
+  Both indexes are written on local and federated login, best-effort and after the session exists: a failure there must not deny a legitimate login, and it is logged rather than swallowed.
+
+  New exports: `SubjectSessionIndex`, `SubjectRevocation`, their factory aliases, `createInMemorySubjectSessionIndex`, `createMemorySubjectRevocation`, `revokeAllForSubject` and its option/result types. `memorySessionStoresModule` provides both new slots.
+
+  **Only in-memory adapters ship here.** A deployment on `redisSessionStoresModule` gets neither slot and `revokeAllForSubject` reports both as `unavailable` — visible by design, but it means multi-replica deployments have no subject-level revocation until **#321** lands the Redis adapters. They need a new client interface: the existing `SessionSidSortedSetClient` has no score-range operations, and per-member expiry needs them.
+
+  **Does not fix #276.** The local logout route still does not run the cascade for its own session; `cascadeLogout` itself is complete and this builds on it.
+
 - **`email_verified` is a declared part of the `User` contract, and can gate token issuance (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** Email verification is a Store-owned lifecycle concern — issuing the verification token, delivering it, and flipping the state all belong to the Store. auth.provider's job is only to read the result and bind it into what it issues (#297).
 
   Most of that already worked: `claimFilter` mapped `emailVerified` → `email_verified` under the `email` scope, and both the id_token and `/userinfo` went through it. What was missing is that **nothing pinned it end to end** — the chain from a `User` the Store returned to a signed id_token rested on unit coverage of one function in the middle. It is now covered directly, including that `false` and absent stay distinguishable (a relying party gating on the claim must tell "the Store says no" from "the Store does not model it") and that a non-boolean is dropped rather than forwarded, so a truthy string cannot become an affirmative claim in a signed token.

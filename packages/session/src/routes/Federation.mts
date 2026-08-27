@@ -21,6 +21,7 @@ import {
 	type FederationTokenStore,
 	type Logger,
 	type SessionFederationIndex,
+	type SubjectSessionIndex,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -67,6 +68,7 @@ export const createRouter = (
 		providerCallbackUrls,
 		userRepository,
 		userSessionStore,
+		subjectSessionIndex,
 		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
@@ -78,6 +80,12 @@ export const createRouter = (
 		providerCallbackUrls: ReadonlyMap<string, string>;
 		userRepository: UserRepository;
 		userSessionStore: UserSessionStore;
+		/**
+		 * Subject-keyed index of live sessions (#296). Optional: a deployment
+		 * that has not wired it simply has no subject-level revocation, which
+		 * `revokeAllForSubject` reports rather than hiding.
+		 */
+		subjectSessionIndex?: SubjectSessionIndex;
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
@@ -346,6 +354,18 @@ export const createRouter = (
 					error: "temporarily_unavailable",
 					error_description: "Session store unavailable",
 				});
+			}
+
+			// #296: record the session against its subject so a later credential
+			// change can find it. Best-effort and after the session exists — a
+			// failure here must not deny a legitimate federated login, and the
+			// cost is that this one session is missed by `revokeAllForSubject`.
+			if (subjectSessionIndex) {
+				try {
+					await subjectSessionIndex.addSid(user.id, sid, expiresAt);
+				} catch (err) {
+					log.error({ err, sub: user.id }, "subject_session_index_write_failed");
+				}
 			}
 
 			// A4 §5.2: federation linkage recorded as a sibling-store operation.

@@ -18,6 +18,8 @@ import { defineModule } from "../../modules/manifest/define-module.mjs";
 import { createInMemorySessionFamilyIndex } from "../memory/sessionFamilyIndex.mjs";
 import { createInMemorySessionFederationIndex } from "../memory/sessionFederationIndex.mjs";
 import { createInMemorySessionRPRegistry } from "../memory/sessionRPRegistry.mjs";
+import { createMemorySubjectRevocation } from "../memory/subjectRevocation.mjs";
+import { createInMemorySubjectSessionIndex } from "../memory/subjectSessionIndex.mjs";
 import { createInMemoryUserSessionStore } from "../memory/userSessionStore.mjs";
 
 /**
@@ -35,5 +37,10 @@ export const memorySessionStoresModule = defineModule({
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
 		sessionFamilyIndex: () => createInMemorySessionFamilyIndex(),
 		sessionFederationIndex: () => createInMemorySessionFederationIndex(),
+		// #296: subject-keyed index + access-token watermark. Bundled here with
+		// the other memory session stores so a single-node deployment gets
+		// subject-level revocation by installing the module it already installs.
+		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
+		subjectRevocation: () => createMemorySubjectRevocation(),
 	} as never,
 });
