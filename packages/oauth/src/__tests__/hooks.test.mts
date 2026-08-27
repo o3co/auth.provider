@@ -451,7 +451,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(res.status).toBe(400);
 		});
 
-		it("login.success audit event carries subject from session.user.id (I-2)", async () => {
+		it("authorize.granted audit event carries subject from session.user.id (I-2)", async () => {
 			const { sink, events } = createSpyAuditSink();
 			const app = express();
 			app.set("trust proxy", 1);
@@ -504,7 +504,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				redirect_uri: "https://example.test/cb",
 			});
 
-			const ev = events.find((e) => e.type === "login.success");
+			const ev = events.find((e) => e.type === "authorize.granted");
 			expect(ev).toBeDefined();
 			expect(ev?.subject).toBe("user-42");
 		});

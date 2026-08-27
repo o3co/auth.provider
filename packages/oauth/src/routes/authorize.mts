@@ -89,15 +89,16 @@ const redirectError = (
 };
 
 /**
- * Emits the `token.issued.failure` audit event every rejected authorization
- * request shares — the same shape the token endpoint emits, so SIEM rules
- * match both surfaces with one pattern. The event name is intentionally
- * unchanged (#329 tracks renaming authorize-side failures separately).
+ * Emits the `authorize.rejected` audit event every rejected authorization
+ * request shares — the payload shape (clientId / ip / userAgent /
+ * `details.reason`) matches the token endpoint's `token.issued.failure`, but
+ * the name is this endpoint's own: /authorize mints codes, not tokens, and
+ * its success event is `authorize.granted` (#329).
  */
 const auditFailure = (ctx: AuthorizeContext, details: Record<string, unknown>): Promise<void> =>
 	emitAuditEvent(ctx.opts.auditSink, {
 		timestamp: new Date(),
-		type: "token.issued.failure",
+		type: "authorize.rejected",
 		clientId: ctx.clientId,
 		ip: ctx.req.ip,
 		userAgent: ctx.req.get("user-agent"),
@@ -610,7 +611,7 @@ const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Re
 
 	await emitAuditEvent(ctx.opts.auditSink, {
 		timestamp: new Date(),
-		type: "login.success",
+		type: "authorize.granted",
 		subject: typeof ctx.req.session.user?.id === "string" ? ctx.req.session.user.id : undefined,
 		clientId: ctx.clientId,
 		ip: ctx.req.ip,
