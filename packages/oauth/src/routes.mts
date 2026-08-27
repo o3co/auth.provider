@@ -952,13 +952,15 @@ export const createOAuthRouter = async (
 					requestedScopes.length > 0
 						? requestedScopes.filter((s) => allowedScopes.includes(s))
 						: allowedScopes;
-				const configuredIssuer = config.oauth.jwt.issuer;
-				const isActingAsOidcProvider =
-					typeof configuredIssuer === "string" && configuredIssuer.length > 0;
+				// #328: the openid-scope gate used to also test issuer presence
+				// (`isActingAsOidcProvider`), suggesting issuer-less operation was a
+				// supported mode. It is not: router construction throws when
+				// `oauth.jwt.issuer` is missing or malformed (#266/#307, top of this
+				// factory), so by the time a request reaches this handler the server
+				// is always acting as an OIDC OP and `oidcMode` alone decides.
 				const oidcMode =
 					(config.oauth as { oidcMode?: "oidc-required" | "dual" }).oidcMode ?? "oidc-required";
 				if (
-					isActingAsOidcProvider &&
 					oidcMode === "oidc-required" &&
 					// Two failure modes both undermine "OIDC required":
 					//   (a) the request itself omits openid;
