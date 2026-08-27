@@ -31,7 +31,6 @@
 import { z } from "zod";
 import type { AppConfig } from "../config/application.schema.mjs";
 import { composeConfigSchema } from "../config/application.schema.mjs";
-import type { Logger } from "../logging/Logger.mjs";
 import type { ComponentKey, ComponentMap } from "../modules/manifest/component-map.mjs";
 import type { Module } from "../modules/manifest/module-spec.mjs";
 import type { RouteContribution } from "../modules/manifest/route-contribution.mjs";
@@ -1468,9 +1467,7 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// a composition root that configured one has already put it there, and the
 	// warning is worthless if it goes somewhere the operator is not reading.
 	{
-		const bootLogger = (bootstrapComponents as Record<string, unknown>).logger as
-			| Logger
-			| undefined;
+		const bootLogger = bootstrapComponents.logger;
 		checkReplicaSafety({
 			modules: normalisedModules,
 			config: parsedConfig,

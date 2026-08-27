@@ -130,6 +130,30 @@ describe("checkReplicaSafety — three states", () => {
 		expect(fields.modules).toHaveLength(2);
 	});
 
+	it("does not treat an inherited Object key as a replica-unsafe module", () => {
+		// `name in reasons` walks the prototype chain, so a module named
+		// "toString" or "constructor" would match and then carry a function
+		// where the reason text should be.
+		const { logger: log, warn } = logger();
+		checkReplicaSafety({
+			modules: modules("toString", "constructor", "valueOf", "hasOwnProperty"),
+			config: {},
+			logger: log,
+		});
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it("does not fail boot in multi mode on an inherited Object key", () => {
+		const { logger: log } = logger();
+		expect(() =>
+			checkReplicaSafety({
+				modules: modules("toString"),
+				config: { deployment: { mode: "multi" } },
+				logger: log,
+			}),
+		).not.toThrow();
+	});
+
 	it("does not require a logger", () => {
 		expect(() =>
 			checkReplicaSafety({ modules: modules("memorySessionStores"), config: {} }),

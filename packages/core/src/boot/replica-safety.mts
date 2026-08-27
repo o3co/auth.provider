@@ -92,9 +92,12 @@ export interface CheckReplicaSafetyInput {
  * mode is for operators who have declared their shape.
  */
 export function checkReplicaSafety({ modules, config, logger }: CheckReplicaSafetyInput): void {
+	// `Object.hasOwn`, not `in`: `in` walks the prototype chain, so a module
+	// named "toString" or "constructor" would match and then carry a function
+	// where its reason text should be.
 	const offenders = modules
 		.map((m) => m.name)
-		.filter((name) => name in REPLICA_UNSAFE_MODULE_REASONS);
+		.filter((name) => Object.hasOwn(REPLICA_UNSAFE_MODULE_REASONS, name));
 	if (offenders.length === 0) return;
 
 	const mode = (config as { deployment?: { mode?: unknown } } | undefined)?.deployment?.mode;
