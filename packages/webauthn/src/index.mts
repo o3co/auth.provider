@@ -22,3 +22,7 @@ export { webauthnModule } from "./module.mjs";
 // WebAuthnSubject + Express Request augmentation — consumers importing this
 // package gain the augmentation automatically via declaration merging.
 export type { WebAuthnSubject } from "./request.mjs";
+// #281 — the rate-limit key for POST /oauth/webauthn/authentication/options.
+// Operator-facing: it is what a `limits` entry on a RateLimiter adapter is
+// keyed by when overriding the per-endpoint spec.
+export { WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG } from "./routes/authenticationOptions.mjs";

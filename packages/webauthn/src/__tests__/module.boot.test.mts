@@ -49,7 +49,7 @@ import {
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -61,13 +61,19 @@ import { webauthnModule } from "../module.mjs";
 // Shared boot components
 // ---------------------------------------------------------------------------
 
+// `makeValidAppConfig()`, not `makeValidCoreConfig()`: the `config` component
+// slot is typed `AppConfig`, and since #281 the webauthn route factory reads
+// `config.rateLimit.failMode` — the same key the OAuth endpoints and
+// `/session/login` read for their limiter-outage policy. The core-only slice
+// has no `rateLimit` section, so booting on it never exercised the contract
+// the module actually declares.
 const coreConfig = {
-	...makeValidCoreConfig(),
+	...makeValidAppConfig(),
 	oauth: {
-		...makeValidCoreConfig().oauth,
+		...makeValidAppConfig().oauth,
 		// CP-20 invariant: a non-empty issuer is required when grantPolicy is wired.
-		// makeValidCoreConfig() omits it; we set it here for the H-2-mandated policy wiring.
-		jwt: { ...makeValidCoreConfig().oauth.jwt, issuer: "https://test.example" },
+		// makeValidAppConfig() defaults it; we pin it here for the H-2-mandated policy wiring.
+		jwt: { ...makeValidAppConfig().oauth.jwt, issuer: "https://test.example" },
 	},
 };
 
@@ -92,6 +98,11 @@ const stubWebAuthnConfig: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
+	// #281 — enumeration-resistant default + the endpoint's own throttle. A
+	// limit high enough that the body-parser probes below are never denied;
+	// the throttle itself is covered by module.rateLimit.test.mts.
+	allowCredentialsForKnownUser: false,
+	rateLimit: { authenticationOptions: { limit: 1000, windowSeconds: 60 } },
 };
 
 /** Bootstrap module: satisfies the `webauthnConfig` DI slot. */

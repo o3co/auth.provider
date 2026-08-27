@@ -34,6 +34,10 @@ const webauthnBootstrap = defineModule({
             attestationPreference: "none",   // S11 recommended for dogfood
             userVerification: "preferred",
             challengeTtlMs: 120_000,         // mobile-network safe (spec §2.4.1)
+            allowCredentialsForKnownUser: false,  // enumeration-resistant (#281)
+            rateLimit: {
+                authenticationOptions: { limit: 30, windowSeconds: 60 },
+            },
         }),
     },
 });
@@ -52,7 +56,7 @@ const app = await createApp({
 });
 ```
 
-The library ships safe defaults for `attestationPreference`, `userVerification`, and `challengeTtlMs` in `config/reference.conf` (resolved via composition-root `withFallback` chain per PR #171 discipline). Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR `packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md`).
+The library ships safe defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in `config/reference.conf` (resolved via composition-root `withFallback` chain per PR #171 discipline). Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR `packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md`).
 
 ## First-credential bootstrap (dogfood)
 
@@ -64,7 +68,7 @@ For consumer-driven account flows (signup forms, magic-link, etc.) the consumer 
 
 - `POST /oauth/webauthn/registration/options` — generates `PublicKeyCredentialCreationOptions`. Requires an authenticated subject (upstream session / bearer middleware sets `req.webauthnSubject`).
 - `POST /oauth/webauthn/registration/verify` — verifies the attestation response and persists a `WebAuthnCredential`. Single-use challenge via `ChallengeCeremony`.
-- `POST /oauth/webauthn/authentication/options` — generates `PublicKeyCredentialRequestOptions`. Unauthenticated; supports both allow-list (`{userId}` body) and discoverable (empty body) flows.
+- `POST /oauth/webauthn/authentication/options` — generates `PublicKeyCredentialRequestOptions`. Unauthenticated, rate-limited, and discoverable-credential only: the response never carries an `allowCredentials` list derived from the request. The allow-list flow is available behind `allowCredentialsForKnownUser` — see [SECURITY — `authentication/options` enumeration](#security--authenticationoptions-enumeration).
 - Grant: `urn:o3co:oauth:grant-type:webauthn` — exchanges a verified assertion for an access token. No refresh token in Wave 1 (deferred to a future minor).
 
 ## SECURITY — `userId` opacity
@@ -78,7 +82,7 @@ await store.registerCredential({ userId: opaqueUserId, /* ... */ });
 
 The bootstrap module's `webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
 
-The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userId` (WebAuthn §5.4.3 user-handle constraint). Requests with a userId outside this range fail with 500 `server_error` — this is a consumer-misconfiguration check, not a runtime user error.
+The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userId` (WebAuthn §5.4.3 user-handle constraint). Requests with a userId outside this range fail with 500 `server_error` — this is a consumer-misconfiguration check, not a runtime user error. `authentication/options` enforces the same bound on the `userId` a *caller* may supply, but as `400 invalid_request`: there the value is untrusted request data, not your configuration.
 
 ## SECURITY — scope authorization
 
@@ -96,9 +100,25 @@ Webauthn access tokens are revocable via `POST /oauth/revoke` ONLY when the gran
 
 The registration endpoints accept any authenticated subject. Deployments SHOULD enforce step-up reauthentication (NIST SP 800-63B): require recent `auth_time` OR MFA OR fresh federation login before allowing registration. The bare endpoint does not enforce this — wire your `grantPolicy` hook or an upstream Express middleware to gate registration to high-assurance sessions.
 
+## SECURITY — `authentication/options` enumeration
+
+`POST /oauth/webauthn/authentication/options` is unauthenticated by design — the passkey assertion *is* the authentication event. That makes its response body a public oracle, so the endpoint answers the same thing to everyone.
+
+**The response is always the discoverable-credential shape.** No `allowCredentials` member is derived from a body-supplied `userId`, the credential store is not consulted, and the body, its key set, and the work behind it are identical for a registered account, an unregistered one, and a request naming no account at all. Before v0.10 a supplied `userId` produced a populated `allowCredentials` for a real account and an empty/absent one otherwise — an unauthenticated "does this account exist, and how many passkeys does it have?" query for anyone who asked ([#281](https://github.com/o3co/auth.provider/issues/281)).
+
+**`allowCredentialsForKnownUser: true`** restores the old behaviour. Set it only for a deployment whose authenticators cannot do discoverable credentials — non-resident keys, typically an older security-key fleet — where the client genuinely needs to be told which credential ids to offer. It reinstates the enumeration oracle for that deployment; the `200`-for-everyone / no-error-shape mitigation is all that remains, and it is not enough on its own. Pair it with a tight `rateLimit.authenticationOptions` and, where you can, put an authenticated identifier-first step in front of the endpoint instead.
+
+**`userId` is bounded before it reaches any store.** The optional body field must be an opaque handle of 1–64 UTF-8 bytes with no control characters (WebAuthn §5.4.3, the same bound the registration endpoint enforces on the session-derived handle). Anything else is `400 invalid_request` with a single fixed `error_description` that does not vary with what the server knows about the value.
+
 ## SECURITY — rate-limiting `authentication/options`
 
-`POST /oauth/webauthn/authentication/options` is unauthenticated and accepts an optional `userId` body field; the response shape leaks whether a user has registered credentials when `userId` is supplied. Wire the `RateLimiter` ComponentMap slot to throttle by source IP and by supplied `userId` (S10 / S15 wiring established by the OAuth revoke endpoint). Deployments needing full enumeration resistance should omit `userId` and rely on the discoverable-credentials flow exclusively.
+The endpoint is rate-limited by the module itself; it is not something a composition root has to remember to add. `webauthnModule` mounts core's shared `createRateLimitGuard` in front of the route:
+
+- **Keyed** `webauthn-authentication-options:ip:<ip>` — exported as `WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG`, which is also the `limits` key an adapter resolves a per-endpoint spec by.
+- **Spec** from `webauthnConfig.rateLimit.authenticationOptions` (`limit` / `windowSeconds`; reference default 30 per 60 s). It also backs the RFC `RateLimit-*` headers when the adapter reports no applied limit of its own.
+- **Outage policy** from `config.rateLimit.failMode`, the same product-wide key `/oauth/token` and `/session/login` read — a limiter outage must not shed load on one surface and wave everything through on another. An outage logs `rate_limiter_failed_open` / `rate_limiter_failed_closed` and emits a `rate_limit.unavailable` audit event when an `auditSink` is wired.
+
+Wire the `rateLimiter` ComponentMap slot (the Redis adapter in a scaled deployment) so the buckets are shared across replicas. **Without it the route is still guarded**, by a per-process memory limiter, and boot warns `webauthn_authentication_options_rate_limiter_not_shared` naming the spec in force — a per-process bucket is weak protection, not absent protection, and the warning says which one you have.
 
 ## SECURITY — `attestationPreference` default
 

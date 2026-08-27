@@ -38,6 +38,14 @@
  *                                       baseline (per spec §2.4.1 / FCoT CA4).
  *   userVerification = "preferred"   — balance between broad platform coverage
  *                                       and security posture.
+ *
+ * #281 baselines (authentication/options hardening):
+ *   allowCredentialsForKnownUser = false     — the endpoint never answers
+ *                                       "does this account exist?".
+ *   rateLimit.authenticationOptions = 30/60s — an unauthenticated endpoint
+ *                                       that writes a challenge per request
+ *                                       is throttled by default, not only
+ *                                       when an operator remembers to.
  */
 // biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below; biome does not track cross-module-declaration references.
 import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
@@ -124,6 +132,51 @@ export const webauthnConfigSchema = z.object({
 	 * Reference default (S11): "preferred". Supplied via reference.conf.
 	 */
 	userVerification: z.enum(["required", "preferred", "discouraged"]),
+	/**
+	 * Opt back in to deriving `allowCredentials` on
+	 * `POST /oauth/webauthn/authentication/options` from the `userId` the
+	 * request body supplies. Reference default: `false` (#281).
+	 *
+	 * With `false` the endpoint always returns the discoverable-credential
+	 * shape: no `allowCredentials` member, no credential-store lookup, and a
+	 * response that is identical for a registered account, an unregistered
+	 * one, and a request that named no account at all. That uniformity is the
+	 * whole point — the previous behaviour answered an unauthenticated
+	 * "does this account exist, and how many passkeys does it have?" query
+	 * for anyone who asked.
+	 *
+	 * Set `true` ONLY for a deployment whose authenticators cannot do
+	 * discoverable credentials (non-resident keys — typically older
+	 * security-key fleets), where the client must be told which credential
+	 * ids to offer. It re-enables the enumeration oracle for that deployment,
+	 * knowingly: pair it with a hard rate limit
+	 * (`rateLimit.authenticationOptions`) and prefer gating the endpoint
+	 * behind an authenticated identifier-first step where you can.
+	 */
+	allowCredentialsForKnownUser: z.boolean(),
+	/**
+	 * Rate limits for the module's own endpoints.
+	 *
+	 * Nested (rather than a flat `authenticationOptionsRateLimit`) so the
+	 * registration endpoints can gain their own entries without a second
+	 * naming convention.
+	 */
+	rateLimit: z.object({
+		/**
+		 * `POST /oauth/webauthn/authentication/options` — unauthenticated by
+		 * design, and it writes a challenge per request. `limit` requests per
+		 * `windowSeconds` per source IP; reference defaults 30 / 60 s.
+		 *
+		 * `z.coerce` because HOCON env substitution
+		 * (`${?WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT}`) yields strings —
+		 * matching `rateLimitSpecSchema` in core's application schema, which
+		 * this shape feeds as a `RateLimitSpec`.
+		 */
+		authenticationOptions: z.object({
+			limit: z.coerce.number().int().positive(),
+			windowSeconds: z.coerce.number().int().positive(),
+		}),
+	}),
 });
 
 export type WebAuthnConfig = z.infer<typeof webauthnConfigSchema>;
