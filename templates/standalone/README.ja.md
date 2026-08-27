@@ -138,9 +138,12 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `CLIENT_USER_TYPE` | `http` | ユーザーリポジトリのバックエンド: `http` |
-| `CLIENT_USER_AUTHENTICATE_URL` | — | パスワード認証用のユーザー認証 URL |
-| `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL |
-| `CLIENT_USER_TIMEOUT` | `5000` | HTTP リクエストタイムアウト（ミリ秒） |
+| `CLIENT_USER_AUTHENTICATE_URL` | — | パスワード認証用のユーザー認証 URL。**https 必須**（下記参照） |
+| `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL。**https 必須**（下記参照） |
+| `CLIENT_USER_TIMEOUT` | `5000` | HTTP リクエストタイムアウト（ミリ秒）。`2147483647` 以下の正の整数 |
+| `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | 上流レスポンスボディの受け入れ上限（バイト） |
+
+ユーザー認証 URL は 2 つとも上流ストアへ**平文のユーザー資格情報**を運ぶため、いずれも絶対 `https://` URL でなければならない。`http://` は loopback ホスト（`localhost`、`127.0.0.0/8` 内のアドレス、`[::1]`）に限って許可され、ローカル開発で証明書を用意せずに済むようにしている。プライベートレンジのアドレス（`http://10.0.0.5/…`）やコンテナネットワークのサービス名（`http://user-service/…`）には `https://` が必要 — これらはデプロイが端から端まで制御していないネットワークを越えるため。URL・タイムアウト・レスポンス上限のいずれかが不正なら、最初のログイン時ではなく起動時に失敗する。
 
 ### コードリポジトリ
 
