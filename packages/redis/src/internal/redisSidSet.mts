@@ -15,6 +15,7 @@
  */
 
 import type { FederationTokenStoreClient } from "../clients.mjs";
+import { assertPositiveInteger } from "./validate.mjs";
 
 /**
  * The slice of `FederationTokenStoreClient` this helper consumes. Named after
@@ -33,6 +34,9 @@ export interface RedisSidSetOptions {
 	 * Members requested per `SSCAN` round-trip. A hint to Redis, not a hard
 	 * limit on a page's size. Default 100 — the batch size the federation
 	 * token store already used for its delete batches.
+	 *
+	 * Must be a positive integer — Redis refuses a non-positive `COUNT`.
+	 * Validated at construction rather than discovered mid-logout.
 	 */
 	readonly scanCount?: number;
 }
@@ -80,6 +84,7 @@ const DEFAULT_SCAN_COUNT = 100;
 export function createRedisSidSet(opts: RedisSidSetOptions): RedisSidSet {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
 	const scanCount = opts.scanCount ?? DEFAULT_SCAN_COUNT;
+	assertPositiveInteger(scanCount, "createRedisSidSet: scanCount");
 	return {
 		async add(sid, member, ttlMs) {
 			await opts.client.sAddWithTtl(k(sid), member, ttlMs);

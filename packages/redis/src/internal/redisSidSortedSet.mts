@@ -15,11 +15,17 @@
  */
 
 import type { SessionSidSortedSetClient } from "../clients.mjs";
+import { assertPositiveInteger } from "./validate.mjs";
 
 export interface RedisSidSortedSetOptions {
 	readonly client: SessionSidSortedSetClient;
 	readonly keyPrefix: string;
-	/** Members read per `ZRANGE` round-trip in `list`. Default 100. */
+	/**
+	 * Members read per `ZRANGE` round-trip in `list`. Default 100.
+	 *
+	 * Must be a positive integer — this is the loop step, so a value that does
+	 * not advance the cursor hangs `list()`. Validated at construction.
+	 */
 	readonly pageSize?: number;
 }
 
@@ -115,6 +121,7 @@ let _insertionCounter = Date.now();
 export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSidSortedSet {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
 	const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
+	assertPositiveInteger(pageSize, "createRedisSidSortedSet: pageSize");
 	return {
 		async add(sid, member, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();

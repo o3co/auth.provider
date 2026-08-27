@@ -17,8 +17,9 @@
 import Redis from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { SessionRPRegistryClient, SessionRPRegistryMultiClient } from "../src/clients.mjs";
+import type { SessionRPRegistryClient } from "../src/clients.mjs";
 import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
+import { makeIoredisClients } from "../src/ioredis.mjs";
 
 let container: StartedTestContainer;
 let raw: Redis;
@@ -30,9 +31,10 @@ beforeAll(async () => {
 		.withStartupTimeout(60_000)
 		.start();
 	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-	// In production the wrapper adapter normalises ioredis to SessionRPRegistryClient.
-	// For these tests we use a hand-rolled minimal wrapper.
-	client = makeWrapper(raw);
+	// The shipped wrapper, not a hand-rolled one: its `exec()` is where the
+	// MULTI/EXEC per-command error check lives, and a local copy would let the
+	// two drift apart exactly where that matters (Copilot review on PR #352).
+	client = makeIoredisClients(raw).sessionRPRegistryClient;
 }, 90_000);
 
 afterAll(async () => {
@@ -146,6 +148,18 @@ describe("createRedisSidHash", () => {
 		expect(out).toHaveLength(1);
 	});
 
+	// Copilot review on PR #352. `setField` awaited `pipeline.exec()` and threw
+	// the reply away; ioredis reports a failed queued command inside that reply
+	// rather than rejecting, so an HSET or PEXPIREAT that Redis refused was
+	// reported to the caller as a successful registration.
+	it("setField surfaces a queued command's failure instead of reporting success", async () => {
+		const h = createRedisSidHash({ client, keyPrefix: prefix("wrongtype") });
+		await raw.set(`${prefix("wrongtype")}sid-1`, "not-a-hash");
+		await expect(h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), FUTURE())).rejects.toThrow(
+			/WRONGTYPE/,
+		);
+	});
+
 	// #291: `listValues` walks HSCAN cursors instead of issuing one HVALS.
 	// 500 fields is well past `hash-max-listpack-entries` (128 by default), so
 	// Redis stores this as a real hashtable and the read genuinely spans
@@ -163,48 +177,3 @@ describe("createRedisSidHash", () => {
 		expect(seen.size).toBe(500);
 	});
 });
-
-function makeWrapper(io: Redis): SessionRPRegistryClient {
-	const buildMulti = (): SessionRPRegistryMultiClient => {
-		const p = io.multi();
-		const m: SessionRPRegistryMultiClient = {
-			hSet: (k, f, v) => {
-				p.hset(k, f, v);
-				return m;
-			},
-			pExpireAt: (k, ms) => {
-				p.pexpireat(k, ms);
-				return m;
-			},
-			pExpireGT: (k, ms) => {
-				p.pexpireat(k, ms, "NX");
-				p.pexpireat(k, ms, "GT");
-				return m;
-			},
-			exec: async () => p.exec(),
-		};
-		return m;
-	};
-
-	return {
-		unlink: (k) => io.unlink(k),
-		hSet: (k, f, v) => io.hset(k, f, v) as Promise<number>,
-		hScanIterator: (key, opts) =>
-			(async function* () {
-				const stream = io.hscanStream(key, { count: opts?.COUNT });
-				for await (const flat of stream) {
-					const pairs = flat as string[];
-					for (let i = 0; i + 1 < pairs.length; i += 2) {
-						yield [pairs[i] as string, pairs[i + 1] as string] as const;
-					}
-				}
-			})(),
-		multi: () => buildMulti(),
-		pExpireAt: (k, ms) => io.pexpireat(k, ms),
-		pExpireGT: async (k, ms) => {
-			const nx = await io.pexpireat(k, ms, "NX");
-			if (nx === 1) return nx;
-			return io.pexpireat(k, ms, "GT");
-		},
-	};
-}

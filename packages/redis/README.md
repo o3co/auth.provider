@@ -98,9 +98,14 @@ The Module pattern is canonical for v0.5.0+; the AdapterFactory pattern
 remains supported for HOCON-config-driven backend selection in the
 standalone template and similar deployments.
 
-## Logout does not scan the keyspace
+## Logout keys, and the keyspace scan you still have to turn off
 
-Every store a logout touches is keyed by `sid`, so removing a session is a
+**Read this before assuming logout stopped scanning: out of the box, it has
+not.** `scanFallback` ships enabled, so every `FederationTokenStore.removeBySid`
+still performs one `SCAN` of the whole keyspace. The O(session) behaviour
+arrives when you set it to `false` — see below for when that is safe.
+
+Every store a logout touches is keyed by `sid`, so the *removal* is already a
 handful of named keys rather than a search:
 
 | Key | Type | Holds |
@@ -109,13 +114,16 @@ handful of named keys rather than a search:
 | `${keyPrefix}idx:${sid}` | **set** | the federation names attached to `${sid}` |
 | `${keyPrefix}lock:${sid}:${federationName}` | string | the advisory lock |
 
-The index (`idx:`) is what makes `FederationTokenStore.removeBySid` cost
-O(that session's federations). Before v0.10 it was a
-`SCAN MATCH ${keyPrefix}${sid}:*` over the entire database — O(keys in Redis),
-on an end-user action, on the connection every other adapter here shares
-(#291). Reads are paged (`SSCAN`, `HSCAN`, `ZRANGE` by rank) so no single
-command's reply grows with how heavily linked a session is, and removals use
-`UNLINK` so the shared connection is not blocked while Redis frees the values.
+The index (`idx:`) is what lets `removeBySid` name the keys it must delete
+instead of hunting for them, at a cost of O(that session's federations). Before
+v0.10 the only way to find them was `SCAN MATCH ${keyPrefix}${sid}:*` over the
+entire database — O(keys in Redis), on an end-user action, on the connection
+every other adapter here shares (#291).
+
+Two improvements do apply unconditionally, flag or not: reads are paged
+(`SSCAN`, `HSCAN`, `ZRANGE` by rank), so no single command's reply grows with
+how heavily linked a session is; and removals use `UNLINK`, so the shared
+connection is not blocked while Redis frees the values.
 
 ### `scanFallback` — a migration flag, not a tuning knob
 
@@ -125,20 +133,21 @@ tokens** in Redis until the store TTL expired them. So `scanFallback` (option
 on the builder, `redisFederationTokenStore.scanFallback` in the module config)
 keeps the old pattern scan running after the index-driven removal.
 
-- **Default `true`.** An upgrade that changes no configuration must not
-  silently orphan tokens.
-- **What it costs while on:** one keyspace scan per `removeBySid` — the
+- **Default `true`,** because an upgrade that changes no configuration must not
+  silently orphan tokens. It is the safe default, not the fast one.
+- **What it costs while on:** one keyspace scan per `removeBySid` — exactly the
   O(keyspace) work #291 is about. The index-driven removal runs first
-  regardless, so the deletes are always bounded; the scan is a safety net, not
-  the mechanism.
+  regardless, so the *deletes* are always bounded and the paging and `UNLINK`
+  improvements are always in effect; but the scan is still there, so a
+  deployment on defaults has **not** yet got the headline fix.
 - **When to set it to `false`:** once no session predating the upgrade can
   still exist — that is, once `ttl` (default 24 h) has elapsed since the last
   replica running the previous release stopped writing. A deployment whose
-  Redis held no federation records before the upgrade can set it to `false`
-  immediately.
+  Redis held no federation records before the upgrade (a fresh database, or
+  `federationTokenStore` newly enabled) can set it to `false` immediately.
 - **When it goes away:** the flag and the scan path are removed together in the
-  release after next, and `scanIterator` leaves `FederationTokenStoreClient`
-  with them.
+  release after next — at which point the index-only behaviour becomes
+  unconditional and `scanIterator` leaves `FederationTokenStoreClient`.
 
 ## Internal helpers
 
