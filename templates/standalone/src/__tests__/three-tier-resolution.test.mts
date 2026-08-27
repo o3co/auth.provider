@@ -26,11 +26,13 @@ import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPa
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
 // Provide required secrets so AppConfigSchema parse succeeds. These are
-// test-only values — no real keys are embedded here.
+// test-only values — no real keys are embedded here. #282: SESSION_SECRET
+// carries a 256-bit entropy floor, so these clear it (the '.' characters keep
+// them outside the base64 alphabet, so the UTF-8 length is what counts).
 const testEnv = {
-	OAUTH_JWT_SECRET: "test-secret-three-tier",
+	OAUTH_JWT_SECRET: "test-secret-three-tier.at-least-32-bytes.ok",
 	OAUTH_JWT_ISSUER: "https://auth.test",
-	SESSION_SECRET: "test-session-secret-three-tier",
+	SESSION_SECRET: "test-session-secret-three-tier.at-least-32-bytes.ok",
 };
 
 function buildResolvedConfig(env: string, extraEnv: Record<string, string> = {}): AppConfig {

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { generateKeyPairSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
 	type AppConfig,
@@ -35,6 +36,14 @@ import { buildModules } from "../buildModules.mjs";
 
 const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 
+// #282: the template's shipped default is EdDSA with a published JWKS, so the
+// smoke test signs the way a real deployment of this scaffold does. Generated
+// per run — no key material is committed.
+const smokeKeyPair = generateKeyPairSync("ed25519", {
+	publicKeyEncoding: { type: "spki", format: "pem" },
+	privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+
 const config: AppConfig = {
 	http: { port: 0, trustProxy: false, readinessTimeoutMs: 1000 },
 	logging: { level: "silent" },
@@ -44,10 +53,11 @@ const config: AppConfig = {
 			signingKey: {
 				provider: "local",
 				local: {
-					algorithm: "HS256",
-					secret: "test-secret-for-smoke-test",
+					algorithm: "EdDSA",
 					kid: "v0",
-					previousSecrets: [],
+					privateKey: smokeKeyPair.privateKey,
+					publicKey: smokeKeyPair.publicKey,
+					previousKeys: [],
 				},
 			},
 		},
@@ -68,7 +78,8 @@ const config: AppConfig = {
 		code: { adapter: "memory" as const },
 	},
 	session: {
-		secret: "test-session-secret",
+		// #282: `session.secret` carries a 256-bit entropy floor.
+		secret: "test-session-secret.at-least-32-bytes.ok",
 		name: "auth.sid",
 		maxAge: 3600000,
 		secure: false,
@@ -299,6 +310,12 @@ describe("standalone smoke test", () => {
 		const res = await request(app).get(jwksPath);
 		expect(res.status).toBe(200);
 		expect(Array.isArray(res.body.keys)).toBe(true);
+		// #282: presence is no longer enough — the advertised jwks_uri must
+		// publish an actual verification key, and never the private half.
+		expect(res.body.keys).toHaveLength(1);
+		expect(res.body.keys[0].alg).toBe("EdDSA");
+		expect(res.body.keys[0].kid).toBe("v0");
+		expect(res.body.keys[0].d).toBeUndefined();
 	});
 
 	it("POST /oauth/token with unsupported grant_type returns 400", async () => {

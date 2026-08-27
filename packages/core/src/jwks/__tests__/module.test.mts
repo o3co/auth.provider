@@ -15,16 +15,35 @@
  */
 
 import express from "express";
+import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
+import { createAsymmetricKeyStore, createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
 import { jwksModule } from "../module.mjs";
 
+// #282: the JWKS route only publishes a key set for an asymmetric keystore,
+// so the module's serve-path tests run against EdDSA — the shipped default.
+const eddsaPair = await generateKeyPair("EdDSA", { extractable: true });
+const eddsaKeyStore = await createAsymmetricKeyStore({
+	algorithm: "EdDSA",
+	kid: "jwks-module-test",
+	privateKeyPem: await exportPKCS8(eddsaPair.privateKey),
+	publicKeyPem: await exportSPKI(eddsaPair.publicKey),
+});
+
 /** Inline module satisfying jwksModule's `requires: ["keyStore"]`. */
 const keyStoreModule = defineModule({
+	name: "test:key-store",
+	provides: {
+		keyStore: () => eddsaKeyStore,
+	},
+});
+
+/** Same slot, symmetric — used to pin the "publishes nothing" refusal. */
+const hs256KeyStoreModule = defineModule({
 	name: "test:key-store",
 	provides: {
 		keyStore: () => createSymmetricKeyStore("test-secret-for-jwks-module!!!!"),
@@ -65,8 +84,30 @@ describe("jwksModule", () => {
 		const res = await request(app).get("/.well-known/jwks.json");
 		expect(res.status).toBe(200);
 		expect(Array.isArray(res.body.keys)).toBe(true);
+		expect(res.body.keys).toHaveLength(1);
+		expect(res.body.keys[0].alg).toBe("EdDSA");
+		expect(res.body.keys[0].kty).toBe("OKP");
 		// Default Cache-Control so verifiers cache the key set.
 		expect(res.headers["cache-control"]).toBe("public, max-age=300");
+		await handle.dispose();
+	});
+
+	it("refuses to publish an empty key set when the keystore is symmetric (#282)", async () => {
+		// End-to-end through the module, not just the route factory: an HS256
+		// deployment that wires jwksModule used to advertise a `jwks_uri` that
+		// answered 200 with zero keys.
+		const config = makeValidAppConfig();
+		const handle = await createTestApp({
+			modules: [jwksModule, hs256KeyStoreModule],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		const app = express();
+		app.use(handle.router);
+		const res = await request(app).get("/.well-known/jwks.json");
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("jwks_not_published");
+		expect(res.body.keys).toBeUndefined();
+		expect(res.headers["cache-control"]).toBe("no-store");
 		await handle.dispose();
 	});
 

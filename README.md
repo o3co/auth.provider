@@ -13,7 +13,7 @@ OAuth 2.0 / OIDC provider. Issue JWTs via session-based login or the authorizati
 ## Features
 
 - **Modular composition** — Pick only the modules you need. Skip session, federation, or authorization code for API-only deployments.
-- **JWT algorithm selection** — HS256, RS256, ES256, EdDSA. JWKS endpoint (`/.well-known/jwks.json`) for asymmetric algorithms.
+- **JWT algorithm selection** — EdDSA (default), ES256, RS256, HS256. The default is asymmetric, so the JWKS endpoint (`/.well-known/jwks.json`) publishes a real verification key and relying parties never hold one that can also mint tokens. HS256 stays selectable and publishes no JWKS.
 - **OAuth 2.0 compliance** — Authorization code flow with PKCE (RFC 7636), token introspection (RFC 7662), refresh tokens
 - **Session authentication** — Local username/password login + OAuth federation (Google, GitHub, and custom providers via per-federation `defineModule(...)` modules)
 - **Rate limiting** — Per-endpoint configurable limits
@@ -93,14 +93,22 @@ oauth {
     signingKey {
       provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory
       local {
-        algorithm = "HS256"        # HS256 | RS256 | ES256 | EdDSA
-        secret = ${?OAUTH_JWT_SECRET}
-        # For asymmetric: privateKey/privateKeyPath + publicKey/publicKeyPath
+        # Default. Asymmetric, so /.well-known/jwks.json publishes a real
+        # verification key and no relying party ever holds a key that can
+        # also MINT tokens. Required — there is no key-material default:
+        #   openssl genpkey -algorithm ed25519 -out jwt-private.pem
+        #   openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+        algorithm = "EdDSA"        # EdDSA | ES256 | RS256 | HS256
+        privateKeyPath = ${?OAUTH_JWT_PRIVATE_KEY_PATH}
+        publicKeyPath  = ${?OAUTH_JWT_PUBLIC_KEY_PATH}
+        # HS256 instead: set algorithm = "HS256" and supply a secret of at
+        # least 32 bytes (`openssl rand -hex 32`). No JWKS is published.
+        # secret = ${?OAUTH_JWT_SECRET}
       }
     }
   }
-  accessToken { expiresIn = 3600 }
-  refreshToken { expiresIn = 86400 }
+  accessToken  { expiresIn = 3600 }   # seconds, positive, <= 1 year
+  refreshToken { expiresIn = 86400 }  # seconds, positive, <= 1 year
 }
 ```
 
@@ -118,6 +126,8 @@ oauth.grants.authorization_code {
 **Session (when `sessionModule` is registered):**
 
 ```hocon
+# `secret` signs the cookie that IS the authenticated session: at least
+# 32 bytes (256 bits), e.g. `openssl rand -hex 32`.
 session { secret = ${SESSION_SECRET} }
 
 # Shorthand: key name = provider type (google, github, or any registered custom type)

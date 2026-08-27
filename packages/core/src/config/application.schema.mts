@@ -32,10 +32,33 @@
 import { z } from "zod";
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { isValidJwksPath } from "../jwks/path.mjs";
+import {
+	describeWeakSecret,
+	MIN_SECRET_ENTROPY_BYTES,
+	measureSecretEntropyBytes,
+} from "../keys/secretEntropy.mjs";
+
+/**
+ * Sanity ceiling for a duration expressed in whole seconds: one year.
+ *
+ * Not a policy — a deployment wanting a 400-day refresh token is a different
+ * conversation — but a typo guard. The pairing with `.positive()` is what
+ * actually matters (see `readinessTimeoutMs` for the same reasoning): HOCON
+ * substitutes an exported-but-empty environment variable as `""`, and
+ * `z.coerce.number()` turns `""` into `0`. A zero token lifetime mints tokens
+ * that are already expired.
+ */
+const MAX_DURATION_SECONDS = 31_536_000;
+
+/** The same one-year ceiling for the settings expressed in milliseconds. */
+const MAX_DURATION_MS = 31_536_000_000;
 
 const rateLimitSchema = z.object({
-	windowMs: z.coerce.number(),
-	limit: z.coerce.number(),
+	// #282: an empty RATE_LIMIT env var coerces to 0, and a zero window (or a
+	// zero limit) turns the /session/login brute-force guard into a no-op
+	// while still looking configured.
+	windowMs: z.coerce.number().int().positive().max(MAX_DURATION_MS),
+	limit: z.coerce.number().int().positive(),
 });
 
 const rateLimitSpecSchema = z.object({
@@ -236,7 +259,8 @@ const jwtSchema = z.preprocess((raw, ctx) => {
 }, jwtSchemaBase);
 
 const refreshTokenSchemaBase = z.object({
-	expiresIn: z.coerce.number(),
+	// #282: positive and bounded. See MAX_DURATION_SECONDS.
+	expiresIn: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 	// CC-2 (v0.5.1): policy for refresh tokens whose `family_id` does not
 	// match a known family record. `"reject"` is the safe default; the
 	// pre-fix behavior was implicit `"accept"` (silent fall-through to
@@ -364,7 +388,8 @@ export const CoreConfigSchema = z.object({
 	oauth: z.object({
 		jwt: jwtSchema,
 		accessToken: z.object({
-			expiresIn: z.coerce.number(),
+			// #282: positive and bounded. See MAX_DURATION_SECONDS.
+			expiresIn: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 		}),
 		refreshToken: refreshTokenSchema,
 		grants: z.object({}).passthrough(),
@@ -474,70 +499,112 @@ const federationEntrySchema = z
 	.passthrough();
 
 export const fullSectionsSchema = z.object({
-	session: z.object({
-		secret: z.string(),
-		name: z.string(),
-		maxAge: z.coerce.number(),
-		secure: z.boolean(),
-		sameSite: z.enum(["lax", "none", "strict"]),
-		domain: z.string().nullable(),
-		/**
-		 * #272 — CSRF policy for the state-changing session routes.
-		 *
-		 * `.optional()` on purpose: a deployment inheriting `reference.conf`
-		 * always has it, and every value has a code-side default, so a
-		 * hand-built config (tests, embedders composing their own object) is
-		 * not forced to restate a section it has no opinion about.
-		 *
-		 * `trustedOrigins` is NOT `cors.allowedOrigins`. "May this origin read
-		 * my responses" and "may this origin make me change state" are two
-		 * questions, and #272 was filed because one list was answering both.
-		 * Deployments whose login UI is served from a different origin than
-		 * the provider list those origins here — explicitly.
-		 */
-		csrf: z
-			.object({
-				trustedOrigins: z.array(z.string()),
-				// `.int().positive()` is load-bearing, not decoration — the same
-				// trap `http.readinessTimeoutMs` above documents, reached through
-				// a different door. The value is used in arithmetic AND
-				// stringified into the CSRF token as its expiry field, so every
-				// non-conforming value disables the token arm *silently*:
-				//
-				//   ""   -> HOCON substitutes an empty SESSION_CSRF_TTL_SECONDS as
-				//           the empty string and `z.coerce.number()` makes that
-				//           `0`, so every minted token is already expired. The
-				//           token arm is dead, header-less clients are locked out,
-				//           and nothing in the config looks wrong.
-				//   0/-n -> the same, stated outright.
-				//   7200.5 -> the expiry stringifies as a decimal, which the
-				//           token's own shape check rejects. Every token the
-				//           provider issues is unverifiable the instant it is
-				//           issued, including the one `GET /session/csrf` just
-				//           handed the caller.
-				//
-				// The ceiling is a policy bound, not a mechanical one: a token
-				// whose job is to outlive a login form sitting open stops being
-				// that and becomes a long-lived bearer value in a JS-readable
-				// cookie. It restates `MAX_CSRF_TTL_SECONDS` from
-				// `@o3co/auth-provider-session`'s `csrf.mts`, which cannot be
-				// imported here (session depends on core, not the reverse); the
-				// two are pinned together by a test in that package.
-				ttlSeconds: z.coerce.number().int().positive().max(86_400),
-			})
-			.optional(),
-		storage: z
-			.object({
-				type: z.string(),
-				redis: z
-					.object({
-						url: z.string(),
-						password: z.string().optional(),
-					})
-					.optional(),
-			})
-			.passthrough(),
-	}),
+	session: z
+		.object({
+			// #282: the session secret signs the cookie that IS the
+			// authenticated session, so guessing it forges logins. It had no
+			// floor at all; it now clears the same 256 bits the JWT signing
+			// secret does. Unlike the JWT secret (whose floor lives in the
+			// keystore builder because that is the only boundary it crosses),
+			// this value goes straight from config into express-session, so
+			// the schema is the only place to catch it.
+			secret: z.string().superRefine((value, ctx) => {
+				const actualBytes = measureSecretEntropyBytes(value);
+				if (actualBytes < MIN_SECRET_ENTROPY_BYTES) {
+					ctx.addIssue({
+						code: z.ZodIssueCode.custom,
+						message: describeWeakSecret(actualBytes, {
+							configKey: "session.secret",
+							envVar: "SESSION_SECRET",
+						}),
+					});
+				}
+			}),
+			name: z.string(),
+			// #282: positive and bounded. A `maxAge` of 0 (what an exported-but-
+			// empty SESSION_MAX_AGE coerces to) makes express-session emit a
+			// cookie that has already expired, so every request arrives
+			// unauthenticated and the deployment looks like a login outage with
+			// nothing in the logs.
+			maxAge: z.coerce.number().int().positive().max(MAX_DURATION_MS),
+			secure: z.boolean(),
+			sameSite: z.enum(["lax", "none", "strict"]),
+			domain: z.string().nullable(),
+			/**
+			 * #272 — CSRF policy for the state-changing session routes.
+			 *
+			 * `.optional()` on purpose: a deployment inheriting `reference.conf`
+			 * always has it, and every value has a code-side default, so a
+			 * hand-built config (tests, embedders composing their own object) is
+			 * not forced to restate a section it has no opinion about.
+			 *
+			 * `trustedOrigins` is NOT `cors.allowedOrigins`. "May this origin read
+			 * my responses" and "may this origin make me change state" are two
+			 * questions, and #272 was filed because one list was answering both.
+			 * Deployments whose login UI is served from a different origin than
+			 * the provider list those origins here — explicitly.
+			 */
+			csrf: z
+				.object({
+					trustedOrigins: z.array(z.string()),
+					// `.int().positive()` is load-bearing, not decoration — the same
+					// trap `http.readinessTimeoutMs` above documents, reached through
+					// a different door. The value is used in arithmetic AND
+					// stringified into the CSRF token as its expiry field, so every
+					// non-conforming value disables the token arm *silently*:
+					//
+					//   ""   -> HOCON substitutes an empty SESSION_CSRF_TTL_SECONDS as
+					//           the empty string and `z.coerce.number()` makes that
+					//           `0`, so every minted token is already expired. The
+					//           token arm is dead, header-less clients are locked out,
+					//           and nothing in the config looks wrong.
+					//   0/-n -> the same, stated outright.
+					//   7200.5 -> the expiry stringifies as a decimal, which the
+					//           token's own shape check rejects. Every token the
+					//           provider issues is unverifiable the instant it is
+					//           issued, including the one `GET /session/csrf` just
+					//           handed the caller.
+					//
+					// The ceiling is a policy bound, not a mechanical one: a token
+					// whose job is to outlive a login form sitting open stops being
+					// that and becomes a long-lived bearer value in a JS-readable
+					// cookie. It restates `MAX_CSRF_TTL_SECONDS` from
+					// `@o3co/auth-provider-session`'s `csrf.mts`, which cannot be
+					// imported here (session depends on core, not the reverse); the
+					// two are pinned together by a test in that package.
+					ttlSeconds: z.coerce.number().int().positive().max(86_400),
+				})
+				.optional(),
+			storage: z
+				.object({
+					type: z.string(),
+					redis: z
+						.object({
+							url: z.string(),
+							password: z.string().optional(),
+						})
+						.optional(),
+				})
+				.passthrough(),
+		})
+		.superRefine((session, ctx) => {
+			// #282: every current browser refuses to store a `SameSite=None`
+			// cookie that is not also `Secure` (Chrome 80+, Firefox 96+,
+			// Safari 13+). The combination is not "less safe" — it is
+			// completely non-functional, and it fails on the client with no
+			// server-side signal at all, which is why it has to be caught here.
+			if (session.sameSite === "none" && session.secure !== true) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					path: ["secure"],
+					message:
+						'session.sameSite = "none" requires session.secure = true (env ' +
+						"SESSION_SECURE=true): browsers drop a SameSite=None cookie that is not " +
+						'Secure, so no session would ever be established. Use sameSite = "lax" ' +
+						"for local HTTP development.",
+				});
+			}
+		}),
 	/**
 	 * Rate-limit config for SESSION routes (e.g. `/session/login` bruteforce
 	 * protection). Uses `windowMs` (milliseconds) for historical reasons —

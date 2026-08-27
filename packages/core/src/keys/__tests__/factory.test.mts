@@ -30,6 +30,14 @@ async function generateTestKeyPair(alg: string) {
 	};
 }
 
+/**
+ * HS256 test secrets must clear the 256-bit entropy floor (#282). The '.'
+ * characters keep these outside the base64/base64url alphabets, so the
+ * UTF-8 reading is the one that counts.
+ */
+const STRONG_SECRET = "test-hs256-secret.at-least-32-bytes.ok";
+const STRONG_SECRET_PREVIOUS = "test-hs256-previous.at-least-32-bytes.ok";
+
 describe("createKeyStoreFactory", () => {
 	it("returns a factory with no registered types by default", () => {
 		const factory = createKeyStoreFactory();
@@ -63,11 +71,37 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 			type: "local",
 			algorithm: "HS256",
 			kid: "v1",
-			secret: "s3cret",
+			secret: STRONG_SECRET,
 			previousSecrets: [],
 		});
 		expect(keyStore.algorithm).toBe("HS256");
 		expect(keyStore.getSigningKidFallback()).toBe("v1");
+	});
+
+	it("HS256 stays selectable — it is no longer the default, but it still builds", async () => {
+		// #282 flipped the shipped default to EdDSA. HS256 remains a supported
+		// choice for deployments that verify in-process and publish no JWKS;
+		// this test pins that it was demoted, not removed.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		const keyStore = await factory.create({
+			type: "local",
+			algorithm: "HS256",
+			kid: "v1",
+			secret: STRONG_SECRET,
+		});
+		expect(keyStore.algorithm).toBe("HS256");
+	});
+
+	it("no longer silently defaults to HS256 when algorithm is absent", async () => {
+		// Pre-#282 an absent `algorithm` fell back to HS256, so a deployment
+		// that configured nothing at all got symmetric signing by accident.
+		// The builder must now refuse rather than choose for the operator.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(factory.create({ type: "local", kid: "v1" })).rejects.toThrow(
+			/algorithm.*is not configured/i,
+		);
 	});
 
 	it("throws clear error when HS256 secret is missing", async () => {
@@ -93,10 +127,72 @@ describe("registerBuiltinKeyStores - local HS256", () => {
 	});
 });
 
+describe("registerBuiltinKeyStores - HS256 secret entropy floor (#282)", () => {
+	function build(secret: string) {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		return factory.create({
+			type: "local",
+			algorithm: "HS256",
+			kid: "v1",
+			secret,
+			previousSecrets: [],
+		});
+	}
+
+	it("rejects a one-character secret", async () => {
+		// Pre-#282 this built a working keystore: the only check was length > 0.
+		await expect(build("x")).rejects.toThrow(/at least 32 bytes/i);
+	});
+
+	it("rejects a short passphrase", async () => {
+		await expect(build("test-secret")).rejects.toThrow(/at least 32 bytes/i);
+	});
+
+	it("rejects a 32-character HEX secret — 32 characters is only 16 bytes decoded", async () => {
+		await expect(build("0123456789abcdef0123456789abcdef")).rejects.toThrow(/at least 32 bytes/i);
+	});
+
+	it("accepts a 64-character hex secret (32 decoded bytes)", async () => {
+		const ks = await build("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+		expect(ks.algorithm).toBe("HS256");
+	});
+
+	it("accepts a 43-character base64url secret (32 decoded bytes)", async () => {
+		const ks = await build("qUeYs4Xb3rTgHnKmLpVdWzCfJyBxNhQaRuEiOtSvZkA");
+		expect(ks.algorithm).toBe("HS256");
+	});
+
+	it("names oauth.jwt.signingKey.local.secret and OAUTH_JWT_SECRET in the failure", async () => {
+		await expect(build("x")).rejects.toThrow(/oauth\.jwt\.signingKey\.local\.secret/);
+		await expect(build("x")).rejects.toThrow(/OAUTH_JWT_SECRET/);
+	});
+
+	it("does not echo the rejected secret back to the operator", async () => {
+		await expect(build("hunter2-leaky")).rejects.toSatisfy(
+			(err: unknown) => !(err as Error).message.includes("hunter2-leaky"),
+		);
+	});
+
+	it("applies the same floor to each previousSecrets entry", async () => {
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "HS256",
+				kid: "v1",
+				secret: STRONG_SECRET,
+				previousSecrets: [{ kid: "v0", secret: "weak", expiresAt: "2099-12-31T00:00:00Z" }],
+			}),
+		).rejects.toThrow(/previousSecrets\[0\]\.secret.*at least 32 bytes/is);
+	});
+});
+
 describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 	it("factory passes previousSecrets through to createSymmetricKeyStore so an old token verifies via the new keystore", async () => {
 		// Old keystore signs a token with kid "v0".
-		const oldKs = createSymmetricKeyStore("old-secret", "v0");
+		const oldKs = createSymmetricKeyStore(STRONG_SECRET_PREVIOUS, "v0");
 		const oldToken = await oldKs.sign({ claims: { sub: "user1" } });
 
 		// Factory builds a new keystore with v0 in previousSecrets.
@@ -106,11 +202,11 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 			type: "local",
 			algorithm: "HS256",
 			kid: "v1",
-			secret: "new-secret",
+			secret: STRONG_SECRET,
 			previousSecrets: [
 				{
 					kid: "v0",
-					secret: "old-secret",
+					secret: STRONG_SECRET_PREVIOUS,
 					expiresAt: "2099-12-31T00:00:00Z",
 				},
 			],
@@ -132,11 +228,11 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 				type: "local",
 				algorithm: "HS256",
 				kid: "v1",
-				secret: "new-secret",
+				secret: STRONG_SECRET,
 				previousSecrets: [
 					{
 						kid: "v0",
-						secret: "old-secret",
+						secret: STRONG_SECRET_PREVIOUS,
 						expiresAt: "not-a-date",
 					},
 				],
@@ -156,7 +252,7 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 				type: "local",
 				algorithm: "HS256",
 				kid: "v1",
-				secret: "new-secret",
+				secret: STRONG_SECRET,
 				previousKeys: [
 					{
 						kid: "v0",
@@ -166,6 +262,28 @@ describe("registerBuiltinKeyStores - HS256 multi-key rotation (IH-9)", () => {
 				],
 			}),
 		).rejects.toThrow(/previousKeys is not valid for HS256/i);
+	});
+
+	it("rejects asymmetric config that includes HS256-shaped previousSecrets (mirror of the above)", async () => {
+		// The asymmetric schema branch is `.passthrough()`, so a stale
+		// `previousSecrets` block survives config validation. Before #282 the
+		// builder silently ignored it, which is the same silent-rotation-loss
+		// bug IH-9 fixed in the other direction.
+		const { privateKeyPem, publicKeyPem } = await generateTestKeyPair("EdDSA");
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		await expect(
+			factory.create({
+				type: "local",
+				algorithm: "EdDSA",
+				kid: "v1",
+				privateKey: privateKeyPem,
+				publicKey: publicKeyPem,
+				previousSecrets: [
+					{ kid: "v0", secret: STRONG_SECRET_PREVIOUS, expiresAt: "2099-12-31T00:00:00Z" },
+				],
+			}),
+		).rejects.toThrow(/previousSecrets is not valid for EdDSA/i);
 	});
 });
 
@@ -405,6 +523,46 @@ describe("registerBuiltinKeyStores - local asymmetric", () => {
 				],
 			}),
 		).rejects.toThrow(/Invalid expiresAt for previous key "v1"/i);
+	});
+
+	it("throws when nothing at all is configured, naming the exact keys to set (#282)", async () => {
+		// The critical operator-facing case: reference.conf now defaults to
+		// EdDSA, so a deployment that configures no key material reaches this
+		// path. It must fail at boot with instructions, never fall back to a
+		// generated or default symmetric secret.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		let message = "";
+		try {
+			await factory.create({ type: "local", algorithm: "EdDSA", kid: "v0" });
+		} catch (err) {
+			message = (err as Error).message;
+		}
+		expect(message).toMatch(/oauth\.jwt\.signingKey\.local\.privateKey/);
+		expect(message).toMatch(/oauth\.jwt\.signingKey\.local\.publicKey/);
+		expect(message).toMatch(/OAUTH_JWT_PRIVATE_KEY_PATH/);
+		expect(message).toMatch(/OAUTH_JWT_PUBLIC_KEY_PATH/);
+		// Tells the operator how to produce the material, not just that it is missing.
+		expect(message).toMatch(/openssl genpkey -algorithm ed25519/i);
+	});
+
+	it("points an operator who set only OAUTH_JWT_SECRET at the HS256 opt-in (#282)", async () => {
+		// Upgrade path: a 0.x deployment carrying only OAUTH_JWT_SECRET now
+		// lands on the EdDSA default. The error must connect the two.
+		const factory = createKeyStoreFactory();
+		registerBuiltinKeyStores(factory);
+		let message = "";
+		try {
+			await factory.create({
+				type: "local",
+				algorithm: "EdDSA",
+				kid: "v0",
+				secret: "test-hs256-secret.at-least-32-bytes.ok",
+			});
+		} catch (err) {
+			message = (err as Error).message;
+		}
+		expect(message).toMatch(/OAUTH_JWT_ALGORITHM=HS256/);
 	});
 
 	it("throws when a previousKeys entry is missing publicKey/publicKeyPath", async () => {

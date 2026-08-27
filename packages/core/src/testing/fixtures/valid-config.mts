@@ -33,8 +33,13 @@ import type {
  * - `session.storage.type` is `"memory"` (hocon defaults to `"redis"`).
  * - `federations` is `{}` (hocon ships a built-in `federations.google`
  *   block with `enabled = false`).
+ * - `oauth.jwt.signingKey.local.algorithm` is `"HS256"` (hocon defaults to
+ *   `"EdDSA"` since #282). HS256 keeps the fixture free of PEM key material;
+ *   tests that exercise the JWKS route or asymmetric signing build their own
+ *   key pair.
  * - `oauth.jwt.signingKey.local.secret` carries an inline test secret
- *   (hocon uses `${?OAUTH_JWT_SECRET}` substitution).
+ *   (hocon uses `${?OAUTH_JWT_SECRET}` substitution). It clears the #282
+ *   entropy floor so the fixture models a valid deployment.
  * - `oauth.jwt.issuer` carries a fixed test issuer (hocon uses
  *   `${?OAUTH_JWT_ISSUER}` substitution). It is required by the schema —
  *   every token this deployment mints is bound to it.
@@ -89,7 +94,12 @@ export function makeValidCoreConfig() {
 					local: {
 						algorithm: "HS256",
 						kid: "v0",
-						secret: "test-secret",
+						// #282: HS256 secrets must carry >= 32 bytes of key
+						// material. The '.' characters keep this value outside
+						// the base64/base64url alphabets so the UTF-8 reading
+						// (38 bytes) is the one that counts — see
+						// `measureSecretEntropyBytes`.
+						secret: "test-hs256-secret.at-least-32-bytes.ok",
 						previousSecrets: [],
 					},
 				},
@@ -119,7 +129,9 @@ export function makeValidCoreConfig() {
 export function makeValidFullSections() {
 	return {
 		session: {
-			secret: "test-session-secret",
+			// #282: `session.secret` carries a 256-bit entropy floor enforced
+			// by AppConfigSchema, so the fixture must clear it too.
+			secret: "test-session-secret.at-least-32-bytes.ok",
 			name: "__Host-auth.session",
 			maxAge: 3600000,
 			secure: true,

@@ -48,8 +48,8 @@ overlay の値は `application.conf` を上書きします。scaffold には
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `OAUTH_JWT_ALGORITHM` | `HS256` | JWT 署名アルゴリズム（例: `RS256`、`ES256`） |
-| `OAUTH_JWT_SECRET` | — | 署名シークレット（HMAC アルゴリズム用） |
+| `OAUTH_JWT_ALGORITHM` | `EdDSA` | JWT 署名アルゴリズム: `EdDSA` / `ES256` / `RS256` / `HS256`。デフォルトが非対称なので `/.well-known/jwks.json` が実際の検証鍵を公開する。 |
+| `OAUTH_JWT_SECRET` | — | 署名シークレット（**HMAC (`HS256`) 専用**）。32 バイト（256 bit）以上のランダム値が必須 — `openssl rand -hex 32`。hex / base64 値は**デコード後**の長さで測るため、32 文字の hex 文字列は 16 バイト扱いで拒否される。 |
 | `OAUTH_JWT_ISSUER` | **（必須）** | すべてのトークンの `iss` に刻まれる canonical issuer URL。絶対 `https` URL（`http` は loopback ホストのみ）で、query / fragment を含まないこと。未設定なら起動に失敗する — `Host` ヘッダから導出されることはない。 |
 | `OAUTH_JWT_KID` | `v0` | JWT ヘッダーに含まれる key ID |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM エンコードされた秘密鍵（非対称アルゴリズム用） |
@@ -57,12 +57,34 @@ overlay の値は `application.conf` を上書きします。scaffold には
 | `OAUTH_JWT_PUBLIC_KEY` | — | PEM エンコードされた公開鍵 |
 | `OAUTH_JWT_PUBLIC_KEY_PATH` | — | PEM 公開鍵ファイルのパス |
 
+**署名鍵は必須。** デフォルトアルゴリズムは `EdDSA` で、鍵素材のデフォルト値は存在しない。
+何も設定しないデプロイは「推測可能なシークレットで黙って署名する」のではなく、設定すべき
+キー名を明示して起動に失敗する。Ed25519 鍵ペアの生成:
+
+```bash
+openssl genpkey -algorithm ed25519 -out jwt-private.pem
+openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+```
+
+生成したら `OAUTH_JWT_PRIVATE_KEY_PATH` / `OAUTH_JWT_PUBLIC_KEY_PATH` を指すか、
+`OAUTH_JWT_PRIVATE_KEY` / `OAUTH_JWT_PUBLIC_KEY` に PEM をインラインで渡す。
+
+`HS256` も引き続き選択可能（`OAUTH_JWT_ALGORITHM=HS256` + 32 バイト以上の
+`OAUTH_JWT_SECRET`）だが、代償を理解した上で選ぶこと: 対称鍵には公開鍵の片割れが
+存在しないため `/.well-known/jwks.json` は `404 jwks_not_published` を返し、
+すべての RP に共有シークレットを渡す必要がある。それは検証だけでなく
+**トークンの発行（偽造）** も可能にする鍵である。
+
 ### トークン有効期限
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | `3600` | アクセストークンの有効期間（秒） |
-| `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | リフレッシュトークンの有効期間（秒） |
+| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | `3600` | アクセストークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
+| `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | リフレッシュトークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
+
+これらを空文字で export すると fallback ではなく起動失敗になる: HOCON は `FOO=` を
+`""` に解決し、それが `0` に coerce され、有効期間 0 は「発行時点で期限切れ」の
+トークンを作るため。
 
 ### グラントタイプ
 
@@ -76,10 +98,10 @@ overlay の値は `application.conf` を上書きします。scaffold には
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `SESSION_SECRET` | — | **必須。** セッション署名シークレット |
-| `SESSION_MAX_AGE` | `3600000` | セッション Cookie の最大有効期間（ミリ秒） |
+| `SESSION_SECRET` | — | **必須。** 認証済みセッションそのものである Cookie に署名する鍵。推測されればログインを偽造できる。32 バイト（256 bit）以上 — `openssl rand -hex 32`。`OAUTH_JWT_SECRET` と同じく**デコード後**の長さで測る。 |
+| `SESSION_MAX_AGE` | `3600000` | セッション Cookie の最大有効期間（ミリ秒）。正の整数、上限は 1 年（`31536000000`）。 |
 | `SESSION_SECURE` | `true` | セッション Cookie に `Secure` フラグを設定 |
-| `SESSION_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`） |
+| `SESSION_SAME_SITE` | `lax` | `SameSite` 属性（`lax`、`strict`、`none`）。`none` は `SESSION_SECURE=true` が**必須** — ブラウザは `Secure` でない `SameSite=None` Cookie を破棄するため、クライアント側で全ログインが無言で失敗するのを避けて起動時に拒否する。 |
 | `SESSION_DOMAIN` | — | Cookie ドメイン（デフォルト未設定） |
 | `SESSION_CSRF_TTL_SECONDS` | `7200` | 発行する CSRF トークンの有効期間（秒）。1〜86400 の整数で、外れると boot が失敗する（*空文字* は `0` に coerce され、トークン側の判定を無言で無効化してしまうため） |
 | `SESSION_STORAGE_TYPE` | `redis` | セッションストアのバックエンド: `redis` または `memory` |

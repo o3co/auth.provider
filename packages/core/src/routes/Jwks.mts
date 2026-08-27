@@ -78,8 +78,15 @@ export interface JwksRouterOptions {
  * `jwks_uri` that does not resolve. (The core `jwksModule` mounts at "/" and
  * relies on the issuer prefix to carry any base path.)
  *
- * The response carries `Cache-Control: public, max-age=<cacheMaxAgeSeconds>`
- * (JWKS is public data and the most-polled verifier endpoint).
+ * A successful response carries `Cache-Control: public, max-age=N`, where N is
+ * `cacheMaxAgeSeconds` (JWKS is public data and the most-polled verifier
+ * endpoint).
+ *
+ * The route never publishes an empty key set (#282). A symmetric (HS256)
+ * keystore answers `404 jwks_not_published`; an asymmetric keystore that
+ * yields no exportable public key answers `503 jwks_unavailable`. Both carry
+ * `Cache-Control: no-store` so the condition is not pinned in a shared cache
+ * after the operator fixes it.
  *
  * Direct callers bypass the config schema, so `path` and `cacheMaxAgeSeconds`
  * are validated here and the factory throws on misconfiguration (a non-
@@ -112,14 +119,24 @@ export const createRouter = (
 
 	router.get(path, async (_req: Request, res: Response) => {
 		if (keyStore.algorithm === "HS256") {
-			// Set Cache-Control only on the SUCCESS path. If we set it up-front
-			// and `getVerificationKeys()`/`exportJWK()` then threw (e.g. a remote
-			// KMS-backed keystore outage), Express would emit a 5xx with the
-			// header still attached, and an explicit `public, max-age` makes that
-			// transient error cacheable by shared caches/CDNs for the full
-			// lifetime — turning a brief outage into a stuck JWKS failure.
-			res.setHeader("Cache-Control", cacheControl);
-			return res.json({ keys: [] });
+			// #282: this used to answer `200 { keys: [] }`. An empty key set is
+			// indistinguishable, to a relying party, from an issuer that has
+			// rotated every key away — so the RP caches the empty answer and
+			// then fails every verification with an unknown-kid error that
+			// points nowhere near the actual cause. Refusing to serve says what
+			// is true: this deployment publishes no JWKS at all.
+			//
+			// `no-store`, not `cacheControl`: this is a configuration state an
+			// operator can fix in a minute, and a shared cache pinning it for
+			// the full max-age would outlive the fix.
+			res.setHeader("Cache-Control", "no-store");
+			return res.status(404).json({
+				error: "jwks_not_published",
+				error_description:
+					"This authorization server signs with HS256, a symmetric algorithm with no " +
+					"public key to publish. Configure an asymmetric algorithm (EdDSA, ES256 or " +
+					"RS256) via oauth.jwt.signingKey.local.algorithm to publish a verifiable JWKS.",
+			});
 		}
 		const managedKeys = await keyStore.getVerificationKeys();
 		const exported = await Promise.all(
@@ -130,7 +147,26 @@ export const createRouter = (
 			}),
 		);
 		const keys = exported.filter((k): k is NonNullable<typeof k> => k !== null);
-		// Header set only after key export succeeded (see HS256 branch note).
+		if (keys.length === 0) {
+			// An asymmetric keystore that yields nothing publishable — a KMS
+			// adapter mid-rotation, or one whose keys all filtered out as
+			// non-public — is an outage, not a valid publication. Same reasoning
+			// as the HS256 branch: an empty set is a lie that caches.
+			res.setHeader("Cache-Control", "no-store");
+			return res.status(503).json({
+				error: "jwks_unavailable",
+				error_description:
+					"No public verification keys are currently available to publish. The signing " +
+					"keystore returned no exportable public key material.",
+			});
+		}
+		// Header set only after key export succeeded and produced at least one
+		// key. If we set it up-front and `getVerificationKeys()`/`exportJWK()`
+		// then threw (e.g. a remote KMS-backed keystore outage), Express would
+		// emit a 5xx with the header still attached, and an explicit
+		// `public, max-age` makes that transient error cacheable by shared
+		// caches/CDNs for the full lifetime — turning a brief outage into a
+		// stuck JWKS failure.
 		res.setHeader("Cache-Control", cacheControl);
 		return res.json({ keys });
 	});
