@@ -25,7 +25,6 @@ describe("resolveOAuthOptions", () => {
 				jwt: { issuer: "https://issuer.example", legacyTypAccept: true },
 				oidcMode: "dual",
 				requireEmailVerified: true,
-				authorize: { allowUnmarkedClients: true },
 				grants: {
 					authorization_code: {
 						pkce: { required: true, defaultMethod: "S256", supportedMethods: ["S256"] },
@@ -40,7 +39,6 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBe(true);
 		expect(options.oidcMode).toBe("dual");
 		expect(options.requireEmailVerified).toBe(true);
-		expect(options.allowUnmarkedClients).toBe(true);
 		expect(options.pkce).toEqual({
 			required: true,
 			defaultMethod: "S256",
@@ -51,8 +49,8 @@ describe("resolveOAuthOptions", () => {
 	});
 
 	it("tolerates a hand-built partial config (issuer only) and applies the defaults", () => {
-		// The shape router tests hand-build: no oauth.grants, no oidcMode, no
-		// authorize block — everything the zod schema would have required.
+		// The shape router tests hand-build: no oauth.grants, no oidcMode —
+		// everything the zod schema would have required.
 		const options = resolveOAuthOptions({
 			oauth: { jwt: { issuer: "https://issuer.example" } },
 		});
@@ -61,7 +59,6 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		expect(options.allowUnmarkedClients).toBe(false);
 		expect(options.pkce).toEqual({
 			required: false,
 			defaultMethod: "plain",
@@ -78,7 +75,6 @@ describe("resolveOAuthOptions", () => {
 		expect(options.legacyTypAccept).toBeUndefined();
 		expect(options.oidcMode).toBe("oidc-required");
 		expect(options.requireEmailVerified).toBe(false);
-		expect(options.allowUnmarkedClients).toBe(false);
 		expect(options.pkce).toEqual({
 			required: false,
 			defaultMethod: "plain",
@@ -94,16 +90,25 @@ describe("resolveOAuthOptions", () => {
 		const options = resolveOAuthOptions({
 			oauth: {
 				requireEmailVerified: "true",
-				authorize: { allowUnmarkedClients: 1 },
 				resourceIndicator: { enabled: "true" },
 				grants: { authorization_code: { pkce: { required: "true" } } },
 			},
 		});
 
 		expect(options.requireEmailVerified).toBe(false);
-		expect(options.allowUnmarkedClients).toBe(false);
 		expect(options.resourceIndicatorEnabled).toBe(false);
 		expect(options.pkce.required).toBe(false);
+	});
+
+	it("does not resolve the removed oauth.authorize.allowUnmarkedClients (#330)", () => {
+		// A hand-built config bypasses the schema tombstone, so the resolver
+		// must not carry the stale key onto the options object — the /authorize
+		// handler has nothing to read even if an embedder still sets it.
+		const options = resolveOAuthOptions({
+			oauth: { authorize: { allowUnmarkedClients: true } },
+		});
+
+		expect("allowUnmarkedClients" in options).toBe(false);
 	});
 
 	it("keeps issuer raw so checkCanonicalIssuer stays the single validator", () => {

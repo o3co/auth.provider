@@ -208,32 +208,21 @@ const checkFirstPartyInvariant = async (
 	ctx: AuthorizeContext,
 	client: PublicClient,
 ): Promise<boolean> => {
+	// Anything that is not an explicit `true` is refused — a
+	// registration with no `firstParty` field and one carrying
+	// `false` alike. The one-time migration flag that admitted
+	// unmarked registrations (`oauth.authorize.allowUnmarkedClients`,
+	// #317) was removed in #330: the config schema rejects a config
+	// still setting it, and this handler no longer reads it, so
+	// there is no permissive path left.
 	if (client.firstParty === true) return true;
-	// `allowUnmarkedClients` admits clients that are *unmarked* —
-	// registrations written before the field existed. A client
-	// carrying `firstParty: false` is not unmarked: it is a
-	// deliberate statement that this client must never receive a
-	// silent code, and the migration window is exactly where
-	// weakening that would be least noticed. So an explicit `false`
-	// is refused regardless of the flag.
-	const unmarked = client.firstParty === undefined;
-	if (!(unmarked && ctx.opts.oauth.allowUnmarkedClients)) {
-		await auditFailure(ctx, { reason: "client_not_first_party" });
-		redirectError(
-			ctx,
-			"unauthorized_client",
-			"client is not authorized for the authorization endpoint",
-		);
-		return false;
-	}
-	// The migration window: admitted, but every request says so,
-	// naming the client, so the work left to do is visible in the
-	// logs rather than only in a config file nobody re-reads.
-	ctx.opts.logger.warn(
-		{ clientId: ctx.clientId, reason: "not_marked_first_party" },
-		"authorize_client_not_marked_first_party",
+	await auditFailure(ctx, { reason: "client_not_first_party" });
+	redirectError(
+		ctx,
+		"unauthorized_client",
+		"client is not authorized for the authorization endpoint",
 	);
-	return true;
+	return false;
 };
 
 // #297: refuse before a code is minted when the deployment requires

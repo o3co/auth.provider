@@ -42,12 +42,6 @@ export interface ResolvedOAuthOptions {
 	readonly oidcMode: "oidc-required" | "dual";
 	/** #297: gate token issuance on Store-published email verification. */
 	readonly requireEmailVerified: boolean;
-	/**
-	 * #267: the migration escape hatch for the `/authorize` first-party
-	 * invariant. `CoreConfigSchema` requires the key, so a deployment that
-	 * boots through the schema has answered it deliberately.
-	 */
-	readonly allowUnmarkedClients: boolean;
 	/** B-7/B-8: PKCE policy for the authorization-code flow. */
 	readonly pkce: {
 		readonly required: boolean;
@@ -75,7 +69,8 @@ type OAuthConfigShape = {
 	jwt?: { issuer?: unknown; legacyTypAccept?: boolean };
 	oidcMode?: "oidc-required" | "dual";
 	requireEmailVerified?: boolean;
-	authorize?: { allowUnmarkedClients?: boolean };
+	// `authorize` is deliberately absent: its only key, `allowUnmarkedClients`,
+	// was removed in #330 and a stale value must stay inert here too.
 	grants?: Record<string, Record<string, unknown> | undefined>;
 	nonce?: { maxLength?: number };
 	resourceIndicator?: { enabled?: boolean };
@@ -92,9 +87,9 @@ type OAuthConfigShape = {
  * through untouched — no coercion, no validation — so a config that lies about
  * its types behaves exactly as it did against the inline casts. Defaults:
  *
- * - boolean opt-ins (`requireEmailVerified`, `authorize.allowUnmarkedClients`,
- *   `resourceIndicator.enabled`, `pkce.required`) enable only on literal
- *   `true` — the safe reading of an absent value is `false` (enforce/off);
+ * - boolean opt-ins (`requireEmailVerified`, `resourceIndicator.enabled`,
+ *   `pkce.required`) enable only on literal `true` — the safe reading of an
+ *   absent value is `false` (enforce/off);
  * - `oidcMode` falls back to `"oidc-required"`;
  * - `nonce.maxLength` falls back to `256`;
  * - `legacyTypAccept` stays `undefined` when absent (consumers default it);
@@ -119,7 +114,6 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 		legacyTypAccept: oauth?.jwt?.legacyTypAccept,
 		oidcMode: oauth?.oidcMode ?? "oidc-required",
 		requireEmailVerified: oauth?.requireEmailVerified === true,
-		allowUnmarkedClients: oauth?.authorize?.allowUnmarkedClients === true,
 		pkce: {
 			required: pkceConfig?.required === true,
 			defaultMethod:

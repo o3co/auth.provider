@@ -109,11 +109,9 @@ export function makeValidCoreConfig() {
 				// off unless the deployment explicitly enables M2M.
 			},
 			oidcMode: "oidc-required",
-			// #267: required by CoreConfigSchema; `false` = enforce the first-party
-
-			// invariant at /authorize, which is what a test fixture should assert against.
-
-			authorize: { allowUnmarkedClients: false },
+			// #330: `oauth.authorize` is gone from the required surface — the
+			// `allowUnmarkedClients` migration flag was removed, and /authorize
+			// enforces the first-party invariant unconditionally.
 		},
 	} satisfies CoreConfig;
 }
