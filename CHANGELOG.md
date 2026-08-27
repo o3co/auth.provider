@@ -92,7 +92,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   - Any claim `extractUserClaims` read off the `User` stands. A federated value never replaces it.
   - Exactly three claims may fill a **gap** — `email`, `name`, `picture` (exported as `PROMOTABLE_FEDERATED_CLAIMS`) — and only where the local record left the field absent, and only when the federated value is a string.
-  - Everything else lands under `claims.federated[<providerName>]`, verbatim and complete: values that were also promoted, and values that lost to a local claim. Nothing the IdP said is discarded, it is just not authoritative.
+  - Everything else lands under `claims.federated[<providerName>]`, verbatim and complete: values that were also promoted, and values that lost to a local claim. Nothing the IdP said is discarded, it is just not authoritative. The key is written only when the provider mapped at least one claim — absent, rather than an empty object, when it mapped none — so a consumer reads it as `claims.federated?.[name]?.groups`.
 
   The promotion is written as one named field read per promotable claim rather than a loop over an allowlist. That is deliberate: there is no expression in `mergeFederatedClaims` that can carry a key the compiler has not seen into the top-level envelope, so a federated `groups` cannot reach it through any input — only through someone adding a line. `filterClaimsByScope` never emits provider-specific claims, so nothing under the namespace can surface in an id_token or `/userinfo` response by accident either.
 

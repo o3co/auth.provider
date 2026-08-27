@@ -276,7 +276,9 @@ What `mapClaims` returns is an **assertion by an upstream IdP**, not a fact abou
 
 So an IdP cannot contribute `groups` (nor a `roles` / `scope` / `permissions` an adapter invents): those reach `claims.federated[<providerName>]` and nothing else. `filterClaimsByScope` never emits provider-specific claims, so nothing under the namespace can appear in an id_token or `/userinfo` response by accident.
 
-`emailVerified` is excluded from promotion for the same reason. Since #297 it is Store-owned state that `oauth.requireEmailVerified` can read as a gate on token issuance, and an upstream IdP verifies an address *it* controls — the `provider:sub` linkage never forces that to be the local account's address. A deployment that wants to act on the assertion reads `claims.federated[<providerName>].emailVerified` and publishes the result on the `User`, which is where #297 put the field.
+**The `federated` claim is optional — read it with a presence check.** It is written only when the provider actually mapped at least one claim, so it is absent on a session whose provider implements no `SupportsClaimMapping`, and on one whose `mapClaims` returned `{}` or a non-object. The provider key is likewise not guaranteed: a session carries the one provider that authenticated it. Use `claims.federated?.[name]?.groups`, never `claims.federated[name].groups`. Absence rather than an empty `federated: {}` is deliberate — it says "this IdP asserted nothing" instead of only "a code path ran", the same absent-is-not-a-value discipline #297 established for `emailVerified`.
+
+`emailVerified` is excluded from promotion for the same reason. Since #297 it is Store-owned state that `oauth.requireEmailVerified` can read as a gate on token issuance, and an upstream IdP verifies an address *it* controls — the `provider:sub` linkage never forces that to be the local account's address. A deployment that wants to act on the assertion reads `claims.federated?.[<providerName>]?.emailVerified` and publishes the result on the `User`, which is where #297 put the field.
 
 ```ts
 // user: { id, username, email: "alice@corp.example", groups: ["staff"] }

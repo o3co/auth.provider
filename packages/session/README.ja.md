@@ -236,7 +236,9 @@ if (supportsClaimMapping(provider)) {
 
 したがって IdP は `groups`（adapter が勝手に生やした `roles` / `scope` / `permissions` も同様）を提供できない。それらは `claims.federated[<providerName>]` にのみ到達する。`filterClaimsByScope` は provider 固有クレームを一切出力しないため、名前空間配下の値が id_token や `/userinfo` に紛れ込むこともない。
 
-`emailVerified` が昇格対象から外れているのも同じ理由による。#297 以降これは Store 所有の状態であり、`oauth.requireEmailVerified` がトークン発行のゲートとして読む。上流 IdP が検証しているのは *IdP 自身が管理するアドレス*であって、`provider:sub` によるリンクはそれがローカルアカウントのアドレスと一致することを保証しない。IdP の主張を採用したい deployment は `claims.federated[<providerName>].emailVerified` を読み、その結果を `User` に publish する — #297 がこのフィールドを置いた場所がそこだからである。
+**`federated` クレームは optional — 存在チェックを伴って読むこと。** 書き込まれるのは provider が実際に 1 つ以上のクレームを map した場合だけなので、`SupportsClaimMapping` を実装しない provider のセッションや、`mapClaims` が `{}` あるいは object 以外を返したセッションには存在しない。provider キーも同様に保証されない（セッションが持つのは、そのセッションを認証した 1 つの provider だけ）。`claims.federated[name].groups` ではなく `claims.federated?.[name]?.groups` を使う。空の `federated: {}` ではなく「不在」にしてあるのは意図的で、「コードパスが走った」だけではなく「この IdP は何も主張しなかった」を表す — #297 が `emailVerified` で確立した「不在は値ではない」という原則と同じである。
+
+`emailVerified` が昇格対象から外れているのも同じ理由による。#297 以降これは Store 所有の状態であり、`oauth.requireEmailVerified` がトークン発行のゲートとして読む。上流 IdP が検証しているのは *IdP 自身が管理するアドレス*であって、`provider:sub` によるリンクはそれがローカルアカウントのアドレスと一致することを保証しない。IdP の主張を採用したい deployment は `claims.federated?.[<providerName>]?.emailVerified` を読み、その結果を `User` に publish する — #297 がこのフィールドを置いた場所がそこだからである。
 
 ```ts
 // user: { id, username, email: "alice@corp.example", groups: ["staff"] }
