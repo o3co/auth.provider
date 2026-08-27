@@ -70,6 +70,7 @@ const makeApp = async (allowedGrantTypes: readonly string[] | undefined) => {
 		clientId: CLIENT_ID,
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [REDIRECT_URI],
+		firstParty: true,
 		allowedScopes: ["read"],
 		...(allowedGrantTypes === undefined ? {} : { allowedGrantTypes }),
 	} as unknown as PublicClient;

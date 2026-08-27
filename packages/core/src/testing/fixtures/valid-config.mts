@@ -109,6 +109,11 @@ export function makeValidCoreConfig() {
 				// off unless the deployment explicitly enables M2M.
 			},
 			oidcMode: "oidc-required",
+			// #267: required by CoreConfigSchema; `false` = enforce the first-party
+
+			// invariant at /authorize, which is what a test fixture should assert against.
+
+			authorize: { allowUnmarkedClients: false },
 		},
 	} satisfies CoreConfig;
 }

@@ -322,6 +322,21 @@ export const CoreConfigSchema = z.object({
 		// requests that omit `openid` unless operators explicitly choose dual
 		// OAuth/OIDC mode. Shape-only; default lives in HOCON.
 		oidcMode: z.enum(["oidc-required", "dual"]),
+		// #267: `/authorize` refuses a client not marked `firstParty: true`.
+		// This escape hatch admits unmarked clients with a per-client warning,
+		// for a deployment still migrating its client records.
+		//
+		// REQUIRED, with **no literal default in `reference.conf`** — only an
+		// env substitution. Client records are runtime data that core cannot
+		// enumerate (`ClientRepository` exposes `findById` / `authenticate`
+		// only), so there is no boot check that could tell an operator their
+		// clients are unmarked. Shipping a default would therefore mean a green
+		// deploy followed by every login failing at request time. Requiring the
+		// key turns that into a boot failure the operator must read about and
+		// answer deliberately — the same shape `oauth.jwt.issuer` takes (#266).
+		authorize: z.object({
+			allowUnmarkedClients: z.boolean(),
+		}),
 		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
 		// repository. Multi-replica deployments MUST set this to `"redis"`;
 		// the in-memory variant loses codes on restart and across replicas.

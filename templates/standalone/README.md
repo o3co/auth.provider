@@ -9,6 +9,26 @@ Deployable server template for auth.provider. This is the composition root — i
 - **Redis 7.2 LTS or later** for any Redis-backed adapter (refresh token family store, code repository, federation token store, session store). The `pExpireGT` flag pair on which several adapters depend was introduced in Redis 7.0+; 7.2 LTS is the tested floor. Tested against AWS ElastiCache for Redis 7.2, Upstash Redis, Redis Cloud 7.2, and self-managed `redis:7.2-alpine`.
 - **ioredis** `^5.4.1` (direct runtime dependency, used by the refresh-token-family client). Other Redis-backed adapters in this template still use the `redis` npm package; ioredis is added for the RT family store specifically.
 
+## First-party clients
+
+`GET /authorize` mints an authorization code as soon as the user's session is authenticated. There is **no consent step**: the user is never asked whether this client may have their identity.
+
+That is a coherent model for a **first-party** OP — one where every registered client is operated by you — and it is coherent nowhere else. A page you do not control can force a top-level navigation to `/authorize?client_id=X&redirect_uri=...&code_challenge=<theirs>`, a logged-in user's browser mints a code bound to *their* session, it is delivered to X's registered `redirect_uri`, and whoever chose the `code_challenge` redeems it for tokens carrying that user's identity.
+
+So the assumption is enforced rather than assumed. A client must carry `firstParty: true` in its registration to use `/authorize`; anything else is refused with `unauthorized_client`. Mark a client first-party only if you would be comfortable with it receiving a user's identity **without the user being asked**.
+
+```yaml
+# config/clients.yaml
+my-app:
+  tokenEndpointAuthMethod: "client_secret_basic"
+  firstParty: true
+  allowedRedirectUris: ["https://app.example/callback"]
+```
+
+**What this does not do.** It does not make `/authorize` safe against forced navigation for a client that *is* first-party — that remains the accepted model here. What it prevents is a client that should never have been trusted with a silent code being registered into that position by accident. The step that changes the former is a consent screen, tracked separately.
+
+**Migrating.** Existing registrations predate the field, so they are all unmarked. Set `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS=true` to keep admitting them while you work through them — each admission logs `authorize_client_not_marked_first_party` with the client id, so the remaining work shows up in your logs rather than only in a config file. Set it back to `false` when the list is empty.
+
 ## Multi-replica deployments
 
 When running multiple instances of the standalone server behind a load balancer, point `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` at a **shared** Redis 7.2+ instance. Without a shared Redis URL, every replica holds refresh-token families in its own connection (and any local-only Redis), so a refresh request that lands on a replica that did not issue the token returns `invalid_grant` on every other request in a round-robin LB.
@@ -74,6 +94,7 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_ALGORITHM` | `HS256` | JWT signing algorithm (e.g. `RS256`, `ES256`) |
 | `OAUTH_JWT_SECRET` | — | Signing secret (HMAC algorithms) |
 | `OAUTH_JWT_ISSUER` | **(required)** | Canonical issuer URL stamped as `iss` on every token. Must be absolute `https` (`http` only for a loopback host), with no query or fragment. Boot fails when unset — it is never derived from the `Host` header. |
+| `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS` | `false` | Admit clients not marked `firstParty: true` at `/authorize`, with a per-client warning. For migrating existing registrations only — see [First-party clients](#first-party-clients). |
 | `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM-encoded private key (asymmetric algorithms) |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | Path to PEM private key file |

@@ -59,6 +59,11 @@ const config: AppConfig = {
 		},
 		grants: {},
 		oidcMode: "oidc-required",
+		// #267: required by CoreConfigSchema — the template enforces the
+
+		// first-party invariant rather than opting out of it.
+
+		authorize: { allowUnmarkedClients: false },
 		// OR-9: explicit memory adapter for the smoke test. The legacy
 		// `repositories.code.type` fallback would also pick memory here,
 		// but the explicit setting documents the intent and avoids

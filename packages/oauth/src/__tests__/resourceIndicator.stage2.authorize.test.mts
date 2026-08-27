@@ -50,6 +50,7 @@ const clientRepo: ClientRepository = {
 	findById: async () => ({
 		clientId: CLIENT_ID,
 		allowedRedirectUris: [REDIRECT],
+		firstParty: true,
 		allowedScopes: ["openid", "profile"],
 		allowedAudiences: [API, OTHER],
 	}),

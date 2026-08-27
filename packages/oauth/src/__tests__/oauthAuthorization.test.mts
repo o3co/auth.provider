@@ -104,6 +104,7 @@ const authorizeClientRepo: ClientRepository = {
 	findById: async () => ({
 		clientId: "client-1",
 		allowedRedirectUris: ["https://example.test/cb"],
+		firstParty: true,
 		allowedScopes: ["openid", "profile"],
 	}),
 	authenticate: async () => null,
@@ -819,6 +820,7 @@ describe("IH-6: /authorize openid scope gate", () => {
 			findById: async () => ({
 				clientId: "client-1",
 				allowedRedirectUris: ["https://example.test/cb"],
+				firstParty: true,
 				// openid is intentionally absent — emulates a non-OIDC client.
 				allowedScopes: ["profile"],
 			}),
@@ -1224,6 +1226,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 			clientId: "public-app",
 			tokenEndpointAuthMethod: "none",
 			allowedRedirectUris: ["https://spa.example.test/cb"],
+			firstParty: true,
 			allowedScopes: ["openid", "profile"],
 		}),
 		authenticate: async () => null,

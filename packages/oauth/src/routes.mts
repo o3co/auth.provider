@@ -155,6 +155,15 @@ export const createOAuthRouter = async (
 	// (no `oauth.jwt` block at all) don't throw at router construction.
 	const legacyTypAcceptOpt = (config as { oauth?: { jwt?: { legacyTypAccept?: boolean } } }).oauth
 		?.jwt?.legacyTypAccept;
+	// #267: the migration escape hatch for the `/authorize` first-party
+	// invariant. Resolved once at router construction; `CoreConfigSchema`
+	// requires the key, so a deployment that boots through the schema has
+	// answered it deliberately. The defensive cast is for hand-built configs
+	// that never passed the schema — same treatment `legacyTypAccept` gets
+	// above, and the safe reading of an absent value is `false` (enforce).
+	const allowUnmarkedClients =
+		(config as { oauth?: { authorize?: { allowUnmarkedClients?: boolean } } }).oauth?.authorize
+			?.allowUnmarkedClients === true;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
@@ -743,6 +752,46 @@ export const createOAuthRouter = async (
 						"unauthorized_client",
 						"client is not authorized for the authorization_code grant",
 						toStr(state),
+					);
+				}
+
+				// #267: `/authorize` mints a code as soon as the session is
+				// authenticated, with no consent step. A forced top-level
+				// navigation from an attacker's page therefore makes a logged-in
+				// victim's browser mint a code, bound to the victim's session and
+				// delivered to the named client's registered `redirect_uri` —
+				// and since the attacker chose the `code_challenge`, they redeem
+				// it. That is defensible in a pure first-party OP and only there.
+				//
+				// The assumption is now enforced instead of assumed. This does
+				// not make the endpoint safe against forced navigation for a
+				// client that *is* first-party; it stops a client that should
+				// never have been trusted with a silent code from being
+				// registered into that position. Consent (#284) is the step that
+				// changes the former.
+				if (client.firstParty !== true) {
+					if (!allowUnmarkedClients) {
+						await emitAuditEvent(auditSink, {
+							timestamp: new Date(),
+							type: "token.issued.failure",
+							clientId: client_id,
+							ip: req.ip,
+							userAgent: req.get("user-agent"),
+							details: { reason: "client_not_first_party" },
+						});
+						return redirectError(
+							redirect_uri,
+							"unauthorized_client",
+							"client is not authorized for the authorization endpoint",
+							toStr(state),
+						);
+					}
+					// The migration window: admitted, but every request says so,
+					// naming the client, so the work left to do is visible in the
+					// logs rather than only in a config file nobody re-reads.
+					logger.warn(
+						{ clientId: client_id, reason: "not_marked_first_party" },
+						"authorize_client_not_marked_first_party",
 					);
 				}
 
