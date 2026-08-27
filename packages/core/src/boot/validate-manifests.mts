@@ -977,12 +977,15 @@ export function checkFederationStoresWiring(
  * working everywhere until expiry.
  *
  * So: when this composition reads the `accessTokenDenylist` slot and
- * `oauth.revocation.accessToken` is `"denylist"` (the default), the slot must
- * be filled. Otherwise boot fails.
+ * `oauth.revocation.accessToken` is `"denylist"` — or absent, which this check
+ * reads the same way (`readAccessTokenRevocationMode` deliberately defaults
+ * nothing; see its JSDoc) — the slot must be filled. Otherwise boot fails.
  *
  * **The trigger is slot consumption, not the route table.** Core cannot see
- * that `packages/oauth` mounts `/oauth/revoke` — routes are factory-shaped and
- * opaque until `applyContributions`. A module declaring `accessTokenDenylist`
+ * that `packages/oauth` mounts `/oauth/revoke`: oauth contributes its routes as
+ * a factory, and step 7 can only inspect statically-declared
+ * `RouteContribution` values — a factory's mount paths do not exist until
+ * `applyContributions` runs it. A module declaring `accessTokenDenylist`
  * in `requires` / `optional` is the composition-level statement that
  * denylist-backed access-token revocation is part of this app's surface, and it
  * is observable here, at stage 1, before a single component is constructed.
@@ -1021,7 +1024,7 @@ export function checkAccessTokenRevocationWiring(
 		stage: "validateManifests",
 		reason: "access-token-revocation-unenforceable",
 		message:
-			`oauth.revocation.accessToken is "denylist" (the default) and ${consumedBy.length === 1 ? `module "${consumedBy[0]}" reads` : `modules [${consumedBy.join(", ")}] read`} ` +
+			`oauth.revocation.accessToken is "denylist" (the reading when the key is absent) and ${consumedBy.length === 1 ? `module "${consumedBy[0]}" reads` : `modules [${consumedBy.join(", ")}] read`} ` +
 			"the accessTokenDenylist slot, but nothing provides one. RFC 7009 revocation of an access " +
 			"token would answer 200 and leave the token valid until it expires. Wire a denylist " +
 			'(a shared one — `accessTokenDenylist.adapter = "redis"` in the standalone template; the ' +

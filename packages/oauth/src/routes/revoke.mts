@@ -67,8 +67,11 @@ export interface RevokeRouterOptions {
  * - Accepts `token` + optional `token_type_hint` form params.
  * - Returns 400 `invalid_request` when `token` is absent.
  * - Returns 400 `unsupported_token_type` when `token_type_hint` is present
- *   but not a recognized value.
- * - ALWAYS returns 200 for all other outcomes (RFC 7009 §2.2 no-info-leak).
+ *   but not a recognized value — and, under
+ *   `accessTokenRevocation: "unsupported"`, for `token_type_hint =
+ *   access_token` as well (see the access-token paths below).
+ * - Returns 200 for every other outcome (RFC 7009 §2.2 no-info-leak),
+ *   whether or not the token existed or belonged to the caller.
  *
  * Refresh-token path:
  * - Verifies the RT signature / type / issuer via `verifyJwt` with
