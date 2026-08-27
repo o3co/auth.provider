@@ -79,12 +79,15 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 			if (current === null) {
 				return { outcome: "not-found" };
 			}
-			const next = updater(current);
-			if (next === null) {
-				return { outcome: "aborted" };
+			const decision = updater(current);
+			if (decision.action === "abort") {
+				// #274: `reason` is echoed verbatim and interpreted nowhere in this
+				// adapter — classification belongs to the wrapper layer (A3 §5.1).
+				return { outcome: "aborted", reason: decision.reason };
 			}
-			// Fail-closed parity with registerFamily: an updater that returns a
-			// family with expiresAtMs <= now() would commit a dead-on-arrival entry
+			const next = decision.family;
+			// Fail-closed parity with registerFamily: an updater that commits a
+			// family with expiresAtMs <= now() would store a dead-on-arrival entry
 			// (lazy-GC'd on next read) and silently diverge from the Redis
 			// adapter's behavior. Symmetric throw aligns both adapters.
 			if (next.expiresAtMs <= Date.now()) {
@@ -95,7 +98,7 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 				family: frozen,
 				expiresAtMs: frozen.expiresAtMs,
 			});
-			return { outcome: "committed", family: frozen };
+			return { outcome: "committed", family: frozen, reason: decision.reason };
 		},
 	};
 }

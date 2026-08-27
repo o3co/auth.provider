@@ -585,33 +585,50 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 						case "replayed": {
 							// PB-1: RFC 6819 §5.2.2 / OAuth 2.1 BCP §4.14.2
 							// require revoking the entire family on replay
-							// so siblings cannot continue to redeem. Fail
-							// closed when the revocation dep is missing or
-							// throws — silently rejecting only the present
-							// request would leave sibling RTs valid.
-							if (!deps.refreshTokenFamilyRevocation) {
-								logger?.error(
-									{ clientId: authenticatedClientId },
-									"rt_reuse_detected_but_no_revocation_dep",
-								);
-								return {
-									result: {
-										status: 503,
-										error: "temporarily_unavailable",
-										errorDescription: "refresh token family revocation not configured",
-									},
-								};
-							}
-							try {
-								await deps.refreshTokenFamilyRevocation.revokeFamily(newFamilyId);
-							} catch {
-								return {
-									result: {
-										status: 503,
-										error: "temporarily_unavailable",
-										errorDescription: "refresh token store unavailable",
-									},
-								};
+							// so siblings cannot continue to redeem.
+							//
+							// #274: the shipped rotation now revokes the family
+							// inside the same compare-and-swap that detected the
+							// replay and says so with `familyRevoked: true`. That
+							// is the ONLY ordering with no race — this handler
+							// used to issue the revoke as a second write, and a
+							// sibling holding the still-active token could rotate
+							// successfully in between.
+							//
+							// The fallback below is not dead code: `familyRevoked`
+							// is optional, so a custom `RefreshTokenFamilyRotation`
+							// written before #274 still reports a bare
+							// `{ outcome: "replayed" }`. Absence is treated as "not
+							// revoked" and we revoke separately — the pre-#274
+							// behaviour, race and all, but never worse than it.
+							// Fail closed when the revocation dep is missing or
+							// throws: silently rejecting only the present request
+							// would leave sibling RTs valid.
+							if (rotateResult.familyRevoked !== true) {
+								if (!deps.refreshTokenFamilyRevocation) {
+									logger?.error(
+										{ clientId: authenticatedClientId },
+										"rt_reuse_detected_but_no_revocation_dep",
+									);
+									return {
+										result: {
+											status: 503,
+											error: "temporarily_unavailable",
+											errorDescription: "refresh token family revocation not configured",
+										},
+									};
+								}
+								try {
+									await deps.refreshTokenFamilyRevocation.revokeFamily(newFamilyId);
+								} catch {
+									return {
+										result: {
+											status: 503,
+											error: "temporarily_unavailable",
+											errorDescription: "refresh token store unavailable",
+										},
+									};
+								}
 							}
 							logger?.warn(
 								{ familyId: newFamilyId, clientId: authenticatedClientId },

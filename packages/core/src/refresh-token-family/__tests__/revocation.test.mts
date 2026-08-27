@@ -83,10 +83,16 @@ describe("createRefreshTokenFamilyRevocation", () => {
 				return initial;
 			},
 			async updateFamily(_id, updater): Promise<RefreshTokenFamilyUpdateResult> {
-				const next = updater(initial);
-				if (next === null) return { outcome: "aborted" };
-				captured = next;
-				return { outcome: "committed", family: Object.freeze({ ...next }) };
+				const decision = updater(initial);
+				if (decision.action === "abort") {
+					return { outcome: "aborted", reason: decision.reason };
+				}
+				captured = decision.family;
+				return {
+					outcome: "committed",
+					family: Object.freeze({ ...decision.family }),
+					reason: decision.reason,
+				};
 			},
 		};
 		const revocation = createRefreshTokenFamilyRevocation({

@@ -701,6 +701,105 @@ describe("createRefreshTokenGrant", () => {
 			expect(revokeFamily).toHaveBeenCalledTimes(1);
 		});
 
+		// -------------------------------------------------------------------
+		// #274: the shipped rotation now revokes the family inside the same
+		// compare-and-swap that detected the replay, and reports
+		// `familyRevoked: true`. The handler's own revoke was the second half
+		// of a two-write sequence with a race in the middle, so when the
+		// rotation says the family is already dead the handler must not write
+		// again — there must be no second operation for a sibling to slip
+		// past.
+		//
+		// The `replayedRotation` stub above deliberately keeps reporting a
+		// bare `{ outcome: "replayed" }`, so the tests around these two keep
+		// covering the fallback path taken by a custom rotation written
+		// before #274.
+		// -------------------------------------------------------------------
+		const atomicallyRevokedRotation: RefreshTokenFamilyRotation = {
+			async register() {},
+			async rotate() {
+				return { outcome: "replayed", familyRevoked: true };
+			},
+		};
+
+		it("does not revoke again when the rotation already revoked the family atomically (#274)", async () => {
+			const revokeFamily = vi.fn().mockResolvedValue(undefined);
+			const revocation = {
+				revokeFamily,
+				async isFamilyRevoked() {
+					return false;
+				},
+			};
+			const deps: GrantDependencies = {
+				...mockDeps,
+				refreshTokenFamilyRotation: atomicallyRevokedRotation,
+				refreshTokenFamilyRevocation: revocation,
+			};
+			const rt = await makeReplayedRt("fam-1");
+
+			const { result } = await createRefreshTokenGrant(deps).handle({
+				...baseCtx,
+				body: { refresh_token: rt },
+			});
+
+			// The wire response is unchanged — this is an internal ordering
+			// fix, not a protocol change.
+			expect(result.status).toBe(400);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("invalid_grant");
+			expect(result.errorDescription).toBe("replay_detected");
+			expect(revokeFamily).not.toHaveBeenCalled();
+		});
+
+		it("still audits the revocation when the rotation revoked atomically (#274)", async () => {
+			// The audit signal belongs to the replay, not to which component
+			// performed the write. A SIEM watching for this event must not go
+			// quiet just because the revocation moved into the store.
+			const warn = vi.fn();
+			const logger = makeStubLogger(warn);
+			const deps: GrantDependencies = {
+				...mockDeps,
+				refreshTokenFamilyRotation: atomicallyRevokedRotation,
+				refreshTokenFamilyRevocation: {
+					async revokeFamily() {},
+					async isFamilyRevoked() {
+						return false;
+					},
+				},
+				logger,
+			};
+			const rt = await makeReplayedRt("fam-1");
+
+			await createRefreshTokenGrant(deps).handle({ ...baseCtx, body: { refresh_token: rt } });
+
+			expect(warn).toHaveBeenCalledWith(
+				expect.objectContaining({ familyId: "fam-1", clientId: DEFAULT_CLIENT_ID }),
+				"rt_reuse_detected_family_revoked",
+			);
+		});
+
+		it("rejects with 400, not 503, when the rotation revoked atomically and no revocation dep is wired (#274)", async () => {
+			// The 503 exists to avoid answering "just this request is refused"
+			// while sibling RTs stay live. Once the family is already revoked
+			// there is nothing left to fail closed about, and returning 503
+			// would tell a client to retry a replay.
+			const deps: GrantDependencies = {
+				...mockDeps,
+				refreshTokenFamilyRotation: atomicallyRevokedRotation,
+			};
+			const rt = await makeReplayedRt("fam-1");
+
+			const { result } = await createRefreshTokenGrant(deps).handle({
+				...baseCtx,
+				body: { refresh_token: rt },
+			});
+
+			expect(result.status).toBe(400);
+			if (!("error" in result)) expect.fail("Expected error in result");
+			expect(result.error).toBe("invalid_grant");
+			expect(result.errorDescription).toBe("replay_detected");
+		});
+
 		it("returns 503 when revocation dep is missing (PB-1 Codex Delta 1, fail-closed)", async () => {
 			// Rotation wired but no revocation dep — fail-closed per Delta 1
 			// (silent skip would violate RFC 6819 §5.2.2 compliance guarantee).
