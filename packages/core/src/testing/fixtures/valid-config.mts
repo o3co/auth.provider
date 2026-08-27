@@ -57,9 +57,9 @@ import type {
  *   as not-enabled. Note that `client_credentials` is deliberately omitted —
  *   the factory mirrors the standalone template defaults, where
  *   client_credentials remains off unless the deployment explicitly enables
- *   M2M. The `pkce: { requireS256: false }` sub-object on `authorization_code`
- *   is illustrative of real-config shape; the `grants` schema is
- *   `passthrough` so the value is not enforced.
+ *   M2M. `authorization_code` carries no `pkce` sub-object: #273 made PKCE
+ *   mandatory and S256-only, so every key that block used to hold is inert
+ *   (the resolver warns about a config that still sets one).
  *
  * If you need fixture values that match production defaults, parse
  * `reference.conf` directly via the test harness.
@@ -112,7 +112,7 @@ export function makeValidCoreConfig() {
 			},
 			grants: {
 				session: { enabled: true },
-				authorization_code: { enabled: true, pkce: { requireS256: false } },
+				authorization_code: { enabled: true },
 				refresh_token: { enabled: true },
 				// client_credentials: deliberately omitted -- factory mirrors the
 				// standalone template defaults, where client_credentials remains

@@ -24,6 +24,7 @@
  * repository failure modes, and the unauthenticated login redirect.
  */
 
+import crypto from "node:crypto";
 import {
 	type AppConfig,
 	type AuditSink,
@@ -41,6 +42,12 @@ import { createOAuthRouter } from "#/routes.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
+
+// #273: PKCE/S256 is mandatory for every client, so every request that is
+// meant to get PAST the PKCE gate has to carry a challenge. `baseQuery`
+// carries one; the PKCE suites below override or drop it deliberately.
+const VERIFIER = "pkce-verifier".padEnd(43, "x");
+const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
 const makeConfig = (oauthOverrides: Record<string, unknown>): AppConfig =>
 	({
@@ -134,6 +141,14 @@ const baseQuery: Query = {
 	client_id: CLIENT_ID,
 	redirect_uri: REDIRECT_URI,
 	state: "xyz",
+	code_challenge: S256_CHALLENGE,
+	code_challenge_method: "S256",
+};
+
+/** `baseQuery` minus the PKCE pair, then `extra` — for the gate's own tests. */
+const withoutPkce = (extra: Query = {}): Query => {
+	const { code_challenge: _c, code_challenge_method: _m, ...rest } = baseQuery;
+	return { ...rest, ...extra };
 };
 
 const authorize = (app: express.Express, query: Query) =>
@@ -234,25 +249,27 @@ describe("/authorize — response_type validation", () => {
 	});
 });
 
-describe("/authorize — PKCE required (B-8)", () => {
-	it("rejects a confidential-client request without code_challenge when pkce.required", async () => {
-		const { app } = await makeApp({
-			oauth: { grants: { authorization_code: { pkce: { required: true } } } },
-		});
-		const res = await authorize(app, baseQuery);
+describe("/authorize — PKCE required (#273)", () => {
+	it("rejects a confidential-client request without code_challenge", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, withoutPkce());
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("invalid_request");
 		expect(params.get("error_description")).toBe("code_challenge is required");
 	});
 
 	it("rejects an empty-string code_challenge the same way", async () => {
-		const { app } = await makeApp({
-			oauth: { grants: { authorization_code: { pkce: { required: true } } } },
-		});
-		const res = await authorize(app, { ...baseQuery, code_challenge: "" });
+		const { app } = await makeApp({});
+		const res = await authorize(app, withoutPkce({ code_challenge: "" }));
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("invalid_request");
 		expect(params.get("error_description")).toBe("code_challenge is required");
+	});
+
+	it("rejects a repeated code_challenge (array) — it is not a single string", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, withoutPkce({ code_challenge: ["a", "b"] }));
+		expect(redirectParams(res).get("error_description")).toBe("code_challenge is required");
 	});
 });
 
@@ -266,39 +283,45 @@ describe("/authorize — nonce validation (IH-16)", () => {
 	});
 });
 
-describe("/authorize — code_challenge_method resolution (B-7)", () => {
-	it("falls back to the configured defaultMethod when the method is omitted", async () => {
-		const { app, createCode } = await makeApp({
-			oauth: {
-				grants: {
-					authorization_code: {
-						pkce: { defaultMethod: "plain", supportedMethods: ["S256", "plain"] },
-					},
-				},
-			},
-		});
-		const res = await authorize(app, { ...baseQuery, code_challenge: "abc" });
+describe("/authorize — code_challenge_method resolution (#273)", () => {
+	it("rejects an omitted method — RFC 7636 §4.3 reads absence as `plain`", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, withoutPkce({ code_challenge: S256_CHALLENGE }));
 		const params = redirectParams(res);
-		expect(params.get("code")).toBe("code-x");
-		expect(createCode).toHaveBeenCalledWith(
-			expect.objectContaining({ code_challenge: "abc", code_challenge_method: "plain" }),
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe(
+			'code_challenge_method is required and must be "S256"',
 		);
 	});
 
-	it("rejects a method outside supportedMethods", async () => {
-		const { app } = await makeApp({
-			oauth: {
-				grants: { authorization_code: { pkce: { supportedMethods: ["plain"] } } },
-			},
-		});
+	it("rejects a repeated method (array) the same way — it resolves as absent", async () => {
+		const { app } = await makeApp({});
 		const res = await authorize(app, {
 			...baseQuery,
-			code_challenge: "abc",
-			code_challenge_method: "S256",
+			code_challenge_method: ["S256", "S256"],
 		});
+		expect(redirectParams(res).get("error_description")).toBe(
+			'code_challenge_method is required and must be "S256"',
+		);
+	});
+
+	it("rejects a method outside the client's list", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, { ...baseQuery, code_challenge_method: "S512" });
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("invalid_request");
-		expect(params.get("error_description")).toBe('code_challenge_method "S256" is not supported');
+		expect(params.get("error_description")).toBe('code_challenge_method "S512" is not supported');
+	});
+
+	it("persists the resolved method on the code", async () => {
+		const { app, createCode } = await makeApp({});
+		expect(redirectParams(await authorize(app, baseQuery)).get("code")).toBe("code-x");
+		expect(createCode).toHaveBeenCalledWith(
+			expect.objectContaining({
+				code_challenge: S256_CHALLENGE,
+				code_challenge_method: "S256",
+			}),
+		);
 	});
 });
 

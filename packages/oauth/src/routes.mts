@@ -251,6 +251,11 @@ export const createOAuthRouter = async (
 								allowedGrantTypes: req.oauthClient.allowedGrantTypes,
 								allowedAudiences: req.oauthClient.allowedAudiences,
 								senderConstrained: req.oauthClient.senderConstrained,
+								// #273: the authorization-code grant applies the same
+								// per-client PKCE method list `/authorize` applied when
+								// it minted the code, so the opt-in has to travel with
+								// the authenticated identity.
+								allowPlainPkce: req.oauthClient.allowPlainPkce,
 							}
 						: null,
 				};

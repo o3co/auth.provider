@@ -96,6 +96,11 @@ export const ClientEntrySchema = z
 		// adapters had no working configuration at all. Absent still means "not
 		// first-party" — the marking is deliberately opt-in.
 		firstParty: z.boolean().optional(),
+		// #273: the ONLY way to reach the RFC 7636 `plain` challenge method.
+		// Optional with no default, because absent must stay distinguishable
+		// from an explicit `false` in the record the repositories surface, and
+		// both mean "S256 only" at the policy site.
+		allowPlainPkce: z.boolean().optional(),
 		// Wave 2 §4.8: per-client sender-constraint requirement.
 		// `methods` is `string().min(1)` so accidental empty kinds (typos
 		// or trailing-comma artifacts) cannot silently match a future
@@ -191,6 +196,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			...(entry.firstParty !== undefined && {
 				firstParty: entry.firstParty,
 			}),
+			...(entry.allowPlainPkce !== undefined && {
+				allowPlainPkce: entry.allowPlainPkce,
+			}),
 		};
 	}
 
@@ -248,6 +256,9 @@ export class InMemoryClientRepository implements ClientRepository {
 			}),
 			...(entry.firstParty !== undefined && {
 				firstParty: entry.firstParty,
+			}),
+			...(entry.allowPlainPkce !== undefined && {
+				allowPlainPkce: entry.allowPlainPkce,
 			}),
 		};
 	}

@@ -31,6 +31,11 @@ import {
 	extractResourceParam,
 	unrepresentedResources,
 } from "../grants/_resourceIndicator.mjs";
+import {
+	PKCE_METHOD_ABSENT_DEFAULT,
+	PKCE_METHOD_S256,
+	pkceMethodsForClient,
+} from "../grants/pkce.mjs";
 import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 export interface AuthorizeHandlerOptions {
@@ -245,45 +250,58 @@ const checkEmailVerified = async (ctx: AuthorizeContext): Promise<boolean> => {
 	return false;
 };
 
+/**
+ * #273 (OAuth 2.1 §4.1.1 / RFC 9700 §2.1.1): PKCE gate + method resolution,
+ * as one step.
+ *
+ * Pre-#273 this was two functions running either side of scope narrowing and
+ * policy evaluation — a presence check here, an allowlist check after the
+ * policy hook — with three different rules between them (a public-client
+ * S256 mandate, an operator `pkce.required` flag, an operator
+ * `supportedMethods` allowlist with a `defaultMethod` fallback). They are one
+ * rule now, applied to every client:
+ *
+ * 1. a `code_challenge` is REQUIRED — confidential clients included, because a
+ *    client secret proves who is redeeming the code, not that the redeemer is
+ *    the party it was issued to;
+ * 2. the method is `S256`, unless this client's registration opts into `plain`
+ *    (`pkceMethodsForClient`).
+ *
+ * Running the allowlist check here rather than after `applyGrantPolicy` also
+ * means an unsupported method is refused before the policy hook's external
+ * I/O, matching the `checkNonce` placement rationale.
+ */
 const checkPkce = (
 	ctx: AuthorizeContext,
 	client: PublicClient,
 	codeChallenge: unknown,
 	codeChallengeMethod: unknown,
-): boolean => {
-	// D-6 (RFC 9700 §2.1.1): PKCE/S256 is mandatory for public clients
-	// regardless of operator `pkce.required` config. Public clients have
-	// no transport-level credential at /token, so the only authenticity
-	// gate on the code redemption is the verifier — accepting `plain`
-	// or omitting PKCE entirely would let anyone with the issued code
-	// exchange it for tokens.
-	if (client.tokenEndpointAuthMethod === "none") {
-		if (typeof codeChallenge !== "string" || !codeChallenge) {
-			redirectError(ctx, "invalid_request", "code_challenge is required for public clients");
-			return false;
-		}
-		const requestedMethod = toStr(codeChallengeMethod);
-		// Public clients must explicitly select S256 — no defaulting to
-		// `plain` per the operator-configured `defaultMethod`. The check
-		// uses the raw query parameter so absence (= would silently pick
-		// up `defaultMethod`) is rejected as `plain` would be.
-		const effectivePublicMethod = requestedMethod ?? "plain";
-		if (effectivePublicMethod !== "S256") {
-			redirectError(
-				ctx,
-				"invalid_request",
-				'code_challenge_method must be "S256" for public clients',
-			);
-			return false;
-		}
-	}
-
-	// B-8: PKCE required check at authorize endpoint
-	if (ctx.opts.oauth.pkce.required && (typeof codeChallenge !== "string" || !codeChallenge)) {
+): { method: string } | null => {
+	// The resolved policy object — the SAME one the authorization grant reads
+	// at `/token`. `required` is `true` by construction (see
+	// `ResolvedPkceOptions`); it is read rather than assumed so both endpoints
+	// demonstrably consult one value.
+	const policy = ctx.opts.oauth.pkce;
+	if (policy.required && (typeof codeChallenge !== "string" || !codeChallenge)) {
 		redirectError(ctx, "invalid_request", "code_challenge is required");
-		return false;
+		return null;
 	}
-	return true;
+	// `toStr` yields undefined for a repeated `?code_challenge_method=` too
+	// (Express surfaces it as an array), which then resolves as absent —
+	// i.e. as `plain` — and is refused unless this client opted in.
+	const requestedMethod = toStr(codeChallengeMethod);
+	const method = requestedMethod ?? PKCE_METHOD_ABSENT_DEFAULT;
+	if (!pkceMethodsForClient(policy, client).includes(method)) {
+		redirectError(
+			ctx,
+			"invalid_request",
+			requestedMethod === undefined
+				? `code_challenge_method is required and must be "${PKCE_METHOD_S256}"`
+				: `code_challenge_method "${requestedMethod}" is not supported`,
+		);
+		return null;
+	}
+	return { method };
 };
 
 // IH-16 (v0.5.1): bound the OIDC `nonce` query parameter BEFORE the
@@ -480,25 +498,6 @@ const applyGrantPolicy = async (
 	return { grantedScopes, grantedAudience };
 };
 
-// B-7: resolve code_challenge_method — use provided value or defaultMethod
-const resolveChallengeMethod = (
-	ctx: AuthorizeContext,
-	codeChallenge: unknown,
-	codeChallengeMethod: unknown,
-): { method: string | undefined } | null => {
-	if (typeof codeChallenge === "string" && codeChallenge) {
-		// Challenge provided: use explicit method or fall back to defaultMethod
-		const method = toStr(codeChallengeMethod) ?? ctx.opts.oauth.pkce.defaultMethod;
-		if (!ctx.opts.oauth.pkce.supportedMethods.includes(method)) {
-			redirectError(ctx, "invalid_request", `code_challenge_method "${method}" is not supported`);
-			return null;
-		}
-		return { method };
-	}
-	// No challenge: method is irrelevant (no PKCE)
-	return { method: undefined };
-};
-
 /**
  * RFC 8707 §2 audience shaping for the code record (Stage 2, #173), or `null`
  * when the requested resources cannot be represented and a response has been
@@ -621,7 +620,7 @@ const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Re
  *    no trusted redirect target yet, per A-1);
  * 3. validate the request: `response_type`, the client's registered grant
  *    types (#268), the first-party invariant (#267), the email-verified
- *    gate (#297), PKCE (D-6/B-8), `nonce` bounds (IH-16);
+ *    gate (#297), PKCE — mandatory, S256 (#273) — `nonce` bounds (IH-16);
  * 4. narrow scope and audience: client allowlist + openid requirement
  *    (IH-6), then policy (C-2), then the RFC 8707 resource check;
  * 5. issue the code and redirect back with `code` + `state` (§4.1.2).
@@ -671,7 +670,8 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!(await checkAuthorizationCodeGrantAllowed(ctx, client))) return;
 		if (!(await checkFirstPartyInvariant(ctx, client))) return;
 		if (!(await checkEmailVerified(ctx))) return;
-		if (!checkPkce(ctx, client, code_challenge, code_challenge_method)) return;
+		const pkce = checkPkce(ctx, client, code_challenge, code_challenge_method);
+		if (!pkce) return;
 		if (!checkNonce(ctx)) return;
 
 		const scopes = resolveScopes(ctx, scope, client.allowedScopes);
@@ -694,9 +694,6 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		});
 		if (!policy) return;
 
-		const challenge = resolveChallengeMethod(ctx, code_challenge, code_challenge_method);
-		if (!challenge) return;
-
 		// CP-14: persist `undefined` when no scopes/audiences survived —
 		// an empty array would later stringify to `scope: ""` in the
 		// token response, which is indistinguishable from "scope claim
@@ -711,8 +708,9 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!audience) return;
 
 		const minted = await mintCode(ctx, {
+			// `checkPkce` proved both are present and admissible for this client.
 			codeChallenge: toStr(code_challenge),
-			codeChallengeMethod: challenge.method,
+			codeChallengeMethod: pkce.method,
 			grantedScope: scopeForPersist,
 			grantedAudience: audience.audienceForPersist,
 		});

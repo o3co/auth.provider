@@ -21,6 +21,15 @@
 #   A client without it is refused at `/authorize`, as is one carrying an
 #   explicit `firstParty: false`. There is no opt-out: mark every client you
 #   operate before pointing it at `/authorize`.
+#
+# `allowPlainPkce` (#273): PKCE is mandatory for EVERY client — confidential
+#   ones included — and `S256` is the only method accepted. There is no
+#   server-wide setting that changes either half. This per-client flag is the
+#   one exception hatch, and only for the method: `allowPlainPkce: true` lets
+#   that one client use the RFC 7636 `plain` challenge, which stores the
+#   verifier itself as the challenge and so proves nothing against anyone who
+#   can read the authorization request. Set it only for a legacy client that
+#   genuinely cannot compute SHA-256, and treat it as a migration deadline.
 
 my-app:
   tokenEndpointAuthMethod: "client_secret_basic"
@@ -42,3 +51,14 @@ my-app:
 #   allowedScopes:
 #     - "openid"
 #     - "profile"
+
+# Legacy client that cannot compute SHA-256 (#273). Prefer fixing the client.
+# my-legacy-device:
+#   tokenEndpointAuthMethod: "client_secret_basic"
+#   firstParty: true
+#   clientSecret: "$2b$10$REPLACE_WITH_BCRYPT_HASH"
+#   allowPlainPkce: true
+#   allowedRedirectUris:
+#     - "https://legacy.example/callback"
+#   allowedScopes:
+#     - "openid"

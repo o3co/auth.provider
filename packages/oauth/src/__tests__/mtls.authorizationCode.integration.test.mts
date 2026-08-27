@@ -52,11 +52,19 @@ const PUBLIC_CLIENT_ID = "mtls-ac-public-client";
 const validCode = {
 	client_id: CLIENT_ID,
 	redirect_uri: RP_URI,
+	// #273: PKCE is mandatory, so a redeemable code always carries an
+	// S256 challenge and the token request presents the matching verifier.
+	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+	code_challenge_method: "S256",
 };
 
 const validPublicCode = {
 	client_id: PUBLIC_CLIENT_ID,
 	redirect_uri: RP_URI,
+	// #273: PKCE is mandatory, so a redeemable code always carries an
+	// S256 challenge and the token request presents the matching verifier.
+	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+	code_challenge_method: "S256",
 };
 
 const confidentialClient = {
@@ -104,7 +112,11 @@ function decodePayload(token: string): Record<string, unknown> {
 }
 
 const baseCtxConfidential: Omit<GrantContext, "tokenBinding"> = {
-	body: { code: "valid-code", redirect_uri: RP_URI },
+	body: {
+		code: "valid-code",
+		redirect_uri: RP_URI,
+		code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+	},
 	session: {},
 	issuer: "localhost",
 	metadata: { ip: "127.0.0.1" },
@@ -112,7 +124,11 @@ const baseCtxConfidential: Omit<GrantContext, "tokenBinding"> = {
 };
 
 const baseCtxPublic: Omit<GrantContext, "tokenBinding"> = {
-	body: { code: "valid-code-public", redirect_uri: RP_URI },
+	body: {
+		code: "valid-code-public",
+		redirect_uri: RP_URI,
+		code_verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+	},
 	session: {},
 	issuer: "localhost",
 	metadata: { ip: "127.0.0.1" },

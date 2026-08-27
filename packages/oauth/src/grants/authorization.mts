@@ -29,20 +29,15 @@ import {
 	type Token,
 	type UserSession,
 } from "@o3co/auth-provider-core";
+import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
 import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
-import { resolvePkceSupportedMethods } from "./pkce.mjs";
+import { pkceMethodsForClient } from "./pkce.mjs";
 
 export const createAuthorizationGrant = (
 	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
 ): GrantHandler => {
 	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
-
-	const grantsConfig = config.oauth.grants as Record<string, Record<string, unknown>> | undefined;
-	const authorizationConfig = grantsConfig?.authorization_code as
-		| Record<string, unknown>
-		| undefined;
-	const pkceConfig = authorizationConfig?.pkce as Record<string, unknown> | undefined;
 
 	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it
 	// directly from config (not ctx.issuer) because the express adapter falls
@@ -55,21 +50,13 @@ export const createAuthorizationGrant = (
 		return typeof value === "string" && value.length > 0 ? value : undefined;
 	})();
 
-	// B-7: structured pkce config (supportedMethods, defaultMethod, required)
-	// Fall back to legacy requireS256 for backward compatibility.
-	// TS-4 (v0.5.1): per-element string validation lives in
-	// `resolvePkceSupportedMethods` — the previous `Array.isArray(...) ? (... as string[])`
-	// pattern silently accepted operator-typed garbage like `[123, null]`
-	// because `Array.isArray` does not constrain element types. Pass `logger`
-	// so the helper's misconfig warnings (non-string elements, filtered-empty
-	// fallback) reach the operator's structured logger; F6 PR3 added the
-	// `logger` slot to GrantDependencies so the TS-4-deferred plumbing is now
-	// available at this call site.
-	const supportedMethods = resolvePkceSupportedMethods(pkceConfig, logger);
-	const pkceRequired: boolean = pkceConfig?.required === true;
-	// Legacy fallback: requireS256=true means only S256 is supported
-	const requireS256Legacy = pkceConfig?.requireS256 === true;
-	const effectiveSupportedMethods = requireS256Legacy ? ["S256"] : supportedMethods;
+	// #273: ONE PKCE policy, resolved from the same config through the same
+	// resolver `/authorize` uses (`grants/session.mts` reads its own knob the
+	// same way). Pre-#273 this site re-derived its own view — a `required`
+	// flag plus a `requireS256` legacy fallback the authorization endpoint did
+	// not honour — so `/authorize` could mint a code that `/token` refused.
+	// Resolved once at composition; `logger` carries the inert-config warning.
+	const pkce = resolveOAuthOptions(config, logger).pkce;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -183,17 +170,6 @@ export const createAuthorizationGrant = (
 			const grantedScopes: readonly string[] | undefined = codeData.grantedScope;
 			const grantedAudiencesFromCode = codeData.grantedAudience;
 
-			// B-8: PKCE required check at token endpoint
-			if (pkceRequired && !codeData.code_challenge_method) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "PKCE is required but code was issued without code_challenge",
-					},
-				};
-			}
-
 			// SF-3 fixup: a code record carrying `code_challenge` without
 			// `code_challenge_method` would silently bypass PKCE validation
 			// because the outer `if (codeData.code_challenge_method)` gate
@@ -221,6 +197,29 @@ export const createAuthorizationGrant = (
 				};
 			}
 
+			// #273: PKCE is required of every authorization-code client, so a
+			// code carrying neither challenge nor method is unredeemable — by a
+			// confidential client too. `/authorize` no longer mints one, so
+			// reaching here means a code issued before the upgrade or by a
+			// custom CodeRepository. `pkce.required` is `true` by construction
+			// (see ResolvedPkceOptions); it is read rather than assumed so this
+			// endpoint demonstrably consults the same object `/authorize` does.
+			//
+			// Ordered AFTER the corrupt-shape guard above on purpose: a record
+			// that carries a challenge but no method is a storage defect, not a
+			// client that skipped PKCE, and it keeps its own `invalid_grant` /
+			// "invalid code" answer rather than being relabelled as a missing
+			// challenge the client never actually omitted.
+			if (pkce.required && !codeData.code_challenge_method) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "PKCE is required but code was issued without code_challenge",
+					},
+				};
+			}
+
 			// Validate code_verifier using code data from repository
 			if (codeData.code_challenge_method) {
 				// SF-3 (v0.5.1): a code record with `code_challenge_method` set
@@ -240,8 +239,16 @@ export const createAuthorizationGrant = (
 						},
 					};
 				}
-				// B-7: check method is in supportedMethods
-				if (!effectiveSupportedMethods.includes(codeData.code_challenge_method)) {
+				// #273: the method must be one THIS client may use — `S256`,
+				// plus `plain` only for a registration that opted in. Same
+				// `pkceMethodsForClient` call `/authorize` made when it minted
+				// the code, against the same registration, so a code this AS
+				// issued is never refused here for its method.
+				if (
+					!pkceMethodsForClient(pkce, ctx.authenticatedClient).includes(
+						codeData.code_challenge_method,
+					)
+				) {
 					return {
 						result: {
 							status: 400,

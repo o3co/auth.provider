@@ -117,7 +117,10 @@ describe("schema open type", () => {
 				refreshToken: { expiresIn: 86400 },
 				grants: {
 					session: { enabled: true },
-					authorization_code: { enabled: true, pkce: { requireS256: false } },
+					// The `pkce: { requireS256: false }` sub-object that used to sit
+					// here is gone with the knob (#273); this fixture is about the
+					// legacy top-level `clients` key, not about grants config.
+					authorization_code: { enabled: true },
 					refresh_token: { enabled: true },
 				},
 			},

@@ -717,4 +717,38 @@ describe("InMemoryClientRepository", () => {
 			expect(client && "firstParty" in client).toBe(false);
 		});
 	});
+
+	describe("#273: allowPlainPkce projection", () => {
+		const entry = {
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "secret",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+			allowPlainPkce: true,
+			// biome-ignore lint/suspicious/noExplicitAny: fixture shorthand, parsed by the schema at construction
+		} as any;
+
+		it("findById surfaces allowPlainPkce so /authorize can admit the method", async () => {
+			// Dropped in the projection, the opt-in is parsed and then lost, so
+			// the client is refused for a method its registration allows.
+			const repo = new InMemoryClientRepository(new Map([["legacy-rp", entry]]));
+			expect((await repo.findById("legacy-rp"))?.allowPlainPkce).toBe(true);
+		});
+
+		it("authenticate surfaces allowPlainPkce too — /token reads it there", async () => {
+			// `/token` projects the authenticated client, not a fresh lookup, so
+			// losing it here would make a code /authorize minted unredeemable.
+			const repo = new InMemoryClientRepository(new Map([["legacy-rp", entry]]));
+			expect((await repo.authenticate("legacy-rp", "secret"))?.allowPlainPkce).toBe(true);
+		});
+
+		it("omits the field entirely when the client did not opt in", async () => {
+			const repo = new InMemoryClientRepository(
+				// biome-ignore lint/suspicious/noExplicitAny: fixture shorthand
+				new Map([["s256-rp", { ...entry, allowPlainPkce: undefined } as any]]),
+			);
+			const client = await repo.findById("s256-rp");
+			expect(client && "allowPlainPkce" in client).toBe(false);
+		});
+	});
 });
