@@ -74,6 +74,11 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 		},
 	});
 
+	// #266 made `oauth.jwt.issuer` required at the schema boundary, so config
+	// validation (step 1) now rejects a missing or malformed issuer before the
+	// CP-20 scan (step 13.5) can run. CP-20 remains as a backstop for a config
+	// object that reaches the DI graph without passing the schema; what these
+	// tests pin is that boot fails, not which of the two gates catches it.
 	it("rejects grantPolicy module when config.oauth.jwt.issuer is missing", async () => {
 		await expect(
 			createApp({
@@ -83,12 +88,9 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 					pathResolver: (p: string) => p,
 				} as never,
 			}),
-		).rejects.toSatisfy((err: unknown) => {
-			if (!(err instanceof BootError)) return false;
-			if (err.reason !== "grant-policy-without-issuer") return false;
-			const d = err.details as { providedBy?: string };
-			return d.providedBy === "test-grant-policy-provider";
-		});
+		).rejects.toSatisfy(
+			(err: unknown) => err instanceof BootError && err.reason === "config-validation-failed",
+		);
 	});
 
 	it("rejects grantPolicy module when issuer is an empty string", async () => {
@@ -101,7 +103,7 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 				} as never,
 			}),
 		).rejects.toSatisfy(
-			(err: unknown) => err instanceof BootError && err.reason === "grant-policy-without-issuer",
+			(err: unknown) => err instanceof BootError && err.reason === "config-validation-failed",
 		);
 	});
 
@@ -117,16 +119,20 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 		await handle.dispose();
 	});
 
-	it("does NOT require issuer when no module provides grantPolicy", async () => {
-		const handle = await createApp({
-			modules: [],
-			bootstrapComponents: {
-				config: configWithIssuer(undefined),
-				pathResolver: (p: string) => p,
-			} as never,
-		});
-		expect(handle).toBeDefined();
-		await handle.dispose();
+	it("requires an issuer even when no module provides grantPolicy", async () => {
+		// Before #266 the issuer was optional unless grantPolicy was wired. It is
+		// now the identity every minted token is bound to, so it is unconditional.
+		await expect(
+			createApp({
+				modules: [],
+				bootstrapComponents: {
+					config: configWithIssuer(undefined),
+					pathResolver: (p: string) => p,
+				} as never,
+			}),
+		).rejects.toSatisfy(
+			(err: unknown) => err instanceof BootError && err.reason === "config-validation-failed",
+		);
 	});
 
 	// CP-20 must also fire when grantPolicy is wired via bootstrapComponents
@@ -146,7 +152,7 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 				} as never,
 			}),
 		).rejects.toSatisfy(
-			(err: unknown) => err instanceof BootError && err.reason === "grant-policy-without-issuer",
+			(err: unknown) => err instanceof BootError && err.reason === "config-validation-failed",
 		);
 	});
 
@@ -163,7 +169,7 @@ describe("CP-20 grantPolicy/issuer invariant — step 13.5", () => {
 				} as never,
 			}),
 		).rejects.toSatisfy(
-			(err: unknown) => err instanceof BootError && err.reason === "grant-policy-without-issuer",
+			(err: unknown) => err instanceof BootError && err.reason === "config-validation-failed",
 		);
 	});
 

@@ -35,6 +35,9 @@ import type {
  *   block with `enabled = false`).
  * - `oauth.jwt.signingKey.local.secret` carries an inline test secret
  *   (hocon uses `${?OAUTH_JWT_SECRET}` substitution).
+ * - `oauth.jwt.issuer` carries a fixed test issuer (hocon uses
+ *   `${?OAUTH_JWT_ISSUER}` substitution). It is required by the schema —
+ *   every token this deployment mints is bound to it.
  * - `repositories.{client,user,code}` declare only the discriminator
  *   `type` field; nested adapter-specific fields (`yaml.path`,
  *   `memory.defaultExpiresIn`, …) are omitted because the schema marks
@@ -80,6 +83,7 @@ export function makeValidCoreConfig() {
 		logging: { level: "info" },
 		oauth: {
 			jwt: {
+				issuer: "https://auth.test",
 				signingKey: {
 					provider: "local",
 					local: {

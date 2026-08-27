@@ -29,6 +29,7 @@ const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 // test-only values — no real keys are embedded here.
 const testEnv = {
 	OAUTH_JWT_SECRET: "test-secret-three-tier",
+	OAUTH_JWT_ISSUER: "https://auth.test",
 	SESSION_SECRET: "test-session-secret-three-tier",
 };
 

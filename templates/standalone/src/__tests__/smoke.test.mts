@@ -40,6 +40,7 @@ const config: AppConfig = {
 	logging: { level: "silent" },
 	oauth: {
 		jwt: {
+			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
 				local: {
@@ -516,9 +517,17 @@ describe("standalone smoke test", () => {
 			type: "local",
 			...(config.oauth.jwt.signingKey.local ?? {}),
 		});
+		// The token must carry the deployment's configured `iss`: introspection
+		// pins it (RFC 9068 §4), and since #266 every deployment has one.
 		const { token } = await generateToken(
 			{},
-			{ keyStore, subject: "u1", expiresIn: 3600, tokenType: "at+jwt" },
+			{
+				keyStore,
+				subject: "u1",
+				expiresIn: 3600,
+				tokenType: "at+jwt",
+				issuer: config.oauth.jwt.issuer,
+			},
 		);
 
 		const res = await request(app)

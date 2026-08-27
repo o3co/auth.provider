@@ -85,6 +85,9 @@ HOCON config file with environment variable overrides. The config schema depends
 http { port = 3000 }
 oauth {
   jwt {
+    # Required. Canonical issuer stamped as `iss` on every minted token:
+    # absolute https URL (http only for a loopback host), no query or fragment.
+    # Boot fails when unset — it is never derived from the Host header.
     issuer = ${?OAUTH_JWT_ISSUER}
     signingKey {
       provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory

@@ -152,6 +152,12 @@ export type {
 	SessionData,
 	SessionMutation,
 } from "./grants/types.mjs";
+export {
+	checkCanonicalIssuer,
+	describeIssuerRejection,
+	type IssuerRejection,
+	isCanonicalIssuer,
+} from "./issuer/canonical.mjs";
 // JWKS publishing — `jwksModule` mounts the route so every provider that signs
 // tokens exposes its verification keys for offline validation; `createJwksRouter`
 // is the underlying factory for direct composition. `DEFAULT_JWKS_PATH` /
