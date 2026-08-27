@@ -113,6 +113,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "grantPolicy"
 		| "refreshTokenFamilyRevocation"
 		| "accessTokenDenylist"
+		| "subjectRevocation"
 		| "userSessionStore"
 		| "sessionRPRegistry"
 		| "sessionFamilyIndex"
@@ -136,6 +137,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"grantPolicy", // Phase 9 Task 4 augmentation — gates POST /oauth/token; allow-all when absent
 			"refreshTokenFamilyRevocation", // A3 §5.3 — introspect/userinfo/logout cascade family-revocation check
 			"accessTokenDenylist", // Wave 1 — RFC 7009 AT revocation; introspect + AT validation consult denylist when wired
+			"subjectRevocation", // #296 — per-subject AT watermark; the same surfaces consult it, so a credential change actually invalidates
 			"userSessionStore", // Phase 8 A4 four-store split
 			"sessionRPRegistry", // Amendment 4 (§1.1.4)
 			"sessionFamilyIndex", // Amendment 4 (§1.1.4)
@@ -164,6 +166,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						grantPolicy: deps.grantPolicy,
 						refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
 						accessTokenDenylist: deps.accessTokenDenylist,
+						subjectRevocation: deps.subjectRevocation,
 						userSessionStore: deps.userSessionStore,
 						sessionRPRegistry: deps.sessionRPRegistry,
 						sessionFamilyIndex: deps.sessionFamilyIndex,
@@ -204,6 +207,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						| "grantPolicy"
 						| "refreshTokenFamilyRevocation"
 						| "accessTokenDenylist"
+						| "subjectRevocation"
 						| "userSessionStore"
 						| "sessionRPRegistry"
 						| "sessionFamilyIndex"

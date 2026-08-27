@@ -32,7 +32,7 @@ interface Watermark {
  * succession must not have the second one, computed on a replica whose clock
  * is behind, move the line backwards and resurrect tokens the first one killed.
  */
-export function createMemorySubjectRevocation(): SubjectRevocation {
+export function createInMemorySubjectRevocation(): SubjectRevocation {
 	const entries = new Map<string, Watermark>();
 
 	return {

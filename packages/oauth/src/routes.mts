@@ -43,6 +43,7 @@ import {
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
 	type SessionRPRegistry,
+	type SubjectRevocation,
 	type UserSessionStore,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -96,6 +97,7 @@ export const createOAuthRouter = async (
 		grantPolicy,
 		refreshTokenFamilyRevocation,
 		accessTokenDenylist,
+		subjectRevocation,
 		userSessionStore,
 		sessionRPRegistry,
 		sessionFamilyIndex,
@@ -115,6 +117,15 @@ export const createOAuthRouter = async (
 		refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 		/** Wave 1 — RFC 7009 access-token revocation. Optional: when absent, AT revocation is a warn-logged no-op. */
 		accessTokenDenylist?: AccessTokenDenylist;
+		/**
+		 * #296 — per-subject access-token watermark. The subject-level companion
+		 * to `accessTokenDenylist`: the denylist revokes a token the client named,
+		 * this revokes every token a subject held as of a credential change, which
+		 * cannot be expressed as a set of jtis. Forwarded to every surface that
+		 * already consults the denylist, so a watermark written by
+		 * `revokeAllForSubject` is honoured rather than inert.
+		 */
+		subjectRevocation?: SubjectRevocation;
 		userSessionStore?: UserSessionStore;
 		sessionRPRegistry?: SessionRPRegistry;
 		sessionFamilyIndex?: SessionFamilyIndex;
@@ -474,6 +485,8 @@ export const createOAuthRouter = async (
 							expectedIssuer: canonicalIssuer,
 							legacyTypAccept: legacyTypAcceptOpt ?? false,
 							...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
+							// #296: subject watermark, alongside the jti denylist.
+							...(subjectRevocation ? { subjectRevocation } : {}),
 							logger,
 						});
 						return next();
@@ -515,6 +528,8 @@ export const createOAuthRouter = async (
 						...(req.oauthClient ? { expectedAudience: req.oauthClient.clientId } : {}),
 						legacyTypAccept: legacyTypAcceptOpt ?? false,
 						...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
+						// #296: subject watermark, alongside the jti denylist.
+						...(subjectRevocation ? { subjectRevocation } : {}),
 						logger,
 					});
 					const { payload } = verified;
@@ -654,6 +669,7 @@ export const createOAuthRouter = async (
 			userSessionStore,
 			refreshTokenFamilyRevocation,
 			accessTokenDenylist,
+			subjectRevocation,
 			issuer: canonicalIssuer,
 			legacyTypAccept: legacyTypAcceptOpt,
 			logger,
@@ -728,6 +744,7 @@ export const createOAuthRouter = async (
 				clientRepository,
 				getFederationProviders,
 				accessTokenDenylist,
+				subjectRevocation,
 				auditSink,
 				logger,
 				issuer: canonicalIssuer,

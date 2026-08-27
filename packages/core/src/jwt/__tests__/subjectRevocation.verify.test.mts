@@ -18,19 +18,21 @@ import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { verifyJwt } from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
-import { createMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
+import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import type { SubjectRevocation } from "#/user-sessions/types.mjs";
 
 const ISSUER = "https://issuer.example";
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 
-const mint = async (opts: { sub?: string; iatSeconds?: number } = {}): Promise<string> => {
+const mint = async (
+	opts: { sub?: string; iatSeconds?: number; omitIat?: boolean } = {},
+): Promise<string> => {
 	const iat = opts.iatSeconds ?? Math.floor(Date.now() / 1000);
-	const builder = new SignJWT({ ...(opts.sub === undefined ? {} : { sub: opts.sub }) })
+	let builder = new SignJWT({ ...(opts.sub === undefined ? {} : { sub: opts.sub }) })
 		.setProtectedHeader({ alg: "HS256", typ: "at+jwt", kid: keyStore.getSigningKidFallback() })
 		.setIssuer(ISSUER)
-		.setIssuedAt(iat)
 		.setExpirationTime(iat + 3600);
+	if (!opts.omitIat) builder = builder.setIssuedAt(iat);
 	return builder.sign(new TextEncoder().encode("test-secret-at-least-32-chars!!"));
 };
 
@@ -44,13 +46,13 @@ const verify = (token: string, subjectRevocation?: SubjectRevocation) =>
 describe("verifyJwt — subject revocation watermark (#296)", () => {
 	it("accepts a token when the subject has no watermark", async () => {
 		const token = await mint({ sub: "u1" });
-		await expect(verify(token, createMemorySubjectRevocation())).resolves.toBeDefined();
+		await expect(verify(token, createInMemorySubjectRevocation())).resolves.toBeDefined();
 	});
 
 	it("rejects a token issued before the watermark", async () => {
 		const nowSec = Math.floor(Date.now() / 1000);
 		const token = await mint({ sub: "u1", iatSeconds: nowSec - 60 });
-		const store = createMemorySubjectRevocation();
+		const store = createInMemorySubjectRevocation();
 		await store.revokeBefore("u1", new Date(nowSec * 1000), new Date(Date.now() + 300_000));
 		await expect(verify(token, store)).rejects.toMatchObject({ reason: "revoked" });
 	});
@@ -62,14 +64,14 @@ describe("verifyJwt — subject revocation watermark (#296)", () => {
 		// costs a retry.
 		const nowSec = Math.floor(Date.now() / 1000);
 		const token = await mint({ sub: "u1", iatSeconds: nowSec });
-		const store = createMemorySubjectRevocation();
+		const store = createInMemorySubjectRevocation();
 		await store.revokeBefore("u1", new Date(nowSec * 1000), new Date(Date.now() + 300_000));
 		await expect(verify(token, store)).rejects.toMatchObject({ reason: "revoked" });
 	});
 
 	it("accepts a token issued after the watermark", async () => {
 		const nowSec = Math.floor(Date.now() / 1000);
-		const store = createMemorySubjectRevocation();
+		const store = createInMemorySubjectRevocation();
 		await store.revokeBefore("u1", new Date((nowSec - 60) * 1000), new Date(Date.now() + 300_000));
 		const token = await mint({ sub: "u1", iatSeconds: nowSec });
 		await expect(verify(token, store)).resolves.toBeDefined();
@@ -77,7 +79,7 @@ describe("verifyJwt — subject revocation watermark (#296)", () => {
 
 	it("does not revoke a different subject's token", async () => {
 		const nowSec = Math.floor(Date.now() / 1000);
-		const store = createMemorySubjectRevocation();
+		const store = createInMemorySubjectRevocation();
 		await store.revokeBefore("u1", new Date(nowSec * 1000), new Date(Date.now() + 300_000));
 		const token = await mint({ sub: "u2", iatSeconds: nowSec - 60 });
 		await expect(verify(token, store)).resolves.toBeDefined();
@@ -100,5 +102,26 @@ describe("verifyJwt — subject revocation watermark (#296)", () => {
 	it("is inert when no store is wired", async () => {
 		const token = await mint({ sub: "u1" });
 		await expect(verify(token)).resolves.toBeDefined();
+	});
+});
+
+describe("verifyJwt — the watermark needs both `sub` and `iat` to mean anything", () => {
+	// The watermark is a statement about one subject at one moment. A token
+	// missing either coordinate cannot be placed relative to it, so the check
+	// is skipped rather than guessed at in either direction — and the token is
+	// still subject to every other check the verifier makes.
+
+	it("skips the check for a token with no sub", async () => {
+		const store = createInMemorySubjectRevocation();
+		await store.revokeBefore("u1", new Date(), new Date(Date.now() + 300_000));
+		const token = await mint({ iatSeconds: Math.floor(Date.now() / 1000) - 60 });
+		await expect(verify(token, store)).resolves.toBeDefined();
+	});
+
+	it("skips the check for a token with no iat", async () => {
+		const store = createInMemorySubjectRevocation();
+		await store.revokeBefore("u1", new Date(), new Date(Date.now() + 300_000));
+		const token = await mint({ sub: "u1", omitIat: true });
+		await expect(verify(token, store)).resolves.toBeDefined();
 	});
 });

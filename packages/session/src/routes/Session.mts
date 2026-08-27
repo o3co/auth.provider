@@ -291,6 +291,13 @@ export const createRouter = (
 						// session exists: a failure here must not deny a legitimate
 						// login, and the cost is that this one session is missed by
 						// `revokeAllForSubject` — logged so it is not silent.
+						//
+						// Written at the earliest point the session exists rather than
+						// after the regeneration below, because the two failure modes
+						// are not symmetric: a missing entry is a live session a
+						// credential change will never find, while an orphan entry
+						// costs one redundant cascade that `cascadeLogout` absorbs
+						// idempotently. The regeneration rollback compensates.
 						if (subjectSessionIndex) {
 							try {
 								await subjectSessionIndex.addSid(user.id, sid, expiresAt);
@@ -317,6 +324,12 @@ export const createRouter = (
 						// primary error is already being returned to the caller.
 						if (sid && userSessionStore) {
 							userSessionStore.delete(sid).catch(() => {
+								/* best-effort cleanup */
+							});
+							// #296: the session is gone, so its subject-index entry must
+							// go too — otherwise `revokeAllForSubject` would enumerate a
+							// sid that no longer exists.
+							subjectSessionIndex?.removeSid(user.id, sid).catch(() => {
 								/* best-effort cleanup */
 							});
 						}

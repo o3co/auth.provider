@@ -24,6 +24,7 @@ import type {
 	Logger,
 	RefreshTokenFamilyRevocation,
 	SessionFederationIndex,
+	SubjectRevocation,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { emitAuditEvent, supportsLock, verifyJwt } from "@o3co/auth-provider-core";
@@ -141,6 +142,13 @@ export interface FederationTokenRouterOptions {
 	/** Wave 1 — RFC 7009: when wired, verifyJwt consults the denylist so revoked ATs respond 401. */
 	accessTokenDenylist?: AccessTokenDenylist;
 	/**
+	 * #296 — when wired, verifyJwt rejects an access token whose `iat` is at or
+	 * before this subject's revocation watermark. The subject-level companion to
+	 * `accessTokenDenylist`: the denylist revokes a named token, this revokes
+	 * every token a subject held as of a credential change.
+	 */
+	subjectRevocation?: SubjectRevocation;
+	/**
 	 * Getter for the federation providers Map. Evaluated at request time (not at
 	 * router construction time) so module init order does not matter.
 	 * Returns undefined when federation is not configured.
@@ -215,6 +223,8 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
 				...(opts.accessTokenDenylist ? { denylist: opts.accessTokenDenylist } : {}),
+				// #296: subject-level watermark, consulted alongside the jti denylist.
+				...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;

@@ -360,6 +360,13 @@ export const createRouter = (
 			// change can find it. Best-effort and after the session exists — a
 			// failure here must not deny a legitimate federated login, and the
 			// cost is that this one session is missed by `revokeAllForSubject`.
+			//
+			// Written HERE, at the earliest point the session exists, rather than
+			// after the last rollback point, because the two failure modes are not
+			// symmetric: a missing entry is a live session a credential change will
+			// never find, while an orphan entry costs one redundant cascade that
+			// `cascadeLogout` absorbs idempotently. So the write goes early and
+			// every rollback path below compensates with `rollbackSubjectIndex`.
 			if (subjectSessionIndex) {
 				try {
 					await subjectSessionIndex.addSid(user.id, sid, expiresAt);
@@ -367,6 +374,20 @@ export const createRouter = (
 					log.error({ err, sub: user.id }, "subject_session_index_write_failed");
 				}
 			}
+
+			/**
+			 * Undo the subject-index entry written above. Best-effort like every
+			 * other rollback step here — the caller's original error is the one
+			 * that must reach them.
+			 */
+			const rollbackSubjectIndex = async (): Promise<void> => {
+				if (!subjectSessionIndex) return;
+				try {
+					await subjectSessionIndex.removeSid(user.id, sid);
+				} catch {
+					// best-effort — bounded by the index's own TTL
+				}
+			};
 
 			// A4 §5.2: federation linkage recorded as a sibling-store operation.
 			// Per A4 §6.1, this call is NOT atomic with userSessionStore.create above.
@@ -384,6 +405,8 @@ export const createRouter = (
 				} catch {
 					// best-effort — ignore (the original error is the one returned)
 				}
+				// #296: the session is gone, so its subject-index entry must go too.
+				await rollbackSubjectIndex();
 				log.warn({ err }, "sessionFederationIndex.addFederation failed");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -421,6 +444,8 @@ export const createRouter = (
 				} catch {
 					// best-effort — ignore
 				}
+				// #296: the session is gone, so its subject-index entry must go too.
+				await rollbackSubjectIndex();
 				log.error(
 					{ err: regenerateErr },
 					"session regeneration failed after userSessionStore.create",
@@ -498,6 +523,8 @@ export const createRouter = (
 				} catch {
 					// best-effort — ignore
 				}
+				// #296: the session is gone, so its subject-index entry must go too.
+				await rollbackSubjectIndex();
 				// Best-effort: destroy the fresh (empty) session so the store doesn't
 				// accumulate authenticated-nothing sessions on post-regenerate failures.
 				await new Promise<void>((resolve) => {

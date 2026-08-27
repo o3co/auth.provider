@@ -411,12 +411,14 @@ export { createInMemorySessionFederationIndex } from "./user-sessions/memory/ses
 export { createInMemorySessionRPRegistry } from "./user-sessions/memory/sessionRPRegistry.mjs";
 // #296: subject-keyed session index + per-subject access-token watermark, and
 // the orchestrator a credential-change flow calls after writing the new secret.
-export { createMemorySubjectRevocation } from "./user-sessions/memory/subjectRevocation.mjs";
+export { createInMemorySubjectRevocation } from "./user-sessions/memory/subjectRevocation.mjs";
 export { createInMemorySubjectSessionIndex } from "./user-sessions/memory/subjectSessionIndex.mjs";
 export { createInMemoryUserSessionStore } from "./user-sessions/memory/userSessionStore.mjs";
 export { memorySessionStoresModule } from "./user-sessions/modules/memory.mjs";
 export {
 	type CascadeSession,
+	type RevokeAllForSubjectCapability,
+	type RevokeAllForSubjectFailure,
 	type RevokeAllForSubjectOptions,
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,

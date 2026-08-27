@@ -28,6 +28,29 @@ import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
  */
 export type CascadeSession = (sid: string) => Promise<{ readonly ok: boolean }>;
 
+/**
+ * The two optional slots this helper consumes. Named rather than free strings
+ * so a caller can branch on them, and so the set is greppable when #321 adds
+ * the Redis adapters that fill them.
+ */
+export type RevokeAllForSubjectCapability = "subjectSessionIndex" | "subjectRevocation";
+
+/**
+ * One store call that was attempted and threw.
+ *
+ * Distinct from {@link RevokeAllForSubjectResult.unavailable}, and the
+ * distinction matters operationally: `unavailable` is a composition gap fixed
+ * by wiring a module, a failure here is a backend outage fixed by retrying.
+ * Collapsing them would send an operator to the wrong runbook.
+ */
+export interface RevokeAllForSubjectFailure {
+	readonly capability: RevokeAllForSubjectCapability;
+	readonly operation: "revokeBefore" | "listSids" | "removeSid";
+	/** The session the failing call concerned, for the per-session operations. */
+	readonly sid?: string;
+	readonly error: unknown;
+}
+
 export interface RevokeAllForSubjectOptions {
 	readonly subject: string;
 	/** How long the watermark must outlive — normally the access-token TTL. */
@@ -56,7 +79,22 @@ export interface RevokeAllForSubjectResult {
 	 * non-empty list means the revocation was **partial** and the caller must
 	 * treat it as a failure.
 	 */
-	readonly unavailable: readonly ("subjectSessionIndex" | "subjectRevocation")[];
+	readonly unavailable: readonly RevokeAllForSubjectCapability[];
+	/**
+	 * Store calls that were wired, attempted, and threw. Empty on the happy
+	 * path. See {@link RevokeAllForSubjectFailure} for why this is separate
+	 * from `unavailable`.
+	 */
+	readonly failures: readonly RevokeAllForSubjectFailure[];
+	/**
+	 * Everything that was asked for actually happened.
+	 *
+	 * The one field a caller has to check. Deriving it from the other four is a
+	 * four-way condition every integrator would have to get right independently,
+	 * and getting it wrong reads as a successful revocation — so it is computed
+	 * here once.
+	 */
+	readonly complete: boolean;
 }
 
 /**
@@ -81,6 +119,12 @@ export interface RevokeAllForSubjectResult {
  *     perhaps alive", not the reverse. A live session with no usable token
  *     can be cleaned up on retry; a live token is the thing being revoked.
  *
+ * **This never throws.** The caller has already written the new credential and
+ * has no undo, so an exception would replace a partial result it could act on
+ * — retry these sids, alert on that outage — with nothing at all. Every store
+ * call is therefore reported rather than propagated, and `complete` is the one
+ * field a caller has to check.
+ *
  * Does **not** fix #276 — the local logout route still does not run the
  * cascade for its own session. This builds on `cascadeLogout`, which is
  * complete; the gap there is that one caller does not invoke it.
@@ -89,7 +133,8 @@ export async function revokeAllForSubject(
 	opts: RevokeAllForSubjectOptions,
 ): Promise<RevokeAllForSubjectResult> {
 	const now = opts.now ?? Date.now;
-	const unavailable: ("subjectSessionIndex" | "subjectRevocation")[] = [];
+	const unavailable: RevokeAllForSubjectCapability[] = [];
+	const failures: RevokeAllForSubjectFailure[] = [];
 
 	// Step 1 — watermark, before anything else. See the ordering note above.
 	let tokensRevoked = false;
@@ -97,12 +142,20 @@ export async function revokeAllForSubject(
 		unavailable.push("subjectRevocation");
 	} else {
 		const at = now();
-		await opts.subjectRevocation.revokeBefore(
-			opts.subject,
-			new Date(at),
-			new Date(at + opts.watermarkTtlMs),
-		);
-		tokensRevoked = true;
+		try {
+			await opts.subjectRevocation.revokeBefore(
+				opts.subject,
+				new Date(at),
+				new Date(at + opts.watermarkTtlMs),
+			);
+			tokensRevoked = true;
+		} catch (error) {
+			// Reported, not thrown, and the cascade below still runs: a watermark
+			// that could not be written does not make the subject's sessions any
+			// less worth killing, and returning here would revoke nothing at all.
+			failures.push({ capability: "subjectRevocation", operation: "revokeBefore", error });
+			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_watermark_failed");
+		}
 	}
 
 	// Step 2 — cascade every session the subject holds.
@@ -111,7 +164,17 @@ export async function revokeAllForSubject(
 	if (opts.subjectSessionIndex === undefined) {
 		unavailable.push("subjectSessionIndex");
 	} else {
-		const sids = await opts.subjectSessionIndex.listSids(opts.subject);
+		const index = opts.subjectSessionIndex;
+		let sids: readonly string[] = [];
+		try {
+			sids = await index.listSids(opts.subject);
+		} catch (error) {
+			// Nothing to enumerate means nothing to cascade, but the watermark
+			// above may already be in force — which is why this is a reported
+			// partial result rather than a thrown one.
+			failures.push({ capability: "subjectSessionIndex", operation: "listSids", error });
+			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_list_sids_failed");
+		}
 		for (const sid of sids) {
 			// Sequential, not concurrent: each cascade is itself a multi-store
 			// sequence whose ordering matters, and a credential change is rare
@@ -124,13 +187,26 @@ export async function revokeAllForSubject(
 				opts.logger?.error({ err, subject: opts.subject, sid }, "revoke_all_cascade_failed");
 				ok = false;
 			}
-			if (ok) {
-				sessionsRevoked.push(sid);
-				await opts.subjectSessionIndex.removeSid(opts.subject, sid);
-			} else {
+			if (!ok) {
 				// Left in the index deliberately: the entry is what a retry
 				// enumerates. Removing it would strand a live session.
 				sessionsFailed.push(sid);
+				continue;
+			}
+			sessionsRevoked.push(sid);
+			try {
+				await index.removeSid(opts.subject, sid);
+			} catch (error) {
+				// Bookkeeping only, and deliberately not fatal to the loop: the
+				// session's cascade already succeeded, so it stays counted as
+				// revoked. A stale entry costs the next call one redundant
+				// cascade, which is idempotent — whereas aborting here would
+				// leave the subject's remaining sessions live.
+				failures.push({ capability: "subjectSessionIndex", operation: "removeSid", sid, error });
+				opts.logger?.error(
+					{ err: error, subject: opts.subject, sid },
+					"revoke_all_remove_sid_failed",
+				);
 			}
 		}
 	}
@@ -139,5 +215,7 @@ export async function revokeAllForSubject(
 		opts.logger?.error({ subject: opts.subject, unavailable }, "revoke_all_for_subject_incomplete");
 	}
 
-	return { sessionsRevoked, sessionsFailed, tokensRevoked, unavailable };
+	const complete = unavailable.length === 0 && failures.length === 0 && sessionsFailed.length === 0;
+
+	return { sessionsRevoked, sessionsFailed, tokensRevoked, unavailable, failures, complete };
 }
