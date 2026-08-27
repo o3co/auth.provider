@@ -46,6 +46,71 @@ function issueMessages(result: ReturnType<typeof AppConfigSchema.safeParse>): st
 	return result.success ? "" : result.error.issues.map((i) => i.message).join("\n");
 }
 
+describe("the session object's cross-field check does not swallow its sub-sections", () => {
+	// #282 wraps `session` in a `.superRefine(...)` for the SameSite/Secure
+	// rule. #272's `session.csrf` sub-section landed inside the same object.
+	// A refinement wrapper that stopped exposing `.shape` would break ts.hocon's
+	// schema-aware coercion for everything under `session` — and it would break
+	// it SILENTLY: `ttlSeconds` would survive as the string "7200", pass a
+	// `.max()` it never really ran, and only fail once the CSRF token arithmetic
+	// reached it at request time. Pinned here so a future refactor of either
+	// feature cannot quietly undo the other.
+
+	it("keeps session.csrf reachable and typed through the refinement wrapper", () => {
+		const base = makeValidAppConfig();
+		const result = AppConfigSchema.safeParse({
+			...base,
+			session: {
+				...base.session,
+				csrf: { trustedOrigins: ["https://app.example.com"], ttlSeconds: 7200 },
+			},
+		});
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.data.session.csrf?.ttlSeconds).toBe(7200);
+			expect(result.data.session.csrf?.trustedOrigins).toEqual(["https://app.example.com"]);
+		}
+	});
+
+	it("still coerces a string csrf.ttlSeconds, as HOCON env substitution produces", () => {
+		const base = makeValidAppConfig();
+		const result = AppConfigSchema.safeParse({
+			...base,
+			session: { ...base.session, csrf: { trustedOrigins: [], ttlSeconds: "900" } },
+		});
+		expect(result.success).toBe(true);
+		if (result.success) expect(result.data.session.csrf?.ttlSeconds).toBe(900);
+	});
+
+	it("keeps #272's 86400 policy ceiling on csrf.ttlSeconds — the #282 one-year bound must not loosen it", () => {
+		const base = makeValidAppConfig();
+		const over = AppConfigSchema.safeParse({
+			...base,
+			session: { ...base.session, csrf: { trustedOrigins: [], ttlSeconds: 86_401 } },
+		});
+		expect(over.success).toBe(false);
+		expect(issuePaths(over)).toContain("session.csrf.ttlSeconds");
+
+		const at = AppConfigSchema.safeParse({
+			...base,
+			session: { ...base.session, csrf: { trustedOrigins: [], ttlSeconds: 86_400 } },
+		});
+		expect(at.success).toBe(true);
+	});
+
+	it("reports BOTH a weak secret and a bad csrf ttl rather than stopping at the first", () => {
+		const base = makeValidAppConfig();
+		const result = AppConfigSchema.safeParse({
+			...base,
+			session: { ...base.session, secret: "x", csrf: { trustedOrigins: [], ttlSeconds: 0 } },
+		});
+		expect(result.success).toBe(false);
+		const paths = issuePaths(result);
+		expect(paths).toContain("session.secret");
+		expect(paths).toContain("session.csrf.ttlSeconds");
+	});
+});
+
 describe("session.secret entropy floor", () => {
 	it("accepts the fixture's baseline secret", () => {
 		expect(AppConfigSchema.safeParse(makeValidAppConfig()).success).toBe(true);

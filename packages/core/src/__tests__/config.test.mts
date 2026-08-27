@@ -52,6 +52,13 @@ describe("provider config", () => {
 		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(config.session.name).toBe("__Host-auth.session");
 		expect(config.redisSessionStores?.keyPrefix).toBe("ss:");
+		// #282 wraps `session` in a cross-field refinement (SameSite/Secure) and
+		// #272 put `session.csrf` inside the same object. Resolve the real
+		// reference.conf and assert the sub-section still arrives COERCED — a
+		// wrapper that broke ts.hocon's shape traversal would leave `ttlSeconds`
+		// as the string "7200" and fail only once the CSRF arithmetic ran.
+		expect(config.session.csrf?.ttlSeconds).toBe(7200);
+		expect(config.session.csrf?.trustedOrigins).toEqual([]);
 	});
 
 	it("fails to build a keystore when reference.conf is loaded with NO key material (#282)", async () => {
