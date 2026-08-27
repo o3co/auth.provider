@@ -13,6 +13,10 @@ Deployable server template for auth.provider. This is the composition root — i
 
 When running multiple instances of the standalone server behind a load balancer, point `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` at a **shared** Redis 7.2+ instance. Without a shared Redis URL, every replica holds refresh-token families in its own connection (and any local-only Redis), so a refresh request that lands on a replica that did not issue the token returns `invalid_grant` on every other request in a round-robin LB.
 
+**Set `HTTP_TRUST_PROXY=true` behind a load balancer.** It defaults to `false`, which makes `req.ip` the *load balancer's* address rather than the client's. Every rate limit keyed by IP — the OAuth endpoint limiters and the `POST /session/login` brute-force guard — then shares **one bucket across all users**: the first 20 login attempts from anyone exhaust the window and every subsequent user gets `429`. The failure reads like an attack rather than a misconfiguration, which is what makes it expensive to diagnose at 3am. Set it whenever anything terminates TLS or proxies in front of this service, and make sure that hop is the one setting `X-Forwarded-For`.
+
+**Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. Since #270 the login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; both adapters seed their own `limits.login` from it, so there is nothing to restate.
+
 Other multi-replica considerations covered by the default modules:
 
 - The session store is wired via `redisSessionStoresModule`; set the corresponding session-store Redis URL (per `session.storage.redis.url`).
@@ -59,7 +63,7 @@ fail fast rather than silently falling back to defaults.
 | Variable | Default | Description |
 |---|---|---|
 | `HTTP_PORT` | `3000` | Port the server listens on |
-| `HTTP_TRUST_PROXY` | `false` | Set to `true` when running behind a reverse proxy |
+| `HTTP_TRUST_PROXY` | `false` | Set to `true` when running behind a reverse proxy. **Required behind a load balancer** — otherwise every IP-keyed rate limit shares one bucket across all users. See [Multi-replica deployments](#multi-replica-deployments) |
 | `HTTP_READINESS_TIMEOUT_MS` | `1000` | Per-probe deadline for `/readyz` (see [Health endpoints](#health-endpoints)) |
 | `LOG_LEVEL` | `info` | Minimum level emitted: `trace`\|`debug`\|`info`\|`warn`\|`error`\|`fatal`\|`silent` |
 

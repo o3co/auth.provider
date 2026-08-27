@@ -431,9 +431,16 @@ export const fullSectionsSchema = z.object({
 	}),
 	/**
 	 * Rate-limit config for SESSION routes (e.g. `/session/login` bruteforce
-	 * protection). Uses `windowMs` (milliseconds) because this section is
-	 * consumed by `express-rate-limit` in
-	 * `packages/session/src/routes/Session.mts`.
+	 * protection). Uses `windowMs` (milliseconds) for historical reasons —
+	 * the section was shaped by `express-rate-limit`, which
+	 * `packages/session/src/routes/Session.mts` consumed until #270.
+	 *
+	 * Since #270 `/session/login` runs on the shared `rateLimiter` component
+	 * instead, keyed `login:ip:<ip>`, so the guard is one bucket set across
+	 * replicas rather than one per process. These values stay the single
+	 * source of truth: both bundled limiter adapters seed their own
+	 * `limits.login` from them (`resolveLoginLimitSpec`), converting to the
+	 * whole seconds a `RateLimitSpec` takes.
 	 *
 	 * IH-18 — config split:
 	 * This section ONLY governs session-route rate limiting. OAuth endpoint
@@ -500,12 +507,14 @@ export const fullSectionsSchema = z.object({
 				.optional(),
 		})
 		.optional(),
-	// Wave 5d (IH-14 + OR-M1): adapter switch for the OAuth-endpoint
-	// rate limiter. Default `"memory"` lives in HOCON. NOTE: this is a
-	// SEPARATE rate-limit system from `rateLimit.login.windowMs` (which
-	// governs session-route bruteforce protection via express-rate-limit
-	// in `packages/session/src/routes/Session.mts`). See `RateLimitSpec`
-	// JSDoc + `reference.conf` comments for the IH-18 split rationale.
+	// Wave 5d (IH-14 + OR-M1): adapter switch for the rate limiter. Default
+	// `"memory"` lives in HOCON. Since #270 this one component serves BOTH
+	// the OAuth endpoints and `/session/login`, so `"redis"` is what makes
+	// either of them safe across replicas. `rateLimit.login.windowMs` remains
+	// a separate config *section* — it configures the login window and limit,
+	// which the adapters seed into `limits.login` — but no longer a separate
+	// rate-limit *system*. See `RateLimitSpec` JSDoc + `reference.conf`
+	// comments for the IH-18 split rationale.
 	rateLimiter: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),

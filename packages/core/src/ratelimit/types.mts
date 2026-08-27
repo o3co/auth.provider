@@ -28,6 +28,21 @@ export interface RateLimitDecision {
 	readonly remaining?: number;
 	readonly resetAt?: Date;
 	readonly reason?: string;
+	/**
+	 * The limit the adapter actually applied to this key.
+	 *
+	 * Adapters resolve a spec per key prefix, so the enforced limit is not
+	 * always the one the *caller* configured: an operator who declares
+	 * `limits.login` on the adapter overrides the value seeded from
+	 * `rateLimit.login`, and a key with no matching prefix falls to
+	 * `defaultLimit`. A caller emitting RFC 9239 `RateLimit-*` headers has to
+	 * report what was enforced, not what it asked for, or the headers
+	 * advertise a limit no request is measured against.
+	 *
+	 * Optional so pre-existing custom adapters keep compiling; callers fall
+	 * back to their own configured value when it is absent.
+	 */
+	readonly limit?: number;
 }
 
 /**

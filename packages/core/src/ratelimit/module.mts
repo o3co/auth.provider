@@ -5,6 +5,7 @@
 
 import { z } from "zod";
 import { defineModule } from "../modules/index.mjs";
+import { resolveLoginLimitSpec } from "./loginSpec.mjs";
 import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
 import type { RateLimitSpec } from "./types.mjs";
 
@@ -52,7 +53,11 @@ export const memoryRateLimiterModule = defineModule({
 				}
 			).memoryRateLimiter;
 			return createMemoryRateLimiter({
-				limits: cfg.limits,
+				// `/session/login` limits under the `login:` prefix, but its window
+				// and limit are configured at `rateLimit.login`. Seeding keeps that
+				// the single source of truth; an operator-declared `limits.login`
+				// still wins. See `resolveLoginLimitSpec` (#270).
+				limits: resolveLoginLimitSpec(cfg.limits, deps.config),
 				defaultLimit: cfg.defaultLimit,
 				maxBuckets: cfg.maxBuckets,
 			});

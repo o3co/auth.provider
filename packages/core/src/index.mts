@@ -291,6 +291,12 @@ export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
+export { resolveLoginLimitSpec } from "./ratelimit/loginSpec.mjs";
+export {
+	createMemoryRateLimiter,
+	DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS,
+	type MemoryRateLimiterOptions,
+} from "./ratelimit/memory.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
 // @o3co/auth-provider-redis (S3).

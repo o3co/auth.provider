@@ -112,7 +112,7 @@ export const sessionModule = defineModule<
 	| "sessionFederationIndex"
 	| "federationProviders"
 	| "federationRedirectPolicyResolver",
-	"logger"
+	"logger" | "rateLimiter"
 >({
 	name: "session",
 	configSchema: sessionConfigSchema,
@@ -125,7 +125,10 @@ export const sessionModule = defineModule<
 		"federationProviders",
 		"federationRedirectPolicyResolver",
 	],
-	optional: ["logger"],
+	// `rateLimiter` is optional so a composition that installs no limiter module
+	// still boots; the session router falls back to a private in-memory limiter
+	// and warns that the login guard is per-process (#270).
+	optional: ["logger", "rateLimiter"],
 	contributes: {
 		routes: [
 			(deps) => {
@@ -137,6 +140,7 @@ export const sessionModule = defineModule<
 						userRepository: deps.userRepository,
 						config,
 						userSessionStore: deps.userSessionStore,
+						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
 						sessionTtlMs: config.session.maxAge,
 						logger: deps.logger ?? consoleLogger,
 					}),
