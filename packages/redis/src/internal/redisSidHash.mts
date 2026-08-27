@@ -19,7 +19,14 @@ import type { SessionRPRegistryClient } from "../clients.mjs";
 export interface RedisSidHashOptions {
 	readonly client: SessionRPRegistryClient;
 	readonly keyPrefix: string;
+	/**
+	 * Fields requested per `HSCAN` round-trip. A hint to Redis, not a hard
+	 * limit on a page's size. Default 100.
+	 */
+	readonly scanCount?: number;
 }
+
+const DEFAULT_SCAN_COUNT = 100;
 
 export interface RedisSidHash {
 	setField(sid: string, id: string, jsonValue: string, expiresAt: Date): Promise<void>;
@@ -47,9 +54,23 @@ export interface RedisSidHash {
  * legal value is fixed at session-create time.
  *
  * **Writes after expiry are no-op**: prevents zombie keys with no TTL.
+ *
+ * **Reads are cursor-based** (`HSCAN`, #291). `HVALS` returned every field in
+ * one reply whose size was bounded by nothing but how many relying parties a
+ * session had accumulated — a single blocking command on the connection every
+ * other adapter in this package shares, issued on the logout path. The trade
+ * is that `HSCAN` can hand back the same field on more than one cursor when
+ * the hash rehashes mid-iteration, so the read de-duplicates by field name.
+ *
+ * The read is paged, **not truncated**: `listRPs` feeds back-channel logout,
+ * and a cap would silently skip notifying the relying parties past it.
+ *
+ * **Removal is `UNLINK`**, not `DEL` — freeing a session's whole RP hash is
+ * not worth blocking the shared connection during a logout.
  */
 export function createRedisSidHash(opts: RedisSidHashOptions): RedisSidHash {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
+	const scanCount = opts.scanCount ?? DEFAULT_SCAN_COUNT;
 	return {
 		async setField(sid, id, jsonValue, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
@@ -60,10 +81,17 @@ export function createRedisSidHash(opts: RedisSidHashOptions): RedisSidHash {
 			await pipeline.exec();
 		},
 		async listValues(sid) {
-			return opts.client.hVals(k(sid));
+			// Keyed by field so a field returned on two cursors counts once;
+			// the later observation wins because it is the fresher read.
+			// Insertion order is preserved, which HSCAN does not define anyway.
+			const byField = new Map<string, string>();
+			for await (const [field, value] of opts.client.hScanIterator(k(sid), { COUNT: scanCount })) {
+				byField.set(field, value);
+			}
+			return [...byField.values()];
 		},
 		async removeBySid(sid) {
-			await opts.client.del(k(sid));
+			await opts.client.unlink(k(sid));
 		},
 	};
 }

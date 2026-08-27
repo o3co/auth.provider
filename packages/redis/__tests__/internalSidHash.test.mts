@@ -145,6 +145,23 @@ describe("createRedisSidHash", () => {
 		const out = await h.listValues(sid);
 		expect(out).toHaveLength(1);
 	});
+
+	// #291: `listValues` walks HSCAN cursors instead of issuing one HVALS.
+	// 500 fields is well past `hash-max-listpack-entries` (128 by default), so
+	// Redis stores this as a real hashtable and the read genuinely spans
+	// several cursors — including, potentially, one that repeats a field.
+	it("listValues returns every field of a hash far larger than one cursor page", async () => {
+		const h = createRedisSidHash({ client, keyPrefix: prefix("paged"), scanCount: 25 });
+		const sid = "sid-paged";
+		const expiresAt = FUTURE();
+		for (let i = 0; i < 500; i++) {
+			await h.setField(sid, `id-${i}`, JSON.stringify({ i }), expiresAt);
+		}
+		const out = await h.listValues(sid);
+		expect(out).toHaveLength(500);
+		const seen = new Set(out.map((v) => (JSON.parse(v) as { i: number }).i));
+		expect(seen.size).toBe(500);
+	});
 });
 
 function makeWrapper(io: Redis): SessionRPRegistryClient {
@@ -170,9 +187,18 @@ function makeWrapper(io: Redis): SessionRPRegistryClient {
 	};
 
 	return {
-		del: (k) => io.del(k),
+		unlink: (k) => io.unlink(k),
 		hSet: (k, f, v) => io.hset(k, f, v) as Promise<number>,
-		hVals: (k) => io.hvals(k),
+		hScanIterator: (key, opts) =>
+			(async function* () {
+				const stream = io.hscanStream(key, { count: opts?.COUNT });
+				for await (const flat of stream) {
+					const pairs = flat as string[];
+					for (let i = 0; i + 1 < pairs.length; i += 2) {
+						yield [pairs[i] as string, pairs[i + 1] as string] as const;
+					}
+				}
+			})(),
 		multi: () => buildMulti(),
 		pExpireAt: (k, ms) => io.pexpireat(k, ms),
 		pExpireGT: async (k, ms) => {

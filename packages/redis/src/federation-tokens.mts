@@ -14,6 +14,7 @@ import { z } from "zod";
 import type { FederationTokenStoreClient } from "./clients.mjs";
 import { decryptTokenField, encryptTokenField } from "./internal/crypto.mjs";
 import { createRedisLock } from "./internal/lock.mjs";
+import { createRedisSidSet } from "./internal/redisSidSet.mjs";
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
@@ -80,9 +81,47 @@ export interface RedisFederationTokenStoreOptions {
 	 * Default: 86400 seconds (24 hours). Spec Section 5.2.
 	 */
 	ttl?: number;
+	/**
+	 * **Migration flag (#291), scheduled for removal.** Keep the legacy
+	 * `SCAN MATCH ${keyPrefix}${sid}:*` sweep as a fallback at the end of
+	 * `removeBySid`, in addition to the per-session key index.
+	 *
+	 * Records written by v0.9.x and earlier have no index entry, so an index-
+	 * only `removeBySid` would walk straight past them and leave a logged-out
+	 * session's upstream refresh tokens sitting in Redis until the store TTL
+	 * expired them. The fallback closes that window on an upgrade.
+	 *
+	 * It is also what the flag costs: while enabled, every `removeBySid` still
+	 * performs one keyspace scan, which is the O(keyspace) work #291 is about.
+	 * The index-driven removal runs first regardless, so the deletes are always
+	 * bounded; the scan is a safety net, not the mechanism.
+	 *
+	 * **When to turn it off**: once no session predating the upgrade can still
+	 * exist — that is, once `ttl` (default 24 h) has elapsed since the last
+	 * replica running the previous release stopped writing. Set it to `false`
+	 * then, and logout stops touching the keyspace at all. A deployment whose
+	 * Redis had no federation records before the upgrade (a fresh database, or
+	 * `federationTokenStore` newly enabled) can set it to `false` immediately.
+	 *
+	 * **When it will be removed**: the flag and the scan path go away together
+	 * in the release after next, at which point `scanIterator` also leaves
+	 * `FederationTokenStoreClient`.
+	 *
+	 * Default: `true` — an upgrade that changes no configuration must not
+	 * silently orphan tokens.
+	 */
+	scanFallback?: boolean;
 }
 
 const DEFAULT_TTL_SECONDS = 86400;
+
+/**
+ * Keys removed per `UNLINK`, and members requested per `SSCAN` / `SCAN`
+ * round-trip. Bounds the size of any single command `removeBySid` issues on
+ * the shared connection, so neither a heavily-linked session nor a large
+ * keyspace turns one logout into one enormous command.
+ */
+const REMOVE_BATCH_SIZE = 100;
 
 interface Envelope {
 	accessToken: string;
@@ -118,7 +157,25 @@ export function createRedisFederationTokenStore(
 		throw new Error("FederationTokenStore redis: ttl must be a positive finite number of seconds");
 	}
 	const storeTtlMs = ttlSeconds * 1000;
+	const scanFallback = opts.scanFallback ?? true;
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
+
+	// #291: per-session key index. One SET per sid holding the federation
+	// names attached to it, so `removeBySid` can name the keys it must delete
+	// instead of hunting for them. Its own sub-namespace, like `lock:` below,
+	// keeps it clear of the `${prefix}${sid}:*` envelope keyspace — the
+	// migration fallback matches that pattern and must not sweep up indexes
+	// belonging to other sessions.
+	//
+	// This shares the constraint `lock:` has carried since D-9: a sid equal to
+	// a sub-namespace token ("idx", "lock") would make the two layouts
+	// ambiguous. Sids are opaque generated identifiers, so this is a bound on
+	// what may be passed in rather than a case to handle.
+	const index = createRedisSidSet({
+		client: opts.client,
+		keyPrefix: `${prefix}idx:`,
+		scanCount: REMOVE_BATCH_SIZE,
+	});
 
 	// Advisory lock: uses a separate key namespace (lock:) so lock keys never
 	// collide with token envelope keys. The lock client shim bridges from
@@ -183,11 +240,35 @@ export function createRedisFederationTokenStore(
 	});
 
 	const writeEnv = async (sid: string, name: string, env: Envelope) => {
+		// Index BEFORE the envelope. A failure between the two then leaves an
+		// index member pointing at a key that does not exist — harmless, the
+		// removal path unlinks missing keys without complaint. The other order
+		// would leave an envelope nothing knows about, which is precisely the
+		// orphan this index exists to prevent.
+		//
+		// This costs the write path one extra round-trip. That is the trade
+		// #291 makes: a write happens once when a federation is linked, while
+		// the read it pays for happens on every logout and used to be
+		// O(the entire keyspace).
+		await index.add(sid, name, storeTtlMs);
 		// Redis TTL is the store lifetime (session upper bound), NOT the access
 		// token's expiresAt. The access token's expiry is preserved inside the
 		// envelope so F-6 consumers can decide to refresh; the record itself
 		// must outlive the access_token so the refresh_token remains available.
 		await opts.client.set(k(sid, name), JSON.stringify(env), "PX", storeTtlMs);
+	};
+
+	/** Unlink `keys` in bounded batches. */
+	const unlinkBatched = async (keys: AsyncIterable<string>): Promise<void> => {
+		const batch: string[] = [];
+		for await (const key of keys) {
+			batch.push(key);
+			if (batch.length >= REMOVE_BATCH_SIZE) {
+				await opts.client.unlink(...batch);
+				batch.length = 0;
+			}
+		}
+		if (batch.length > 0) await opts.client.unlink(...batch);
 	};
 
 	return {
@@ -208,6 +289,10 @@ export function createRedisFederationTokenStore(
 				// key/crypto mismatches surface as "missing tokens" — hard to
 				// debug. Returning null after delete signals re_authentication.
 				await opts.client.del(key);
+				// Drop the index member too: the envelope it named is gone, and
+				// an index that outlives its records makes `removeBySid` do work
+				// for keys that cannot exist.
+				await index.remove(sid, name);
 				return null;
 			}
 		},
@@ -215,20 +300,30 @@ export function createRedisFederationTokenStore(
 			await writeEnv(sid, name, toEnvelope(tokens));
 		},
 		async removeBySid(sid) {
-			// Use SCAN (non-blocking) instead of KEYS (O(N), blocking). Each
-			// batch of scanned keys is deleted before we await the next batch.
-			const keysBatch: string[] = [];
-			for await (const key of opts.client.scanIterator({ MATCH: sidPattern(sid), COUNT: 100 })) {
-				keysBatch.push(key);
-				if (keysBatch.length >= 100) {
-					await opts.client.del(...keysBatch);
-					keysBatch.length = 0;
-				}
-			}
-			if (keysBatch.length > 0) await opts.client.del(...keysBatch);
+			// #291: the session's own index names the keys, so this is O(the
+			// session's federations) rather than O(the keyspace). Read in
+			// SSCAN pages and unlinked in bounded batches, so neither half
+			// grows with how heavily linked the session is.
+			await unlinkBatched(
+				(async function* () {
+					for await (const name of index.members(sid)) yield k(sid, name);
+				})(),
+			);
+			await index.removeBySid(sid);
+
+			if (!scanFallback) return;
+			// Migration fallback — see `scanFallback` in the options doc. Records
+			// written before the index existed have no member naming them, so
+			// they are only reachable by the pattern scan the index replaced.
+			// SCAN (cursor-based) rather than KEYS (O(N), blocking), and the
+			// same bounded UNLINK batches.
+			await unlinkBatched(
+				opts.client.scanIterator({ MATCH: sidPattern(sid), COUNT: REMOVE_BATCH_SIZE }),
+			);
 		},
 		async delete(sid, name) {
 			await opts.client.del(k(sid, name));
+			await index.remove(sid, name);
 		},
 		acquireLock(a) {
 			return lock.acquireLock(a);
@@ -244,7 +339,8 @@ export function createRedisFederationTokenStore(
  *   { client: FederationTokenStoreClient,
  *     encryption: EncryptionConfig | { mode?: "required" | "allow-plaintext", key?: Buffer | string },
  *     keyPrefix?: string,
- *     ttl?: number }
+ *     ttl?: number,
+ *     scanFallback?: boolean }
  *
  * Encryption defaults: mode = "required", key MUST be 32-byte (raw Buffer or
  * base64 string). `mode = "allow-plaintext"` emits a startup warning and is
@@ -259,21 +355,34 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		encryption?: { mode?: "required" | "allow-plaintext"; key?: Buffer | string };
 		keyPrefix?: string;
 		ttl?: number;
+		scanFallback?: boolean;
 	};
 	if (!cfg.client) {
 		throw new Error("federationTokenStore.redis: 'client' option is required");
 	}
 	const clientObj = cfg.client as Record<string, unknown>;
-	// `compareAndDelete` is required by the advisory-lock release path (D-9).
-	// Validate it here so a custom client missing the method fails at builder
-	// time with a clear message rather than at first lock release with an
-	// obscure `TypeError`.
-	const requiredMethods = ["get", "set", "del", "scanIterator", "compareAndDelete"] as const;
+	// `compareAndDelete` is required by the advisory-lock release path (D-9);
+	// `unlink` and the three SET primitives by the per-session key index
+	// (#291). Validate them here so a custom client missing one fails at
+	// builder time with a clear message rather than at first logout with an
+	// obscure `TypeError` — on the path whose whole job is to make sure a
+	// logged-out session's upstream tokens are gone.
+	const requiredMethods = [
+		"get",
+		"set",
+		"del",
+		"unlink",
+		"sAddWithTtl",
+		"sRem",
+		"sScanIterator",
+		"scanIterator",
+		"compareAndDelete",
+	] as const;
 	const missing = requiredMethods.filter((m) => typeof clientObj[m] !== "function");
 	if (missing.length > 0) {
 		throw new Error(
 			`federationTokenStore.redis: client is missing required method(s): ${missing.join(", ")}. ` +
-				`Pass a wrapper that implements get/set/del/scanIterator/compareAndDelete (e.g. makeIoredisClients(io).federationTokenStoreClient).`,
+				`Pass a wrapper that implements ${requiredMethods.join("/")} (e.g. makeIoredisClients(io).federationTokenStoreClient).`,
 		);
 	}
 	const mode = cfg.encryption?.mode ?? "required";
@@ -305,6 +414,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 		encryption,
 		keyPrefix: cfg.keyPrefix,
 		ttl: cfg.ttl,
+		scanFallback: cfg.scanFallback,
 	});
 };
 
@@ -332,8 +442,16 @@ export const redisFederationTokenStoreModule = defineModule({
 				ttl: z.number().positive().default(86400),
 				encryptionMode: z.enum(["required", "allow-plaintext"]).default("required"),
 				encryptionKey: z.string().optional(),
+				// #291 migration flag — see `RedisFederationTokenStoreOptions.scanFallback`
+				// for what it costs while on and when to turn it off.
+				scanFallback: z.boolean().default(true),
 			})
-			.default({ keyPrefix: "ft:", ttl: 86400, encryptionMode: "required" }),
+			.default({
+				keyPrefix: "ft:",
+				ttl: 86400,
+				encryptionMode: "required",
+				scanFallback: true,
+			}),
 	}),
 	provides: {
 		federationTokenStore: (deps) => {
@@ -344,6 +462,7 @@ export const redisFederationTokenStoreModule = defineModule({
 						ttl: number;
 						encryptionMode: "required" | "allow-plaintext";
 						encryptionKey?: string;
+						scanFallback: boolean;
 					};
 				}
 			).redisFederationTokenStore;
@@ -353,6 +472,7 @@ export const redisFederationTokenStoreModule = defineModule({
 					encryption: { mode: cfg.encryptionMode, key: cfg.encryptionKey },
 					keyPrefix: cfg.keyPrefix,
 					ttl: cfg.ttl,
+					scanFallback: cfg.scanFallback,
 				},
 				{},
 			);

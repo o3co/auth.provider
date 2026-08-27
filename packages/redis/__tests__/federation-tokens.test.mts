@@ -18,9 +18,20 @@ import {
 
 function createFakeRedis() {
 	const data = new Map<string, string>();
+	// #291: the per-session key index lives in a SET, kept separate from the
+	// string-valued envelopes so assertions on `data` still see only envelopes.
+	const sets = new Map<string, Set<string>>();
 	const ttls = new Map<string, number>();
+	const removeKey = (k: string): number => {
+		let removed = 0;
+		if (data.delete(k)) removed += 1;
+		if (sets.delete(k)) removed += 1;
+		ttls.delete(k);
+		return removed;
+	};
 	return {
 		data,
+		sets,
 		ttls,
 		get: vi.fn(async (k: string) => data.get(k) ?? null),
 		// Positional form: (key, value, mode: "PX", ttlMs, condition?: "NX")
@@ -38,10 +49,26 @@ function createFakeRedis() {
 				return "OK";
 			},
 		),
-		del: vi.fn(async (...keys: string[]) => {
-			let n = 0;
-			for (const k of keys) if (data.delete(k)) n += 1;
-			return n;
+		del: vi.fn(async (...keys: string[]) => keys.reduce((n, k) => n + removeKey(k), 0)),
+		unlink: vi.fn(async (...keys: string[]) => keys.reduce((n, k) => n + removeKey(k), 0)),
+		sAddWithTtl: vi.fn(async (key: string, member: string, ttlMs: number) => {
+			const members = sets.get(key) ?? new Set<string>();
+			members.add(member);
+			sets.set(key, members);
+			ttls.set(key, Math.max(ttls.get(key) ?? 0, ttlMs));
+		}),
+		sRem: vi.fn(async (key: string, member: string) => {
+			const members = sets.get(key);
+			if (!members) return 0;
+			const removed = members.delete(member) ? 1 : 0;
+			if (members.size === 0) sets.delete(key);
+			return removed;
+		}),
+		sScanIterator: vi.fn((key: string, _opts?: { COUNT?: number }) => {
+			const snapshot = [...(sets.get(key) ?? [])];
+			return (async function* () {
+				for (const member of snapshot) yield member;
+			})();
 		}),
 		scanIterator: vi.fn((opts: { MATCH: string; COUNT?: number }) => {
 			const prefix = opts.MATCH.endsWith("*") ? opts.MATCH.slice(0, -1) : opts.MATCH;
@@ -58,7 +85,11 @@ function createFakeRedis() {
 			}
 			return false;
 		}),
-	} satisfies FederationTokenStoreClient & { data: Map<string, string>; ttls: Map<string, number> };
+	} satisfies FederationTokenStoreClient & {
+		data: Map<string, string>;
+		sets: Map<string, Set<string>>;
+		ttls: Map<string, number>;
+	};
 }
 
 const encryptionKey = Buffer.alloc(32, 7);
@@ -448,6 +479,10 @@ describe("redisFederationTokenStoreBuilder structural validator", () => {
 			get: vi.fn(),
 			set: vi.fn(),
 			del: vi.fn(),
+			unlink: vi.fn(),
+			sAddWithTtl: vi.fn(),
+			sRem: vi.fn(),
+			sScanIterator: vi.fn(),
 			scanIterator: vi.fn(),
 			// compareAndDelete intentionally absent
 		};

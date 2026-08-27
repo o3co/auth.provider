@@ -86,7 +86,7 @@ describe("TS-M2: redisReplaySeenSetBuilder — client guard", () => {
 // `redisSessionStoresModule`.
 
 const noopSidSortedSetClient: SessionSidSortedSetClient = {
-	del: async () => 0,
+	unlink: async () => 0,
 	multi: () => ({}) as never,
 	pExpireAt: async () => 0,
 	pExpireGT: async () => 0,
@@ -96,9 +96,9 @@ const noopSidSortedSetClient: SessionSidSortedSetClient = {
 };
 
 const noopRPRegistryClient: SessionRPRegistryClient = {
-	del: async () => 0,
+	unlink: async () => 0,
 	hSet: async () => 0,
-	hVals: async () => [],
+	hScanIterator: () => (async function* () {})(),
 	multi: () => ({}) as never,
 	pExpireAt: async () => 0,
 	pExpireGT: async () => 0,

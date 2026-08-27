@@ -19,7 +19,11 @@ import type { SessionSidSortedSetClient } from "../clients.mjs";
 export interface RedisSidSortedSetOptions {
 	readonly client: SessionSidSortedSetClient;
 	readonly keyPrefix: string;
+	/** Members read per `ZRANGE` round-trip in `list`. Default 100. */
+	readonly pageSize?: number;
 }
+
+const DEFAULT_PAGE_SIZE = 100;
 
 export interface RedisSidSortedSet {
 	add(sid: string, member: string, expiresAt: Date): Promise<void>;
@@ -92,9 +96,25 @@ let _insertionCounter = Date.now();
  * **Score**: monotonic module-level counter (see `_insertionCounter` above).
  * The counter replaces `Date.now()` as the score source to guarantee strict
  * insertion-order even when multiple adds execute within the same millisecond.
+ *
+ * **`list` pages by rank** (#291). `ZRANGE key 0 -1` returned the whole set in
+ * one reply whose size grew with how many families or federations a session
+ * had accumulated, on the connection every other adapter shares and on the
+ * logout path. Paging is safe for the ordering contract because ZADD NX with a
+ * monotonically increasing score only ever appends: a member added mid-read
+ * lands after the ranks already walked. A concurrent `remove` shifts later
+ * ranks down by one and can drop a member from that read — acceptable here,
+ * where the two callers (cascade revoke, IdP-logout redirect) both re-read on
+ * the next request and neither treats one listing as authoritative.
+ *
+ * The read is paged, **not truncated**: `listFamilyIds` drives cascade
+ * revocation, and a cap would silently leave the families past it live.
+ *
+ * **Removal is `UNLINK`**, not `DEL`.
  */
 export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSidSortedSet {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
+	const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
 	return {
 		async add(sid, member, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
@@ -109,13 +129,20 @@ export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSi
 			await pipeline.exec();
 		},
 		async list(sid) {
-			return opts.client.zRange(k(sid), 0, -1);
+			const all: string[] = [];
+			for (let start = 0; ; start += pageSize) {
+				const page = await opts.client.zRange(k(sid), start, start + pageSize - 1);
+				all.push(...page);
+				// A short page is the end of the set. A full one is not: an exact
+				// multiple of `pageSize` needs one more round-trip to learn that.
+				if (page.length < pageSize) return all;
+			}
 		},
 		async remove(sid, member) {
 			await opts.client.zRem(k(sid), member);
 		},
 		async removeBySid(sid) {
-			await opts.client.del(k(sid));
+			await opts.client.unlink(k(sid));
 		},
 	};
 }
