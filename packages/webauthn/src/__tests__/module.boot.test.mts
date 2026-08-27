@@ -67,13 +67,17 @@ import { webauthnModule } from "../module.mjs";
 // `/session/login` read for their limiter-outage policy. The core-only slice
 // has no `rateLimit` section, so booting on it never exercised the contract
 // the module actually declares.
+// Captured once and reused: the factory returns a fresh object per call, so
+// building the override from three separate calls left three fixtures that
+// only happened to agree — nothing would have caught them drifting apart.
+const baseAppConfig = makeValidAppConfig();
 const coreConfig = {
-	...makeValidAppConfig(),
+	...baseAppConfig,
 	oauth: {
-		...makeValidAppConfig().oauth,
+		...baseAppConfig.oauth,
 		// CP-20 invariant: a non-empty issuer is required when grantPolicy is wired.
 		// makeValidAppConfig() defaults it; we pin it here for the H-2-mandated policy wiring.
-		jwt: { ...makeValidAppConfig().oauth.jwt, issuer: "https://test.example" },
+		jwt: { ...baseAppConfig.oauth.jwt, issuer: "https://test.example" },
 	},
 };
 

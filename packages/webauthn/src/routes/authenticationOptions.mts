@@ -44,8 +44,11 @@
  *     response body, its key set, and the work done to produce it are identical
  *     whether or not the named account exists.
  *
- * NOT barrel-exported from the package index — internal to the webauthn module
- * until Task 31 wires the router.
+ * `createAuthenticationOptionsHandler` is NOT barrel-exported from the package
+ * index — it is internal to the webauthn module, which mounts it (Task 31).
+ * {@link WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG} IS exported, because
+ * it is an operator-facing name rather than an internal one: it is the `limits`
+ * key a `RateLimiter` adapter resolves this route's spec by.
  *
  * Cross-refs: Plan T29 / spec §2.4 / issue #281
  */
