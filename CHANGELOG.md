@@ -86,6 +86,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **Migration:** a client exchanging a bound `subject_token` must now present the matching DPoP proof or client certificate on the exchange request; without it the exchange returns `400 invalid_grant`. Deployments that never enabled DPoP or mTLS are unaffected — an unbound subject token with no binding presented behaves exactly as before.
 
+- **`allowedGrantTypes` is now enforced for every grant, not just two of them (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** The field was consulted only by `client_credentials` and the WebAuthn grant. `authorization_code`, `refresh_token`, token-exchange and the session grant never looked at it, so a client registered for one grant could exercise all the others — a client provisioned for machine-to-machine access could redeem authorization codes, refresh tokens and perform RFC 8693 exchanges, and the registration's restriction was silently void.
+
+  The check moved to **grant dispatch** in `/oauth/token`, alongside the sender-constraint check that already sat there for the same reason: it runs once per request before the concrete handler, so every grant — including one registered later through `GrantFactory` — inherits it without opting in. `/authorize` gets the same check against `authorization_code`, so a client that may not use the code flow is turned away before the user authenticates and a code is minted rather than after. Both reject with `unauthorized_client` (RFC 6749 §5.2 / §4.1.2.1) and emit a `token.issued.failure` audit event carrying `reason: "grant_type_not_allowed"`.
+
+  The central rule, exported as `isGrantTypeAllowed`:
+
+  - **absent → unrestricted.** Absence means the registration declared no policy, not an empty one. The grants that ignored this field predate it, so denying on absence would revoke every grant from every registration written before it existed.
+  - **declared → allowed iff the `grant_type` string appears in it**, compared exactly (`grant_type` is case-sensitive, and extension grants are URIs where a prefix match would be a namespace confusion).
+
+  `client_credentials` and the WebAuthn grant keep their stricter **deny-by-absence** rule on top, so machine-to-machine access is still never acquired by omission. The two rules compose to the stricter of the pair: either can reject, and only the absent case distinguishes them.
+
+  There is no deployment-level switch to make deny-by-absence the central rule; that posture is tracked in #311.
+
+  **Migration:** a client with a declared `allowedGrantTypes` can now only use the grants it names. Audit registrations before upgrading — a client whose list was written when only `client_credentials` read it may be relying on other grants that the list does not mention, and those stop working. In particular **`allowedGrantTypes: []` now denies every grant**, where previously it denied only `client_credentials`; a registration that used `[]` to mean "not a machine client" while relying on `authorization_code` must list its grants explicitly. Clients that omit the field entirely are unaffected.
+
+
 
 ### Fixed
 
