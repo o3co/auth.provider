@@ -18,22 +18,41 @@ import type { UserSessionClaims } from "@o3co/auth-provider-core";
 
 /**
  * Top-level claim under which an upstream IdP's mapped claims are recorded,
- * keyed by provider name: `claims.federated["google"].hd`.
+ * keyed by provider name: `claims.federated?.["google"]?.hd`.
  *
  * Nothing here is authoritative for this deployment. It is the IdP's assertion,
  * kept verbatim so a consumer that wants a federated value can take it
  * deliberately, rather than receiving it merged into the envelope it also uses
  * for authorization.
  *
- * The key cannot collide with a locally-sourced claim: `extractUserClaims`
- * picks a fixed five fields off `User` and this is not one of them, so
- * `claims.federated` is always written by the federation callback route.
+ * **The key is optional — read it with a presence check.**
+ * {@link mergeFederatedClaims} writes it only when the provider actually mapped
+ * at least one claim, so it is absent on a session whose provider implements no
+ * `SupportsClaimMapping`, and on one whose `mapClaims` returned `{}` or a value
+ * that is not an object. `claims.federated?.[name]?.groups`, never
+ * `claims.federated[name].groups`. The provider key is likewise not guaranteed:
+ * a session carries the one provider that authenticated it, not every provider
+ * the deployment registered.
+ *
+ * The omission is deliberate and should not be "fixed" into always writing the
+ * key. An empty `federated: {}` would sit in the envelope of every session
+ * created by a provider that maps nothing, saying only that a code path ran;
+ * absence says "this IdP asserted nothing", which is the same absent-is-not-a-
+ * value discipline #297 established for `emailVerified`.
+ *
+ * When the key *is* present, it came from this merge and never from the Store:
+ * it cannot collide with a locally-sourced claim, because `extractUserClaims`
+ * picks a fixed five fields off `User` (`email`, `emailVerified`, `name`,
+ * `picture`, `groups`) and this is not one of them.
  */
 export const FEDERATED_CLAIMS_KEY = "federated";
 
 /**
  * The only claims a federated profile may contribute to the top-level claims
- * envelope, and then only where the local record left the field absent.
+ * envelope, and then only where the local record left the field absent and the
+ * mapped value is a string. A promotable claim whose mapped value is any other
+ * type is dropped rather than promoted — an adapter is reached across an
+ * untyped boundary, and a `name` that is an object would reach a signed token.
  *
  * Deliberately excluded:
  *
@@ -46,14 +65,24 @@ export const FEDERATED_CLAIMS_KEY = "federated";
  *   verifies an address *it* controls; it has no knowledge of the local
  *   account's address, which the `provider:sub` linkage never forces to match.
  *   A deployment that wants to act on the IdP's assertion reads
- *   `claims.federated[<provider>].emailVerified` and publishes the result on
+ *   `claims.federated?.[<provider>]?.emailVerified` and publishes the result on
  *   the `User` — the Store is where #297 put the field, and that is the opt-in.
  *
  * Exported so a deployment can assert on the set from its own tests.
  */
 export const PROMOTABLE_FEDERATED_CLAIMS = ["email", "name", "picture"] as const;
 
-/** Per-provider record of what each upstream IdP asserted, verbatim. */
+/**
+ * What an upstream IdP asserted, keyed by provider name and shallow-copied from
+ * the `mapClaims` return so a later mutation by the adapter cannot reach a
+ * stored session.
+ *
+ * The index signature carries no guarantee that a given provider is present. A
+ * session created by the federation callback holds the single provider that
+ * authenticated it; the shape is a map so that a consumer merging claims across
+ * providers has somewhere to put them, not because one session accumulates
+ * several.
+ */
 export interface FederatedClaimsNamespace {
 	readonly [providerName: string]: Readonly<Record<string, unknown>>;
 }
@@ -70,8 +99,19 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * account is already resolved — the callback route looked it up by
  * `provider:sub` — so any field the local `User` declares is this deployment's
  * answer, and an upstream IdP does not get to replace it. Where the local
- * record is silent on a promotable profile claim, the federated value fills the
- * gap; everything else is recorded under {@link FEDERATED_CLAIMS_KEY}.
+ * record is silent on a claim in {@link PROMOTABLE_FEDERATED_CLAIMS}, a string
+ * mapped value fills the gap.
+ *
+ * The mapped claims are *also* recorded under {@link FEDERATED_CLAIMS_KEY} in
+ * full — the promoted values, the values that lost to a local claim, and the
+ * ones that were never promotable — so the record of what the IdP said stays
+ * complete and stays separate from what this deployment holds. That key is
+ * written only when at least one claim was mapped; see
+ * {@link FEDERATED_CLAIMS_KEY} for why absence rather than `{}`, and for the
+ * presence check a consumer therefore owes it.
+ *
+ * Returns a fresh envelope. Neither `localClaims` nor `mappedClaims` is
+ * mutated, and the namespaced snapshot is a shallow copy.
  *
  * Promotion is written as one named read per promotable claim rather than a
  * loop over {@link PROMOTABLE_FEDERATED_CLAIMS}. That is the point: there is no
@@ -106,9 +146,15 @@ export const mergeFederatedClaims = ({
 		merged.picture = mapped.picture;
 	}
 
-	// The namespace carries the full mapped snapshot, including values that were
-	// also promoted and values that lost to a local claim — the record of what
-	// the IdP said stays complete and separate from what this deployment holds.
+	// The namespace carries the full mapped snapshot — promoted values, values
+	// that lost to a local claim, and values that were never promotable alike.
+	//
+	// The guard is load-bearing, not an optimization: a provider that maps
+	// nothing leaves the key absent rather than writing `federated: {}`, so
+	// "this IdP asserted nothing" reads as absence instead of as an empty object
+	// in every such session's envelope. Consumers must therefore presence-check
+	// the key — which is the documented contract on FEDERATED_CLAIMS_KEY, so
+	// removing this guard would be a contract change, not a simplification.
 	if (Object.keys(mapped).length > 0) {
 		merged[FEDERATED_CLAIMS_KEY] = {
 			[providerName]: { ...mapped },
