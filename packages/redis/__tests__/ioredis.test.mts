@@ -326,3 +326,31 @@ describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 		await expect(p.exec()).resolves.toBeNull();
 	});
 });
+
+describe("makeIoredisClients — MULTI/EXEC reply shapes the check must survive", () => {
+	it("treats a bare (non-tuple) result as success, for a driver that does not wrap", async () => {
+		// node-redis and friends resolve `exec()` with plain results and reject
+		// on error, so there is no error slot to find. Reading `[0]` off such a
+		// value would misread the first result as an error — `0`, `""` and
+		// `null` are all legal results, and a truthy one (say the `1` from a
+		// successful SADD) would be reported as a failure. Fail on the shape we
+		// actually get, not on every shape we might.
+		const io = makeFakeIoredis({
+			multi: vi.fn(() => makeFakePipeline([1, "OK", 0])) as never,
+		});
+		await expect(
+			makeIoredisClients(io).federationTokenStoreClient.sAddWithTtl("k", "m", 1000),
+		).resolves.toBeUndefined();
+	});
+
+	it("reports a non-Error rejection value without stringifying it as [object Object]", async () => {
+		// Redis replies arrive as `ReplyError`, but a mocked or exotic driver
+		// can put anything in the slot. The operator still needs to read it.
+		const io = makeFakeIoredis({
+			multi: vi.fn(() => makeFakePipeline([["EXECABORT Transaction discarded", null]])) as never,
+		});
+		await expect(
+			makeIoredisClients(io).federationTokenStoreClient.sAddWithTtl("k", "m", 1000),
+		).rejects.toThrow(/EXECABORT Transaction discarded/);
+	});
+});
