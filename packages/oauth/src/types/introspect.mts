@@ -56,64 +56,10 @@ export interface IntrospectResponse {
 }
 
 /**
- * Validate and narrow a raw `cnf` claim value extracted from a JWT
- * payload into a `Confirmation`. Returns `undefined` when the value
- * is missing or fails any of:
- *
- * - non-object (null, array, primitive)
- * - missing both `jkt` and `x5t#S256` members
- * - member value is not a non-empty string
- *
- * Empty-string members are rejected because RFC 9449 §6 / RFC 8705 §3
- * define both `jkt` (RFC 7638 JWK Thumbprint) and `x5t#S256` (DER cert
- * SHA-256 thumbprint) as non-empty base64url strings.
- *
- * Compound binding (a cnf object carrying BOTH `jkt` and `x5t#S256`)
- * is out of scope for Stage 1 (spec §1 "out of scope"). If both are
- * present, this helper returns the `jkt` variant — matching the intent-
- * explicit dispatch policy (spec §3.5) where DPoP wins over an ambient
- * mTLS signal.
- *
- * That narrowing is a claim-shape contract, NOT an admission decision.
- * Callers that vouch for a token to a third party (the `/oauth/introspect`
- * handler) MUST screen with {@link isCompoundConfirmation} first and refuse
- * the token — narrowing alone would report a binding the AS never issued.
- * See the token-binding ADR, "compound cnf across the AS surfaces".
+ * `extractConfirmation` and `isCompoundConfirmation` moved to core in
+ * #324 — the raw-cnf shape rules they encode are the same rows
+ * `matchConfirmation` evaluates, so they live with the `Confirmation`
+ * union (`core/grants/confirmationMatch.mts`). Re-exported here because
+ * this package's barrel published them.
  */
-export const extractConfirmation = (raw: unknown): Confirmation | undefined => {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-	const obj = raw as Record<string, unknown>;
-	const jkt = obj.jkt;
-	if (typeof jkt === "string" && jkt.length > 0) {
-		return { jkt };
-	}
-	const x5t = obj["x5t#S256"];
-	if (typeof x5t === "string" && x5t.length > 0) {
-		return { "x5t#S256": x5t };
-	}
-	return undefined;
-};
-
-/**
- * Whether a raw `cnf` claim value carries BOTH a well-formed `jkt` and a
- * well-formed `x5t#S256` — an ambiguous compound binding.
- *
- * This AS never mints one: a grant emits exactly one mechanism's
- * confirmation. A compound cnf therefore indicates a forged token (signing-key
- * compromise) or an AS bug, and the response is to refuse the token rather
- * than to pick a winner — the same structural stance the refresh path already
- * takes (`grants/refreshToken.mts` rejects a compound RT cnf with
- * `invalid_grant`).
- *
- * Member validation matches {@link extractConfirmation}: a cnf whose second
- * member is empty-string or non-string is a single-mechanism binding with junk
- * attached, not an ambiguous one, so it is NOT compound and `extractConfirmation`
- * narrows it to the well-formed member as usual.
- */
-export const isCompoundConfirmation = (raw: unknown): boolean => {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-	const obj = raw as Record<string, unknown>;
-	const jkt = obj.jkt;
-	const x5t = obj["x5t#S256"];
-	return typeof jkt === "string" && jkt.length > 0 && typeof x5t === "string" && x5t.length > 0;
-};
+export { extractConfirmation, isCompoundConfirmation } from "@o3co/auth-provider-core";

@@ -43,8 +43,9 @@
 
 import type { Request, RequestHandler } from "express";
 import { decodeJwt } from "jose";
+import { parseAccessTokenAuthorization } from "../accessTokenHeader.mjs";
 import { errorEnvelope } from "../errors/envelope.mjs";
-import type { Confirmation } from "../grants/confirmation.mjs";
+import { BINDING_PROFILES, matchConfirmation } from "../grants/confirmationMatch.mjs";
 import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
@@ -62,69 +63,20 @@ export interface ProtectedResourceBindingOptions {
 	readonly logger?: Logger;
 }
 
-/**
- * The auth scheme a token bound by each `cnf` variant must be presented
- * under, and the mechanism `kind` that owns that variant.
- *
- * Both halves are core vocabulary: core owns the `Confirmation` union
- * (`grants/confirmation.mts`), and the spec makes adding a variant a core
- * semver-minor change — so the mapping lives with the union rather than
- * being negotiated with each mechanism package. Gating on `kind` (rather
- * than on the confirmation's shape alone) is the same stance
- * `grants/refreshToken.mts` takes: `Confirmation` is mechanism-extensible,
- * so a third-party mechanism could emit `{ jkt }` without ever validating a
- * DPoP proof, and shape-matching alone would hand it a bound token.
- */
-const BINDING_PROFILES = {
-	jkt: { kind: "dpop", scheme: "dpop", challenge: "DPoP" },
-	"x5t#S256": { kind: "mtls", scheme: "bearer", challenge: "Bearer" },
-} as const satisfies Record<string, { kind: string; scheme: string; challenge: string }>;
-
-type ConfirmationMember = keyof typeof BINDING_PROFILES;
-
-const CONFIRMATION_MEMBERS = Object.keys(BINDING_PROFILES) as readonly ConfirmationMember[];
-
-/** Schemes that carry an access token, lowercased for comparison. */
-const TOKEN_SCHEMES: ReadonlySet<string> = new Set(["bearer", "dpop"]);
-
-const readMember = (
-	cnf: Record<string, unknown>,
-	member: ConfirmationMember,
-): string | undefined => {
-	const value = cnf[member];
-	return typeof value === "string" && value.length > 0 ? value : undefined;
-};
-
-const confirmationValue = (
-	confirmation: Confirmation,
-	member: ConfirmationMember,
-): string | undefined => readMember(confirmation as unknown as Record<string, unknown>, member);
-
 export const protectedResourceBindingMw = ({
 	mechanisms,
 	logger,
 }: ProtectedResourceBindingOptions): RequestHandler => {
 	return async (req, res, next) => {
-		const authorization = req.headers.authorization;
-		if (authorization === undefined) {
-			next();
-			return;
-		}
-
-		const separator = authorization.indexOf(" ");
-		if (separator === -1) {
-			next();
-			return;
-		}
-		const scheme = authorization.slice(0, separator).toLowerCase();
-		const accessToken = authorization.slice(separator + 1).trim();
 		// Anything that is not an access-token scheme belongs to another
 		// authentication surface — `Basic` client auth on the introspection
 		// endpoint is the case that actually occurs — and is not ours to judge.
-		if (!TOKEN_SCHEMES.has(scheme) || accessToken === "") {
+		const authorization = parseAccessTokenAuthorization(req.headers.authorization);
+		if (authorization === null) {
 			next();
 			return;
 		}
+		const { scheme, token: accessToken } = authorization;
 
 		// Claims are read WITHOUT verifying the signature; the endpoint
 		// downstream still runs the full `verifyJwt`. That is sound because the
@@ -141,20 +93,15 @@ export const protectedResourceBindingMw = ({
 			return;
 		}
 
-		const cnf = claims.cnf;
-		if (!cnf || typeof cnf !== "object" || Array.isArray(cnf)) {
+		// Classify the token's `cnf` before any mechanism runs: `binding` is
+		// still unresolved here, so the match can only be `unbound`,
+		// `compound`, or `no-proof` — the latter meaning "bound by `member`,
+		// proof still to be collected below".
+		const match = matchConfirmation(claims.cnf, null);
+		if (match.status === "unbound") {
 			// Unbound token (or a junk `cnf` that names no binding). Nothing to
 			// enforce — an unbound token was never sender-constrained, and the
 			// endpoint's own authorization checks still apply.
-			next();
-			return;
-		}
-
-		const present = CONFIRMATION_MEMBERS.filter(
-			(member) => readMember(cnf as Record<string, unknown>, member) !== undefined,
-		);
-
-		if (present.length === 0) {
 			next();
 			return;
 		}
@@ -173,7 +120,7 @@ export const protectedResourceBindingMw = ({
 			res.status(401).json(errorEnvelope("invalid_token", description));
 		};
 
-		if (present.length > 1) {
+		if (match.status === "compound") {
 			// This AS mints exactly one mechanism's confirmation per token, so a
 			// compound `cnf` means a forged token or an AS bug. Refuse rather
 			// than pick a winner — the same call `grants/refreshToken.mts` and
@@ -182,8 +129,7 @@ export const protectedResourceBindingMw = ({
 			return;
 		}
 
-		const member = present[0] as ConfirmationMember;
-		const expected = readMember(cnf as Record<string, unknown>, member) as string;
+		const { member } = match;
 		const profile = BINDING_PROFILES[member];
 
 		if (scheme !== profile.scheme) {
@@ -210,7 +156,7 @@ export const protectedResourceBindingMw = ({
 				reject("proof_invalid", profile.challenge, "presented proof-of-possession is invalid");
 				return;
 			}
-			if (candidate !== null && confirmationValue(candidate.confirmation, member) === expected) {
+			if (candidate !== null && matchConfirmation(claims.cnf, candidate).status === "satisfied") {
 				binding = candidate;
 				break;
 			}
@@ -221,13 +167,9 @@ export const protectedResourceBindingMw = ({
 			// is not installed (a deployment that dropped the module while bound
 			// tokens are still live), no material was presented, or the material
 			// proved possession of a different key or certificate. Each is a
-			// stolen-token replay from the resource's point of view.
-			//
-			// Plain `!==` on the thumbprint (inside the loop above): `jkt` is a
-			// SHA-256 digest of a *public* key and `x5t#S256` of a certificate
-			// the client just presented — neither is secret, so there is no
-			// material a timing side-channel could leak that the caller does not
-			// already hold. Mirrors `grants/refreshToken.mts`.
+			// stolen-token replay from the resource's point of view. (For why
+			// the thumbprint comparison is a plain `!==`, see
+			// `grants/confirmationMatch.mts`.)
 			reject(
 				"no_matching_binding",
 				profile.challenge,

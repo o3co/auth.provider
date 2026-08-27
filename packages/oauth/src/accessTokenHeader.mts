@@ -15,41 +15,9 @@
  */
 
 /**
- * The auth schemes that carry an access token as the credential.
- *
- * `Bearer` is RFC 6750 §2.1. `DPoP` is RFC 9449 §7.1, which requires a
- * DPoP-bound access token to be presented under its own scheme rather than
- * as a Bearer token — that separation is what lets a resource refuse a bound
- * token that arrives without its proof (issue #264).
- *
- * Which of the two a given token is *allowed* to use is decided by
- * `protectedResourceBindingMw` against the token's `cnf` claim, not here:
- * this helper only answers "is there an access token in this header, and
- * what is it?" so every protected resource extracts it the same way.
+ * `parseAccessTokenHeader` moved to core in #324 so
+ * `protectedResourceBindingMw` could share it instead of re-parsing the
+ * header inline with its own duplicate scheme set. Re-exported here for
+ * import-path compatibility within this package.
  */
-const ACCESS_TOKEN_SCHEMES: ReadonlySet<string> = new Set(["bearer", "dpop"]);
-
-/**
- * Extract the access token from an `Authorization` header value, or `null`
- * when the header carries no access token — absent, malformed, a different
- * scheme (`Basic` client authentication is the case that occurs), or a
- * scheme with an empty credential.
- *
- * The scheme is matched as a whole token, not as a prefix: `BearerToken xyz`
- * is a different scheme and returns `null`, where `startsWith("Bearer ")`
- * would have been fooled by `Bearer` + any suffix only if it also matched the
- * space — but the surrounding endpoints previously used both `startsWith`
- * and case-insensitive regexes, so pinning one behaviour in one place removes
- * the drift.
- */
-export const parseAccessTokenHeader = (authorization: string | undefined): string | null => {
-	if (authorization === undefined) return null;
-	const separator = authorization.indexOf(" ");
-	if (separator === -1) return null;
-	// RFC 9110 §11.1: the scheme is case-insensitive.
-	const scheme = authorization.slice(0, separator).toLowerCase();
-	if (!ACCESS_TOKEN_SCHEMES.has(scheme)) return null;
-	// RFC 9110 §5.6.3 allows optional whitespace around a field value.
-	const token = authorization.slice(separator + 1).trim();
-	return token === "" ? null : token;
-};
+export { parseAccessTokenHeader } from "@o3co/auth-provider-core";

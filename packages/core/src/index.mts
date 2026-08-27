@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
+// Access-token extraction from the Authorization header (folded down from
+// the oauth package in #324 so `protectedResourceBindingMw` shares it).
+export {
+	type AccessTokenAuthorization,
+	type AccessTokenScheme,
+	parseAccessTokenAuthorization,
+	parseAccessTokenHeader,
+} from "./accessTokenHeader.mjs";
 // Adapter factory primitives (public extension point)
 export {
 	type AdapterBuilder,
@@ -115,6 +123,17 @@ export type {
 export { supportsLock } from "./federation-tokens/types.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
+// The ONE cnf/token-binding comparison matrix (#324) — consumed by the
+// refresh and token-exchange grants, `protectedResourceBindingMw`, and the
+// introspection handler; each caller keeps only its own error mapping.
+export {
+	type ConfirmationMatch,
+	type ConfirmationMember,
+	extractConfirmation,
+	isCompoundConfirmation,
+	matchConfirmation,
+	ownedConfirmation,
+} from "./grants/confirmationMatch.mjs";
 export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // id_token generation (OIDC Core §2)
 export {

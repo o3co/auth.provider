@@ -22,6 +22,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	matchConfirmation,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
@@ -139,10 +140,13 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// binding matrices for DPoP (RFC 9449 §5) and mTLS (RFC 8705 §4).
 			// RT carries `cnf` (jkt or x5t#S256) only when issued to a public
 			// client with proof; confidential-client RTs are always plain.
-			// Each mechanism owns its own 5-row matrix (parallel structure)
-			// and they are evaluated BEFORE any further work so rejections
-			// short-circuit ahead of policy evaluation, store I/O, and
-			// `generateToken` keystore signatures.
+			// The matrix itself is core's `matchConfirmation` (#324) — one
+			// implementation shared with the token-exchange grant,
+			// `protectedResourceBindingMw`, and introspection; this grant
+			// keeps only the row → `invalid_grant` error mapping below. It is
+			// evaluated BEFORE any further work so rejections short-circuit
+			// ahead of policy evaluation, store I/O, and `generateToken`
+			// keystore signatures.
 			//
 			// DPoP matrix (unchanged from Phase 2):
 			//   RT cnf.jkt | proof JKT       | Outcome
@@ -186,24 +190,18 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// `invalid_dpop_proof` / a future `invalid_client_certificate`
 			// (the proof / cert itself is well-formed; the grant is what
 			// cannot be honored).
-			const cnfClaim = (tokenPayload as { cnf?: unknown }).cnf;
-			const rtCnfJkt =
-				typeof cnfClaim === "object" &&
-				cnfClaim !== null &&
-				"jkt" in cnfClaim &&
-				typeof (cnfClaim as { jkt: unknown }).jkt === "string"
-					? (cnfClaim as { jkt: string }).jkt
-					: undefined;
-			const rtCnfX5t =
-				typeof cnfClaim === "object" &&
-				cnfClaim !== null &&
-				"x5t#S256" in cnfClaim &&
-				typeof (cnfClaim as { "x5t#S256": unknown })["x5t#S256"] === "string"
-					? (cnfClaim as { "x5t#S256": string })["x5t#S256"]
-					: undefined;
-
-			// Compound-cnf pre-matrix reject — see comment above.
-			if (rtCnfJkt !== undefined && rtCnfX5t !== undefined) {
+			// `presentedConfirmation` is mechanism-agnostic and feeds the
+			// AT cnf claim emission below (RFC 7800 — mechanism-neutral).
+			// `matchConfirmation` gates each cnf member on its owning
+			// mechanism kind (PR #185 / Codex Important #2) — see
+			// `core/grants/confirmationMatch.mts` for the kind-boundary and
+			// thumbprint-timing rationale.
+			const presentedConfirmation = ctx.tokenBinding?.confirmation;
+			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
+			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
+			const match = matchConfirmation((tokenPayload as { cnf?: unknown }).cnf, ctx.tokenBinding);
+			if (match.status === "compound") {
+				// Compound-cnf pre-matrix reject — see comment above.
 				return {
 					result: {
 						status: 400,
@@ -213,78 +211,29 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					},
 				};
 			}
-
-			// `presentedConfirmation` is mechanism-agnostic and feeds the
-			// AT cnf claim emission below (RFC 7800 — mechanism-neutral).
-			// Each mechanism's matrix extracts its own proof field gated on
-			// `kind === "<mechanism>"` (PR #185 / Codex Important #2): the
-			// `Confirmation` union is mechanism-extensible, so a non-DPoP
-			// mechanism emitting `{ jkt: "..." }` (or a non-mTLS mechanism
-			// emitting `{ "x5t#S256": "..." }`) could otherwise satisfy a
-			// bound RT without actually presenting the right proof.
-			// Restrict each matrix to its declared mechanism so the kind
-			// boundary is enforced structurally, not by convention.
-			const presentedConfirmation = ctx.tokenBinding?.confirmation;
-			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
-			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
-			const proofJkt =
-				bindingIsDpop && presentedConfirmation && "jkt" in presentedConfirmation
-					? presentedConfirmation.jkt
-					: undefined;
-			const proofX5t =
-				bindingIsMtls && presentedConfirmation && "x5t#S256" in presentedConfirmation
-					? presentedConfirmation["x5t#S256"]
-					: undefined;
-			if (rtCnfJkt !== undefined) {
-				if (proofJkt === undefined) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "refresh_token requires a DPoP proof",
-						},
-					};
-				}
-				// Plain `!==` is acceptable here: the JKT is a SHA-256
-				// thumbprint of a *public* key (RFC 7638) — not a secret. A
-				// timing-side-channel cannot leak material an attacker
-				// could not already derive from the public key they
-				// presented. Mirrors PKCE which uses constantTimeStringEqual
-				// only because the code_verifier IS secret.
-				if (proofJkt !== rtCnfJkt) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "DPoP proof does not match refresh_token binding",
-						},
-					};
-				}
+			if (match.status === "no-proof") {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription:
+							match.member === "jkt"
+								? "refresh_token requires a DPoP proof"
+								: "refresh_token requires a client certificate",
+					},
+				};
 			}
-			if (rtCnfX5t !== undefined) {
-				if (proofX5t === undefined) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "refresh_token requires a client certificate",
-						},
-					};
-				}
-				// Plain `!==` is acceptable here: x5t#S256 is a SHA-256
-				// thumbprint of the cert's DER (RFC 8705 §3.1), which is
-				// presented openly during the TLS handshake. No secret
-				// material is leaked by timing — same rationale as the
-				// DPoP `jkt` comparison above.
-				if (proofX5t !== rtCnfX5t) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "client certificate does not match refresh_token binding",
-						},
-					};
-				}
+			if (match.status === "mismatch") {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription:
+							match.member === "jkt"
+								? "DPoP proof does not match refresh_token binding"
+								: "client certificate does not match refresh_token binding",
+					},
+				};
 			}
 
 			const subjectStr = typeof tokenPayload.sub === "string" ? tokenPayload.sub : undefined;
