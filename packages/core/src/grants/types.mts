@@ -161,6 +161,34 @@ export interface GrantHandlerResult {
 export interface GrantHandler {
 	handle(ctx: GrantContext): Promise<GrantHandlerResult>;
 	cleanup?(): void;
+	/**
+	 * Declares that this grant must never be acquired by omission (#326).
+	 *
+	 * The shared `/token` dispatch always enforces the base
+	 * `allowedGrantTypes` rule (`isGrantTypeAllowed`), under which an
+	 * **absent** allowlist means "no policy declared" and admits every
+	 * grant. A handler that sets this flag opts into the stricter
+	 * deny-by-absence composition: when the authenticated client's
+	 * `allowedGrantTypes` is absent, dispatch refuses the request with
+	 * `400 unauthorized_client` before the handler runs.
+	 *
+	 * Declare it on grants where access is a standing capability rather
+	 * than a per-user ceremony — machine-to-machine grants like
+	 * `client_credentials` and the WebAuthn grant do — so that a
+	 * registration written before `allowedGrantTypes` existed cannot
+	 * silently acquire them. Enforcement used to be hand-rolled inside
+	 * those two handlers; the flag replaces that folklore with a
+	 * declaration the dispatch enforces for every current and future
+	 * strict grant.
+	 *
+	 * The check only applies when an authenticated client is present.
+	 * `ctx.authenticatedClient === null` (custom wiring, direct handler
+	 * invocation, or a grant that deliberately serves unauthenticated
+	 * callers, e.g. WebAuthn's passkey-is-the-auth-event mode) has no
+	 * allowlist to consult; handlers that require a client identity keep
+	 * rejecting `null` themselves with `invalid_client`.
+	 */
+	readonly requiresExplicitGrantAllowlist?: boolean;
 }
 
 export interface GrantDependencies {

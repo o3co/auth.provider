@@ -35,9 +35,11 @@ const GRANT_TYPE = "client_credentials";
  * `client_credentials` grant per RFC 6749 §4.4 + Wave 1 §3.
  *
  * Public clients (`tokenEndpointAuthMethod === "none"`) are rejected (§3.4):
- * RFC 6749 §4.4 limits the grant to confidential clients. Per-client
- * gating is via `AuthenticatedClient.allowedGrantTypes`: an absent or empty
- * list denies the grant (§3.4.1 deny-by-absence-only-for-`client_credentials`).
+ * RFC 6749 §4.4 limits the grant to confidential clients. Per-client gating
+ * is via `AuthenticatedClient.allowedGrantTypes`, enforced at `/token`
+ * dispatch: the handler declares `requiresExplicitGrantAllowlist`, so an
+ * absent or empty list denies the grant (§3.4.1
+ * deny-by-absence-only-for-`client_credentials`, made declarative in #326).
  *
  * The issued access token has `sub = client.clientId` (RFC 6749 §4.4.2: no
  * end-user) and no refresh token is issued (RFC 6749 §4.4.3).
@@ -46,6 +48,11 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 	const { config, keyStore } = deps;
 
 	return {
+		// §3.4.1: machine-to-machine access is never acquired by omission — a
+		// registration that never declared `allowedGrantTypes` does not get
+		// this grant. Dispatch enforces the denial before `handle` runs
+		// (#326); it used to be a hand-rolled check in this handler.
+		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const client = ctx.authenticatedClient;
 			if (!client) {
@@ -64,16 +71,6 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 						status: 400,
 						error: "invalid_client",
 						errorDescription: "client_credentials requires a confidential client",
-					},
-				};
-			}
-
-			if (!isGrantAllowed(client)) {
-				return {
-					result: {
-						status: 400,
-						error: "unauthorized_client",
-						errorDescription: `client is not authorized for ${GRANT_TYPE}`,
 					},
 				};
 			}
@@ -267,12 +264,6 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 		},
 	};
 };
-
-function isGrantAllowed(client: AuthenticatedClient): boolean {
-	const allowed = client.allowedGrantTypes;
-	if (allowed === undefined) return false;
-	return allowed.includes(GRANT_TYPE);
-}
 
 function resolveScope(
 	ctx: GrantContext,

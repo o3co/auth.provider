@@ -142,6 +142,52 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 		expect(res.body.error).toBe("unauthorized_client");
 	});
 
+	it("keeps the pre-#326 denial wire format for deny-by-absence", async () => {
+		// #326 moved the deny-by-absence check from the handler onto dispatch
+		// (`requiresExplicitGrantAllowlist`). Pure refactor: the response the
+		// handler used to emit — code AND description — must survive the move.
+		const app = await buildApp(clientRepoWith({ allowedGrantTypes: undefined }));
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+		expect(res.body.error_description).toBe("client is not authorized for client_credentials");
+	});
+
+	it("denies a public client with no allowlist through the allowlist rule (#326 precedence)", async () => {
+		// The one composed-order change #326 makes, pinned so it stays
+		// deliberate: this doubly-ineligible request (public client AND absent
+		// allowlist) used to reach the handler and fail its confidential-client
+		// rule first (`invalid_client`); the dispatch-level deny-by-absence now
+		// runs before any handler code, so the allowlist denial wins
+		// (`unauthorized_client`). Still a 400 denial either way — keeping the
+		// old precedence would mean teaching dispatch cc's confidential-client
+		// rule, which is exactly the folklore the flag exists to delete.
+		const publicClient = {
+			clientId: TEST_CLIENT_ID,
+			tokenEndpointAuthMethod: "none" as const,
+			allowedRedirectUris: [],
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+		};
+		const repo: ClientRepository = {
+			findById: async (id) => (id === TEST_CLIENT_ID ? publicClient : null),
+			authenticate: async () => null,
+		};
+		const app = await buildApp(repo);
+		const res = await request(app)
+			.post("/oauth/token")
+			.type("form")
+			.send({ grant_type: "client_credentials", client_id: TEST_CLIENT_ID });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+	});
+
 	it("propagates allowedScopes so the scope subset check sees the client's allowlist", async () => {
 		const app = await buildApp(
 			clientRepoWith({

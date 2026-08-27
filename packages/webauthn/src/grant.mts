@@ -123,37 +123,20 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
 
 	return {
+		// allowedGrantTypes strictness for authenticated clients — mirroring
+		// the cc pattern (§3.4.1 deny-by-absence): a client must be explicitly
+		// authorized for the webauthn grant type. Declared here, enforced at
+		// /token dispatch before `handle` runs (#326; previously a hand-rolled
+		// Step 0 in this handler — Codex Round 2 P1-2 / cc parity).
+		//
+		// When ctx.authenticatedClient is null, dispatch skips the check
+		// entirely: the webauthn grant does not require client authentication —
+		// the passkey IS the auth event. Consumers may optionally wire
+		// clientAuthMw before this handler; when they do not, there is no
+		// allowedGrantTypes source to validate against.
+		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, issuer } = ctx;
-
-			// ------------------------------------------------------------------
-			// Step 0: Enforce allowedGrantTypes for authenticated clients
-			//
-			// When a client is authenticated, verify it is explicitly authorized
-			// for the webauthn grant type — mirroring the cc/rt/auth_code pattern
-			// (clientCredentials.mts isGrantAllowed / §3.4.1 deny-by-absence).
-			//
-			// When ctx.authenticatedClient is null, skip the check entirely:
-			// the webauthn grant does not require client authentication — the
-			// passkey IS the auth event. Consumers may optionally wire
-			// clientAuthMw before this handler; when they do not, there is no
-			// allowedGrantTypes source to validate against.
-			//
-			// Cross-refs: Codex Round 2 P1-2 / cc parity
-			// ------------------------------------------------------------------
-			const authenticatedClientForCheck = ctx.authenticatedClient;
-			if (
-				authenticatedClientForCheck &&
-				!authenticatedClientForCheck.allowedGrantTypes?.includes(WEBAUTHN_GRANT_TYPE)
-			) {
-				return {
-					result: {
-						status: 400,
-						error: "unauthorized_client",
-						errorDescription: `client is not authorized for ${WEBAUTHN_GRANT_TYPE}`,
-					},
-				};
-			}
 
 			// ------------------------------------------------------------------
 			// Step 1: Parse assertion from body
