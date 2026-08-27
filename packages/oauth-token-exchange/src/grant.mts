@@ -294,6 +294,148 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
+			// RFC 9449 §5 / RFC 8705 §4 sender-constraint matrices, mirroring
+			// `packages/oauth/src/grants/refreshToken.mts` row for row. Without
+			// them the exchange grant was a de-binding laundry: a stolen
+			// DPoP- or mTLS-bound `subject_token` was accepted with no
+			// proof-of-possession and the issued token dropped the binding, so
+			// an attacker converted a token that was useless without the key
+			// into an ordinary bearer token for their own client (#265).
+			//
+			// DPoP matrix:
+			//   subject cnf.jkt | proof JKT       | Outcome
+			//   no              | no              | issue plain Bearer (legacy)
+			//   no              | yes             | issue DPoP-bound AT (opt-in upgrade)
+			//   yes             | no              | reject invalid_grant
+			//   yes             | yes, differs    | reject invalid_grant (multi-key attack)
+			//   yes             | yes, equal      | issue DPoP-bound AT (binding preserved)
+			//
+			// mTLS matrix: identical over `cnf["x5t#S256"]` and the presented
+			// client certificate.
+			//
+			// Evaluated here — after subject validation, before policy
+			// evaluation, store I/O and the keystore signature — so a rejection
+			// short-circuits ahead of the expensive work, the same ordering
+			// rationale the refresh grant states.
+			//
+			// `invalid_grant` rather than `invalid_dpop_proof`: the proof or
+			// certificate is well-formed; it is the *grant* that cannot be
+			// honoured, which is the more caller-actionable classification and
+			// what the refresh path already returns for the same rows.
+			//
+			// Enforcement covers `subject_token` only. A request carries exactly
+			// one `ctx.tokenBinding` — one DPoP proof, one client certificate —
+			// so when a subject and an actor token are bound to different keys no
+			// caller could satisfy both, and requiring it would break legitimate
+			// delegation. The residual actor-token gap is tracked separately in #309.
+			const subjectCnf = subjectValidated.claims.cnf;
+			const cnfObject =
+				subjectCnf !== null && typeof subjectCnf === "object" && !Array.isArray(subjectCnf)
+					? (subjectCnf as Record<string, unknown>)
+					: undefined;
+			const readCnfMember = (member: string): string | undefined => {
+				const value = cnfObject?.[member];
+				return typeof value === "string" && value.length > 0 ? value : undefined;
+			};
+			const subjectJkt = readCnfMember("jkt");
+			const subjectX5t = readCnfMember("x5t#S256");
+
+			if (subjectJkt !== undefined && subjectX5t !== undefined) {
+				// This AS emits exactly one mechanism's confirmation per token, so
+				// a compound cnf is a forged token or an AS bug. Refuse rather
+				// than pick a winner — the stance the refresh grant and the
+				// introspection handler already take.
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription:
+							"subject_token has compound cnf binding which is not supported (Stage 1)",
+					},
+				};
+			}
+
+			// Each mechanism reads only its own confirmation member, gated on the
+			// binding's `kind`. `Confirmation` is a mechanism-extensible union, so
+			// a third-party mechanism emitting `{ jkt }` without ever validating a
+			// DPoP proof would otherwise satisfy a DPoP-bound subject token.
+			const presentedConfirmation = ctx.tokenBinding?.confirmation;
+			const presentedJkt =
+				ctx.tokenBinding?.kind === "dpop" && presentedConfirmation && "jkt" in presentedConfirmation
+					? presentedConfirmation.jkt
+					: undefined;
+			const presentedX5t =
+				ctx.tokenBinding?.kind === "mtls" &&
+				presentedConfirmation &&
+				"x5t#S256" in presentedConfirmation
+					? presentedConfirmation["x5t#S256"]
+					: undefined;
+
+			if (subjectJkt !== undefined) {
+				if (presentedJkt === undefined) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "subject_token requires a DPoP proof",
+						},
+					};
+				}
+				// Plain `!==`: the JKT is a SHA-256 thumbprint of a *public* key
+				// (RFC 7638), not a secret, so a timing side-channel cannot leak
+				// material the caller does not already hold. Same reasoning as the
+				// refresh grant.
+				if (presentedJkt !== subjectJkt) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "DPoP proof does not match subject_token binding",
+						},
+					};
+				}
+			}
+
+			if (subjectX5t !== undefined) {
+				if (presentedX5t === undefined) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "subject_token requires a client certificate",
+						},
+					};
+				}
+				if (presentedX5t !== subjectX5t) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "client certificate does not match subject_token binding",
+						},
+					};
+				}
+			}
+
+			// The confirmation stamped onto the issued token. When the subject was
+			// bound this is the same value it carried — the matrices above have
+			// already established that the presented material matches — so
+			// "preserve" and "rebind to what was proven" are the same claim, and
+			// taking it from the presented binding keeps the token bound to
+			// material this request actually proved possession of.
+			//
+			// Row 2 of each matrix rides on the same expression: an unbound
+			// subject exchanged with a proof yields a bound token. That cannot
+			// help an attacker — a stolen *unbound* subject token was already a
+			// usable bearer credential — and it takes the issued token out of
+			// bearer replay for everyone else.
+			const issuedConfirmation =
+				presentedJkt !== undefined
+					? ({ jkt: presentedJkt } as const)
+					: presentedX5t !== undefined
+						? ({ "x5t#S256": presentedX5t } as const)
+						: undefined;
+
 			// Fail-closed: the self-issued validator silently skips the family check
 			// when refreshTokenFamilyRevocation is absent, but Token Exchange must
 			// not issue tokens whose revocation cannot be observed (spec §7.2 state 1).
@@ -649,6 +791,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					authorizedParty: client.clientId,
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					...(issuedConfirmation ? { confirmation: issuedConfirmation } : {}),
 				},
 			);
 

@@ -66,6 +66,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **Breaking:** a DPoP-bound access token must now be presented as `Authorization: DPoP <token>` with a matching, `ath`-bearing proof. Clients sending `Authorization: Bearer <dpop-bound-token>` to `/userinfo`, the federation-token endpoint, `/logout` or bearer self-introspection will receive `401 invalid_token` — that acceptance was the vulnerability. Those four endpoints now accept both the `Bearer` and `DPoP` schemes (matched case-insensitively per RFC 9110 §11.1, and as a whole scheme token rather than a prefix); unbound tokens are unaffected in every respect. Deployments that never enabled DPoP or mTLS see no behaviour change.
 
+- **Token exchange no longer launders a sender-constrained token into an unbound one (`@o3co/auth-provider-oauth-token-exchange`).** The RFC 8693 grant did no `cnf` handling whatsoever — a DPoP- or mTLS-bound `subject_token` was accepted with **no proof-of-possession check**, and the issued token dropped the binding entirely. The whole value of binding a token is that stealing it is not enough without the key; exchange handed an attacker a conversion from "bound token I cannot use" to "ordinary bearer token for my own client". Scope-widening and audience-widening were already prevented, so the laundering was bounded to exactly this: the loss of the sender constraint.
+
+  The grant now runs the same two 5-row matrices `packages/oauth/src/grants/refreshToken.mts` established for the refresh path, row for row:
+
+  | subject `cnf.jkt` | proof JKT | outcome |
+  | --- | --- | --- |
+  | no | no | issue plain Bearer (unchanged) |
+  | no | yes | issue DPoP-bound AT (opt-in upgrade) |
+  | yes | no | reject `invalid_grant` |
+  | yes | yes, differs | reject `invalid_grant` |
+  | yes | yes, equal | issue DPoP-bound AT, binding preserved |
+
+  The mTLS matrix is identical over `cnf["x5t#S256"]` and the presented client certificate. A compound `cnf` (both members) is rejected before either matrix runs — this AS never mints one, so it indicates a forged token. Each matrix reads only its own confirmation member and is gated on `ctx.tokenBinding.kind`: `Confirmation` is a mechanism-extensible union, so a third-party mechanism emitting `{ jkt }` without ever validating a DPoP proof would otherwise satisfy a DPoP-bound subject token.
+
+  The checks run after subject validation but **before** policy evaluation, store I/O and the keystore signature, so a rejection short-circuits ahead of the expensive work. `invalid_grant` is the error rather than `invalid_dpop_proof`: the proof or certificate is well-formed and it is the grant that cannot be honoured, which is both more caller-actionable and what the refresh path already returns for the same rows.
+
+  Enforcement covers `subject_token` only. A request carries exactly one `ctx.tokenBinding` — one DPoP proof, one client certificate — so a subject and an actor token bound to different keys could not both be satisfied by any caller, and requiring it would break legitimate delegation. The residual `actor_token` gap is tracked in #309.
+
+  **Migration:** a client exchanging a bound `subject_token` must now present the matching DPoP proof or client certificate on the exchange request; without it the exchange returns `400 invalid_grant`. Deployments that never enabled DPoP or mTLS are unaffected — an unbound subject token with no binding presented behaves exactly as before.
+
+
 ### Fixed
 
 - **A Redis blip no longer crashes the process — the node-redis session client and every duplicated ioredis connection now have `error` listeners (`@o3co/auth-provider-session`, `@o3co/auth-provider-redis`).** node-redis emits `error` on socket failures even while it is happily auto-reconnecting, and an EventEmitter `error` with no listener throws. The session store's client was created and connected with no listener anywhere, and `session.storage.type = "redis"` is the shipped default — so a Redis failover or maintenance blip took down the identity provider, and the restart reconnected into the same flapping Redis. The listener is now attached **before** `connect()`, since a connection failing during the handshake emits while `connect()` is still in flight.
