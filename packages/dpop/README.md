@@ -47,6 +47,12 @@ When both `dpopModule` and `mtlsModule` are installed, the `oauth.tokenBinding.d
 
 See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md) for the design rationale and [packages/mtls/README.md](../mtls/README.md#cross-mechanism-dispatch-dpop--mtls) for the symmetric view from the mTLS side.
 
+## Discovery metadata
+
+When `oauth.dpop.enabled = true`, this module contributes `dpop_signing_alg_values_supported` (RFC 9449 §5.1) to `/.well-known/openid-configuration`, carrying the configured `alg-whitelist` verbatim. It is the same read the proof verifier is constructed from, so an algorithm a client picks off discovery is one this deployment will accept.
+
+Nothing is contributed while DPoP is disabled — a client then has no way to tell this module apart from an uninstalled one, which is accurate.
+
 ## Operator requirements
 
 - **`oauth.jwt.issuer` MUST name the origin clients actually reach.** Since [#292](https://github.com/o3co/auth.provider/issues/292) the `htu` a proof is checked against is built from the configured issuer's origin plus the path of the request, *not* from `req.protocol` and the `Host` header. Those two read `X-Forwarded-Proto` / `X-Forwarded-Host` whenever Express `trust proxy` is on, which let a caller who could reach the AS past the edge choose the value its own proof had to match — satisfying both halves of the comparison at once. The issuer is a property of the deployment and no request can move it, which is the whole reason it is the right source.

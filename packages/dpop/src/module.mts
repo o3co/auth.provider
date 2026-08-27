@@ -150,6 +150,38 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 	requires: ["config"],
 	optional: ["logger", "dpopReplayStore"],
 	contributes: {
+		// RFC 9449 §5.1 authorization-server metadata (#283). Without it a client
+		// reading `/.well-known/openid-configuration` cannot discover that this
+		// deployment accepts DPoP proofs at all, let alone which JOSE algorithms
+		// the verifier will accept — it would have to try one and read the error.
+		//
+		// The advertised list is the SAME `alg-whitelist` read the mechanism is
+		// constructed from below, so an algorithm a client picks off discovery
+		// cannot be one the proof verifier then rejects.
+		//
+		// Contributes an EMPTY contribution (not `null`) when DPoP is disabled:
+		// unlike `tokenBindingMechanisms`, the `discoveryMetadata` kind has no
+		// null-filtering contract — core's aggregator iterates every collected
+		// contribution. An empty one adds no fields, which is what "disabled"
+		// means to a reader of the document.
+		discoveryMetadata: [
+			(deps) => {
+				const dpop = (
+					deps.config as {
+						oauth?: { dpop?: { enabled?: unknown; "alg-whitelist"?: unknown } };
+					}
+				).oauth?.dpop;
+				if (dpop?.enabled !== true) return {};
+				const algs = dpop["alg-whitelist"];
+				// `oauth.dpop` reaches modules through `composeConfigSchema`, so the
+				// whitelist is normally schema-defaulted. A composition root that
+				// hand-builds its config bypasses that, and an absent whitelist must
+				// not become `dpop_signing_alg_values_supported: undefined` in the
+				// served document.
+				if (!Array.isArray(algs) || algs.length === 0) return {};
+				return { metadata: { dpop_signing_alg_values_supported: [...algs] } };
+			},
+		],
 		tokenBindingMechanisms: [
 			(deps) => {
 				const dpopConfig = (deps.config as { oauth?: { dpop?: { enabled?: unknown } } }).oauth

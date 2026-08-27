@@ -636,12 +636,18 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 
 - `issuer`、`authorization_endpoint`、`token_endpoint`、`userinfo_endpoint`、`introspection_endpoint`
 - `jwks_uri` — 常に広告する（`jwksModule` が contribute）。issuer 設定済みの構成は `jwksModule` を必ず組み込む必要があり、欠如すると boot が `DiscoveryDocumentError` で fail-fast する。JWKS ルートが空の鍵セットを返すことはない（#282）: HS256 構成は `404 jwks_not_published`、非対称でも公開可能な鍵が 0 件なら `503 jwks_unavailable` を返し、いずれも `Cache-Control: no-store`。対称鍵の secret はどちらの経路でも公開されない。このルートが `200` を返すときは必ず 1 件以上の鍵を含む。
+- `revocation_endpoint` — `POST /oauth/revoke` が**何かしら revoke できる**ときに広告する。判定はルート自身の解決規則に合わせた 2 本の腕からなる: refresh 側は `refreshTokenFamilyRevocation` が wire されていること、access 側は `accessTokenDenylist` が wire され**かつ** `oauth.revocation.accessToken` が `"unsupported"` でないこと（明示的な `"unsupported"` は wiring に関わらず access 側の経路を無効化する — #277 参照）。どちらか一方で足りる: RFC 7009 §2.2.1 は AS が片方の token type だけを revoke できる状況のために `unsupported_token_type` を定義しているので、refresh のみのエンドポイントも revocation endpoint であり、URL を隠せば logout 時に refresh token を revoke したい client が何も revoke できなくなる。**どちらの腕も無い**場合、ルートは RFC 7009 が要求する `200` を返しつつ何も revoke しないため、広告することは #277 の失敗をメタデータとして再現することになる。どの *token type* を revoke するかは依然として discovery からは導出できない（RFC 7009 / RFC 8414 に token type 別のメタデータフィールドは無い）: access token 側の答えはエンドポイント自身が `unsupported_token_type` として返す。
 - `response_types_supported: ["code"]`
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — 設定された `KeyStore.algorithm` から導出
 - `scopes_supported: ["openid", "profile", "email", "groups"]`
+- `grant_types_supported` — `/oauth/token` が dispatch する grant handler registry から読む。つまりこの構成が実際に登録した grant（それぞれ `oauth.grants.<name>.enabled` で gate される）だけが並び、それ以外は入らない。空でも出力する: RFC 8414 §2 は **省略** を `["authorization_code", "implicit"]` と解釈するため、省略はこの AS が一度も実装していない `implicit` を広告していた。
 - `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`
-- `code_challenge_methods_supported: ["S256"]`
+- `introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"]` — `none` は無い: `/oauth/introspect` は RFC 7662 §2.1 に従い public client を拒否する
+- `revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]` — `revocation_endpoint` と同時に出力。RFC 7009 §2.1 が public client による自身の token の revoke を認めるため `none` を含む
+- `code_challenge_methods_supported: ["S256"]` — `S256` のみ。`oauth.grants.authorization_code.pkce.supportedMethods` から導出は**しない**。この配列は server-wide メタデータであり、読んだ client は「このいずれかを使ってよい」と解釈する。`plain` はそれを満たさない（`/authorize` は RFC 9700 §2.1.1 に従い public client には即座に拒否する）ので載せない — client 単位の例外は、どちらの向きであれ server-wide 配列には属さない。
+- `dpop_signing_alg_values_supported` — `oauth.dpop.enabled = true` のとき `@o3co/auth-provider-dpop` が contribute し、そのモジュールの `alg-whitelist` をそのまま載せる（RFC 9449 §5.1）
+- `tls_client_certificate_bound_access_tokens: true` — `oauth.mtls.enabled = true` のとき `@o3co/auth-provider-mtls` が contribute する（RFC 8705 §3.3）。それ以外では省略し、RFC はこれを `false` と定義している。`oauth.mtls.source` には依存しない: TLS layer 経由でも trusted-proxy header 経由でも token に載る `cnf["x5t#S256"]` は同じで、このフラグは token を説明するものだから。
 - `end_session_endpoint` — TODO-F-5 で追加
 - `backchannel_logout_supported: true` — TODO-F-5 で追加
 - `backchannel_logout_session_supported: true` — TODO-F-5 で追加

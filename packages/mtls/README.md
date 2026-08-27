@@ -80,6 +80,14 @@ The key is declared by core's bundled config schema (single source of truth). It
 | `"tls-layer"` (default) | `req.socket.getPeerCertificate()` — the live TLS handshake. Requires the auth provider's listener to be TLS-terminated with `requestCert = true`. | The auth provider terminates TLS itself. **This is the RFC 8705 §3 shape**: the certificate is proven by the handshake rather than asserted by a header, so there is nothing to forge. |
 | `"header"` | A forwarded-cert header set by a trusted reverse proxy (Envoy, nginx). Pair with `cert-header`, `cert-header-dialect`, and a **required** `trusted-proxies` allowlist. | The auth provider sits behind a TLS-terminating proxy. Common at scale, and safe only to the extent the proxy hop is. |
 
+## Discovery metadata
+
+When `oauth.mtls.enabled = true`, this module contributes `tls_client_certificate_bound_access_tokens: true` (RFC 8705 §3.3) to `/.well-known/openid-configuration`. While disabled it contributes nothing, and the RFC already reads an omitted flag as `false`.
+
+The flag does **not** vary with `source`: both source modes above produce the same `cnf["x5t#S256"]` on the issued token, and §3.3 describes the token, not the transport the certificate arrived over.
+
+This is the only field contributed, on purpose. This package implements RFC 8705 **§3 token binding**, not **§2 mTLS client authentication**, so `tls_client_auth` / `self_signed_tls_client_auth` never appear in `token_endpoint_auth_methods_supported` — the token endpoint does not accept a certificate as a client credential.
+
 ## Trusted-Proxy Security Guidance
 
 RFC 8705 §3 accepts a client certificate from the TLS layer, or from an **authenticated** trusted proxy. `source = "header"` is the second shape, and the word doing the work is *authenticated*.
