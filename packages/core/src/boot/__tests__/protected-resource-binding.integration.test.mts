@@ -19,6 +19,12 @@
  * middleware must be mounted on every OAuth surface that accepts an access
  * token as a credential, and must be mounted even when the deployment
  * contributes no mechanisms at all.
+ *
+ * Extended for issue #327: coverage is fail-closed. The middleware guards
+ * EVERY route — including routes contributed by modules core has never heard
+ * of — except the explicitly exempt token endpoint. A module contributing a
+ * new token-accepting route must be guarded by default, not by remembering
+ * to update an allowlist in core.
  */
 
 import express, { type Request, type RequestHandler, Router } from "express";
@@ -83,6 +89,30 @@ const protectedRoutesModule = () =>
 		},
 	});
 
+/**
+ * Stands in for a third-party module contributing a token-accepting route at
+ * a mount point core has never heard of (#327). Before the fail-closed
+ * inversion this route sat outside the hard-coded allowlist and shipped
+ * unguarded by default.
+ */
+const extensionResourceModule = () =>
+	defineModule({
+		name: "extension-resource",
+		requires: [],
+		optional: [],
+		contributes: {
+			routes: [
+				() => {
+					const router = Router();
+					router.get("/resource", (_req, res) => {
+						res.status(200).json({ reached: true });
+					});
+					return { id: "extension", mountPath: "/acme", handler: router };
+				},
+			],
+		},
+	});
+
 const mechanismModule = (mechanism: TokenBindingMechanism | null) =>
 	defineModule({
 		name: "mechanism",
@@ -93,7 +123,11 @@ const mechanismModule = (mechanism: TokenBindingMechanism | null) =>
 
 const bootApp = async (mechanism: TokenBindingMechanism | null) => {
 	const handle = await createApp({
-		modules: [...(mechanism === null ? [] : [mechanismModule(mechanism)]), protectedRoutesModule()],
+		modules: [
+			...(mechanism === null ? [] : [mechanismModule(mechanism)]),
+			protectedRoutesModule(),
+			extensionResourceModule(),
+		],
 		bootstrapComponents: BOOT,
 	});
 	const app = express();
@@ -160,5 +194,64 @@ describe("protected-resource sender-constraint mount (#264)", () => {
 			.post("/oauth/token")
 			.set("Authorization", "Basic Y2xpZW50OnNlY3JldA==");
 		expect(res.status).toBe(200);
+	});
+
+	it("leaves /oauth/token alone even when the Authorization header carries a bound token", async () => {
+		// No legitimate flow presents an access token at the token endpoint —
+		// this pins that the exemption really is the path, not the middleware
+		// happening to pass through: the same header is a 401 everywhere else.
+		const app = await bootApp(dpopMech);
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", `Bearer ${await boundToken()}`);
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ reached: true });
+	});
+});
+
+describe("fail-closed coverage at the extension seam (#327)", () => {
+	it("refuses a bound token replayed as a plain Bearer at a module-contributed route", async () => {
+		// The regression #327 closes: this route is NOT in the old hard-coded
+		// allowlist, so it used to ship unguarded by default.
+		const app = await bootApp(dpopMech);
+		const res = await request(app)
+			.get("/acme/resource")
+			.set("Authorization", `Bearer ${await boundToken()}`);
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_token");
+	});
+
+	it("admits the same token under the DPoP scheme at a module-contributed route", async () => {
+		const app = await bootApp(dpopMech);
+		const res = await request(app)
+			.get("/acme/resource")
+			.set("Authorization", `DPoP ${await boundToken()}`);
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ reached: true });
+	});
+
+	it("leaves an unbound Bearer token alone at a module-contributed route", async () => {
+		const app = await bootApp(dpopMech);
+		const res = await request(app)
+			.get("/acme/resource")
+			.set("Authorization", `Bearer ${await unboundToken()}`);
+		expect(res.status).toBe(200);
+	});
+
+	it("leaves a request without an Authorization header alone at a module-contributed route", async () => {
+		const app = await bootApp(dpopMech);
+		const res = await request(app).get("/acme/resource");
+		expect(res.status).toBe(200);
+	});
+
+	it("refuses a bound token at a module-contributed route when no mechanisms are contributed", async () => {
+		// Fail-closed twice over: the route is outside the old allowlist AND
+		// the deployment dropped its mechanism module while bound tokens are
+		// still live.
+		const app = await bootApp(null);
+		const res = await request(app)
+			.get("/acme/resource")
+			.set("Authorization", `Bearer ${await boundToken()}`);
+		expect(res.status).toBe(401);
 	});
 });
