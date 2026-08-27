@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import {
-	type ClientRepository,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -34,16 +33,14 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  * `allowedScopes` are the ceiling for the request, and `aud` / `azp` name that
  * same client.
  *
- * The `clientRepository` dependency is retained in the signature for
- * compatibility with existing composition roots, but the grant no longer reads
- * from it: `clientAuthMw` already resolved the client record, so re-reading it
- * would be a second lookup of the same row — and looking it up by a body
- * `client_id` would reintroduce a body-spoofable identity (the D-6 / Codex M2
- * invariant that no identity decision reads the raw body).
+ * The grant deliberately takes no `clientRepository`: `clientAuthMw` already
+ * resolved the client record, so re-reading it would be a second lookup of the
+ * same row — and looking it up by a body `client_id` would reintroduce a
+ * body-spoofable identity (the D-6 / Codex M2 invariant that no identity
+ * decision reads the raw body). #295 kept the parameter for compatibility
+ * after removing the read; #331 removed it.
  */
-export const createSessionGrant = (
-	deps: GrantDependencies & { clientRepository: ClientRepository },
-): GrantHandler => {
+export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore } = deps;
 	// #328: deployment config, not request state — resolved once at grant
 	// construction, matching the altitude the router resolves its knobs at.

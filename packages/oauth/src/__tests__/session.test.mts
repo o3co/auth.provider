@@ -15,13 +15,12 @@
  */
 
 import {
-	type ClientRepository,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 
 const mockConfig = {
@@ -37,15 +36,9 @@ const mockConfig = {
 	},
 } as unknown as GrantDependencies["config"];
 
-const makeDeps = (
-	overrides?: Partial<GrantDependencies & { clientRepository: ClientRepository }>,
-) => ({
+const makeDeps = (overrides?: Partial<GrantDependencies>) => ({
 	config: mockConfig,
 	keyStore: createSymmetricKeyStore("test-secret"),
-	clientRepository: {
-		findById: vi.fn(),
-		authenticate: vi.fn(),
-	} as unknown as ClientRepository,
 	...overrides,
 });
 
@@ -371,19 +364,10 @@ describe("createSessionGrant", () => {
 				expect(result.error).toBe("invalid_client");
 			});
 
-			it("does not consult the client repository — the authenticated record is authoritative", async () => {
-				const deps = makeDeps();
-				const handler = createSessionGrant(deps);
-				await handler.handle({
-					body: { scope: "read" },
-					session: { isAuthenticated: true, user: { id: "u1" } },
-					issuer: "localhost",
-					metadata: { ip: "127.0.0.1" },
-					authenticatedClient: basicAuthClient,
-				});
-
-				expect(deps.clientRepository.findById).not.toHaveBeenCalled();
-			});
+			// #295 pinned "the client repository is not consulted" with a spy on
+			// an injected mock. #331 removed the dependency from the factory
+			// signature entirely, so the type system now enforces what that
+			// test observed and the pin is retired with the parameter.
 		});
 
 		it("does not return sessionMutation", async () => {

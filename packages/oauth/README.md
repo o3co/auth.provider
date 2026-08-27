@@ -51,7 +51,7 @@ Routes mounted:
 
 ```typescript
 function oauthSessionModule(params: {
-  clientRepository: ClientRepository;
+  config: AppConfig;
 }): Module;
 ```
 
