@@ -770,7 +770,15 @@ export const createOAuthRouter = async (
 				// registered into that position. Consent (#284) is the step that
 				// changes the former.
 				if (client.firstParty !== true) {
-					if (!allowUnmarkedClients) {
+					// `allowUnmarkedClients` admits clients that are *unmarked* —
+					// registrations written before the field existed. A client
+					// carrying `firstParty: false` is not unmarked: it is a
+					// deliberate statement that this client must never receive a
+					// silent code, and the migration window is exactly where
+					// weakening that would be least noticed. So an explicit `false`
+					// is refused regardless of the flag.
+					const unmarked = client.firstParty === undefined;
+					if (!(unmarked && allowUnmarkedClients)) {
 						await emitAuditEvent(auditSink, {
 							timestamp: new Date(),
 							type: "token.issued.failure",

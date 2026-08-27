@@ -126,7 +126,10 @@ export interface Client {
 	 * So the assumption is now enforced rather than assumed: `/authorize`
 	 * refuses any client that is not `true` here. A deployment still migrating
 	 * its client records can set `oauth.authorize.allowUnmarkedClients = true`
-	 * to keep admitting unmarked ones, with a per-client warning.
+	 * to keep admitting ones with no `firstParty` field at all, each with a
+	 * per-client warning. An explicit `false` is refused regardless — it is a
+	 * deliberate statement rather than an unmigrated record, and the migration
+	 * window is where weakening it would be least noticed.
 	 *
 	 * This does **not** make `/authorize` safe against forced navigation for a
 	 * client that *is* first-party — that is the accepted model, and the

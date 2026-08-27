@@ -29,6 +29,8 @@ my-app:
 
 **Migrating.** Existing registrations predate the field, so they are all unmarked. Set `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS=true` to keep admitting them while you work through them — each admission logs `authorize_client_not_marked_first_party` with the client id, so the remaining work shows up in your logs rather than only in a config file. Set it back to `false` when the list is empty.
 
+The flag admits clients with **no** `firstParty` field. A client carrying `firstParty: false` stays refused even during migration: that is a deliberate statement that it must never receive a silent code, and the migration window is exactly where weakening it would be least noticed.
+
 ## Multi-replica deployments
 
 When running multiple instances of the standalone server behind a load balancer, point `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` at a **shared** Redis 7.2+ instance. Without a shared Redis URL, every replica holds refresh-token families in its own connection (and any local-only Redis), so a refresh request that lands on a replica that did not issue the token returns `invalid_grant` on every other request in a round-robin LB.
