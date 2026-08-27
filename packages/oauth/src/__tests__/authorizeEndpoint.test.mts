@@ -360,8 +360,8 @@ describe("/authorize — code issuance failure", () => {
 	});
 });
 
-describe("/authorize — success audit subject (login.success)", () => {
-	it("emits login.success with subject undefined when the session user has no string id", async () => {
+describe("/authorize — success audit subject (authorize.granted)", () => {
+	it("emits authorize.granted with subject undefined when the session user has no string id", async () => {
 		const record = vi.fn(async () => {});
 		const { app } = await makeApp({
 			auditSink: { record },
@@ -369,11 +369,33 @@ describe("/authorize — success audit subject (login.success)", () => {
 		});
 		const res = await authorize(app, baseQuery);
 		expect(redirectParams(res).get("code")).toBe("code-x");
-		expect(record).toHaveBeenCalledWith(expect.objectContaining({ type: "login.success" }));
+		expect(record).toHaveBeenCalledWith(expect.objectContaining({ type: "authorize.granted" }));
 		const event = record.mock.calls.find(
-			(c) => (c as unknown as [Record<string, unknown>])[0]?.type === "login.success",
+			(c) => (c as unknown as [Record<string, unknown>])[0]?.type === "authorize.granted",
 		)?.[0] as unknown as Record<string, unknown>;
 		expect(event.subject).toBeUndefined();
 		expect(event.clientId).toBe(CLIENT_ID);
+	});
+});
+
+describe("/authorize — rejection audit vocabulary (authorize.rejected, #329)", () => {
+	it("emits authorize.rejected when the client is not registered for the code grant", async () => {
+		// The rejection used to reuse the token endpoint's
+		// `token.issued.failure`; /authorize rejections carry their own name
+		// so the success/failure pair names one operation.
+		const record = vi.fn(async () => {});
+		const { app } = await makeApp({
+			auditSink: { record },
+			client: { allowedGrantTypes: ["client_credentials"] },
+		});
+		const res = await authorize(app, baseQuery);
+		expect(redirectParams(res).get("error")).toBe("unauthorized_client");
+		expect(record).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "authorize.rejected",
+				clientId: CLIENT_ID,
+				details: expect.objectContaining({ reason: "grant_type_not_allowed" }),
+			}),
+		);
 	});
 });

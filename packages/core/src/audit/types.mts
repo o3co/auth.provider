@@ -21,7 +21,8 @@ export interface AuditEvent {
 	/**
 	 * Built-in event types (informative, not exhaustive):
 	 *   "login.success" | "login.failure" |
-	 *   "token.issued" | "token.refreshed" | "token.revoked" |
+	 *   "authorize.granted" | "authorize.rejected" |
+	 *   "token.issued" | "token.issued.failure" | "token.refreshed" | "token.revoked" |
 	 *   "federation.success" | "federation.failure" |
 	 *   "mfa.challenge.issued" | "mfa.challenge.success" | "mfa.challenge.failure" |
 	 *   "logout" | "scope.denied" | "rate_limit.unavailable"
