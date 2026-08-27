@@ -58,10 +58,20 @@
  *             Wave 1 post-merge audit H-2
  */
 
-import { defineModule } from "@o3co/auth-provider-core";
+import {
+	consoleLogger,
+	createMemoryRateLimiter,
+	createRateLimitGuard,
+	defineModule,
+	type RateLimiter,
+	type RateLimitSpec,
+} from "@o3co/auth-provider-core";
 import express from "express";
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "./grant.mjs";
-import { createAuthenticationOptionsHandler } from "./routes/authenticationOptions.mjs";
+import {
+	createAuthenticationOptionsHandler,
+	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
+} from "./routes/authenticationOptions.mjs";
 import { createRegistrationOptionsHandler } from "./routes/registrationOptions.mjs";
 import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs";
 
@@ -79,11 +89,14 @@ import { createRegistrationVerifyHandler } from "./routes/registrationVerify.mjs
  *   /oauth/webauthn/registration/verify    — id: webauthn-registration-verify
  *   /oauth/webauthn/authentication/options — id: webauthn-authentication-options
  *
- * Rate-limit for authentication/options is composed externally — the handler
- * factory (T29) has no rateLimiter dep. Per project convention (S10/S15),
- * rate-limit middleware is wired at the route level via middleware composition,
- * not as a handler-factory dependency. To apply, wrap the handler inside an
- * Express router with the RateLimiter middleware before mounting.
+ * `POST /oauth/webauthn/authentication/options` is rate-limited by this module
+ * (#281). The route factory mounts core's shared `createRateLimitGuard` under
+ * the `webauthn-authentication-options` tag, on the wired `rateLimiter`
+ * component when there is one and on a per-process memory limiter (with a
+ * warning) when there is not. The spec comes from
+ * `webauthnConfig.rateLimit.authenticationOptions`; the outage policy comes
+ * from `config.rateLimit.failMode`, the same key the OAuth endpoints and
+ * `/session/login` read.
  */
 export const webauthnModule = defineModule<
 	| "webauthnConfig"
@@ -92,7 +105,7 @@ export const webauthnModule = defineModule<
 	| "challengeCeremony"
 	| "config"
 	| "keyStore",
-	"grantPolicy"
+	"grantPolicy" | "rateLimiter" | "auditSink" | "logger"
 >({
 	name: "webauthn",
 	requires: [
@@ -109,6 +122,15 @@ export const webauthnModule = defineModule<
 		// composable with non-webauthn modules that don't need policy — the
 		// factory throws at boot when this slot is unwired.
 		"grantPolicy",
+		// #281 — the authentication/options throttle. `rateLimiter` optional so a
+		// composition installing no limiter module still boots; unlike the OAuth
+		// routes, absence does NOT mean unguarded here (see the route factory).
+		"rateLimiter",
+		// #281 — `rate_limit.unavailable` during a limiter outage. No events when
+		// absent, matching how oauth and session treat the slot.
+		"auditSink",
+		// #281 — operator-visible outage channel + the fallback-limiter warning.
+		"logger",
 	],
 	contributes: {
 		grants: {
@@ -190,13 +212,62 @@ export const webauthnModule = defineModule<
 				};
 			},
 			// POST /oauth/webauthn/authentication/options
-			// Rate-limit is composed externally — no rateLimiter arg on handler (T29 / S10/S15).
 			// express.json() at router level — same rationale as above.
+			//
+			// #281: the rate limit is MOUNTED here. It used to be "composed
+			// externally at module-wiring time (S10/S15)" — a comment, not a
+			// middleware, on the one webauthn route that is unauthenticated and
+			// writes a challenge per request.
 			(deps) => {
 				const router = express.Router();
 				router.use(express.json({ limit: "100kb" }));
+
+				const logger = deps.logger ?? consoleLogger;
+				const spec: RateLimitSpec = {
+					limit: deps.webauthnConfig.rateLimit.authenticationOptions.limit,
+					windowSeconds: deps.webauthnConfig.rateLimit.authenticationOptions.windowSeconds,
+				};
+				if (deps.rateLimiter === undefined) {
+					logger.warn(
+						{
+							limit: spec.limit,
+							windowSeconds: spec.windowSeconds,
+							tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
+						},
+						"webauthn_authentication_options_rate_limiter_not_shared",
+					);
+				}
+				// Falling back rather than leaving the route unguarded, the same
+				// choice `/session/login` makes: this endpoint is the credential-
+				// store flood and enumeration surface, so a per-process bucket is
+				// weak protection, not absent protection. The warning above says
+				// which one is in force so the weakness is stated, not implied.
+				// Wire the shared `rateLimiter` component (Redis in a scaled
+				// deployment) to get one bucket set across replicas.
+				const limiter: RateLimiter =
+					deps.rateLimiter ??
+					createMemoryRateLimiter({
+						limits: { [WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: spec },
+						defaultLimit: spec,
+					});
+
 				router.post(
 					"/",
+					// `failMode` is read from the same product-wide config key the
+					// OAuth endpoints and `/session/login` read: a limiter outage
+					// must not mean "shed load" on one surface and "let everything
+					// through" on another.
+					createRateLimitGuard({
+						limiter,
+						tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
+						failMode: deps.config.rateLimit.failMode,
+						logger,
+						auditSink: deps.auditSink,
+						// This endpoint HAS a documented per-endpoint spec, so the
+						// RateLimit-* headers are backed by it when a custom adapter
+						// reports no applied limit of its own.
+						headerFallback: spec,
+					}),
 					createAuthenticationOptionsHandler({
 						config: deps.webauthnConfig,
 						challengeStore: deps.challengeStore,

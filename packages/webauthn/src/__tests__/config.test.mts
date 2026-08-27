@@ -21,72 +21,102 @@ import { webauthnConfigSchema } from "../config.mjs";
 // packages/webauthn/config/reference.conf (not in Zod .default() calls).
 // Tests must supply all required fields explicitly — the minimum-valid test
 // verifies the schema shape and S11-mandated field values.
+/**
+ * Every field the schema requires, minus the one under test. Spelled out
+ * rather than derived so a new required field forces this file to be updated
+ * deliberately (ADR 2026-04-30: no schema-side defaults).
+ */
+const VALID = {
+	rpId: "example.com",
+	rpName: "Example App",
+	origin: ["https://example.com"],
+	// S11: attestationPreference = "none" is the dogfood-friendly baseline.
+	// In production this comes from reference.conf; tests supply it explicitly
+	// per ADR 2026-04-30 (no schema-side defaults).
+	attestationPreference: "none",
+	userVerification: "preferred",
+	challengeTtlMs: 120_000,
+	allowCredentialsForKnownUser: false,
+	rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
+};
+
+const without = (key: keyof typeof VALID) => {
+	const { [key]: _dropped, ...rest } = VALID;
+	return rest;
+};
+
 describe("webauthnConfigSchema (spec §2.4.1)", () => {
 	it("accepts minimum valid config with all required fields", () => {
-		const parsed = webauthnConfigSchema.parse({
-			rpId: "example.com",
-			rpName: "Example App",
-			origin: ["https://example.com"],
-			// S11: attestationPreference = "none" is the dogfood-friendly baseline.
-			// In production this comes from reference.conf; tests supply it explicitly
-			// per ADR 2026-04-30 (no schema-side defaults).
-			attestationPreference: "none",
-			userVerification: "preferred",
-			challengeTtlMs: 120_000,
-		});
+		const parsed = webauthnConfigSchema.parse(VALID);
 		expect(parsed.attestationPreference).toBe("none"); // S11 default value
 		expect(parsed.userVerification).toBe("preferred");
 		expect(parsed.challengeTtlMs).toBe(120_000); // mobile-network safe baseline
 	});
 
 	it("rejects missing rpId", () => {
-		expect(
-			webauthnConfigSchema.safeParse({
-				rpName: "x",
-				origin: ["https://x"],
-				attestationPreference: "none",
-				userVerification: "preferred",
-				challengeTtlMs: 120_000,
-			}).success,
-		).toBe(false);
+		expect(webauthnConfigSchema.safeParse(without("rpId")).success).toBe(false);
 	});
 
 	it("origin must be non-empty array", () => {
-		expect(
-			webauthnConfigSchema.safeParse({
-				rpId: "x",
-				rpName: "x",
-				origin: [],
-				attestationPreference: "none",
-				userVerification: "preferred",
-				challengeTtlMs: 120_000,
-			}).success,
-		).toBe(false);
+		expect(webauthnConfigSchema.safeParse({ ...VALID, origin: [] }).success).toBe(false);
 	});
 
 	it("attestationPreference enum is constrained", () => {
 		expect(
-			webauthnConfigSchema.safeParse({
-				rpId: "x",
-				rpName: "x",
-				origin: ["https://x"],
-				attestationPreference: "bogus",
-				userVerification: "preferred",
-				challengeTtlMs: 120_000,
-			}).success,
+			webauthnConfigSchema.safeParse({ ...VALID, attestationPreference: "bogus" }).success,
 		).toBe(false);
+	});
+
+	// #281 — the enumeration escape hatch and the endpoint's own throttle.
+	describe("authentication/options security knobs (#281)", () => {
+		it("allowCredentialsForKnownUser is required — there is no implicit fallback", () => {
+			expect(webauthnConfigSchema.safeParse(without("allowCredentialsForKnownUser")).success).toBe(
+				false,
+			);
+		});
+
+		it("allowCredentialsForKnownUser must be a boolean", () => {
+			expect(
+				webauthnConfigSchema.safeParse({ ...VALID, allowCredentialsForKnownUser: "true" }).success,
+			).toBe(false);
+		});
+
+		it("carries the opt-in through to the parsed config", () => {
+			const parsed = webauthnConfigSchema.parse({ ...VALID, allowCredentialsForKnownUser: true });
+			expect(parsed.allowCredentialsForKnownUser).toBe(true);
+		});
+
+		it("rateLimit.authenticationOptions is required", () => {
+			expect(webauthnConfigSchema.safeParse(without("rateLimit")).success).toBe(false);
+		});
+
+		it("coerces the HOCON/env string form into numbers", () => {
+			const parsed = webauthnConfigSchema.parse({
+				...VALID,
+				rateLimit: { authenticationOptions: { limit: "45", windowSeconds: "120" } },
+			});
+			expect(parsed.rateLimit.authenticationOptions).toEqual({ limit: 45, windowSeconds: 120 });
+		});
+
+		it("rejects a non-positive limit or window", () => {
+			for (const bad of [
+				{ limit: 0, windowSeconds: 60 },
+				{ limit: 30, windowSeconds: 0 },
+				{ limit: -1, windowSeconds: 60 },
+				{ limit: 1.5, windowSeconds: 60 },
+			]) {
+				expect(
+					webauthnConfigSchema.safeParse({ ...VALID, rateLimit: { authenticationOptions: bad } })
+						.success,
+				).toBe(false);
+			}
+		});
 	});
 
 	// Wave 1 post-merge audit M-1 + follow-up review I2:
 	// URL-parse-based origin gate must reject textual-prefix bypasses.
 	describe("origin secure-context gate (M-1 / I2)", () => {
-		const okBase = {
-			rpId: "x",
-			rpName: "x",
-			attestationPreference: "none" as const,
-			userVerification: "preferred" as const,
-			challengeTtlMs: 120_000,
-		};
+		const { origin: _origin, ...okBase } = VALID;
 		const accepts = [
 			"https://example.com",
 			"https://app.example.com:8443",
