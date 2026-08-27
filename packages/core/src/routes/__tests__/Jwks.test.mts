@@ -168,7 +168,31 @@ describe("JWKS cache max-age resolution", () => {
 });
 
 describe("JWKS Cache-Control", () => {
+	async function makeEs256KeyStore() {
+		const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
+		return createAsymmetricKeyStore({
+			algorithm: "ES256",
+			kid: "cache-k1",
+			privateKeyPem: await exportPKCS8(privateKey),
+			publicKeyPem: await exportSPKI(publicKey),
+		});
+	}
+
 	async function getHeaderFor(opts?: Parameters<typeof createRouter>[2]) {
+		// #282: only a non-empty published key set is cacheable, so the
+		// success-path header assertions run against an asymmetric keystore.
+		const ks = await makeEs256KeyStore();
+		const express = createMockExpress();
+		createRouter(express, ks, opts);
+		const res = createMockRes();
+		await express.routes[opts?.path ?? "/.well-known/jwks.json"](
+			{} as Request,
+			res as unknown as Response,
+		);
+		return res.getHeader("Cache-Control");
+	}
+
+	async function getHs256HeaderFor(opts?: Parameters<typeof createRouter>[2]) {
 		const ks = createSymmetricKeyStore("test-secret");
 		const express = createMockExpress();
 		createRouter(express, ks, opts);
@@ -188,9 +212,11 @@ describe("JWKS Cache-Control", () => {
 		expect(await getHeaderFor({ cacheMaxAgeSeconds: 3600 })).toBe("public, max-age=3600");
 	});
 
-	it("sets the header on the HS256 empty-set response too", async () => {
-		// createSymmetricKeyStore yields HS256 → empty keys; header must still be present.
-		expect(await getHeaderFor({ cacheMaxAgeSeconds: 60 })).toBe("public, max-age=60");
+	it("does NOT cache the HS256 refusal — it is a misconfiguration, not public data", async () => {
+		// #282: HS256 no longer answers `{ keys: [] }` with a long public
+		// max-age. A shared cache pinning that answer turns a fixable config
+		// mistake into a stuck JWKS for the whole cache lifetime.
+		expect(await getHs256HeaderFor({ cacheMaxAgeSeconds: 60 })).toBe("no-store");
 	});
 
 	it("sets the header on the asymmetric (ES256) success path", async () => {
@@ -227,16 +253,61 @@ describe("JWKS Cache-Control", () => {
 	});
 });
 
-describe("JWKS endpoint", () => {
-	it("returns an empty JWK set for HS256 without exposing shared secrets", async () => {
+describe("JWKS endpoint — never publishes an empty key set (#282)", () => {
+	it("refuses to serve for HS256 instead of publishing `{ keys: [] }`", async () => {
+		// Pre-#282 this answered 200 `{ keys: [] }`. A relying party cannot tell
+		// that apart from "this issuer has rotated all its keys away", so it
+		// caches the empty set and then fails every verification with an
+		// unknown-kid error that points nowhere near the actual cause.
 		const ks = createSymmetricKeyStore("test-secret");
 		const express = createMockExpress();
 		createRouter(express, ks);
 		const handler = express.routes["/.well-known/jwks.json"];
 		const res = createMockRes();
 		await handler({} as Request, res as unknown as Response);
-		expect(res.getStatusCode()).toBe(200);
-		expect(res.getBody()).toEqual({ keys: [] });
+		expect(res.getStatusCode()).toBe(404);
+		const body = res.getBody() as Record<string, unknown>;
+		expect(body.keys).toBeUndefined();
+		expect(body.error).toBe("jwks_not_published");
+	});
+
+	it("still never exposes the shared secret in the refusal body", async () => {
+		const ks = createSymmetricKeyStore("test-secret-do-not-leak");
+		const express = createMockExpress();
+		createRouter(express, ks);
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		expect(JSON.stringify(res.getBody())).not.toContain("test-secret-do-not-leak");
+	});
+
+	it("names the algorithm and the fix in the HS256 refusal", async () => {
+		const ks = createSymmetricKeyStore("test-secret");
+		const express = createMockExpress();
+		createRouter(express, ks);
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		const body = res.getBody() as { error_description?: string };
+		expect(body.error_description).toMatch(/HS256/);
+		expect(body.error_description).toMatch(/EdDSA|asymmetric/i);
+	});
+
+	it("refuses to serve when an asymmetric keystore yields zero publishable keys", async () => {
+		// A KMS-backed keystore mid-rotation (or one whose only key is
+		// unexportable) can return a set that filters down to nothing. That is
+		// an outage, not a valid publication.
+		const emptyKeyStore = {
+			algorithm: "ES256" as const,
+			getVerificationKeys: async () => [],
+		} as unknown as Parameters<typeof createRouter>[1];
+		const express = createMockExpress();
+		createRouter(express, emptyKeyStore);
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		expect(res.getStatusCode()).toBe(503);
+		const body = res.getBody() as Record<string, unknown>;
+		expect(body.error).toBe("jwks_unavailable");
+		expect(body.keys).toBeUndefined();
+		expect(res.getHeader("Cache-Control")).toBe("no-store");
 	});
 
 	it("returns JWK set for ES256", async () => {
@@ -286,7 +357,9 @@ describe("JWKS endpoint", () => {
 	it("excludes an oct (symmetric) key a custom adapter mistakenly returns (never publish `k`)", async () => {
 		// exportJWK of a symmetric KeyObject yields `{ kty: "oct", k: <secret> }`.
 		// A symmetric key has no public representation, so it must be dropped from
-		// the JWKS entirely rather than sanitized to a keyless entry.
+		// the JWKS entirely rather than sanitized to a keyless entry. #282: with
+		// nothing left to publish the route now refuses rather than answering
+		// 200 with an empty set — but the secret still never reaches the wire.
 		const secret = createSecretKey(Buffer.from("super-secret-value-for-oct-jwks-test!!"));
 		const octKeyStore = {
 			algorithm: "ES256" as const,
@@ -296,8 +369,10 @@ describe("JWKS endpoint", () => {
 		createRouter(express, octKeyStore);
 		const res = createMockRes();
 		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
-		const body = res.getBody() as { keys: Array<Record<string, unknown>> };
-		expect(body.keys).toHaveLength(0);
+		expect(res.getStatusCode()).toBe(503);
+		const serialized = JSON.stringify(res.getBody());
+		expect(serialized).not.toContain("super-secret-value-for-oct-jwks-test");
+		expect(serialized).not.toContain("oct-leak");
 	});
 
 	it("includes non-expired previous keys", async () => {

@@ -20,6 +20,7 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	createAsymmetricKeyStore,
 	createSymmetricKeyStore,
 	defineModule,
 	type FederationProviderHandle,
@@ -35,7 +36,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
-import { SignJWT } from "jose";
+import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
@@ -82,6 +83,24 @@ const keyStoreModule = defineModule({
 	name: "test:key-store",
 	provides: {
 		keyStore: () => createSymmetricKeyStore("test-secret-for-oauth-module!!!!!"),
+	},
+});
+
+// #282: the JWKS route refuses to publish an empty key set, so the
+// discovery/JWKS path-agreement tests below need a keystore that actually has
+// public key material. EdDSA is the shipped default.
+const eddsaPair = await generateKeyPair("EdDSA", { extractable: true });
+const eddsaKeyStore = await createAsymmetricKeyStore({
+	algorithm: "EdDSA",
+	kid: "oauth-module-test",
+	privateKeyPem: await exportPKCS8(eddsaPair.privateKey),
+	publicKeyPem: await exportSPKI(eddsaPair.publicKey),
+});
+
+const asymmetricKeyStoreModule = defineModule({
+	name: "test:key-store-asymmetric",
+	provides: {
+		keyStore: () => eddsaKeyStore,
 	},
 });
 
@@ -314,7 +333,10 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
-				keyStoreModule,
+				// Asymmetric: since #282 the JWKS route refuses to publish an
+				// empty key set, so "resolves to a mounted route" is only
+				// observable with a keystore that has public material.
+				asymmetricKeyStoreModule,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -327,6 +349,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const res = await request(app).get(jwksPath);
 		expect(res.status).toBe(200);
 		expect(Array.isArray(res.body.keys)).toBe(true);
+		expect(res.body.keys).toHaveLength(1);
 		await handle.dispose();
 	});
 
@@ -376,7 +399,7 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 				jwksModule,
 				clientRepositoryModule,
 				codeRepositoryModule,
-				keyStoreModule,
+				asymmetricKeyStoreModule,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});

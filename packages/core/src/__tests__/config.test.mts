@@ -2,7 +2,11 @@ import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
 import { AppConfigSchema, CoreConfigSchema } from "#/config/application.schema.mjs";
-import { createKeyStoreFactory, registerBuiltinKeyStores } from "#/keys/factory.mjs";
+import {
+	createKeyStoreFactory,
+	DEFAULT_SIGNING_ALGORITHM,
+	registerBuiltinKeyStores,
+} from "#/keys/factory.mjs";
 
 // jwtSchema now describes the nested signingKey shape (Task 5 migration).
 // Schema only enforces shape; field-level validation lives in the local builder.
@@ -18,9 +22,9 @@ describe("provider config", () => {
 	it("loads and validates reference.conf with required env vars", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
-				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -31,15 +35,102 @@ describe("provider config", () => {
 		// OAUTH_JWT_SECRET flows into signingKey.local.secret
 		const local = config.oauth.jwt.signingKey.local as Record<string, unknown>;
 		expect(local).toBeDefined();
-		expect(local.secret).toBe("test-secret");
+		expect(local.secret).toBe("test-jwt-secret.at-least-32-bytes.ok");
 
 		// algorithm and kid come from hocon (`reference.conf`); the schema
 		// is strict and supplies no defaults of its own (ADR 2026-04-30).
-		expect(local.algorithm).toBe("HS256");
+		// #282: the shipped default is an ASYMMETRIC algorithm. HS256 makes
+		// relying parties either unable to verify (no JWKS) or holders of a
+		// token-forging key, so it is opt-in rather than what you get by
+		// doing nothing.
+		expect(local.algorithm).toBe("EdDSA");
+		// Drift guard: the shipped HOCON default and the constant the builder's
+		// error message quotes are the same value, or an operator gets pointed
+		// at an algorithm their config does not use.
+		expect(local.algorithm).toBe(DEFAULT_SIGNING_ALGORITHM);
 		expect(local.kid).toBe("v0");
 		expect(config.oauth.oidcMode).toBe("oidc-required");
 		expect(config.session.name).toBe("__Host-auth.session");
 		expect(config.redisSessionStores?.keyPrefix).toBe("ss:");
+	});
+
+	it("fails to build a keystore when reference.conf is loaded with NO key material (#282)", async () => {
+		// The headline requirement: a deployment that sets no signing key at all
+		// must not boot. Pre-#282 it silently got HS256 with whatever
+		// OAUTH_JWT_SECRET happened to be — including nothing useful.
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_ISSUER: "https://auth.test",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+		const local = config.oauth.jwt.signingKey.local as Record<string, unknown>;
+		let message = "";
+		try {
+			await makeFactory().create({ type: "local", ...local });
+		} catch (err) {
+			message = (err as Error).message;
+		}
+		expect(message).toMatch(/OAUTH_JWT_PRIVATE_KEY_PATH/);
+		expect(message).toMatch(/OAUTH_JWT_PUBLIC_KEY_PATH/);
+		expect(message).toMatch(/openssl genpkey -algorithm ed25519/i);
+	});
+
+	it("fails to build a keystore when only OAUTH_JWT_SECRET is set, and says how to opt into HS256 (#282)", async () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_ISSUER: "https://auth.test",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+		const local = config.oauth.jwt.signingKey.local as Record<string, unknown>;
+		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
+			/OAUTH_JWT_ALGORITHM=HS256/,
+		);
+	});
+
+	it("HS256 remains selectable through OAUTH_JWT_ALGORITHM with a strong secret (#282)", async () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_ISSUER: "https://auth.test",
+				OAUTH_JWT_ALGORITHM: "HS256",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+		const local = config.oauth.jwt.signingKey.local as Record<string, unknown>;
+		const keyStore = await makeFactory().create({ type: "local", ...local });
+		expect(keyStore.algorithm).toBe("HS256");
+	});
+
+	it("HS256 selected with a weak secret fails at boot (#282)", async () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_ISSUER: "https://auth.test",
+				OAUTH_JWT_ALGORITHM: "HS256",
+				OAUTH_JWT_SECRET: "test-secret-for-e2e",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
+			},
+		});
+		const config = validate(raw, AppConfigSchema);
+		const local = config.oauth.jwt.signingKey.local as Record<string, unknown>;
+		await expect(makeFactory().create({ type: "local", ...local })).rejects.toThrow(
+			/at least 32 bytes/i,
+		);
+	});
+
+	it("rejects a SESSION_SECRET below the 256-bit floor (#282)", () => {
+		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
+			env: {
+				OAUTH_JWT_ISSUER: "https://auth.test",
+				SESSION_SECRET: "too-short",
+			},
+		});
+		expect(() => validate(raw, AppConfigSchema)).toThrow(/at least 32 bytes/i);
 	});
 
 	it("fails validation when required fields are missing", () => {
@@ -59,10 +150,10 @@ describe("provider config", () => {
 		// it must be deleted too).
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
-				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
 				OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS: "false",
-				SESSION_SECRET: "test-session-secret",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		expect(() => validate(raw, AppConfigSchema)).toThrow(/allowUnmarkedClients was removed/);
@@ -71,9 +162,9 @@ describe("provider config", () => {
 	it("overrides defaults with env vars", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
-				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_APP_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
@@ -101,9 +192,9 @@ describe("provider config", () => {
 	it("repositories.client.type is yaml when reference.conf is loaded with no override", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
-				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 				CLIENT_USER_BASE_URL: "http://localhost:8080",
 				CLIENT_CODE_ENDPOINT_URI: "redis://localhost:6379",
 			},
@@ -115,9 +206,9 @@ describe("provider config", () => {
 	it("repositories.user.type is yaml when reference.conf is loaded with no override", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
-				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -127,9 +218,9 @@ describe("provider config", () => {
 	it("repositories.code.type is memory when reference.conf is loaded with no override", () => {
 		const raw = parseFile(new URL("../../config/reference.conf", import.meta.url).pathname, {
 			env: {
-				OAUTH_JWT_SECRET: "test-secret",
+				OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 				OAUTH_JWT_ISSUER: "https://auth.test",
-				SESSION_SECRET: "test-session-secret",
+				SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 			},
 		});
 		const config = validate(raw, AppConfigSchema);
@@ -141,9 +232,9 @@ describe("provider config", () => {
 		const base = validate(
 			parseFile(path, {
 				env: {
-					OAUTH_JWT_SECRET: "test-secret",
+					OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 					OAUTH_JWT_ISSUER: "https://auth.test",
-					SESSION_SECRET: "test-session-secret",
+					SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 				},
 			}),
 			AppConfigSchema,
@@ -153,9 +244,9 @@ describe("provider config", () => {
 		const overridden = validate(
 			parseFile(path, {
 				env: {
-					OAUTH_JWT_SECRET: "test-secret",
+					OAUTH_JWT_SECRET: "test-jwt-secret.at-least-32-bytes.ok",
 					OAUTH_JWT_ISSUER: "https://auth.test",
-					SESSION_SECRET: "test-session-secret",
+					SESSION_SECRET: "test-session-secret.at-least-32-bytes.ok",
 					MEMORY_RATE_LIMITER_MAX_BUCKETS: "123",
 				},
 			}),

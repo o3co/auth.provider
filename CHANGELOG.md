@@ -140,6 +140,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **What this does not do:** it does not add a CSRF token to `/oauth/authorize`, for the reason recorded in the `firstParty` entry below — that endpoint is legitimately entered cross-site.
 
+- **BREAKING: signing defaults to EdDSA, shared secrets need 256 bits, and the JWKS endpoint never publishes an empty key set (`@o3co/auth-provider-core`, standalone template).** Four separate weaknesses that only look small individually (#282):
+
+  1. **`HS256` was the default algorithm.** With a symmetric key there is no public half to publish, so a relying party either verifies nothing or is handed the shared secret — which does not merely let it *verify* tokens, it lets it **mint** them for any subject.
+  2. **A one-character secret was accepted.** The only check on `oauth.jwt.signingKey.local.secret` was `length > 0`. `OAUTH_JWT_SECRET=x` built a working keystore.
+  3. **`/.well-known/jwks.json` answered `200 {"keys": []}`** under HS256, cached `public, max-age=300`. An empty key set is indistinguishable, to a verifier, from an issuer that has rotated every key away — so it caches the emptiness and then fails every verification with an unknown-kid error pointing nowhere near the cause.
+  4. **`session.secret` had no floor at all**, and neither did the session or token lifetimes.
+
+  **New defaults and rules:**
+
+  - `reference.conf` ships `algorithm = "EdDSA"` (Ed25519). Exported as `DEFAULT_SIGNING_ALGORITHM`. EdDSA rather than RS256 because every layer here already supports it end to end and it has no key-size or padding parameter an operator can get quietly wrong.
+  - **There is no key-material default and no fallback.** A deployment that configures no signing key **fails at boot** with a message naming the exact config keys, the exact environment variables, and the `openssl` command that produces them. An absent `algorithm` is likewise an error rather than an implicit `HS256` — that silent fallback is how a composition root got symmetric signing by accident.
+  - **HS256 remains fully selectable** (`OAUTH_JWT_ALGORITHM=HS256`). It was demoted, not removed.
+  - HMAC secrets — `oauth.jwt.signingKey.local.secret`, every `previousSecrets[].secret`, and `session.secret` — must carry **at least 32 bytes (256 bits)** of key material. Measured on the **decoded** value, taking the smallest plausible reading: a 64-character hex string is 32 bytes and passes; a 32-character hex string is 16 bytes and does not.
+  - The JWKS route never publishes an empty set. HS256 answers `404 jwks_not_published`; an asymmetric keystore yielding no exportable public key answers `503 jwks_unavailable`. Both carry `Cache-Control: no-store`, so a fixable misconfiguration is not pinned in a shared cache for the full max-age. A `200` from this route now always carries at least one key.
+  - `session.maxAge`, `oauth.accessToken.expiresIn`, `oauth.refreshToken.expiresIn` and `rateLimit.login.{windowMs,limit}` must be **positive whole numbers**, bounded at one year. This is the same trap `http.readinessTimeoutMs` already documents: HOCON resolves an exported-but-empty variable to `""` and `z.coerce.number()` turns that into `0`. A zero `maxAge` emits an already-expired cookie and every request arrives unauthenticated with nothing in the logs.
+  - `session.sameSite = "none"` now **requires** `session.secure = true`. Browsers drop a `SameSite=None` cookie that is not `Secure`, so the combination is not "less safe" — it is completely non-functional, and it fails client-side with no server signal at all.
+  - The builder also rejects `previousSecrets` under an asymmetric algorithm, mirroring the existing HS256-rejects-`previousKeys` guard. The asymmetric schema branch is `.passthrough()`, so a leftover HS256 rotation block used to survive validation and be silently dropped.
+
+  Existing `previousKeys` / `previousSecrets` kid-overlap rotation semantics are unchanged.
+
+  New exports: `DEFAULT_SIGNING_ALGORITHM`, `MIN_SECRET_ENTROPY_BYTES`, `measureSecretEntropyBytes`, `assertSecretEntropy`, `describeWeakSecret`, and the `SecretEntropyRequirement` type — so a composition root that accepts its own operator secrets can apply the identical check. Note the floor is enforced at the **config boundaries** (the `"local"` keystore builder and `AppConfigSchema`); `createSymmetricKeyStore` is the low-level primitive and does not enforce it, so a root calling it directly owns the check.
+
+  **Migration.** Every deployment must act — boot fails otherwise, which is the point.
+
+  1. **Generate a signing key pair** and keep the private half out of version control and off the image:
+
+     ```bash
+     openssl genpkey -algorithm ed25519 -out jwt-private.pem
+     openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+     ```
+
+     ```bash
+     OAUTH_JWT_PRIVATE_KEY_PATH=/run/secrets/jwt-private.pem
+     OAUTH_JWT_PUBLIC_KEY_PATH=/run/secrets/jwt-public.pem
+     ```
+
+     (or inline the PEMs via `OAUTH_JWT_PRIVATE_KEY` / `OAUTH_JWT_PUBLIC_KEY`).
+
+  2. **Repoint your verifiers at the JWKS endpoint.** Switching algorithm invalidates tokens signed by the old key, so relying parties that pinned the shared secret must fetch `${issuer}/.well-known/jwks.json` instead. Schedule the cutover for a window longer than your access-token TTL, or stage it: move to EdDSA with the old HS256 kid in `previousSecrets` first, let outstanding tokens expire, then drop it.
+
+  3. **Or stay on HS256 deliberately**, with both lines set so the choice is visible in config rather than inherited:
+
+     ```bash
+     OAUTH_JWT_ALGORITHM=HS256
+     OAUTH_JWT_SECRET=$(openssl rand -hex 32)
+     ```
+
+     Understand the cost: no JWKS is published, and every relying party holds a token-forging key.
+
+  4. **Regenerate `SESSION_SECRET`** at ≥32 bytes — `openssl rand -hex 32`. Rotating it invalidates existing session cookies, so users re-authenticate once.
+
+  5. **Check for empty-string duration overrides.** `SESSION_MAX_AGE=`, `OAUTH_ACCESS_TOKEN_EXPIRES_IN=` and friends now fail boot instead of resolving to `0`. Unset them or give them a value.
+
+  6. **If you set `SESSION_SAME_SITE=none`**, set `SESSION_SECURE=true` alongside it.
+
 - **`/authorize` refuses a client not marked `firstParty: true` (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `GET /authorize` issued an authorization code the moment `req.session.isAuthenticated` was true — no consent step, no approval, nothing asked of the user. A page you do not control could force a top-level navigation to `/authorize?client_id=X&redirect_uri=…&code_challenge=<theirs>`; a logged-in victim's browser minted a code bound to *their* session, delivered it to X's registered `redirect_uri`, and whoever chose the `code_challenge` redeemed it for tokens carrying the victim's identity.
 
   That model is coherent for a pure first-party OP — one where every registered client is operated by you — and coherent nowhere else. The library assumed it and never said so, so registering a single semi-trusted client silently turned the endpoint into an account-linking vector (#267).

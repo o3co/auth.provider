@@ -7,7 +7,7 @@ OAuth 2.0 / OIDC プロバイダー。セッションベースのログインや
 ## 特徴
 
 - **モジュラー構成** — 必要なモジュールだけを選択。API のみのデプロイではセッション、フェデレーション、認可コードを丸ごとスキップ可能。
-- **JWT アルゴリズム選択** — HS256, RS256, ES256, EdDSA。非対称アルゴリズムの場合は JWKS エンドポイント (`/.well-known/jwks.json`) を自動公開。
+- **JWT アルゴリズム選択** — EdDSA（デフォルト）, ES256, RS256, HS256。デフォルトが非対称なので JWKS エンドポイント (`/.well-known/jwks.json`) が実際の検証鍵を公開し、RP がトークンを**発行**できる鍵を持つことがない。HS256 も選択可能だが JWKS は公開されない。
 - **OAuth 2.0 準拠** — PKCE 対応認可コードフロー (RFC 7636)、トークンイントロスペクション (RFC 7662)、リフレッシュトークン
 - **セッション認証** — ローカル ユーザー名/パスワードログイン + OAuth フェデレーション（Google、GitHub、per-federation `defineModule(...)` によるカスタムプロバイダー対応）
 - **レート制限** — エンドポイント毎に設定可能
@@ -84,20 +84,30 @@ oauth {
     signingKey {
       provider = "local"           # 組み込みは "local" のみ。KeyStoreFactory で拡張可能
       local {
-        algorithm = "HS256"        # HS256 | RS256 | ES256 | EdDSA
-        secret = ${?OAUTH_JWT_SECRET}
-        # 非対称の場合: privateKey/privateKeyPath + publicKey/publicKeyPath
+        # デフォルト。非対称なので /.well-known/jwks.json が実際の検証鍵を
+        # 公開でき、RP にトークンを発行できる鍵を渡さずに済む。
+        # 鍵素材のデフォルトは存在しない（未設定なら起動失敗）:
+        #   openssl genpkey -algorithm ed25519 -out jwt-private.pem
+        #   openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+        algorithm = "EdDSA"        # EdDSA | ES256 | RS256 | HS256
+        privateKeyPath = ${?OAUTH_JWT_PRIVATE_KEY_PATH}
+        publicKeyPath  = ${?OAUTH_JWT_PUBLIC_KEY_PATH}
+        # HS256 を使う場合: algorithm = "HS256" にして 32 バイト以上の
+        # シークレット（`openssl rand -hex 32`）を設定。JWKS は公開されない。
+        # secret = ${?OAUTH_JWT_SECRET}
       }
     }
   }
-  accessToken { expiresIn = 3600 }
-  refreshToken { expiresIn = 86400 }
+  accessToken  { expiresIn = 3600 }   # 秒、正の整数、上限 1 年
+  refreshToken { expiresIn = 86400 }  # 秒、正の整数、上限 1 年
 }
 ```
 
 **セッション (`sessionModule` 登録時):**
 
 ```hocon
+# `secret` は「認証済みセッションそのもの」である Cookie に署名する鍵。
+# 32 バイト（256 bit）以上が必須（例: `openssl rand -hex 32`）。
 session { secret = ${SESSION_SECRET} }
 
 # ショートハンド: キー名 = プロバイダータイプ (google、github、またはカスタム登録タイプ)

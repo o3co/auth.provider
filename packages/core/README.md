@@ -217,6 +217,20 @@ function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
 
 `createKeyStoreFactory` creates a new factory with no registered types. `registerBuiltinKeyStores` registers the built-in `"local"` provider, which dispatches to `createAsymmetricKeyStore` or `createSymmetricKeyStore` based on `algorithm`. The factory pattern follows the same `AdapterFactory<T>` contract as `ClientRepository`, `UserRepository`, and `CodeRepository` factories.
 
+#### Algorithm default and key requirements (#282)
+
+`reference.conf` ships `algorithm = "EdDSA"` (`DEFAULT_SIGNING_ALGORITHM`). Asymmetric by default because HS256 leaves a relying party with two bad options: verify nothing (there is no public key to publish) or hold the shared secret — which also lets it **mint** tokens.
+
+The `"local"` builder has **no fallbacks**:
+
+- An absent `algorithm` is an error, not an implicit `HS256`.
+- An asymmetric algorithm with no `privateKey`/`privateKeyPath` (or no public half) throws a message naming the exact config keys, the exact environment variables, and the `openssl genpkey -algorithm ed25519` command that produces them.
+- `HS256` requires `secret` to carry at least `MIN_SECRET_ENTROPY_BYTES` (32) of key material, and so does every `previousSecrets[].secret`.
+
+Entropy is measured on the **decoded** value, taking the smallest plausible reading (`measureSecretEntropyBytes`): a 64-character hex string is 32 bytes and passes; a 32-character hex string is 16 bytes and does not. The same floor applies to `session.secret`, enforced by `AppConfigSchema`. `assertSecretEntropy` / `describeWeakSecret` are exported so a composition root that accepts its own operator secrets can apply the identical check.
+
+Note that the floor lives in the **builder and the schema** — the config boundaries. `createSymmetricKeyStore` is the low-level primitive and does not enforce it, so a composition root calling it directly owns the check.
+
 #### HS256 key rotation (IH-9)
 
 To rotate an HS256 signing key without a maintenance window:
@@ -241,7 +255,9 @@ To rotate an HS256 signing key without a maintenance window:
 4. Restart the server. Tokens signed by `v0` continue to verify (resolved by `kid` from the JWT header) until `expiresAt`.
 5. After the overlap window passes (all `v0` tokens have expired), remove `v0` from `previousSecrets` and restart again.
 
-The schema rejects mixing the asymmetric `previousKeys` shape with HS256 — operators on RS256/ES256/EdDSA use the existing `previousKeys` field instead.
+Both the new `secret` and every `previousSecrets[].secret` must clear the 32-byte floor — a retired secret is still a live verification key for the whole overlap window, so it carries the same forgery risk the current one does.
+
+The schema rejects mixing the asymmetric `previousKeys` shape with HS256, and the builder rejects the reverse (`previousSecrets` under RS256/ES256/EdDSA) — operators on an asymmetric algorithm use the `previousKeys` field instead.
 
 ### Repositories
 
@@ -700,7 +716,7 @@ Maps `UserSessionClaims` to the JWT-shaped claim subset that the granted scopes 
 OIDC Discovery 1.0 metadata endpoint. Synthesized and mounted by core when `config.oauth.jwt.issuer` is configured AND a module declares the provider surface (`oauthModule` sets `providerRoot: true` on its `discoveryMetadata` contribution). Core aggregates every module's `discoveryMetadata` slice — `oauthModule` contributes the endpoints + capabilities, `jwksModule` contributes `jwks_uri` — into one document advertising:
 
 - `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `introspection_endpoint`
-- `jwks_uri` — always advertised (contributed by `jwksModule`); an issuer-configured composition MUST install `jwksModule` or boot fails fast with `DiscoveryDocumentError`. For HS256-only deployments the JWKS route serves an empty key set (`{ "keys": [] }`, HTTP 200) rather than 404 — the symmetric secret is never published.
+- `jwks_uri` — always advertised (contributed by `jwksModule`); an issuer-configured composition MUST install `jwksModule` or boot fails fast with `DiscoveryDocumentError`. The route never publishes an empty key set (#282): an HS256 deployment answers `404 jwks_not_published`, and an asymmetric keystore that yields no exportable public key answers `503 jwks_unavailable`, both with `Cache-Control: no-store`. The symmetric secret is never published either way. A `200` from this route always carries at least one key.
 - `response_types_supported: ["code"]`
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — derived from the configured `KeyStore.algorithm`

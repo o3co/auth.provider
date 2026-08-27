@@ -207,6 +207,20 @@ function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
 
 `createKeyStoreFactory` は登録済みタイプが空の新しいファクトリーを返します。`registerBuiltinKeyStores` は組み込みの `"local"` プロバイダーを登録します。`algorithm` に応じて `createAsymmetricKeyStore` または `createSymmetricKeyStore` に委譲します。ファクトリーパターンは `ClientRepository`、`UserRepository`、`CodeRepository` と同じ `AdapterFactory<T>` 契約に従います。
 
+#### アルゴリズムのデフォルトと鍵の要件（#282）
+
+`reference.conf` のデフォルトは `algorithm = "EdDSA"`（`DEFAULT_SIGNING_ALGORITHM`）。HS256 では RP に「検証できない（公開鍵が存在しない）」か「共有シークレットを持つ ＝ トークンを**発行**できてしまう」かの二択しか残らないため、デフォルトは非対称。
+
+`"local"` builder に fallback は一切ない:
+
+- `algorithm` 未設定はエラー。暗黙の `HS256` にはならない。
+- 非対称アルゴリズムで `privateKey`/`privateKeyPath`（または公開鍵側）が無い場合、設定キー名・環境変数名・`openssl genpkey -algorithm ed25519` コマンドを明示したエラーで起動失敗する。
+- `HS256` の `secret` は `MIN_SECRET_ENTROPY_BYTES`（32 バイト）以上が必須。`previousSecrets[].secret` も同じ。
+
+エントロピーは**デコード後**の値で、かつ最も小さく読める解釈で測る（`measureSecretEntropyBytes`）: 64 文字の hex は 32 バイトで通り、32 文字の hex は 16 バイトで落ちる。`session.secret` にも同じ floor が `AppConfigSchema` で適用される。`assertSecretEntropy` / `describeWeakSecret` は export されているので、独自の composition root でも同じ検査を適用できる。
+
+floor が置かれているのは **builder と schema**（= config 境界）であることに注意。`createSymmetricKeyStore` は低レベルプリミティブなので強制しない — 直接呼ぶ composition root は自分で検査する責任を持つ。
+
 ### リポジトリ
 
 リポジトリインターフェースはデータアクセスのコントラクトを定義します。開発・テスト向けのインメモリ実装が標準で提供されています。
@@ -621,7 +635,7 @@ function filterClaimsByScope(
 OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issuer` が設定され、かつ provider surface を宣言するモジュールがある（`oauthModule` が `discoveryMetadata` contribution に `providerRoot: true` を設定）場合に、core が合成して mount する。core は各モジュールの `discoveryMetadata` slice（`oauthModule` が endpoints + capabilities、`jwksModule` が `jwks_uri`）を集約して 1 つのドキュメントにする:
 
 - `issuer`、`authorization_endpoint`、`token_endpoint`、`userinfo_endpoint`、`introspection_endpoint`
-- `jwks_uri` — 常に広告する（`jwksModule` が contribute）。issuer 設定済みの構成は `jwksModule` を必ず組み込む必要があり、欠如すると boot が `DiscoveryDocumentError` で fail-fast する。HS256 のみの構成では JWKS ルートは空の鍵セット（`{ "keys": [] }`、HTTP 200）を返す（404 ではない）— 対称鍵の secret は決して公開されない。
+- `jwks_uri` — 常に広告する（`jwksModule` が contribute）。issuer 設定済みの構成は `jwksModule` を必ず組み込む必要があり、欠如すると boot が `DiscoveryDocumentError` で fail-fast する。JWKS ルートが空の鍵セットを返すことはない（#282）: HS256 構成は `404 jwks_not_published`、非対称でも公開可能な鍵が 0 件なら `503 jwks_unavailable` を返し、いずれも `Cache-Control: no-store`。対称鍵の secret はどちらの経路でも公開されない。このルートが `200` を返すときは必ず 1 件以上の鍵を含む。
 - `response_types_supported: ["code"]`
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — 設定された `KeyStore.algorithm` から導出

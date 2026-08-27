@@ -202,7 +202,11 @@ export type {
 } from "./jwt/verify.mjs";
 export { JwtVerificationError, verifyJwt } from "./jwt/verify.mjs";
 export type { KeyStoreFactory } from "./keys/factory.mjs";
-export { createKeyStoreFactory, registerBuiltinKeyStores } from "./keys/factory.mjs";
+export {
+	createKeyStoreFactory,
+	DEFAULT_SIGNING_ALGORITHM,
+	registerBuiltinKeyStores,
+} from "./keys/factory.mjs";
 // Keys
 export type {
 	Algorithm,
@@ -219,6 +223,16 @@ export {
 	ExpiredKidError,
 	UnknownKidError,
 } from "./keys/KeyStore.mjs";
+// Shared-secret entropy floor (#282). Exported so a composition root that
+// builds its own KeyStore — or accepts any other HMAC secret from an
+// operator — can apply the same check the built-in `local` builder does.
+export type { SecretEntropyRequirement } from "./keys/secretEntropy.mjs";
+export {
+	assertSecretEntropy,
+	describeWeakSecret,
+	MIN_SECRET_ENTROPY_BYTES,
+	measureSecretEntropyBytes,
+} from "./keys/secretEntropy.mjs";
 export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs";
 // Logging
 export type { EventLogger, Logger, LogLevel } from "./logging/Logger.mjs";

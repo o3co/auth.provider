@@ -32,7 +32,12 @@ const minimalCoreConfig = {
 			issuer: "https://auth.test",
 			signingKey: {
 				provider: "local",
-				local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousSecrets: [] },
+				local: {
+					algorithm: "HS256",
+					kid: "v0",
+					secret: "test-hs256-secret.at-least-32-bytes.ok",
+					previousSecrets: [],
+				},
 			},
 		},
 		accessToken: { expiresIn: 3600 },
@@ -251,7 +256,12 @@ describe("AppConfigSchema backward compatibility", () => {
 					issuer: "https://auth.test",
 					signingKey: {
 						provider: "local",
-						local: { algorithm: "HS256", kid: "v0", secret: "test-secret", previousSecrets: [] },
+						local: {
+							algorithm: "HS256",
+							kid: "v0",
+							secret: "test-hs256-secret.at-least-32-bytes.ok",
+							previousSecrets: [],
+						},
 					},
 				},
 				accessToken: { expiresIn: 3600 },
@@ -268,7 +278,7 @@ describe("AppConfigSchema backward compatibility", () => {
 				oidcMode: "oidc-required",
 			},
 			session: {
-				secret: "session-secret",
+				secret: "test-session-secret.at-least-32-bytes.ok",
 				name: "__Host-auth.session",
 				maxAge: 3600000,
 				secure: true,

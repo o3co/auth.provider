@@ -24,7 +24,8 @@ import { makeValidFullSections } from "#/testing/fixtures/valid-config.mjs";
  */
 function validSession(overrides: Record<string, unknown> = {}) {
 	return {
-		secret: "s",
+		// #282: `session.secret` carries a 256-bit entropy floor.
+		secret: "test-session-secret.at-least-32-bytes.ok",
 		name: "__Host-auth.session",
 		maxAge: 3600000,
 		secure: true,

@@ -95,8 +95,8 @@ fail fast rather than silently falling back to defaults.
 
 | Variable | Default | Description |
 |---|---|---|
-| `OAUTH_JWT_ALGORITHM` | `HS256` | JWT signing algorithm (e.g. `RS256`, `ES256`) |
-| `OAUTH_JWT_SECRET` | — | Signing secret (HMAC algorithms) |
+| `OAUTH_JWT_ALGORITHM` | `EdDSA` | JWT signing algorithm: `EdDSA`, `ES256`, `RS256` or `HS256`. The default is asymmetric so `/.well-known/jwks.json` publishes a real verification key. |
+| `OAUTH_JWT_SECRET` | — | Signing secret, **HMAC (`HS256`) only**. At least 32 bytes (256 bits) of random material — `openssl rand -hex 32`. Hex/base64 values are measured **decoded**, so a 32-character hex string counts as 16 bytes and is refused. |
 | `OAUTH_JWT_ISSUER` | **(required)** | Canonical issuer URL stamped as `iss` on every token. Must be absolute `https` (`http` only for a loopback host), with no query or fragment. Boot fails when unset — it is never derived from the `Host` header. |
 | `OAUTH_REQUIRE_EMAIL_VERIFIED` | `false` | Refuse to issue tokens for a user until the Store publishes `emailVerified: true`. Enforced at `/authorize` and on the `session` grant. Verification itself is the Store's job — this only reads the result. |
 | `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header |
@@ -105,12 +105,35 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_PUBLIC_KEY` | — | PEM-encoded public key |
 | `OAUTH_JWT_PUBLIC_KEY_PATH` | — | Path to PEM public key file |
 
+**Signing keys are required.** The default algorithm is `EdDSA` and there is no
+key-material default: a deployment that sets none fails at boot naming the keys
+to set, rather than quietly signing with something guessable. Generate an
+Ed25519 pair:
+
+```bash
+openssl genpkey -algorithm ed25519 -out jwt-private.pem
+openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+```
+
+then point `OAUTH_JWT_PRIVATE_KEY_PATH` / `OAUTH_JWT_PUBLIC_KEY_PATH` at them
+(or inline the PEMs via `OAUTH_JWT_PRIVATE_KEY` / `OAUTH_JWT_PUBLIC_KEY`).
+
+`HS256` is still selectable (`OAUTH_JWT_ALGORITHM=HS256` plus a ≥32-byte
+`OAUTH_JWT_SECRET`), but understand what it costs: a symmetric key has no
+public half, so `/.well-known/jwks.json` answers `404 jwks_not_published` and
+every relying party must be handed the shared secret — which also lets it
+**mint** tokens, not merely verify them.
+
 ### Token Expiry
 
 | Variable | Default | Description |
 |---|---|---|
-| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | `3600` | Access token lifetime in seconds |
-| `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | Refresh token lifetime in seconds |
+| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | `3600` | Access token lifetime in seconds. Whole positive number, at most one year (`31536000`). |
+| `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | Refresh token lifetime in seconds. Whole positive number, at most one year (`31536000`). |
+
+Exporting one of these as an empty string is a boot failure, not a fallback:
+HOCON resolves `FOO=` to `""`, which coerces to `0`, and a zero lifetime mints
+tokens that have already expired.
 
 ### Grant Types
 
@@ -124,11 +147,11 @@ fail fast rather than silently falling back to defaults.
 
 | Variable | Default | Description |
 |---|---|---|
-| `SESSION_SECRET` | — | **Required.** Session signing secret |
+| `SESSION_SECRET` | — | **Required.** Signs the cookie that *is* the authenticated session, so guessing it forges logins. At least 32 bytes (256 bits) — `openssl rand -hex 32`. Measured **decoded**, same rule as `OAUTH_JWT_SECRET`. |
 | `SESSION_NAME` | `__Host-auth.session` | Session cookie name. The default uses the `__Host-` prefix and therefore requires `SESSION_SECURE=true` and no `SESSION_DOMAIN`. |
-| `SESSION_MAX_AGE` | `3600000` | Session cookie max age in milliseconds |
+| `SESSION_MAX_AGE` | `3600000` | Session cookie max age in milliseconds. Whole positive number, at most one year (`31536000000`). |
 | `SESSION_SECURE` | `true` | Set `Secure` flag on session cookie |
-| `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`) |
+| `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`). `none` **requires** `SESSION_SECURE=true` — browsers drop a `SameSite=None` cookie that is not `Secure`, so boot refuses the combination rather than letting every login fail silently in the client. |
 | `SESSION_DOMAIN` | — | Cookie domain (unset by default) |
 | `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds. Integer, 1–86400; boot fails otherwise (an *empty* value coerces to `0` and would silently disable the token arm). |
 | `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory` |
