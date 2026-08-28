@@ -51,13 +51,41 @@ export interface AuditSink {
 
 export type AuditSinkFactory = AdapterFactory<AuditSink>;
 
+/**
+ * The declared-absence policy every bundled module that reads `auditSink`
+ * attaches to it (#363, the sink half of #287).
+ *
+ * `auditSink` stays optional to wire — which sink is a configuration
+ * question — but not optional to decide: `emitAuditEvent` is a no-op on an
+ * empty slot, so a composition that simply never fills it discards every
+ * security event with no symptom, which is how the standalone template
+ * shipped eventless until #287. The template answers by always wiring a sink
+ * (`audit.sink.type` has no "none" builder there); every other composition
+ * answers here — wire a sink, or write `audit.sink.type = "none"` and own
+ * the decision in config.
+ *
+ * One shared constant rather than three per-module copies, so the boot
+ * error's advice cannot depend on which module tripped it — the
+ * declared-absence guard refuses policies that disagree.
+ */
+export const AUDIT_SINK_ABSENCE_POLICY = {
+	configKey: ["audit", "sink", "type"],
+	absentValue: "none",
+	hint:
+		"Without a sink every security event the routes emit (token issuance failures, " +
+		"authorize decisions, rate-limit outages) is discarded.",
+} as const;
+
 // ---------------------------------------------------------------------------
 // ComponentMap declaration-merge (A2-α §6.1 — optional slot)
 //
 // Declared here so oauthModule can list "auditSink" in its `optional` array
 // and the DI graph types deps.auditSink as AuditSink | undefined.
-// The slot is optional: when absent, oauth routes emit no audit events (the
-// emitAuditEvent helper is a no-op when sink is undefined).
+// The slot is optional to WIRE: when absent, oauth routes emit no audit
+// events (the emitAuditEvent helper is a no-op when sink is undefined). It is
+// no longer optional to DECIDE: the bundled modules attach
+// AUDIT_SINK_ABSENCE_POLICY, so an unfilled slot must be declared with
+// audit.sink.type = "none" or boot refuses (#363).
 // Phase 9 Task 4 augmentation.
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {

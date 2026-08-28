@@ -59,6 +59,7 @@
  */
 
 import {
+	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
@@ -132,6 +133,10 @@ export const webauthnModule = defineModule<
 		// #281 — operator-visible outage channel + the fallback-limiter warning.
 		"logger",
 	],
+	// #363: `auditSink` is optional to wire, not optional to decide — an
+	// unfilled slot must be declared with audit.sink.type = "none" or boot
+	// refuses. Same shared policy as the oauth and session modules.
+	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
 	contributes: {
 		grants: {
 			[WEBAUTHN_GRANT_TYPE]: (deps) => {

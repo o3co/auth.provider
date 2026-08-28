@@ -155,6 +155,12 @@ export function makeValidFullSections() {
 			// from it. Keeping the fixture valid across all v0.5.0 module schemas.
 			login: { url: "/login" },
 		},
+		// #363: the bundled modules refuse to boot with an unfilled `auditSink`
+		// unless the config declares the capability absent. Test compositions
+		// rarely wire a sink, so the fixture makes the declaration explicitly —
+		// which is also what it is: this fixture has no audit trail, on purpose.
+		// A test exercising the declared-absence guard itself removes this key.
+		audit: { sink: { type: "none" } },
 		cors: { allowedOrigins: [] },
 	} satisfies FullSectionsConfig;
 }
