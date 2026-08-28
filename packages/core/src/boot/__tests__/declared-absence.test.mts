@@ -181,3 +181,40 @@ describe("checkDeclaredAbsence (#363)", () => {
 		).resolves.toBeDefined();
 	});
 });
+
+describe("checkDeclaredAbsence — manifest authoring bugs", () => {
+	it("refuses a policy on a key the module does not list in requires/optional", async () => {
+		// `defineModule`'s `const O` inference lets `absencePolicies` widen `O`
+		// on its own, so this compiles — which is exactly why the guard has to
+		// catch it at stage 1 instead of the type system.
+		const policyWithoutRead = defineModule({
+			name: "test:policy-without-read",
+			absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
+		});
+		const err = await createApp({
+			modules: [policyWithoutRead],
+			bootstrapComponents: boot({ audit: { sink: { type: "none" } } }),
+		}).catch((e: unknown) => e as BootError);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).reason).toBe("component-absence-undeclared");
+		expect((err as BootError).message).toContain("does not list it in requires or optional");
+	});
+
+	it("refuses two policies that differ only in hint", async () => {
+		// The hint is interpolated into the boot error, so a hint-only
+		// difference still makes the operator-facing advice order-dependent.
+		const hintVariantModule = defineModule({
+			name: "test:audit-consumer-hint-variant",
+			optional: ["auditSink"] as const,
+			absencePolicies: {
+				auditSink: { ...AUDIT_SINK_ABSENCE_POLICY, hint: "a different story" },
+			},
+		});
+		const err = await createApp({
+			modules: [auditConsumerModule, hintVariantModule],
+			bootstrapComponents: boot({ audit: { sink: { type: "none" } } }),
+		}).catch((e: unknown) => e as BootError);
+		expect(err).toBeInstanceOf(BootError);
+		expect((err as BootError).message).toContain("disagree");
+	});
+});
