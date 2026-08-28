@@ -716,8 +716,13 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	const issuerOrigin = new URL(opts.issuer).origin;
 	return async (req: Request, res: Response) => {
 		if (!req.session.isAuthenticated) {
+			// `endpoints.login.url` may already carry a query string (e.g.
+			// `/login?tenant=x`), so `redirect_to` joins with `&` there and `?`
+			// otherwise — a second `?` would corrupt both parameters.
+			const loginUrl = opts.loginUrl();
+			const joiner = loginUrl.includes("?") ? "&" : "?";
 			return res.redirect(
-				`${opts.loginUrl()}?redirect_to=${encodeURIComponent(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl))}`,
+				`${loginUrl}${joiner}redirect_to=${encodeURIComponent(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl))}`,
 			);
 		}
 
