@@ -1579,13 +1579,201 @@ function checkRouteOrderEdges(rawModules: readonly Module[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// The stage-1 check registries (#368)
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything a stage-1 check may read. One shape for every check, so a row
+ * is `(ctx) => void` and adding a guard is appending a row — not choosing a
+ * fraction between two existing step numbers and finding the right brace in
+ * `validateManifests` (which is how this file accreted steps 7.5 and
+ * 13.5–13.10 before #368).
+ *
+ * `parsedConfig` is `undefined` for the pre-config registry: those checks
+ * run before the config-parse stage that produces it, which is exactly what
+ * splits the two registries.
+ */
+interface StageOneContext {
+	readonly rawModules: readonly Module[];
+	readonly modules: readonly NormalisedModule[];
+	readonly bootstrapComponents: BootstrapMap;
+	readonly overrideComponents: Partial<ComponentMap> | undefined;
+	readonly contributionKinds: ContributionKindMap | undefined;
+	readonly parsedConfig: unknown;
+	/**
+	 * Provides ∪ bootstrapComponents ∪ overrideComponents — the three
+	 * supported component sources. Wiring guards MUST test against all three
+	 * or a composition root wiring via bootstrap/override is falsely rejected
+	 * (multi-agent-review I1+P2 convergence, 2026-05-01).
+	 */
+	readonly plannedKeys: ReadonlySet<string>;
+}
+
+/** One stage-1 check: an id for humans, a spec pointer, and the run. */
+export interface StageOneCheck {
+	readonly id: string;
+	/** Where the check's contract lives (A2-β section, or the issue). */
+	readonly spec: string;
+	readonly run: (ctx: StageOneContext) => void;
+}
+
+/**
+ * The checks that run BEFORE config parse, in order. These are A2-β §5.1's
+ * numbered steps 1–12 (7.5 sits between 7 and 8 per A5 §8.2); the numbers
+ * live in `spec`, so file order and spec order can never disagree with each
+ * other silently — the registry order IS the execution order, and the
+ * first-violation semantics follow from running rows in sequence.
+ */
+export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = [
+	{
+		id: "unique-module-names",
+		spec: "A2-β §5.1 step 1",
+		run: (ctx) => checkUniqueModuleNames(ctx.rawModules),
+	},
+	{
+		id: "provides-closure",
+		spec: "A2-β §5.1 step 2",
+		run: (ctx) => checkProvidesClosure(ctx.modules),
+	},
+	{
+		id: "bootstrap-synthetic-disjointness",
+		spec: "A2-β §5.1 step 3",
+		run: (ctx) =>
+			checkBootstrapAndSyntheticDisjointness(
+				ctx.modules,
+				ctx.bootstrapComponents,
+				ctx.overrideComponents,
+			),
+	},
+	{
+		id: "requires-closure",
+		spec: "A2-β §5.1 step 4",
+		run: (ctx) =>
+			checkRequiresClosure(ctx.modules, ctx.bootstrapComponents, ctx.overrideComponents),
+	},
+	{
+		id: "contribution-kind-coverage",
+		spec: "A2-β §5.1 step 5",
+		run: (ctx) => checkContributionKindCoverage(ctx.modules, ctx.contributionKinds),
+	},
+	{
+		id: "per-kind-contribute-duplicates",
+		spec: "A2-β §5.1 step 6",
+		run: (ctx) => checkPerKindContributeDuplicates(ctx.modules, ctx.contributionKinds ?? {}),
+	},
+	{
+		id: "route-collisions",
+		spec: "A2-β §5.1 step 7",
+		run: (ctx) => checkRouteCollisions(ctx.modules, ctx.rawModules),
+	},
+	{
+		id: "federation-redirect-policy-pairing",
+		spec: "A5 §8.2 (step 7.5)",
+		run: (ctx) => checkFederationRedirectPolicyPairing(ctx.modules),
+	},
+	{
+		id: "override-targets",
+		spec: "A2-β §5.1 step 8",
+		run: (ctx) => checkOverrideTargets(ctx.modules, ctx.contributionKinds ?? {}),
+	},
+	{
+		id: "override-duplicates",
+		spec: "A2-β §5.1 step 9",
+		run: (ctx) => checkOverrideDuplicates(ctx.modules),
+	},
+	{
+		id: "same-module-contribute-override",
+		spec: "A2-β §5.1 step 10",
+		run: (ctx) => checkSameModuleContributeOverride(ctx.modules),
+	},
+	{
+		id: "list-shaped-overrides",
+		spec: "A2-β §5.1 step 11",
+		run: (ctx) => checkListShapedOverrides(ctx.rawModules, ctx.contributionKinds ?? {}),
+	},
+	{
+		id: "lifecycle-closure",
+		spec: "A2-β §5.1 step 12",
+		run: (ctx) => checkLifecycleClosure(ctx.modules),
+	},
+];
+
+/**
+ * The checks that run AFTER config parse (A2-β §5.1 step 13, which stays a
+ * distinct stage in `validateManifests` because it *produces* the parsed
+ * config these rows read), in order. This is where wiring guards live —
+ * the rows that used to be hand-numbered 13.5–13.10 — plus the step-14
+ * route-order sanity check that always ran last.
+ *
+ * Adding a wiring guard = appending a row before `route-order-edges`.
+ */
+export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = [
+	{
+		id: "grant-policy-issuer",
+		spec: "CP-20 (restored v0.4.x guard; step 13.5)",
+		run: (ctx) =>
+			checkGrantPolicyIssuerInvariant(
+				ctx.modules,
+				ctx.parsedConfig,
+				ctx.bootstrapComponents,
+				ctx.overrideComponents,
+			),
+	},
+	{
+		id: "mfa-partial-wiring",
+		spec: "issue #101, A2-β §6.1 amendment 2026-05 (step 13.6)",
+		run: (ctx) => checkMfaPartialWiring(ctx.plannedKeys),
+	},
+	{
+		id: "federation-stores-wiring",
+		spec: "issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05 (step 13.7)",
+		run: (ctx) => checkFederationStoresWiring(ctx.parsedConfig as AppConfig, ctx.plannedKeys),
+	},
+	{
+		id: "access-token-revocation-wiring",
+		spec: "issue #277 (step 13.9)",
+		run: (ctx) => checkAccessTokenRevocationWiring(ctx.modules, ctx.parsedConfig, ctx.plannedKeys),
+	},
+	{
+		id: "declared-absence",
+		spec: "issue #363 (step 13.10)",
+		run: (ctx) =>
+			checkDeclaredAbsence(ctx.modules, ctx.rawModules, ctx.parsedConfig, ctx.plannedKeys),
+	},
+	{
+		id: "replica-safety",
+		spec: "issue #271 (step 13.8)",
+		// The logger comes from bootstrapComponents rather than a parameter: a
+		// composition root that configured one has already put it there, and
+		// the warning is worthless if it goes somewhere the operator is not
+		// reading.
+		run: (ctx) => {
+			const bootLogger = ctx.bootstrapComponents.logger;
+			checkReplicaSafety({
+				modules: ctx.modules,
+				config: ctx.parsedConfig,
+				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
+			});
+		},
+	},
+	{
+		id: "route-order-edges",
+		spec: "A2-β §5.1 step 14",
+		run: (ctx) => checkRouteOrderEdges(ctx.rawModules),
+	},
+];
+
+// ---------------------------------------------------------------------------
 // Public API — validateManifests
 // ---------------------------------------------------------------------------
 
 /**
  * Stage 1 of the A2-β boot planner pipeline. Accepts the consumer's
  * `Module[]`, `bootstrapComponents`, `contributionKinds`, and
- * `overrideComponents` and runs 14 ordered sub-checks.
+ * `overrideComponents` and runs the two check registries around the
+ * config-parse stage: {@link STAGE_ONE_PRE_CONFIG_CHECKS}, then A2-β §5.1
+ * step 13 (`validateAndComposeConfig`, which produces the parsed config),
+ * then {@link STAGE_ONE_POST_CONFIG_CHECKS}.
  *
  * Returns a `ValidatedManifests` on success. Throws a typed `BootError`
  * on the first violation in input-array order.
@@ -1599,123 +1787,38 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 	// Normalise all modules first for efficient lookup across checks
 	const normalisedModules = modules.map(normaliseModule);
 
-	// Step 1: Module identity uniqueness
-	checkUniqueModuleNames(modules);
-
-	// Step 2: Provides closure (no duplicate providers)
-	checkProvidesClosure(normalisedModules);
-
-	// Step 3: Bootstrap + synthetic-key disjointness
-	checkBootstrapAndSyntheticDisjointness(
-		normalisedModules,
+	const baseContext: StageOneContext = {
+		rawModules: modules,
+		modules: normalisedModules,
 		bootstrapComponents,
 		overrideComponents,
-	);
+		contributionKinds,
+		parsedConfig: undefined,
+		plannedKeys: new Set<string>([
+			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
+			...Object.keys(bootstrapComponents),
+			...Object.keys(overrideComponents ?? {}),
+		]),
+	};
 
-	// Step 4: Requires closure
-	checkRequiresClosure(normalisedModules, bootstrapComponents, overrideComponents);
+	for (const check of STAGE_ONE_PRE_CONFIG_CHECKS) {
+		check.run(baseContext);
+	}
 
-	// Step 5: Contribution kind coverage
-	checkContributionKindCoverage(normalisedModules, contributionKinds);
-
-	// Step 6: Per-kind name-keyed duplicate contributes
-	checkPerKindContributeDuplicates(normalisedModules, contributionKinds ?? {});
-
-	// Step 7: Route collisions + advertisement path validation
-	checkRouteCollisions(normalisedModules, modules);
-
-	// Step 7.5: Federation / federationRedirectPolicies pairing invariant
-	checkFederationRedirectPolicyPairing(normalisedModules);
-
-	// Step 8: Override target existence
-	checkOverrideTargets(normalisedModules, contributionKinds ?? {});
-
-	// Step 9: Duplicate override check
-	checkOverrideDuplicates(normalisedModules);
-
-	// Step 10: Same-module contribute+override collision
-	checkSameModuleContributeOverride(normalisedModules);
-
-	// Step 11: List-shaped override rejection
-	checkListShapedOverrides(modules, contributionKinds ?? {});
-
-	// Step 12: Lifecycle/provides closure
-	checkLifecycleClosure(normalisedModules);
-
-	// Step 13: Config schema composition and validation.
-	// The parsed value (with Zod defaults / transforms applied) replaces the
-	// original config in the returned bootstrapComponents so all downstream
-	// stages receive the fully-validated config. Per A2-β §5.1 step 13.
+	// A2-β §5.1 step 13: config schema composition and validation. Not a
+	// registry row because it PRODUCES a value — the parsed config (with Zod
+	// defaults / transforms applied) that replaces the original config in the
+	// returned bootstrapComponents, and that every post-config row reads.
 	const parsedConfig = validateAndComposeConfig(modules, bootstrapComponents);
 	const substitutedBootstrap: BootstrapMap = {
 		...bootstrapComponents,
 		config: parsedConfig as BootstrapMap["config"],
 	};
 
-	// Step 13.5: CP-20 grantPolicy/issuer invariant — runs after step 13 so
-	// the parsed config is available (restored v0.4.x guard). Inspects all
-	// three supported component sources: module provides, bootstrapComponents,
-	// and overrideComponents.
-	checkGrantPolicyIssuerInvariant(
-		normalisedModules,
-		parsedConfig,
-		bootstrapComponents,
-		overrideComponents,
-	);
-
-	// Step 13.6: MFA partial-wiring guard — if mfaCoordinator is provided,
-	// both mfaProviderFactory and mfaTransactionStore MUST also be provided.
-	// Per issue #101, A2-β §6.1 amendment 2026-05.
-	//
-	// `plannedKeys` MUST cover all three supported component sources (module
-	// provides, bootstrapComponents, overrideComponents) — same shape as the
-	// CP-20 invariant at step 13.5. Otherwise a composition root that wires
-	// MFA / federation stores via bootstrap or override is falsely rejected
-	// (see multi-agent-review I1+P2 convergence, 2026-05-01).
-	{
-		const plannedKeys = new Set<string>([
-			...normalisedModules.flatMap((m) => m.providesKeys as string[]),
-			...Object.keys(bootstrapComponents),
-			...Object.keys(overrideComponents ?? {}),
-		]);
-		checkMfaPartialWiring(plannedKeys);
-
-		// Step 13.7: Federation stores wiring guard — if any federation is
-		// enabled in config, all required federation stores must be wired
-		// (see FEDERATION_REQUIRED_STORES for the authoritative list).
-		// Per issue #101 TODO-F-1, A2-β §6.1 amendment 2026-05.
-		checkFederationStoresWiring(parsedConfig as AppConfig, plannedKeys);
-
-		// Step 13.9: access-token revocation enforceability — a composition that
-		// reads the `accessTokenDenylist` slot must have one, unless it declares
-		// `oauth.revocation.accessToken = "unsupported"`. Per issue #277.
-		checkAccessTokenRevocationWiring(normalisedModules, parsedConfig, plannedKeys);
-
-		// Step 13.10: declared-absence guard — every optional key carrying an
-		// AbsencePolicy must be filled or declared absent in config. The
-		// generic form of 13.9's pattern. Per issue #363.
-		checkDeclaredAbsence(normalisedModules, modules, parsedConfig, plannedKeys);
+	const postConfigContext: StageOneContext = { ...baseContext, parsedConfig };
+	for (const check of STAGE_ONE_POST_CONFIG_CHECKS) {
+		check.run(postConfigContext);
 	}
-
-	// Step 13.8: Replica-safety guard — state held in this process's memory
-	// that a multi-replica deployment must share. Fails boot when
-	// `deployment.mode = "multi"`, warns when the mode is unset, silent when
-	// the operator declared `"single"`. Per issue #271.
-	//
-	// The logger comes from `bootstrapComponents` rather than a new parameter:
-	// a composition root that configured one has already put it there, and the
-	// warning is worthless if it goes somewhere the operator is not reading.
-	{
-		const bootLogger = bootstrapComponents.logger;
-		checkReplicaSafety({
-			modules: normalisedModules,
-			config: parsedConfig,
-			...(bootLogger !== undefined ? { logger: bootLogger } : {}),
-		});
-	}
-
-	// Step 14: Route-order edge sanity
-	checkRouteOrderEdges(modules);
 
 	// Build output indices
 	const validatedModules: ValidatedModule[] = normalisedModules.map((normalised, i) => ({
