@@ -146,12 +146,12 @@ describe("scaffold", () => {
 		expect(pkg.dependencies["@o3co/auth-provider-foundation"]).toMatch(/^\^/);
 	});
 
-	it("removes private field from package.json", () => {
+	it('keeps "private": true so a scaffolded service is not publishable by accident', () => {
 		const targetDir = join(tempDir, "my-auth");
 		scaffold(targetDir, "my-auth");
 
 		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
-		expect(pkg.private).toBeUndefined();
+		expect(pkg.private).toBe(true);
 	});
 
 	it("writes scoped project name verbatim into package.json", () => {
