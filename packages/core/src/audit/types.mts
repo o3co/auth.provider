@@ -16,17 +16,51 @@
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 
+/**
+ * Every audit-event type the bundled packages emit (#369).
+ *
+ * This used to be an informative doc comment, and it had drifted badly: it
+ * named events nothing emits (`"logout"`, `"scope.denied"`,
+ * `"login.success"`, the `"mfa.challenge.*"` family) and omitted most of
+ * what IS emitted — so a sink implementor or dashboard author filtering on
+ * the documented names matched nothing. The list is now a constant, pinned
+ * against the actual emission sites in both directions by
+ * `audit/__tests__/auditEventInventory.drift.test.mts`: adding an emission
+ * without listing it here fails CI, and so does keeping a name here after
+ * its last emission site is removed.
+ *
+ * The naming convention is `subject.outcome` (dots between segments,
+ * `snake_case` within one): `authorize.granted`, `rate_limit.unavailable`,
+ * `federation.token.family_revoked`. Consumers MAY emit custom event types;
+ * namespace them so they cannot collide with future entries here.
+ */
+export const BUILT_IN_AUDIT_EVENT_TYPES = [
+	"authorize.granted",
+	"authorize.rejected",
+	"federation.logout.idp_unreachable",
+	"federation.logout.success",
+	"federation.token.family_revoked",
+	"federation.token.forbidden",
+	"federation.token.reauthentication_required",
+	"federation.token.refresh_failed",
+	"federation.token.success",
+	"introspect.family_revoked",
+	"introspect.store_unavailable",
+	"logout.cascade_failed",
+	"logout.family_revoked",
+	"logout.success",
+	"rate_limit.unavailable",
+	"token.issued",
+	"token.issued.failure",
+] as const;
+
 export interface AuditEvent {
 	readonly timestamp: Date;
 	/**
-	 * Built-in event types (informative, not exhaustive):
-	 *   "login.success" | "login.failure" |
-	 *   "authorize.granted" | "authorize.rejected" |
-	 *   "token.issued" | "token.issued.failure" | "token.refreshed" | "token.revoked" |
-	 *   "federation.success" | "federation.failure" |
-	 *   "mfa.challenge.issued" | "mfa.challenge.success" | "mfa.challenge.failure" |
-	 *   "logout" | "scope.denied" | "rate_limit.unavailable"
-	 * Consumers MAY emit custom event types with their own namespace.
+	 * The event's type. The built-in vocabulary is
+	 * {@link BUILT_IN_AUDIT_EVENT_TYPES} — a constant rather than prose, so
+	 * the inventory cannot drift from the emission sites again. Kept an open
+	 * `string` because consumers emit custom, namespaced types of their own.
 	 */
 	readonly type: string;
 	readonly subject?: string;

@@ -41,11 +41,13 @@ export {
 } from "./audit/factory.mjs";
 // Audit
 export type { AuditEvent, AuditSink, AuditSinkFactory } from "./audit/types.mjs";
-// The declared-absence policy the bundled auditSink readers share (#363) —
-// one constant, so the boot error's advice cannot depend on which module
-// tripped it. The AbsencePolicy vocabulary itself is exported below with the
-// manifest types.
-export { AUDIT_SINK_ABSENCE_POLICY } from "./audit/types.mjs";
+// Two audit constants: the declared-absence policy the bundled auditSink
+// readers share (#363 — one constant, so the boot error's advice cannot
+// depend on which module tripped it; the AbsencePolicy vocabulary itself is
+// exported below with the manifest types), and the built-in audit-event
+// inventory (#369 — pinned against the emission sites by a drift-guard test,
+// so sinks and dashboards filter on names that actually occur).
+export { AUDIT_SINK_ABSENCE_POLICY, BUILT_IN_AUDIT_EVENT_TYPES } from "./audit/types.mjs";
 export type {
 	AppHandle,
 	BootErrorDetails,
