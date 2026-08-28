@@ -286,7 +286,7 @@ describe("/authorize — response_type validation", () => {
 		expect(params.get("code")).toBeNull();
 	});
 
-	it("answers 400 JSON for a non-code response_type when the client cannot be validated (A-1)", async () => {
+	it("answers 400 invalid_client JSON when the client cannot be validated — the client refusal outranks response_type (A-1)", async () => {
 		const { app } = await makeApp({ clientNotFound: true });
 		const res = await authorize(app, { ...baseQuery, response_type: "token" });
 		// No validated redirect target exists, so nothing redirects — the

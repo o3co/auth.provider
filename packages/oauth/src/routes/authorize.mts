@@ -169,13 +169,18 @@ const resolveClientAndRedirectUri = async (
 // types and repeats such as `?response_type=code&response_type=token`,
 // which Express surfaces as an array.
 const checkResponseTypeIsCode = (ctx: AuthorizeContext): boolean => {
-	const responseType = toStr(ctx.req.query.response_type);
-	if (responseType !== "code") {
-		redirectError(
-			ctx,
-			"unsupported_response_type",
-			`response_type "${responseType}" is not supported`,
-		);
+	const raw = ctx.req.query.response_type;
+	if (toStr(raw) !== "code") {
+		// The description names what actually arrived — a missing parameter and
+		// a repeated one are different client bugs, and `"undefined"` in quotes
+		// (the old rendering of both) pointed at neither.
+		const description =
+			raw === undefined
+				? "response_type is required"
+				: Array.isArray(raw)
+					? "response_type must not be included more than once"
+					: `response_type ${JSON.stringify(String(raw))} is not supported`;
+		redirectError(ctx, "unsupported_response_type", description);
 		return false;
 	}
 	return true;
