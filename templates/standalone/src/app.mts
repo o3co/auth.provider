@@ -30,6 +30,7 @@ import { buildModules } from "./buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
+import { createTerminalErrorHandler } from "./terminalError.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
 // ENV = CONFIG_ENV || NODE_ENV || "development"; missing {ENV}.conf is fatal.
@@ -142,6 +143,10 @@ await (async (): Promise<void> => {
 
 	// Step 5: Mount the composed auth router and start the HTTP server.
 	app.use(handle.router);
+	// Terminal error handler LAST (#293 item 8): Express routes an error only
+	// to handlers registered after the route that threw it. See
+	// `terminalError.mts` for what it catches and why.
+	app.use(createTerminalErrorHandler(logger));
 	const server = app.listen(config.http.port, (): void => {
 		logger.info(`Server is running on http://localhost:${config.http.port}`);
 	});

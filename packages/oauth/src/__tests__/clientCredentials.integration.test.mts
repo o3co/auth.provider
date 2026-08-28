@@ -128,6 +128,20 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 		expect(payload.aud).toBe("https://api.example");
 	});
 
+	it("returns 400 invalid_request when grant_type is missing (RFC 6749 §5.2, #293 item 10)", async () => {
+		// A missing required parameter is `invalid_request`; the server answers
+		// `unsupported_grant_type` only for a VALUE it does not support.
+		const app = await buildApp(clientRepoWith({ allowedGrantTypes: ["client_credentials"] }));
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({});
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_request");
+	});
+
 	it("returns 400 unauthorized_client when the client record omits allowedGrantTypes (deny-by-absence)", async () => {
 		// Confirms the field's absence is propagated as undefined (not coerced
 		// to [] or some allow-all default) so §3.4.1 deny-by-absence holds.

@@ -222,8 +222,11 @@ export const createOAuthRouter = async (
 						userAgent: req.get("user-agent"),
 						details: { reason: "missing_grant_type" },
 					});
+					// RFC 6749 §5.2: a missing required parameter is `invalid_request`;
+					// `unsupported_grant_type` is reserved for a value the server does
+					// not support (#293 item 10). The next branch keeps that one.
 					return res.status(400).json({
-						error: "unsupported_grant_type",
+						error: "invalid_request",
 						error_description: "grant_type must be a non-empty string",
 					});
 				}
@@ -463,6 +466,16 @@ export const createOAuthRouter = async (
 		.post(
 			"/introspect",
 			rateLimitGuard("introspect"),
+			(_req, res, next) => {
+				// Every introspection response is token metadata — `active`, and on
+				// the positive path scope/sub/exp — so an intermediary caching one
+				// keeps serving yesterday's liveness after a revocation (#293 item
+				// 2). Same header pair the token endpoint sets on issuance
+				// (RFC 6749 §5.1), applied here once for every exit below.
+				res.set("Cache-Control", "no-store");
+				res.set("Pragma", "no-cache");
+				next();
+			},
 			async (req: Request, res: Response, next) => {
 				// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
 				// access token used as the introspection credential. Which scheme a
