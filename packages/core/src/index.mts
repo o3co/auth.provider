@@ -202,10 +202,12 @@ export { jwksModule } from "./jwks/module.mjs";
 export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
 // JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
 export type {
+	JwtRevocationSources,
 	JwtType,
 	JwtVerificationReason,
 	JwtVerifyOptions,
 	VerifiedJwt,
+	VerifyRevocation,
 } from "./jwt/verify.mjs";
 export { JwtVerificationError, verifyJwt } from "./jwt/verify.mjs";
 export type { KeyStoreFactory } from "./keys/factory.mjs";

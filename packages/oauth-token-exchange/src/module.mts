@@ -96,6 +96,15 @@ export const tokenExchangeModule: Module = defineModule({
 		// aud-skip warnings emit through the operator's structured logger
 		// rather than being silently dropped.
 		"logger",
+		// #367: a subject_token is an access token presented as a credential,
+		// so the exchange consults the same revocation stores every other
+		// token-accepting surface does — otherwise revoking an AT and then
+		// exchanging it launders the revocation away. Declaring
+		// `accessTokenDenylist` here also enrolls this module in the #277
+		// boot guard: a composition mounting token exchange must wire a
+		// denylist or declare `oauth.revocation.accessToken = "unsupported"`.
+		"accessTokenDenylist",
+		"subjectRevocation",
 	],
 	contributes: {
 		grants: {
@@ -109,6 +118,10 @@ export const tokenExchangeModule: Module = defineModule({
 					keyStore: deps.keyStore,
 					issuer: deps.config.oauth.jwt.issuer,
 					refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+					// #367: revocation stores, forwarded like every other
+					// token-accepting surface. See the optional-keys comment above.
+					accessTokenDenylist: deps.accessTokenDenylist,
+					subjectRevocation: deps.subjectRevocation,
 					// SF-1: thread legacyTypAccept through so the operator's
 					// HOCON / env-var override governs the validator. Without
 					// this, the validator's `?? true` fallback masked any

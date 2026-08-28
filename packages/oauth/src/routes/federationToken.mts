@@ -222,9 +222,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				type: "access_token",
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
-				...(opts.accessTokenDenylist ? { denylist: opts.accessTokenDenylist } : {}),
-				// #296: subject-level watermark, consulted alongside the jti denylist.
-				...(opts.subjectRevocation ? { subjectRevocation: opts.subjectRevocation } : {}),
+				// #296/#367: token-accepting surface — forward what the composition
+				// wired, jti denylist and subject watermark both.
+				revocation: {
+					denylist: opts.accessTokenDenylist,
+					subjectRevocation: opts.subjectRevocation,
+				},
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;

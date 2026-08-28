@@ -64,7 +64,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 				type: "access_token",
 				expectedIssuer: TEST_ISSUER,
 				expectedAudience: TEST_AUDIENCE,
-				denylist,
+				revocation: { denylist },
 			}),
 		).rejects.toMatchObject({ reason: "revoked" });
 	});
@@ -76,7 +76,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 			type: "access_token",
 			expectedIssuer: TEST_ISSUER,
 			expectedAudience: TEST_AUDIENCE,
-			denylist,
+			revocation: { denylist },
 		});
 		expect(verified.payload.sub).toBe("u-1");
 	});
@@ -92,6 +92,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 		await expect(
 			verifyJwt(token, testKeyStore(), {
 				type: "access_token",
+				revocation: "none",
 				expectedIssuer: TEST_ISSUER,
 				expectedAudience: TEST_AUDIENCE,
 				clockSkewMs: 0,
@@ -101,6 +102,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 		// With flag → passes
 		const verified = await verifyJwt(token, testKeyStore(), {
 			type: "access_token",
+			revocation: "none",
 			expectedIssuer: TEST_ISSUER,
 			expectedAudience: TEST_AUDIENCE,
 			ignoreExpiration: true,
@@ -113,6 +115,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 		const { token } = await mintAccessToken();
 		const verified = await verifyJwt(token, testKeyStore(), {
 			type: "access_token",
+			revocation: "none",
 			expectedIssuer: TEST_ISSUER,
 			expectedAudience: TEST_AUDIENCE,
 		});
@@ -137,7 +140,7 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 				type: "access_token",
 				expectedIssuer: TEST_ISSUER,
 				expectedAudience: TEST_AUDIENCE,
-				denylist: throwingDenylist,
+				revocation: { denylist: throwingDenylist },
 			}),
 		).rejects.toMatchObject({
 			reason: "revoked",

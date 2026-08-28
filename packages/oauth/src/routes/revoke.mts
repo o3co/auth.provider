@@ -237,6 +237,9 @@ async function tryRevokeRefreshToken(
 			// SECURITY GUARDRAIL (§4.5 S9): this is one of two legitimate sites
 			// for ignoreExpiration: true (along with the AT path below).
 			ignoreExpiration: true,
+			// #367: deliberate — the caller is here to revoke; refusing an
+			// already-revoked token would break RFC 7009 §2.2's idempotent 200.
+			revocation: "none",
 		});
 		const claims = verified.payload as Record<string, unknown>;
 
@@ -304,6 +307,9 @@ async function tryRevokeAccessToken(
 			type: "access_token",
 			expectedIssuer: opts.issuer,
 			ignoreExpiration: true,
+			// #367: deliberate — same idempotency as the RT path above; a jti
+			// already on the denylist gets its RFC 7009 200 without a re-check.
+			revocation: "none",
 		});
 		const claims = verified.payload as Record<string, unknown>;
 

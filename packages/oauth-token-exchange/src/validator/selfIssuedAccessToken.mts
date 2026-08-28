@@ -15,9 +15,11 @@
  */
 
 import {
+	type AccessTokenDenylist,
 	type KeyStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
+	type SubjectRevocation,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type {
@@ -35,6 +37,18 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	keyStore: KeyStore;
 	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
+	/**
+	 * #367: a subject_token is an access token presented as a credential —
+	 * the exchange mints a NEW token from it, so accepting a revoked one is
+	 * a laundering path: revoke an AT, exchange it, keep an equivalent. The
+	 * jti denylist and the subject watermark are consulted exactly as the
+	 * other token-accepting surfaces (userinfo, introspection,
+	 * federation-token) do. Optional because whether each store exists is
+	 * the composition's decision (#363); `tokenExchangeModule` forwards
+	 * both slots.
+	 */
+	accessTokenDenylist?: AccessTokenDenylist;
+	subjectRevocation?: SubjectRevocation;
 	issuer: string;
 	/**
 	 * SF-1 / Phase G / S2: when true, the central JWT verifier
@@ -76,7 +90,15 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
 ): ExchangeTokenValidator {
-	const { keyStore, refreshTokenFamilyRevocation, issuer, legacyTypAccept, logger } = options;
+	const {
+		keyStore,
+		refreshTokenFamilyRevocation,
+		accessTokenDenylist,
+		subjectRevocation,
+		issuer,
+		legacyTypAccept,
+		logger,
+	} = options;
 	if (typeof issuer !== "string" || issuer.length === 0) {
 		throw new Error(
 			"createSelfIssuedAccessTokenValidator: issuer is required (a non-empty string). Without an issuer to compare against, an at+jwt signed by the same KeyStore but with a different `iss` claim could be accepted.",
@@ -102,6 +124,9 @@ export function createSelfIssuedAccessTokenValidator(
 					type: "access_token",
 					expectedIssuer: issuer,
 					legacyTypAccept: legacyTypAccept ?? false,
+					// #367: token-accepting surface — a revoked subject_token must
+					// not be exchangeable for a fresh token. See the options JSDoc.
+					revocation: { denylist: accessTokenDenylist, subjectRevocation },
 					logger,
 				});
 				payload = verified.payload as Record<string, unknown>;

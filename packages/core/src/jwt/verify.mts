@@ -74,6 +74,36 @@ export class JwtVerificationError extends Error {
 	}
 }
 
+/**
+ * The revocation stores a verification consults, travelling as one bundle
+ * (#367) so a call site cannot forget half of them.
+ *
+ * - `denylist` — Wave 1 (§4.5): `denylist.has(jti)` runs after all
+ *   signature/expiry/type checks; a hit throws `reason: "revoked"`.
+ * - `subjectRevocation` — #296: a token whose `iat` is at or before the
+ *   subject's revocation watermark throws `reason: "revoked"`. The companion
+ *   to the denylist rather than a replacement: the denylist revokes a token
+ *   by identity, the watermark revokes every token a subject held as of a
+ *   moment — which is what a credential change needs, since the jtis
+ *   outstanding for a subject are not enumerable.
+ *
+ * Both fields stay individually optional inside the bundle: whether each
+ * store exists is the composition's decision (#363). What the bundle removes
+ * is the call site's ability to not ask.
+ */
+export interface JwtRevocationSources {
+	readonly denylist?: AccessTokenDenylist;
+	readonly subjectRevocation?: SubjectRevocation;
+}
+
+/**
+ * What a `verifyJwt` call consults about revocation — the sources the
+ * composition wired, or the literal `"none"` for the few surfaces where a
+ * revoked token is still safe to act on. See
+ * {@link JwtVerifyOptions.revocation} for when each is correct.
+ */
+export type VerifyRevocation = "none" | JwtRevocationSources;
+
 export interface JwtVerifyOptions {
 	/** Token type — selects default `typ` expectation. */
 	readonly type: JwtType;
@@ -142,21 +172,28 @@ export interface JwtVerifyOptions {
 	 */
 	readonly legacyTypAccept?: boolean;
 	/**
-	 * Wave 1 (§4.5): when present, verifyJwt calls `denylist.has(jti)` after
-	 * signature/expiry/type checks and throws with reason "revoked" if true.
-	 * Omitting this option (the default) preserves current behavior.
-	 */
-	readonly denylist?: AccessTokenDenylist;
-	/**
-	 * #296: when present, verifyJwt rejects a token whose `iat` is at or before
-	 * this subject's revocation watermark, with reason "revoked".
+	 * REQUIRED: what this verification consults about revocation (#367).
 	 *
-	 * The companion to `denylist` rather than a replacement: the denylist
-	 * revokes a token by identity, this revokes every token a subject held as
-	 * of a moment — which is what a credential change needs, since the jtis
-	 * outstanding for a subject are not enumerable.
+	 * The two checks used to be independent optional options whose omission
+	 * "preserved current behavior" — which meant a new call site skipped
+	 * revocation silently, the same seam shape that produced the #277/#287/
+	 * #322 silent no-ops. Ten call sites hand-forwarded them; the eleventh
+	 * would have failed open with no symptom. Making the field required turns
+	 * that omission into a type error, and makes the deliberate skip a
+	 * greppable, reviewable literal:
+	 *
+	 *   - `{ denylist?, subjectRevocation? }` — consult what the composition
+	 *     wired. This is the shape for every surface that ACCEPTS a token as
+	 *     a credential; forward both slots even when they may be undefined,
+	 *     because "the deployment wired nothing" is the composition's
+	 *     decision (#363), not the call site's.
+	 *   - `"none"` — this call site does not ask about revocation ON
+	 *     PRINCIPLE, and says so in a code review-able way. Correct only
+	 *     where the operation is safe or meaningful for a revoked token:
+	 *     revoking it again (idempotent), logging it out, or reading an
+	 *     id_token_hint.
 	 */
-	readonly subjectRevocation?: SubjectRevocation;
+	readonly revocation: VerifyRevocation;
 	/**
 	 * Wave 1 (§4.5): SECURITY GUARDRAIL — set true ONLY in the /oauth/revoke
 	 * AT path. Spreading this flag to other call sites bypasses token-lifetime
@@ -231,10 +268,13 @@ export async function verifyJwt(
 		expectedAlgs,
 		logger,
 		legacyTypAccept = false,
-		denylist,
-		subjectRevocation,
+		revocation,
 		ignoreExpiration = false,
 	} = options;
+	// "none" and an empty bundle behave identically below; the distinction is
+	// for the reader and the reviewer, not the machine.
+	const denylist = revocation === "none" ? undefined : revocation.denylist;
+	const subjectRevocation = revocation === "none" ? undefined : revocation.subjectRevocation;
 
 	let header: ProtectedHeaderParameters;
 	try {
