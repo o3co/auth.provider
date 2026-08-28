@@ -522,7 +522,7 @@ export async function verifyJwt(
 	if (subjectRevocation !== undefined) {
 		const sub = typeof payload.sub === "string" ? payload.sub : undefined;
 		const iat = typeof payload.iat === "number" ? payload.iat : undefined;
-		if (sub !== undefined && iat !== undefined) {
+		if (sub !== undefined) {
 			let watermark: Date | null;
 			try {
 				watermark = await subjectRevocation.revokedBefore(sub);
@@ -535,12 +535,31 @@ export async function verifyJwt(
 				emitRejection(logger, err, payload, header);
 				throw err;
 			}
+			// A token with no `iat` cannot prove it postdates an in-force
+			// watermark, so it is refused while one exists (#376 review): every
+			// token this provider mints carries `iat`, which makes an iat-less
+			// token exactly the legacy/foreign shape a credential change must
+			// not keep honouring. When the subject has no watermark, absence of
+			// `iat` stays a non-event, as before.
+			if (watermark !== null && iat === undefined) {
+				const err = new JwtVerificationError(
+					"revoked",
+					`JWT for subject ${sub} carries no iat to compare against an in-force ` +
+						"subject revocation watermark (fail-closed)",
+				);
+				emitRejection(logger, err, payload, header);
+				throw err;
+			}
 			// Inclusive on purpose. `iat` is second-truncated and a multi-replica
 			// deployment has independent clocks, so a token minted a few hundred
 			// milliseconds *before* the revocation routinely lands in the same
 			// second as the watermark. Killing one minted just after costs a
 			// retry; letting one from just before survive is the vulnerability.
-			if (watermark !== null && iat <= Math.floor(watermark.getTime() / 1000)) {
+			if (
+				watermark !== null &&
+				iat !== undefined &&
+				iat <= Math.floor(watermark.getTime() / 1000)
+			) {
 				const err = new JwtVerificationError(
 					"revoked",
 					`JWT for subject ${sub} predates the subject revocation watermark`,
