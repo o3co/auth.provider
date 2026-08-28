@@ -34,7 +34,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isLoopbackHostname } from "../loopback.mjs";
+import { isLoopbackHostname } from "#/net/loopback.mjs";
 
 describe("isLoopbackHostname", () => {
 	it.each([

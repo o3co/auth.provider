@@ -38,7 +38,7 @@
  * the definition patterns — consumers may re-export the mapped home freely.
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -94,7 +94,7 @@ function listShippedSources(): string[] {
 }
 
 function walk(dir: string, out: string[]): void {
-	let entries: ReturnType<typeof readdirSync>;
+	let entries: Dirent[];
 	try {
 		entries = readdirSync(dir, { withFileTypes: true });
 	} catch {
