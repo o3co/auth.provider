@@ -121,10 +121,21 @@ describe("verifyJwt — the watermark needs both `sub` and `iat` to mean anythin
 		await expect(verify(token, store)).resolves.toBeDefined();
 	});
 
-	it("skips the check for a token with no iat", async () => {
+	it("rejects a token with no iat while a watermark is in force (#376, fail-closed)", async () => {
+		// A token that cannot prove it postdates the watermark must not survive
+		// it: every token this provider mints carries iat, so an iat-less token
+		// is exactly the legacy/foreign shape a credential change must not
+		// keep honouring.
 		const store = createInMemorySubjectRevocation();
 		await store.revokeBefore("u1", new Date(), new Date(Date.now() + 300_000));
 		const token = await mint({ sub: "u1", omitIat: true });
-		await expect(verify(token, store)).resolves.toBeDefined();
+		await expect(verify(token, store)).rejects.toMatchObject({ reason: "revoked" });
+	});
+
+	it("still accepts a token with no iat when the subject has no watermark", async () => {
+		// Absence of iat is only load-bearing while something is in force to
+		// compare against — an unrevoked subject sees no behavior change.
+		const token = await mint({ sub: "u1", omitIat: true });
+		await expect(verify(token, createInMemorySubjectRevocation())).resolves.toBeDefined();
 	});
 });
