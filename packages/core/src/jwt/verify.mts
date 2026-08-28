@@ -75,8 +75,8 @@ export class JwtVerificationError extends Error {
 }
 
 /**
- * The revocation stores a verification consults, travelling as one bundle
- * (#367) so a call site cannot forget half of them.
+ * The revocation stores that a verification consults, travelling as one
+ * bundle (#367) so a call site cannot forget half of them.
  *
  * - `denylist` — Wave 1 (§4.5): `denylist.has(jti)` runs after all
  *   signature/expiry/type checks; a hit throws `reason: "revoked"`.
