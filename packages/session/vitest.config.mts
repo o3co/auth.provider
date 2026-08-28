@@ -1,21 +1,13 @@
 import { defineConfig } from "vitest/config";
+import { WORKSPACE_TEST_TIMEOUTS } from "../../vitest.shared.mts";
 
 export default defineConfig({
 	test: {
 		include: ["src/**/__tests__/**/*.test.mts"],
-		// Not because anything here is slow. `pnpm -r run test` runs every
-		// workspace's vitest concurrently, and `packages/redis` starts a Redis
-		// testcontainer per test file; on a saturated box the transform+import of
-		// a test file can itself exceed vitest's 5s default, and tests here fail
-		// with "Test timed out" on nothing more than `await import("#/index.mjs")`
-		// — a machine-load artifact reported as a product failure. Which test
-		// loses the race varies run to run, which is the tell.
-		//
-		// `packages/redis` already carries an override for the same reason
-		// (container boot). Raising the deadline does not hide a real hang: a
-		// genuinely stuck test still fails, 15s later.
-		testTimeout: 20_000,
-		hookTimeout: 20_000,
+		// #357: this package was the first to hit the machine-load timeout and
+		// carried the ad-hoc 20s override; the policy now lives workspace-wide
+		// in vitest.shared.mts, rationale included.
+		...WORKSPACE_TEST_TIMEOUTS,
 		typecheck: {
 			enabled: true,
 			// Scoped to A5 redirect-policy / contributes-map / slim type-only tests.
