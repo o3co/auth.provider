@@ -86,6 +86,8 @@ const makeApp = async (
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [REDIRECT_URI],
 		allowedScopes: ["read"],
+		// #396: the old implicit omitted-scope grant, now declared.
+		defaultScopes: ["read"],
 		firstParty: true,
 		...(opts.client ?? {}),
 	} as unknown as PublicClient;

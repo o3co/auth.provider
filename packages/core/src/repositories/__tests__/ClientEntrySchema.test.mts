@@ -233,6 +233,36 @@ describe("ClientEntrySchema — allowedRedirectUris shape (#395)", () => {
 			const message = result.error.issues.map((issue) => issue.message).join("\n");
 			expect(message).toContain("javascript:alert(1)");
 			expect(message).toContain("myapp://cb");
+
+describe("ClientEntrySchema — defaultScopes field (#396)", () => {
+	const base = {
+		tokenEndpointAuthMethod: "client_secret_basic",
+		clientSecret: "s",
+		allowedScopes: ["read", "write"],
+	};
+
+	it("accepts defaultScopes that are a subset of allowedScopes", () => {
+		const result = ClientEntrySchema.safeParse({ ...base, defaultScopes: ["read"] });
+		expect(result.success).toBe(true);
+		if (result.success) expect(result.data.defaultScopes).toEqual(["read"]);
+	});
+
+	it("accepts absent defaultScopes (deny-by-absence is the runtime's job)", () => {
+		const result = ClientEntrySchema.safeParse(base);
+		expect(result.success).toBe(true);
+		if (result.success) expect(result.data.defaultScopes).toBeUndefined();
+	});
+
+	it("refuses defaultScopes outside allowedScopes at boot, naming them", () => {
+		// A default the allowlist would refuse could never be granted to a
+		// scope-carrying request; letting it ride the omitted-scope path would
+		// make omission the wider grant.
+		const result = ClientEntrySchema.safeParse({ ...base, defaultScopes: ["read", "admin"] });
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const message = result.error.issues.map((issue) => issue.message).join("\n");
+			expect(message).toContain("admin");
+			expect(message).not.toContain('"read"');
 		}
 	});
 });

@@ -441,17 +441,40 @@ const checkNonce = (ctx: AuthorizeContext): boolean => {
  * RFC 6749 §3.3 scope narrowing plus the IH-6 openid requirement. Returns the
  * requested scopes and the client-allowlist-filtered set the policy step takes
  * as its ceiling, or `null` when a response has been sent.
+ *
+ * Narrowing is kept, deliberately (#396): §3.3 sanctions ignoring scopes the
+ * client is not registered for, and the honesty half — the token response's
+ * `scope` member naming what WAS granted whenever it differs — is pinned by
+ * test. The omitted-scope default is not kept: it granted the client's entire
+ * allowlist, making "forgot to send scope" the maximum grant. An omitted
+ * scope now draws on the client's declared `defaultScopes`, and a client that
+ * declares none answers `invalid_scope` — deny-by-absence, the #326/#363
+ * shape. The one carve-out: a client whose allowlist is EMPTY keeps the empty
+ * grant, because there is nothing to over-grant and scope-less deployments
+ * are a supported shape.
  */
 const resolveScopes = (
 	ctx: AuthorizeContext,
 	scope: unknown,
-	allowedScopes: readonly string[],
+	client: PublicClient,
 ): { requestedScopes: string[]; allowedFilteredScopes: readonly string[] } | null => {
+	const allowedScopes = client.allowedScopes;
 	const requestedScopes = toStr(scope)?.split(" ").filter(Boolean) ?? [];
-	const allowedFilteredScopes =
-		requestedScopes.length > 0
-			? requestedScopes.filter((s) => allowedScopes.includes(s))
-			: allowedScopes;
+	let allowedFilteredScopes: readonly string[];
+	if (requestedScopes.length > 0) {
+		allowedFilteredScopes = requestedScopes.filter((s) => allowedScopes.includes(s));
+	} else if (client.defaultScopes !== undefined) {
+		// Filtered through the allowlist even so: schema-validated registrations
+		// are ⊆ allowedScopes by boot (#396's superRefine), but a custom
+		// ClientRepository is under no such obligation.
+		allowedFilteredScopes = client.defaultScopes.filter((s) => allowedScopes.includes(s));
+	} else if (allowedScopes.length === 0) {
+		allowedFilteredScopes = [];
+	} else {
+		void auditFailure(ctx, { reason: "scope_omitted_without_default" });
+		redirectError(ctx, "invalid_scope", "scope is required: this client declares no defaultScopes");
+		return null;
+	}
 	// #328: the openid-scope gate used to also test issuer presence
 	// (`isActingAsOidcProvider`), suggesting issuer-less operation was a
 	// supported mode. It is not: router construction throws when
@@ -781,7 +804,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!pkce) return;
 		if (!checkNonce(ctx)) return;
 
-		const scopes = resolveScopes(ctx, scope, client.allowedScopes);
+		const scopes = resolveScopes(ctx, scope, client);
 		if (!scopes) return;
 
 		// RFC 8707 §2 at the authorization endpoint (Stage 2, #173). Read

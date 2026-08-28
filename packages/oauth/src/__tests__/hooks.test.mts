@@ -479,6 +479,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 					allowedRedirectUris: ["https://example.test/cb"],
 					firstParty: true,
 					allowedScopes: ["read"],
+					// #396: the old implicit omitted-scope grant, now declared.
+					defaultScopes: ["read"],
 				}),
 				authenticate: async () => null,
 			};
@@ -682,6 +684,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		it("rejects with invalid_scope when grantPolicy returns scopes outside client allowance (CP-13)", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
 				allowedScopes: ["read"],
+				// #396: the old implicit omitted-scope grant, now declared.
+				defaultScopes: ["read"],
 			});
 			const grantPolicy: GrantPolicyHook = {
 				kind: "escalating",

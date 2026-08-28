@@ -45,6 +45,16 @@ export interface Client {
 	readonly allowedRedirectUris: readonly string[];
 	readonly allowedScopes: readonly string[];
 	/**
+	 * What an omitted `scope` parameter grants (#396). Absent means the client
+	 * has not declared a default: a scope-omitting request is then refused with
+	 * `invalid_scope` whenever `allowedScopes` is non-empty — the old behavior
+	 * granted the ENTIRE allowlist, making "forgot to send scope" the maximum
+	 * grant (deny-by-absence, the #326/#363 shape). A client whose
+	 * `allowedScopes` is empty is unaffected: there is nothing to over-grant,
+	 * and scope-less deployments keep working.
+	 */
+	readonly defaultScopes?: readonly string[];
+	/**
 	 * Audience URIs this client may receive tokens for.
 	 *
 	 * Consumers:

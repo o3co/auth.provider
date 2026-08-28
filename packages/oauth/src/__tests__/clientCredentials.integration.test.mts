@@ -75,6 +75,8 @@ function clientRepoWith(opts: {
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [],
 		allowedScopes: opts.allowedScopes ?? ["read", "write"],
+		// #396: the old implicit omitted-scope grant, now declared.
+		defaultScopes: opts.allowedScopes ?? ["read", "write"],
 		allowedAudiences: opts.allowedAudiences ?? ["https://api.example"],
 		...(opts.allowedGrantTypes !== undefined && { allowedGrantTypes: opts.allowedGrantTypes }),
 	};
@@ -186,6 +188,8 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 			tokenEndpointAuthMethod: "none" as const,
 			allowedRedirectUris: [],
 			allowedScopes: ["read"],
+			// #396: the old implicit omitted-scope grant, now declared.
+			defaultScopes: ["read"],
 			allowedAudiences: [],
 		};
 		const repo: ClientRepository = {
@@ -207,6 +211,8 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 			clientRepoWith({
 				allowedGrantTypes: ["client_credentials"],
 				allowedScopes: ["scope:a"],
+				// #396: the old implicit omitted-scope grant, now declared.
+				defaultScopes: ["scope:a"],
 			}),
 		);
 		const res = await request(app)

@@ -89,6 +89,8 @@ const makeApp = async (opts: {
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [REDIRECT_URI],
 		allowedScopes: ["read"],
+		// #396: the old implicit omitted-scope grant, now declared.
+		defaultScopes: ["read"],
 		firstParty: true,
 		...(opts.client ?? {}),
 	} as unknown as PublicClient;
@@ -269,6 +271,44 @@ describe("/authorize — A-1 pre-redirect validation (400/500 JSON)", () => {
 			error: "invalid_request",
 			error_description: "redirect_uri not allowed",
 		});
+	});
+});
+
+describe("/authorize — scope semantics (#396)", () => {
+	it("narrows an over-asking request and persists only the allowlisted scopes", async () => {
+		// The narrowing half of the §3.3 contract; the echo half (the token
+		// response naming what WAS granted) is pinned in authorization.test.mts.
+		const { app, createCode } = await makeApp({});
+		const res = await authorize(app, { ...baseQuery, scope: "read bogus" });
+		expect(res.status).toBe(302);
+		expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ grantedScope: ["read"] }));
+	});
+
+	it("grants defaultScopes when scope is omitted and the client declares them", async () => {
+		const { app, createCode } = await makeApp({});
+		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ grantedScope: ["read"] }));
+	});
+
+	it("redirects invalid_scope when scope is omitted and no defaultScopes are declared", async () => {
+		// #396 deny-by-absence: the old behavior granted the client's ENTIRE
+		// allowlist, making "forgot to send scope" the maximum grant.
+		const { app } = await makeApp({ client: { defaultScopes: undefined } });
+		const res = await authorize(app, baseQuery);
+		const params = redirectParams(res);
+		expect(params.get("error")).toBe("invalid_scope");
+		expect(params.get("error_description")).toContain("defaultScopes");
+	});
+
+	it("keeps the empty grant for a scope-less client (empty allowlist, no defaults)", async () => {
+		// The carve-out: nothing to over-grant, so scope-less deployments work.
+		const { app, createCode } = await makeApp({
+			client: { allowedScopes: [], defaultScopes: undefined },
+		});
+		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ grantedScope: undefined }));
 	});
 });
 

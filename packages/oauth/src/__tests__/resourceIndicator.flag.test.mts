@@ -64,6 +64,8 @@ const DEFAULT_AUTH_CLIENT: AuthenticatedClient = {
 	tokenEndpointAuthMethod: "client_secret_basic",
 	allowedGrantTypes: ["client_credentials"],
 	allowedScopes: ["read:res"],
+	// #396: the old implicit omitted-scope grant, now declared.
+	defaultScopes: ["read:res"],
 };
 
 function makeStubPolicy(

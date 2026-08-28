@@ -406,6 +406,39 @@ describe("createAuthorizationGrant", () => {
 			expect(decoded.scope).toBeUndefined();
 		});
 
+		it("echoes the code's granted scope in the token response (#396, RFC 6749 §3.3)", async () => {
+			// The honesty half of keeping silent narrowing at /authorize: the
+			// grant the client actually received is visible on the wire. The
+			// narrowing half (request "read bogus" → code carries ["read"]) is
+			// pinned in authorizeEndpoint.test.mts.
+			const deps = makeDeps(
+				vi.fn().mockResolvedValue({
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_challenge: S256_CHALLENGE,
+					code_challenge_method: "S256",
+					sid: "test-sid-1",
+					grantedScope: ["read"] as readonly string[],
+				}),
+			);
+			const handler = createAuthorizationGrant(deps);
+			const { result } = await handler.handle({
+				body: {
+					code: "abc",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+				},
+				session: {},
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) throw new Error("expected tokens");
+			expect(result.tokens.scope).toBe("read");
+		});
+
 		it("omits scope when Code.grantedScope is explicitly empty (CP-12)", async () => {
 			// Even if persisted as [], code exchange must not emit `scope: ""`.
 			const deps = makeDeps(

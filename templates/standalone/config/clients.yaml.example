@@ -40,6 +40,13 @@ my-app:
   allowedScopes:
     - "read"
     - "write"
+  # What an omitted `scope` parameter grants (#396). Must be a subset of
+  # allowedScopes (checked at boot). Without this, a request that omits
+  # `scope` is refused with invalid_scope — the old behavior granted the
+  # ENTIRE allowlist, which made "forgot to send scope" the maximum grant.
+  # Declare what an unscoped request should mean, not the ceiling.
+  defaultScopes:
+    - "read"
 
 # Public client example (e.g., a single-page app or mobile app):
 # my-spa:
