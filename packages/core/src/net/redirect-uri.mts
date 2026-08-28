@@ -54,6 +54,7 @@ import { isLoopbackHostname } from "./loopback.mjs";
 /** Why a registered redirect URI was refused. */
 export type RedirectUriRejection =
 	| { reason: "unparsable" }
+	| { reason: "control-characters" }
 	| { reason: "fragment" }
 	| { reason: "userinfo" }
 	| { reason: "http-non-loopback"; hostname: string }
@@ -90,12 +91,24 @@ export function checkRedirectUri(raw: string): RedirectUriRejection | null {
 	} catch {
 		return { reason: "unparsable" };
 	}
+	// AFTER the parse, so a tab-smuggled `java\tscript:` still reports as the
+	// executable scheme it parses into rather than as a character problem — but
+	// refused regardless: WHATWG strips ASCII tab/newline/CR, while everything
+	// downstream matches the registered string EXACTLY (`allowedRedirectUris
+	// .includes(...)`). A registration these characters survive into can never
+	// match a real request; it is a dead entry that is miserable to diagnose.
+	const scheme = url.protocol.slice(0, -1); // parsed: lowercased, tab/newline-stripped
+	if (/[\t\n\r]/.test(raw)) {
+		const firstLabel = scheme.split(".")[0] ?? scheme;
+		return EXECUTABLE_SCHEME_LABELS.has(firstLabel)
+			? { reason: "executable-scheme", scheme }
+			: { reason: "control-characters" };
+	}
 	// `url.hash` is "" for both "no fragment" and a bare trailing "#"; the raw
 	// string tells the two apart, and §3.1.2's MUST NOT covers both.
 	if (url.hash !== "" || raw.includes("#")) return { reason: "fragment" };
 	if (url.username !== "" || url.password !== "") return { reason: "userinfo" };
 
-	const scheme = url.protocol.slice(0, -1); // parsed: lowercased, tab/newline-stripped
 	if (scheme === "https") return null;
 	if (scheme === "http") {
 		return isLoopbackHostname(url.hostname)
@@ -117,6 +130,11 @@ export function describeRedirectUriRejection(rejection: RedirectUriRejection): s
 	switch (rejection.reason) {
 		case "unparsable":
 			return "must be an absolute URL";
+		case "control-characters":
+			return (
+				"must not contain tab, newline or carriage-return characters — the URL parser strips " +
+				"them, but redirect_uri matching is exact, so the registration could never match a request"
+			);
 		case "fragment":
 			return "must not carry a fragment (RFC 6749 §3.1.2)";
 		case "userinfo":
