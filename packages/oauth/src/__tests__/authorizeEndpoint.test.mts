@@ -49,7 +49,7 @@ const REDIRECT_URI = "https://app.example/cb";
 const VERIFIER = "pkce-verifier".padEnd(43, "x");
 const S256_CHALLENGE = crypto.createHash("sha256").update(VERIFIER).digest("base64url");
 
-const makeConfig = (oauthOverrides: Record<string, unknown>): AppConfig =>
+const makeConfig = (oauthOverrides: Record<string, unknown>, loginUrl = "/login"): AppConfig =>
 	({
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
@@ -61,7 +61,7 @@ const makeConfig = (oauthOverrides: Record<string, unknown>): AppConfig =>
 			...oauthOverrides,
 		},
 		rateLimit: { failMode: "open" as const },
-		endpoints: { login: { url: "/login" } },
+		endpoints: { login: { url: loginUrl } },
 	}) as unknown as AppConfig;
 
 const makeApp = async (opts: {
@@ -79,6 +79,8 @@ const makeApp = async (opts: {
 	session?: Record<string, unknown>;
 	/** Merged into `config.oauth`. */
 	oauth?: Record<string, unknown>;
+	/** `endpoints.login.url`; default `/login`. */
+	loginUrl?: string;
 	grantPolicy?: GrantPolicyHook;
 	auditSink?: AuditSink;
 }) => {
@@ -114,7 +116,7 @@ const makeApp = async (opts: {
 
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
-		config: makeConfig(opts.oauth ?? {}),
+		config: makeConfig(opts.oauth ?? {}, opts.loginUrl),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -174,6 +176,17 @@ describe("/authorize — unauthenticated session", () => {
 		// the login page's redirect allowlist can pin exactly.
 		expect(redirectTo.startsWith("https://issuer.example/oauth/authorize?")).toBe(true);
 		expect(redirectTo).toContain(`client_id=${CLIENT_ID}`);
+	});
+
+	it("joins redirect_to with & when the login URL already carries a query", async () => {
+		const { app } = await makeApp({
+			session: { isAuthenticated: false },
+			loginUrl: "/login?tenant=x",
+		});
+		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		const location = res.headers.location as string;
+		expect(location.startsWith("/login?tenant=x&redirect_to=")).toBe(true);
 	});
 
 	it("builds redirect_to from the configured origin, not the Host header (#356)", async () => {
