@@ -1037,6 +1037,124 @@ export function checkAccessTokenRevocationWiring(
 }
 
 // ---------------------------------------------------------------------------
+// Step 13.10 — Declared-absence guard
+// Per issue #363. (#368 tracks turning these numbered guards into a registry.)
+// ---------------------------------------------------------------------------
+
+/** Read a dotted path off the parsed config without asserting its shape. */
+function readConfigPath(config: unknown, path: readonly string[]): unknown {
+	let value: unknown = config;
+	for (const segment of path) {
+		if (value === null || typeof value !== "object") return undefined;
+		value = (value as Record<string, unknown>)[segment];
+	}
+	return value;
+}
+
+/**
+ * Generic enforcement for `ModuleSpec.absencePolicies` (#363): every optional
+ * key carrying a policy must be filled from one of the three component
+ * sources, or the config must carry the policy's declared-absent value.
+ * Otherwise boot refuses with `component-absence-undeclared` — the capability
+ * slot cannot be a silent no-op, which is the failure mode #277 (revocation),
+ * #287 (audit sink) and #322 (subject revocation) all shipped.
+ *
+ * Two modules attaching *different* policies to the same key is refused
+ * outright, even when the absence is declared: the boot error's advice must
+ * not depend on module input order, and the bundled modules share one policy
+ * constant per key (e.g. `AUDIT_SINK_ABSENCE_POLICY`) precisely so this
+ * cannot happen by accident.
+ *
+ * `consumedBy` follows `checkAccessTokenRevocationWiring`'s reading: every
+ * module naming the key in `requires` / `optional` is the evidence that the
+ * slot is part of this app's surface. That check (#277, step 13.9) predates
+ * this vocabulary and keeps its spec-pinned reason; new absence rules attach
+ * an `AbsencePolicy` instead of adding another bespoke stage.
+ */
+function checkDeclaredAbsence(
+	modules: readonly NormalisedModule[],
+	rawModules: readonly Module[],
+	config: unknown,
+	plannedKeys: ReadonlySet<string>,
+): void {
+	interface Collected {
+		readonly policy: {
+			readonly configKey: readonly string[];
+			readonly absentValue: string;
+			readonly hint: string;
+		};
+		readonly declaredBy: string[];
+	}
+	const byKey = new Map<string, Collected>();
+
+	for (const m of rawModules) {
+		for (const [key, policy] of Object.entries(m.absencePolicies ?? {})) {
+			if (policy === undefined) continue;
+			const existing = byKey.get(key);
+			if (existing === undefined) {
+				byKey.set(key, { policy, declaredBy: [m.name] });
+				continue;
+			}
+			const agrees =
+				existing.policy.absentValue === policy.absentValue &&
+				existing.policy.configKey.length === policy.configKey.length &&
+				existing.policy.configKey.every((seg, i) => seg === policy.configKey[i]);
+			if (!agrees) {
+				throw new BootError({
+					message:
+						`Absence policies for "${key}" disagree — modules ` +
+						`[${[...existing.declaredBy, m.name].join(", ")}] declare different ` +
+						"config keys or absent values for the same slot, so the boot error's " +
+						"advice would depend on module order. Share one policy constant.",
+					reason: "component-absence-undeclared",
+					stage: "validateManifests",
+					details: {
+						reason: "component-absence-undeclared",
+						componentKey: key as ComponentKey,
+						consumedBy: [...existing.declaredBy, m.name],
+						configKey: existing.policy.configKey.join("."),
+						absentValue: existing.policy.absentValue,
+					},
+				});
+			}
+			existing.declaredBy.push(m.name);
+		}
+	}
+
+	for (const [key, { policy }] of byKey) {
+		if (plannedKeys.has(key)) continue;
+		if (readConfigPath(config, policy.configKey) === policy.absentValue) continue;
+
+		const consumedBy = modules
+			.filter(
+				(m) =>
+					(m.requires as readonly string[]).includes(key) ||
+					(m.optional as readonly string[]).includes(key),
+			)
+			.map((m) => m.name);
+		const configKeyDotted = policy.configKey.join(".");
+
+		throw new BootError({
+			message:
+				`Component "${key}" is read by ` +
+				`${consumedBy.length === 1 ? `module "${consumedBy[0]}"` : `modules [${consumedBy.join(", ")}]`} ` +
+				"but nothing provides it, and its absence is not declared. " +
+				`Wire a provider, or set ${configKeyDotted} = "${policy.absentValue}" to declare ` +
+				`the capability absent on purpose. ${policy.hint}`,
+			reason: "component-absence-undeclared",
+			stage: "validateManifests",
+			details: {
+				reason: "component-absence-undeclared",
+				componentKey: key as ComponentKey,
+				consumedBy,
+				configKey: configKeyDotted,
+				absentValue: policy.absentValue,
+			},
+		});
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Step 8 — Override target existence
 // Per A2-β §5.1 step 8.
 // ---------------------------------------------------------------------------
@@ -1537,6 +1655,11 @@ export function validateManifests(input: ValidateManifestsInput): ValidatedManif
 		// reads the `accessTokenDenylist` slot must have one, unless it declares
 		// `oauth.revocation.accessToken = "unsupported"`. Per issue #277.
 		checkAccessTokenRevocationWiring(normalisedModules, parsedConfig, plannedKeys);
+
+		// Step 13.10: declared-absence guard — every optional key carrying an
+		// AbsencePolicy must be filled or declared absent in config. The
+		// generic form of 13.9's pattern. Per issue #363.
+		checkDeclaredAbsence(normalisedModules, modules, parsedConfig, plannedKeys);
 	}
 
 	// Step 13.8: Replica-safety guard — state held in this process's memory

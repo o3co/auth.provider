@@ -925,13 +925,17 @@ export const fullSectionsSchema = z.object({
 	// string rather than an enum — `registerBuiltinAuditSinks` ships `console`,
 	// and a deployment that registers its own sink must not need a schema
 	// change in this package to name it. Sub-keys pass through for the same
-	// reason: an out-of-tree sink's options are its own.
+	// reason: an out-of-tree sink's options are its own. The one value core
+	// itself reads is `type = "none"`: the declared-absence guard (#363) takes
+	// it as the operator's statement that this composition runs sink-less on
+	// purpose (AUDIT_SINK_ABSENCE_POLICY) — the standalone template registers
+	// no "none" builder, so there the spelling still fails boot.
 	//
-	// This section MUST be declared here even though nothing in core reads it.
-	// `AppConfigSchema` strips undeclared top-level keys, so an operator's
-	// `audit { … }` block would vanish between `parseFile` and the composition
-	// root — the sink selector would silently read `undefined` while the
-	// configuration sat in the file looking effective.
+	// This section MUST be declared here regardless: `AppConfigSchema` strips
+	// undeclared top-level keys, so an operator's `audit { … }` block would
+	// vanish between `parseFile` and the composition root — the sink selector
+	// would silently read `undefined` while the configuration sat in the file
+	// looking effective.
 	//
 	// `.optional()` because a hand-built config is not forced to restate it;
 	// the safe default (a sink, never "none" — #304's sink policy) is the

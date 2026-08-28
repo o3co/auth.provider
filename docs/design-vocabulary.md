@@ -40,7 +40,7 @@ second definition it was never shown; a drift guard can.
 | Canonical issuer — what `oauth.jwt.issuer` may be | `packages/core/src/issuer/canonical.mts` | config schema, oauth router re-check | unreleased (issuer-required fix) | no (single consumer signature) |
 | Secret entropy floor | `packages/core/src/keys/secretEntropy.mts` | key factory, `session.secret` schema | #282 | no |
 | Retired config key — how a removed key dies | *pending — see #366* | schema tombstones, PKCE inert keys | #366 | no |
-| Declared absence — optional DI slot whose absence must be stated | *pending — see #363* | `accessTokenDenylist` (#277), `auditSink` (#287), subject revocation (#322) | #363 | no |
+| Declared absence — optional DI slot whose absence must be stated | `packages/core/src/modules/manifest/absence-policy.mts` (enforced by `checkDeclaredAbsence`, validate-manifests step 13.10) | `auditSink` via `AUDIT_SINK_ABSENCE_POLICY` (oauth, session, webauthn); `accessTokenDenylist` still on the pre-vocabulary #277 check (fold-in tracked in #363) | #363 | no |
 
 ## What does not belong here
 

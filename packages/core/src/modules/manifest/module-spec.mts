@@ -15,6 +15,7 @@
  */
 
 import type { z } from "zod";
+import type { AbsencePolicy } from "./absence-policy.mjs";
 import type { ComponentKey, ComponentMap } from "./component-map.mjs";
 import type { ContributesMap } from "./contributes-map.mjs";
 import type { Provider, ProviderDeps } from "./provider.mjs";
@@ -83,6 +84,17 @@ export interface ModuleSpec<R extends ComponentKey = never, O extends ComponentK
 	 * appear as `readonly K?: ComponentMap[K]` on the typed deps.
 	 */
 	readonly optional?: readonly O[];
+
+	/**
+	 * Declared-absence policies for optional keys (#363). A key listed here
+	 * stays optional to *wire* but not optional to *decide*: when nothing
+	 * fills the slot, the config must carry the policy's declared-absent
+	 * value or boot refuses (`component-absence-undeclared`). Keys are
+	 * constrained to `O`, so a policy on a key this module does not read is
+	 * a compile-time error. See `manifest/absence-policy.mts` for what a
+	 * policy is and why it is data.
+	 */
+	readonly absencePolicies?: { readonly [K in O]?: AbsencePolicy };
 
 	/**
 	 * Component values this module materialises into the DI graph. Each

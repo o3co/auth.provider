@@ -628,17 +628,17 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 26 literals, Per A2-β §6.1 (+ #271, #277)
+// BootErrorReason — 27 literals, Per A2-β §6.1 (+ #271, #277, #363)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 26 reasons.
+ * exactly 27 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
- * federation-stores-incomplete) and the OIDC discovery aggregator
- * (discovery-document-invalid).
+ * federation-stores-incomplete), the OIDC discovery aggregator
+ * (discovery-document-invalid), and #363 (component-absence-undeclared).
  */
 export type BootErrorReason =
 	| "duplicate-module-name"
@@ -666,7 +666,8 @@ export type BootErrorReason =
 	| "federation-stores-incomplete"
 	| "discovery-document-invalid"
 	| "replica-unsafe-adapter"
-	| "access-token-revocation-unenforceable";
+	| "access-token-revocation-unenforceable"
+	| "component-absence-undeclared";
 
 // ---------------------------------------------------------------------------
 // Per-reason *Details interfaces — 25 total, Per A2-β §6.1 (+ #271)
@@ -1018,6 +1019,31 @@ export interface AccessTokenRevocationUnenforceableDetails {
 }
 
 /**
+ * A module attached an `AbsencePolicy` to an optional key, nothing fills the
+ * slot, and the config does not carry the policy's declared-absent value
+ * (#363). The generic successor to the #277 pattern: an unfilled capability
+ * slot must be a stated decision, never a silent no-op.
+ *
+ * Also thrown — with the offending modules named in the message — when two
+ * modules attach *disagreeing* policies to the same key, because the boot
+ * error's advice must not depend on module input order.
+ */
+export interface ComponentAbsenceUndeclaredDetails {
+	readonly reason: "component-absence-undeclared";
+	readonly componentKey: ComponentKey;
+	/**
+	 * Modules naming the key in `requires` / `optional` — the evidence the
+	 * slot is part of this app's surface, same reading as
+	 * {@link AccessTokenRevocationUnenforceableDetails.consumedBy}.
+	 */
+	readonly consumedBy: readonly string[];
+	/** The policy's config path, dotted, as an operator writes it. */
+	readonly configKey: string;
+	/** The one value at `configKey` that declares the capability absent. */
+	readonly absentValue: string;
+}
+
+/**
  * Discriminated union of all per-reason Details interfaces.
  * The `reason` field on each member is the discriminant.
  *
@@ -1051,7 +1077,8 @@ export type BootErrorDetails =
 	| FederationStoresIncompleteDetails
 	| DiscoveryDocumentInvalidDetails
 	| ReplicaUnsafeAdapterDetails
-	| AccessTokenRevocationUnenforceableDetails;
+	| AccessTokenRevocationUnenforceableDetails
+	| ComponentAbsenceUndeclaredDetails;
 
 // ---------------------------------------------------------------------------
 // BootError class — Per A2-β §6.1

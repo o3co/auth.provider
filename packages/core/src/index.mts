@@ -41,6 +41,11 @@ export {
 } from "./audit/factory.mjs";
 // Audit
 export type { AuditEvent, AuditSink, AuditSinkFactory } from "./audit/types.mjs";
+// The declared-absence policy the bundled auditSink readers share (#363) —
+// one constant, so the boot error's advice cannot depend on which module
+// tripped it. The AbsencePolicy vocabulary itself is exported below with the
+// manifest types.
+export { AUDIT_SINK_ABSENCE_POLICY } from "./audit/types.mjs";
 export type {
 	AppHandle,
 	BootErrorDetails,
@@ -277,6 +282,7 @@ export {
 // authoring code uses `Module` and `defineModule()` from
 // `@o3co/auth-provider-core/modules/manifest`.
 export type {
+	AbsencePolicy,
 	AuditHook,
 	AuditHookFactory,
 	ComponentKey,

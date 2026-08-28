@@ -559,3 +559,13 @@ describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 		await handle.dispose();
 	});
 });
+
+describe("auditSink absence policy (#363)", () => {
+	it("carries the shared AUDIT_SINK_ABSENCE_POLICY constant, by identity", async () => {
+		// Identity, not shape: the declared-absence guard refuses modules whose
+		// policies for one key disagree, and sharing the one constant is what
+		// makes disagreement impossible by construction.
+		const { AUDIT_SINK_ABSENCE_POLICY } = await import("@o3co/auth-provider-core");
+		expect(webauthnModule.absencePolicies?.auditSink).toBe(AUDIT_SINK_ABSENCE_POLICY);
+	});
+});
