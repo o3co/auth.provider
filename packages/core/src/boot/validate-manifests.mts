@@ -1086,17 +1086,51 @@ function checkDeclaredAbsence(
 		readonly declaredBy: string[];
 	}
 	const byKey = new Map<string, Collected>();
+	// Step 1 (checkUniqueModuleNames) has run, so the name lookup is total.
+	const normalisedByName = new Map(modules.map((nm) => [nm.name, nm]));
 
 	for (const m of rawModules) {
+		// biome-ignore lint/style/noNonNullAssertion: every raw module was normalised under its (unique) name
+		const normalised = normalisedByName.get(m.name)!;
 		for (const [key, policy] of Object.entries(m.absencePolicies ?? {})) {
 			if (policy === undefined) continue;
+			// The manifest types constrain policy keys to the module's own `O`,
+			// but `defineModule`'s `const O` inference lets `absencePolicies`
+			// itself widen `O` — a policy on a key the module never listed in
+			// `requires` / `optional` still compiles. That policy would then
+			// govern a slot its module does not read, which is a manifest
+			// authoring bug; refuse it by name rather than enforcing it.
+			const reads =
+				(normalised.requires as readonly string[]).includes(key) ||
+				(normalised.optional as readonly string[]).includes(key);
+			if (!reads) {
+				throw new BootError({
+					message:
+						`Module "${m.name}" attaches an absence policy to "${key}" but does ` +
+						"not list it in requires or optional. A policy belongs on a key its " +
+						"module actually reads — add the key to the manifest, or remove the policy.",
+					reason: "component-absence-undeclared",
+					stage: "validateManifests",
+					details: {
+						reason: "component-absence-undeclared",
+						componentKey: key as ComponentKey,
+						consumedBy: [m.name],
+						configKey: policy.configKey.join("."),
+						absentValue: policy.absentValue,
+					},
+				});
+			}
 			const existing = byKey.get(key);
 			if (existing === undefined) {
 				byKey.set(key, { policy, declaredBy: [m.name] });
 				continue;
 			}
+			// `hint` participates deliberately: it is interpolated into the boot
+			// error, so two policies differing only there would still make the
+			// operator-facing advice depend on module input order.
 			const agrees =
 				existing.policy.absentValue === policy.absentValue &&
+				existing.policy.hint === policy.hint &&
 				existing.policy.configKey.length === policy.configKey.length &&
 				existing.policy.configKey.every((seg, i) => seg === policy.configKey[i]);
 			if (!agrees) {
@@ -1104,8 +1138,9 @@ function checkDeclaredAbsence(
 					message:
 						`Absence policies for "${key}" disagree — modules ` +
 						`[${[...existing.declaredBy, m.name].join(", ")}] declare different ` +
-						"config keys or absent values for the same slot, so the boot error's " +
-						"advice would depend on module order. Share one policy constant.",
+						"policy details (config key, absent value, or hint) for the same " +
+						"slot, so the boot error's advice would depend on module order. " +
+						"Share one policy constant.",
 					reason: "component-absence-undeclared",
 					stage: "validateManifests",
 					details: {

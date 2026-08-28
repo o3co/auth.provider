@@ -89,10 +89,16 @@ export interface ModuleSpec<R extends ComponentKey = never, O extends ComponentK
 	 * Declared-absence policies for optional keys (#363). A key listed here
 	 * stays optional to *wire* but not optional to *decide*: when nothing
 	 * fills the slot, the config must carry the policy's declared-absent
-	 * value or boot refuses (`component-absence-undeclared`). Keys are
-	 * constrained to `O`, so a policy on a key this module does not read is
-	 * a compile-time error. See `manifest/absence-policy.mts` for what a
-	 * policy is and why it is data.
+	 * value or boot refuses (`component-absence-undeclared`).
+	 *
+	 * Keys are typed against `O` for authoring ergonomics, but that alone is
+	 * not an enforcement: `defineModule`'s `const O` inference unifies over
+	 * every position, so a policy key can *widen* `O` instead of being
+	 * checked against it. The declared-absence guard therefore verifies at
+	 * stage 1 that every policy key appears in this module's `requires` or
+	 * `optional`, and refuses boot when one does not — a policy on a slot
+	 * its module never reads is an authoring bug, not a rule. See
+	 * `manifest/absence-policy.mts` for what a policy is and why it is data.
 	 */
 	readonly absencePolicies?: { readonly [K in O]?: AbsencePolicy };
 
