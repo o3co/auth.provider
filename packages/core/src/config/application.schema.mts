@@ -41,6 +41,7 @@ import {
 	checkTrustedProxyEntry,
 	describeTrustedProxyEntryRejection,
 } from "../net/trusted-proxy.mjs";
+import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
 
 /**
  * Sanity ceiling for a duration expressed in whole seconds: one year.
@@ -225,11 +226,7 @@ const LEGACY_JWT_FIELDS = [
  * filled in at release-cut time (R6 step 5) — entries added on HEAD between
  * cuts use a neutral value like `"Phase G / M4"` until the next cut.
  */
-const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
-	name: string;
-	removedIn: string;
-	note: string;
-}> = [
+const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [
 	{
 		name: "legacyTokenCompat",
 		removedIn: "v0.6.0 (Phase G / M4)",
@@ -248,11 +245,7 @@ const REMOVED_REFRESH_TOKEN_FIELDS: ReadonlyArray<{
  * keeps the `${?OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS}` substitution as a
  * tombstone, so a still-exported env var reaches this check too.
  */
-const REMOVED_AUTHORIZE_FIELDS: ReadonlyArray<{
-	name: string;
-	removedIn: string;
-	note: string;
-}> = [
+const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 	{
 		name: "allowUnmarkedClients",
 		removedIn: "this release (#330)",
@@ -357,53 +350,27 @@ const refreshTokenSchemaBase = z.object({
 });
 
 /**
- * Detects fields removed from `oauth.refreshToken` and emits a targeted
- * Zod issue. Zod's default behavior strips unknown keys before
- * superRefine runs, so without this preprocess wrapper an operator's
- * stale config line (e.g. `legacyTokenCompat = true`) would be silently
- * ignored on upgrade.
+ * Fields removed from `oauth.refreshToken` die loudly via `withRemovedKeys`
+ * (#366) — see `./removed-keys.mts` for why detection runs on the raw input.
  */
-const refreshTokenSchema = z.preprocess((raw, ctx) => {
-	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-		const rawObj = raw as Record<string, unknown>;
-		for (const removed of REMOVED_REFRESH_TOKEN_FIELDS) {
-			if (removed.name in rawObj) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message:
-						`oauth.refreshToken.${removed.name} was removed in ${removed.removedIn}; see CHANGELOG. ` +
-						`${removed.note} Remove this field from your config.`,
-					path: [removed.name],
-				});
-			}
-		}
-	}
-	return raw;
-}, refreshTokenSchemaBase);
+const refreshTokenSchema = withRemovedKeys(
+	"oauth.refreshToken",
+	REMOVED_REFRESH_TOKEN_FIELDS,
+	refreshTokenSchemaBase,
+);
 
 /**
  * `oauth.authorize` holds no live keys anymore — it exists only to retire
- * `allowUnmarkedClients` loudly (#330). Optional because nothing requires the
- * section; the empty-object case is what `reference.conf` yields when the
- * tombstone env substitution resolves to nothing.
+ * `allowUnmarkedClients` loudly (#330), via `withRemovedKeys` (#366).
+ * Optional because nothing requires the section; the empty-object case is
+ * what `reference.conf` yields when the tombstone env substitution resolves
+ * to nothing.
  */
-const authorizeSchema = z.preprocess((raw, ctx) => {
-	if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-		const rawObj = raw as Record<string, unknown>;
-		for (const removed of REMOVED_AUTHORIZE_FIELDS) {
-			if (removed.name in rawObj) {
-				ctx.addIssue({
-					code: z.ZodIssueCode.custom,
-					message:
-						`oauth.authorize.${removed.name} was removed in ${removed.removedIn}; see CHANGELOG. ` +
-						`${removed.note} Remove this field from your config.`,
-					path: [removed.name],
-				});
-			}
-		}
-	}
-	return raw;
-}, z.object({}).optional());
+const authorizeSchema = withRemovedKeys(
+	"oauth.authorize",
+	REMOVED_AUTHORIZE_FIELDS,
+	z.object({}).optional(),
+);
 
 /**
  * Sanity ceiling for `http.trustProxy` expressed as a hop count.

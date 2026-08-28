@@ -40,7 +40,7 @@ second definition it was never shown; a drift guard can.
 | Canonical issuer — what `oauth.jwt.issuer` may be | `packages/core/src/issuer/canonical.mts` | config schema, oauth router re-check | unreleased (issuer-required fix) | no (single consumer signature) |
 | Secret entropy floor | `packages/core/src/keys/secretEntropy.mts` | key factory, `session.secret` schema | #282 | no |
 | Built-in audit-event names | `packages/core/src/audit/types.mts` (`BUILT_IN_AUDIT_EVENT_TYPES`) | every `emitAuditEvent` / sink `record` site | #369 | yes (`audit/__tests__/auditEventInventory.drift.test.mts`, both directions) |
-| Retired config key — how a removed key dies | *pending — see #366* | schema tombstones, PKCE inert keys | #366 | no |
+| Retired config key — how a removed key dies | `packages/core/src/config/removed-keys.mts` (`withRemovedKeys`; decision rule in `docs/release-policy.md` §"Retiring a config key") | `oauth.refreshToken` / `oauth.authorize` tombstones; warn-path stays with `INERT_PKCE_KEYS` per the rule | #366 | yes |
 | Declared absence — optional DI slot whose absence must be stated | `packages/core/src/modules/manifest/absence-policy.mts` (enforced by `checkDeclaredAbsence`, validate-manifests step 13.10) | `auditSink` via `AUDIT_SINK_ABSENCE_POLICY` (oauth, session, webauthn); `accessTokenDenylist` still on the pre-vocabulary #277 check (fold-in tracked in #363) | #363 | no |
 
 ## What does not belong here

@@ -109,6 +109,39 @@ Before tagging a release `vX.Y.Z`:
 6. PR title for the release-cut PR uses "release: vX.Y.Z" (no Phase / GA / "next-release" labels)
 7. Release notes (`gh release create` body) include a brief retirement note if any pre-existing label was retired in this cut
 
+## Retiring a config key (#366)
+
+Four spellings of "this key used to exist" had accumulated, at two different
+severities, and the next removal would have copied whichever file its author
+read last. The decision rule and the mechanisms are now fixed:
+
+**Severity — one question decides it.** *Would silently ignoring the key
+change observable behavior for traffic that works today?*
+
+- **Yes → fail boot.** The operator must act before the deploy, not during
+  the incident. Example: `allowUnmarkedClients` (#330) — ignoring it means
+  previously-admitted clients start being refused at request time.
+- **No (behavior becomes strictly stronger, requests keep working) →
+  warn once at composition and ignore the key.** Taking a deployment down
+  over a key that is now harmless is worse than the stale line. Example:
+  the retired PKCE knobs (#273) — every value they could carry only ever
+  weakened the policy, so ignoring them is the strong reading.
+
+**Mechanism — pick by what happened to the key:**
+
+| What happened | Mechanism | Home |
+| --- | --- | --- |
+| Key removed outright | `withRemovedKeys(sectionPath, table, schema)` — fails boot naming key, release, and remedy | `core/src/config/removed-keys.mts` |
+| A VALUE removed from a live key | shrink the `z.enum` — Zod's `invalid_enum_value` names the survivors | in place (e.g. `legacyRtPolicy`) |
+| Key moved to a new shape | bespoke preprocess with a migration pointer, not a removal notice | `LEGACY_JWT_FIELDS` |
+| Key ignored (warn path) | warn-once keyed on the config object | `INERT_PKCE_KEYS` (`@o3co/auth-provider-oauth`) |
+
+`removedIn` strings follow R5/R6 above: neutral phase markers on HEAD,
+replaced with the actual tag at release-cut. Note `withRemovedKeys` wraps
+the section in `z.preprocess`, which the hocon bridge's coercion walk does
+not enter — fields under a wrapped section must own their coercion
+(`coerceBooleanFromEnv`, `z.coerce.number()`) per #288.
+
 ## "1.0 GA" label retirement (2026-05-12)
 
 Prior to 2026-05-12, the auth scope's planning artifacts anchored multi-release commitments on the label "1.0 GA". That label was retired because bookkeeping drift made it internally contradictory and silently dropped originally-committed features.

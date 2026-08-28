@@ -79,6 +79,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/ratelimit/guard.mts",
 		definition: /(?:function|const)\s+createRateLimitGuard\b/,
 	},
+	{
+		concept: "retired config key (#366)",
+		home: "packages/core/src/config/removed-keys.mts",
+		definition: /(?:function|const)\s+withRemovedKeys\b/,
+	},
 ];
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */
