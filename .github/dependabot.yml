@@ -1,5 +1,15 @@
 version: 2
 updates:
+  # The standalone template pins its base image by digest. A digest never moves,
+  # which is the point — and also means it never picks up the CVE fixes that
+  # `node:24-alpine` rebuilds carry. This is the update path: Dependabot bumps
+  # tag and digest together, so the pin stays deliberate instead of stale.
+  - package-ecosystem: "docker"
+    directory: "/templates/standalone"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
   - package-ecosystem: "npm"
     directory: "/"
     schedule:

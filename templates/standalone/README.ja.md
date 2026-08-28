@@ -203,6 +203,11 @@ make test
 
 `docker-compose.yml` は認証サーバーと Redis コンテナをまとめて起動します。環境変数は `.env` で設定してください。
 
+イメージは `pnpm install --frozen-lockfile` でインストールするため、コミット済みの
+`pnpm-lock.yaml` がビルドの必須入力です。`create-auth-provider` が scaffold 時に
+生成します。手元に無い場合は一度 `pnpm install` を実行して結果をコミットしてください。
+これにより同じソースからのリビルドは同じ依存ツリーになります。
+
 ## カスタムモジュールの追加
 
 カスタムモジュールを追加するには、`src/buildModules.mts` でインポートし、`createApp` に渡す `modules` 配列に追加します。
