@@ -2,3 +2,22 @@ packages:
   - "packages/*"
   - "templates/*"
   - "create-app"
+
+# pnpm 10.29 reads these from here, not from package.json `pnpm.*` (#360 —
+# the old location was silently ignored, so everything below was inert from
+# the pnpm upgrade until this move).
+onlyBuiltDependencies:
+  - bcrypt
+
+# Security pins for transitive ranges with known advisories. Scoped to the
+# vulnerable range (`pkg@range`) so the override expires by itself once the
+# tree stops asking for a vulnerable version — same shape the
+# o3co/auth.policy-verifier audit gate settled on (#149 there).
+#
+# The former `@types/node: ^22.0.0` override is deliberately NOT migrated:
+# it predates the repo-wide move to @types/node 26 (#230, #258) and was
+# already inert — reactivating it would downgrade every package's types.
+overrides:
+  "qs@>=6.11.1 <=6.15.1": "^6.15.2"
+  "js-yaml@>=4.0.0 <=4.1.1": "^4.2.0"
+  "body-parser@>=2.0.0 <2.3.0": "^2.3.0"
