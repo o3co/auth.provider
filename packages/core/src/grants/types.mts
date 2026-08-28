@@ -211,6 +211,15 @@ export interface GrantDependencies {
 	sessionFamilyIndex?: SessionFamilyIndex;
 	sessionFederationIndex?: SessionFederationIndex;
 	/**
+	 * #376: the #296 subject-revocation watermark, consulted by the refresh
+	 * grant at RT redemption as the backstop for a partial #322 cascade
+	 * failure — an RT family the cascade could not revoke must not keep
+	 * minting fresh access tokens for a subject whose credential changed.
+	 * A rotated RT carries a fresh `iat`, so the check only bites RTs minted
+	 * before the credential change: exactly the intended set.
+	 */
+	subjectRevocation?: import("../user-sessions/types.mjs").SubjectRevocation;
+	/**
 	 * Optional structured logger for security-relevant grant audit events
 	 * (RT replay detection, unknown-family policy decisions, legacy-token
 	 * acceptance). Falls back silently when absent so the grant factory

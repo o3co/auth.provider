@@ -83,6 +83,10 @@ const DEFAULT_CLIENT_ID = "client1";
 async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
 	return new SignJWT({ sub: "u1", scope: "read write", ...overrides })
 		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+		// #376: real RTs carry iat (generateToken sets it), and the subject
+		// watermark compares against it — a fixture without one would skip
+		// the backstop and never exercise it.
+		.setIssuedAt()
 		.setIssuer("localhost")
 		.setAudience(DEFAULT_CLIENT_ID)
 		.setExpirationTime("24h")
@@ -1573,6 +1577,61 @@ describe("createRefreshTokenGrant", () => {
 			};
 
 			await expect(handler.handle(ctx)).rejects.toThrow(/unhandled rotation outcome/);
+		});
+	});
+
+	describe("subject-revocation watermark backstop (#376)", () => {
+		const makeSubjectRevocation = (revokedSubject: string) => ({
+			kind: "stub",
+			revokeBefore: async () => {},
+			// Watermark far in the future: every RT this subject already holds
+			// was minted before it.
+			revokedBefore: async (sub: string) =>
+				sub === revokedSubject ? new Date(Date.now() + 86_400_000) : null,
+		});
+
+		it("refuses an RT minted before the subject's watermark with invalid_grant", async () => {
+			// The #322 cascade revokes RT families directly; the watermark is the
+			// backstop for a partial cascade failure. An RT whose iat is at or
+			// before the watermark must not redeem, forcing re-authentication.
+			const handler = createRefreshTokenGrant({
+				...mockDeps,
+				subjectRevocation: makeSubjectRevocation("u1"),
+			});
+			const ctx: GrantContext = {
+				body: { refresh_token: await makeRefreshToken() },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_grant");
+		});
+
+		it("does not touch an RT whose subject has no watermark in force", async () => {
+			const handler = createRefreshTokenGrant({
+				...mockDeps,
+				subjectRevocation: makeSubjectRevocation("someone-else"),
+			});
+			const ctx: GrantContext = {
+				body: { refresh_token: await makeRefreshToken() },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			};
+
+			const { result } = await handler.handle(ctx);
+
+			// The token passes verification (no watermark rejection); whatever
+			// happens downstream, it is NOT the verifier's invalid_grant.
+			const description =
+				"errorDescription" in result ? result.errorDescription : undefined;
+			expect(description).not.toBe("invalid refresh_token");
 		});
 	});
 });
