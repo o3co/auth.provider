@@ -273,14 +273,26 @@ describe("/authorize — A-1 pre-redirect validation (400/500 JSON)", () => {
 });
 
 describe("/authorize — response_type validation", () => {
-	it("answers 400 JSON for a non-code response_type (no validated redirect_uri)", async () => {
+	// #397: once the client and redirect_uri validate, the refusal travels via
+	// redirect (RFC 6749 §4.1.2.1) — the user lands back in the app instead of
+	// on a JSON wall. 400 JSON remains for the cases where no redirect target
+	// could be validated (next test).
+	it("redirects unsupported_response_type for a non-code response_type once the client validates", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, { ...baseQuery, response_type: "token" });
+		const params = redirectParams(res);
+		expect(params.get("error")).toBe("unsupported_response_type");
+		expect(params.get("state")).toBe("xyz");
+		expect(params.get("code")).toBeNull();
+	});
+
+	it("answers 400 JSON for a non-code response_type when the client cannot be validated (A-1)", async () => {
+		const { app } = await makeApp({ clientNotFound: true });
+		const res = await authorize(app, { ...baseQuery, response_type: "token" });
+		// No validated redirect target exists, so nothing redirects — the
+		// refusal is about the client, which outranks the response_type.
 		expect(res.status).toBe(400);
-		expect(res.body).toEqual({
-			error: "unsupported_response_type",
-			error_description: 'response_type "token" is not supported',
-		});
+		expect(res.body.error).toBe("invalid_client");
 	});
 
 	it("redirects unsupported_response_type for a repeated response_type that includes code", async () => {
