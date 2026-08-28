@@ -78,6 +78,18 @@ describe("checkRedirectUri (#395)", () => {
 		expect(reason("javascript.evil:x")).toBe("executable-scheme");
 	});
 
+	it("refuses raw control characters that the parser would strip", () => {
+		// WHATWG strips tab/newline/CR, but runtime redirect_uri matching is
+		// EXACT — a registration these survive into can never match a request.
+		// Refused at boot instead of becoming a dead entry (Copilot on #399).
+		expect(reason("https://app.example/\ncb")).toBe("control-characters");
+		expect(reason("https://app.example/\tcb")).toBe("control-characters");
+		expect(reason("https://app.example/cb\r")).toBe("control-characters");
+		// The tab-smuggled executable scheme still reports as WHAT it parses
+		// into — the sharper refusal wins.
+		expect(reason("java\tscript:alert(1)")).toBe("executable-scheme");
+	});
+
 	it("refuses what the parser refuses", () => {
 		expect(reason("not a url")).toBe("unparsable");
 		expect(reason("%6aavascript:x")).toBe("unparsable");
