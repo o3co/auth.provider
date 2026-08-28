@@ -120,6 +120,14 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	RATE_LIMITER_ADAPTER: "redis",
 	MEMORY_RATE_LIMITER_MAX_BUCKETS: "10000",
 
+	// --- audit --------------------------------------------------------
+	// #287: selects the sink builder; "console" is the registered builtin.
+	// There is deliberately no "none" — an unknown type fails boot in
+	// buildModules (pinned by audit-sink.test.mts), not at config parse,
+	// because the schema keeps `audit.sink.type` an open string so
+	// out-of-tree sinks need no schema change here.
+	AUDIT_SINK_TYPE: "console",
+
 	// --- shared stores ------------------------------------------------
 	DEPLOYMENT_MODE: "multi",
 	USER_SESSION_STORES_ADAPTER: "redis",
