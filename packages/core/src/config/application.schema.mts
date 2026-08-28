@@ -680,8 +680,9 @@ export type AccessTokenRevocationMode = "denylist" | "unsupported";
  * A collapsed default would have to pick one of those and be wrong at the
  * other layer, so the resolution stays where the reasoning lives.
  *
- * Accepts `unknown` because the caller (`packages/oauth`'s revocation router)
- * reads through its own options shape, which may predate the key.
+ * Accepts `unknown` because its callers in `packages/oauth` — the revocation
+ * router and the module's discovery-metadata wiring — read through their own
+ * config/options shapes, which may predate the key.
  */
 export function readAccessTokenRevocationMode(
 	config: unknown,
