@@ -321,6 +321,12 @@ export {
 	defineModule,
 	SYNTHETIC_COMPONENT_KEYS,
 } from "./modules/index.mjs";
+// The single loopback-hostname vocabulary (#364) — the predicate behind every
+// "http:// is accepted for loopback hosts only" carve-out
+// (`checkSecureEndpoint` in foundation, `checkRedirectShape` in session).
+// Exported so consumers import or re-export it rather than defining a copy;
+// the designVocabulary drift guard fails any second definition.
+export { isLoopbackHostname } from "./net/loopback.mjs";
 // The single trusted-proxy address vocabulary (#292) — Express's own
 // `trust proxy` forms. `http.trustProxy` validates its entries with
 // `checkTrustedProxyEntry`; `@o3co/auth-provider-mtls` matches

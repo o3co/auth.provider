@@ -39,10 +39,18 @@
  * separate rather than reused because the constraints genuinely differ: an
  * issuer may not carry a query string or fragment (OIDC Discovery derives the
  * metadata URL from it), while a Store endpoint is an ordinary POST target for
- * which `?tenant=acme` is legitimate. It also widens the carve-out from the
- * single address `127.0.0.1` to the whole `127.0.0.0/8` block, because
- * `127.0.0.53` (systemd-resolved) and friends are as local as `127.0.0.1`.
+ * which `?tenant=acme` is legitimate. The loopback *predicate* the carve-out
+ * runs on, though, is shared vocabulary: `isLoopbackHostname` comes from
+ * `@o3co/auth-provider-core` (`net/loopback`, #364), the same definition the
+ * session redirect policy consumes, so the carve-outs cannot drift apart.
  */
+
+import { isLoopbackHostname } from "@o3co/auth-provider-core";
+
+// Re-exported unchanged: this module's callers (and its tests) read the
+// predicate as part of the endpoint-validation surface. The definition lives
+// in core (#364) — re-exporting is the sanctioned way to surface it.
+export { isLoopbackHostname };
 
 /** Why a candidate endpoint was rejected, phrased for a boot-time error. */
 export type EndpointRejection =
@@ -55,25 +63,6 @@ export type EndpointRejection =
 
 /** Matches `scheme://` — the shape that distinguishes an absolute URL from a bare host. */
 const ABSOLUTE_URL_PREFIX = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
-
-/** Dotted-quad IPv4, the only numeric form the WHATWG URL parser emits. */
-const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-
-/**
- * Whether `hostname` — as `URL.hostname` reports it, so IPv6 arrives bracketed
- * and IPv4 shorthand has already been normalized to dotted quad — names an
- * address that never leaves the machine.
- */
-export function isLoopbackHostname(hostname: string): boolean {
-	if (hostname === "localhost") return true;
-	if (hostname === "[::1]") return true;
-
-	const v4 = IPV4.exec(hostname);
-	if (v4 === null) return false;
-	// The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1.
-	const octets = [v4[1], v4[2], v4[3], v4[4]].map(Number);
-	return octets[0] === 127 && octets.every((o) => o <= 255);
-}
 
 /**
  * Returns `null` when `value` is a usable Store endpoint, otherwise the reason
