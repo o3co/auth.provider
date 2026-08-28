@@ -1,0 +1,71 @@
+# Production compose example (#293 item 16).
+#
+# `docker-compose.yml` is a DEVELOPMENT file: it builds the `develop` target
+# and bind-mounts ./src and ./config into the container, so copy-paste
+# deploying it ships a hot-reload server running your working tree. This file
+# is the deployable shape: the `runtime` target (compiled JS only, tini,
+# healthcheck), no source mounts, restart policies, and a Redis that is
+# reachable from the app network only and persists to a volume.
+#
+#   docker compose -f docker-compose.production.yml up -d --build
+#
+# What this file deliberately does NOT do:
+#
+# - **TLS.** Terminate it in front (reverse proxy / load balancer), and set
+#   HTTP_TRUST_PROXY to that hop's address so `req.ip` — and every IP-keyed
+#   rate limit — means the client, not the proxy. See README
+#   "Multi-replica deployments".
+# - **Scale out.** This is one replica (DEPLOYMENT_MODE=single). Before
+#   `--scale app=N`, set DEPLOYMENT_MODE=multi and read that same README
+#   section — boot will then refuse any in-memory store that must be shared.
+# - **Invent secrets.** SESSION_SECRET (and any client secrets referenced by
+#   config/clients.yaml) come from `.env`, which is required here — chmod 600
+#   it, keep it out of git (`git local-files` or your secret manager of
+#   choice), and never bake it into the image.
+
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      # Required, unlike the dev file: a production boot without
+      # SESSION_SECRET (or with the sample one) must fail loudly here, not
+      # serve quietly with a guessable secret.
+      - path: .env
+        required: true
+    environment:
+      NODE_ENV: production
+      DEPLOYMENT_MODE: single
+      # Every Redis-backed store shares the compose-network Redis below.
+      REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: redis://redis:6379
+      SESSION_STORAGE_TYPE: redis
+      SESSION_STORAGE_REDIS_URL: redis://redis:6379
+      # The memory rate limiter is per-process and evadable under bucket
+      # exhaustion (see README) — production points it at Redis.
+      RATE_LIMITER_ADAPTER: redis
+
+  redis:
+    image: redis:7.2-alpine
+    restart: unless-stopped
+    # No `ports:`, deliberately — the app reaches Redis over the compose
+    # network, and nothing else should. The dev file publishes 6379 to
+    # loopback for redis-cli convenience; a published production Redis with
+    # no AUTH is an incident.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis-data:

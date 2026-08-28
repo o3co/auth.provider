@@ -309,6 +309,13 @@ make test
 
 The `docker-compose.yml` starts the auth server together with a Redis container. Configure environment variables in `.env`.
 
+`docker-compose.yml` is a **development** file: it builds the `develop` target and bind-mounts `./src` and `./config`, so deploying it ships a hot-reload server running your working tree. The deployable shape is
+[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front plus `HTTP_TRUST_PROXY`, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
+
+```bash
+docker compose -f docker-compose.production.yml up -d --build
+```
+
 The image installs with `pnpm install --frozen-lockfile`, so a committed
 `pnpm-lock.yaml` is a required build input — `create-auth-provider` generates
 one at scaffold time; if yours is missing, run `pnpm install` once and commit

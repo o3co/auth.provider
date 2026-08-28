@@ -203,6 +203,9 @@ make test
 
 `docker-compose.yml` は認証サーバーと Redis コンテナをまとめて起動します。環境変数は `.env` で設定してください。
 
+`docker-compose.yml` は**開発用**です(`develop` target をビルドし `./src` / `./config` を bind-mount するため、そのままデプロイすると working tree を hot-reload で配信します)。デプロイ可能な形は
+[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target・source mount なし・restart policy・ネットワーク内部限定の永続 Redis・**必須**の `.env`(実際の `SESSION_SECRET` が無い boot は大声で失敗すべき)です。TLS 終端 + `HTTP_TRUST_PROXY`、`--scale` 前の multi-replica 手順など「意図的に委ねる範囲」はファイル冒頭のコメントに明記しています。
+
 イメージは `pnpm install --frozen-lockfile` でインストールするため、コミット済みの
 `pnpm-lock.yaml` がビルドの必須入力です。`create-auth-provider` が scaffold 時に
 生成します。手元に無い場合は一度 `pnpm install` を実行して結果をコミットしてください。
