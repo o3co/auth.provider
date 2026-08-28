@@ -52,6 +52,9 @@ const makeStore = async () => {
 		empty: () => {
 			keys = [];
 		},
+		shuffle: () => {
+			keys = [...keys].reverse();
+		},
 	};
 };
 
@@ -102,7 +105,21 @@ describe("JWKS route — ETag + one serialization per key set (#293 item 4)", ()
 		expect(after.body.keys.map((k: { kid: string }) => k.kid)).toEqual(["v2", "v1"]);
 	});
 
-	it("exports and serializes once per key set, not once per request", async () => {
+	it("treats a reordered set as the same set: stable ETag, 304 still honored", async () => {
+		// RFC 7517 assigns no meaning to key order — an adapter returning the
+		// same keys reordered must not churn the cache or break pollers' 304s.
+		const { store, rotate, shuffle } = await makeStore();
+		const app = makeApp(store);
+
+		rotate();
+		const before = await request(app).get(PATH);
+		shuffle();
+		const revalidated = await request(app).get(PATH).set("If-None-Match", before.headers.etag);
+		expect(revalidated.status).toBe(304);
+		expect(revalidated.headers.etag).toBe(before.headers.etag);
+	});
+
+	it("runs the key export once per key set, not once per request", async () => {
 		const { store, getVerificationKeys } = await makeStore();
 		const app = makeApp(store);
 
