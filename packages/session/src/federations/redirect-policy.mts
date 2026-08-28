@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { ProviderDeps } from "@o3co/auth-provider-core";
+import { isLoopbackHostname, type ProviderDeps } from "@o3co/auth-provider-core";
 import type { RedirectConfig } from "./helpers.mjs";
 import { resolveCallbackRedirect } from "./helpers.mjs";
 import type { FederationResult } from "./types.mjs";
@@ -91,42 +91,31 @@ import type { FederationResult } from "./types.mjs";
  * An operator who genuinely needs a cross-domain redirect target unsets
  * `sessionDomain`, which is then an explicit decision rather than a silent one.
  *
- * ## Why the loopback rule is spelled out again here
+ * ## Where the loopback rule lives
  *
- * `isLoopbackHostname` duplicates `@o3co/auth-provider-foundation`'s copy
- * rather than importing it: `foundation` is an adapter package that does not
- * re-export the helper, and `session` has no dependency edge to it. Adding one
- * to reach ten lines would point the dependency graph the wrong way. The
- * *rule* is the same one on purpose — an operator meets one loopback policy
- * across this repository, not three — and the rejection vocabulary below
- * follows `checkSecureEndpoint`'s (`<reason>` token plus an operator-facing
- * sentence that states the actual rule) rather than inventing a dialect.
+ * `isLoopbackHostname` is imported from `@o3co/auth-provider-core`
+ * (`net/loopback`, #364) — the same definition `checkSecureEndpoint`
+ * (`@o3co/auth-provider-foundation`, #285) runs on — and re-exported here
+ * unchanged, because this package's public API surfaces it. An earlier
+ * revision kept a local copy instead (on the correct observation that
+ * `session` must not grow a dependency edge to `foundation`), and the copies
+ * drifted within one commit; `core`, which both packages already depend on,
+ * is the vocabulary home #292 established. The rejection vocabulary below
+ * still follows `checkSecureEndpoint`'s (`<reason>` token plus an
+ * operator-facing sentence that states the actual rule) rather than
+ * inventing a dialect.
  */
+
+// Re-exported unchanged: `@o3co/auth-provider-session`'s index surfaces the
+// predicate as public API. The definition lives in core (#364) — see the
+// module comment's "Where the loopback rule lives".
+export { isLoopbackHostname };
 
 /** The longest `redirect_to` accepted, checked before the value is parsed. */
 export const MAX_REDIRECT_URL_LENGTH = 2048;
 
 /** Matches `scheme://` — the shape that distinguishes an absolute URL from a path or a bare host. */
 const ABSOLUTE_URL_PREFIX = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
-
-/** Dotted-quad IPv4, the only numeric form the WHATWG URL parser emits. */
-const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
-
-/**
- * Whether `hostname` — as `URL.hostname` reports it, so IPv6 arrives bracketed
- * and IPv4 shorthand has already been normalized to dotted quad — names an
- * address that never leaves the machine.
- */
-export function isLoopbackHostname(hostname: string): boolean {
-	if (hostname === "localhost") return true;
-	if (hostname === "[::1]" || hostname === "::1") return true;
-
-	const v4 = IPV4.exec(hostname);
-	if (v4 === null) return false;
-	// The whole 127.0.0.0/8 block is loopback, not just 127.0.0.1.
-	const octets = [v4[1], v4[2], v4[3], v4[4]].map(Number);
-	return octets[0] === 127 && octets.every((o) => o <= 255);
-}
 
 /**
  * Why a redirect target was refused.
