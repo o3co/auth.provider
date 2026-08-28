@@ -162,9 +162,12 @@ const resolveClientAndRedirectUri = async (
 	return { client, clientId: client_id, redirectUri: redirect_uri };
 };
 
-// A-1: validate response_type (the handler already dispatched on
-// includes("code"), but handle unknown types such as `?response_type=code&
-// response_type=token`, which Express surfaces as an array).
+// The sole owner of the response_type refusal since #397 — it runs after
+// `resolveClientAndRedirectUri`, so the refusal travels via redirect per
+// RFC 6749 §4.1.2.1 (A-1's rule that nothing redirects to an unvalidated
+// target holds; validation has already succeeded here). Handles unknown
+// types and repeats such as `?response_type=code&response_type=token`,
+// which Express surfaces as an array.
 const checkResponseTypeIsCode = (ctx: AuthorizeContext): boolean => {
 	const responseType = toStr(ctx.req.query.response_type);
 	if (responseType !== "code") {
@@ -726,13 +729,17 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			);
 		}
 
-		if (![req.query.response_type].flat().includes("code")) {
-			// A-1: unknown response_type without a validated redirect_uri → 400 JSON
-			return res.status(400).json({
-				error: "unsupported_response_type",
-				error_description: `response_type "${req.query.response_type}" is not supported`,
-			});
-		}
+		// #397: no early response_type gate. RFC 6749 §4.1.2.1 prefers that once
+		// the client and redirect_uri ARE validated, errors travel via redirect
+		// so the user lands back in the app — and the pre-validation 400-JSON
+		// gate that used to sit here made that unreachable for this error class.
+		// A-1's trust rule is untouched: `resolveClientAndRedirectUri` still
+		// answers 400 JSON whenever the redirect target cannot be validated, and
+		// nothing redirects before it succeeds. `checkResponseTypeIsCode` (after
+		// validation) is now the sole owner of the response_type refusal. The
+		// accepted cost: a garbage response_type with a real client_id spends one
+		// repository lookup before its refusal — the price of having a validated
+		// target to redirect the user back to.
 
 		const {
 			scope = null,
