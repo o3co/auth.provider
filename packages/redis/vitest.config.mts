@@ -3,10 +3,13 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { defineConfig } from "vitest/config";
+import { WORKSPACE_TEST_TIMEOUTS } from "../../vitest.shared.mts";
 
 export default defineConfig({
 	test: {
-		// testcontainers boot + Redis warm-up takes time on first run.
+		...WORKSPACE_TEST_TIMEOUTS,
+		// Raises the #357 workspace floor (never lowers it): testcontainers
+		// boot + Redis warm-up takes time on first run.
 		testTimeout: 30_000,
 		hookTimeout: 30_000,
 		typecheck: {
