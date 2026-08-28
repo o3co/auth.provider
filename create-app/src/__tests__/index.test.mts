@@ -2,7 +2,6 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { generateLockfile, isValidDirName, isValidProjectName, main, scaffold } from "../index.mjs";
 import { shouldCopyTemplateEntry } from "../internal/template-filter.mjs";
 
 // generateLockfile shells out to a package manager. Every test in this file
@@ -11,6 +10,13 @@ import { shouldCopyTemplateEntry } from "../internal/template-filter.mjs";
 // that no registry can resolve anyway.
 const { spawnSyncMock } = vi.hoisted(() => ({ spawnSyncMock: vi.fn() }));
 vi.mock("node:child_process", () => ({ spawnSync: spawnSyncMock }));
+
+// Imported AFTER vi.mock (repo pattern — see federation-google's test suite)
+// so the mocked child_process is definitely registered before the module
+// under test loads, independent of transform hoisting behavior.
+const { generateLockfile, isValidDirName, isValidProjectName, main, scaffold } = await import(
+	"../index.mjs"
+);
 
 const enoent = (bin: string) => Object.assign(new Error(`spawn ${bin} ENOENT`), { code: "ENOENT" });
 
