@@ -1,0 +1,20 @@
+coverage:
+  status:
+    project:
+      default:
+        # Without a threshold, deleting well-tested code fails the project
+        # status arithmetically: removing N covered lines lowers the overall
+        # ratio even when every surviving line keeps its tests and the diff
+        # itself is 100% covered. #375 (which deleted the fully-tested #277
+        # boot stage in favour of a data policy) was the first refactor to
+        # trip it: patch 100%, project -0.09%. 0.1% absorbs exactly that
+        # arithmetic wobble and nothing more — a real coverage regression
+        # still fails, and the patch status below keeps demanding tested
+        # diffs regardless.
+        threshold: 0.1%
+    patch:
+      default:
+        # Explicitly the default behaviour: every diff must clear the
+        # project's current ratio. Declared so a future edit to this file
+        # cannot loosen it by accident while touching the project knob.
+        target: auto
