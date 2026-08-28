@@ -62,7 +62,17 @@ import { Redis } from "ioredis";
 import { createApp } from "@o3co/auth-provider-core";
 import { makeIoredisClients, redisChallengeStoreModule } from "@o3co/auth-provider-redis";
 
-const io = new Redis({ host: "localhost", port: 6379 });
+const io = new Redis({
+    host: "localhost",
+    port: 6379,
+    // Required in production. On the driver's defaults there is no command
+    // timeout at all, so a partition does not produce errors — it produces
+    // waiting, and requests pile up behind a socket that will not answer. See
+    // "Failure timing" below.
+    commandTimeout: 1_000,
+    connectTimeout: 5_000,
+    maxRetriesPerRequest: 3,
+});
 
 // Required. ioredis emits `error` on socket failures — including while it is
 // auto-reconnecting — and an EventEmitter `error` with no listener throws and
@@ -81,6 +91,32 @@ const handle = await createApp({
 For mixed-backend deployments (e.g. memcached for `ChallengeStore` +
 redis for `FederationTokenStore`), wire each per-purpose slot
 individually instead of spreading.
+
+### Failure timing
+
+`makeIoredisClients` derives every client from the one connection you hand it
+and opens none of its own (the exception is `refreshTokenFamilyClient
+.duplicate()`, one per refresh rotation). Connection-level ioredis options are
+therefore shared by all eleven purposes, and the ones governing how a partition
+*ends* are the ones worth setting deliberately:
+
+- **`commandTimeout`** is the only option that bounds a command which never
+  reaches the wire. ioredis arms it before deciding whether the socket is
+  writable, so it covers the offline queue too — and it is the sole guard
+  against a zombie connection where no `close` event fires and the reconnect
+  path is never entered. Without it, a rate limiter running fail-closed never
+  gets an error to fail on, so it never sheds load (#286).
+- **`maxRetriesPerRequest`** bounds how *deep* the offline queue gets: it fails
+  the whole queue once the reconnect count is reached. The default is 20, which
+  on ioredis 6's exponential backoff is tens of seconds of accumulation.
+- **`enableOfflineQueue: false`** makes a command issued while the socket is
+  down reject immediately rather than after `commandTimeout`. It is the right
+  answer for a rate-limiter connection and the wrong one for a session or
+  refresh-token connection, where it turns a sub-second reconnect blip into a
+  forced re-login. Because it is per-connection, choosing it for one purpose
+  means giving that purpose its own `Redis` instance — the per-purpose client
+  interfaces exist for exactly that, and a second socket should be a deliberate
+  choice rather than a side effect.
 
 ## Module pattern vs AdapterFactory pattern
 

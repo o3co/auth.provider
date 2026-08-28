@@ -169,6 +169,45 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		expect(onSpies[0]).toHaveBeenCalledWith("error", expect.any(Function));
 	});
 
+	it("bounds every command and every connect attempt (#286)", async () => {
+		// Without these the driver's defaults apply: no command timeout at all,
+		// a 10s connect timeout, and 20 reconnect attempts before a queued
+		// command is failed. A partition therefore parks in-flight `/token`
+		// requests indefinitely instead of erroring, which is what stops the
+		// fail-closed rate-limit policy from ever shedding load.
+		const { standaloneRedisClientsModule } = await importModule();
+		const provides = (
+			standaloneRedisClientsModule as unknown as {
+				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
+			}
+		).provides;
+		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
+
+		const options = redisCtorCalls[0]?.options;
+		expect(options?.commandTimeout).toBe(1_000);
+		expect(options?.connectTimeout).toBe(5_000);
+		expect(options?.maxRetriesPerRequest).toBe(3);
+	});
+
+	it("keeps the offline queue ON, explicitly, because one socket serves every purpose (#286)", async () => {
+		// `enableOfflineQueue` is a per-CONNECTION option and every adapter in
+		// this template draws from the single socket built below, so the
+		// "off for the rate limiter, on elsewhere" split is not expressible
+		// here. Asserting the explicit `true` rather than accepting the
+		// driver default is the point: the value is a decision (see the
+		// comment in `getOrCreateClients`), and a future change that wants
+		// `false` has to come through this test.
+		const { standaloneRedisClientsModule } = await importModule();
+		const provides = (
+			standaloneRedisClientsModule as unknown as {
+				provides: Record<string, (deps: Record<string, unknown>) => Promise<unknown>>;
+			}
+		).provides;
+		await provides.refreshTokenFamilyClient({ config: { ...baseConfig } });
+
+		expect(redisCtorCalls[0]?.options?.enableOfflineQueue).toBe(true);
+	});
+
 	it("declares 'config' as required and both registrars as optional", async () => {
 		const { standaloneRedisClientsModule } = await importModule();
 		const m = standaloneRedisClientsModule as {
