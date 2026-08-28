@@ -240,6 +240,26 @@ describe("isValidDirName", () => {
 	});
 });
 
+describe("scaffold — pnpm-workspace.yaml generation", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "create-auth-provider-wsyaml-"));
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("writes the bcrypt build allowlist where pnpm >= 10.29 reads it", () => {
+		const targetDir = join(tempDir, "my-auth");
+		scaffold(targetDir, "my-auth");
+
+		const yaml = readFileSync(join(targetDir, "pnpm-workspace.yaml"), "utf-8");
+		expect(yaml).toMatch(/onlyBuiltDependencies:\n\s*- bcrypt/);
+	});
+});
+
 describe("generateLockfile", () => {
 	const LOCKFILE_ARGS = ["install", "--lockfile-only", "--ignore-workspace"];
 

@@ -84,6 +84,25 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 	}
 
 	writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+
+	// pnpm ≥10.29 reads `onlyBuiltDependencies` only from pnpm-workspace.yaml,
+	// in single-package projects too — the template's former package.json
+	// `pnpm` block is silently ignored (#360). The template cannot ship the
+	// file: inside the monorepo it would shadow the workspace root for anyone
+	// running pnpm from the template directory. So the scaffold writes it,
+	// mirroring the allowlist the workspace root keeps for the same dependency.
+	writeFileSync(
+		resolve(targetDir, "pnpm-workspace.yaml"),
+		[
+			"# pnpm (>= 10.29) reads onlyBuiltDependencies from this file, even in a",
+			"# single-package project. bcrypt's install hook compiles the native addon",
+			"# on platforms with no shipped prebuild; without this allowlist pnpm",
+			"# silently skips the hook and bcrypt fails at require time there.",
+			"onlyBuiltDependencies:",
+			"  - bcrypt",
+			"",
+		].join("\n"),
+	);
 };
 
 /** Outcome of the scaffold-time lockfile generation. */
