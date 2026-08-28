@@ -87,6 +87,12 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					type: "refresh_token",
 					expectedIssuer: issuer ?? "",
 					legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? false,
+					// #367: deliberate — refresh-token revocation runs off the
+					// family store (`refreshTokenFamilyRevocation`, consulted
+					// below), not the AT jti denylist. Whether the subject
+					// watermark should ALSO gate RT redemption as a
+					// cascade-failure backstop is tracked in #367's follow-up.
+					revocation: "none",
 					logger,
 				});
 				tokenPayload = verified.payload;

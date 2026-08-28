@@ -239,6 +239,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					type: "access_token",
 					expectedIssuer: opts.issuer ?? "",
 					legacyTypAccept: opts.legacyTypAccept ?? false,
+					// #367: deliberate. Logout only destroys the session the token
+					// names — a safe, idempotent direction for a revoked token, and
+					// exactly what a user does right after a credential-change
+					// cascade (#322). Consulting revocation here would strand them
+					// logged in.
+					revocation: "none",
 					logger: opts.logger,
 				});
 				payload = verified.payload as Record<string, unknown>;
@@ -478,6 +484,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				type: "id_token",
 				expectedIssuer: opts.issuer ?? "",
 				legacyTypAccept: opts.legacyTypAccept ?? false,
+				// #367: deliberate. An id_token_hint names WHO is logging out
+				// (OIDC RP-Initiated Logout 1.0); it is not presented as a
+				// credential, and the jti denylist tracks access tokens anyway.
+				revocation: "none",
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;

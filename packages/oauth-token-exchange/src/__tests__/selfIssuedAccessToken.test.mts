@@ -152,4 +152,34 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		const logoutToken = await signSelfIssuedAccessToken({}, { typ: "logout+jwt" });
 		expect(await validator().validate(logoutToken, { role: "subject" })).toBeNull();
 	});
+
+	it("returns null for a subject_token whose jti is on the denylist (#367)", async () => {
+		// The laundering path: revoke an AT, exchange it, keep an equivalent.
+		// A revoked subject_token must not mint a fresh token.
+		const token = await signSelfIssuedAccessToken({ jti: "at-revoked" });
+		const denylist = {
+			kind: "stub",
+			add: async () => {},
+			has: async (jti: string) => jti === "at-revoked",
+		};
+		const v = validator({ accessTokenDenylist: denylist });
+		expect(await v.validate(token, { role: "subject" })).toBeNull();
+
+		// Same denylist, different jti: still exchangeable.
+		const live = await signSelfIssuedAccessToken({ jti: "at-live" });
+		expect(await v.validate(live, { role: "subject" })).not.toBeNull();
+	});
+
+	it("returns null for a subject_token issued before the subject watermark (#367)", async () => {
+		const token = await signSelfIssuedAccessToken({ sub: "u-reset" });
+		const subjectRevocation = {
+			kind: "stub",
+			revokeBefore: async () => {},
+			// Watermark far in the future: every token this subject holds is out.
+			revokedBefore: async (sub: string) =>
+				sub === "u-reset" ? new Date(Date.now() + 86_400_000) : null,
+		};
+		const v = validator({ subjectRevocation });
+		expect(await v.validate(token, { role: "subject" })).toBeNull();
+	});
 });

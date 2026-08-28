@@ -40,7 +40,10 @@ const verify = (token: string, subjectRevocation?: SubjectRevocation) =>
 	verifyJwt(token, keyStore, {
 		type: "access_token",
 		expectedIssuer: ISSUER,
-		...(subjectRevocation ? { subjectRevocation } : {}),
+		// The bundle form even when the store may be undefined: this suite
+		// plays the role of a token-accepting surface, and those always
+		// forward what the composition wired (#367).
+		revocation: { subjectRevocation },
 	});
 
 describe("verifyJwt — subject revocation watermark (#296)", () => {

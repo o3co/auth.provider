@@ -90,6 +90,7 @@ async function signValidAccessToken(
 
 const baseOptions: JwtVerifyOptions = {
 	type: "access_token",
+	revocation: "none",
 	expectedIssuer: TEST_ISSUER,
 	expectedAudience: TEST_AUDIENCE,
 };
@@ -232,6 +233,7 @@ describe("verifyJwt", () => {
 			verifyJwt(jwt, keyStore, {
 				...baseOptions,
 				type: "access_token",
+				revocation: "none",
 				legacyTypAccept: true,
 			}),
 		).rejects.toMatchObject({
@@ -313,6 +315,7 @@ describe("verifyJwt", () => {
 		const jwt = await signValidAccessToken({ iss: "anything-goes" }, keyStore);
 		const result = await verifyJwt(jwt, keyStore, {
 			type: "access_token",
+			revocation: "none",
 			expectedIssuer: "",
 			expectedAudience: TEST_AUDIENCE,
 			logger,
@@ -334,6 +337,7 @@ describe("verifyJwt", () => {
 		const jwt = await signValidAccessToken({ aud: "any-other-audience" }, keyStore);
 		const { type } = await verifyJwt(jwt, keyStore, {
 			type: "access_token",
+			revocation: "none",
 			expectedIssuer: TEST_ISSUER,
 			logger,
 		});
@@ -351,6 +355,7 @@ describe("verifyJwt", () => {
 		await expect(
 			verifyJwt(jwt, keyStore, {
 				type: "refresh_token",
+				revocation: "none",
 				expectedIssuer: TEST_ISSUER,
 				expectedAudience: TEST_AUDIENCE,
 				expectedAzp: TEST_AUDIENCE,

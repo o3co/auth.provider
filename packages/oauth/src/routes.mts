@@ -489,9 +489,9 @@ export const createOAuthRouter = async (
 							type: "access_token",
 							expectedIssuer: canonicalIssuer,
 							legacyTypAccept: legacyTypAcceptOpt ?? false,
-							...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
-							// #296: subject watermark, alongside the jti denylist.
-							...(subjectRevocation ? { subjectRevocation } : {}),
+							// #296/#367: token-accepting surface — forward what the
+							// composition wired, jti denylist and subject watermark both.
+							revocation: { denylist: accessTokenDenylist, subjectRevocation },
 							logger,
 						});
 						return next();
@@ -532,9 +532,9 @@ export const createOAuthRouter = async (
 						expectedIssuer: canonicalIssuer,
 						...(req.oauthClient ? { expectedAudience: req.oauthClient.clientId } : {}),
 						legacyTypAccept: legacyTypAcceptOpt ?? false,
-						...(accessTokenDenylist ? { denylist: accessTokenDenylist } : {}),
-						// #296: subject watermark, alongside the jti denylist.
-						...(subjectRevocation ? { subjectRevocation } : {}),
+						// #296/#367: token-accepting surface — forward what the
+						// composition wired, jti denylist and subject watermark both.
+						revocation: { denylist: accessTokenDenylist, subjectRevocation },
 						logger,
 					});
 					const { payload } = verified;
