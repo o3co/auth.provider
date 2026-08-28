@@ -1624,7 +1624,16 @@ export interface StageOneCheck {
  * other silently — the registry order IS the execution order, and the
  * first-violation semantics follow from running rows in sequence.
  */
-export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = [
+/**
+ * The registries are exported (so tooling and tests can read the plan) and
+ * are the live structures `validateManifests` iterates — so they are frozen,
+ * rows included: an execution plan for boot-time security validation must
+ * not be mutable by anything running in-process. Per Copilot review on #380.
+ */
+const freezeChecks = (checks: readonly StageOneCheck[]): readonly StageOneCheck[] =>
+	Object.freeze(checks.map((check) => Object.freeze(check)));
+
+export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
 		id: "unique-module-names",
 		spec: "A2-β §5.1 step 1",
@@ -1696,7 +1705,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = [
 		spec: "A2-β §5.1 step 12",
 		run: (ctx) => checkLifecycleClosure(ctx.modules),
 	},
-];
+]);
 
 /**
  * The checks that run AFTER config parse (A2-β §5.1 step 13, which stays a
@@ -1707,7 +1716,7 @@ export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = [
  *
  * Adding a wiring guard = appending a row before `route-order-edges`.
  */
-export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = [
+export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
 	{
 		id: "grant-policy-issuer",
 		spec: "CP-20 (restored v0.4.x guard; step 13.5)",
@@ -1761,7 +1770,7 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = [
 		spec: "A2-β §5.1 step 14",
 		run: (ctx) => checkRouteOrderEdges(ctx.rawModules),
 	},
-];
+]);
 
 // ---------------------------------------------------------------------------
 // Public API — validateManifests

@@ -74,4 +74,12 @@ describe("stage-1 check registries (#368)", () => {
 			"route-order-edges",
 		]);
 	});
+
+	it("is frozen, rows included — the execution plan is not mutable in-process", () => {
+		expect(Object.isFrozen(STAGE_ONE_PRE_CONFIG_CHECKS)).toBe(true);
+		expect(Object.isFrozen(STAGE_ONE_POST_CONFIG_CHECKS)).toBe(true);
+		for (const check of all) {
+			expect(Object.isFrozen(check), check.id).toBe(true);
+		}
+	});
 });
