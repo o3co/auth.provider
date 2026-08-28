@@ -337,6 +337,15 @@ export {
 // Exported so consumers import or re-export it rather than defining a copy;
 // the designVocabulary drift guard fails any second definition.
 export { isLoopbackHostname } from "./net/loopback.mjs";
+// The registered-redirect-URI shape vocabulary (#395) — enforced by
+// ClientEntrySchema at boot; exported so a custom ClientRepository, which
+// bypasses that schema by design, can hold its registrations to the same
+// rules and refuse in the same words.
+export {
+	checkRedirectUri,
+	describeRedirectUriRejection,
+	type RedirectUriRejection,
+} from "./net/redirect-uri.mjs";
 // The single canonical-request-URL vocabulary (#292, #356) — "the URL this
 // request reached" is the configured origin plus `req.originalUrl`, never
 // `req.protocol` + the `Host` header (attacker-influenced under

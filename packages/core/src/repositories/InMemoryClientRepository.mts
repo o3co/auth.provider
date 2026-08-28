@@ -17,6 +17,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import { z } from "zod";
+import { checkRedirectUri, describeRedirectUriRejection } from "../net/redirect-uri.mjs";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
 /**
@@ -63,7 +64,25 @@ export const ClientEntrySchema = z
 		// secret in.
 		tokenEndpointAuthMethod: z.enum(["client_secret_basic", "client_secret_post", "none"]),
 		clientSecret: z.string().min(1).optional(),
-		allowedRedirectUris: z.array(z.string()).default([]),
+		// #395: held to the registered-redirect-URI shape (net/redirect-uri.mts)
+		// at boot — a `javascript:` target, a fragment, userinfo, or plain http
+		// off loopback used to register cleanly and become a valid redirect.
+		// The logout URL fields below were already URL-validated; the more
+		// dangerous surface now is too. Refusal wording comes from the checker,
+		// so a custom ClientRepository opting in refuses in the same words.
+		allowedRedirectUris: z
+			.array(
+				z.string().superRefine((uri, ctx) => {
+					const rejection = checkRedirectUri(uri);
+					if (rejection !== null) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: `allowedRedirectUris entry ${JSON.stringify(uri)}: ${describeRedirectUriRejection(rejection)}`,
+						});
+					}
+				}),
+			)
+			.default([]),
 		allowedScopes: z.array(z.string()).default([]),
 		allowedAudiences: z.array(z.string()).default([]),
 		// Wave 1 §3.4.1: per-client grant type allowlist. Absent means no restriction on
