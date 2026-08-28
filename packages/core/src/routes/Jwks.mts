@@ -140,14 +140,31 @@ export const createRouter = (
 		etag: string;
 	} | null = null;
 
+	const byKid = (
+		a: Pick<ManagedKey, "kid" | "publicKey">,
+		b: Pick<ManagedKey, "kid" | "publicKey">,
+	): number => (a.kid < b.kid ? -1 : a.kid > b.kid ? 1 : 0);
+
+	// Order-insensitive, deliberately: RFC 7517 assigns no meaning to key
+	// order, so a store that returns the same keys reordered keeps serving the
+	// cached bytes (the ETag stays byte-honest because the cached body is what
+	// is served). Sorting is by kid with a stable sort, so the degenerate
+	// duplicate-kid shapes at worst fail the identity compare and recompute —
+	// the safe direction.
 	const sameKeySet = (
 		current: readonly ManagedKey[],
 		previous: readonly Pick<ManagedKey, "kid" | "publicKey">[],
-	): boolean =>
-		current.length === previous.length &&
-		current.every(
-			(key, i) => key.kid === previous[i]?.kid && key.publicKey === previous[i]?.publicKey,
+	): boolean => {
+		if (current.length !== previous.length) return false;
+		const sortedCurrent = current
+			.map((key) => ({ kid: key.kid, publicKey: key.publicKey }))
+			.sort(byKid);
+		const sortedPrevious = [...previous].sort(byKid);
+		return sortedCurrent.every(
+			(key, i) =>
+				key.kid === sortedPrevious[i]?.kid && key.publicKey === sortedPrevious[i]?.publicKey,
 		);
+	};
 
 	router.get(path, async (req: Request, res: Response) => {
 		if (keyStore.algorithm === "HS256") {
