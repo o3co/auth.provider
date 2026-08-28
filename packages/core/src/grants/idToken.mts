@@ -37,15 +37,14 @@ export interface GenerateIdTokenOptions {
  *   - nonce (when provided by the authorize request)
  *   - scope-filtered user claims via {@link filterClaimsByScope}
  *
- * Header: `typ: "id+jwt"`. Not a hint: this value is **load-bearing**. The
- * logout endpoint's SF-1 check pins `id_token_hint` to exactly this `typ`
- * (`oauth/src/routes/logout.mts`), and every at+jwt-pinned surface (userinfo,
- * introspection, the central verifier) relies on it being disjoint from
- * RFC 9068's `at+jwt` to refuse an id_token presented as an access token.
- * The spelling is nonstandard — strict external RPs that validate `typ`
- * expect `JWT` or none (#293 item 9) — but changing it is a coordinated
- * migration (mint + logout pin + a dual-accept window for tokens already in
- * the wild), not an edit here.
+ * Header: `typ: "JWT"` (#394). Load-bearing, not a hint: logout's SF-1 check
+ * pins `id_token_hint` to the id_token `typ`, and every at+jwt-pinned surface
+ * (userinfo, introspection, the central verifier) relies on the value being
+ * **disjoint from RFC 9068's `at+jwt`** to refuse an id_token presented as an
+ * access token — a property `JWT` satisfies just as the pre-#394 `id+jwt`
+ * did, without failing strict external RPs that validate `typ`. Tokens minted
+ * before the flip carry `id+jwt`; the verifier accepts both during the
+ * migration window #402 closes.
  */
 export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token> {
 	const now = Math.floor(Date.now() / 1000);
@@ -63,7 +62,7 @@ export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Tok
 		...(opts.nonce ? { nonce: opts.nonce } : {}),
 		...filterClaimsByScope(opts.userClaims, opts.scopes),
 	};
-	const token = await opts.keyStore.sign({ claims, header: { typ: "id+jwt" } });
+	const token = await opts.keyStore.sign({ claims, header: { typ: "JWT" } });
 	return {
 		token,
 		expiresIn,

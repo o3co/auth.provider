@@ -610,7 +610,7 @@ OIDC id_token JWT（OIDC Core §2）に署名して返す。クレーム構成:
 - `nonce` — 認可リクエストから転送し、そのまま反映
 - `filterClaimsByScope` によるスコープフィルター済みユーザークレーム
 
-ヘッダーは `typ: "id+jwt"` を使用する（イントロスペクション向けのヒント）。
+ヘッダーは `typ: "JWT"` を使用する(#394 — 標準綴り。RFC 9068 の `at+jwt` と意図的に排他で、id_token が access-token 面を通ることはない)。#394 以前に発行されたトークンは `id+jwt` を持ち、#402 の移行窓の間は検証側が両方を受理する。
 
 #### `filterClaimsByScope`
 
