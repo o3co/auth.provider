@@ -13,11 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { createHash } from "node:crypto";
 import type { Request, Response, Router } from "express";
 import { exportJWK } from "jose";
 import { DEFAULT_JWKS_CACHE_MAX_AGE } from "../jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH, isValidJwksPath } from "../jwks/path.mjs";
-import type { KeyStore } from "../keys/KeyStore.mjs";
+import type { KeyStore, ManagedKey } from "../keys/KeyStore.mjs";
 
 /**
  * JWK members that carry PRIVATE or SYMMETRIC key material and must never
@@ -117,7 +118,38 @@ export const createRouter = (
 
 	const cacheControl = `public, max-age=${cacheMaxAgeSeconds}`;
 
-	router.get(path, async (_req: Request, res: Response) => {
+	// #293 item 4: the export + hash work is done once per key SET, not once
+	// per request — the JWKS endpoint is the most-polled verifier surface, and
+	// every poll re-ran `exportJWK` (an async crypto export) per key. The
+	// cache is keyed on the set itself, (kid, publicKey identity) pairs,
+	// because the `KeyStore` contract has no rotation event to invalidate on:
+	// the built-in store's set shrinks by `previousKeys` expiry on its own
+	// clock, and a remote adapter may refresh whenever it likes. Identity
+	// comparison degrades gracefully — an adapter that mints fresh key objects
+	// per call recomputes per call, which is exactly the pre-cache behavior.
+	//
+	// The strong `ETag` is the SHA-256 of the canonical serialization, hashed
+	// once at cache time, so a polling verifier sending `If-None-Match` gets
+	// `304` until the set actually changes. (`res.json`'s per-request
+	// stringify of the small cached document is noise next to the export.)
+	// Error responses (404/503) are never cached and carry no `ETag` of ours —
+	// an empty set is a lie that caches (#282), and so is its tag.
+	let cached: {
+		keyRefs: readonly Pick<ManagedKey, "kid" | "publicKey">[];
+		keys: readonly Record<string, unknown>[];
+		etag: string;
+	} | null = null;
+
+	const sameKeySet = (
+		current: readonly ManagedKey[],
+		previous: readonly Pick<ManagedKey, "kid" | "publicKey">[],
+	): boolean =>
+		current.length === previous.length &&
+		current.every(
+			(key, i) => key.kid === previous[i]?.kid && key.publicKey === previous[i]?.publicKey,
+		);
+
+	router.get(path, async (req: Request, res: Response) => {
 		if (keyStore.algorithm === "HS256") {
 			// #282: this used to answer `200 { keys: [] }`. An empty key set is
 			// indistinguishable, to a relying party, from an issuer that has
@@ -139,36 +171,58 @@ export const createRouter = (
 			});
 		}
 		const managedKeys = await keyStore.getVerificationKeys();
-		const exported = await Promise.all(
-			managedKeys.map(async (mk) => {
-				const publicJwk = toPublicJwk((await exportJWK(mk.publicKey)) as Record<string, unknown>);
-				if (publicJwk === null) return null;
-				return { ...publicJwk, kid: mk.kid, use: "sig", alg: keyStore.algorithm };
-			}),
-		);
-		const keys = exported.filter((k): k is NonNullable<typeof k> => k !== null);
-		if (keys.length === 0) {
-			// An asymmetric keystore that yields nothing publishable — a KMS
-			// adapter mid-rotation, or one whose keys all filtered out as
-			// non-public — is an outage, not a valid publication. Same reasoning
-			// as the HS256 branch: an empty set is a lie that caches.
-			res.setHeader("Cache-Control", "no-store");
-			return res.status(503).json({
-				error: "jwks_unavailable",
-				error_description:
-					"No public verification keys are currently available to publish. The signing " +
-					"keystore returned no exportable public key material.",
-			});
+		if (cached === null || !sameKeySet(managedKeys, cached.keyRefs)) {
+			const exported = await Promise.all(
+				managedKeys.map(async (mk) => {
+					const publicJwk = toPublicJwk((await exportJWK(mk.publicKey)) as Record<string, unknown>);
+					if (publicJwk === null) return null;
+					return { ...publicJwk, kid: mk.kid, use: "sig", alg: keyStore.algorithm };
+				}),
+			);
+			const keys = exported.filter((k): k is NonNullable<typeof k> => k !== null);
+			if (keys.length === 0) {
+				// An asymmetric keystore that yields nothing publishable — a KMS
+				// adapter mid-rotation, or one whose keys all filtered out as
+				// non-public — is an outage, not a valid publication. Same reasoning
+				// as the HS256 branch: an empty set is a lie that caches. Not
+				// cached here either: the next request re-asks the keystore.
+				res.setHeader("Cache-Control", "no-store");
+				return res.status(503).json({
+					error: "jwks_unavailable",
+					error_description:
+						"No public verification keys are currently available to publish. The signing " +
+						"keystore returned no exportable public key material.",
+				});
+			}
+			const body = JSON.stringify({ keys });
+			cached = {
+				keyRefs: managedKeys.map((mk) => ({ kid: mk.kid, publicKey: mk.publicKey })),
+				keys,
+				etag: `"${createHash("sha256").update(body).digest("base64url")}"`,
+			};
 		}
-		// Header set only after key export succeeded and produced at least one
-		// key. If we set it up-front and `getVerificationKeys()`/`exportJWK()`
+		// Headers set only after key export succeeded and produced at least one
+		// key. If we set them up-front and `getVerificationKeys()`/`exportJWK()`
 		// then threw (e.g. a remote KMS-backed keystore outage), Express would
-		// emit a 5xx with the header still attached, and an explicit
+		// emit a 5xx with the headers still attached, and an explicit
 		// `public, max-age` makes that transient error cacheable by shared
 		// caches/CDNs for the full lifetime — turning a brief outage into a
 		// stuck JWKS failure.
 		res.setHeader("Cache-Control", cacheControl);
-		return res.json({ keys });
+		res.setHeader("ETag", cached.etag);
+		// Optional chain: hand-built callers (and the route's own unit tests)
+		// may stub a request without a headers bag.
+		const ifNoneMatch = req.headers?.["if-none-match"];
+		if (
+			typeof ifNoneMatch === "string" &&
+			ifNoneMatch
+				.split(",")
+				.map((tag) => tag.trim())
+				.includes(cached.etag)
+		) {
+			return res.status(304).end();
+		}
+		return res.json({ keys: cached.keys });
 	});
 
 	return router;
