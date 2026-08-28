@@ -9,10 +9,13 @@ packages:
 onlyBuiltDependencies:
   - bcrypt
 
-# Security pins for transitive ranges with known advisories. Scoped to the
-# vulnerable range (`pkg@range`) so the override expires by itself once the
-# tree stops asking for a vulnerable version — same shape the
-# o3co/auth.policy-verifier audit gate settled on (#149 there).
+# Security overrides for transitive ranges with known advisories: any
+# resolution that lands inside the vulnerable range (`pkg@range`) is redirected
+# to the patched line. The replacement is a caret floor, not an exact pin — the
+# point is to keep the tree out of the bad range, not to freeze it — and the
+# override expires by itself once the tree stops asking for a vulnerable
+# version. Same shape the o3co/auth.policy-verifier audit gate settled on
+# (#149 there).
 #
 # The former `@types/node: ^22.0.0` override is deliberately NOT migrated:
 # it predates the repo-wide move to @types/node 26 (#230, #258) and was
