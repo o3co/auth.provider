@@ -180,3 +180,59 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(result.success).toBe(false);
 	});
 });
+
+describe("ClientEntrySchema — allowedRedirectUris shape (#395)", () => {
+	const base = {
+		tokenEndpointAuthMethod: "client_secret_basic",
+		clientSecret: "s",
+	};
+
+	it("accepts https, loopback http, and reverse-domain custom schemes", () => {
+		const result = ClientEntrySchema.safeParse({
+			...base,
+			allowedRedirectUris: [
+				"https://app.example/cb",
+				"http://localhost:3000/callback",
+				"com.example.app:/oauth2redirect",
+			],
+		});
+		expect(result.success).toBe(true);
+	});
+
+	it("refuses a javascript: registration at boot, naming the entry", () => {
+		const result = ClientEntrySchema.safeParse({
+			...base,
+			allowedRedirectUris: ["javascript:alert(1)"],
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const message = result.error.issues.map((issue) => issue.message).join("\n");
+			expect(message).toContain("javascript:alert(1)");
+			expect(message).toContain("executable");
+		}
+	});
+
+	it.each([
+		["a fragment", "https://app.example/cb#frag"],
+		["userinfo", "https://user@app.example/cb"],
+		["http off loopback", "http://app.example/cb"],
+		["a dotless legacy scheme", "myapp://callback"],
+		["an unparsable entry", "not a url"],
+	])("refuses %s at boot", (_label, uri) => {
+		const result = ClientEntrySchema.safeParse({ ...base, allowedRedirectUris: [uri] });
+		expect(result.success).toBe(false);
+	});
+
+	it("reports every bad entry, not only the first", () => {
+		const result = ClientEntrySchema.safeParse({
+			...base,
+			allowedRedirectUris: ["javascript:alert(1)", "https://ok.example/cb", "myapp://cb"],
+		});
+		expect(result.success).toBe(false);
+		if (!result.success) {
+			const message = result.error.issues.map((issue) => issue.message).join("\n");
+			expect(message).toContain("javascript:alert(1)");
+			expect(message).toContain("myapp://cb");
+		}
+	});
+});
