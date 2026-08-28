@@ -628,17 +628,19 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 27 literals, Per A2-β §6.1 (+ #271, #277, #363)
+// BootErrorReason — 26 literals, Per A2-β §6.1 (+ #271, #363; #277's reason was folded into #363's by #375)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 27 reasons.
+ * exactly 26 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
  * federation-stores-incomplete), the OIDC discovery aggregator
- * (discovery-document-invalid), and #363 (component-absence-undeclared).
+ * (discovery-document-invalid), and #363 (component-absence-undeclared —
+ * which #375 also folded #277's retired access-token-revocation-unenforceable
+ * reason into).
  */
 export type BootErrorReason =
 	| "duplicate-module-name"
@@ -666,7 +668,6 @@ export type BootErrorReason =
 	| "federation-stores-incomplete"
 	| "discovery-document-invalid"
 	| "replica-unsafe-adapter"
-	| "access-token-revocation-unenforceable"
 	| "component-absence-undeclared";
 
 // ---------------------------------------------------------------------------
@@ -1001,24 +1002,6 @@ export interface ReplicaUnsafeAdapterDetails {
 }
 
 /**
- * The composition reads the `accessTokenDenylist` slot while
- * `oauth.revocation.accessToken` is `"denylist"` — either stated, or absent,
- * which `checkAccessTokenRevocationWiring` reads the same way — and nothing
- * provides one (#277).
- *
- * `consumedBy` names every module that declared the slot, because that is the
- * evidence for the diagnosis rather than a detail of it: reading the slot is
- * what core takes as the statement that denylist-backed access-token
- * revocation is part of this app's surface, since it cannot see route mounts
- * at this stage.
- */
-export interface AccessTokenRevocationUnenforceableDetails {
-	readonly reason: "access-token-revocation-unenforceable";
-	/** Modules declaring `accessTokenDenylist` in `requires` / `optional`. */
-	readonly consumedBy: readonly string[];
-}
-
-/**
  * A module attached an `AbsencePolicy` to an optional key, nothing fills the
  * slot, and the config does not carry the policy's declared-absent value
  * (#363). The generic successor to the #277 pattern: an unfilled capability
@@ -1032,9 +1015,9 @@ export interface ComponentAbsenceUndeclaredDetails {
 	readonly reason: "component-absence-undeclared";
 	readonly componentKey: ComponentKey;
 	/**
-	 * Modules naming the key in `requires` / `optional` — the evidence the
-	 * slot is part of this app's surface, same reading as
-	 * {@link AccessTokenRevocationUnenforceableDetails.consumedBy}.
+	 * Modules naming the key in `requires` / `optional` — the evidence that
+	 * the slot is part of this app's surface (core cannot see route mounts
+	 * at stage 1; reading the slot is the observable statement).
 	 */
 	readonly consumedBy: readonly string[];
 	/** The policy's config path, dotted, as an operator writes it. */
@@ -1077,7 +1060,6 @@ export type BootErrorDetails =
 	| FederationStoresIncompleteDetails
 	| DiscoveryDocumentInvalidDetails
 	| ReplicaUnsafeAdapterDetails
-	| AccessTokenRevocationUnenforceableDetails
 	| ComponentAbsenceUndeclaredDetails;
 
 // ---------------------------------------------------------------------------

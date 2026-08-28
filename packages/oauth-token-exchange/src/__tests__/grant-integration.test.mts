@@ -271,3 +271,16 @@ describe("token_exchange — integration", () => {
 		expect(tokenExchangeModule.optional).toContain("grantPolicy");
 	});
 });
+
+describe("absence policy (#375)", () => {
+	it("carries the shared ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY constant, by identity", async () => {
+		// Identity, not shape: the declared-absence guard refuses modules whose
+		// policies for one key disagree; sharing oauthModule's constant makes
+		// disagreement impossible by construction.
+		const { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } = await import("@o3co/auth-provider-core");
+		const { tokenExchangeModule } = await import("#/module.mjs");
+		expect(tokenExchangeModule.absencePolicies?.accessTokenDenylist).toBe(
+			ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+		);
+	});
+});
