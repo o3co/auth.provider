@@ -187,6 +187,10 @@ describe("D-2 / standaloneRedisClientsModule", () => {
 		expect(options?.commandTimeout).toBe(1_000);
 		expect(options?.connectTimeout).toBe(5_000);
 		expect(options?.maxRetriesPerRequest).toBe(3);
+		// `lazyConnect: false` is the driver default, but it is declared in
+		// SHARED_REDIS_TIMEOUTS as a load-bearing decision (connect at boot,
+		// not at first command) — pin it so a future flip has to come here.
+		expect(options?.lazyConnect).toBe(false);
 	});
 
 	it("keeps the offline queue ON, explicitly, because one socket serves every purpose (#286)", async () => {

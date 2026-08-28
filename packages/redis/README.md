@@ -60,7 +60,8 @@ adapter, this package exports `makeIoredisClients(io)`:
 ```ts
 import { Redis } from "ioredis";
 import { createApp } from "@o3co/auth-provider-core";
-import { makeIoredisClients, redisChallengeStoreModule } from "@o3co/auth-provider-redis";
+import { redisChallengeStoreModule } from "@o3co/auth-provider-redis";
+import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 
 const io = new Redis({
     host: "localhost",
@@ -95,8 +96,9 @@ individually instead of spreading.
 ### Failure timing
 
 `makeIoredisClients` derives every client from the one connection you hand it
-and opens none of its own (the exception is `refreshTokenFamilyClient
-.duplicate()`, one per refresh rotation). Connection-level ioredis options are
+and opens none of its own (the exception is
+`refreshTokenFamilyClient.duplicate()`, one per refresh rotation).
+Connection-level ioredis options are
 therefore shared by all eleven purposes, and the ones governing how a partition
 *ends* are the ones worth setting deliberately:
 
