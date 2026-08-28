@@ -120,10 +120,18 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
 }
 
 /**
- * Wrap a single ioredis connection into the 9 typed client wrappers
+ * Wrap a single ioredis connection into the 11 typed client wrappers
  * needed by `@o3co/auth-provider-redis` adapters. Production consumers
  * use this factory in their composition root and spread the result into
  * `bootstrapComponents`.
+ *
+ * Every returned client issues its commands against the one connection passed
+ * in — this factory opens nothing of its own (the sole exception is
+ * `refreshTokenFamilyClient.duplicate()`, which is per rotation, not per
+ * purpose). Connection-level ioredis options are therefore shared by all
+ * eleven purposes, so a composition root that needs different failure timing
+ * for one of them — `enableOfflineQueue: false` on the rate limiter, say —
+ * has to build that purpose off a second connection deliberately (#286).
  *
  * Lives on the `@o3co/auth-provider-redis/ioredis` subpath so that consumers
  * importing the main entry (`@o3co/auth-provider-redis`) do NOT pull

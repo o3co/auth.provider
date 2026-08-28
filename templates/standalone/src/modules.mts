@@ -39,10 +39,13 @@ import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import { redisFederationTokenStoreBuilder } from "@o3co/auth-provider-redis";
 import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
-// Named import is required here, not default. Under `module: "nodenext"`
-// with esModuleInterop, the default import resolves to the entire ioredis
-// CJS module-exports namespace object (because ioredis 5.x ships
-// `export = Redis`), so `new Redis(...)` raises TS2351 "not constructable".
+// Named import is required here, not default. ioredis is CJS and its entry
+// does `module.exports = Redis` with the class re-exported as both `default`
+// and `Redis`; under `module: "nodenext"` with esModuleInterop the default
+// import therefore resolves to the module-exports namespace object rather
+// than the class, and `new Redis(...)` raises TS2351 "not constructable".
+// Still true on ioredis 6 — verified against 6.0.0, not inherited from the
+// ioredis 5 era this note was first written in.
 // The 11 default-import sites elsewhere in the repo all live under
 // `packages/redis/__tests__/` which `packages/redis/tsconfig.json`
 // explicitly excludes from strict tsc build (vitest's vue-tsc is more
@@ -301,10 +304,10 @@ export const storesModule: Module = defineModule({
 
 /**
  * Shared ioredis clients module — opens ONE long-lived ioredis connection
- * per replica, wraps it via `makeIoredisClients()` (returns 9 typed
+ * per replica, wraps it via `makeIoredisClients()` (returns 11 typed
  * per-purpose clients), and exposes the slots consumed by the standalone's
  * Redis-backed adapters (refresh-token-family + 4 user-session stores +
- * rate limiter).
+ * rate limiter + code repository + access-token denylist).
  *
  * Per F4 PR1 (D-2 v2) + Wave 5d unification: the previous design opened a
  * separate ioredis socket per Redis-backed module (3+ sockets per replica).
@@ -407,6 +410,84 @@ export const standaloneRedisClientsModule: Module = defineModule({
 	},
 });
 
+/**
+ * Failure-timing options for the one shared ioredis socket (#286).
+ *
+ * On the driver's defaults this connection had no `commandTimeout` at all, so
+ * a partition did not produce errors — it produced *waiting*. Every `/token`
+ * request that touched Redis parked in the offline queue while the socket
+ * reconnected, and because nothing threw, the `rateLimit.failMode = "closed"`
+ * policy (`createRateLimitGuard`, OR-5) never engaged: it only fires when
+ * `limiter.check()` rejects. The load the policy exists to shed kept arriving
+ * and kept accumulating, and memory and sockets grew until ioredis's 20th
+ * reconnect attempt finally flushed the queue — tens of seconds later.
+ *
+ * The values below are chosen against the actual command surface of this
+ * socket, which is entirely O(1) primitives and small paged scans
+ * (`SET`/`GET`/`DEL`/`EXISTS`/`PTTL`/`INCR`/`EVAL`/`HSCAN`/`SSCAN`/`ZADD`/…).
+ * There is no blocking command here, so no legitimate command has any reason
+ * to take a meaningful fraction of a second.
+ *
+ * - `commandTimeout: 1000` — the hard ceiling on any single command. ioredis
+ *   arms this timer in `sendCommand`, *before* the writability check, so it
+ *   bounds a command that went into the offline queue exactly as it bounds one
+ *   already on the wire. That is what makes the queued case fail rather than
+ *   hang, and it is also the only guard that survives the nastiest partition
+ *   shape: a zombie TCP connection where no `close` event ever fires, so the
+ *   reconnect path described next is never entered at all.
+ * - `maxRetriesPerRequest: 3` — on the fourth reconnect attempt (roughly
+ *   0.4–1 s in on ioredis 6's jittered exponential backoff) the whole queue is
+ *   failed in one go with `MaxRetriesPerRequestError`, rather than on the
+ *   twentieth as the default has it. `commandTimeout` alone bounds each command's
+ *   *latency*, but the queue would still grow to (request rate × 1 s) entries
+ *   for as long as the outage lasted; this bounds its *depth*. Three rather
+ *   than one so an ordinary sub-second reconnect blip is ridden out silently.
+ * - `connectTimeout: 5000` — halves the driver's 10 s default. A dropped SYN
+ *   (a partition that black-holes packets rather than refusing them) is the
+ *   only case that reaches this ceiling; a real connect on any deployment
+ *   topology this template targets completes in well under a second.
+ * - `enableOfflineQueue: true` — the driver default, declared explicitly
+ *   because it is a decision, not an inherited value. See below.
+ * - `lazyConnect: false` — also the driver default (still, on ioredis 6),
+ *   declared so the boot-time-connect contract survives a future flip.
+ *
+ * **Why the offline queue stays on.** Turning it off is the sharper answer for
+ * the rate limiter specifically: a command issued while the socket is down
+ * rejects immediately instead of after `commandTimeout`, so the fail-closed
+ * policy sheds load at the first request rather than one second per request
+ * later. But `enableOfflineQueue` is a per-**connection** option, and this
+ * template runs every purpose off one socket — refresh-token families, the
+ * four user-session stores, the authorization-code repository, the
+ * access-token denylist and the rate limiter all come out of a single
+ * `makeIoredisClients(io)` call (pinned by "one connection in, one connection
+ * used" in `packages/redis/__tests__/ioredis.test.mts`). There is no way to
+ * express "off here, on there" without opening a second socket, which is the
+ * connection-pool pressure the shared-socket design was built to avoid.
+ *
+ * So the choice is one setting for all eleven purposes, and `false` is the
+ * wrong one to pick for all eleven: it converts every reconnect — including
+ * the sub-second blip of a routine managed-Redis failover, during which
+ * ioredis would have recovered transparently — into hard errors on session
+ * lookup, code redemption and refresh rotation. A failed refresh rotation is
+ * not a retryable blip to the end user; it is a re-login.
+ *
+ * `true` costs the rate limiter up to `commandTimeout` of delay before it
+ * starts shedding, and that is the honest trade. It is affordable precisely
+ * because `commandTimeout` exists: the pile-up is now bounded by
+ * (request rate × 1 s) and self-draining, rather than unbounded and growing.
+ * A deployment that wants the sharper behavior gives the rate limiter its own
+ * connection in its own composition root — the per-purpose client interfaces
+ * exist for exactly that, and it is a deliberate second socket rather than a
+ * silent global.
+ */
+const SHARED_REDIS_TIMEOUTS = {
+	commandTimeout: 1_000,
+	connectTimeout: 5_000,
+	maxRetriesPerRequest: 3,
+	enableOfflineQueue: true,
+	lazyConnect: false,
+} as const;
+
 // Module-scoped cache so each `provides.*` factory invocation reuses the
 // same `Redis` instance (and its `makeIoredisClients()` derivation) within
 // a single createApp() invocation. The boot planner calls each `provides`
@@ -443,10 +524,7 @@ function getOrCreateClients(
 	}
 	const password = typeof cfg.password === "string" ? cfg.password : undefined;
 
-	// `lazyConnect: false` is the ioredis 5.x default; the explicit option
-	// documents the boot-time-connect contract so a future ioredis version
-	// flip does not silently change the failure mode.
-	const io = new Redis(cfg.url, { password, lazyConnect: false });
+	const io = new Redis(cfg.url, { password, ...SHARED_REDIS_TIMEOUTS });
 
 	// Attach an error handler so unhandled "error" events do not crash the
 	// process. Initial connection failures surface here; downstream adapter

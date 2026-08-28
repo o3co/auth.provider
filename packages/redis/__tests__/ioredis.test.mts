@@ -354,3 +354,54 @@ describe("makeIoredisClients — MULTI/EXEC reply shapes the check must survive"
 		).rejects.toThrow(/EXECABORT Transaction discarded/);
 	});
 });
+
+describe("makeIoredisClients — one connection in, one connection used", () => {
+	// #286's offline-queue decision rests entirely on this. `enableOfflineQueue`,
+	// `commandTimeout`, `connectTimeout` and `maxRetriesPerRequest` are all
+	// per-CONNECTION ioredis options, so "shed load immediately on the
+	// rate-limiter client, tolerate a reconnect blip everywhere else" is only
+	// expressible if the purposes sit on different sockets. They do not: every
+	// client below issues its commands against the single `Redis` the caller
+	// passed in, and the wrapper opens nothing of its own at construction time.
+	//
+	// If this test has to change, the composition root's timeout comment has to
+	// change with it — that is the whole reason it is pinned here rather than
+	// left as an implementation detail.
+	it("routes every purpose's commands to the passed-in Redis and opens no second socket", async () => {
+		const io = makeFakeIoredis({
+			pttl: vi.fn().mockResolvedValue(1),
+			exists: vi.fn().mockResolvedValue(0),
+			get: vi.fn().mockResolvedValue(null),
+			hset: vi.fn().mockResolvedValue(1),
+			zrange: vi.fn().mockResolvedValue([]),
+			zrem: vi.fn().mockResolvedValue(0),
+			getdel: vi.fn().mockResolvedValue(null),
+			eval: vi.fn().mockResolvedValue(1),
+		} as never);
+		const c = makeIoredisClients(io);
+
+		await c.challengeStoreClient.pttl("ch");
+		await c.accessTokenDenylistClient.exists("jti");
+		await c.replaySeenSetClient.exists("jti");
+		await c.refreshTokenFamilyClient.get("fam");
+		await c.userSessionStoreClient.get("sid");
+		await c.sessionRPRegistryClient.hSet("rp", "f", "v");
+		await c.sessionFamilyIndexClient.zRange("fam-idx", 0, -1);
+		await c.sessionFederationIndexClient.zRem("fed-idx", "m");
+		await c.federationTokenStoreClient.get("ft");
+		await c.rateLimiterClient.incrementWithTtl("token:ip:1.2.3.4", 60);
+		await c.codeRepositoryClient.getDel("code");
+
+		const fake = io as unknown as Record<string, ReturnType<typeof vi.fn>>;
+		for (const method of ["pttl", "exists", "get", "hset", "zrange", "zrem", "getdel", "eval"]) {
+			expect(
+				fake[method],
+				`${method} went somewhere other than the passed-in connection`,
+			).toHaveBeenCalled();
+		}
+		// The one place this wrapper does open its own connection is
+		// `refreshTokenFamilyClient.duplicate()`, per rotation — not per purpose,
+		// and not at construction.
+		expect(fake.duplicate).not.toHaveBeenCalled();
+	});
+});
