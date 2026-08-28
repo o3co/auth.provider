@@ -79,10 +79,15 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 		// so OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED=false reaches the resolved value.
 		// Without the repeated env line, the substitution at reference.conf is
 		// shadowed by the template's literal `true`.
-		// Note: ts.hocon substitutes env vars as strings; the schema (passthrough)
-		// preserves the string. The assertion checks the string form so that
-		// the precedence invariant is testable now; a future schema-coercion PR
-		// (separate from this one) will make this resolve to boolean false.
+		// Note: ts.hocon substitutes env vars as strings, and `oauth.grants` is
+		// `z.object({}).passthrough()` — an open tree each grant module's own
+		// `configSchema` validates — so no shape-walking coercion reaches this
+		// leaf and the string survives to the resolved config. #288 unified the
+		// coercion for every DECLARED boolean in the schema and deliberately
+		// left this one alone: every consumer of a grant's `enabled`
+		// (`GrantRegistry.isEnabled`, `oauthAuthorization`, `oauthSession`)
+		// already reads `true` and `"true"` as enabled and everything else,
+		// `"false"` included, as not-enabled.
 		const config = buildResolvedConfig("development", {
 			OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED: "false",
 		});

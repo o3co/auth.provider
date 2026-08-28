@@ -57,6 +57,75 @@ const MAX_DURATION_SECONDS = 31_536_000;
 /** The same one-year ceiling for the settings expressed in milliseconds. */
 const MAX_DURATION_MS = 31_536_000_000;
 
+/**
+ * The one coercion every env-overridable boolean in this file goes through
+ * (#288).
+ *
+ * HOCON substitutes `${?VAR}` as a **string**, always, so no boolean leaf that
+ * an environment variable can reach may be a bare `z.boolean()`. Two of them
+ * were, and it is worth being precise about why that mostly worked and how it
+ * stopped:
+ *
+ * `@o3co/ts.hocon`'s zod bridge pre-coerces the parsed object against the
+ * schema before `parse` runs, but it only walks what it recognises —
+ * `ZodObject` shapes, array elements, and the optional / nullable / default /
+ * catch / readonly wrappers. Anything else it hands through untouched. So a
+ * bare boolean leaf sitting directly in an object shape got coerced for free,
+ * and the moment that leaf ended up behind something the walker does not
+ * descend into, the free coercion vanished with no other symptom than a boot
+ * failure in the field:
+ *
+ *   - `z.preprocess(...)` compiles to a `ZodPipe`, which the walker does not
+ *     enter. `oauth.jwt` is wrapped that way to catch legacy flat fields, and
+ *     that is what silently broke `OAUTH_JWT_LEGACY_TYP_ACCEPT` — the
+ *     documented override failed boot for *both* `true` and `false`.
+ *   - `z.record(...)` likewise, which is why `federations.<name>.enabled`
+ *     needed the explicit coercion from the start.
+ *
+ * #292 hit the same wall from the other side and wrote it down at
+ * `normalizeTrustProxy`: widening `http.trustProxy` to a union left the bridge
+ * with nothing to coerce towards, so the mapping had to move into the schema.
+ * This is that finding applied to every remaining boolean, so the property is
+ * owned by the field rather than by what happens to be wrapped around it.
+ *
+ * The accepted spellings are deliberately narrow:
+ *
+ *   "true" | "1"        → true
+ *   "false" | "0" | ""  → false
+ *   boolean             → pass-through unchanged
+ *   anything else       → rejected, naming the spellings it accepts
+ *
+ * Case-insensitive and trimmed, because `FOO=True` and a trailing space in a
+ * `.env` file are typing, not intent.
+ *
+ * `""` — an exported-but-empty variable, the shape a `.env` file, a compose
+ * `environment:` entry or a blank ConfigMap key produces — reads as `false`,
+ * matching what `normalizeTrustProxy` already decided for the same input.
+ *
+ * Rejecting the rest is the point. `z.coerce.boolean()` is `Boolean(value)`,
+ * so every non-empty string is `true` — `"false"` included, which would turn
+ * an operator switching a feature off into switching it on. Refusing `"ture"`
+ * outright, loudly, at boot, is the only reading that cannot be silently wrong.
+ * Note this is narrower than the hocon bridge's own vocabulary, which also
+ * takes `yes` / `no` / `on` / `off`: those used to work by accident on the
+ * leaves the bridge could reach, and now fail at boot naming the four
+ * spellings that are real.
+ */
+const coerceBooleanFromEnv = z.preprocess(
+	(val) => {
+		if (typeof val === "boolean") return val;
+		if (typeof val === "string") {
+			const normalized = val.trim().toLowerCase();
+			if (normalized === "true" || normalized === "1") return true;
+			if (normalized === "false" || normalized === "0" || normalized === "") return false;
+		}
+		return val; // rejected below, with a message naming the accepted spellings
+	},
+	z.boolean({
+		error: 'must be one of "true", "false", "1" or "0" (an empty value reads as false)',
+	}),
+);
+
 const rateLimitSchema = z.object({
 	// #282: an empty RATE_LIMIT env var coerces to 0, and a zero window (or a
 	// zero limit) turns the /session/login brute-force guard into a no-op
@@ -233,7 +302,13 @@ const jwtSchemaBase = z.object({
 	// accepts tokens whose `typ` header is absent and emits a deprecation
 	// warning. v0.6+ should set this to false and reject typ-less tokens.
 	// Per the v0.5.1 ADR the literal default lives in `reference.conf`.
-	legacyTypAccept: z.boolean().optional(),
+	//
+	// #288: `coerceBooleanFromEnv`, not `z.boolean()`. This section is wrapped
+	// in `z.preprocess` (see `jwtSchema` below), which the hocon zod bridge
+	// does not descend into — so `OAUTH_JWT_LEGACY_TYP_ACCEPT` arrived here as
+	// the raw substituted string and failed boot for every value an operator
+	// could write.
+	legacyTypAccept: coerceBooleanFromEnv.optional(),
 });
 
 /**
@@ -360,6 +435,12 @@ const NUMERIC_STRING = /^-?[0-9]+(\.[0-9]+)?$/;
  * bridge coerces for a bare boolean leaf. A union gives the bridge nothing to
  * coerce towards, so the mapping has to live here. Without it the sole
  * documented override surface (the env var) could not express a list at all.
+ *
+ * #288 generalised that finding: no env-overridable boolean in this file
+ * relies on the bridge any more. This function stays separate because
+ * `trustProxy` is not a boolean — it reads `1` and `0` as **hop counts**,
+ * where `coerceBooleanFromEnv` reads them as true and false. The two
+ * deliberately diverge; `true` / `false` / `""` agree.
  */
 const normalizeTrustProxy = (raw: unknown): unknown => {
 	if (Array.isArray(raw)) {
@@ -438,33 +519,6 @@ const trustProxySchema = z
 	});
 
 /**
- * Env-var-safe boolean coercion for `enabled` fields.
- *
- * z.coerce.boolean() calls JavaScript's Boolean(value), so any non-empty string
- * (including "false", "no", "0") coerces to true. This is unsafe for env-var
- * overrides where operators set e.g. OAUTH_RESOURCE_INDICATOR_ENABLED=false.
- *
- * This preprocess explicitly maps the common string representations:
- *   "true" | "1"        → true
- *   "false" | "0" | ""  → false
- *   boolean             → pass-through unchanged
- *   other values        → forwarded to z.boolean() which rejects with a type error
- *
- * Used by:
- *  - federation `enabled` fields (fullSectionsSchema)
- *  - oauth.resourceIndicator.enabled (Wave 1 §5.3 / RFC 8707)
- */
-const coerceBooleanFromEnv = z.preprocess((val) => {
-	if (typeof val === "boolean") return val;
-	if (typeof val === "string") {
-		const normalized = val.trim().toLowerCase();
-		if (normalized === "true" || normalized === "1") return true;
-		if (normalized === "false" || normalized === "0" || normalized === "") return false;
-	}
-	return val; // zod rejects with a type error for other values
-}, z.boolean());
-
-/**
  * Minimal always-required config for the auth provider core.
  * Token-only deployments (no session, no federation) only need these sections.
  */
@@ -515,7 +569,13 @@ export const CoreConfigSchema = z.object({
 		// on would refuse every user of every deployment that has not adopted
 		// the field. The verification *flow* stays with the Store; this is only
 		// a gate on what this library issues.
-		requireEmailVerified: z.boolean().optional(),
+		//
+		// #288: `coerceBooleanFromEnv`. `OAUTH_REQUIRE_EMAIL_VERIFIED` reached a
+		// bare `z.boolean()` and worked only because the hocon bridge happens to
+		// coerce a boolean leaf sitting directly in an object shape — a property
+		// of where the field sits, not of the field. Wrapping `oauth` the way
+		// `oauth.jwt` is wrapped would have taken it away silently.
+		requireEmailVerified: coerceBooleanFromEnv.optional(),
 		// #267: `/authorize` refuses a client not marked `firstParty: true` —
 		// one with no `firstParty` field and one carrying an explicit `false`
 		// alike. The `allowUnmarkedClients` migration escape hatch that
@@ -713,7 +773,13 @@ export const fullSectionsSchema = z.object({
 			// unauthenticated and the deployment looks like a login outage with
 			// nothing in the logs.
 			maxAge: z.coerce.number().int().positive().max(MAX_DURATION_MS),
-			secure: z.boolean(),
+			// #288: `coerceBooleanFromEnv`. `SESSION_SECURE=false` is the
+			// override every plain-HTTP local run and the umbrella E2E depend
+			// on, and it reached a bare `z.boolean()` — surviving only because
+			// this section's `.superRefine` leaves it a `ZodObject` the hocon
+			// bridge can still walk into. Reshape the section as a preprocess
+			// and the boot failure appears with nothing here having changed.
+			secure: coerceBooleanFromEnv,
 			sameSite: z.enum(["lax", "none", "strict"]),
 			domain: z.string().nullable(),
 			/**

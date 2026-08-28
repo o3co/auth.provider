@@ -120,6 +120,7 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | Path to PEM private key file |
 | `OAUTH_JWT_PUBLIC_KEY` | — | PEM-encoded public key |
 | `OAUTH_JWT_PUBLIC_KEY_PATH` | — | Path to PEM public key file |
+| `OAUTH_JWT_LEGACY_TYP_ACCEPT` | `false` | Accept tokens whose `typ` header is absent. `false` rejects them, treating a typ-less token as the misconfiguration or downgrade attempt it usually is. Set `true` only for a bounded migration window while v0.4.x tokens are still in circulation. |
 
 **Signing keys are required.** The default algorithm is `EdDSA` and there is no
 key-material default: a deployment that sets none fails at boot naming the keys
@@ -260,9 +261,12 @@ Use values that include the deployment name, for example `tenant-a:ss:`,
 
 | Variable | Default | Description |
 |---|---|---|
-| `ENDPOINTS_LOGIN_URL` | — | URL of the login page (for redirects) |
-| `ENDPOINTS_CLIENT_URL` | — | URL of the client application |
-| `ENDPOINTS_AUTH_CALLBACK_URL` | — | URL of the authorization callback |
+| `ENDPOINTS_LOGIN_URL` | `/login` | URL of the login page (for redirects) |
+
+`ENDPOINTS_CLIENT_URL` and `ENDPOINTS_AUTH_CALLBACK_URL` were removed (IH-10) —
+no production consumer read them, and the config lines leaked values into
+`AppConfig` that nothing consumed. Federation callback URLs are configured
+per-provider (`FEDERATIONS_GOOGLE_CALLBACK_URL`).
 
 ## Module Composition Order
 
