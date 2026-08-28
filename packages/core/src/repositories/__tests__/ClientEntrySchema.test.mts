@@ -233,6 +233,9 @@ describe("ClientEntrySchema — allowedRedirectUris shape (#395)", () => {
 			const message = result.error.issues.map((issue) => issue.message).join("\n");
 			expect(message).toContain("javascript:alert(1)");
 			expect(message).toContain("myapp://cb");
+		}
+	});
+});
 
 describe("ClientEntrySchema — defaultScopes field (#396)", () => {
 	const base = {
