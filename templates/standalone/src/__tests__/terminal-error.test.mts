@@ -74,6 +74,7 @@ describe("terminal error handler (#293 item 8)", () => {
 
 		expect(res.status).toBe(413);
 		expect(res.body.error).toBe("invalid_request");
+		expect(res.body.error_description).toBe("request body too large");
 	});
 
 	it("answers an unexpected route throw with 500 server_error and logs it structurally", async () => {

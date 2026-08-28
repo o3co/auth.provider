@@ -465,17 +465,19 @@ export const createOAuthRouter = async (
 		// RFC 7662: Token Introspection
 		.post(
 			"/introspect",
-			rateLimitGuard("introspect"),
 			(_req, res, next) => {
 				// Every introspection response is token metadata — `active`, and on
 				// the positive path scope/sub/exp — so an intermediary caching one
 				// keeps serving yesterday's liveness after a revocation (#293 item
 				// 2). Same header pair the token endpoint sets on issuance
-				// (RFC 6749 §5.1), applied here once for every exit below.
+				// (RFC 6749 §5.1). Ahead of the rate-limit guard, deliberately: the
+				// guard's own 429/503 exits end the chain without calling next(),
+				// and "every exit" includes those.
 				res.set("Cache-Control", "no-store");
 				res.set("Pragma", "no-cache");
 				next();
 			},
+			rateLimitGuard("introspect"),
 			async (req: Request, res: Response, next) => {
 				// Bearer (RFC 6750 §2.1) or DPoP (RFC 9449 §7.1) — the caller's own
 				// access token used as the introspection credential. Which scheme a

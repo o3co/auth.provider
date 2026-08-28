@@ -50,7 +50,8 @@ export const createTerminalErrorHandler = (logger: Logger): ErrorRequestHandler 
 					? status.statusCode
 					: undefined;
 		if (httpStatus !== undefined && httpStatus >= 400 && httpStatus < 500) {
-			res.status(httpStatus).json(errorEnvelope("invalid_request", "malformed request body"));
+			const description = httpStatus === 413 ? "request body too large" : "malformed request body";
+			res.status(httpStatus).json(errorEnvelope("invalid_request", description));
 			return;
 		}
 		logger.error({ err, endpoint: req.path }, "unhandled_request_error");
