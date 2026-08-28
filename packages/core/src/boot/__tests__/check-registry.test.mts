@@ -68,7 +68,6 @@ describe("stage-1 check registries (#368)", () => {
 			"grant-policy-issuer",
 			"mfa-partial-wiring",
 			"federation-stores-wiring",
-			"access-token-revocation-wiring",
 			"declared-absence",
 			"replica-safety",
 			"route-order-edges",

@@ -15,6 +15,7 @@
  */
 
 import {
+	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
@@ -148,10 +149,14 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
 			"logger", // D-4 — structured logger; falls back to consoleLogger when absent
 		],
-		// #363: `auditSink` is optional to wire, not optional to decide — an
-		// unfilled slot must be declared with audit.sink.type = "none" or boot
-		// refuses, so a composition cannot discard security events silently.
-		absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
+		// #363/#375: optional to wire, not optional to decide. `auditSink`
+		// absence must be declared with audit.sink.type = "none";
+		// `accessTokenDenylist` absence with oauth.revocation.accessToken =
+		// "unsupported" (#277's boot refusal, now expressed as a policy).
+		absencePolicies: {
+			auditSink: AUDIT_SINK_ABSENCE_POLICY,
+			accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+		},
 		contributes: {
 			routes: [
 				// oauth-endpoints — always contributed (Theme D: const shape).

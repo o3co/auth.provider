@@ -39,9 +39,9 @@
  * is a sign the declaration vocabulary is wrong, not that this type needs a
  * callback.
  *
- * `checkAccessTokenRevocationWiring` (#277, "step 13.9") predates this
- * vocabulary and keeps its own reason and details, which A2-β §6.1 pins;
- * folding it onto a policy is tracked in #363. New absence rules start here.
+ * #277's bespoke check ("step 13.9") predated this vocabulary and was
+ * folded onto it by #375: `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` carries its
+ * semantics, and its reason merged into `component-absence-undeclared`.
  */
 export interface AbsencePolicy {
 	/**

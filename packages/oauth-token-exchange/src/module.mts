@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import { defineModule, type GrantHandler, type Module } from "@o3co/auth-provider-core";
+import {
+	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+	defineModule,
+	type GrantHandler,
+	type Module,
+} from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "./grant.mjs";
 import {
@@ -106,6 +111,9 @@ export const tokenExchangeModule: Module = defineModule({
 		"accessTokenDenylist",
 		"subjectRevocation",
 	],
+	// #375: same policy constant as oauthModule — an unfilled denylist slot
+	// must be declared with oauth.revocation.accessToken = "unsupported".
+	absencePolicies: { accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY },
 	contributes: {
 		grants: {
 			[TOKEN_EXCHANGE_GRANT_TYPE]: ((deps: AnyDeps) => createTokenExchangeGrant(deps)) as (

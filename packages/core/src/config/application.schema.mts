@@ -664,23 +664,24 @@ export type AccessTokenRevocationMode = "denylist" | "unsupported";
  * Deliberately undefaulted. The two layers that consume this key resolve
  * omission differently, and both are right:
  *
- * - The **boot validator** decides whether a composition may run at all, so
- *   omission there means `"denylist"`. Every config written before #277 omits
- *   the key, and those are exactly the deployments whose revocation endpoint
- *   was answering 200 with nothing behind it. Defaulting to `"unsupported"`
- *   would keep them booting and keep the promise broken.
+ * - The **boot-time reading** is that omission means `"denylist"`: every
+ *   config written before #277 omits the key, and those are exactly the
+ *   deployments whose revocation endpoint was answering 200 with nothing
+ *   behind it. Since #375 that reading is enforced by
+ *   `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` through the declared-absence
+ *   guard — only an explicit `"unsupported"` at this key excuses an unfilled
+ *   denylist slot — rather than by a bespoke validator stage calling this
+ *   function.
  * - The **revocation router** decides what to answer given what it was handed.
  *   Handed no denylist and no declaration, it cannot revoke access tokens, and
  *   `unsupported_token_type` is the honest answer. It never returns to a 200
  *   that means nothing.
  *
  * A collapsed default would have to pick one of those and be wrong at the
- * other layer, so the resolution stays at the call sites where the reasoning
- * lives.
+ * other layer, so the resolution stays where the reasoning lives.
  *
- * Accepts `unknown` because both callers hold a config whose static type may
- * predate the key: core's boot validator sees the freshly parsed value as
- * `unknown`, and `packages/oauth` reads through its own options shape.
+ * Accepts `unknown` because the caller (`packages/oauth`'s revocation router)
+ * reads through its own options shape, which may predate the key.
  */
 export function readAccessTokenRevocationMode(
 	config: unknown,

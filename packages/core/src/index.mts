@@ -574,6 +574,9 @@ export {
 export { createMemoryAccessTokenDenylist } from "./access-token-denylist/memory.mjs";
 export { memoryAccessTokenDenylistModule } from "./access-token-denylist/module.mjs";
 export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
+// #375: the declared-absence policy the denylist readers share — #277's boot
+// refusal, expressed through the #363 vocabulary instead of a bespoke stage.
+export { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } from "./access-token-denylist/types.mjs";
 
 // SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
 // root because `packages/core/package.json#exports` does not register a

@@ -896,13 +896,18 @@ describe("oauthModule — federation logout via typed deps", () => {
 	});
 });
 
-describe("auditSink absence policy (#363)", () => {
-	it("carries the shared AUDIT_SINK_ABSENCE_POLICY constant, by identity", async () => {
+describe("absence policies (#363, #375)", () => {
+	it("carries the shared policy constants, by identity", async () => {
 		// Identity, not shape: the declared-absence guard refuses modules whose
 		// policies for one key disagree, and sharing the one constant is what
 		// makes disagreement impossible by construction.
-		const { AUDIT_SINK_ABSENCE_POLICY } = await import("@o3co/auth-provider-core");
+		const { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY, AUDIT_SINK_ABSENCE_POLICY } = await import(
+			"@o3co/auth-provider-core"
+		);
 		const manifest = oauthModule({ config: makeValidAppConfig() as never });
 		expect(manifest.absencePolicies?.auditSink).toBe(AUDIT_SINK_ABSENCE_POLICY);
+		expect(manifest.absencePolicies?.accessTokenDenylist).toBe(
+			ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+		);
 	});
 });
