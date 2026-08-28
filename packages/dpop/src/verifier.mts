@@ -42,6 +42,7 @@
  */
 
 import {
+	buildCanonicalRequestUrl,
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type Logger,
@@ -131,34 +132,12 @@ const DEFAULT_REPLAY_TTL_SECONDS = 300;
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Build the effective request URL for htu comparison: the deployment's
- * **configured** origin plus the path the request actually reached.
- *
- * The origin is fixed at construction from `oauth.jwt.issuer` and is
- * deliberately not derived from the request. `req.protocol` and `req.get("host")`
- * read `X-Forwarded-Proto` / `X-Forwarded-Host` under Express `trust proxy`,
- * so reconstructing from them let the caller pick the value its own proof had
- * to match (#292).
- *
- * The path still comes from `req.originalUrl` — the AS serves whatever path it
- * is mounted at, and the query string rides along because `normalizeHtu`
- * strips it uniformly from both sides.
- *
- * String concatenation, never `new URL(path, origin)`: a request target of
- * `//evil.example/token` resolves *relative to* an origin as a
- * protocol-relative URL and would move the host, which is the same spoof
- * arriving through a different door. Concatenated onto an absolute origin the
- * WHATWG parser reads it as the path it is.
- */
-const buildRequestUrl = (issuerOrigin: string, req: Request): string => {
-	const target = req.originalUrl;
-	// Express reports an origin-form target, which always starts with `/`. An
-	// absolute-form target (`GET http://x/ HTTP/1.1`, legal per RFC 9112 §3.2)
-	// would not, and must not be spliced into the authority position.
-	const path = target.startsWith("/") ? target : `/${target}`;
-	return `${issuerOrigin}${path}`;
-};
+// The effective request URL for htu comparison is the configured origin plus
+// `req.originalUrl` — `buildCanonicalRequestUrl`, the shared vocabulary this
+// package's #292 fix established (home: core/src/net/request-url.mts, since
+// #356 grew a second consumer). The origin is fixed at construction from
+// `oauth.jwt.issuer`; the query string rides along because `normalizeHtu`
+// strips it uniformly from both sides.
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -290,7 +269,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			let expectedHtu: string;
 			let presentedHtu: string;
 			try {
-				expectedHtu = normalizeHtu(buildRequestUrl(issuerOrigin, req));
+				expectedHtu = normalizeHtu(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
 				presentedHtu = normalizeHtu(proof.claims.htu);
 			} catch (err) {
 				throw new DPoPError(

@@ -169,9 +169,42 @@ describe("/authorize — unauthenticated session", () => {
 		expect(res.status).toBe(302);
 		const location = res.headers.location as string;
 		expect(location.startsWith("/login?redirect_to=")).toBe(true);
-		expect(decodeURIComponent(location.split("redirect_to=")[1] as string)).toContain(
-			"/oauth/authorize",
+		const redirectTo = decodeURIComponent(location.split("redirect_to=")[1] as string);
+		// #356: the target's origin is the configured issuer — a fixed value
+		// the login page's redirect allowlist can pin exactly.
+		expect(redirectTo.startsWith("https://issuer.example/oauth/authorize?")).toBe(true);
+		expect(redirectTo).toContain(`client_id=${CLIENT_ID}`);
+	});
+
+	it("builds redirect_to from the configured origin, not the Host header (#356)", async () => {
+		const { app } = await makeApp({ session: { isAuthenticated: false } });
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.set("Host", "evil.example")
+			.query(baseQuery);
+		expect(res.status).toBe(302);
+		const redirectTo = decodeURIComponent(
+			(res.headers.location as string).split("redirect_to=")[1] as string,
 		);
+		expect(new URL(redirectTo).origin).toBe("https://issuer.example");
+	});
+
+	it("ignores forwarded proto/host even under `trust proxy` (#356)", async () => {
+		const { app } = await makeApp({ session: { isAuthenticated: false } });
+		// The deployment shape the attack needs: Express trusting its proxy
+		// hop, so `req.protocol` / `req.get("host")` follow whatever forwarded
+		// headers the client sent. The fix never reads them.
+		app.set("trust proxy", true);
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.set("X-Forwarded-Proto", "http")
+			.set("X-Forwarded-Host", "evil.example")
+			.query(baseQuery);
+		expect(res.status).toBe(302);
+		const redirectTo = decodeURIComponent(
+			(res.headers.location as string).split("redirect_to=")[1] as string,
+		);
+		expect(new URL(redirectTo).origin).toBe("https://issuer.example");
 	});
 });
 
