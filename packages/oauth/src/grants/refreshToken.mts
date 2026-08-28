@@ -34,7 +34,7 @@ import {
 } from "./_resourceIndicator.mjs";
 
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
-	const { config, keyStore, logger } = deps;
+	const { config, keyStore, logger, subjectRevocation } = deps;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -87,12 +87,13 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					type: "refresh_token",
 					expectedIssuer: issuer ?? "",
 					legacyTypAccept: config.oauth.jwt.legacyTypAccept ?? false,
-					// #367: deliberate — refresh-token revocation runs off the
-					// family store (`refreshTokenFamilyRevocation`, consulted
-					// below), not the AT jti denylist. Whether the subject
-					// watermark should ALSO gate RT redemption as a
-					// cascade-failure backstop is tracked in #367's follow-up.
-					revocation: "none",
+					// #367/#376: no AT jti denylist here — RT revocation runs off
+					// the family store (`refreshTokenFamilyRevocation`, consulted
+					// below). The subject watermark IS consulted: it is the
+					// backstop for a partial #322 cascade failure, and a rotated
+					// RT carries a fresh `iat`, so only RTs minted before the
+					// credential change are refused.
+					revocation: { subjectRevocation },
 					logger,
 				});
 				tokenPayload = verified.payload;

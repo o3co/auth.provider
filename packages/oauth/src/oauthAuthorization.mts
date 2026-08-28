@@ -118,6 +118,9 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			// caught at runtime by the fail-closed 503 path in
 			// `refreshToken.mts` rather than silently no-op-ing.
 			"refreshTokenFamilyRevocation",
+			// #376: the #296 subject watermark, consulted at RT redemption as
+			// the backstop for a partial credential-change cascade (#322).
+			"subjectRevocation",
 			"grantPolicy",
 			"userSessionStore",
 			"sessionRPRegistry", // Amendment 4 (§1.1.4)
