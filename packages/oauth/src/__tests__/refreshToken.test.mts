@@ -81,16 +81,18 @@ const mockDeps: GrantDependencies = {
 const DEFAULT_CLIENT_ID = "client1";
 
 async function makeRefreshToken(overrides: Record<string, unknown> = {}): Promise<string> {
-	return new SignJWT({ sub: "u1", scope: "read write", ...overrides })
-		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
-		// #376: real RTs carry iat (generateToken sets it), and the subject
-		// watermark compares against it — a fixture without one would skip
-		// the backstop and never exercise it.
-		.setIssuedAt()
-		.setIssuer("localhost")
-		.setAudience(DEFAULT_CLIENT_ID)
-		.setExpirationTime("24h")
-		.sign(secretKey);
+	return (
+		new SignJWT({ sub: "u1", scope: "read write", ...overrides })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			// #376: real RTs carry iat (generateToken sets it), and the subject
+			// watermark compares against it — a fixture without one would skip
+			// the backstop and never exercise it.
+			.setIssuedAt()
+			.setIssuer("localhost")
+			.setAudience(DEFAULT_CLIENT_ID)
+			.setExpirationTime("24h")
+			.sign(secretKey)
+	);
 }
 
 const DEFAULT_AUTH_CLIENT = {
@@ -1629,8 +1631,7 @@ describe("createRefreshTokenGrant", () => {
 
 			// The token passes verification (no watermark rejection); whatever
 			// happens downstream, it is NOT the verifier's invalid_grant.
-			const description =
-				"errorDescription" in result ? result.errorDescription : undefined;
+			const description = "errorDescription" in result ? result.errorDescription : undefined;
 			expect(description).not.toBe("invalid refresh_token");
 		});
 	});
