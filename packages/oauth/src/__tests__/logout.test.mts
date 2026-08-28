@@ -41,14 +41,16 @@ const keyStore = createSymmetricKeyStore(SECRET);
 const secretKey = createSecretKey(Buffer.from(SECRET));
 
 /** Mint an id_token with the given claims. */
-async function mintIdToken(extra: Record<string, unknown> = {}): Promise<string> {
+// #394: new mints carry typ JWT; `typ` stays overridable so the window test
+// below can mint a pre-#394 id+jwt hint.
+async function mintIdToken(extra: Record<string, unknown> = {}, typ = "JWT"): Promise<string> {
 	return new SignJWT({
 		sub: "u-1",
 		aud: "client-1",
 		sid: "sid-1",
 		...extra,
 	})
-		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ })
 		.setExpirationTime("1h")
 		.setIssuedAt()
 		.setIssuer("https://auth.example.com")
@@ -284,6 +286,31 @@ describe("POST /oauth/logout", () => {
 			expect(res.body).toEqual({ logged_out: true });
 			expect(refreshFamilyRevocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+		});
+	});
+
+	describe("#394 dual-accept window (closed by #402)", () => {
+		it("still honors a pre-#394 id_token_hint carrying typ id+jwt", async () => {
+			const sessionStore = makeSessionStore();
+			const app = buildApp({ sessionStore });
+			const token = await mintIdToken({}, "id+jwt");
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ logged_out: true });
+		});
+
+		it("keeps refusing a typ that is neither JWT nor id+jwt", async () => {
+			// The window widens the accepted set by exactly one legacy value —
+			// an at+jwt (or anything else) presented as an id_token_hint is
+			// still cross-type confusion and still refused.
+			const app = buildApp({});
+			const token = await mintIdToken({}, "at+jwt");
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(400);
 		});
 	});
 

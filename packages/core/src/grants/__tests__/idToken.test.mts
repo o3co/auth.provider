@@ -22,7 +22,7 @@ import { generateIdToken } from "../idToken.mjs";
 describe("generateIdToken", () => {
 	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
 
-	it("emits typ: id+jwt header", async () => {
+	it("emits typ: JWT header (#394 — standard spelling, disjoint from at+jwt)", async () => {
 		const { token } = await generateIdToken({
 			sub: "u-1",
 			aud: "client-1",
@@ -33,7 +33,7 @@ describe("generateIdToken", () => {
 			keyStore,
 			issuer: "https://auth.example.com",
 		});
-		expect(decodeProtectedHeader(token).typ).toBe("id+jwt");
+		expect(decodeProtectedHeader(token).typ).toBe("JWT");
 	});
 
 	it("carries the required OIDC claims (iss, sub, aud, exp, iat, auth_time, sid)", async () => {

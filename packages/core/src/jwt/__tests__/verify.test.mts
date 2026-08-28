@@ -95,6 +95,45 @@ const baseOptions: JwtVerifyOptions = {
 	expectedAudience: TEST_AUDIENCE,
 };
 
+describe("verifyJwt — the #394 id_token typ window (closed by #402)", () => {
+	const keyStore = makeKeyStore();
+	it('accepts typ "JWT" as the id_token default', async () => {
+		const jwt = await signValidAccessToken({ typ: "JWT" }, keyStore);
+		const verified = await verifyJwt(jwt, keyStore, { ...baseOptions, type: "id_token" });
+		expect(verified.header.typ).toBe("JWT");
+	});
+
+	it('accepts the pre-#394 "id+jwt" for id_token, warning on each acceptance', async () => {
+		const warn = vi.fn();
+		const logger = { warn, error: vi.fn(), info: vi.fn(), debug: vi.fn() } as unknown as Logger;
+		const jwt = await signValidAccessToken({ typ: "id+jwt" }, keyStore);
+		const verified = await verifyJwt(jwt, keyStore, {
+			...baseOptions,
+			type: "id_token",
+			logger,
+		});
+		expect(verified.header.typ).toBe("id+jwt");
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ reason: "typ", typ: "id+jwt", expectedTyp: "JWT" }),
+			"jwt_verify_legacy_id_token_typ",
+		);
+	});
+
+	it("does not widen any other type: id+jwt still fails an access_token surface", async () => {
+		const jwt = await signValidAccessToken({ typ: "id+jwt" }, keyStore);
+		await expect(
+			verifyJwt(jwt, keyStore, { ...baseOptions, type: "access_token" }),
+		).rejects.toThrow(/typ/);
+	});
+
+	it("does not accept a third spelling on id_token: at+jwt is still cross-type confusion", async () => {
+		const jwt = await signValidAccessToken({ typ: "at+jwt" }, keyStore);
+		await expect(verifyJwt(jwt, keyStore, { ...baseOptions, type: "id_token" })).rejects.toThrow(
+			/typ/,
+		);
+	});
+});
+
 describe("verifyJwt", () => {
 	it("Test 1 — rejects alg=none JWT with reason=alg", async () => {
 		const keyStore = makeKeyStore();

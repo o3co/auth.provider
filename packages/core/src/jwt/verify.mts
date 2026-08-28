@@ -213,8 +213,21 @@ export interface VerifiedJwt {
 const DEFAULT_TYP_BY_TYPE: Record<JwtType, string> = {
 	access_token: "at+jwt",
 	refresh_token: "rt+jwt",
-	id_token: "id+jwt",
+	// #394: the standard spelling. What token-confusion refusal needs is
+	// "disjoint from at+jwt", which `JWT` satisfies; the nonstandard `id+jwt`
+	// bought nothing but failed strict external RPs that validate `typ`.
+	id_token: "JWT",
 };
+
+/**
+ * The pre-#394 id_token `typ`, accepted alongside `JWT` during the migration
+ * window — id_tokens already in the wild carry it, and a logout that stops
+ * honoring their `id_token_hint` mid-session is a worse bug than the spelling.
+ * Every legacy acceptance logs `jwt_verify_legacy_id_token_typ`; #402 closes
+ * the window (one refresh-token lifetime after the flip ships, once that log
+ * line has gone quiet).
+ */
+const LEGACY_ID_TOKEN_TYP = "id+jwt";
 
 /**
  * Maps the v0.3-era `payload.type` legacy claim back to a {@link JwtType}.
@@ -315,6 +328,16 @@ export async function verifyJwt(
 				emitRejection(logger, err, undefined, header);
 				throw err;
 			}
+		} else if (
+			type === "id_token" &&
+			effectiveExpectedTyp === DEFAULT_TYP_BY_TYPE.id_token &&
+			headerTyp === LEGACY_ID_TOKEN_TYP
+		) {
+			// #394 migration window — see LEGACY_ID_TOKEN_TYP; closed by #402.
+			logger?.warn(
+				{ reason: "typ", typ: headerTyp, expectedTyp: effectiveExpectedTyp },
+				"jwt_verify_legacy_id_token_typ",
+			);
 		} else if (headerTyp !== effectiveExpectedTyp) {
 			const err = new JwtVerificationError(
 				"typ",
