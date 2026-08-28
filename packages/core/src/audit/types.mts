@@ -29,10 +29,13 @@ import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
  * without listing it here fails CI, and so does keeping a name here after
  * its last emission site is removed.
  *
- * The naming convention is `subject.outcome` (dots between segments,
- * `snake_case` within one): `authorize.granted`, `rate_limit.unavailable`,
- * `federation.token.family_revoked`. Consumers MAY emit custom event types;
- * namespace them so they cannot collide with future entries here.
+ * The naming convention is dot-separated segments, most specific last and
+ * `snake_case` within one segment — two segments for a plain
+ * subject-and-outcome (`authorize.granted`, `rate_limit.unavailable`),
+ * more when the subject itself is namespaced
+ * (`federation.token.family_revoked`, `token.issued.failure`). Consumers
+ * MAY emit custom event types; namespace them so they cannot collide with
+ * future entries here.
  */
 export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"authorize.granted",

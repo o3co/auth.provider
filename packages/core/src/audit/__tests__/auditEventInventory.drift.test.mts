@@ -36,7 +36,7 @@ import { type Dirent, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { BUILT_IN_AUDIT_EVENT_TYPES } from "../types.mjs";
+import { BUILT_IN_AUDIT_EVENT_TYPES } from "#/audit/types.mjs";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../../../../..");
 
@@ -67,15 +67,24 @@ function walk(dir: string, out: string[]): void {
 }
 
 /**
- * Every `type: "..."` literal within an `emitAuditEvent(` or `.record(`
- * call's argument window. The window is generous (600 chars) because the
- * event literal is usually the first field but not always the first line.
+ * Every `type: "..."` literal within an emission call's argument window.
+ * The window is generous (600 chars) because the event literal is usually
+ * the first field but not always the first line.
+ *
+ * The receiver pattern is deliberately narrow — `emitAuditEvent(` (the
+ * helper every module-side emission goes through) and `sink.record(` (the
+ * direct calls inside the audit plumbing itself) — because a bare
+ * `\.record\(` also matches `z.record(`, and a schema definition sitting
+ * near an unrelated `type: "..."` literal would poison the inventory.
+ * A new emission spelled differently shows up as a missing-inventory
+ * failure the moment its event is added to the constant, so the narrowness
+ * cannot hide events silently.
  */
 function emittedEventTypes(): ReadonlySet<string> {
 	const found = new Set<string>();
 	for (const file of listShippedSources()) {
 		const source = readFileSync(file, "utf8");
-		for (const call of source.matchAll(/(?:emitAuditEvent|\.record)\(/g)) {
+		for (const call of source.matchAll(/(?:emitAuditEvent|\bsink\.record)\(/g)) {
 			const windowText = source.slice(call.index, (call.index ?? 0) + 600);
 			const literal = /type:\s*"([^"]+)"/.exec(windowText);
 			if (literal?.[1]) found.add(literal[1]);
