@@ -276,9 +276,29 @@ function resolveScope(
 			errorDescription: string;
 	  } {
 	const allowed = client.allowedScopes ?? [];
+	// #396: an omitted scope draws on the client's DECLARED default, never on
+	// the whole allowlist — "forgot to send scope" used to be the maximum
+	// grant. A client with no defaultScopes and a non-empty allowlist answers
+	// invalid_scope (deny-by-absence); an empty allowlist keeps the empty
+	// grant, since there is nothing to over-grant.
+	const omittedScopeGrant = ():
+		| { scopes: readonly string[] }
+		| { status: 400; error: "invalid_scope"; errorDescription: string } => {
+		if (client.defaultScopes !== undefined) {
+			// Filtered even so: schema-validated registrations are ⊆ by boot,
+			// custom repositories are under no such obligation.
+			return { scopes: client.defaultScopes.filter((s) => allowed.includes(s)) };
+		}
+		if (allowed.length === 0) return { scopes: [] };
+		return {
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "scope is required: this client declares no defaultScopes",
+		};
+	};
 	const requestedRaw = ctx.body.scope;
 	if (requestedRaw === undefined) {
-		return { scopes: allowed };
+		return omittedScopeGrant();
 	}
 	// RFC 6749 §3.3: `scope` MUST be a single space-delimited string when
 	// present. A non-string value (e.g. an array materialized by Express'
@@ -293,7 +313,7 @@ function resolveScope(
 		};
 	}
 	if (requestedRaw.trim() === "") {
-		return { scopes: allowed };
+		return omittedScopeGrant();
 	}
 	// RFC 6749 §3.3 ABNF: scope-token delimiter is a single SP (0x20).
 	// Match sibling grants (`refreshToken.mts`, `routes.mts`) on the literal

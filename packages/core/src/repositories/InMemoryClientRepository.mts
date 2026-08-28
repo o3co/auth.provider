@@ -84,6 +84,12 @@ export const ClientEntrySchema = z
 			)
 			.default([]),
 		allowedScopes: z.array(z.string()).default([]),
+		// #396: what an omitted `scope` parameter grants. Optional — absent plus a
+		// non-empty allowlist makes a scope-omitting request `invalid_scope`
+		// (deny-by-absence; the old behavior granted the ENTIRE allowlist). Held
+		// to ⊆ allowedScopes by the superRefine below: a default the allowlist
+		// would refuse is a misconfiguration, not a grant.
+		defaultScopes: z.array(z.string()).optional(),
 		allowedAudiences: z.array(z.string()).default([]),
 		// Wave 1 §3.4.1: per-client grant type allowlist. Absent means no restriction on
 		// existing grants (authorization_code, refresh_token). Grants that declare
@@ -136,6 +142,19 @@ export const ClientEntrySchema = z
 	})
 	.strict()
 	.superRefine((data, ctx) => {
+		// #396: defaultScopes ⊆ allowedScopes, at boot. An entry outside the
+		// allowlist could never be granted to a scope-CARRYING request; letting
+		// it ride the omitted-scope path would make omission the wider grant.
+		if (data.defaultScopes !== undefined) {
+			const outside = data.defaultScopes.filter((s) => !data.allowedScopes.includes(s));
+			if (outside.length > 0) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `defaultScopes entries not in allowedScopes: ${outside.join(" ")}`,
+					path: ["defaultScopes"],
+				});
+			}
+		}
 		// D-6 (v0.5.1): the discriminator must select the right credential shape.
 		// Confidential clients (basic / post) must carry a secret; public clients
 		// (`"none"`) MUST NOT — accepting a secret on a `"none"` client would leave
@@ -193,6 +212,7 @@ export class InMemoryClientRepository implements ClientRepository {
 			tokenEndpointAuthMethod: entry.tokenEndpointAuthMethod,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
+			defaultScopes: entry.defaultScopes,
 			allowedAudiences: entry.allowedAudiences,
 			...(entry.allowedGrantTypes !== undefined && {
 				allowedGrantTypes: entry.allowedGrantTypes,
@@ -254,6 +274,7 @@ export class InMemoryClientRepository implements ClientRepository {
 			tokenEndpointAuthMethod: entry.tokenEndpointAuthMethod,
 			allowedRedirectUris: entry.allowedRedirectUris,
 			allowedScopes: entry.allowedScopes,
+			defaultScopes: entry.defaultScopes,
 			allowedAudiences: entry.allowedAudiences,
 			...(entry.allowedGrantTypes !== undefined && {
 				allowedGrantTypes: entry.allowedGrantTypes,

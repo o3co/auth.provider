@@ -69,6 +69,8 @@ const CC_CLIENT: AuthenticatedClient = {
 	tokenEndpointAuthMethod: "client_secret_basic",
 	allowedGrantTypes: ["client_credentials"],
 	allowedScopes: ["read:res"],
+	// #396: the old implicit omitted-scope grant, now declared.
+	defaultScopes: ["read:res"],
 	allowedAudiences: [API, OTHER],
 };
 
@@ -147,6 +149,8 @@ const makeRefreshCtx = (
 		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedGrantTypes: ["refresh_token"],
 		allowedScopes: ["read", "write"],
+		// #396: the old implicit omitted-scope grant, now declared.
+		defaultScopes: ["read", "write"],
 		allowedAudiences: [API, OTHER],
 	},
 });
@@ -208,6 +212,8 @@ const makeAuthzCtx = (body: Record<string, unknown> = {}): GrantContext => ({
 		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedGrantTypes: ["authorization_code"],
 		allowedScopes: ["read:res"],
+		// #396: the old implicit omitted-scope grant, now declared.
+		defaultScopes: ["read:res"],
 		allowedAudiences: [API, OTHER],
 	},
 });

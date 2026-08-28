@@ -60,6 +60,8 @@ const clientRepo: ClientRepository = (() => {
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
 		allowedRedirectUris: [],
 		allowedScopes: ["read"],
+		// #396: the old implicit omitted-scope grant, now declared.
+		defaultScopes: ["read"],
 		allowedAudiences: ["https://api.example"],
 		allowedGrantTypes: ["client_credentials"],
 	};

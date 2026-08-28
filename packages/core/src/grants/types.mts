@@ -55,6 +55,12 @@ export interface AuthenticatedClient {
 	 */
 	readonly allowedScopes?: readonly string[];
 	/**
+	 * What an omitted `scope` grants (#396) — mirrored from the client
+	 * registration. Absent + non-empty `allowedScopes` means a scope-omitting
+	 * request answers `invalid_scope` instead of receiving the whole ceiling.
+	 */
+	readonly defaultScopes?: readonly string[];
+	/**
 	 * Per-client grant-type gate, mirrored from the client registration by
 	 * `clientAuthMw`. Enforced **centrally** by `isGrantTypeAllowed` at grant
 	 * dispatch and at `/authorize`, so every grant inherits the check (#268);

@@ -89,6 +89,8 @@ const clientRepo = new InMemoryClientRepository(
 				tokenEndpointAuthMethod: "client_secret_basic" as const,
 				allowedRedirectUris: [],
 				allowedScopes: ["read"],
+				// #396: the old implicit omitted-scope grant, now declared.
+				defaultScopes: ["read"],
 				// AT audience defaults to allowedAudiences[0]; introspect's
 				// expectedAudience is the calling client's clientId. Align
 				// them so the AT introspects as active.

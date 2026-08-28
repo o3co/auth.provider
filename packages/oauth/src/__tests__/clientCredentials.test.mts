@@ -44,6 +44,8 @@ function makeClient(overrides: Partial<AuthenticatedClient> = {}): Authenticated
 		clientId: CLIENT_ID,
 		tokenEndpointAuthMethod: "client_secret_basic",
 		allowedScopes: ["read:foo", "write:foo"],
+		// #396: the old implicit omitted-scope grant, now declared.
+		defaultScopes: ["read:foo", "write:foo"],
 		allowedAudiences: ["https://rs"],
 		allowedGrantTypes: ["client_credentials"],
 		...overrides,
@@ -119,16 +121,42 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect(payload.scope).toBe("read:foo");
 	});
 
-	it("defaults scope to allowedScopes when scope is omitted", async () => {
+	// #396: an omitted scope draws on the client's DECLARED default — never on
+	// the whole allowlist, which made "forgot to send scope" the maximum grant.
+	it("grants defaultScopes when scope is omitted and the client declares them", async () => {
 		const handler = createClientCredentialsGrant(baseDeps);
-		const client = makeClient({ allowedScopes: ["s1", "s2"] });
+		const client = makeClient({ allowedScopes: ["s1", "s2"], defaultScopes: ["s1"] });
 
 		const { result } = await handler.handle(makeCtx(client));
 
 		expect(result.status).toBe(200);
 		if (!("tokens" in result)) throw new Error("expected tokens in result");
 		const payload = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
-		expect(payload.scope).toBe("s1 s2");
+		expect(payload.scope).toBe("s1");
+	});
+
+	it("returns 400 invalid_scope when scope is omitted and no defaultScopes are declared", async () => {
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedScopes: ["s1", "s2"], defaultScopes: undefined });
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(400);
+		if (!("error" in result)) throw new Error("expected error in result");
+		expect(result.error).toBe("invalid_scope");
+	});
+
+	it("keeps the empty grant for a scope-less client (empty allowlist, no defaults)", async () => {
+		// The carve-out: nothing to over-grant, so scope-less deployments work.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedScopes: [], defaultScopes: undefined });
+
+		const { result } = await handler.handle(makeCtx(client));
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+		expect(payload.scope).toBeUndefined();
 	});
 
 	it("returns 400 invalid_scope when requested scope is not in allowedScopes", async () => {
