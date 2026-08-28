@@ -37,8 +37,15 @@ export interface GenerateIdTokenOptions {
  *   - nonce (when provided by the authorize request)
  *   - scope-filtered user claims via {@link filterClaimsByScope}
  *
- * Header: `typ: "id+jwt"` (RFC 9068 is at+jwt; id_token is in the OIDC family but
- * we use typ for introspection convenience — the header is a hint, not spec-mandated).
+ * Header: `typ: "id+jwt"`. Not a hint: this value is **load-bearing**. The
+ * logout endpoint's SF-1 check pins `id_token_hint` to exactly this `typ`
+ * (`oauth/src/routes/logout.mts`), and every at+jwt-pinned surface (userinfo,
+ * introspection, the central verifier) relies on it being disjoint from
+ * RFC 9068's `at+jwt` to refuse an id_token presented as an access token.
+ * The spelling is nonstandard — strict external RPs that validate `typ`
+ * expect `JWT` or none (#293 item 9) — but changing it is a coordinated
+ * migration (mint + logout pin + a dual-accept window for tokens already in
+ * the wild), not an edit here.
  */
 export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token> {
 	const now = Math.floor(Date.now() / 1000);

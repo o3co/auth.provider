@@ -338,7 +338,10 @@ describe("createOAuthRouter", () => {
 			expect(failEvent?.clientId).toBe(TEST_CLIENT_ID);
 		});
 
-		it("missing grant_type: returns 400 unsupported_grant_type + audit failure", async () => {
+		// #293 item 10: a missing required parameter is `invalid_request`
+		// (RFC 6749 §5.2); `unsupported_grant_type` is for a value the server
+		// does not support.
+		it("missing grant_type: returns 400 invalid_request + audit failure", async () => {
 			// Covers the early `if (typeof grant_type !== "string" ...)` branch.
 			const events: AuditEvent[] = [];
 			const auditSink: AuditSink = {
@@ -359,7 +362,7 @@ describe("createOAuthRouter", () => {
 				.type("form")
 				.send({}); // no grant_type
 			expect(res.status).toBe(400);
-			expect(res.body.error).toBe("unsupported_grant_type");
+			expect(res.body.error).toBe("invalid_request");
 			await new Promise((r) => setImmediate(r));
 			expect(events.find((e) => e.type === "token.issued.failure")).toBeDefined();
 		});
