@@ -309,6 +309,11 @@ make test
 
 The `docker-compose.yml` starts the auth server together with a Redis container. Configure environment variables in `.env`.
 
+The image installs with `pnpm install --frozen-lockfile`, so a committed
+`pnpm-lock.yaml` is a required build input — `create-auth-provider` generates
+one at scaffold time; if yours is missing, run `pnpm install` once and commit
+the result. Rebuilding the same source then produces the same dependency tree.
+
 The production image sets `ENV HTTP_PORT=3000` and uses it for both `EXPOSE`
 and the Docker-native healthcheck against `/_healthcheck`. The HOCON config
 also reads `${?HTTP_PORT}` for `http.port`, so `app.listen()` and the

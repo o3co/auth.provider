@@ -229,11 +229,34 @@ describe("standalone smoke test", () => {
 		expect(dockerfile).toMatch(
 			/CMD\s+wget\s+-q\s+-O\s+\/dev\/null\s+"http:\/\/localhost:[$]\{HTTP_PORT\}\/_healthcheck"\s+\|\|\s+exit\s+1/,
 		);
-		expect(dockerfile).toMatch(/FROM node-base AS deps[\s\S]*USER node[\s\S]*RUN pnpm install/);
-		expect(dockerfile).toMatch(/FROM deps AS builder[\s\S]*USER node[\s\S]*RUN pnpm run build/);
 		expect(dockerfile).toMatch(
-			/FROM node-base AS runtime[\s\S]*USER node[\s\S]*RUN pnpm install --prod/,
+			/FROM node-base AS deps[\s\S]*USER node[\s\S]*RUN pnpm install --frozen-lockfile/,
 		);
+		expect(dockerfile).toMatch(/FROM deps AS builder[\s\S]*USER node[\s\S]*RUN pnpm run build/);
+		// #289: dependencies are resolved exactly once, in `deps`. The runtime
+		// stage must take its node_modules from a prune of that same tree — a
+		// second `pnpm install` would be a second resolution, so its absence
+		// after the runtime FROM is part of the contract.
+		expect(dockerfile).toMatch(
+			/FROM deps AS prod-deps[\s\S]*USER node[\s\S]*RUN pnpm prune --prod/,
+		);
+		expect(dockerfile).toMatch(
+			/FROM node-base AS runtime[\s\S]*COPY --from=prod-deps[\s\S]*USER node/,
+		);
+		expect(dockerfile.slice(dockerfile.indexOf("FROM node-base AS runtime"))).not.toContain(
+			"pnpm install",
+		);
+	});
+
+	it("Dockerfile pins its mutable build inputs (#289)", () => {
+		// Base image by digest — the tag alone is a moving pointer, and
+		// Dependabot's docker ecosystem bumps tag and digest together.
+		expect(dockerfile).toMatch(/FROM node:24-alpine@sha256:[0-9a-f]{64} AS node-base/);
+		// Global corepack by version — `npm install -g corepack` with no pin
+		// resolved whatever was latest at build time.
+		expect(dockerfile).toMatch(/npm install -g corepack@\d+\.\d+\.\d+ --force/);
+		// The lockfile is a required build input for --frozen-lockfile.
+		expect(dockerfile).toMatch(/COPY --chown=node:node package\.json pnpm-lock\.yaml/);
 	});
 
 	it("GET /_healthcheck returns 200", async () => {

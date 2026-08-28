@@ -2,8 +2,22 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:f
 import { tmpdir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isValidDirName, isValidProjectName, main, scaffold } from "../index.mjs";
+import { generateLockfile, isValidDirName, isValidProjectName, main, scaffold } from "../index.mjs";
 import { shouldCopyTemplateEntry } from "../internal/template-filter.mjs";
+
+// generateLockfile shells out to a package manager. Every test in this file
+// drives that boundary through the mock: the suite must never touch the
+// network, and the monorepo's own template pins `workspace:*` placeholders
+// that no registry can resolve anyway.
+const { spawnSyncMock } = vi.hoisted(() => ({ spawnSyncMock: vi.fn() }));
+vi.mock("node:child_process", () => ({ spawnSync: spawnSyncMock }));
+
+const enoent = (bin: string) => Object.assign(new Error(`spawn ${bin} ENOENT`), { code: "ENOENT" });
+
+beforeEach(() => {
+	spawnSyncMock.mockReset();
+	spawnSyncMock.mockReturnValue({ status: 0, signal: null });
+});
 
 // Both POSIX and Windows separators are exercised explicitly so the suite
 // validates the separator-relative segment logic regardless of the host
@@ -226,6 +240,79 @@ describe("isValidDirName", () => {
 	});
 });
 
+describe("generateLockfile", () => {
+	const LOCKFILE_ARGS = ["install", "--lockfile-only", "--ignore-workspace"];
+
+	it("resolves the dependency graph with pnpm in the target directory", () => {
+		const result = generateLockfile("/tmp/target");
+
+		expect(result.ok).toBe(true);
+		expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+		const [bin, args, options] = spawnSyncMock.mock.calls[0];
+		expect(bin).toBe("pnpm");
+		expect(args).toEqual(LOCKFILE_ARGS);
+		expect(options.cwd).toBe("/tmp/target");
+		// A scaffolded project must get its OWN lockfile even when the target
+		// directory happens to sit inside somebody else's pnpm workspace.
+		expect(args).toContain("--ignore-workspace");
+	});
+
+	it("falls back to corepack when pnpm is not on PATH", () => {
+		spawnSyncMock
+			.mockReturnValueOnce({ error: enoent("pnpm") })
+			.mockReturnValueOnce({ status: 0, signal: null });
+
+		const result = generateLockfile("/tmp/target");
+
+		expect(result.ok).toBe(true);
+		expect(spawnSyncMock).toHaveBeenCalledTimes(2);
+		const [bin, args] = spawnSyncMock.mock.calls[1];
+		expect(bin).toBe("corepack");
+		expect(args).toEqual(["pnpm", ...LOCKFILE_ARGS]);
+	});
+
+	it("does not retry with corepack when pnpm ran and failed", () => {
+		// A non-zero exit means resolution failed (offline, private registry,
+		// unpublished version). Running the same resolution through a second
+		// launcher would fail identically and only doubles the wait.
+		spawnSyncMock.mockReturnValue({ status: 1, signal: null });
+
+		const result = generateLockfile("/tmp/target");
+
+		expect(result.ok).toBe(false);
+		expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+	});
+
+	it("does not retry with corepack when launching pnpm failed for any other reason", () => {
+		// ENOENT is "this binary is not on PATH", which the next launcher can
+		// answer. EACCES is not: pnpm IS there and could not be executed, and
+		// retrying would both hide that and hand the operator the wrong
+		// instruction ("install pnpm") for a permissions problem.
+		spawnSyncMock.mockReturnValue({
+			error: Object.assign(new Error("spawn pnpm EACCES"), { code: "EACCES" }),
+		});
+
+		const result = generateLockfile("/tmp/target");
+
+		expect(result.ok).toBe(false);
+		expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+		if (result.ok) throw new Error("unreachable");
+		expect(result.reason).toMatch(/EACCES/);
+	});
+
+	it("reports failure when no package manager can be launched", () => {
+		spawnSyncMock
+			.mockReturnValueOnce({ error: enoent("pnpm") })
+			.mockReturnValueOnce({ error: enoent("corepack") });
+
+		const result = generateLockfile("/tmp/target");
+
+		expect(result.ok).toBe(false);
+		if (result.ok) throw new Error("unreachable");
+		expect(result.reason).toMatch(/pnpm/);
+	});
+});
+
 describe("main (argv parsing and directory derivation)", () => {
 	let cwdBackup: string;
 	let workdir: string;
@@ -303,6 +390,25 @@ describe("main (argv parsing and directory derivation)", () => {
 		expect(r.exitCode).toBe(0);
 		const pkg = JSON.parse(readFileSync(join(workdir, "custom", "package.json"), "utf-8"));
 		expect(pkg.name).toBe("my-auth");
+	});
+
+	// #289: the scaffold resolves the new project's lockfile by default…
+	it("generates a lockfile in the scaffolded project by default", () => {
+		const r = runMain(["my-auth"]);
+		expect(r.exitCode).toBe(0);
+		expect(spawnSyncMock).toHaveBeenCalledTimes(1);
+		const [, , options] = spawnSyncMock.mock.calls[0];
+		// process.cwd() is still `workdir` here (afterEach restores it later),
+		// and comparing through it sidesteps mkdtemp's /var → /private/var
+		// symlink on macOS.
+		expect(options.cwd).toBe(join(process.cwd(), "my-auth"));
+	});
+
+	// …and --no-lockfile is the opt-out.
+	it("--no-lockfile skips lockfile generation", () => {
+		const r = runMain(["my-auth", "--no-lockfile"]);
+		expect(r.exitCode).toBe(0);
+		expect(spawnSyncMock).not.toHaveBeenCalled();
 	});
 
 	// Positive: flags may come before the positional
