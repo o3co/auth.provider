@@ -16,6 +16,7 @@
 
 import {
 	type AuditSink,
+	buildCanonicalRequestUrl,
 	type ClientRepository,
 	type CodeRepository,
 	emitAuditEvent,
@@ -703,10 +704,20 @@ const redirectWithCode = async (ctx: AuthorizeContext, code: string): Promise<Re
  * same audit payloads.
  */
 export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHandler => {
+	// #356: the login round-trip target is built from the deployment's
+	// configured origin plus `req.originalUrl` — never `req.protocol` +
+	// `Host`, which follow `X-Forwarded-Proto` / the client's `Host` under
+	// `trust proxy` and made `redirect_to` an open redirect the caller aims.
+	// Same door #292 closed for the DPoP htu; `buildCanonicalRequestUrl`
+	// (core/src/net/request-url.mts) is the shared vocabulary. Resolved once
+	// here so a hand-built config whose issuer cannot name an origin fails at
+	// composition, not per request (`checkCanonicalIssuer` already vouched for
+	// schema-validated deployments at router creation).
+	const issuerOrigin = new URL(opts.issuer).origin;
 	return async (req: Request, res: Response) => {
 		if (!req.session.isAuthenticated) {
 			return res.redirect(
-				`${opts.loginUrl()}?redirect_to=${encodeURIComponent(`${req.protocol}://${req.get("host")}${req.originalUrl}`)}`,
+				`${opts.loginUrl()}?redirect_to=${encodeURIComponent(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl))}`,
 			);
 		}
 

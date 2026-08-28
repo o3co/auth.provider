@@ -35,6 +35,7 @@ second definition it was never shown; a drift guard can.
 | --- | --- | --- | --- | --- |
 | Loopback hostname — "http:// is accepted for loopback hosts only" carve-outs | `packages/core/src/net/loopback.mts` | foundation `checkSecureEndpoint` (#285), session `checkRedirectShape` (#278) | #364 | yes |
 | Trusted-proxy address vocabulary — "is this hop one of ours?" | `packages/core/src/net/trusted-proxy.mts` | `http.trustProxy` schema, mtls `trusted-proxies` (#280) | #292 | yes |
+| Canonical request URL — "the URL this request reached": configured origin + `req.originalUrl`, never `req.protocol` + `Host` | `packages/core/src/net/request-url.mts` | dpop htu comparison (#292), oauth `/authorize` login round-trip (#356) | #292, #356 | yes |
 | cnf / token-binding comparison matrix | `packages/core/src/grants/confirmationMatch.mts` | oauth refresh grant, token-exchange, protected-resource binding, introspection | #324 | yes |
 | Rate-limit guard — check + outage policy for security throttles | `packages/core/src/ratelimit/guard.mts` | `/oauth/token` `/oauth/authorize` `/oauth/introspect`, `/session/login`, webauthn options | #325 | yes |
 | Canonical issuer — what `oauth.jwt.issuer` may be | `packages/core/src/issuer/canonical.mts` | config schema, oauth router re-check | unreleased (issuer-required fix) | no (single consumer signature) |

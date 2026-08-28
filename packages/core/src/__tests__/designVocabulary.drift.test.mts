@@ -70,6 +70,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+(?:checkTrustedProxyEntry|createTrustedProxyMatcher)\b/,
 	},
 	{
+		concept: "canonical request URL (#292, #356)",
+		home: "packages/core/src/net/request-url.mts",
+		definition: /(?:function|const)\s+buildCanonicalRequestUrl\b/,
+	},
+	{
 		concept: "cnf/token-binding comparison matrix (#324)",
 		home: "packages/core/src/grants/confirmationMatch.mts",
 		definition: /(?:function|const)\s+matchConfirmation\b/,

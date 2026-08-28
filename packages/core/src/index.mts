@@ -337,6 +337,13 @@ export {
 // Exported so consumers import or re-export it rather than defining a copy;
 // the designVocabulary drift guard fails any second definition.
 export { isLoopbackHostname } from "./net/loopback.mjs";
+// The single canonical-request-URL vocabulary (#292, #356) — "the URL this
+// request reached" is the configured origin plus `req.originalUrl`, never
+// `req.protocol` + the `Host` header (attacker-influenced under
+// `trust proxy`). DPoP htu comparison and the /authorize login round-trip
+// both consume this; the designVocabulary drift guard fails any second
+// definition.
+export { buildCanonicalRequestUrl } from "./net/request-url.mjs";
 // The single trusted-proxy address vocabulary (#292) — Express's own
 // `trust proxy` forms. `http.trustProxy` validates its entries with
 // `checkTrustedProxyEntry`; `@o3co/auth-provider-mtls` matches
