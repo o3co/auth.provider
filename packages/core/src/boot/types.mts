@@ -25,6 +25,10 @@
  *
  * Per A2-β §3.2 (intermediate types), §6.1 (BootError + reasons + per-reason
  * details), §6.2 (createApp options + collector contracts), §6.3 (AppHandle).
+ * A2-β is the boot-planner design document from the v0.5.0 module-system
+ * campaign; the document itself was never committed, and its surviving
+ * normative content is these doc comments plus the validate-manifests
+ * spec-provenance registry — see docs/design-campaign-index.md.
  */
 
 import type { Server as HttpServer } from "node:http";

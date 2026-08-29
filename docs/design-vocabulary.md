@@ -45,6 +45,17 @@ second definition it was never shown; a drift guard can.
 | Retired config key — how a removed key dies | `packages/core/src/config/removed-keys.mts` (`withRemovedKeys`; decision rule in `docs/release-policy.md` §"Retiring a config key") | `oauth.refreshToken` / `oauth.authorize` tombstones; warn-path stays with `INERT_PKCE_KEYS` per the rule | #366 | yes |
 | Declared absence — optional DI slot whose absence must be stated | `packages/core/src/modules/manifest/absence-policy.mts` (enforced by `checkDeclaredAbsence` in the post-config check registry) | `auditSink` via `AUDIT_SINK_ABSENCE_POLICY` (oauth, session, webauthn); `accessTokenDenylist` via `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` (oauth, token-exchange — #375 folded #277's bespoke check onto it) | #363, #375 | no |
 
+## Provenance identifiers
+
+Campaign identifiers (`A1 §5.1`, `IH-16`, `D-6`, `Wave 5d`, …) are NOT vocabulary
+rows — they are historical provenance from development campaigns whose source
+documents were never committed. They resolve in
+[design-campaign-index.md](design-campaign-index.md), which also carries the
+forward rule: new code must not cite a session-local campaign ID as its sole
+rationale — write the rationale in place and anchor linkage in durable artifacts
+(issue/PR numbers, CHANGELOG, ADRs). The index's inventory is guarded by
+`packages/core/src/__tests__/campaignVocabulary.drift.test.mts`.
+
 ## What does not belong here
 
 - **Package-local helpers** with one caller — a map row is earned by a second
