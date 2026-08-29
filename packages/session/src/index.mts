@@ -54,6 +54,8 @@ export type {
 	FederationRedirectPolicy,
 	FederationRedirectPolicyConfig,
 	FederationRedirectPolicyFactory,
+	RedirectAllowlistOptions,
+	RedirectAllowlistValidator,
 	RedirectRejection,
 } from "./federations/redirect-policy.mjs";
 // `validateRedirect` is deliberately NOT exported: the standalone helper
@@ -62,7 +64,9 @@ export type {
 // built from an allowlist. The pieces below are exported so a custom policy can
 // reuse the same rules and rejection vocabulary instead of inventing its own.
 export {
+	checkRedirectShape,
 	createFederationRedirectPolicy,
+	createRedirectAllowlistValidator,
 	describeRedirectRejection,
 	isLoopbackHostname,
 	MAX_REDIRECT_URL_LENGTH,

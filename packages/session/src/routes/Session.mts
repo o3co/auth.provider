@@ -38,6 +38,7 @@ import {
 	type SessionCsrfConfigSlice,
 } from "../csrf.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
+import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -188,6 +189,26 @@ export const createRouter = (
 		headerFallback: loginLimitSpec,
 	});
 
+	// #405: `redirect_to` is held to the same exact-match, fail-closed allowlist
+	// #278 gave the federation entry point, and for the same reason. The rule
+	// this replaced was the pre-#278 one verbatim — any absolute http(s) URL,
+	// narrowed to the cookie domain only when one was configured — so with
+	// `session.domain` at its `null` default the route stored any URL on the
+	// internet under `req.session.redirectTo`. Nothing in this repository
+	// redirects to that key today, but it is declared on `SessionData` and
+	// `MfaResumeState`'s `flow: "login"` variant designs a consumer for it, so
+	// what an embedder reads back has to be a value the deployment named.
+	//
+	// Built here rather than per request so a dead allowlist entry (a typo, or
+	// a target outside `session.domain`) fails boot instead of refusing logins
+	// at runtime with nothing in the config looking wrong.
+	const redirectPolicy = createRedirectAllowlistValidator({
+		redirectAllowlist: config.session.redirectAllowlist,
+		sessionDomain: config.session.domain,
+		allowlistConfigKey: "session.redirectAllowlist",
+		factoryName: "createRouter",
+	});
+
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
@@ -201,40 +222,11 @@ export const createRouter = (
 			(req: Request, res: Response, next: NextFunction): void => {
 				const { redirect_to } = req.body;
 				if (redirect_to != null) {
-					if (typeof redirect_to !== "string" || redirect_to.length > 2048) {
-						res.status(400).json({
-							error: "invalid_redirect",
-							error_description: "Invalid redirect_to",
-						});
-						return;
-					}
-					try {
-						const parsed = new URL(redirect_to);
-						if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-							res.status(400).json({
-								error: "invalid_redirect",
-								error_description: "Invalid redirect URL scheme",
-							});
-							return;
-						}
-						const cookieDomain = config.session.domain;
-						if (cookieDomain) {
-							const normalizedDomain = cookieDomain.replace(/^\./, "");
-							if (
-								parsed.hostname !== normalizedDomain &&
-								!parsed.hostname.endsWith(`.${normalizedDomain}`)
-							) {
-								res.status(400).json({
-									error: "invalid_redirect",
-									error_description: "Redirect domain not allowed",
-								});
-								return;
-							}
-						}
-					} catch {
-						res.status(400).json({
-							error: "invalid_redirect",
-							error_description: "Invalid redirect URL",
+					const validation = redirectPolicy.validateRedirect(redirect_to);
+					if (!validation.ok) {
+						res.status(validation.status).json({
+							error: validation.error,
+							error_description: validation.errorDescription,
 						});
 						return;
 					}

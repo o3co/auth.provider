@@ -42,6 +42,19 @@ const stubConfig: AppConfig = {
 } as unknown as AppConfig;
 
 /**
+ * `stubConfig` with the session slice overridden — the redirect allowlist and
+ * the cookie domain are the two keys #405's policy is built from.
+ */
+const configWith = (session: {
+	readonly domain?: string | null;
+	readonly redirectAllowlist?: readonly string[];
+}): AppConfig =>
+	({
+		...stubConfig,
+		session: { ...stubConfig.session, ...session },
+	}) as unknown as AppConfig;
+
+/**
  * A double-submit pair minted from the same secret and cookie name the router
  * derives from `stubConfig`. Since #272 the state-changing session routes
  * reject a request carrying neither an origin signal nor a token, and
@@ -371,7 +384,23 @@ describe("Session routes — POST /session/login", () => {
 		});
 	});
 
-	describe("redirect_to validation", () => {
+	/**
+	 * #405 — `redirect_to` is held to the same exact-match allowlist #278 gave
+	 * the federation flow, and an absent allowlist is the empty allowlist.
+	 *
+	 * The pre-#405 rule here was "any absolute http(s) URL, narrowed to
+	 * `session.domain` if one is configured". `session.domain` is nullable and
+	 * defaults to null, so the shipped default stored any URL on the internet
+	 * under `req.session.redirectTo` — the exact shape #278 removed one route
+	 * over. Nothing in this repository redirects to that key today, but it is
+	 * declared public on `SessionData` and `MfaResumeState`'s `flow: "login"`
+	 * variant designs a consumer for it, so a validated value is what an
+	 * embedder must be handed.
+	 */
+	describe("redirect_to validation (#405)", () => {
+		const reasonOf = (description: unknown): string | undefined =>
+			typeof description === "string" ? /\(reason: ([a-z-]+)\)/.exec(description)?.[1] : undefined;
+
 		it("rejects non-string redirect_to with 400", async () => {
 			const { app } = buildApp();
 
@@ -381,6 +410,7 @@ describe("Session routes — POST /session/login", () => {
 
 			expect(res.status).toBe(400);
 			expect(res.body).toMatchObject({ error: "invalid_redirect" });
+			expect(reasonOf(res.body.error_description)).toBe("not-a-string");
 		});
 
 		it("rejects non-http/https redirect_to scheme with 400", async () => {
@@ -392,6 +422,144 @@ describe("Session routes — POST /session/login", () => {
 
 			expect(res.status).toBe(400);
 			expect(res.body).toMatchObject({ error: "invalid_redirect" });
+			expect(reasonOf(res.body.error_description)).toBe("unsupported-scheme");
+		});
+
+		// The #405 finding itself: this is the request that used to succeed.
+		it("refuses any absolute https URL when no allowlist is configured", async () => {
+			const { app } = buildApp();
+
+			const res = await loginRequest(app)
+				.send({ username: "alice", password: "secret", redirect_to: "https://evil.example/" })
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(400);
+			expect(res.body).toMatchObject({ error: "invalid_redirect" });
+			expect(reasonOf(res.body.error_description)).toBe("no-allowlist");
+		});
+
+		it("names the session config key an operator has to set, not the federation one", async () => {
+			const { app } = buildApp();
+
+			const res = await loginRequest(app)
+				.send({ username: "alice", password: "secret", redirect_to: "https://evil.example/" })
+				.set("Content-Type", "application/json");
+
+			expect(res.body.error_description).toContain("session.redirectAllowlist");
+			expect(res.body.error_description).not.toContain("federation");
+		});
+
+		it("accepts an exact allowlist match and stores it on the session", async () => {
+			const { app, capturedSession } = buildApp({
+				config: configWith({ redirectAllowlist: ["https://app.example.com/welcome"] }),
+			});
+
+			const res = await loginRequest(app)
+				.send({
+					username: "alice",
+					password: "secret",
+					redirect_to: "https://app.example.com/welcome",
+				})
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(200);
+			expect(capturedSession.current?.redirectTo).toBe("https://app.example.com/welcome");
+		});
+
+		it("refuses a URL the allowlist does not name exactly", async () => {
+			const { app, capturedSession } = buildApp({
+				config: configWith({ redirectAllowlist: ["https://app.example.com/welcome"] }),
+			});
+
+			const res = await loginRequest(app)
+				.send({
+					username: "alice",
+					password: "secret",
+					redirect_to: "https://app.example.com/welcome?next=//evil.example",
+				})
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(400);
+			expect(reasonOf(res.body.error_description)).toBe("not-allowlisted");
+			expect(capturedSession.current?.redirectTo).toBeUndefined();
+		});
+
+		// `https://app.example.com@evil.example/` parses with host `evil.example`.
+		it("refuses a URL that embeds credentials", async () => {
+			const { app } = buildApp({
+				config: configWith({ redirectAllowlist: ["https://app.example.com/welcome"] }),
+			});
+
+			const res = await loginRequest(app)
+				.send({
+					username: "alice",
+					password: "secret",
+					redirect_to: "https://app.example.com@evil.example/welcome",
+				})
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(400);
+			expect(reasonOf(res.body.error_description)).toBe("has-credentials");
+		});
+
+		it("refuses http on a non-loopback host before it ever reaches the allowlist", async () => {
+			const { app } = buildApp({
+				config: configWith({ redirectAllowlist: ["https://app.example.com/welcome"] }),
+			});
+
+			const res = await loginRequest(app)
+				.send({
+					username: "alice",
+					password: "secret",
+					redirect_to: "http://app.example.com/welcome",
+				})
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(400);
+			expect(reasonOf(res.body.error_description)).toBe("insecure-scheme");
+		});
+
+		// RFC 8252 §7.3 — a native client's loopback listener has no certificate.
+		it("accepts an allowlisted http loopback target", async () => {
+			const { app, capturedSession } = buildApp({
+				config: configWith({ redirectAllowlist: ["http://127.0.0.1:3000/callback"] }),
+			});
+
+			const res = await loginRequest(app)
+				.send({
+					username: "alice",
+					password: "secret",
+					redirect_to: "http://127.0.0.1:3000/callback",
+				})
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(200);
+			expect(capturedSession.current?.redirectTo).toBe("http://127.0.0.1:3000/callback");
+		});
+
+		// A deployment that never sends `redirect_to` is unaffected.
+		it("leaves a login without redirect_to alone", async () => {
+			const { app, capturedSession } = buildApp();
+
+			const res = await loginRequest(app)
+				.send({ username: "alice", password: "secret" })
+				.set("Content-Type", "application/json");
+
+			expect(res.status).toBe(200);
+			expect(capturedSession.current?.redirectTo).toBeUndefined();
+		});
+
+		// Same as the federation policy: a dead allowlist entry is a boot failure,
+		// not a redirect that is silently refused at request time.
+		it("refuses at construction an allowlist entry outside session.domain", () => {
+			expect(() =>
+				buildApp({
+					config: configWith({
+						domain: ".example.com",
+						redirectAllowlist: ["https://app.other.example/welcome"],
+					}),
+				}),
+			).toThrow(/redirectAllowlist\[0\].*outside-session-domain/s);
 		});
 	});
 

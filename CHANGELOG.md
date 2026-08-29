@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Security
+
+- **BREAKING: `POST /session/login` holds `redirect_to` to an exact-match allowlist, and an absent allowlist is the empty allowlist (`@o3co/auth-provider-core`, `@o3co/auth-provider-session`, standalone template).** #278 replaced "any absolute http(s) URL, narrowed to the cookie domain **if one is configured**" with a fail-closed allowlist at the federation entry point. The login route kept the old rule verbatim: `session.domain` is nullable and defaults to `null`, so the shipped default accepted every absolute http(s) URL on the internet and stored it under `req.session.redirectTo` — the same vulnerability one route over, and the one this release's own CHANGELOG describes as *"an unset `sessionDomain` accepted every http(s) URL on earth"* (#405).
+
+  Nothing in this repository redirects to that key today — the federation callback reads the separately-validated `req.session.federation.redirectTo` — so the finding is a stored unvalidated URL rather than a live open redirect. It is stored under a name that is declared public on `SessionData`, and `MfaResumeState`'s `flow: "login"` variant designs a consumer for it, so what an embedder reads back has to be a value the deployment named rather than one the caller chose.
+
+  **New key: `session.redirectAllowlist`**, defaulting to the empty list. Same rule as the federation allowlist and now literally the same code: exact match after `new URL(x).href` normalization (scheme, host, port, path and query all significant, no wildcards), `http://` for loopback hosts only, credentials in the URL refused by name, and every non-loopback entry narrowed against `session.domain` **at boot** so a dead entry fails to start rather than refusing logins at runtime with nothing in the config looking wrong.
+
+  **Migration — a deployment whose login page posts `redirect_to` must add the key, or those logins answer `400 invalid_redirect`:**
+
+  ```hocon
+  session {
+    # Exact URLs, no wildcards. Take the values the front-end actually sends.
+    redirectAllowlist = ["https://app.example.com/welcome"]
+  }
+  ```
+
+  A deployment that never sends `redirect_to` needs no change. Note that the `/authorize` login round-trip (#356) hands the login **page** a `redirect_to` query parameter carrying a dynamic `/oauth/authorize?…` URL; a front-end that reads it from its own query string and navigates there is unaffected, while one that posts it back to `/session/login` cannot be allowlisted as a family and should carry the value in its own state instead.
+
+  **The rule now has one home.** It moved to `@o3co/auth-provider-session`'s package root (`redirect-allowlist.mjs`) because it had been written down under `federations/`, where the login route had no reason to import it from — which is how one entry point got fixed and the other did not. `federations/redirect-policy.mjs` re-exports the public names unchanged and keeps `createFederationRedirectPolicy` (allowlist + `resolveCallbackRedirect`). New exports: `createRedirectAllowlistValidator`, `checkRedirectShape`, `RedirectAllowlistOptions`, `RedirectAllowlistValidator`.
+
+  **Visible change to refusal messages.** `describeRedirectRejection` takes an optional `{ allowlistConfigKey }` so a refusal names the config path the reader has to edit — pointing a login-flow operator at a federation key would send them to edit a section that has no effect on the request they are debugging. The `no-allowlist` and `not-allowlisted` prose changed accordingly, and `outside-session-domain` now says "session cookie domain" rather than "sessionDomain", which is not that key's name on the login side. The `reason:` tokens, the `400` status and the `invalid_redirect` error code are unchanged.
+
+  Not addressed here: the federation callback still consumes `session.redirectTo` without re-validating it at consumption time. It reads the validated federation key today, so this fix closes the writer; re-validating at the reader as defence in depth is tracked separately.
+
 ## [0.10.0] - 2026-08-29
 
 ### Added
