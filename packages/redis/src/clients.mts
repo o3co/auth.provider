@@ -29,7 +29,10 @@
 // so consumers wiring redis backends via `bootstrapComponents` get the slot
 // types whenever they import from this package.
 //
-// Per Phase 10 addendum §3 + v0.5.0 pre-tag interface review S3.
+// Per Phase 10 addendum §3 (the "backing client interface" pattern: narrow
+// per-purpose Redis-command contracts owned by the adapter package) +
+// v0.5.0 pre-tag interface review S3 (the decision that core does not
+// declare them). Both resolve in docs/design-campaign-index.md.
 // ---------------------------------------------------------------------------
 
 // --- ChallengeStoreClient --------------------------------------------------

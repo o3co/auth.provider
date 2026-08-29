@@ -109,7 +109,9 @@ export type RefreshTokenFamilyUpdateResult =
  * unknown_family`) is composed in the wrapper layer (`RefreshTokenFamilyRotation`),
  * NOT classified by the adapter.
  *
- * Per A3 §5.1.
+ * Per A3 §5.1 — A3 is the refresh-token-family design document (uncommitted,
+ * v0.5.0 campaign); its surviving content is indexed in
+ * docs/design-campaign-index.md.
  */
 export interface RefreshTokenFamilyStore {
 	readonly kind: string;

@@ -36,7 +36,7 @@ oauth {
 }
 ```
 
-Public-client tokens are bound to the DPoP JKT in both AT (`cnf.jkt`) and RT (`cnf.jkt`). Confidential clients get an AT-bound token + a plain RT (client_secret is the refresh-time authenticator per RFC 9449 §5). At refresh time the §9.2 5-row matrix enforces that the presented proof matches the persisted RT binding.
+Public-client tokens are bound to the DPoP JKT in both AT (`cnf.jkt`) and RT (`cnf.jkt`). Confidential clients get an AT-bound token + a plain RT (client_secret is the refresh-time authenticator per RFC 9449 §5). At refresh time the refresh-time token-binding enforcement matrix (the "§9.2 matrix", core `confirmationMatch.mts`) enforces that the presented proof matches the persisted RT binding.
 
 ## Cross-mechanism dispatch (DPoP + mTLS)
 

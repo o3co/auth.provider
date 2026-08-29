@@ -18,7 +18,9 @@
  * Server-issued challenge metadata returned by ChallengeStore.find().
  * Epoch ms instead of Date eliminates the mutation surface that
  * `Object.freeze` cannot defend against on a Date instance.
- * Per A1 §5.1 (lines 89-95).
+ * Per A1 §5.1 (lines 89-95) — A1 is the challenge-store/replay-seen-set
+ * design document (uncommitted, v0.5.0 campaign); its surviving content is
+ * indexed in docs/design-campaign-index.md.
  */
 export interface Challenge {
 	readonly expiresAtMs: number;

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-webauthn
 
-Wave 1 first slice for the [@o3co/auth-provider](https://github.com/o3co/auth.provider) Passkey-native auth toolkit. **AS-scope only** — credential lifecycle + authentication grant. No signup, no recovery, no email infrastructure (consumer's domain per the auth-provider scope discipline).
+Passkey (WebAuthn) credential lifecycle + authentication grant for [@o3co/auth-provider](https://github.com/o3co/auth.provider) — the toolkit's first Passkey slice, shipped in v0.7.0 (roadmap Wave 1). **AS-scope only**: no signup, no recovery, no email infrastructure (consumer's domain per the auth-provider scope discipline). Campaign identifiers in this README (S7–S12, T-series) resolve in [docs/design-campaign-index.md](../../docs/design-campaign-index.md).
 
 ## Install
 
@@ -31,9 +31,9 @@ const webauthnBootstrap = defineModule({
             rpId: "example.com",
             rpName: "Example App",
             origin: ["https://example.com"],
-            attestationPreference: "none",   // S11 recommended for dogfood
+            attestationPreference: "none",   // dogfood baseline: platform authenticators need no attestation chain (S11)
             userVerification: "preferred",
-            challengeTtlMs: 120_000,         // mobile-network safe (spec §2.4.1)
+            challengeTtlMs: 120_000,         // 120s survives slow mobile networks (spec §2.4.1 baseline)
             allowCredentialsForKnownUser: false,  // enumeration-resistant (#281)
             rateLimit: {
                 authenticationOptions: { limit: 30, windowSeconds: 60 },
@@ -122,7 +122,7 @@ Wire the `rateLimiter` ComponentMap slot (the Redis adapter in a scaled deployme
 
 ## SECURITY — `attestationPreference` default
 
-`attestationPreference` defaults to `"none"` (S11). Dogfood deployments using platform authenticators (Touch ID, Windows Hello, Android biometrics) typically don't need attestation chain verification. Set `"direct"` only when:
+`attestationPreference` defaults to `"none"` — the dogfood baseline (S11): attestation chain verification adds nothing for the common platform-authenticator case. Dogfood deployments using platform authenticators (Touch ID, Windows Hello, Android biometrics) typically don't need attestation chain verification. Set `"direct"` only when:
 
 - Your threat model requires authenticator provenance verification (e.g. enterprise device fleet, FIDO2 metadata service consumer)
 - You have a curated trust anchor set (FIDO MDS root list) wired into your verifier
