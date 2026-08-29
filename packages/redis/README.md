@@ -46,8 +46,10 @@ This package ships ten adapters covering every redis-backed component that
 ## Backing-client contract
 
 Each adapter consumes a **per-purpose backing-client interface** declared
-in `@o3co/auth-provider-core` (e.g. `ChallengeStoreClient`,
-`FederationTokenStoreClient`, `RateLimiterClient`). The interfaces declare
+in this package (`src/clients.mts` — e.g. `ChallengeStoreClient`,
+`FederationTokenStoreClient`, `RateLimiterClient`). Core deliberately does
+not declare them: the backing-client vocabulary belongs to the adapter
+package (v0.5.0 pre-tag interface review S3). The interfaces declare
 only the methods the adapter actually calls — `ChallengeStoreClient` is
 `{ set(NX); pttl; del }`, `RateLimiterClient` is `{ incr; expire }`, etc.
 Consumers wire whichever backend wrapper (ioredis, node-redis, custom

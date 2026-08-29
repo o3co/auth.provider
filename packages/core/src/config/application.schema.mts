@@ -799,6 +799,10 @@ export const fullSectionsSchema = z.object({
 			storage: z
 				.object({
 					type: z.string(),
+					// Per-type options for `storage.type = "redis"` (the shipped
+					// default): sessionStoreModule spreads `storage[storage.type]`
+					// into the store factory — see packages/session/src/modules/
+					// sessionStoreModule.mts (storageSlice[storageSlice.type]).
 					redis: z
 						.object({
 							url: z.string(),

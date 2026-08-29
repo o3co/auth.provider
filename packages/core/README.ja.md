@@ -1,6 +1,8 @@
 # @o3co/auth-provider-core
 
-auth.provider のグラント登録、トークンサービス、リポジトリインターフェース、アプリ設定、およびモジュールシステムを提供するパッケージです。他のすべてのパッケージが依存するコア抽象を定義しています。
+auth.provider のモジュールシステム、トークンサービス、リポジトリインターフェース、およびアプリ設定を提供するパッケージです。他のすべてのパッケージが依存するコア抽象を定義しています。
+
+語彙: **the Store** は auth.provider の用語で、利用者側の上流ユーザーサービス — identity・クレデンシャル・メール検証状態の system of record — を指します。定義は `src/repositories/types.mts` の `User` doc にあり、auth.provider は Store が公開した状態を読むだけで、書き込むことはありません。
 
 ## インストール
 

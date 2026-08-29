@@ -1,6 +1,8 @@
 # @o3co/auth-provider-core
 
-Grant registry, token service, repository interfaces, app config, and module system for auth.provider. This package defines the core abstractions that all other packages build on.
+Module system, token service, repository interfaces, and app config for auth.provider. This package defines the core abstractions that all other packages build on.
+
+Vocabulary: **the Store** is auth.provider's term for the consumer's upstream user service — the system of record for identity, credentials, and email-verification state. Defined on the `User` doc in `src/repositories/types.mts`; auth.provider reads Store-published state and never writes it.
 
 ## Install
 
