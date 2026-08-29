@@ -396,6 +396,34 @@ describe("describeRedirectRejection", () => {
 		expect(describeRedirectRejection("unsupported-scheme")).toMatch(/loopback/);
 		expect(describeRedirectRejection("insecure-scheme")).toMatch(/loopback/);
 	});
+
+	/*
+	 * #405 — the same rule now guards two entry points configured in two
+	 * places, so the two allowlist reasons have to name the caller's own key.
+	 * A login-flow operator sent to `federations.<name>.redirectAllowlist`
+	 * edits a section that has no effect on the request they are debugging.
+	 */
+	it("names the caller's allowlist config key in the two allowlist reasons", () => {
+		const withKey = { allowlistConfigKey: "session.redirectAllowlist" };
+		expect(describeRedirectRejection("no-allowlist", withKey)).toContain(
+			"session.redirectAllowlist",
+		);
+		expect(describeRedirectRejection("not-allowlisted", withKey)).toContain(
+			"session.redirectAllowlist",
+		);
+	});
+
+	it("defaults to naming the federation's allowlist, which is what the federation policy builds", () => {
+		expect(describeRedirectRejection("no-allowlist")).toContain("federation");
+		expect(describeRedirectRejection("not-allowlisted")).toContain("federation");
+	});
+
+	it("leaves the shape reasons free of any config key", () => {
+		const withKey = { allowlistConfigKey: "session.redirectAllowlist" };
+		for (const reason of reasons.filter((r) => r !== "no-allowlist" && r !== "not-allowlisted")) {
+			expect(describeRedirectRejection(reason, withKey)).toBe(describeRedirectRejection(reason));
+		}
+	});
 });
 
 describe("createFederationRedirectPolicy — resolveCallbackRedirect", () => {

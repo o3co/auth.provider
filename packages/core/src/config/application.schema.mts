@@ -752,6 +752,27 @@ export const fullSectionsSchema = z.object({
 			sameSite: z.enum(["lax", "none", "strict"]),
 			domain: z.string().nullable(),
 			/**
+			 * #405 — the exact URLs `POST /session/login` may accept as
+			 * `redirect_to`.
+			 *
+			 * `.optional()` because absence is already the safe answer: the
+			 * policy fails closed, so a deployment that never sends
+			 * `redirect_to` needs no key and one that omits it by mistake gets
+			 * a refused redirect naming this path, not an open redirect. That
+			 * is the opposite of the `.optional()` slots #363 gave an
+			 * `AbsencePolicy` — those default to *doing nothing*, this one
+			 * defaults to *refusing everything*.
+			 *
+			 * Entries are exact URLs, matched after `new URL(x).href`
+			 * normalization; there is no wildcard or prefix form. They are
+			 * validated where the router is built (`@o3co/auth-provider-session`),
+			 * not here, because the rule they are held to also narrows them
+			 * against `session.domain` — one check reading two keys belongs
+			 * with the code that owns the rule rather than split across the
+			 * schema.
+			 */
+			redirectAllowlist: z.array(z.string()).optional(),
+			/**
 			 * #272 — CSRF policy for the state-changing session routes.
 			 *
 			 * `.optional()` on purpose: a deployment inheriting `reference.conf`
