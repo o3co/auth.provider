@@ -183,7 +183,8 @@ export interface Client {
  * record for identity, credentials, and email-verification state. auth.provider
  * reads Store-published state and never writes it; `HttpUserRepository` in
  * `@o3co/auth-provider-foundation` is the shipped client. This doc is the
- * term's definition site (see docs/design-vocabulary.md).
+ * term's definition site (see docs/design-vocabulary.md in the repository —
+ * the docs/ tree is not shipped in the npm package).
  *
  * The claim-bearing fields below are the ones `extractUserClaims` reads when
  * seeding a session's claims envelope, and they mirror `UserSessionClaims`
