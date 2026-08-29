@@ -237,9 +237,13 @@ export interface SubjectSessionIndex {
  * from just *before* survive is the vulnerability this exists to close.
  *
  * TTL contract: `revokeBefore` MUST be called with an `expiresAt` at least as
- * far out as the longest-lived access token that could still be presented.
- * Refresh tokens are handled separately by family revocation, so the watermark
- * does not need to outlive them.
+ * far out as the longest-lived credential the watermark has to refuse — which
+ * is the longest-lived **refresh token**, not the access token, wherever the
+ * composition forwards `subjectRevocation` to the refresh grant (`oauthModule`
+ * does). Family revocation is the primary kill for refresh tokens and the
+ * watermark is the backstop for the case family revocation did not complete, so
+ * sizing the watermark to the access-token TTL retires the backstop minutes
+ * after a cascade failure while the RT it exists to catch lives for days.
  */
 export interface SubjectRevocation {
 	readonly kind: string;

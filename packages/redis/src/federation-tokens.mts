@@ -104,7 +104,8 @@ export interface RedisFederationTokenStoreOptions {
 	 * `federationTokenStore` newly enabled) can set it to `false` immediately.
 	 *
 	 * **When it will be removed**: the flag and the scan path go away together
-	 * in the release after next, at which point `scanIterator` also leaves
+	 * once the migration window has closed — see CHANGELOG for the release that
+	 * performs the removal. At that point `scanIterator` also leaves
 	 * `FederationTokenStoreClient`.
 	 *
 	 * Default: `true` — an upgrade that changes no configuration must not

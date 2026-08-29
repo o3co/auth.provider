@@ -53,7 +53,13 @@ export interface RevokeAllForSubjectFailure {
 
 export interface RevokeAllForSubjectOptions {
 	readonly subject: string;
-	/** How long the watermark must outlive — normally the access-token TTL. */
+	/**
+	 * How long the watermark must outlive. Size it to the longest-lived
+	 * **refresh token**, not the access token: the refresh grant consults the
+	 * watermark as the backstop for a family revocation that did not complete,
+	 * so a watermark that expires first takes the backstop with it. See the TTL
+	 * contract on {@link SubjectRevocation}.
+	 */
 	readonly watermarkTtlMs: number;
 	readonly cascadeSession: CascadeSession;
 	readonly subjectSessionIndex?: SubjectSessionIndex;

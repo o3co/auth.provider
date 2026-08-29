@@ -313,8 +313,27 @@ The `docker-compose.yml` starts the auth server together with a Redis container.
 [`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front plus `HTTP_TRUST_PROXY`, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
 
 ```bash
+# The signing keys are a required input: EdDSA is the default and there is no
+# key-material default, so a deployment that generates none fails at boot.
+openssl genpkey -algorithm ed25519 -out jwt-private.pem
+openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+chmod 600 jwt-private.pem
+
 docker compose -f docker-compose.production.yml up -d --build
 ```
+
+**Keys in containers.** The pem pair reaches the container as a compose
+**secret**, mounted read-only at `/run/secrets/`, and the compose file points
+`OAUTH_JWT_*_KEY_PATH` there. Do not park them in `config/`: the `Dockerfile`
+`COPY`s that directory, so a key placed there is baked into an image layer and
+travels with every push — a key you then have to rotate rather than one you
+merely stored badly. The same applies to `.env`; keep both out of git.
+
+The production file also pins `SESSION_SECURE=true` and the `__Host-` cookie
+name in its `environment:` block, which wins over `env_file`. `.env.example`
+ships `SESSION_SECURE=false` so a plain-HTTP local run works, and this file
+requires that same `.env` — behind the TLS it assumes, a non-Secure session
+cookie is the session handed to anyone who can read one plaintext hop.
 
 The image installs with `pnpm install --frozen-lockfile`, so a committed
 `pnpm-lock.yaml` is a required build input — `create-auth-provider` generates
