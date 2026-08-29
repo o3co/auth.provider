@@ -81,7 +81,10 @@ const HYPHENATED = /\b(?:IH|OR|SF|MIN|PB|AS|CP|CR|CC|TS|SC|TD|D|F)-\d+\b/g;
  * direction-2 occurrence sweep it is compared against) uses the loose form.
  */
 const A_DOC_STRICT = /\bA[1-7](?:-[αβγ])?(?=\s+(?:§|Amendment))/g;
-const A_DOC_LOOSE = /\bA[1-7](?:-[αβγ])?\b/g;
+// (?!\d) instead of a trailing \b: JS \b is ASCII-only, so after a Greek
+// letter it would only match before a word character and `A2-β —` would
+// truncate to `A2`. The lookahead just has to keep `A25` from matching `A2`.
+const A_DOC_LOOSE = /\bA[1-7](?:-[αβγ])?(?!\d)/g;
 const BARE_S = /\bS(?:1[0-5]|[1-9])\b/g;
 
 function idsIn(text: string, aDoc: RegExp = A_DOC_STRICT): Set<string> {
