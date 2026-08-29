@@ -155,7 +155,8 @@ function isAbortError(err: unknown): boolean {
 }
 
 /**
- * `UserRepository` backed by an upstream HTTP user service ("the Store").
+ * `UserRepository` backed by "the Store" — the upstream user service defined
+ * on core's `User` doc (`@o3co/auth-provider-core`, `src/repositories/types.mts`).
  *
  * Both endpoints receive plaintext user credentials, so both are validated at
  * **construction**: a deployment configured with an `http://` Store URL fails

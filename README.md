@@ -36,11 +36,11 @@ pnpm build
 │  (standalone template or your own app)   │
 ├─────────┬───────────┬────────────────────┤
 │  oauth  │  session  │    foundation      │
-│ /oauth  │ /session  │  Redis, HTTP       │
-│ routes  │  routes   │  adapters          │
+│ /oauth  │ /session  │  HTTP user         │
+│ routes  │  routes   │  adapter           │
 ├─────────┴───────────┴────────────────────┤
 │                   core                    │
-│  GrantRegistry · KeyStore · Repositories │
+│  Module system · KeyStore · Repositories │
 └──────────────────────────────────────────┘
 ```
 
@@ -48,18 +48,24 @@ pnpm build
 - **oauth** — OAuth routes (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`). Required for any token issuance.
 - **session** — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.
 - **federation-google / federation-github** — Concrete OAuth federation providers. Optional — install only the providers you register.
-- **foundation** — Production repository adapters (Redis code store, HTTP user lookup). Optional.
+- **foundation** — Production HTTP user-authentication adapter (client of "the Store"). Optional.
+- **webauthn / dpop / mtls / oauth-token-exchange / redis** — Optional capability and adapter modules; see [Packages](#packages).
 
 ## Packages
 
 | Package | npm | Description |
 | --- | --- | --- |
-| [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | Grant registry, token service, repository interfaces, config schemas |
-| [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth routes: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
-| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session routes and provider-registered OAuth federation |
-| [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google OAuth/OIDC federation provider |
-| [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub OAuth federation provider |
-| [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Redis code store, HTTP user/client repositories |
+| [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | Core abstractions all other packages build on: module system, token service, repository interfaces, config schemas |
+| [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth 2.0 routes module: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
+| [`packages/oauth-token-exchange`](packages/oauth-token-exchange/) | `@o3co/auth-provider-oauth-token-exchange` | RFC 8693 Token Exchange grant — on-behalf-of, delegation (`act`), scope/audience narrowing |
+| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session and federation routes module: login, logout, OAuth 2.0 federation |
+| [`packages/webauthn`](packages/webauthn/) | `@o3co/auth-provider-webauthn` | Passkey (WebAuthn) credential lifecycle + authentication grant, AS-scope only |
+| [`packages/dpop`](packages/dpop/) | `@o3co/auth-provider-dpop` | DPoP (RFC 9449) sender-constrained access tokens |
+| [`packages/mtls`](packages/mtls/) | `@o3co/auth-provider-mtls` | mTLS (RFC 8705) sender-constrained access tokens |
+| [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google federation provider |
+| [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub federation provider |
+| [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis-backed adapters and `defineModule` manifests |
+| [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Production HTTP user-authentication adapter ("the Store" client) |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
 | [`create-app`](create-app/) | `@o3co/create-auth-provider` | CLI scaffolder |
 

@@ -40,6 +40,7 @@ second definition it was never shown; a drift guard can.
 | Rate-limit guard — check + outage policy for security throttles | `packages/core/src/ratelimit/guard.mts` | `/oauth/token` `/oauth/authorize` `/oauth/introspect`, `/session/login`, webauthn options | #325 | yes |
 | Canonical issuer — what `oauth.jwt.issuer` may be | `packages/core/src/issuer/canonical.mts` | config schema, oauth router re-check | unreleased (issuer-required fix) | no (single consumer signature) |
 | Secret entropy floor | `packages/core/src/keys/secretEntropy.mts` | key factory, `session.secret` schema | #282 | no |
+| the Store — the consumer's upstream user service: system of record for identity, credentials, email verification | `packages/core/src/repositories/types.mts` (doc on `User`) | foundation `HttpUserRepository`, `emailVerifiedGate` (#297), `oauth.requireEmailVerified` schema | #297 | no (prose concept, no definition signature) |
 | Built-in audit-event names | `packages/core/src/audit/types.mts` (`BUILT_IN_AUDIT_EVENT_TYPES`) | every `emitAuditEvent` / sink `record` site | #369 | yes (`audit/__tests__/auditEventInventory.drift.test.mts`, both directions) |
 | Retired config key — how a removed key dies | `packages/core/src/config/removed-keys.mts` (`withRemovedKeys`; decision rule in `docs/release-policy.md` §"Retiring a config key") | `oauth.refreshToken` / `oauth.authorize` tombstones; warn-path stays with `INERT_PKCE_KEYS` per the rule | #366 | yes |
 | Declared absence — optional DI slot whose absence must be stated | `packages/core/src/modules/manifest/absence-policy.mts` (enforced by `checkDeclaredAbsence` in the post-config check registry) | `auditSink` via `AUDIT_SINK_ABSENCE_POLICY` (oauth, session, webauthn); `accessTokenDenylist` via `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` (oauth, token-exchange — #375 folded #277's bespoke check onto it) | #363, #375 | no |
@@ -54,4 +55,7 @@ second definition it was never shown; a drift guard can.
   (loopback) they both consume, not their differing policies.
 - **Cross-repo contracts** (JWT alg symmetry, JWKS): those live in the
   workspace-level `Dependency_map.xml`, one level up. This map is
-  intra-repository, where this repo's CI can enforce it.
+  intra-repository, where this repo's CI can enforce it. The claim-level
+  provider↔verifier contract is published at the umbrella's
+  [docs/claims-contract.md](https://github.com/o3co/auth/blob/develop/docs/claims-contract.md)
+  (`Dependency_map.xml` is workspace-local, not on GitHub).

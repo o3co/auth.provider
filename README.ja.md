@@ -30,27 +30,35 @@ pnpm build
 │  (standalone テンプレート or 独自アプリ)   │
 ├─────────┬───────────┬────────────────────┤
 │  oauth  │  session  │    foundation      │
-│ /oauth  │ /session  │  Redis, HTTP       │
-│ routes  │  routes   │  adapters          │
+│ /oauth  │ /session  │  HTTP user         │
+│ routes  │  routes   │  adapter           │
 ├─────────┴───────────┴────────────────────┤
 │                   core                    │
-│  GrantRegistry · KeyStore · Repositories │
+│  Module system · KeyStore · Repositories │
 └──────────────────────────────────────────┘
 ```
 
 - **core** — インターフェース、設定スキーマ、トークンサービス、アプリファクトリ。常に必要。
 - **oauth** — OAuth ルート (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`)。トークン発行に必須。
 - **session** — セッションログイン + OAuth フェデレーション（Google、GitHub、拡張可能）。オプション — API のみのデプロイではスキップ可能。
-- **foundation** — 本番向けリポジトリアダプター (Redis コードストア, HTTP ユーザー検索)。オプション。
+- **foundation** — 本番向け HTTP ユーザー認証アダプター（「the Store」のクライアント）。オプション。
+- **webauthn / dpop / mtls / oauth-token-exchange / redis** — オプションの capability / アダプターモジュール。[パッケージ構成](#パッケージ構成)を参照。
 
 ## パッケージ構成
 
 | パッケージ | npm | 説明 |
 | --- | --- | --- |
-| [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | グラントレジストリ、トークンサービス、リポジトリインターフェース、設定スキーマ |
-| [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth ルート: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
-| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | セッションルート, Passport.js, OAuth フェデレーション（Google・GitHub・拡張可能） |
-| [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Redis コードストア, HTTP ユーザー/クライアントリポジトリ |
+| [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | 全パッケージが依存するコア抽象: モジュールシステム、トークンサービス、リポジトリインターフェース、設定スキーマ |
+| [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth 2.0 ルートモジュール: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
+| [`packages/oauth-token-exchange`](packages/oauth-token-exchange/) | `@o3co/auth-provider-oauth-token-exchange` | RFC 8693 Token Exchange グラント — on-behalf-of、委譲 (`act`)、scope/audience 縮小 |
+| [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | セッション + フェデレーションルートモジュール: ログイン、ログアウト、OAuth 2.0 フェデレーション |
+| [`packages/webauthn`](packages/webauthn/) | `@o3co/auth-provider-webauthn` | Passkey (WebAuthn) クレデンシャルライフサイクル + 認証グラント（AS スコープのみ） |
+| [`packages/dpop`](packages/dpop/) | `@o3co/auth-provider-dpop` | DPoP (RFC 9449) sender-constrained アクセストークン |
+| [`packages/mtls`](packages/mtls/) | `@o3co/auth-provider-mtls` | mTLS (RFC 8705) sender-constrained アクセストークン |
+| [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google フェデレーションプロバイダー |
+| [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub フェデレーションプロバイダー |
+| [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis バックエンドのアダプターと `defineModule` マニフェスト |
+| [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | 本番向け HTTP ユーザー認証アダプター（「the Store」のクライアント） |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |
 | [`create-app`](create-app/) | `@o3co/create-auth-provider` | CLI スキャフォルダー |
 
