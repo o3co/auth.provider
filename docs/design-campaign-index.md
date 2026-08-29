@@ -22,8 +22,9 @@ plausible inference; `[inference-only]` — bare citation, content inferred from
 usage alone. The enforcement arm is
 `packages/core/src/__tests__/campaignVocabulary.drift.test.mts` (two directions:
 every campaign ID cited in shipped source/READMEs must appear here; every ID here
-must still be cited somewhere). CHANGELOGs are historical narrative and are out of
-the test's scope. Series-prefix expansions are `[reconstructed]` unless noted —
+must still be cited somewhere). CHANGELOGs are historical narrative: they count
+as occurrence sites for the second direction, but a CHANGELOG citation never
+*requires* an index entry. Series-prefix expansions are `[reconstructed]` unless noted —
 they name the campaign's own shorthand, and the per-ID meanings do not depend on
 them.
 

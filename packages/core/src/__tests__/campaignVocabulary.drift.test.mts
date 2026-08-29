@@ -137,7 +137,8 @@ function occurrenceSites(): string[] {
 			(name.endsWith(".mts") ||
 				name.endsWith(".md") ||
 				name.endsWith(".conf") ||
-				name.endsWith(".yml")),
+				name.endsWith(".yml") ||
+				name.endsWith(".yaml")),
 		files,
 	);
 	return files;
