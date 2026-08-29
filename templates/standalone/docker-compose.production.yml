@@ -7,7 +7,15 @@
 # healthcheck), no source mounts, restart policies, and a Redis that is
 # reachable from the app network only and persists to a volume.
 #
+#   openssl genpkey -algorithm ed25519 -out jwt-private.pem
+#   openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+#   chmod 600 jwt-private.pem
 #   docker compose -f docker-compose.production.yml up -d --build
+#
+# The pem pair is required: EdDSA is the default and there is no key-material
+# default, so a deployment that generates none fails at boot naming the keys to
+# set. It reaches the container as a compose secret rather than through
+# `config/`, which the image COPYs — see the `secrets:` block below.
 #
 # What this file deliberately does NOT do:
 #
@@ -40,9 +48,37 @@ services:
       # serve quietly with a guessable secret.
       - path: .env
         required: true
+    secrets:
+      # The signing keys. EdDSA is the default algorithm and there is no key
+      # material default, so the process needs the pem pair at boot — and the
+      # `runtime` image deliberately does not contain it: `Dockerfile` COPYs
+      # `config/`, so a key parked there is baked into a layer that travels
+      # with every image push. Compose secrets mount read-only under
+      # /run/secrets and are the reason the env below overrides the
+      # `./jwt-*.pem` paths in `.env.example`.
+      #
+      # Generate them next to this file before the first `up`:
+      #   openssl genpkey -algorithm ed25519 -out jwt-private.pem
+      #   openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+      #   chmod 600 jwt-private.pem
+      - jwt_private_key
+      - jwt_public_key
     environment:
       NODE_ENV: production
       DEPLOYMENT_MODE: single
+      # Point the process at the mounted secrets rather than the working-copy
+      # paths `.env` carries for local runs.
+      OAUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
+      OAUTH_JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      # `environment` wins over `env_file`, which is the point here:
+      # `.env.example` ships SESSION_SECURE=false / SESSION_NAME=auth.sid so a
+      # plain-HTTP local run works, and this file requires that same `.env`.
+      # Behind the TLS this compose assumes, a non-Secure session cookie is the
+      # session handed to anyone who can read one plaintext hop. The default
+      # `__Host-` cookie name is restored with it — the prefix browsers only
+      # honour on a Secure cookie.
+      SESSION_SECURE: "true"
+      SESSION_NAME: __Host-auth.session
       # Every Redis-backed store shares the compose-network Redis below.
       REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: redis://redis:6379
       SESSION_STORAGE_TYPE: redis
@@ -69,3 +105,12 @@ services:
 
 volumes:
   redis-data:
+
+secrets:
+  # File-backed, so the pem pair stays on the host and reaches the container
+  # read-only at /run/secrets. Keep both out of git alongside `.env`; a key
+  # committed or COPYed into the image is a key you have to rotate.
+  jwt_private_key:
+    file: ./jwt-private.pem
+  jwt_public_key:
+    file: ./jwt-public.pem

@@ -183,8 +183,9 @@ keeps the old pattern scan running after the index-driven removal.
   replica running the previous release stopped writing. A deployment whose
   Redis held no federation records before the upgrade (a fresh database, or
   `federationTokenStore` newly enabled) can set it to `false` immediately.
-- **When it goes away:** the flag and the scan path are removed together in the
-  release after next — at which point the index-only behaviour becomes
+- **When it goes away:** the flag and the scan path are removed together once
+  the migration window has closed (see the root CHANGELOG for the release that
+  performs the removal) — at which point the index-only behaviour becomes
   unconditional and `scanIterator` leaves `FederationTokenStoreClient`.
 
 ## Internal helpers

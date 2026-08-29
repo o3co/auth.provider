@@ -206,6 +206,30 @@ make test
 `docker-compose.yml` は**開発用**です(`develop` target をビルドし `./src` / `./config` を bind-mount するため、そのままデプロイすると working tree を hot-reload で配信します)。デプロイ可能な形は
 [`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target・source mount なし・restart policy・ネットワーク内部限定の永続 Redis・**必須**の `.env`(実際の `SESSION_SECRET` が無い boot は大声で失敗すべき)です。TLS 終端 + `HTTP_TRUST_PROXY`、`--scale` 前の multi-replica 手順など「意図的に委ねる範囲」はファイル冒頭のコメントに明記しています。
 
+```bash
+# 署名鍵は必須の入力です。デフォルトは EdDSA で鍵のデフォルト値は存在しないため、
+# 鍵を生成していないデプロイは boot で失敗します。
+openssl genpkey -algorithm ed25519 -out jwt-private.pem
+openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+chmod 600 jwt-private.pem
+
+docker compose -f docker-compose.production.yml up -d --build
+```
+
+**コンテナへの鍵の渡し方**。pem のペアは compose の **secret** として
+`/run/secrets/` に read-only でマウントされ、compose 側が
+`OAUTH_JWT_*_KEY_PATH` をそこに向けます。`config/` には置かないでください —
+`Dockerfile` がこのディレクトリを `COPY` するため、置いた鍵はイメージレイヤに
+焼き込まれ、push のたびに一緒に運ばれます(保管場所を誤っただけでは済まず、
+ローテーションが必要になります)。`.env` も同様に git の外に置いてください。
+
+production ファイルは `environment:` で `SESSION_SECURE=true` と `__Host-`
+cookie 名も固定します(`environment` は `env_file` より優先されます)。
+`.env.example` は plain-HTTP のローカル実行のために `SESSION_SECURE=false` を
+出荷しており、このファイルはその同じ `.env` を要求するためです。前段で TLS を
+終端する前提の構成で非 Secure な session cookie を配ることは、平文区間を読める
+相手にセッションを渡すことと同じです。
+
 イメージは `pnpm install --frozen-lockfile` でインストールするため、コミット済みの
 `pnpm-lock.yaml` がビルドの必須入力です。`create-auth-provider` が scaffold 時に
 生成します。手元に無い場合は一度 `pnpm install` を実行して結果をコミットしてください。
