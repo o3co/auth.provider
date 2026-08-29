@@ -161,9 +161,7 @@ describe("design-campaign provenance index (#386)", () => {
 	});
 
 	it("resolves every cited campaign ID in the index", () => {
-		const unresolved = [...cited]
-			.filter((id) => !indexed.has(id) && !EXCLUDED_IDS.has(id))
-			.sort();
+		const unresolved = [...cited].filter((id) => !indexed.has(id) && !EXCLUDED_IDS.has(id)).sort();
 		expect(unresolved, "cited in shipped source/READMEs but absent from the index").toEqual([]);
 	});
 
