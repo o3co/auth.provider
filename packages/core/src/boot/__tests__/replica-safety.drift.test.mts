@@ -108,6 +108,17 @@ describe("replica-safety list vs. the modules that exist (#304)", () => {
 		expect(orphans).toEqual([]);
 	});
 
+	it("answers undefined for a module it does not refuse", () => {
+		// The other half of the accessor's contract, and the one a composition
+		// root running its own check depends on: a safe module must not come
+		// back with a reason attached.
+		expect(replicaUnsafeReason("core-rate-limiter-redis")).toBeUndefined();
+		expect(replicaUnsafeReason("not-a-module-at-all")).toBeUndefined();
+		// Prototype keys are not entries — `in` would have said otherwise.
+		expect(replicaUnsafeReason("toString")).toBeUndefined();
+		expect(replicaUnsafeReason("constructor")).toBeUndefined();
+	});
+
 	it("gives every unsafe module a reason, not just a name", () => {
 		// "use redis" is not by itself a reason. The guard's message quotes
 		// these, and an operator triaging a refused boot deserves the
