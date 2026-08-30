@@ -44,7 +44,14 @@ describe("#407 — the Dockerfile installs with everything pnpm needs", () => {
 			dockerfile.indexOf("FROM node-base AS deps"),
 			dockerfile.indexOf("FROM", dockerfile.indexOf("FROM node-base AS deps") + 1),
 		);
-		expect(depsStage).toContain("pnpm-workspace.yaml");
+		// Matched as a COPY instruction, not as a substring of the stage: the
+		// comment above that COPY names the file too, so a substring check
+		// would keep passing if the instruction regressed and the comment
+		// stayed — which is the failure this test exists to catch.
+		const copyLines = depsStage
+			.split("\n")
+			.filter((line) => /^COPY\b/.test(line.trim()) && !line.trim().startsWith("#"));
+		expect(copyLines.some((line) => /\bpnpm-workspace\.yaml\b/.test(line))).toBe(true);
 	});
 });
 
