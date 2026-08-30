@@ -286,11 +286,15 @@ describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
 			},
 		}) as never;
 
+	/** The contributed grant factories, or `{}` when the module contributes none. */
+	const grantsOf = (enabled: boolean): Record<string, (d: unknown) => unknown> => {
+		const mod = oauthAuthorizationModule({ config: configWith(enabled) });
+		const contributed = mod.contributes?.grants;
+		return (contributed ?? {}) as Record<string, (d: unknown) => unknown>;
+	};
+
 	it("refuses to build the grant when the verifier is missing", () => {
-		const mod = oauthAuthorizationModule({ config: configWith(true) });
-		const factory = (mod.contributes?.grants as Record<string, (d: unknown) => unknown>)[
-			JWT_BEARER_GRANT_TYPE
-		];
+		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
 		expect(factory).toBeDefined();
 		expect(() => factory?.({ config: configWith(true), keyStore })).toThrow(
 			/no assertionVerifier is wired/,
@@ -298,26 +302,20 @@ describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
 	});
 
 	it("names both ways out — wire one, or disable the grant", () => {
-		const mod = oauthAuthorizationModule({ config: configWith(true) });
-		const factory = (mod.contributes?.grants as Record<string, (d: unknown) => unknown>)[
-			JWT_BEARER_GRANT_TYPE
-		];
-		const err = (() => {
-			try {
-				factory?.({ config: configWith(true), keyStore });
-			} catch (e) {
-				return e as Error;
-			}
-			return new Error("did not throw");
-		})();
-		expect(err.message).toMatch(/createJwtAssertionVerifier/);
-		expect(err.message).toMatch(/disable the grant/);
+		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
+		expect(factory).toBeDefined();
+		let message = "did not throw";
+		try {
+			factory?.({ config: configWith(true), keyStore });
+		} catch (e) {
+			message = (e as Error).message;
+		}
+		expect(message).toMatch(/createJwtAssertionVerifier/);
+		expect(message).toMatch(/disable the grant/);
 	});
 
 	it("does not register the grant at all when it is not enabled", () => {
 		// Secure-default opt-in: a deployment that says nothing gets nothing.
-		const mod = oauthAuthorizationModule({ config: configWith(false) });
-		const grants = (mod.contributes?.grants ?? {}) as Record<string, unknown>;
-		expect(grants[JWT_BEARER_GRANT_TYPE]).toBeUndefined();
+		expect(grantsOf(false)[JWT_BEARER_GRANT_TYPE]).toBeUndefined();
 	});
 });
