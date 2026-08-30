@@ -42,6 +42,7 @@
  */
 
 import { DEVICE_CODE_STORE_ABSENCE_POLICY, defineModule } from "@o3co/auth-provider-core";
+import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express from "express";
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
@@ -136,12 +137,20 @@ const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string =
 const disabledRoute = (id: string, mountPath: string) => {
 	const router = express.Router();
 	router.all("/", (_req, res) => {
-		res.status(404).json({
-			error: "not_found",
-			error_description:
-				"the device authorization grant is not enabled on this deployment " +
-				"(oauth.deviceAuthorization.enabled = false)",
-		});
+		// Same cache directives as the live endpoints. A 404 with no
+		// directives is exactly the shape an intermediary heuristically
+		// caches — and a cached "this deployment has no device grant" would
+		// outlive the operator turning it on.
+		res
+			.status(404)
+			.set("Cache-Control", "no-store")
+			.set("Pragma", "no-cache")
+			.json({
+				error: "not_found",
+				error_description:
+					"the device authorization grant is not enabled on this deployment " +
+					"(oauth.deviceAuthorization.enabled = false)",
+			});
 	});
 	return { id, mountPath, handler: router };
 };
@@ -208,12 +217,24 @@ export const deviceGrantModule = defineModule({
 				// WebAuthn routes: `createApp` installs no global parser.
 				router.use(express.json({ limit: "16kb" }));
 				router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+				// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
+				// requirements to this endpoint, and §5.6 expects device clients
+				// to be public. `allowPublicClients: true` is exactly that pair:
+				// a public client is identified by `client_id`, a confidential
+				// one must still present its secret. The same middleware and the
+				// same option `/oauth/token` uses, so there is one notion of
+				// client authentication rather than two that can drift.
+				router.use(
+					createClientAuthMiddleware(deps.clientRepository, {
+						issuer: deps.config.oauth.jwt.issuer,
+						allowPublicClients: true,
+						...(deps.logger ? { logger: deps.logger } : {}),
+					}),
+				);
 				router.post(
 					"/",
 					createDeviceAuthorizationHandler({
 						store: deps.deviceCodeStore,
-						clientRepository: deps.clientRepository,
-						issuerOrigin: deps.config.oauth.jwt.issuer,
 						settings: {
 							verificationUri: requireVerificationUri(slice),
 							verificationUriComplete: slice["verification-uri-complete"],

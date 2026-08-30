@@ -43,10 +43,12 @@
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "^0.0.0",
+		"@o3co/auth-provider-oauth": "^0.0.0",
 		"express": "^5.0.0"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-oauth": "workspace:*",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",
 		"@vitest/coverage-v8": "^4.1.10",

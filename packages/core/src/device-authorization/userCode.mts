@@ -44,11 +44,12 @@
  *   arise. §6.1: "It is RECOMMENDED to avoid character sets that contain two
  *   or more characters that can easily be confused".
  *
- * The hyphen in `BCDF-GHJK` is presentation only, and normalisation strips it
- * along with anything else outside the set — so a user who types
- * `bcdf ghjk`, `BCDFGHJK` or `bcdf-ghjk` is entering the same code, and the
- * one who mistypes a `0` for an `O` is told the code is wrong rather than
- * being silently matched against a different one.
+ * The hyphen in `BCDF-GHJK` is presentation only. Normalisation drops it and
+ * whitespace, and folds case — so `bcdf ghjk`, `BCDFGHJK` and `bcdf-ghjk` are
+ * all the same code. Any *other* character outside the set is **rejected, not
+ * stripped**: a user who mistypes a `0` for an `O` is told the code is wrong
+ * rather than having a character silently removed and being matched against a
+ * different code.
  */
 
 import { randomBytes, randomInt } from "node:crypto";

@@ -96,6 +96,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-oauth':
+        specifier: workspace:*
+        version: link:../oauth
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6

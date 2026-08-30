@@ -29,6 +29,8 @@ import {
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import express from "express";
+import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
@@ -36,6 +38,21 @@ import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 const clientRepository: ClientRepository = {
 	findById: async () => null,
 	authenticate: async () => null,
+};
+
+const CONFIDENTIAL_ID = "backend-app";
+const CONFIDENTIAL_SECRET = "s3cret-value";
+const confidentialClient = {
+	clientId: CONFIDENTIAL_ID,
+	tokenEndpointAuthMethod: "client_secret_basic" as const,
+	allowedScopes: ["openid"],
+	defaultScopes: ["openid"],
+};
+
+const confidentialRepository: ClientRepository = {
+	findById: async (id) => (id === CONFIDENTIAL_ID ? (confidentialClient as never) : null),
+	authenticate: async (id, secret) =>
+		id === CONFIDENTIAL_ID && secret === CONFIDENTIAL_SECRET ? (confidentialClient as never) : null,
 };
 
 interface Overrides {
@@ -171,6 +188,85 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 				},
 			}),
 		).toEqual({});
+	});
+});
+
+describe("deviceGrantModule — the route it actually contributes", () => {
+	/** Build the contributed router and mount it, as `assembleApp` would. */
+	const mountContributedRoute = (index: number, deps: Record<string, unknown>) => {
+		const factory = deviceGrantModule.contributes?.routes?.[index] as (d: unknown) => {
+			mountPath: string;
+			handler: express.RequestHandler;
+		};
+		const route = factory(deps);
+		const app = express();
+		app.use(route.mountPath, route.handler);
+		return app;
+	};
+
+	const enabledDeps = () => ({
+		config: {
+			oauth: {
+				jwt: { issuer: "https://as.example.test" },
+				accessToken: { expiresIn: 300 },
+				deviceAuthorization: {
+					enabled: true,
+					"verification-uri": "https://example.test/device",
+					"verification-uri-complete": false,
+					"code-lifetime-seconds": 600,
+					"polling-interval-seconds": 5,
+				},
+			},
+		},
+		clientRepository: confidentialRepository,
+		deviceCodeStore: createMemoryDeviceCodeStore(),
+		rateLimiter: createMemoryRateLimiter({
+			limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		}),
+	});
+
+	it("enforces client authentication on the mounted device_authorization route", async () => {
+		// The handler trusts `req.oauthClient`, so whether a confidential
+		// client can be impersonated depends on the module *mounting* the
+		// middleware — which no test of the handler alone can observe.
+		const app = mountContributedRoute(0, enabledDeps());
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
+		// Asserted on the *middleware's* wording specifically. The handler
+		// also refuses an absent `req.oauthClient` — a deliberate fail-closed
+		// backstop — so a looser matcher would pass on that instead and stop
+		// noticing if the middleware were unmounted, which is the one thing
+		// this test exists to catch.
+		expect(res.body.error_description).toContain("confidential clients");
+	});
+
+	it("lets an authenticated confidential client through the mounted route", async () => {
+		const app = mountContributedRoute(0, enabledDeps());
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(200);
+		expect(typeof res.body.device_code).toBe("string");
+	});
+
+	it("answers 404 with no-store when the grant is disabled", async () => {
+		// A 404 carrying no cache directives is the shape an intermediary
+		// heuristically caches, and a cached "no device grant here" would
+		// outlive the operator turning it on.
+		const app = mountContributedRoute(0, {
+			config: { oauth: { deviceAuthorization: { enabled: false } } },
+		});
+		const res = await request(app).post("/oauth/device_authorization").send({});
+
+		expect(res.status).toBe(404);
+		expect(res.headers["cache-control"]).toContain("no-store");
 	});
 });
 

@@ -35,14 +35,23 @@
  *
  * RFC 8628 §3.1: "The client authentication requirements of Section 3.2.1 of
  * [RFC6749] apply to requests on this endpoint" — and §5.6 observes that
- * device clients "should be treated as public clients". Both are satisfied by
- * mounting the same `clientAuthMw` the token endpoint uses: a confidential
- * client is authenticated, a public one is identified by `client_id`, and the
- * decision about which a given registration is stays in one place rather than
- * being re-litigated here.
+ * device clients "should be treated as public clients".
+ *
+ * Both are satisfied by mounting `createClientAuthMiddleware` from
+ * `@o3co/auth-provider-oauth` with `allowPublicClients: true` — the same
+ * middleware, with the same options, that `/oauth/token` uses. That is why
+ * this handler reads `req.oauthClient` and never looks a client up itself:
+ * the middleware has already enforced the registration's own
+ * `tokenEndpointAuthMethod`, so a **confidential** client cannot be
+ * identified by its `client_id` alone, while a public one can.
+ *
+ * Re-deriving that here would be a second notion of client authentication
+ * living beside the canonical one, differing in exactly the ways nobody
+ * notices until one of them is wrong — the drift #292 removed when it moved
+ * the trusted-proxy vocabulary into a single shared matcher.
  */
 
-import type { AuthenticatedClient, ClientRepository } from "@o3co/auth-provider-core";
+import type { AuthenticatedClient } from "@o3co/auth-provider-core";
 import { generateDeviceCode, generateUserCode, normaliseUserCode } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import type { DeviceGrantDependencies } from "./types.mjs";
@@ -113,10 +122,7 @@ const resolveScope = (
 	return { ok: true, scope: requested };
 };
 
-export interface DeviceAuthorizationEndpointOptions extends DeviceGrantDependencies {
-	readonly clientRepository: ClientRepository;
-	readonly issuerOrigin: string;
-}
+export interface DeviceAuthorizationEndpointOptions extends DeviceGrantDependencies {}
 
 /** How many times to re-draw when a generated code collides with a live one. */
 const CODE_COLLISION_RETRIES = 5;
@@ -130,24 +136,17 @@ export const createDeviceAuthorizationHandler = (
 	return async (req: Request, res: Response): Promise<void> => {
 		const body = (req.body ?? {}) as Record<string, unknown>;
 
-		// `clientAuthMw` populates `req.oauthClient` when it authenticated a
-		// confidential client. A public device client sends only `client_id`,
-		// which §5.6 expects — so the identity is looked up rather than
-		// asserted, and an unknown one is refused here rather than becoming a
-		// pending authorization nobody can redeem.
-		const authenticated = (req as { oauthClient?: AuthenticatedClient }).oauthClient;
-		const clientId = authenticated?.clientId ?? body.client_id;
-		if (typeof clientId !== "string" || clientId === "") {
-			fail(res, 400, {
-				error: "invalid_request",
-				error_description: "client_id is required",
+		// Set by `createClientAuthMiddleware`, which the module mounts ahead of
+		// this handler. Its absence means the handler was wired without that
+		// middleware — a composition error, not a request the caller can fix,
+		// and answering it as an authentication failure is both true and the
+		// only safe reading.
+		const client = (req as { oauthClient?: AuthenticatedClient }).oauthClient;
+		if (client === undefined) {
+			fail(res, 401, {
+				error: "invalid_client",
+				error_description: "client authentication is required",
 			});
-			return;
-		}
-
-		const client = authenticated ?? (await options.clientRepository.findById(clientId));
-		if (client === null || client === undefined) {
-			fail(res, 401, { error: "invalid_client", error_description: "unknown client" });
 			return;
 		}
 

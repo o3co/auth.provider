@@ -36,6 +36,7 @@ import {
 	generateUserCode,
 	normaliseUserCode,
 } from "@o3co/auth-provider-core";
+import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,9 +56,29 @@ const client = {
 	allowedAudiences: ["https://api.example.test"],
 } as unknown as AuthenticatedClient;
 
+/**
+ * A confidential registration, to prove that this endpoint enforces the
+ * registration's own `tokenEndpointAuthMethod` rather than accepting any
+ * known `client_id`.
+ */
+const CONFIDENTIAL_ID = "backend-app";
+const CONFIDENTIAL_SECRET = "s3cret-value";
+
+const confidentialClient = {
+	clientId: CONFIDENTIAL_ID,
+	tokenEndpointAuthMethod: "client_secret_basic" as const,
+	allowedScopes: ["openid"],
+	defaultScopes: ["openid"],
+} as unknown as AuthenticatedClient;
+
 const clientRepository: ClientRepository = {
-	findById: async (id) => (id === CLIENT_ID ? (client as never) : null),
-	authenticate: async () => null,
+	findById: async (id) => {
+		if (id === CLIENT_ID) return client as never;
+		if (id === CONFIDENTIAL_ID) return confidentialClient as never;
+		return null;
+	},
+	authenticate: async (id, secret) =>
+		id === CONFIDENTIAL_ID && secret === CONFIDENTIAL_SECRET ? (confidentialClient as never) : null,
 };
 
 const settings = {
@@ -103,12 +124,16 @@ const makeHarness = (
 		(req as unknown as { session: unknown }).session = session;
 		next();
 	});
+	// The same middleware the module mounts, so these tests exercise the real
+	// client-authentication path rather than a hand-set `req.oauthClient`.
 	app.post(
 		"/oauth/device_authorization",
+		createClientAuthMiddleware(clientRepository, {
+			issuer: ISSUER,
+			allowPublicClients: true,
+		}),
 		createDeviceAuthorizationHandler({
 			store,
-			clientRepository,
-			issuerOrigin: ISSUER,
 			settings: resolved,
 			now: clock.now,
 		}),
@@ -188,6 +213,47 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		expect(res.headers["cache-control"]).toContain("no-store");
 	});
 
+	it("refuses a confidential client identified by client_id alone", async () => {
+		// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
+		// requirements here. Without them anyone could open pending
+		// authorizations in a confidential client's name and phish a user into
+		// approving one.
+		const { app } = makeHarness();
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
+	});
+
+	it("accepts a confidential client that authenticates", async () => {
+		const { app } = makeHarness();
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+		expect(res.status).toBe(200);
+		expect(typeof res.body.device_code).toBe("string");
+	});
+
+	it("refuses a confidential client with the wrong secret", async () => {
+		const { app } = makeHarness();
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, "wrong")
+			.send({});
+		expect(res.status).toBe(401);
+	});
+
+	it("still accepts a public device client on client_id alone (§5.6)", async () => {
+		// The other half of the same rule: device clients "should be treated
+		// as public clients", so requiring a secret from them would make the
+		// grant unusable for what it exists to serve.
+		const { app } = makeHarness();
+		const res = await startDevice(app);
+		expect(res.status).toBe(200);
+	});
+
 	it("refuses an unknown client", async () => {
 		const { app } = makeHarness();
 		const res = await startDevice(app, { client_id: "not-registered" });
@@ -207,10 +273,13 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		// #396's rule, applied here: "forgot to send scope" must not be the
 		// maximum grant. The client allows openid+profile and defaults to
 		// openid.
-		const { app, store } = makeHarness();
+		const { app, store, clock } = makeHarness();
 		const res = await startDevice(app);
 		const userCode = normaliseUserCode(res.body.user_code as string);
-		const pending = await store.findPendingByUserCode(userCode as string, Date.now());
+		// The harness clock, not `Date.now()`: the synthetic clock starts in the
+		// future, so a wall-clock read would report the record expired the day
+		// real time passes that start and turn this into a dated failure.
+		const pending = await store.findPendingByUserCode(userCode as string, clock.now());
 		expect(pending?.requestedScope).toEqual(["openid"]);
 	});
 });
