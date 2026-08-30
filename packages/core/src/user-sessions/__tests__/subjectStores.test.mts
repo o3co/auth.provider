@@ -11,6 +11,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import { createInMemorySubjectSessionIndex } from "#/user-sessions/memory/subjectSessionIndex.mjs";
+import { runSubjectRevocationContract } from "./subjectRevocation.contract.mjs";
+import { runSubjectSessionIndexContract } from "./subjectSessionIndex.contract.mjs";
+
+// The behaviour every adapter owes, shared with `@o3co/auth-provider-redis`'s
+// suite (#321). What stays below is what only the in-process adapter can be
+// asked: ageing over a clock `vi.useFakeTimers` can actually move.
+runSubjectSessionIndexContract(async () => createInMemorySubjectSessionIndex());
+runSubjectRevocationContract(async () => createInMemorySubjectRevocation());
 
 const FUTURE = new Date(Date.now() + 3_600_000);
 

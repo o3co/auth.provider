@@ -47,6 +47,9 @@ export type {
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
+	SubjectRevocationClient,
+	SubjectSessionIndexClient,
+	SubjectSessionIndexMultiClient,
 	UserSessionStoreClient,
 } from "./clients.mjs";
 // makeIoredisClients lives at the `/ioredis` subpath
@@ -126,6 +129,16 @@ export {
 	type RedisSessionRPRegistryOptions,
 	redisSessionRPRegistryBuilder,
 } from "./sessionRPRegistry.mjs";
+export {
+	createRedisSubjectRevocation,
+	type RedisSubjectRevocationOptions,
+	redisSubjectRevocationBuilder,
+} from "./subjectRevocation.mjs";
+export {
+	createRedisSubjectSessionIndex,
+	type RedisSubjectSessionIndexOptions,
+	redisSubjectSessionIndexBuilder,
+} from "./subjectSessionIndex.mjs";
 // ---------------------------------------------------------------------------
 // A4 user-session adapters (Phase 8b).
 // Per A4 §8.1 + §11.2.

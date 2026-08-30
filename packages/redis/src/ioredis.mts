@@ -19,6 +19,9 @@ import type {
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
 	SessionSidSortedSetMultiClient,
+	SubjectRevocationClient,
+	SubjectSessionIndexClient,
+	SubjectSessionIndexMultiClient,
 	UserSessionStoreClient,
 } from "./clients.mjs";
 
@@ -68,6 +71,65 @@ end
  * `SCRIPT LOAD` would cost on every cold-cache `EVAL` fallback.
  */
 const LUA_COMPARE_AND_DELETE_SHA = createHash("sha1").update(LUA_COMPARE_AND_DELETE).digest("hex");
+
+/**
+ * Lua monotonic watermark write — the `SubjectRevocation` store's only mutation.
+ *
+ * `KEYS[1]` = the watermark key; `ARGV[1]` = the proposed `before` in epoch ms;
+ * `ARGV[2]` = the proposed expiry in epoch ms. Returns the watermark in force
+ * after the write.
+ *
+ * Both fields take the **larger** of proposed and stored. Moving the watermark
+ * backwards would resurrect every token the earlier reset killed, and
+ * shortening the expiry would retire the line while tokens it must refuse are
+ * still presentable — so a plain `SET key value PX ttl` is the wrong primitive,
+ * and a client-side read-compare-write loses the same race one round-trip
+ * later.
+ *
+ * `PEXPIRETIME` (Redis 7.0+, and v0.5.1 pins the floor to 7.2 LTS) answers the
+ * absolute expiry directly, so the comparison needs no clock reading of its
+ * own. It answers `-1` for a key with no TTL and `-2` for one that does not
+ * exist; both fall through to the proposed expiry, which is what makes an
+ * expired watermark start fresh rather than being resurrected by the guard.
+ */
+const LUA_SET_WATERMARK_MONOTONIC = `
+local before = tonumber(ARGV[1])
+local expiresAt = tonumber(ARGV[2])
+local current = redis.call("GET", KEYS[1])
+if current then
+  local currentBefore = tonumber(current)
+  if currentBefore and currentBefore > before then
+    before = currentBefore
+  end
+end
+local currentExpiry = redis.call("PEXPIRETIME", KEYS[1])
+if currentExpiry > 0 and currentExpiry > expiresAt then
+  expiresAt = currentExpiry
+end
+redis.call("SET", KEYS[1], tostring(before), "PXAT", expiresAt)
+return tostring(before)
+`.trim();
+
+/** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
+const LUA_SET_WATERMARK_MONOTONIC_SHA = createHash("sha1")
+	.update(LUA_SET_WATERMARK_MONOTONIC)
+	.digest("hex");
+
+/** Script-cache residency flag for {@link LUA_SET_WATERMARK_MONOTONIC}. */
+let watermarkScriptCached = false;
+
+/**
+ * Whether `err` is Redis's `NOSCRIPT` — the cold-cache reply to `EVALSHA`
+ * after a `SCRIPT FLUSH` or a cluster failover, and the signal to fall back to
+ * `EVAL` (which implicitly reloads the script) rather than to fail the call.
+ *
+ * Shared by both EVALSHA call sites since #321 added the second one; a second
+ * inline copy of the `instanceof` + `includes` pair is how the two would come
+ * to disagree about what counts as a cache miss.
+ */
+function isNoScriptError(err: unknown): boolean {
+	return err instanceof Error && err.message.includes("NOSCRIPT");
+}
 
 /**
  * Module-level flag tracking whether the script is currently expected to be
@@ -180,6 +242,8 @@ export function makeIoredisClients(
 	sessionRPRegistryClient: SessionRPRegistryClient;
 	sessionFamilyIndexClient: SessionSidSortedSetClient;
 	sessionFederationIndexClient: SessionSidSortedSetClient;
+	subjectSessionIndexClient: SubjectSessionIndexClient;
+	subjectRevocationClient: SubjectRevocationClient;
 	federationTokenStoreClient: FederationTokenStoreClient;
 	rateLimiterClient: RateLimiterClient;
 	codeRepositoryClient: CodeRepositoryClient;
@@ -378,6 +442,61 @@ export function makeIoredisClients(
 		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
 	};
 
+	// --- subject-keyed clients (#321) ---------------------------------------
+
+	const buildSubjectIndexMulti = (p: ReturnType<Redis["multi"]>) => {
+		const m: SubjectSessionIndexMultiClient = {
+			zAdd: (k, e) => {
+				p.zadd(k, e.score, e.value);
+				return m;
+			},
+			// Same NX-then-GT pair as the sid-keyed client, and for the same
+			// reason: Redis treats a non-volatile key as having infinite TTL for
+			// `GT`, so a bare `GT` silently no-ops on the first write.
+			pExpireGT: (k, ms) => {
+				p.pexpireat(k, ms, "NX");
+				p.pexpireat(k, ms, "GT");
+				return m;
+			},
+			exec: async () => assertPipelineSucceeded(await p.exec(), "subjectSessionIndexClient.exec"),
+		};
+		return m;
+	};
+
+	const subjectSessionIndexClient: SubjectSessionIndexClient = {
+		multi: () => buildSubjectIndexMulti(io.multi()),
+		zAdd: (k, e) => io.zadd(k, e.score, e.value) as Promise<unknown> as Promise<number>,
+		zRangeByScore: (k, min, max) => io.zrangebyscore(k, String(min), String(max)),
+		zRemRangeByScore: (k, min, max) =>
+			io.zremrangebyscore(k, String(min), String(max)) as Promise<number>,
+		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
+		unlink: (k) => io.unlink(k),
+	};
+
+	const subjectRevocationClient: SubjectRevocationClient = {
+		get: (k) => io.get(k),
+		async setWatermarkMonotonic(key, beforeMs, expiresAtMs) {
+			// EVALSHA-first with a NOSCRIPT fallback to EVAL, matching
+			// `compareAndDelete` above — see `scriptCached` for why the flag is
+			// module-scoped and how a `SCRIPT FLUSH` or cluster failover is
+			// recovered from.
+			const args = [key, String(beforeMs), String(expiresAtMs)] as const;
+			if (watermarkScriptCached) {
+				try {
+					const r = (await io.evalsha(LUA_SET_WATERMARK_MONOTONIC_SHA, 1, ...args)) as string;
+					return Number(r);
+				} catch (err) {
+					if (!isNoScriptError(err)) throw err;
+					watermarkScriptCached = false;
+				}
+			}
+			const r = (await io.eval(LUA_SET_WATERMARK_MONOTONIC, 1, ...args)) as string;
+			// EVAL implicitly loads the script into Redis's server-side cache.
+			watermarkScriptCached = true;
+			return Number(r);
+		},
+	};
+
 	const federationTokenStoreClient: FederationTokenStoreClient = {
 		get: (k) => io.get(k),
 		// Cast required for overloaded `set`; see UserSessionStoreClient above.
@@ -431,7 +550,7 @@ export function makeIoredisClients(
 					const r = (await io.evalsha(LUA_COMPARE_AND_DELETE_SHA, 1, key, expectedValue)) as number;
 					return r === 1;
 				} catch (err) {
-					if (!(err instanceof Error) || !err.message.includes("NOSCRIPT")) throw err;
+					if (!isNoScriptError(err)) throw err;
 					scriptCached = false;
 					// Fall through to EVAL.
 				}
@@ -470,6 +589,8 @@ export function makeIoredisClients(
 		sessionRPRegistryClient,
 		sessionFamilyIndexClient: sortedSetClient,
 		sessionFederationIndexClient: sortedSetClient,
+		subjectSessionIndexClient,
+		subjectRevocationClient,
 		federationTokenStoreClient,
 		rateLimiterClient,
 		codeRepositoryClient,
