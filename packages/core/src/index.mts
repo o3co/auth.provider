@@ -495,6 +495,7 @@ export type {
 	UserSessionStore,
 	UserSessionStoreFactory,
 } from "./user-sessions/types.mjs";
+export { SUBJECT_REVOCATION_ABSENCE_POLICY } from "./user-sessions/types.mjs";
 
 // ---------------------------------------------------------------------------
 // A1 — Challenge Store + Replay Seen Set + Default Ceremony (Phase 5)

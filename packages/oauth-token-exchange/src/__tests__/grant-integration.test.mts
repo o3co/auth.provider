@@ -194,10 +194,11 @@ describe("token_exchange — integration", () => {
 				...base.oauth,
 				jwt: { ...base.oauth.jwt, issuer: ISSUER },
 				// #367 enrolled this module in the #277 boot guard by declaring
-				// `accessTokenDenylist` in its optional keys. This composition
-				// wires no denylist and is not about revocation, so it declares
-				// the capability absent — loudly, which is the point.
-				revocation: { accessToken: "unsupported" as const },
+				// `accessTokenDenylist` in its optional keys, and #406 did the
+				// same for `subjectRevocation`. This composition wires neither
+				// and is not about revocation, so it declares both capabilities
+				// absent — loudly, which is the point.
+				revocation: { accessToken: "unsupported" as const, subject: "unsupported" as const },
 			},
 		};
 

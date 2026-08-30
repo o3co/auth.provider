@@ -443,7 +443,14 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 		const base = issuerConfig();
 		const config = {
 			...base,
-			oauth: { ...base.oauth, revocation: { accessToken: "unsupported" } },
+			// `subject: "unsupported"` rides along because this override replaces
+			// the whole `revocation` object, and the fixture's declaration
+			// (#406) goes with it. This composition wires no subject stores
+			// either, so the declaration is honest.
+			oauth: {
+				...base.oauth,
+				revocation: { accessToken: "unsupported", subject: "unsupported" },
+			},
 		} as ReturnType<typeof makeValidAppConfig>;
 		const handle = await createTestApp({
 			modules: [

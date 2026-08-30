@@ -55,6 +55,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   No source behaviour changed and no test changed. Published `.d.ts` files are now emitted by TS 6 — consumers pinned to a TypeScript old enough to reject its output should upgrade alongside.
 
+### Fixed
+
+- **BREAKING: an unfilled subject-level revocation slot must be a stated decision — the last silent no-op #363 named but did not close (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`, `@o3co/auth-provider-oauth-token-exchange`, `@o3co/auth-provider-session`, standalone template).** #363 gave `auditSink` and `accessTokenDenylist` an `AbsencePolicy` so an unfilled optional slot has to be declared at boot, and its own doc cites *"a subject-revocation watermark nothing consulted (#322)"* as motivation. `subjectRevocation` and `subjectSessionIndex` never got one (#406).
+
+  The consequence reached every shape this repository shipped. `packages/redis` had no adapter for either slot until #321, and the standalone template's own `standalone:in-memory-session-stores` provided the four session stores and neither of these — on **both** its memory and redis branches. So a scaffolded deployment got `subjectRevocation: undefined`: `verifyJwt` skipped the watermark check, the #376 refresh-redemption gate was inert, and `revokeAllForSubject` reported `unavailable`. Nothing failed and nothing warned, in either direction — exactly the shape `absencePolicies` exists to refuse.
+
+  New `SUBJECT_REVOCATION_ABSENCE_POLICY`, attached by `oauthModule` and `tokenExchangeModule` to `subjectRevocation` and by `sessionModule` to `subjectSessionIndex`. **One policy across both keys**, because they are two components but one capability: the index enumerates what a credential change cascades over and the watermark refuses what the cascade missed, so a deployment that has neither has one thing to say. #321's adapters fill them together for the same reason.
+
+  **The standalone template now wires both rather than declaring them absent** — its memory branch gains core's in-process adapters, and its redis branch has had `redisSessionStoresModule`'s since #321. The gap outlived #296 because there was no distributed adapter to point the scaffold at; there is now.
+
+  **Migration — a composition that reads either slot and fills neither must now say so:**
+
+  ```hocon
+  oauth.revocation.subject = "unsupported"   # env: OAUTH_REVOCATION_SUBJECT
+  ```
+
+  Leave the key unset when the stores are wired; the guard reads it only for an unfilled slot. A deployment on the standalone template is unaffected in both directions. Refresh-token family revocation is governed by neither value — it runs off `refreshTokenFamilyRevocation` and works regardless.
+
 ### Security
 
 - **BREAKING: a sender-constrained `actor_token` must prove possession, like the `subject_token` already had to (`@o3co/auth-provider-oauth-token-exchange`).** #265 enforced the subject's `cnf` against the presented DPoP proof / client certificate and named the actor as a tracked residual (#309). Until now a bound `actor_token` was accepted with **no proof-of-possession at all** — while `buildActClaim` folded its identity into the issued token's `act` claim (RFC 8693 §4.1). A stolen bound actor token therefore forged the delegation chain recorded on the issued token: the same laundering #265 closed for the subject, one parameter over.

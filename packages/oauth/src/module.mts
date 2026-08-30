@@ -24,6 +24,7 @@ import {
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
@@ -154,6 +155,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		// `accessTokenDenylist` absence with oauth.revocation.accessToken =
 		// "unsupported" (#277's boot refusal, now expressed as a policy).
 		absencePolicies: {
+			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
 			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 			accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 		},

@@ -20,6 +20,7 @@ import {
 	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
@@ -139,7 +140,14 @@ export const sessionModule = defineModule<
 	// #363: `auditSink` is optional to wire, not optional to decide — an
 	// unfilled slot must be declared with audit.sink.type = "none" or boot
 	// refuses. Same shared policy as the oauth and webauthn modules.
-	absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY },
+	// #406: subject-level revocation is optional to wire, not optional to
+	// decide. Its absence must be declared with
+	// oauth.revocation.subject = "unsupported", or a credential change
+	// silently invalidates nothing that was already issued.
+	absencePolicies: {
+		auditSink: AUDIT_SINK_ABSENCE_POLICY,
+		subjectSessionIndex: SUBJECT_REVOCATION_ABSENCE_POLICY,
+	},
 	contributes: {
 		routes: [
 			(deps) => {
