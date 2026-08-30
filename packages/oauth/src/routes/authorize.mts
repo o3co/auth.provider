@@ -877,8 +877,14 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// `redirect_uri` validated, so `login_required` can be delivered where
 		// the RP is listening for it.
 		//
-		// Only that case falls through. Every other unauthenticated request
-		// still answers before touching the repository, which is what keeps an
+		// The gate opens for any `prompt` list that names `none`, including
+		// the combinations §3.1.2.1 forbids (`prompt=none login`). That is
+		// deliberate, not slack: such a request still comes from a silent
+		// context, so answering it with a login page hangs the same hidden
+		// iframe, and its `invalid_request` belongs at the RP's
+		// `redirect_uri` — which cannot be trusted until it is validated,
+		// which costs the lookup. Every other unauthenticated request still
+		// answers before touching the repository, which is what keeps an
 		// unauthenticated endpoint from doing a lookup per hit.
 		const promptRaw = authorizeParams(req).prompt;
 		const wantsSilentAuth =
@@ -968,10 +974,10 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!scopes) return;
 
 		// RFC 8707 §2 at the authorization endpoint (Stage 2, #173). Read
-		// from the query string here — `/authorize` is a GET — using the
-		// same extractor the token endpoint uses, so a repeated
-		// `?resource=` (which Express surfaces as an array) is handled
-		// identically on both endpoints.
+		// through `authorizeParams`, so a GET's query string and a POST's
+		// form body reach the same extractor the token endpoint uses and a
+		// repeated `resource` (which Express surfaces as an array) is
+		// handled identically on every endpoint and method.
 		const authorizeResource = opts.oauth.resourceIndicatorEnabled
 			? extractResourceParam(authorizeParams(req))
 			: null;
