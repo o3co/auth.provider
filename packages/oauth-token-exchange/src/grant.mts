@@ -505,8 +505,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// precedent for; #309 keeps that as the future path rather than
 			// approximating it with a rule that enforces nothing.
 			//
-			// Evaluated before `may_act` and every store round-trip, matching
-			// the subject matrix's short-circuit ordering.
+			// Placed as early as the check can be: it needs the actor's claims,
+			// so it runs immediately after actor validation and ahead of
+			// `may_act`, the policy hook and the keystore signature. It is not
+			// ahead of *all* store I/O — validating the subject and the actor
+			// already consulted the family revocation store — because a `cnf`
+			// cannot be read out of a token that has not been verified yet.
 			if (actorValidated) {
 				const actorMatch = matchConfirmation(actorValidated.claims.cnf, ctx.tokenBinding);
 				if (actorMatch.status === "compound") {

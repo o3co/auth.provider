@@ -244,9 +244,11 @@ describe("token exchange — cnf edge cases (#265)", () => {
 /**
  * `exchange` with an `actor_token` alongside the subject.
  *
- * The subject is left unbound in every actor row so the outcome is driven by
- * the actor's `cnf` alone — a bound subject would consume the single
- * `ctx.tokenBinding` and confound which token caused the rejection.
+ * The subject defaults to unbound so each matrix row is driven by the actor's
+ * `cnf` alone — a bound subject would consume the single `ctx.tokenBinding`
+ * and confound which of the two tokens caused the rejection. `subjectClaims`
+ * overrides that for the one row that deliberately binds both, which is the
+ * only delegation shape a single binding can carry.
  */
 const exchangeWithActor = async (
 	actorClaims: Record<string, unknown>,
