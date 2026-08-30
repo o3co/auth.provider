@@ -36,6 +36,14 @@
  * Scanned from source rather than from an import graph on purpose: a module
  * that is not yet wired into any bundle is exactly the one that would slip
  * through, and it is still a module someone can compose.
+ *
+ * Comments are stripped first. `defineModule` appears inside JSDoc `@example`
+ * blocks — `define-module.mts` documents itself with one — and a scan that
+ * counts those is picking up names no module has. Harmless today (the example
+ * is called `my-module`), a false failure the day someone writes an example
+ * with `memory` in the name, and quietly wrong in the other direction too:
+ * the stale-entry check compares against this list, so an inflated list makes
+ * that assertion weaker than it reads.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -57,6 +65,18 @@ const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
  */
 const SAFE_MEMORY_MODULES: Readonly<Record<string, string>> = {};
 
+/**
+ * Remove block and line comments so documentation examples are not read as
+ * code. Deliberately not a parser: this only has to be right about `/* … *\/`
+ * and `// …`, and pulling a TypeScript AST in to find one call expression
+ * would be a heavier dependency than the check is worth. The test below pins
+ * that the known doc example is excluded, so a regression in this shows up
+ * as a failure rather than as silence.
+ */
+function stripComments(source: string): string {
+	return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+}
+
 /** Every `defineModule({ name: "..." })` in the repository's package sources. */
 function collectModuleNames(): string[] {
 	const names: string[] = [];
@@ -69,7 +89,7 @@ function collectModuleNames(): string[] {
 				continue;
 			}
 			if (!entry.endsWith(".mts")) continue;
-			const source = readFileSync(full, "utf8");
+			const source = stripComments(readFileSync(full, "utf8"));
 			for (const match of source.matchAll(/defineModule\(\{\s*\n?\s*name:\s*"([^"]+)"/g)) {
 				const name = match[1];
 				if (name !== undefined) names.push(name);
@@ -82,6 +102,14 @@ function collectModuleNames(): string[] {
 
 describe("replica-safety list vs. the modules that exist (#304)", () => {
 	const moduleNames = collectModuleNames();
+
+	it("does not count names from documentation examples", () => {
+		// `define-module.mts` documents itself with a `defineModule({ name:
+		// "my-module" })` example. Counting it inflates the list, which makes
+		// the stale-entry assertion below weaker than it reads and would turn
+		// into a false failure the day an example carries "memory" in its name.
+		expect(moduleNames).not.toContain("my-module");
+	});
 
 	it("finds the bundled modules at all — the scan is not vacuously passing", () => {
 		// A drift guard whose scan silently returns nothing is worse than no
