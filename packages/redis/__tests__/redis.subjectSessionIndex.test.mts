@@ -130,3 +130,33 @@ describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 		expect((await idx.listSids("u5")).length).toBe(100);
 	});
 });
+
+describe("SubjectSessionIndex — the read boundary is the store's clock (#321)", () => {
+	it("hands the read no timestamp of its own", async () => {
+		// Structural, not incidental: `pruneExpiredAndList` takes a key and
+		// nothing else, so the adapter *cannot* pass a caller-side `Date.now()`
+		// as the boundary. Scores are written by whichever replica handled the
+		// login and read by whichever replica handles the next request; a host
+		// clock on either side of that comparison is the skew that drops live
+		// sessions early or keeps expired ones listed.
+		const calls: unknown[][] = [];
+		const idx = createRedisSubjectSessionIndex({
+			client: {
+				multi: () => {
+					throw new Error("not used by listSids");
+				},
+				zAdd: async () => 1,
+				pruneExpiredAndList: async (...args: unknown[]) => {
+					calls.push(args);
+					return ["s1"];
+				},
+				zRem: async () => 1,
+				unlink: async () => 1,
+			} as never,
+			keyPrefix: "t321i:clock:",
+		});
+
+		expect(await idx.listSids("u9")).toEqual(["s1"]);
+		expect(calls).toEqual([["t321i:clock:u9"]]);
+	});
+});

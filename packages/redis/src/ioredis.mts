@@ -119,6 +119,39 @@ const LUA_SET_WATERMARK_MONOTONIC_SHA = createHash("sha1")
 let watermarkScriptCached = false;
 
 /**
+ * Lua sweep-then-list for the subject session index — the read path of
+ * `SubjectSessionIndex`.
+ *
+ * `KEYS[1]` = the subject's sorted set. Returns the members still live.
+ *
+ * The boundary is `TIME`, the **server's** clock, not the calling replica's
+ * `Date.now()`. Scores are written by whichever replica handled the login and
+ * read by whichever replica handles the next request; comparing two host
+ * clocks would drop live sessions early or keep expired ones listed by exactly
+ * the skew between them. The store is the one clock every replica shares,
+ * which is the reason this index moved off in-process state at all.
+ *
+ * Sweeping and reading in one script also makes them one value and one moment
+ * — as two commands they could disagree about the boundary member.
+ *
+ * `TIME` makes the script non-deterministic, which is fine: Redis has
+ * replicated scripts by their effects since 5.0 and does so unconditionally in
+ * 7.x, so replicas receive the resulting `ZREMRANGEBYSCORE`, not a re-run.
+ */
+const LUA_PRUNE_AND_LIST = `
+local t = redis.call("TIME")
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+redis.call("ZREMRANGEBYSCORE", KEYS[1], "-inf", now)
+return redis.call("ZRANGEBYSCORE", KEYS[1], now, "+inf")
+`.trim();
+
+/** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
+const LUA_PRUNE_AND_LIST_SHA = createHash("sha1").update(LUA_PRUNE_AND_LIST).digest("hex");
+
+/** Script-cache residency flag for {@link LUA_PRUNE_AND_LIST}. */
+let pruneAndListScriptCached = false;
+
+/**
  * Whether `err` is Redis's `NOSCRIPT` — the cold-cache reply to `EVALSHA`
  * after a `SCRIPT FLUSH` or a cluster failover, and the signal to fall back to
  * `EVAL` (which implicitly reloads the script) rather than to fail the call.
@@ -466,9 +499,20 @@ export function makeIoredisClients(
 	const subjectSessionIndexClient: SubjectSessionIndexClient = {
 		multi: () => buildSubjectIndexMulti(io.multi()),
 		zAdd: (k, e) => io.zadd(k, e.score, e.value) as Promise<unknown> as Promise<number>,
-		zRangeByScore: (k, min, max) => io.zrangebyscore(k, String(min), String(max)),
-		zRemRangeByScore: (k, min, max) =>
-			io.zremrangebyscore(k, String(min), String(max)) as Promise<number>,
+		async pruneExpiredAndList(key) {
+			// EVALSHA-first with a NOSCRIPT fallback, as above.
+			if (pruneAndListScriptCached) {
+				try {
+					return (await io.evalsha(LUA_PRUNE_AND_LIST_SHA, 1, key)) as string[];
+				} catch (err) {
+					if (!isNoScriptError(err)) throw err;
+					pruneAndListScriptCached = false;
+				}
+			}
+			const r = (await io.eval(LUA_PRUNE_AND_LIST, 1, key)) as string[];
+			pruneAndListScriptCached = true;
+			return r;
+		},
 		zRem: (k, m) => io.zrem(k, m) as Promise<number>,
 		unlink: (k) => io.unlink(k),
 	};

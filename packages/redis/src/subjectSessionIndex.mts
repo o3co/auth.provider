@@ -46,13 +46,18 @@ import type { SubjectSessionIndexClient } from "./clients.mjs";
  * subject's set in with it. Paired with the write in one pipeline, because a
  * mutation whose expiry silently failed is the shape #269 paid for.
  *
- * ## Read prunes
+ * ## Read prunes, on the store's clock
  *
  * There is no background sweep, so `listSids` is the only chance to reclaim.
- * It prunes and reads in one pipeline against a single `now`, so the two
- * commands cannot disagree about which members are live. An emptied sorted set
- * is removed by Redis itself, which is what keeps the keyspace from holding an
- * entry for everyone who ever logged in.
+ * It sweeps and reads in one server-side operation whose boundary is the
+ * **store's** clock — see `pruneExpiredAndList`. Using the calling replica's
+ * `Date.now()` would compare a score written by whichever replica handled the
+ * login against whichever replica handles the read: two host clocks, and the
+ * skew between them drops live sessions early or keeps expired ones listed.
+ * One operation also makes the sweep and the read agree about the boundary
+ * member, which two commands could not. An emptied sorted set is removed by
+ * Redis itself, which keeps the keyspace from holding an entry for everyone
+ * who ever logged in.
  */
 export interface RedisSubjectSessionIndexOptions {
 	readonly client: SubjectSessionIndexClient;
@@ -73,6 +78,13 @@ export function createRedisSubjectSessionIndex(
 			const expiresAtMs = expiresAt.getTime();
 			// An already-expired session is not worth indexing; it would only be
 			// swept on the next read. Mirrors the in-process adapter.
+			//
+			// This one comparison is deliberately local: `expiresAt` was computed
+			// on this host, so checking it against this host's clock is
+			// self-consistent, and it is an optimisation rather than the
+			// correctness gate — the server-clock sweep in `listSids` is. Reading
+			// the store's clock here would buy a round-trip to make a
+			// short-circuit slightly more accurate.
 			if (expiresAtMs <= Date.now()) return;
 			const k = key(subject);
 			await deps.client
@@ -83,22 +95,7 @@ export function createRedisSubjectSessionIndex(
 		},
 
 		async listSids(subject) {
-			// One `now` for both commands, so the sweep and the read cannot
-			// disagree about the boundary member.
-			//
-			// Deliberately two round-trips rather than one pipeline. The pipeline's
-			// `exec` hands back the driver's raw reply — ioredis returns one
-			// `[error, result]` tuple per command — and reaching into that here
-			// would put one driver's wire shape into an adapter the client
-			// interface exists to keep vendor-agnostic. Nothing is lost by
-			// splitting them: a concurrent `addSid` between the two carries a
-			// future score and is included by the read, and a concurrent `removeSid`
-			// is honoured. Only the write path is pipelined, where the pairing is
-			// load-bearing (#269).
-			const now = Date.now();
-			const k = key(subject);
-			await deps.client.zRemRangeByScore(k, "-inf", now);
-			return deps.client.zRangeByScore(k, now, "+inf");
+			return deps.client.pruneExpiredAndList(key(subject));
 		},
 
 		async removeSid(subject, sid) {
