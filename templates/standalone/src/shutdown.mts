@@ -56,6 +56,9 @@ import type { Logger } from "@o3co/auth-provider-core";
  * 5. **`cleanup` runs after draining, before exit**, and its failure is logged
  *    through the app logger and reflected in the exit code. It never wedges the
  *    process: a dispose that throws still exits.
+ * 6. **A `close` that fails is not reported as a clean drain.** `server.close`
+ *    reports through its callback, and treating that as success would tell an
+ *    orchestrator the listener came down when it did not.
  *
  * Size `drainTimeoutMs` **below** the orchestrator's own kill grace period
  * (Kubernetes `terminationGracePeriodSeconds`, compose `stop_grace_period`,
@@ -135,8 +138,18 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		// has already finished.
 		deadline.unref?.();
 
-		server.close(() => {
+		server.close((err) => {
 			clearTimeout(deadline);
+			if (err) {
+				// `close` reports through its callback — "Server is not running"
+				// is the common one, but any listener teardown failure lands
+				// here. Reporting "drained" and exiting 0 on it would tell an
+				// orchestrator the shutdown went cleanly when the listener did
+				// not actually come down.
+				logger.error({ err }, "graceful shutdown: server close failed");
+				void finish(1, "close-failed");
+				return;
+			}
 			void finish(0, "drained");
 		});
 		// Idle keep-alive sockets have no request behind them, so nothing is
