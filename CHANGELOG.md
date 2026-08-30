@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The replica-safety list cannot fall behind the modules it guards (`@o3co/auth-provider-core`) (#304).** #271 shipped the guard — `deployment.mode = "multi"` with an in-process state store wired refuses to boot, naming each offender and what diverges per replica — driven by a hand-maintained map keyed by module name. Hand-maintained is the exposure: the next in-memory adapter is replica-unsafe the moment it exists and silent until someone remembers that file, which is "implementers reintroduce unsafe defaults" one indirection out.
+
+  A drift guard now requires every bundled module whose name marks it memory-backed to be accounted for — listed as unsafe, or exempted with a reason in a list that is empty today because nothing qualifies. Scanned from source rather than from an import graph, since a module not yet wired into a bundle is exactly the one that would slip through and is still a module someone can compose. It also refuses a stale entry naming a module that no longer exists, and requires each reason to be a consequence rather than an instruction — the guard quotes them into a refused boot, and "use redis" tells an operator what to type without telling them what breaks.
+
+  `memorySessionStores`' reason was itself stale: #321 and #406 added the subject-level revocation pair to that module, so a multi-replica deployment on it also loses password-reset propagation. Said so now.
+
+  New export: `replicaUnsafeReason(moduleName)`, so a composition root running its own version of this check reuses the wording instead of inventing a second vocabulary for the same failure.
+
+  **The rest of #304's policy is recorded next to the enforcement rather than re-implemented**, because it already resolved elsewhere: sinks never default to silence (answered by #363's declared-absence guard, which is stronger than defaulting to stdout — that would hand a sink to a composition root that never asked for one and call it safety); state stores never silently fall back to memory (this file); and `LocalFile`/`SQLite` is not a global default, being node-local and ephemeral in a container, though it would suit a single-node profile whose adapter does not exist yet. The shipped profile names (`single` / `multi`) are kept over the issue's sketch (`dev` / `single-node` / `multi-replica`): renaming would break every deployment that has declared its shape, to buy a third name for a profile with no adapter behind it.
+
+
 ### Added
 
 - **Redis adapters for `SubjectSessionIndex` and `SubjectRevocation` — subject-level revocation now works on a multi-replica deployment (`@o3co/auth-provider-redis`).** #296 landed `revokeAllForSubject` with in-memory adapters only, bundled into `memorySessionStoresModule`. A deployment on `redisSessionStoresModule` filled **neither** slot, so a password reset answered `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked nothing — visible rather than silent, deliberately, but nothing revoked all the same, and on exactly the deployments that need it since the in-memory pair is single-process only (#321).

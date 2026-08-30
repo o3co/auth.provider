@@ -18,6 +18,34 @@ import type { Logger } from "../logging/Logger.mjs";
 import { BootError } from "./types.mjs";
 
 /**
+ * ## The default-adapter policy this file enforces (#304)
+ *
+ * #304 asked for the policy to be pinned "so implementers don't reintroduce
+ * unsafe defaults". Recording it here, next to the enforcement, with what each
+ * clause resolved to:
+ *
+ * 1. **Sinks never default to silence.** Answered by #363 rather than by a
+ *    stdout default: an unfilled `auditSink` refuses boot unless the config
+ *    declares the capability absent (`audit.sink.type = "none"`). Stronger
+ *    than defaulting to stdout, which would hand a sink to a composition root
+ *    that never asked for one and call that safety. Same shape now covers the
+ *    access-token denylist (#375) and subject-level revocation (#406).
+ * 2. **Shared/durable state stores never silently fall back to memory.** This
+ *    file. `deployment.mode = "multi"` with an in-process store wired refuses
+ *    to boot; `"single"` is silent; unset warns. There is deliberately no
+ *    HOCON default, so the unset state stays reachable — see
+ *    {@link checkReplicaSafety}.
+ * 3. **`LocalFile`/`SQLite` is not a global default.** Node-local storage does
+ *    not fix what `memory` gets wrong across replicas, and is ephemeral in a
+ *    container. It would be a legitimate default for a single-node profile,
+ *    which needs an adapter that does not exist yet — separate work, as #304
+ *    itself notes.
+ *
+ * The profile names differ from #304's sketch (`single` / `multi`, not
+ * `dev` / `single-node` / `multi-replica`): the two shipped with #271 and
+ * renaming them would break every deployment that has declared its shape, to
+ * buy a third name for a profile whose adapter does not exist.
+ *
  * Bundled modules that hold state in this process's memory which **must** be
  * shared for a deployment to run more than one replica correctly (#271).
  *
@@ -33,7 +61,7 @@ import { BootError } from "./types.mjs";
  */
 const REPLICA_UNSAFE_MODULE_REASONS: Readonly<Record<string, string>> = {
 	memorySessionStores:
-		"user sessions, RP registrations and family indexes fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others",
+		"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it (#321)",
 	"core-rate-limiter-memory":
 		"rate-limit counters fork per replica — every configured limit is effectively multiplied by the replica count, and resets on each deploy",
 	"core-access-token-denylist-memory":
@@ -56,6 +84,21 @@ const REPLICA_UNSAFE_MODULE_REASONS: Readonly<Record<string, string>> = {
  * the set is greppable from a deployment's own tests.
  */
 export const REPLICA_UNSAFE_MODULES: readonly string[] = Object.keys(REPLICA_UNSAFE_MODULE_REASONS);
+
+/**
+ * What diverges per replica for `moduleName`, or `undefined` when the module is
+ * not one this guard refuses.
+ *
+ * Exported so the drift guard (#304) can check that every listed module has a
+ * reason worth printing, and so a composition root running its own version of
+ * this check can reuse the wording rather than inventing a second vocabulary
+ * for the same failure.
+ */
+export function replicaUnsafeReason(moduleName: string): string | undefined {
+	return Object.hasOwn(REPLICA_UNSAFE_MODULE_REASONS, moduleName)
+		? REPLICA_UNSAFE_MODULE_REASONS[moduleName]
+		: undefined;
+}
 
 export interface CheckReplicaSafetyInput {
 	readonly modules: readonly { readonly name: string }[];
