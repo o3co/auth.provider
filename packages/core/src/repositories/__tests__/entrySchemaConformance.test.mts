@@ -33,11 +33,14 @@
  * precisely the #342 shape, caught by construction instead of by someone
  * noticing.
  *
- * Keeping this honest is a maintenance obligation: when `Client` gains a field,
- * `FULLY_POPULATED_CLIENT` below has to gain it too, or the guard silently
- * stops covering it. The type annotation is what forces that — a missing
- * required field is a compile error, and `exactOptionalPropertyTypes` plus the
- * `satisfies` below turn a typo into one as well.
+ * Keeping this honest is the fixtures' job, and it has to be enforced rather
+ * than asked for: when `Client` gains a field, `FULLY_POPULATED_CLIENT` below
+ * must gain it too, or the guard silently stops covering the one thing it
+ * exists to cover. A plain `satisfies Omit<Client, "clientId">` does not do
+ * that — an omitted *optional* field is still assignable, so the fixture would
+ * quietly fall behind the type. `Required<...>` is what makes the omission a
+ * compile error, which is the same move as the runtime check below: catch the
+ * class mechanically instead of trusting a comment.
  */
 
 import { describe, expect, it } from "vitest";
@@ -69,7 +72,10 @@ const FULLY_POPULATED_CLIENT = {
 	senderConstrained: { required: true, methods: ["dpop"] },
 	firstParty: true,
 	allowPlainPkce: false,
-} satisfies Omit<Client, "clientId">;
+	// `Required<...>`, not a bare `Omit<...>`: an omitted optional field is
+	// assignable to the latter, so a new field on `Client` would silently stop
+	// being covered here. This turns that into a compile error.
+} satisfies Required<Omit<Client, "clientId">>;
 
 describe("ClientEntrySchema conformance with Client (#343)", () => {
 	it("represents every field the domain type carries", () => {
@@ -113,6 +119,11 @@ describe("ClientEntrySchema conformance with Client (#343)", () => {
  * signature for Store-specific claims, which no schema can enumerate — and
  * `UserEntrySchema` is `.catchall(z.unknown())` rather than `.strict()` for
  * that reason. So the check here is the round-trip, not the refusal.
+ *
+ * `Required<User>` for the same reason the client fixture uses it: a new
+ * optional field on `User` must break this line rather than slip past it. The
+ * index signature survives `Required` and forces nothing, which is correct —
+ * there is no set of Store-specific claims to enumerate.
  */
 const FULLY_POPULATED_USER = {
 	id: "u-1",
@@ -122,7 +133,7 @@ const FULLY_POPULATED_USER = {
 	name: "Alice Example",
 	picture: "https://example.com/alice.png",
 	groups: ["staff"],
-} satisfies Omit<User, "password"> & Record<string, unknown>;
+} satisfies Required<User>;
 
 describe("UserEntrySchema conformance with User (#343)", () => {
 	it("round-trips every declared field", () => {

@@ -20,6 +20,13 @@ export default defineConfig({
 				// is cleaned up — track in the next core/repositories
 				// hygiene PR.
 				"src/repositories/__tests__/InMemoryCodeRepository.test.mts",
+				// #343: this file's fixtures use `satisfies Required<...>` to make
+				// a new optional field on `Client` / `User` a COMPILE error rather
+				// than a silently uncovered one. That only fires under typecheck
+				// mode, and `tsconfig.json` excludes `__tests__` — so without this
+				// line the annotation is decorative, which is the same
+				// looks-enforced-but-is-not shape #343 is about.
+				"src/repositories/__tests__/entrySchemaConformance.test.mts",
 				// CC-5 readonly compile-time contract tests. The @ts-expect-error
 				// directives in these files only fire under typecheck mode.
 				"src/__tests__/grant-context-readonly.test.mts",

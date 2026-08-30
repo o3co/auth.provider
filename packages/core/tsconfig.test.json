@@ -10,6 +10,11 @@
 		"src/user-sessions/**/*.mts",
 		"src/adapters/**/*.mts",
 		"src/repositories/__tests__/InMemoryCodeRepository.test.mts",
+		// #343: paired with the same entry in vitest.config.mts's
+		// `typecheck.include`. BOTH lists are needed -- vitest decides which
+		// files it typechecks, this decides what tsc is given -- and adding the
+		// file to only one leaves the annotation unchecked while looking wired.
+		"src/repositories/__tests__/entrySchemaConformance.test.mts",
 		// D-1 FOLLOW-UP: this entry is a single file, not a `repositories/__tests__/**` glob,
 		// because `InMemoryClientRepository.test.mts` has 16 pre-existing TS errors
 		// (Map<...> shape mismatches) unrelated to D-1. Widen this to the glob
