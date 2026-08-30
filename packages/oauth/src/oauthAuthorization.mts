@@ -18,6 +18,7 @@ import {
 	defineModule,
 	type GrantHandler,
 	type Module,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";
 import { createClientCredentialsGrant } from "./grants/clientCredentials.mjs";
@@ -128,6 +129,14 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			"sessionFederationIndex", // Amendment 4 (§1.1.4)
 			"logger", // D-4 — structured logger; security audit logs (PB-1/CC-2/SF-6)
 		],
+		// #406: `subjectRevocation` is optional to wire, not optional to decide.
+		// This module reads the slot on its own — a composition that mounts it
+		// without `oauthModule` (the grants alone, no routes) would otherwise
+		// still boot with the watermark unfilled and undeclared, which is the
+		// hole #406 exists to close, one module over.
+		absencePolicies: {
+			subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+		},
 		contributes: { grants },
 	});
 };

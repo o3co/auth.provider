@@ -1415,3 +1415,71 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		expect(captured?.code_challenge_method).toBe("S256");
 	});
 });
+
+/*
+ * #406 — this module reads `subjectRevocation` on its own.
+ *
+ * `oauthModule` got the policy first, but a composition can mount the grants
+ * without the routes, and that composition would then still boot with the
+ * watermark unfilled and undeclared: `verifyJwt` skips the check, the #376
+ * refresh-redemption gate is inert, and nothing says so. That is the hole
+ * #406 exists to close, one module over — found in review on the PR that
+ * closed it everywhere else.
+ */
+describe("oauthAuthorizationModule — declared absence for subjectRevocation (#406)", () => {
+	const withoutDeclaration = () => {
+		const base = makeValidAppConfig() as Record<string, unknown> & {
+			oauth: Record<string, unknown>;
+		};
+		const revocation = { ...(base.oauth.revocation as Record<string, unknown>) };
+		delete revocation.subject;
+		return { ...base, oauth: { ...base.oauth, revocation } } as ReturnType<
+			typeof makeValidAppConfig
+		>;
+	};
+
+	it("refuses boot when the slot is unfilled and undeclared", async () => {
+		const config = withoutDeclaration();
+		await expect(
+			createTestApp({
+				modules: [oauthAuthorizationModule({ config })],
+				bootstrapComponents: {
+					config,
+					pathResolver: (s: string) => s,
+					clientRepository: { findById: async () => null, authenticate: async () => null },
+					codeRepository: {
+						createCode: async () => ({}),
+						findByCode: async () => null,
+						consumeByCode: async () => null,
+						removeByCode: async () => {},
+					},
+					keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				} as never,
+			}),
+		).rejects.toMatchObject({
+			reason: "component-absence-undeclared",
+			details: { componentKey: "subjectRevocation" },
+		});
+	});
+
+	it("boots once the deployment declares the capability absent", async () => {
+		const config = makeValidAppConfig();
+		await expect(
+			createTestApp({
+				modules: [oauthAuthorizationModule({ config })],
+				bootstrapComponents: {
+					config,
+					pathResolver: (s: string) => s,
+					clientRepository: { findById: async () => null, authenticate: async () => null },
+					codeRepository: {
+						createCode: async () => ({}),
+						findByCode: async () => null,
+						consumeByCode: async () => null,
+						removeByCode: async () => {},
+					},
+					keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				} as never,
+			}),
+		).resolves.toBeDefined();
+	});
+});

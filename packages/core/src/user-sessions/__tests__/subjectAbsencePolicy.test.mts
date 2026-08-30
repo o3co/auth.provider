@@ -100,9 +100,9 @@ function boot(value?: "watermark" | "unsupported") {
 		}
 	} else {
 		// `accessToken` is required once the `revocation` object exists (#277),
-		// and the fixture carries no `revocation` at all — so a config that
-		// declares only `subject` has to restate it. A real deployment inherits
-		// it from reference.conf and writes one line.
+		// so it is seeded here for the case where a caller strips the whole
+		// object first. The fixture itself carries both keys, and the spread
+		// below keeps whatever it has.
 		oauth.revocation = { accessToken: "denylist", ...(revocation ?? {}), subject: value };
 	}
 	return { config: { ...base, oauth }, pathResolver: (p: string) => p } as never;
