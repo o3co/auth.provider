@@ -37,6 +37,14 @@ no flow in this library that sends anything, so a delivery port would be a seam
 with no caller on this side of the boundary. Full IdPs ship one because they own
 the flows that send; verify/issue-only libraries do not.
 
+The line also cuts the other way, and `assertionVerifier` is the example. A
+device presenting a signed credential *is* an authentication modality, so
+verifying possession belongs here — but resolving that credential to a person
+does not. The RFC 7523 grant (#301) verifies, then hands an opaque handle to
+`authenticateByToken` and takes whatever subject the Store returns. Device
+registration, device→user linking and anonymous→registered continuity stay
+outside; the provider never learns they happened.
+
 Before adding a slot, the question is not "could this be pluggable" but "does a
 flow *this library owns* need it". If the answer is that an operator's component
 would call it, the slot belongs in the operator's composition, not here.
@@ -84,6 +92,7 @@ a composition root. Listed because a module may `require` them.
 | Slot | Type | Wiring | Declared in | Purpose |
 | --- | --- | --- | --- | --- |
 | `accessTokenDenylist` | `AccessTokenDenylist` | optional | `core/access-token-denylist/types.mts` | RFC 7009 access-token revocation by `jti`. Absence must be declared (#375). |
+| `assertionVerifier` | `AssertionVerifier` | optional | `core/assertions/types.mts` | Proves possession of a presented assertion (device JWT, platform attestation) and returns the opaque handle the Store resolves. Required once the RFC 7523 jwt-bearer grant is enabled — there is no default, because the only possible one accepts things (#301). |
 | `auditSink` | `AuditSink` | optional | `core/audit/types.mts` | Where security events go. Optional to wire, **not optional to decide** — an unfilled slot must be declared absent (#363). |
 | `challengeCeremony` | `ChallengeCeremony` | optional | `core/challenges/types.mts` | The ceremony driver — issue and verify — kept separate from its storage. |
 | `challengeStore` | `ChallengeStore` | optional | `core/challenges/types.mts` | In-flight WebAuthn ceremony challenges. |

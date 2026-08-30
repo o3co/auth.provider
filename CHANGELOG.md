@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **RFC 7523 JWT-bearer grant — the public entry point for "present a device credential, get tokens" (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`) (#301).** `UserRepository.authenticateByToken(handle)` already existed and was service-pluggable, but the only caller was the federation callback, so there was no way in from outside. `POST /oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` and an `assertion` now verifies possession, hands the resulting opaque handle to the Store, and issues tokens for whatever subject the Store returns.
+
+  **Why a grant and not the token-exchange recipe the issue suggested.** Option (A) was a custom `ExchangeTokenValidator`, on the reading that it "works today". It does not for this case: the exchange grant answers `401 invalid_client` for `tokenEndpointAuthMethod === "none"` — *"Token Exchange does not support public clients"* — and a device holding a signed assertion is the archetypal public client. RFC 7523 §3 is the standard written for exactly this and makes client authentication **optional**, which is the property token exchange refuses. It also leaves *how* an assertion is validated explicitly out of scope, which makes resolving it through a pluggable verifier conforming rather than a deviation — so the grant type is the registered URN, not an invented one.
+
+  **New `assertionVerifier` slot.** Verification proves **possession**; the Store decides **identity**. `createJwtAssertionVerifier` ships as the vendor-neutral implementation — an RFC 7523 §3 JWT checked against a configured authority key with `iss`, `aud` and `exp` pinned — because otherwise every deployment hand-rolls that and a missing `aud` check makes an assertion minted for another service replayable here. A platform attestation (Apple DeviceCheck, Play Integrity) needs a vendor call and is the operator's own implementation of the port, the same split #303 made for remote signing.
+
+  **There is no default verifier and there will not be one**: the only possible default is one that accepts things, and a bare identifier is not authentication. Enabling the grant without wiring a verifier fails at composition with a message naming both ways out. The grant itself is opt-in like every other (`oauth.grants."urn:ietf:params:oauth:grant-type:jwt-bearer".enabled`, default `false`).
+
+  **Scope is a ceiling from three directions** — request ∩ assertion ∩ client allowlist — and a request with **no** ceiling to bound it is refused rather than granted. An absent ceiling constrains nothing; it must not become a licence to take everything, which is #396's distinction and the shape a vacuous `[].every(...)` turns into a fail-open.
+
+  **The boundary is unchanged.** The grant never inspects who a handle belongs to, never creates or links anything, and never writes. An unlinked device is the Store's business: it returns whatever subject it chooses, including a stable anonymous one, and anonymous→registered continuity is a Store data-modelling choice the provider never learns about. A failed verification and an unknown handle answer identically, so neither can be used to probe for live identifiers; a verifier or Store that *throws* answers `503`, because an attestation service being down is an outage rather than a bad credential (#408's distinction).
+
 - **`docs/adapter-surface.md` — the adapter surface documented in one place, with a guard that keeps it true (#305).** The epic's last open child asked to "document every slot's interface, lifecycle, and the verify-only boundary in one place, so implementers cannot drift across it". All 49 `ComponentMap` slots are now listed with type, wiring (required/optional), declaring file and purpose, split into the three tiers that were previously only implicit: boot infrastructure, synthetic keys the planner assembles, and the adapter slots themselves — plus the vendor-facing client slots that exist so `@o3co/auth-provider-redis` can build every store on one socket, and which a core module never requires.
 
   **The boundary is the first section, not an appendix.** Adapter freedom applies *within* authentication and token issuance: `UserRepository` is `authenticate` / `authenticateByToken` and nothing else, and the three call sites that already say the Store owns issuing, delivering and flipping state are cited rather than paraphrased. Message delivery is documented as the worked example of a slot that does **not** belong — there is no flow here that sends anything, so the port would have no caller on this side of the line (#302).
@@ -15,22 +27,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   **Enforced in three directions** by `adapterSurface.drift.test.mts`, modelled on the design-campaign index's guard: every declared slot is documented, every documented slot still exists, and every file path the document cites resolves. The third caught a real mistake on its first run, and the first two were verified by introducing drift each way and watching the guard name it.
 
   Also records where an implementer can prove an adapter: eleven ports now ship a conformance suite, each run against every in-repo implementation of its port.
-
-
-### Fixed
-
-- **The replica-safety list cannot fall behind the modules it guards (`@o3co/auth-provider-core`) (#304).** #271 shipped the guard — `deployment.mode = "multi"` with an in-process state store wired refuses to boot, naming each offender and what diverges per replica — driven by a hand-maintained map keyed by module name. Hand-maintained is the exposure: the next in-memory adapter is replica-unsafe the moment it exists and silent until someone remembers that file, which is "implementers reintroduce unsafe defaults" one indirection out.
-
-  A drift guard now requires every bundled module whose name marks it memory-backed to be accounted for — listed as unsafe, or exempted with a reason in a list that is empty today because nothing qualifies. Scanned from source rather than from an import graph, since a module not yet wired into a bundle is exactly the one that would slip through and is still a module someone can compose. It also refuses a stale entry naming a module that no longer exists, and requires each reason to be a consequence rather than an instruction — the guard quotes them into a refused boot, and "use redis" tells an operator what to type without telling them what breaks.
-
-  `memorySessionStores`' reason was itself stale: #321 and #406 added the subject-level revocation pair to that module, so a multi-replica deployment on it also loses password-reset propagation. Said so now.
-
-  New export: `replicaUnsafeReason(moduleName)`, so a composition root running its own version of this check reuses the wording instead of inventing a second vocabulary for the same failure.
-
-  **The rest of #304's policy is recorded next to the enforcement rather than re-implemented**, because it already resolved elsewhere: sinks never default to silence (answered by #363's declared-absence guard, which is stronger than defaulting to stdout — that would hand a sink to a composition root that never asked for one and call it safety); state stores never silently fall back to memory (this file); and `LocalFile`/`SQLite` is not a global default, being node-local and ephemeral in a container, though it would suit a single-node profile whose adapter does not exist yet. The shipped profile names (`single` / `multi`) are kept over the issue's sketch (`dev` / `single-node` / `multi-replica`): renaming would break every deployment that has declared its shape, to buy a third name for a profile with no adapter behind it.
-
-
-### Added
 
 - **`createRemoteSigningKeyStore` — a `KeyStore` whose private key never enters this process (`@o3co/auth-provider-core`) (#303).** Signing keys had to be in-config material, which is a ceiling on the adapter surface for a security-critical issuer: there was no seam to source them from AWS KMS, GCP KMS, PKCS#11/HSM, or a Vault transit key where the private half never leaves the boundary.
 
@@ -113,6 +109,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   **Migration:** an external RP that pinned `id+jwt` must accept `JWT`. Anything minted by this provider since v0.10.0 already carries `JWT`; only tokens issued before the flip are affected, and this repository has shipped no deployment that could hold one.
 
 ### Fixed
+
+- **The replica-safety list cannot fall behind the modules it guards (`@o3co/auth-provider-core`) (#304).** #271 shipped the guard — `deployment.mode = "multi"` with an in-process state store wired refuses to boot, naming each offender and what diverges per replica — driven by a hand-maintained map keyed by module name. Hand-maintained is the exposure: the next in-memory adapter is replica-unsafe the moment it exists and silent until someone remembers that file, which is "implementers reintroduce unsafe defaults" one indirection out.
+
+  A drift guard now requires every bundled module whose name marks it memory-backed to be accounted for — listed as unsafe, or exempted with a reason in a list that is empty today because nothing qualifies. Scanned from source rather than from an import graph, since a module not yet wired into a bundle is exactly the one that would slip through and is still a module someone can compose. It also refuses a stale entry naming a module that no longer exists, and requires each reason to be a consequence rather than an instruction — the guard quotes them into a refused boot, and "use redis" tells an operator what to type without telling them what breaks.
+
+  `memorySessionStores`' reason was itself stale: #321 and #406 added the subject-level revocation pair to that module, so a multi-replica deployment on it also loses password-reset propagation. Said so now.
+
+  New export: `replicaUnsafeReason(moduleName)`, so a composition root running its own version of this check reuses the wording instead of inventing a second vocabulary for the same failure.
+
+  **The rest of #304's policy is recorded next to the enforcement rather than re-implemented**, because it already resolved elsewhere: sinks never default to silence (answered by #363's declared-absence guard, which is stronger than defaulting to stdout — that would hand a sink to a composition root that never asked for one and call it safety); state stores never silently fall back to memory (this file); and `LocalFile`/`SQLite` is not a global default, being node-local and ephemeral in a container, though it would suit a single-node profile whose adapter does not exist yet. The shipped profile names (`single` / `multi`) are kept over the issue's sketch (`dev` / `single-node` / `multi-replica`): renaming would break every deployment that has declared its shape, to buy a third name for a profile with no adapter behind it.
 
 - **The in-memory access-token denylist no longer grows without bound (`@o3co/auth-provider-core`) (#293 item 6).** GC was lazy on `has` alone: an entry was reclaimed only if someone presented that exact `jti` again *after* it expired. For a **revoked** token that is precisely the request that stops coming, so nothing was ever reclaimed and every revocation became a permanent `Map` entry on a long-running single-process deployment.
 

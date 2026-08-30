@@ -34,6 +34,18 @@ export {
 // App factory — v0.5.0 boot planner. Re-exports from ./boot/index.mjs through
 // ./app.mjs for backwards-compatible import-path stability.
 export { createApp } from "./app.mjs";
+export type {
+	JwtAssertionVerifierOptions,
+	SubjectHandleReader,
+} from "./assertions/jwtAssertionVerifier.mjs";
+export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
+// #301: possession proof for the RFC 7523 jwt-bearer grant. The port is here;
+// the JWT implementation is the vendor-neutral one, and a platform attestation
+// (DeviceCheck, Play Integrity) is the operator's own.
+export type {
+	AssertionVerificationResult,
+	AssertionVerifier,
+} from "./assertions/types.mjs";
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,
