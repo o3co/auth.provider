@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`docs/adapter-surface.md` — the adapter surface documented in one place, with a guard that keeps it true (#305).** The epic's last open child asked to "document every slot's interface, lifecycle, and the verify-only boundary in one place, so implementers cannot drift across it". All 49 `ComponentMap` slots are now listed with type, wiring (required/optional), declaring file and purpose, split into the three tiers that were previously only implicit: boot infrastructure, synthetic keys the planner assembles, and the adapter slots themselves — plus the vendor-facing client slots that exist so `@o3co/auth-provider-redis` can build every store on one socket, and which a core module never requires.
+
+  **The boundary is the first section, not an appendix.** Adapter freedom applies *within* authentication and token issuance: `UserRepository` is `authenticate` / `authenticateByToken` and nothing else, and the three call sites that already say the Store owns issuing, delivering and flipping state are cited rather than paraphrased. Message delivery is documented as the worked example of a slot that does **not** belong — there is no flow here that sends anything, so the port would have no caller on this side of the line (#302).
+
+  **Enforced in three directions** by `adapterSurface.drift.test.mts`, modelled on the design-campaign index's guard: every declared slot is documented, every documented slot still exists, and every file path the document cites resolves. The third caught a real mistake on its first run, and the first two were verified by introducing drift each way and watching the guard name it.
+
+  Also records where an implementer can prove an adapter: eleven ports now ship a conformance suite, each run against every in-repo implementation of its port.
+
+
 ### Fixed
 
 - **The replica-safety list cannot fall behind the modules it guards (`@o3co/auth-provider-core`) (#304).** #271 shipped the guard — `deployment.mode = "multi"` with an in-process state store wired refuses to boot, naming each offender and what diverges per replica — driven by a hand-maintained map keyed by module name. Hand-maintained is the exposure: the next in-memory adapter is replica-unsafe the moment it exists and silent until someone remembers that file, which is "implementers reintroduce unsafe defaults" one indirection out.
