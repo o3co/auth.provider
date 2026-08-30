@@ -74,16 +74,25 @@ describe("createMemoryAccessTokenDenylist — bounded growth (#293 item 6)", () 
 	it("keeps every live entry when it sweeps", async () => {
 		// A sweep that drops a live jti un-revokes a token, which is worse than
 		// the leak it is fixing.
+		//
+		// The interval is set small ON PURPOSE. With the default (1000) the
+		// trigger add never reaches a sweep, so `has("dead-0")` would answer
+		// `false` through the lazy read path and the assertions would pass with
+		// the sweep broken — or deleting live entries. Asserting on `size`
+		// rather than on `has` for the same reason: `has` deletes what it finds
+		// expired, so reading through it hides whether the sweep ran.
 		vi.useFakeTimers();
-		const denylist = createMemoryAccessTokenDenylist();
+		const denylist = createMemoryAccessTokenDenylist({ sweepInterval: 5 });
 		await fill(denylist, 10, 600_000, "live");
-		await fill(denylist, DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL, 1_000, "dead");
+		await fill(denylist, 5, 1_000, "dead");
 		vi.advanceTimersByTime(60_000);
-		await denylist.add("trigger", Date.now() + 600_000);
+		// Five more adds guarantee a sweep now that the dead set has expired.
+		await fill(denylist, 5, 600_000, "trigger");
+		// 10 live + 5 trigger; the 5 dead are gone, and nothing read them.
+		expect(denylist.size).toBe(15);
 		for (let i = 0; i < 10; i += 1) {
 			expect(await denylist.has(`live-${i}`)).toBe(true);
 		}
-		expect(await denylist.has("dead-0")).toBe(false);
 	});
 
 	it("does not sweep on every add — the work is amortized", async () => {
