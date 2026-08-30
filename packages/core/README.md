@@ -693,7 +693,7 @@ Signs and returns an OIDC id_token JWT (OIDC Core §2). Claim composition:
 - `nonce` — reflected verbatim from the authorization request when provided
 - scope-filtered user claims via `filterClaimsByScope`
 
-Header uses `typ: "JWT"` (#394) — the standard spelling, kept deliberately disjoint from RFC 9068's `at+jwt` so an id_token can never pass an access-token surface. Tokens minted before #394 carry `id+jwt`, which verification accepts through the #402 migration window.
+Header uses `typ: "JWT"` (#394) — the standard spelling, kept deliberately disjoint from RFC 9068's `at+jwt` so an id_token can never pass an access-token surface. Tokens minted before #394 carry `id+jwt`; #394 accepted that spelling alongside `JWT` for a migration window, and #402 closed it — `id+jwt` is now refused as an ordinary `typ` mismatch.
 
 #### `filterClaimsByScope`
 
