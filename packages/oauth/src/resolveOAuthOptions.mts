@@ -57,6 +57,12 @@ export interface ResolvedOAuthOptions {
 	readonly nonceMaxLength: number;
 	/** Wave 1 §5.3 (RFC 8707): opt-in gate for Resource Indicator enforcement. */
 	readonly resourceIndicatorEnabled: boolean;
+	/**
+	 * #311: when true, a client that declares no `allowedGrantTypes` is denied
+	 * every grant instead of being unrestricted. Resolved here so both
+	 * enforcement points #268 added read one value decided at composition.
+	 */
+	readonly requireGrantTypeAllowlist: boolean;
 }
 
 /**
@@ -70,6 +76,7 @@ type OAuthConfigShape = {
 	jwt?: { issuer?: unknown; legacyTypAccept?: boolean };
 	oidcMode?: "oidc-required" | "dual";
 	requireEmailVerified?: boolean;
+	requireGrantTypeAllowlist?: boolean;
 	// `authorize` is deliberately absent: its only key, `allowUnmarkedClients`,
 	// was removed in #330 and a stale value must stay inert here too.
 	grants?: Record<string, Record<string, unknown> | undefined>;
@@ -119,5 +126,6 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 		pkce: resolvePkceOptions(pkceConfig, logger),
 		nonceMaxLength: oauth?.nonce?.maxLength ?? 256,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
+		requireGrantTypeAllowlist: oauth?.requireGrantTypeAllowlist === true,
 	};
 };

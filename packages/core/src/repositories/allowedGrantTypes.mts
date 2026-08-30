@@ -37,6 +37,22 @@
  * pair, because either can reject and only the absent case distinguishes
  * them; both are enforced at dispatch, next to each other.
  *
+ * `options.requireAllowlist` (#311) flips the absent case to denial for the
+ * whole deployment — the counterpart of `requiresExplicitGrantAllowlist`,
+ * which only a handler can declare and only for itself. Without it the secure
+ * posture is opt-in *per registration*: an operator who wants deny-by-default
+ * has to guarantee that every registration, now and in future, carries the
+ * field, and nothing enforces that. It defaults off, because flipping the
+ * default is the outage #268 was shaped to avoid; a deployment turns it on
+ * once it has audited what it has registered.
+ *
+ * Absence denies outright rather than falling back to an implied set. RFC 7591
+ * §2 does the latter — an omitted `grant_types` there means
+ * `["authorization_code"]` alone — and that is good evidence absence should
+ * not mean "everything", but an implied set is still a decision nobody wrote
+ * down, which is the shape #363 exists to refuse. A deployment that turns this
+ * on has said it audits its registrations, so it can name the grants.
+ *
  * Exact string comparison: `grant_type` is case-sensitive, and extension
  * grants are URIs (RFC 6749 §4.5), where a prefix or case-folded match would
  * be a namespace confusion rather than a convenience.
@@ -44,4 +60,8 @@
 export const isGrantTypeAllowed = (
 	allowedGrantTypes: readonly string[] | undefined,
 	grantType: string,
-): boolean => allowedGrantTypes === undefined || allowedGrantTypes.includes(grantType);
+	options?: { readonly requireAllowlist?: boolean },
+): boolean =>
+	allowedGrantTypes === undefined
+		? options?.requireAllowlist !== true
+		: allowedGrantTypes.includes(grantType);

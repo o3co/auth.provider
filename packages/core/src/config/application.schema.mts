@@ -543,6 +543,25 @@ export const CoreConfigSchema = z.object({
 		// of where the field sits, not of the field. Wrapping `oauth` the way
 		// `oauth.jwt` is wrapped would have taken it away silently.
 		requireEmailVerified: coerceBooleanFromEnv.optional(),
+		// #311: deployment-wide deny-by-absence for `allowedGrantTypes`.
+		//
+		// #268 made a *declared* allowlist restrict which grants a client may
+		// use, and had to keep absence meaning "unrestricted": the grants that
+		// ignored the field predate it, so denying on absence would have
+		// revoked every grant from every registration written before it
+		// existed. The consequence is that the secure posture is opt-in per
+		// registration and a deployment cannot state it once — an omitted
+		// field silently gets every grant.
+		//
+		// Off by default for the same reason the central rule allows by
+		// absence. Turning it on is the operator saying they have audited
+		// their registrations; it composes with the per-grant
+		// `requiresExplicitGrantAllowlist` (#326) to the stricter of the two,
+		// which for the absent case is this one.
+		//
+		// `coerceBooleanFromEnv` for the reason the field above documents:
+		// `OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST` arrives as a string.
+		requireGrantTypeAllowlist: coerceBooleanFromEnv.optional(),
 		// #267: `/authorize` refuses a client not marked `firstParty: true` —
 		// one with no `firstParty` field and one carrying an explicit `false`
 		// alike. The `allowUnmarkedClients` migration escape hatch that
