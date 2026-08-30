@@ -54,7 +54,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   No source behaviour changed and no test changed. Published `.d.ts` files are now emitted by TS 6 — consumers pinned to a TypeScript old enough to reject its output should upgrade alongside.
 
+### Removed
+
+- **BREAKING: the `id+jwt` dual-accept window is closed — an `id_token` must carry `typ: JWT` (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** #394 flipped the id_token `typ` to the standard `JWT` and accepted the pre-#394 `id+jwt` alongside it for a migration window, so id_tokens already issued kept their `id_token_hint` value at `/oauth/logout`. Every legacy acceptance logged `jwt_verify_legacy_id_token_typ` (#402).
+
+  **Closed now rather than on the schedule the issue wrote down.** Its two conditions were "one refresh-token lifetime after the release that shipped the flip" and "the legacy-acceptance log line has gone quiet in the deployments you watch". Both presuppose deployments; this provider has none, so there is no population of `id+jwt` tokens the window protects and no log to watch go quiet. Waiting out a timer for an empty set only leaves a second accepted spelling in the verifier.
+
+  `id+jwt` is now an ordinary `typ` mismatch — same `reason: "typ"`, same refusal path as `at+jwt` — with no special case for a caller to know about. The `jwt_verify_legacy_id_token_typ` log line is gone with the branch that emitted it.
+
+  **Migration:** an external RP that pinned `id+jwt` must accept `JWT`. Anything minted by this provider since v0.10.0 already carries `JWT`; only tokens issued before the flip are affected, and this repository has shipped no deployment that could hold one.
+
 ### Fixed
+
+- **A subject-revocation store outage answers `503`, not a forced logout for everyone refreshing (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `verifyJwt` fails closed when `subjectRevocation.revokedBefore` throws — an unreachable store must never read as "not revoked" — but it reported that as `reason: "revoked"`, and the refresh grant mapped every verification error to `400 invalid_grant`. Per RFC 6749 §5.2 a client discards its refresh token on `invalid_grant`, so a transient store outage did not degrade the service: it **force-logged-out every user who refreshed during it**, while the same handler already answered family-store outages with `503 temporarily_unavailable` a few hundred lines below (#408).
+
+  New `JwtVerificationReason` `"revocation_unavailable"`, and `isRevocationUnavailable` to test for it. The refresh grant answers `503 temporarily_unavailable` on that reason alone; every other verification failure — bad signature, wrong `typ`, expired, genuinely revoked — is still `invalid_grant`. Surfaces whose refusal does not cost the caller a credential (introspection answering `active: false`, a protected resource answering `401`) keep treating it as a refusal, deliberately: the token is refused either way, and only the refresh grant's answer told the client to throw the credential away.
+
+  Not reachable before #321 — the only `SubjectRevocation` adapter was in-process and could not fail. It went live the moment a Redis one existed, which is why it is fixed now.
+
+- **The watermark comparison allows a second of cross-replica clock skew (`@o3co/auth-provider-core`).** `iat <= floor(watermark / 1000)` is inclusive, but only to the same second. A minting replica whose clock runs a second or more ahead of the replica that wrote the watermark stamps `iat` past the boundary, so tokens minted *just before* a credential change survive it — the exact case the inclusive comparison exists to catch, one second further out (#408).
+
+  New `JwtVerifyOptions.subjectRevocationSkewMs`, default `1_000`. Deliberately **not** `clockSkewMs`: that is five minutes, sized for `exp`/`nbf` per RFC 8725 §3.10, and applying it here would refuse every token minted in the five minutes after a reset — including the one from the re-login the reset sends the user to. One second is the smallest value that covers a whole-second-ahead replica, since the comparison is already second-truncated, and every additional second is a second of post-reset logins refused. The cost is one-sided and bounded: a token minted within the allowance *after* a reset is refused, costing its holder one retry. Set `0` for the previous exact comparison. The value is rounded **up** to whole seconds — the comparison is in seconds, and truncating would make the guard weaker than what was configured — and a negative value is clamped to `0`, which would otherwise move the boundary earlier than the watermark itself.
 
 - **A subject-revocation store outage answers `503`, not a forced logout for everyone refreshing (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `verifyJwt` fails closed when `subjectRevocation.revokedBefore` throws — an unreachable store must never read as "not revoked" — but it reported that as `reason: "revoked"`, and the refresh grant mapped every verification error to `400 invalid_grant`. Per RFC 6749 §5.2 a client discards its refresh token on `invalid_grant`, so a transient store outage did not degrade the service: it **force-logged-out every user who refreshed during it**, while the same handler already answered family-store outages with `503 temporarily_unavailable` a few hundred lines below (#408).
 

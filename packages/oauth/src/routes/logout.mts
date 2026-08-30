@@ -476,8 +476,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 
 		let payload: Record<string, unknown>;
 		try {
-			// SF-1: pin alg / iss / typ (=JWT, with the pre-#394 id+jwt accepted
-			// through the #402 window) + signature. Audience is
+			// SF-1: pin alg / iss / typ (=JWT; the pre-#394 `id+jwt` spelling
+			// was accepted through the #394 window, which #402 closed) +
+			// signature. Audience is
 			// derived from the id_token's aud claim post-verification (the
 			// id_token was issued for a specific client); we can't pin aud
 			// before knowing the client, so the verifier records the gap.
