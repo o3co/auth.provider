@@ -6,34 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Fixed
-
-- **A subject-revocation store outage answers `503`, not a forced logout for everyone refreshing (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `verifyJwt` fails closed when `subjectRevocation.revokedBefore` throws — an unreachable store must never read as "not revoked" — but it reported that as `reason: "revoked"`, and the refresh grant mapped every verification error to `400 invalid_grant`. Per RFC 6749 §5.2 a client discards its refresh token on `invalid_grant`, so a transient store outage did not degrade the service: it **force-logged-out every user who refreshed during it**, while the same handler already answered family-store outages with `503 temporarily_unavailable` a few hundred lines below (#408).
-
-  New `JwtVerificationReason` `"revocation_unavailable"`, and `isRevocationUnavailable` to test for it. The refresh grant answers `503 temporarily_unavailable` on that reason alone; every other verification failure — bad signature, wrong `typ`, expired, genuinely revoked — is still `invalid_grant`. Surfaces whose refusal does not cost the caller a credential (introspection answering `active: false`, a protected resource answering `401`) keep treating it as a refusal, deliberately: the token is refused either way, and only the refresh grant's answer told the client to throw the credential away.
-
-  Not reachable before #321 — the only `SubjectRevocation` adapter was in-process and could not fail. It went live the moment a Redis one existed, which is why it is fixed now.
-
-- **The watermark comparison allows a second of cross-replica clock skew (`@o3co/auth-provider-core`).** `iat <= floor(watermark / 1000)` is inclusive, but only to the same second. A minting replica whose clock runs a second or more ahead of the replica that wrote the watermark stamps `iat` past the boundary, so tokens minted *just before* a credential change survive it — the exact case the inclusive comparison exists to catch, one second further out (#408).
-
-  New `JwtVerifyOptions.subjectRevocationSkewMs`, default `1_000`. Deliberately **not** `clockSkewMs`: that is five minutes, sized for `exp`/`nbf` per RFC 8725 §3.10, and applying it here would refuse every token minted in the five minutes after a reset — including the one from the re-login the reset sends the user to. One second is the smallest value that covers a whole-second-ahead replica, since the comparison is already second-truncated, and every additional second is a second of post-reset logins refused. The cost is one-sided and bounded: a token minted within the allowance *after* a reset is refused, costing its holder one retry. Set `0` for the previous exact comparison. The value is rounded **up** to whole seconds — the comparison is in seconds, and truncating would make the guard weaker than what was configured — and a negative value is clamped to `0`, which would otherwise move the boundary earlier than the watermark itself.
-- **Scaffold hardening from the v0.10.0 release-cut audit (standalone template, `@o3co/create-auth-provider`) (#407).** The Critical in this area — the production compose could not deliver the signing keys, and served a non-Secure session cookie — was fixed in the release PR. These are the remainder, and two of them changed the artifact an operator actually deploys rather than only what they read:
-
-  **The scaffold ships a `.gitignore`, and it survives publication.** Without one, the first `git add .` in a scaffolded project commits the `.env` holding `SESSION_SECRET` and the `jwt-private.pem` the README's own setup steps say to create right there. npm drops a file literally named `.gitignore` from a published package, so adding it to the template would have fixed nothing for `npx @o3co/create-auth-provider` while looking fixed in the repository — the packaging step now stages it dot-less and the scaffolder restores it, and the packed-tarball e2e asserts a scaffolded project has one. That test is what found the packing behaviour.
-
-  **The `Dockerfile` copies `pnpm-workspace.yaml` into the deps stage.** The scaffolder generates that file to carry bcrypt's `onlyBuiltDependencies` allowlist, and pnpm ≥ 10.29 reads the setting **only** from there, in single-package projects too (#360). In-container installs were therefore running allowlist-less — free while an alpine prebuild exists, and #360 again the day one is missing.
-
-  **`.env.example` sets `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`.** It backs the shared ioredis socket this release hung the code repository, the access-token denylist and the rate limiter on, and it defaults to `redis://localhost:6379` — which inside the container is the container. The dev compose boot dialled nothing.
-
-  **`docker-compose.production.yml` publishes on loopback**, not on every interface. The file assumes TLS terminated in front and the README says to keep `/metrics` off the public listener; `"3000:3000"` contradicted both. The external-LB case is spelled out in a comment rather than left to be guessed.
-
-  **`README.ja.md` no longer recommends `HTTP_TRUST_PROXY=true`.** #292 made `trust proxy` a CIDR/hop policy precisely because `true` means "believe the leftmost forwarded entry from whoever opened the connection". The English README warned against it and the Japanese one recommended it, so the two disagreed on which is safe.
-
-  **`config/clients.yaml.example` leads with the bcrypt form** and says what the plaintext one is for. It also states plainly that the schema's floor here is any non-empty string — deliberate, since the field also holds a bcrypt hash whose shape a 256-bit floor would reject, but it means nothing stops `clientSecret: "changeme"` and the example should not read as though that were fine.
-
-  **Minor:** `config/production.conf` no longer names `OAUTH_JWT_SECRET` as the typical production secret — that is the HMAC path, stale since EdDSA became the default (#282) and the shipped route became a mounted key pair. Both compose files now say why their Redis is tag-pinned rather than digest-pinned, and what to do about it for a deployment that must be reproducible.
-
-
 ### Added
 
 - **Redis adapters for `SubjectSessionIndex` and `SubjectRevocation` — subject-level revocation now works on a multi-replica deployment (`@o3co/auth-provider-redis`).** #296 landed `revokeAllForSubject` with in-memory adapters only, bundled into `memorySessionStoresModule`. A deployment on `redisSessionStoresModule` filled **neither** slot, so a password reset answered `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked nothing — visible rather than silent, deliberately, but nothing revoked all the same, and on exactly the deployments that need it since the in-memory pair is single-process only (#321).
@@ -70,7 +42,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **Migration: none.** The default preserves current behaviour exactly.
 
-
 ### Changed
 
 - **The toolchain builds on TypeScript 6 (#60).** A devDependency bump with no runtime change, but two things TS 6 tightened had to be fixed rather than worked around, and both are the kind that only surface at the compiler upgrade:
@@ -84,6 +55,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   No source behaviour changed and no test changed. Published `.d.ts` files are now emitted by TS 6 — consumers pinned to a TypeScript old enough to reject its output should upgrade alongside.
 
 ### Fixed
+
+- **A subject-revocation store outage answers `503`, not a forced logout for everyone refreshing (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `verifyJwt` fails closed when `subjectRevocation.revokedBefore` throws — an unreachable store must never read as "not revoked" — but it reported that as `reason: "revoked"`, and the refresh grant mapped every verification error to `400 invalid_grant`. Per RFC 6749 §5.2 a client discards its refresh token on `invalid_grant`, so a transient store outage did not degrade the service: it **force-logged-out every user who refreshed during it**, while the same handler already answered family-store outages with `503 temporarily_unavailable` a few hundred lines below (#408).
+
+  New `JwtVerificationReason` `"revocation_unavailable"`, and `isRevocationUnavailable` to test for it. The refresh grant answers `503 temporarily_unavailable` on that reason alone; every other verification failure — bad signature, wrong `typ`, expired, genuinely revoked — is still `invalid_grant`. Surfaces whose refusal does not cost the caller a credential (introspection answering `active: false`, a protected resource answering `401`) keep treating it as a refusal, deliberately: the token is refused either way, and only the refresh grant's answer told the client to throw the credential away.
+
+  Not reachable before #321 — the only `SubjectRevocation` adapter was in-process and could not fail. It went live the moment a Redis one existed, which is why it is fixed now.
+
+- **The watermark comparison allows a second of cross-replica clock skew (`@o3co/auth-provider-core`).** `iat <= floor(watermark / 1000)` is inclusive, but only to the same second. A minting replica whose clock runs a second or more ahead of the replica that wrote the watermark stamps `iat` past the boundary, so tokens minted *just before* a credential change survive it — the exact case the inclusive comparison exists to catch, one second further out (#408).
+
+  New `JwtVerifyOptions.subjectRevocationSkewMs`, default `1_000`. Deliberately **not** `clockSkewMs`: that is five minutes, sized for `exp`/`nbf` per RFC 8725 §3.10, and applying it here would refuse every token minted in the five minutes after a reset — including the one from the re-login the reset sends the user to. One second is the smallest value that covers a whole-second-ahead replica, since the comparison is already second-truncated, and every additional second is a second of post-reset logins refused. The cost is one-sided and bounded: a token minted within the allowance *after* a reset is refused, costing its holder one retry. Set `0` for the previous exact comparison. The value is rounded **up** to whole seconds — the comparison is in seconds, and truncating would make the guard weaker than what was configured — and a negative value is clamped to `0`, which would otherwise move the boundary earlier than the watermark itself.
+- **Scaffold hardening from the v0.10.0 release-cut audit (standalone template, `@o3co/create-auth-provider`) (#407).** The Critical in this area — the production compose could not deliver the signing keys, and served a non-Secure session cookie — was fixed in the release PR. These are the remainder, and two of them changed the artifact an operator actually deploys rather than only what they read:
+
+  **The scaffold ships a `.gitignore`, and it survives publication.** Without one, the first `git add .` in a scaffolded project commits the `.env` holding `SESSION_SECRET` and the `jwt-private.pem` the README's own setup steps say to create right there. npm drops a file literally named `.gitignore` from a published package, so adding it to the template would have fixed nothing for `npx @o3co/create-auth-provider` while looking fixed in the repository — the packaging step now stages it dot-less and the scaffolder restores it, and the packed-tarball e2e asserts a scaffolded project has one. That test is what found the packing behaviour.
+
+  **The `Dockerfile` copies `pnpm-workspace.yaml` into the deps stage.** The scaffolder generates that file to carry bcrypt's `onlyBuiltDependencies` allowlist, and pnpm ≥ 10.29 reads the setting **only** from there, in single-package projects too (#360). In-container installs were therefore running allowlist-less — free while an alpine prebuild exists, and #360 again the day one is missing.
+
+  **`.env.example` sets `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`.** It backs the shared ioredis socket this release hung the code repository, the access-token denylist and the rate limiter on, and it defaults to `redis://localhost:6379` — which inside the container is the container. The dev compose boot dialled nothing.
+
+  **`docker-compose.production.yml` publishes on loopback**, not on every interface. The file assumes TLS terminated in front and the README says to keep `/metrics` off the public listener; `"3000:3000"` contradicted both. The external-LB case is spelled out in a comment rather than left to be guessed.
+
+  **`README.ja.md` no longer recommends `HTTP_TRUST_PROXY=true`.** #292 made `trust proxy` a CIDR/hop policy precisely because `true` means "believe the leftmost forwarded entry from whoever opened the connection". The English README warned against it and the Japanese one recommended it, so the two disagreed on which is safe.
+
+  **`config/clients.yaml.example` leads with the bcrypt form** and says what the plaintext one is for. It also states plainly that the schema's floor here is any non-empty string — deliberate, since the field also holds a bcrypt hash whose shape a 256-bit floor would reject, but it means nothing stops `clientSecret: "changeme"` and the example should not read as though that were fine.
+
+  **Minor:** `config/production.conf` no longer names `OAUTH_JWT_SECRET` as the typical production secret — that is the HMAC path, stale since EdDSA became the default (#282) and the shipped route became a mounted key pair. Both compose files now say why their Redis is tag-pinned rather than digest-pinned, and what to do about it for a deployment that must be reproducible.
+
+
 
 - **BREAKING: an unfilled subject-level revocation slot must be a stated decision — the last silent no-op #363 named but did not close (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`, `@o3co/auth-provider-oauth-token-exchange`, `@o3co/auth-provider-session`, standalone template).** #363 gave `auditSink` and `accessTokenDenylist` an `AbsencePolicy` so an unfilled optional slot has to be declared at boot, and its own doc cites *"a subject-revocation watermark nothing consulted (#322)"* as motivation. `subjectRevocation` and `subjectSessionIndex` never got one (#406).
 
