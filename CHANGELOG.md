@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **The in-memory access-token denylist no longer grows without bound (`@o3co/auth-provider-core`) (#293 item 6).** GC was lazy on `has` alone: an entry was reclaimed only if someone presented that exact `jti` again *after* it expired. For a **revoked** token that is precisely the request that stops coming, so nothing was ever reclaimed and every revocation became a permanent `Map` entry on a long-running single-process deployment.
+
+  The sibling in-memory stores are bounded by what they key on — the rate limiter caps buckets and evicts, the subject stores are keyed by subject, so both are bounded by population. This one is keyed by `jti`, where nothing bounds it but time, so the sweep has to be its own step rather than a side effect of a lucky read.
+
+  Amortized on `add` (every `sweepInterval` calls, default 1000) rather than on a timer: a background interval would need lifecycle registration to avoid holding the process open, and `add` is the only operation that grows the map, which makes it the honest place to pay for the growth. The guarantee is bounded growth, not zero-lag reclamation — an expired entry is dropped **within** an interval, and `has` keeps answering correctly for one not yet swept.
+
+  `createMemoryAccessTokenDenylist` takes an optional `{ sweepInterval }` and now exposes `size`, so a deployment can see the bound holding rather than inferring it. New exports: `DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL`, `MemoryAccessTokenDenylist`, `MemoryAccessTokenDenylistOptions`. No behaviour change for callers: `add` and `has` answer exactly as before.
+
+
 ### Added
 
 - **Redis adapters for `SubjectSessionIndex` and `SubjectRevocation` — subject-level revocation now works on a multi-replica deployment (`@o3co/auth-provider-redis`).** #296 landed `revokeAllForSubject` with in-memory adapters only, bundled into `memorySessionStoresModule`. A deployment on `redisSessionStoresModule` filled **neither** slot, so a password reset answered `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked nothing — visible rather than silent, deliberately, but nothing revoked all the same, and on exactly the deployments that need it since the in-memory pair is single-process only (#321).

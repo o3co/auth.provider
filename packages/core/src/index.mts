@@ -588,7 +588,14 @@ export {
 	createAccessTokenDenylistFactory,
 	registerBuiltinAccessTokenDenylists,
 } from "./access-token-denylist/factory.mjs";
-export { createMemoryAccessTokenDenylist } from "./access-token-denylist/memory.mjs";
+export type {
+	MemoryAccessTokenDenylist,
+	MemoryAccessTokenDenylistOptions,
+} from "./access-token-denylist/memory.mjs";
+export {
+	createMemoryAccessTokenDenylist,
+	DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL,
+} from "./access-token-denylist/memory.mjs";
 export { memoryAccessTokenDenylistModule } from "./access-token-denylist/module.mjs";
 export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
 // #375: the declared-absence policy the denylist readers share — #277's boot
