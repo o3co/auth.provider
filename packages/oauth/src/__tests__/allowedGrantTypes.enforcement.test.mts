@@ -83,7 +83,10 @@ const strictGrant = (): GrantHandler => ({
 	},
 });
 
-const makeApp = async (allowedGrantTypes: readonly string[] | undefined) => {
+const makeApp = async (
+	allowedGrantTypes: readonly string[] | undefined,
+	options: { readonly requireGrantTypeAllowlist?: boolean } = {},
+) => {
 	const record = {
 		clientId: CLIENT_ID,
 		tokenEndpointAuthMethod: "client_secret_basic" as const,
@@ -112,7 +115,16 @@ const makeApp = async (allowedGrantTypes: readonly string[] | undefined) => {
 
 	const { router } = await createOAuthRouter(express, {
 		registry,
-		config,
+		config:
+			options.requireGrantTypeAllowlist === undefined
+				? config
+				: ({
+						...config,
+						oauth: {
+							...(config as unknown as { oauth: Record<string, unknown> }).oauth,
+							requireGrantTypeAllowlist: options.requireGrantTypeAllowlist,
+						},
+					} as unknown as AppConfig),
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
@@ -275,5 +287,92 @@ describe("allowedGrantTypes — /authorize enforcement (#268)", () => {
 	it("does not restrict a client that declared no allowlist", async () => {
 		const app = await makeApp(undefined);
 		expect(errorOf(await authorize(app))).not.toBe("unauthorized_client");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #311 — deployment-wide deny-by-absence
+// ---------------------------------------------------------------------------
+
+/*
+ * #268 had to keep absence meaning "unrestricted": the grants that ignored
+ * `allowedGrantTypes` predate it, so denying on absence would have revoked
+ * every grant from every registration written before the field existed. The
+ * consequence is that the secure posture is opt-in *per registration*, and an
+ * operator who wants deny-by-default has to guarantee that every registration,
+ * now and in future, carries the field. Nothing enforced that.
+ *
+ * `oauth.requireGrantTypeAllowlist` is the deployment-level statement, off by
+ * default so #268's migration story is untouched. It is read once at router
+ * composition, so both of #268's enforcement points inherit it rather than
+ * each re-reading config.
+ */
+describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence (#311)", () => {
+	const authorize = (app: express.Express) =>
+		request(app).get("/oauth/authorize").query({
+			response_type: "code",
+			client_id: CLIENT_ID,
+			redirect_uri: REDIRECT_URI,
+			state: "xyz",
+		});
+
+	it("refuses a grant at /oauth/token when the client declared no allowlist", async () => {
+		const app = await makeApp(undefined, { requireGrantTypeAllowlist: true });
+		const res = await tokenRequest(app, "refresh_token");
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+	});
+
+	it("still admits a grant the client did declare", async () => {
+		const app = await makeApp(["refresh_token"], { requireGrantTypeAllowlist: true });
+		expect((await tokenRequest(app, "refresh_token")).status).toBe(200);
+	});
+
+	it("still refuses a grant absent from a declared allowlist", async () => {
+		const app = await makeApp(["authorization_code"], { requireGrantTypeAllowlist: true });
+		const res = await tokenRequest(app, "refresh_token");
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+	});
+
+	it("refuses to start a code flow when the client declared no allowlist", async () => {
+		const app = await makeApp(undefined, { requireGrantTypeAllowlist: true });
+		const res = await authorize(app);
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location as string);
+		expect(location.origin + location.pathname).toBe(REDIRECT_URI);
+		expect(location.searchParams.get("error")).toBe("unauthorized_client");
+		expect(location.searchParams.get("state")).toBe("xyz");
+	});
+
+	it("starts the code flow when the client declared authorization_code", async () => {
+		const app = await makeApp(["authorization_code"], { requireGrantTypeAllowlist: true });
+		const res = await authorize(app);
+		const location = res.headers.location as string | undefined;
+		const error =
+			location === undefined
+				? ((res.body?.error as string | undefined) ?? null)
+				: new URL(location, "https://base.example").searchParams.get("error");
+		expect(error).not.toBe("unauthorized_client");
+	});
+
+	// #268's migration story is the default, and it must stay the default.
+	it("leaves an undeclared client unrestricted when the flag is off", async () => {
+		const app = await makeApp(undefined, { requireGrantTypeAllowlist: false });
+		expect((await tokenRequest(app, "refresh_token")).status).toBe(200);
+	});
+
+	it("leaves an undeclared client unrestricted when the key is absent entirely", async () => {
+		const app = await makeApp(undefined);
+		expect((await tokenRequest(app, "refresh_token")).status).toBe(200);
+	});
+
+	// #326's per-grant rule is independent: it denies by absence whatever this
+	// flag says, so turning the flag off must not loosen it.
+	it("does not loosen a requiresExplicitGrantAllowlist grant when the flag is off", async () => {
+		const app = await makeApp(undefined, { requireGrantTypeAllowlist: false });
+		const res = await tokenRequest(app, STRICT_GRANT_TYPE);
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
 	});
 });

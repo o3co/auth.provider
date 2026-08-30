@@ -288,6 +288,9 @@ export const createOAuthRouter = async (
 				// Absence of the field is "no policy declared", not "deny": the
 				// grants that ignored it predate it, so denying here would revoke
 				// every grant from every registration written before it existed.
+				// A deployment that has audited its registrations flips that with
+				// `oauth.requireGrantTypeAllowlist` (#311), which is read once at
+				// composition and applies to both enforcement points.
 				// Handlers that declare `requiresExplicitGrantAllowlist` compose a
 				// stricter deny-by-absence rule on top (#326, enforced just before
 				// the handler runs below), so machine-to-machine access is still
@@ -295,7 +298,11 @@ export const createOAuthRouter = async (
 				//
 				// RFC 6749 §5.2 `unauthorized_client`: "The authenticated client is
 				// not authorized to use this authorization grant type."
-				if (!isGrantTypeAllowed(ctx.authenticatedClient?.allowedGrantTypes, grant_type)) {
+				if (
+					!isGrantTypeAllowed(ctx.authenticatedClient?.allowedGrantTypes, grant_type, {
+						requireAllowlist: options.requireGrantTypeAllowlist,
+					})
+				) {
 					await emitAuditEvent(auditSink, {
 						timestamp: new Date(),
 						type: "token.issued.failure",

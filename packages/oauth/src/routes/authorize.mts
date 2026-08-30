@@ -195,7 +195,12 @@ const checkAuthorizationCodeGrantAllowed = async (
 	ctx: AuthorizeContext,
 	client: PublicClient,
 ): Promise<boolean> => {
-	if (isGrantTypeAllowed(client.allowedGrantTypes, "authorization_code")) return true;
+	if (
+		isGrantTypeAllowed(client.allowedGrantTypes, "authorization_code", {
+			requireAllowlist: ctx.opts.oauth.requireGrantTypeAllowlist,
+		})
+	)
+		return true;
 	await auditFailure(ctx, { reason: "grant_type_not_allowed", grant_type: "authorization_code" });
 	redirectError(
 		ctx,

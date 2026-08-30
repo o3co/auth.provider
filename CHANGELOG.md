@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`oauth.requireGrantTypeAllowlist` — a deployment can now say "every client must declare its grants" (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** #268 made a *declared* `allowedGrantTypes` restrict which grants a client may use, and had to keep absence meaning "unrestricted": the grants that ignored the field predate it, so denying on absence would have revoked every grant from every registration written before it existed — a total outage on upgrade rather than a security fix. The consequence is that the secure posture is opt-in **per registration**, and nothing guarantees that every registration, now and in future, carries the field. A record that omits it silently gets every grant, while `client_credentials` and the WebAuthn grant already deny by absence individually — so the deployment-wide posture was inconsistent as well as unenforceable (#311).
+
+  The new key flips the central rule to deny-by-absence for the whole deployment. It is **off by default**, for exactly the reason the central rule allows by absence; turning it on is an operator saying they have audited their registrations. Read once at router composition, so both of #268's enforcement points — `/oauth/token` dispatch and `/authorize` — inherit one decision instead of each re-reading config. A client that then omits the field is refused with `unauthorized_client` at both.
+
+  It composes with the per-grant `requiresExplicitGrantAllowlist` (#326) to the stricter of the two, which for the absent case is this one. Turning it *off* does not loosen the per-grant rule: `client_credentials` and the WebAuthn grant still deny by absence on their own.
+
+  **Absence denies outright rather than falling back to an implied set.** RFC 7591 §2 takes the other route — an omitted `grant_types` there means `["authorization_code"]` alone — and that is good evidence absence should not mean "everything". But an implied set is still a decision nobody wrote down, which is the shape #363 exists to refuse, and a deployment that turns this on can name its grants.
+
+  **Migration: none.** The default preserves current behaviour exactly. To adopt it, add `allowedGrantTypes` to every client registration, then set `oauth.requireGrantTypeAllowlist = true` (env `OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST`). `isGrantTypeAllowed` gains an optional third argument, `{ requireAllowlist }`, defaulting to the old behaviour — existing callers are unaffected.
+
 ### Changed
 
 - **The toolchain builds on TypeScript 6 (#60).** A devDependency bump with no runtime change, but two things TS 6 tightened had to be fixed rather than worked around, and both are the kind that only surface at the compiler upgrade:
