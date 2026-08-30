@@ -16,7 +16,7 @@
 
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { verifyJwt } from "#/jwt/verify.mjs";
+import { isRevocationUnavailable, JwtVerificationError, verifyJwt } from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import type { SubjectRevocation } from "#/user-sessions/types.mjs";
@@ -270,5 +270,41 @@ describe("verifyJwt — watermark clock skew (#408)", () => {
 		await expect(verify(token, store, { subjectRevocationSkewMs: 3_000 })).rejects.toMatchObject({
 			reason: "revoked",
 		});
+	});
+});
+
+/*
+ * The predicate callers branch on. Exported rather than left as an inline
+ * `instanceof` + `reason` pair at each call site, because the answer changes
+ * what a caller says on the wire — `503` versus the `400 invalid_grant` that
+ * tells a client to discard its refresh token — and a wrong answer is
+ * invisible in a happy-path test.
+ */
+describe("isRevocationUnavailable (#408)", () => {
+	it("is true for the reason it names", () => {
+		expect(
+			isRevocationUnavailable(new JwtVerificationError("revocation_unavailable", "store down")),
+		).toBe(true);
+	});
+
+	it("is false for a genuine revocation", () => {
+		// The distinction the 503 branch rests on: if this were true, the
+		// refresh grant would answer 503 to a real credential change and the
+		// client would keep its revoked token.
+		expect(isRevocationUnavailable(new JwtVerificationError("revoked", "watermark"))).toBe(false);
+	});
+
+	it("is false for every other verification failure", () => {
+		for (const reason of ["signature", "expired", "typ", "azp", "kid_unknown"] as const) {
+			expect(isRevocationUnavailable(new JwtVerificationError(reason, "x"))).toBe(false);
+		}
+	});
+
+	it("is false for something that is not a verification error at all", () => {
+		expect(isRevocationUnavailable(new Error("revocation_unavailable"))).toBe(false);
+		expect(isRevocationUnavailable("revocation_unavailable")).toBe(false);
+		expect(isRevocationUnavailable({ reason: "revocation_unavailable" })).toBe(false);
+		expect(isRevocationUnavailable(undefined)).toBe(false);
+		expect(isRevocationUnavailable(null)).toBe(false);
 	});
 });
