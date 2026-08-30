@@ -22,6 +22,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";
 import { createClientCredentialsGrant } from "./grants/clientCredentials.mjs";
+import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "./grants/jwtBearer.mjs";
 import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 
 /**
@@ -85,6 +86,25 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	if (isExplicitlyEnabled(grantsCfg.refresh_token?.enabled)) {
 		grants.refresh_token = (deps) => createRefreshTokenGrant(deps);
 	}
+	// #301: RFC 7523 jwt-bearer. Opt-in like every other grant, and additionally
+	// inert without an `assertionVerifier` — the module lists it optional so a
+	// deployment that never enables this grant is not made to wire one, and the
+	// factory below refuses to register the grant when it is missing rather
+	// than registering one that would accept anything.
+	if (isExplicitlyEnabled(grantsCfg["urn:ietf:params:oauth:grant-type:jwt-bearer"]?.enabled)) {
+		grants[JWT_BEARER_GRANT_TYPE] = (deps) => {
+			if (!deps.assertionVerifier) {
+				throw new Error(
+					`${JWT_BEARER_GRANT_TYPE} is enabled but no assertionVerifier is wired. ` +
+						"This grant turns a presented assertion into a login, so there is no " +
+						"default: the only possible one would accept things. Wire an " +
+						"AssertionVerifier (createJwtAssertionVerifier for a signed device JWT, " +
+						"or your own for a platform attestation), or disable the grant.",
+				);
+			}
+			return createJwtBearerGrant(deps);
+		};
+	}
 	// Wave 1 §3.5: client_credentials follows the same opt-in semantics.
 	// Per-client `AuthenticatedClient.allowedGrantTypes` (§3.4.1 deny-by-absence)
 	// is the authoritative access gate; the server-wide flag exists for
@@ -122,6 +142,11 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 			// #376: the #296 subject watermark, consulted at RT redemption as
 			// the backstop for a partial credential-change cascade (#322).
 			"subjectRevocation",
+			// #301: read by the jwt-bearer grant. Optional so a deployment that
+			// never enables that grant is not made to wire one; the grant
+			// factory refuses at composition when it is enabled without one.
+			"assertionVerifier",
+			"userRepository",
 			"grantPolicy",
 			"userSessionStore",
 			"sessionRPRegistry", // Amendment 4 (§1.1.4)
