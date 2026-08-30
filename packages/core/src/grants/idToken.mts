@@ -42,9 +42,11 @@ export interface GenerateIdTokenOptions {
  * (userinfo, introspection, the central verifier) relies on the value being
  * **disjoint from RFC 9068's `at+jwt`** to refuse an id_token presented as an
  * access token — a property `JWT` satisfies just as the pre-#394 `id+jwt`
- * did, without failing strict external RPs that validate `typ`. Tokens minted
- * before the flip carry `id+jwt`; the verifier accepts both during the
- * migration window #402 closes.
+ * did, without failing strict external RPs that validate `typ`.
+ *
+ * #394 accepted the pre-flip `id+jwt` alongside it for a migration window;
+ * #402 closed that window, and `id+jwt` is now refused as an ordinary `typ`
+ * mismatch.
  */
 export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token> {
 	const now = Math.floor(Date.now() / 1000);
