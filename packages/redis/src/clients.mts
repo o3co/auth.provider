@@ -323,10 +323,19 @@ export interface SessionSidSortedSetClient {
 export interface SubjectSessionIndexClient {
 	multi(): SubjectSessionIndexMultiClient;
 	zAdd(key: string, entry: { score: number; value: string }): Promise<number>;
-	/** Members whose score is in `[min, max]`, ascending. */
-	zRangeByScore(key: string, min: number | "-inf", max: number | "+inf"): Promise<string[]>;
-	/** Remove members whose score is in `[min, max]` — the GC sweep. */
-	zRemRangeByScore(key: string, min: number | "-inf", max: number | "+inf"): Promise<number>;
+	/**
+	 * Sweep members whose expiry has passed, then return the ones that remain,
+	 * **evaluating "has passed" against the store's own clock**.
+	 *
+	 * One operation rather than a range-remove plus a range-read, because the
+	 * boundary has to be a single value and it must not be the calling
+	 * replica's `Date.now()`. Scores are written from whichever replica handled
+	 * the login; comparing them against whichever replica handles the read is
+	 * two host clocks, and the skew between them drops live sessions early or
+	 * keeps expired ones listed. The store is the one clock every replica
+	 * shares, which is the whole reason this index moved off in-process state.
+	 */
+	pruneExpiredAndList(key: string): Promise<string[]>;
 	zRem(key: string, member: string): Promise<number>;
 	/**
 	 * Remove the key, reclaiming its memory on a background thread (Redis
