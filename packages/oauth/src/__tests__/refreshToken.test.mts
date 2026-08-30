@@ -1635,4 +1635,93 @@ describe("createRefreshTokenGrant", () => {
 			expect(description).not.toBe("invalid refresh_token");
 		});
 	});
+
+	/*
+	 * #408 — a watermark store outage is not a revocation.
+	 *
+	 * The verifier fails closed on an unreachable store, which is right, but it
+	 * reported that as `reason: "revoked"` and this handler mapped every
+	 * verification error to `400 invalid_grant`. Per RFC 6749 §5.2 a client
+	 * discards its refresh token on `invalid_grant`, so a transient outage did
+	 * not degrade the service — it force-logged-out every user who refreshed
+	 * during it, while this same handler already answered family-store outages
+	 * with `503 temporarily_unavailable` a few hundred lines below.
+	 *
+	 * Not reachable before #321: the only `SubjectRevocation` adapter was
+	 * in-process and could not fail. It went live the moment a Redis one landed.
+	 */
+	describe("subject-revocation store outage (#408)", () => {
+		const outageStore = {
+			kind: "outage",
+			revokeBefore: async () => {},
+			revokedBefore: async () => {
+				throw new Error("ECONNREFUSED");
+			},
+		};
+
+		const refreshWith = async (subjectRevocation: unknown) => {
+			const handler = createRefreshTokenGrant({
+				...mockDeps,
+				subjectRevocation,
+			} as never);
+			const ctx: GrantContext = {
+				body: { refresh_token: await makeRefreshToken() },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			};
+			return (await handler.handle(ctx)).result;
+		};
+
+		it("answers 503 temporarily_unavailable, not invalid_grant", async () => {
+			const result = await refreshWith(outageStore);
+			expect(result.status).toBe(503);
+			expect("error" in result && result.error).toBe("temporarily_unavailable");
+		});
+
+		it("matches what a family-store outage already answered", async () => {
+			// The two outages are the same event class on the same endpoint, and
+			// answering them differently is what made this one destructive.
+			const result = await refreshWith(outageStore);
+			expect(result.status).toBe(503);
+		});
+
+		it("does not tell the client to discard its refresh token", async () => {
+			// The whole point: RFC 6749 §5.2 makes `invalid_grant` the signal to
+			// throw the credential away.
+			const result = await refreshWith(outageStore);
+			expect("error" in result && result.error).not.toBe("invalid_grant");
+		});
+
+		it("still refuses the request — the outage is not fail-open", async () => {
+			const result = await refreshWith(outageStore);
+			expect("tokens" in result).toBe(false);
+		});
+
+		it("keeps a genuine watermark hit on invalid_grant", async () => {
+			// The 503 branch must not start swallowing real revocations.
+			const result = await refreshWith({
+				kind: "stub",
+				revokeBefore: async () => {},
+				revokedBefore: async () => new Date(Date.now() + 86_400_000),
+			});
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_grant");
+		});
+
+		it("keeps a malformed token on invalid_grant", async () => {
+			// Every other verification failure is still the client's problem.
+			const handler = createRefreshTokenGrant({ ...mockDeps } as never);
+			const { result } = await handler.handle({
+				body: { refresh_token: "not-a-jwt" },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			} as GrantContext);
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_grant");
+		});
+	});
 });

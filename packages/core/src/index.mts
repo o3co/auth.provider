@@ -211,7 +211,7 @@ export type {
 	VerifiedJwt,
 	VerifyRevocation,
 } from "./jwt/verify.mjs";
-export { JwtVerificationError, verifyJwt } from "./jwt/verify.mjs";
+export { isRevocationUnavailable, JwtVerificationError, verifyJwt } from "./jwt/verify.mjs";
 export type { KeyStoreFactory } from "./keys/factory.mjs";
 export {
 	createKeyStoreFactory,

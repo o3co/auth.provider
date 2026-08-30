@@ -56,7 +56,20 @@ export type JwtVerificationReason =
 	// Wave 1 (§4.5): token present in the AccessTokenDenylist (i.e. explicitly
 	// revoked via RFC 7009). Distinct from `expired` so SIEM filters can tell
 	// natural expiry apart from an operator-initiated revocation event.
-	| "revoked";
+	| "revoked"
+	// #408: a revocation store could not be consulted. Verification still fails
+	// closed — an unreachable backend must never read as "not revoked" — but the
+	// failure is an outage, not a finding, and the two must not be reported as
+	// one thing.
+	//
+	// The refresh grant is where that mattered enough to split the reason: it
+	// mapped every verification error to `400 invalid_grant`, and per RFC 6749
+	// §5.2 a client discards its refresh token on that. A transient store outage
+	// therefore did not degrade the service, it force-logged-out every user who
+	// refreshed during it — while the same handler already answered family-store
+	// outages with `503 temporarily_unavailable`. A caller that can retry should
+	// say so; one that cannot still refuses the token.
+	| "revocation_unavailable";
 
 /**
  * Thrown by {@link verifyJwt} on any verification failure. The `reason` field
@@ -72,6 +85,27 @@ export class JwtVerificationError extends Error {
 	) {
 		super(message);
 	}
+}
+
+/**
+ * Whether `err` is a {@link JwtVerificationError} reporting that a revocation
+ * store could not be consulted (#408).
+ *
+ * A predicate rather than an inline `instanceof` + `reason` pair at each call
+ * site, because the answer changes what a caller says on the wire and getting
+ * it wrong is not visible in a test that only checks the happy path. The
+ * refresh grant maps this to `503 temporarily_unavailable` instead of
+ * `400 invalid_grant`, since RFC 6749 §5.2 makes the latter the signal for a
+ * client to discard its refresh token — turning a transient outage into a
+ * forced logout for everyone who refreshed during it.
+ *
+ * Surfaces that cannot retry, or whose refusal does not cost the caller a
+ * credential (introspection answering `active: false`, a protected resource
+ * answering `401`), are right to keep treating it as a refusal. The token is
+ * refused either way: verification still fails closed.
+ */
+export function isRevocationUnavailable(err: unknown): boolean {
+	return err instanceof JwtVerificationError && err.reason === "revocation_unavailable";
 }
 
 /**
@@ -143,6 +177,30 @@ export interface JwtVerifyOptions {
 	 * checks. Default: 300_000 (5 min) per RFC 8725 §3.10 guidance.
 	 */
 	readonly clockSkewMs?: number;
+	/**
+	 * Cross-replica clock allowance for the subject-revocation watermark
+	 * comparison, in milliseconds. Default: 1_000.
+	 *
+	 * Deliberately **not** `clockSkewMs`. That one is five minutes, sized for
+	 * `exp`/`nbf`, and using it here would refuse every token minted in the
+	 * five minutes after a credential change — including the one from the
+	 * re-login the change sends the user to. This allowance runs in the other
+	 * direction and has to stay small enough that a legitimate post-reset
+	 * login is not caught by it (#408).
+	 *
+	 * What it buys: the comparison is `iat <= watermark`, second-truncated and
+	 * inclusive, which covers a token minted in the same second as the reset.
+	 * A minting replica whose clock runs a second or more ahead of the replica
+	 * that wrote the watermark stamps `iat` past it, and tokens minted *just
+	 * before* the credential change survive it — the exact case the inclusive
+	 * comparison exists to catch, one second further out. One second of
+	 * allowance covers the skew a monitored fleet actually has.
+	 *
+	 * The cost is bounded and one-sided: a token minted within the allowance
+	 * *after* a reset is refused, which costs its holder one retry. Set to `0`
+	 * for the pre-#408 exact comparison.
+	 */
+	readonly subjectRevocationSkewMs?: number;
 	/**
 	 * Override default `typ` for this {@link JwtType}. Pass `null` to skip
 	 * `typ` checking entirely (legacy migration paths only).
@@ -245,6 +303,15 @@ const LEGACY_PAYLOAD_TYPE_MAP: Record<string, JwtType> = {
 const DEFAULT_CLOCK_SKEW_MS = 300_000;
 
 /**
+ * Default watermark allowance (#408). One second, because the comparison is
+ * already second-truncated, so this is the smallest value that covers a
+ * minting replica a whole second ahead of the watermark writer — and every
+ * additional second is a second of post-reset logins refused. See
+ * `JwtVerifyOptions.subjectRevocationSkewMs`.
+ */
+const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
+
+/**
  * Centralized JWT verification with alg / iss / aud / typ pinning.
  *
  * The verifier:
@@ -277,6 +344,7 @@ export async function verifyJwt(
 		expectedAzp,
 		expectedNonce,
 		clockSkewMs = DEFAULT_CLOCK_SKEW_MS,
+		subjectRevocationSkewMs = DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 		expectedTyp,
 		expectedAlgs,
 		logger,
@@ -551,8 +619,14 @@ export async function verifyJwt(
 				watermark = await subjectRevocation.revokedBefore(sub);
 			} catch (cause) {
 				const causeMessage = cause instanceof Error ? cause.message : String(cause);
+				// #408: still fail closed — an unreachable store must never read
+				// as "not revoked" — but report it as the outage it is. Reported
+				// as `revoked`, it was indistinguishable from a finding, and the
+				// refresh grant's blanket `invalid_grant` mapping turned a
+				// transient outage into a forced logout for every user who
+				// refreshed during it (RFC 6749 §5.2).
 				const err = new JwtVerificationError(
-					"revoked",
+					"revocation_unavailable",
 					`subject revocation consult failed (fail-closed): ${causeMessage}`,
 				);
 				emitRejection(logger, err, payload, header);
@@ -578,11 +652,20 @@ export async function verifyJwt(
 			// milliseconds *before* the revocation routinely lands in the same
 			// second as the watermark. Killing one minted just after costs a
 			// retry; letting one from just before survive is the vulnerability.
-			if (
-				watermark !== null &&
-				iat !== undefined &&
-				iat <= Math.floor(watermark.getTime() / 1000)
-			) {
+			//
+			// #408 widens that by `subjectRevocationSkewMs` for the same reason
+			// one second further out: same-second inclusivity covers a replica
+			// whose clock agrees to within a second, and a replica running a
+			// full second ahead of the watermark writer stamps `iat` past the
+			// boundary, so tokens minted just *before* the credential change
+			// survive it. The allowance is its own small value and not
+			// `clockSkewMs` — five minutes here would refuse the re-login the
+			// credential change sends the user to.
+			const watermarkBoundarySeconds =
+				watermark === null
+					? 0
+					: Math.floor(watermark.getTime() / 1000) + Math.floor(subjectRevocationSkewMs / 1000);
+			if (watermark !== null && iat !== undefined && iat <= watermarkBoundarySeconds) {
 				const err = new JwtVerificationError(
 					"revoked",
 					`JWT for subject ${sub} predates the subject revocation watermark`,
