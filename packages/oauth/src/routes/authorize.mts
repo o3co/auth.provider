@@ -76,6 +76,12 @@ interface AuthorizeContext {
 	readonly redirectUri: string;
 	/** Verbatim `state` when it was a single string; echoed on every response. */
 	readonly state: string | undefined;
+	/**
+	 * The request's parameters — query string on GET, form body on POST.
+	 * Carried on the context so every check reads the same object regardless
+	 * of how the request arrived (#284).
+	 */
+	readonly params: Record<string, unknown>;
 }
 
 const toStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
@@ -123,7 +129,7 @@ const resolveClientAndRedirectUri = async (
 	res: Response,
 	opts: AuthorizeHandlerOptions,
 ): Promise<{ client: PublicClient; clientId: string; redirectUri: string } | null> => {
-	const { client_id = null, redirect_uri = null } = req.query;
+	const { client_id = null, redirect_uri = null } = authorizeParams(req);
 
 	// A-1: invalid client_id and redirect_uri → 400 JSON (cannot redirect)
 	if (typeof client_id !== "string" || !client_id) {
@@ -169,7 +175,7 @@ const resolveClientAndRedirectUri = async (
 // types and repeats such as `?response_type=code&response_type=token`,
 // which Express surfaces as an array.
 const checkResponseTypeIsCode = (ctx: AuthorizeContext): boolean => {
-	const raw = ctx.req.query.response_type;
+	const raw = ctx.params.response_type;
 	if (toStr(raw) !== "code") {
 		// The description names what actually arrived — a missing parameter and
 		// a repeated one are different client bugs, and `"undefined"` in quotes
@@ -377,9 +383,122 @@ const SINGLE_VALUED_QUERY_PARAMS = [
  * wording IH-16 already used for `nonce`, which this gate now owns for the
  * whole class.
  */
+/**
+ * The authorization request's parameters, wherever this request carried them.
+ *
+ * OIDC Core §3.1.2.1: *"Authorization Servers MUST support the use of the HTTP
+ * GET and POST methods"*. A POST carries the same parameters in a
+ * form-encoded body — the parameter names, the single-valued rule and every
+ * check below are identical, so the only thing that differs is which object
+ * they are read from, and reading it in one place is what keeps a check from
+ * silently applying to GET alone (#284).
+ *
+ * Express's `qs` surfaces a repeated parameter as an array from either source,
+ * so `checkSingleValuedParams` covers both without knowing which it got.
+ */
+export const authorizeParams = (req: Request): Record<string, unknown> =>
+	req.method === "POST"
+		? ((req.body ?? {}) as Record<string, unknown>)
+		: (req.query as Record<string, unknown>);
+
+/**
+ * OIDC Core §3.1.2.1 `prompt` (#284).
+ *
+ * `none` is the one that matters and the one whose absence broke standard RP
+ * libraries: silent renewal asks for a token without user interaction and
+ * expects `login_required` when there is no session. Answering with the login
+ * page instead — which is what happened before — hands an HTML redirect to a
+ * hidden iframe, where it does nothing and produces a timeout rather than an
+ * error the RP can act on.
+ *
+ * Every other value is **refused**, not ignored, and each for its own reason:
+ *
+ * - `consent` / `select_account` — this AS admits only first-party clients
+ *   (#267) and has no consent step or account picker by design. Ignoring them
+ *   would hand back a token the RP believes was freshly consented to.
+ * - `login` — forcing re-authentication needs a way to know that it just
+ *   happened, or the user returns from the login page with the same
+ *   `prompt=login` and goes round again. That marker is `auth_time`, which
+ *   arrives with `max_age`; until then a looping implementation would be worse
+ *   than an honest refusal.
+ *
+ * `invalid_request` naming the value is the answer — OIDC Core defines no
+ * "prompt value unsupported" code, and inventing one would put a non-standard
+ * error where an RP expects a standard one.
+ *
+ * Returns the resolved directive, or `null` when it has already answered.
+ */
+type PromptDirective = { readonly silent: boolean };
+
+const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
+	const raw = ctx.params.prompt;
+	if (raw === undefined) return { silent: false };
+	if (typeof raw !== "string") {
+		redirectError(ctx, "invalid_request", "prompt must be a single string value");
+		return null;
+	}
+	// §3.1.2.1: a space-delimited list. `none` may not be combined with any
+	// other value — "if this parameter contains none with any other value, an
+	// error is returned".
+	const values = raw.split(" ").filter((v) => v.length > 0);
+	if (values.length === 0) return { silent: false };
+	if (values.includes("none") && values.length > 1) {
+		redirectError(ctx, "invalid_request", "prompt=none cannot be combined with other values");
+		return null;
+	}
+	const unsupported = values.filter((v) => v !== "none");
+	if (unsupported.length > 0) {
+		redirectError(
+			ctx,
+			"invalid_request",
+			`prompt values not supported: ${unsupported.join(" ")} — this authorization server ` +
+				"serves first-party clients only, so it has no consent step or account picker, " +
+				"and it cannot yet tell that a forced re-authentication has happened",
+		);
+		return null;
+	}
+	return { silent: true };
+};
+
+/**
+ * Refuse the request-object parameters this AS does not implement (#284).
+ *
+ * OIDC Core defines `request_not_supported` and `request_uri_not_supported`
+ * for exactly this, and the reason to answer rather than ignore is security,
+ * not tidiness. A signed request object exists to make the parameters
+ * tamper-proof; an AS that ignores it and processes the query string instead
+ * gives an attacker precisely what the request object was there to prevent,
+ * while the RP believes its signed request was honoured. Silence is the worst
+ * of the three options.
+ *
+ * The discovery document says the same thing in its own vocabulary —
+ * `request_uri_parameter_supported: false` is emitted because OIDC Discovery
+ * defaults that field to **true** when omitted, so saying nothing claimed
+ * support for `request_uri`. Same shape #283 found in `grant_types_supported`.
+ */
+const checkRequestObjectUnsupported = (ctx: AuthorizeContext): boolean => {
+	if (ctx.params.request !== undefined) {
+		redirectError(
+			ctx,
+			"request_not_supported",
+			"this authorization server does not accept request objects",
+		);
+		return false;
+	}
+	if (ctx.params.request_uri !== undefined) {
+		redirectError(
+			ctx,
+			"request_uri_not_supported",
+			"this authorization server does not accept request_uri",
+		);
+		return false;
+	}
+	return true;
+};
+
 const checkSingleValuedParams = (ctx: AuthorizeContext): boolean => {
 	for (const name of SINGLE_VALUED_QUERY_PARAMS) {
-		const value = ctx.req.query[name];
+		const value = ctx.params[name];
 		if (value === undefined || typeof value === "string") continue;
 		redirectError(ctx, "invalid_request", `${name} must be a single string value`);
 		return false;
@@ -406,7 +525,7 @@ const checkSingleValuedParams = (ctx: AuthorizeContext): boolean => {
 // validation so errors can use `redirectError`.
 const checkNonce = (ctx: AuthorizeContext): boolean => {
 	const nonceMaxLength = ctx.opts.oauth.nonceMaxLength;
-	if (ctx.req.query.nonce === undefined) return true;
+	if (ctx.params.nonce === undefined) return true;
 	// Reject a `nonce` that is not a single string (Copilot review on
 	// PR #126). This is the sole owner of the rule for this
 	// parameter — `SINGLE_VALUED_QUERY_PARAMS` deliberately omits
@@ -422,11 +541,11 @@ const checkNonce = (ctx: AuthorizeContext): boolean => {
 	// `invalid_request` immediately so the failure is at the
 	// request boundary, not asynchronously at id_token
 	// validation time.
-	if (typeof ctx.req.query.nonce !== "string") {
+	if (typeof ctx.params.nonce !== "string") {
 		redirectError(ctx, "invalid_request", "nonce must be a single string value");
 		return false;
 	}
-	const nonceValue = ctx.req.query.nonce;
+	const nonceValue = ctx.params.nonce;
 	if (nonceValue.length > nonceMaxLength) {
 		redirectError(ctx, "invalid_request", `nonce exceeds maximum length of ${nonceMaxLength}`);
 		return false;
@@ -685,7 +804,7 @@ const mintCode = async (
 			grantedScope: params.grantedScope,
 			grantedAudience: params.grantedAudience,
 			// NEW (TODO-F-3): OIDC round-trip state on the code record.
-			nonce: typeof ctx.req.query.nonce === "string" ? ctx.req.query.nonce : undefined,
+			nonce: typeof ctx.params.nonce === "string" ? ctx.params.nonce : undefined,
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
 		});
 	} catch {
@@ -751,7 +870,31 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 	// schema-validated deployments at router creation).
 	const issuerOrigin = new URL(opts.issuer).origin;
 	return async (req: Request, res: Response) => {
-		if (!req.session.isAuthenticated) {
+		// #284: `prompt=none` asks for a token *without* user interaction, so
+		// the login redirect below is exactly what it must not get — a hidden
+		// iframe cannot act on an HTML page, and the RP sees a timeout instead
+		// of an error. Such a request falls through to have its client and
+		// `redirect_uri` validated, so `login_required` can be delivered where
+		// the RP is listening for it.
+		//
+		// The gate opens for any `prompt` list that names `none`, including
+		// the combinations §3.1.2.1 forbids (`prompt=none login`). That is
+		// deliberate, not slack: such a request still comes from a silent
+		// context, so answering it with a login page hangs the same hidden
+		// iframe, and its `invalid_request` belongs at the RP's
+		// `redirect_uri` — which cannot be trusted until it is validated,
+		// which costs the lookup. Every other unauthenticated request still
+		// answers before touching the repository, which is what keeps an
+		// unauthenticated endpoint from doing a lookup per hit.
+		const promptRaw = authorizeParams(req).prompt;
+		const wantsSilentAuth =
+			typeof promptRaw === "string" &&
+			promptRaw
+				.split(" ")
+				.filter((v) => v.length > 0)
+				.includes("none");
+
+		if (!req.session.isAuthenticated && !wantsSilentAuth) {
 			// `endpoints.login.url` may already carry a query string (e.g.
 			// `/login?tenant=x`), so `redirect_to` joins with `&` there and `?`
 			// otherwise — a second `?` would corrupt both parameters.
@@ -779,7 +922,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			state = null,
 			code_challenge = null,
 			code_challenge_method = null,
-		} = req.query;
+		} = authorizeParams(req);
 
 		const resolved = await resolveClientAndRedirectUri(req, res, opts);
 		if (!resolved) return;
@@ -793,8 +936,26 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			clientId: resolved.clientId,
 			redirectUri: resolved.redirectUri,
 			state: toStr(state),
+			params: authorizeParams(req),
 		};
 
+		// #284: the request-object refusal runs before anything interprets the
+		// query parameters, because the whole point is that those parameters
+		// are not the ones the RP signed.
+		if (!checkRequestObjectUnsupported(ctx)) return;
+		const prompt = resolvePrompt(ctx);
+		if (prompt === null) return;
+		if (prompt.silent && !req.session.isAuthenticated) {
+			// OIDC Core §3.1.2.6. Now that `redirect_uri` is validated this
+			// reaches the RP's own listener rather than a login page it cannot
+			// use.
+			redirectError(
+				ctx,
+				"login_required",
+				"prompt=none was requested but no end-user session is present",
+			);
+			return;
+		}
 		if (!checkResponseTypeIsCode(ctx)) return;
 		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
 		// it is interpreted — a repeat read as absence is a different request
@@ -813,12 +974,12 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!scopes) return;
 
 		// RFC 8707 §2 at the authorization endpoint (Stage 2, #173). Read
-		// from the query string here — `/authorize` is a GET — using the
-		// same extractor the token endpoint uses, so a repeated
-		// `?resource=` (which Express surfaces as an array) is handled
-		// identically on both endpoints.
+		// through `authorizeParams`, so a GET's query string and a POST's
+		// form body reach the same extractor the token endpoint uses and a
+		// repeated `resource` (which Express surfaces as an array) is
+		// handled identically on every endpoint and method.
 		const authorizeResource = opts.oauth.resourceIndicatorEnabled
-			? extractResourceParam(req.query as Record<string, unknown>)
+			? extractResourceParam(authorizeParams(req))
 			: null;
 
 		const policy = await applyGrantPolicy(ctx, {

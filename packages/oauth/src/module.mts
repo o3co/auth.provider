@@ -322,6 +322,22 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						},
 						metadata: {
 							response_types_supported: ["code"],
+							// #284: OIDC Discovery defaults this to **true** when
+							// omitted, so saying nothing claimed support for
+							// `request_uri` — which `/authorize` has never
+							// implemented. Same shape #283 found in
+							// `grant_types_supported`, and worse in consequence: an RP
+							// that believed it had sent a signed, tamper-proof request
+							// object would have had the query string processed
+							// instead. `/authorize` now also refuses the parameter
+							// outright with `request_uri_not_supported`.
+							//
+							// `request_parameter_supported` and
+							// `claims_parameter_supported` stay omitted: both default
+							// to `false`, so omission already tells the truth, and
+							// restating a correct default is noise in a document RPs
+							// read.
+							request_uri_parameter_supported: false,
 							subject_types_supported: ["public"],
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
 							scopes_supported: ["openid", "profile", "email", "groups"],

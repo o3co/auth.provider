@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **BREAKING: `/authorize` refuses `request` and `request_uri` instead of ignoring them, and the discovery document stops claiming to support the latter (`@o3co/auth-provider-oauth`) (#284).** This is the security half of "the OIDC surface is overclaimed", and the issue did not name it. A signed request object exists to make the authorization parameters tamper-proof; `/authorize` never read either parameter, so it processed the query string instead — handing an attacker who can rewrite that query exactly what the request object was there to prevent, while the RP believed its signed request had been honoured. Silence was the worst of the three possible answers. Both now answer OIDC Core's `request_not_supported` / `request_uri_not_supported`, before anything interprets the parameters.
+
+  The discovery document said the same thing by omission, in the other direction: **OIDC Discovery defaults `request_uri_parameter_supported` to `true`**, so saying nothing advertised support for a parameter that was silently dropped. It is now emitted as `false` — the same shape #283 found in `grant_types_supported`, and worse in consequence. `request_parameter_supported` and `claims_parameter_supported` stay omitted deliberately: both default to `false`, so omission already tells the truth and restating a correct default is noise in a document RPs read.
+
+- **`/authorize` supports POST (`@o3co/auth-provider-oauth`) (#284).** OIDC Core §3.1.2.1: *"Authorization Servers MUST support the use of the HTTP GET and POST methods"*. Both methods share one handler instance reading through one parameter accessor, so a check cannot be mounted on GET and forgotten on POST.
+
+- **`prompt=none` answers `login_required` instead of the login page (`@o3co/auth-provider-oauth`) (#284).** Silent renewal runs in a hidden iframe, which cannot act on an HTML redirect — standard RP libraries saw a timeout rather than an error they could handle. A `prompt=none` request without a session is now allowed past the session gate specifically so its `redirect_uri` can be validated and `login_required` delivered where the RP is listening; every other unauthenticated request still answers before touching the repository.
+
+  `prompt=login`, `consent` and `select_account` are **refused** with `invalid_request` naming the value, not ignored. There is no consent step or account picker by design — `/authorize` admits only first-party clients (#267), and returning a token an RP believes was freshly consented to is worse than refusing. `prompt=login` needs `auth_time` to know a forced re-authentication happened, or the user loops through the login page; that arrives with `max_age`, which is not implemented. The `packages/oauth` README now states the whole surface, including what is deliberately absent.
+
+
 ### Added
 
 - **RFC 7523 JWT-bearer grant — the public entry point for "present a device credential, get tokens" (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`) (#301).** `UserRepository.authenticateByToken(handle)` already existed and was service-pluggable, but the only caller was the federation callback, so there was no way in from outside. `POST /oauth/token` with `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer` and an `assertion` now verifies possession, hands the resulting opaque handle to the Store, and issues tokens for whatever subject the Store returns.

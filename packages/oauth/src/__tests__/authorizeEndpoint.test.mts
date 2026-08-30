@@ -526,3 +526,162 @@ describe("/authorize — rejection audit vocabulary (authorize.rejected, #329)",
 		);
 	});
 });
+
+/*
+ * #284 — "the OIDC surface is narrower than the OIDC-provider claim".
+ *
+ * Three separate defects behind that sentence, and they are not the same kind:
+ *
+ *  - `request` / `request_uri` were silently ignored. That is the security one:
+ *    a signed request object exists to make the parameters tamper-proof, so an
+ *    AS that processes the query string instead hands an attacker exactly what
+ *    the object was there to prevent, while the RP believes it was honoured.
+ *  - The discovery document *claimed* `request_uri` support by omission — OIDC
+ *    Discovery defaults `request_uri_parameter_supported` to `true`.
+ *  - `prompt=none` returned the login page, so silent renewal in a hidden
+ *    iframe timed out rather than receiving `login_required`.
+ *
+ * POST was a plain missing MUST (OIDC Core §3.1.2.1).
+ */
+
+const authorizePost = (app: express.Express, body: Query) =>
+	request(app)
+		.post("/oauth/authorize")
+		.type("form")
+		.send(body as Record<string, string>);
+
+describe("/authorize — request objects are refused, not ignored (#284)", () => {
+	it("answers request_not_supported for a request parameter", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, request: "ey.J.x" }));
+		expect(params.get("error")).toBe("request_not_supported");
+	});
+
+	it("answers request_uri_not_supported for a request_uri parameter", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, request_uri: "https://rp.example/req.jwt" }),
+		);
+		expect(params.get("error")).toBe("request_uri_not_supported");
+	});
+
+	it("refuses before minting anything", async () => {
+		// The failure mode was issuing a code for the query parameters while
+		// the RP believed its signed object had been used.
+		const createCode = vi.fn();
+		const { app } = await makeApp({ createCode });
+		await authorize(app, { ...baseQuery, request_uri: "https://rp.example/req.jwt" });
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("preserves state on the refusal so the RP can correlate it", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, state: "xyz", request: "ey.J.x" }),
+		);
+		expect(params.get("state")).toBe("xyz");
+	});
+});
+
+describe("/authorize — prompt=none (#284)", () => {
+	it("answers login_required by redirect when there is no session", async () => {
+		// The point: a hidden iframe cannot act on a login page. This has to
+		// reach the RP's own redirect_uri, which is why the request is allowed
+		// past the session gate to have its redirect_uri validated first.
+		const { app } = await makeApp({ session: { isAuthenticated: false } });
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "none" }));
+		expect(params.get("error")).toBe("login_required");
+	});
+
+	it("proceeds silently when a session is present", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, { ...baseQuery, prompt: "none" });
+		const location = new URL(res.headers.location as string);
+		expect(location.searchParams.get("error")).toBeNull();
+		expect(location.searchParams.get("code")).not.toBeNull();
+	});
+
+	it("still sends an unauthenticated request without prompt=none to the login page", async () => {
+		// The fall-through is scoped to prompt=none; every other
+		// unauthenticated request must still answer before touching the
+		// repository.
+		const { app } = await makeApp({ session: { isAuthenticated: false } });
+		const res = await authorize(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(res.headers.location).toContain("/login");
+	});
+
+	it("refuses prompt=none combined with another value", async () => {
+		// §3.1.2.1: "if this parameter contains none with any other value, an
+		// error is returned".
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "none login" }));
+		expect(params.get("error")).toBe("invalid_request");
+	});
+
+	it("refuses consent and select_account rather than ignoring them", async () => {
+		// Ignoring would hand back a token the RP believes was freshly
+		// consented to. This AS is first-party only and has no consent step.
+		const { app } = await makeApp({});
+		// Collected then asserted as a set, so a failure names which value
+		// behaved differently rather than stopping at the first.
+		const outcomes: string[] = [];
+		for (const prompt of ["consent", "select_account", "login"]) {
+			const params = redirectParams(await authorize(app, { ...baseQuery, prompt }));
+			const namesTheValue = (params.get("error_description") ?? "").includes(prompt);
+			outcomes.push(`${prompt}:${params.get("error")}:names=${namesTheValue}`);
+		}
+		expect(outcomes).toEqual([
+			"consent:invalid_request:names=true",
+			"select_account:invalid_request:names=true",
+			"login:invalid_request:names=true",
+		]);
+	});
+
+	it("refuses a repeated prompt parameter instead of picking one", async () => {
+		// `?prompt=none&prompt=login` parses to an array, not a string. Reading
+		// one element of it would let an attacker who can append to the query
+		// choose which directive the AS sees; taking the whole thing as a
+		// single value would then reject a legitimate `prompt=none`. Neither
+		// is a decision this endpoint should be making on the RP's behalf.
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, prompt: ["none", "login"] }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toContain("single string");
+	});
+
+	it("treats an absent prompt exactly as before", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, baseQuery);
+		expect(new URL(res.headers.location as string).searchParams.get("code")).not.toBeNull();
+	});
+});
+
+describe("/authorize — POST is supported (#284)", () => {
+	it("accepts the same request as a form POST", async () => {
+		// OIDC Core §3.1.2.1 makes this a MUST, and it is how an RP sends a
+		// request too large for a URL.
+		const { app } = await makeApp({});
+		const res = await authorizePost(app, baseQuery);
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location as string).searchParams.get("code")).not.toBeNull();
+	});
+
+	it("runs the same checks on POST — a refusal on GET is a refusal on POST", async () => {
+		// One handler instance behind both methods, so a check cannot be
+		// mounted on one and forgotten on the other.
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorizePost(app, { ...baseQuery, request_uri: "https://rp.example/r.jwt" }),
+		);
+		expect(params.get("error")).toBe("request_uri_not_supported");
+	});
+
+	it("answers login_required on POST too", async () => {
+		const { app } = await makeApp({ session: { isAuthenticated: false } });
+		const params = redirectParams(await authorizePost(app, { ...baseQuery, prompt: "none" }));
+		expect(params.get("error")).toBe("login_required");
+	});
+});

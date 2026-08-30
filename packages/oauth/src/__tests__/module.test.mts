@@ -413,6 +413,11 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 			// memory denylist, so it can actually revoke something.
 			revocation_endpoint: `${iss}/oauth/revoke`,
 			response_types_supported: ["code"],
+			// #284: emitted BECAUSE its OIDC Discovery default is `true` — an
+			// omitted field here claimed support for `request_uri`, which
+			// `/authorize` refuses. The sibling `*_parameter_supported` fields
+			// default to `false` and stay absent.
+			request_uri_parameter_supported: false,
 			subject_types_supported: ["public"],
 			// keyStoreModule signs HS256, so the aggregator advertises exactly that.
 			id_token_signing_alg_values_supported: ["HS256"],
