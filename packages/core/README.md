@@ -213,6 +213,54 @@ function createSymmetricKeyStore(
   kid?: string,
   previousSecrets?: ReadonlyArray<SymmetricPreviousSecret>,
 ): KeyStore;
+```
+
+#### Signing without holding the private key (KMS / HSM / Vault)
+
+`createRemoteSigningKeyStore` is a `KeyStore` whose private key never enters this process. The whole seam is one method:
+
+```typescript
+interface RemoteSigner {
+  // Signature in JWS form (RFC 7515 §3.3), not the provider's native encoding.
+  sign(kid: string, data: Uint8Array): Promise<Uint8Array>;
+}
+
+function createRemoteSigningKeyStore(options: {
+  algorithm: "RS256" | "ES256" | "EdDSA";
+  kid: string;
+  signer: RemoteSigner;
+  publicKeyPem: string;              // public material only
+  previousKeys?: ReadonlyArray<{ kid: string; publicKeyPem: string; expiresAt: Date }>;
+  verifyOnConstruction?: boolean;    // default true
+}): Promise<KeyStore>;
+```
+
+Everything else a `KeyStore` owes — building the protected header, base64url encoding, assembling the compact JWT, rotation bookkeeping, publishing JWKS — is done for you, so an integrator writes the provider call and nothing else.
+
+**No vendor is bundled.** Wire AWS KMS, PKCS#11, or a Vault transit key by supplying `signer`; `core` stays free of any of their SDKs. There is no `remote` entry in the key-store factory for the same reason a `RemoteSigner` is a function: build the store in your composition root and supply it as the `keyStore` component.
+
+**`ES256` returns DER from almost every provider, and JWS does not accept it.** AWS KMS, PKCS#11 and OpenSSL all return an ASN.1 `SEQUENCE`; JWS wants the raw `R || S` concatenation. `derToJoseEcdsaSignature(der)` converts it. Getting this wrong produces signatures that fail at the relying party while the signer reports success, which is why the store signs one token at construction and verifies it against `publicKeyPem` — a signer returning the wrong form fails boot with a message naming both likely causes. Pass `verifyOnConstruction: false` only where a provider call at boot is itself the problem.
+
+**There is no `HS256` variant, deliberately.** A shared secret has no public half, so "the key never leaves the boundary" cannot be true of it — every verifier needs the same bytes the signer has. Offering it here would let a deployment believe it had moved key material out of reach when it had not.
+
+```typescript
+// Sketch: AWS KMS, ES256
+const store = await createRemoteSigningKeyStore({
+  algorithm: "ES256",
+  kid: "v1",
+  publicKeyPem: await fetchPublicKeyPem(),
+  signer: {
+    async sign(_kid, data) {
+      const { Signature } = await kms.send(new SignCommand({
+        KeyId: KMS_KEY_ID,
+        Message: data,
+        MessageType: "RAW",
+        SigningAlgorithm: "ECDSA_SHA_256",
+      }));
+      return derToJoseEcdsaSignature(Signature!);  // KMS returns DER
+    },
+  },
+});
 function createKeyStoreFactory(): KeyStoreFactory;
 function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
 ```

@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`createRemoteSigningKeyStore` — a `KeyStore` whose private key never enters this process (`@o3co/auth-provider-core`) (#303).** Signing keys had to be in-config material, which is a ceiling on the adapter surface for a security-critical issuer: there was no seam to source them from AWS KMS, GCP KMS, PKCS#11/HSM, or a Vault transit key where the private half never leaves the boundary.
+
+  **The port already anticipated this** — `KeyStore.sign`'s own doc says "remote-sign adapters (KMS/HSM) perform the remote call here", and `getSigningKidFallback` is specified as MUST-be-local so a remote adapter caches the kid rather than reaching for it. What was missing was an implementation and a way for one to prove itself, not a different interface. The whole seam is one method: `RemoteSigner.sign(kid, data)`. Header construction, base64url encoding, compact-JWT assembly, rotation bookkeeping and JWKS publication are done for the integrator, so a vendor binding is the provider call and nothing else.
+
+  **No vendor is bundled**, for the reason #302 gives for delivery: an AWS SDK in `core` would sit in the dependency closure of every deployment, including the ones signing with PKCS#11. For the same reason there is no `remote` entry in the key-store factory — a `RemoteSigner` is a function and there is no HOCON spelling for one, so the store is built in a composition root and supplied as the `keyStore` component.
+
+  **`ES256` providers return DER, and JWS does not accept it.** AWS KMS, PKCS#11 and OpenSSL all hand back an ASN.1 `SEQUENCE`; JWS wants the raw `R || S` concatenation. `derToJoseEcdsaSignature` (also exported) converts it. Getting this wrong yields signatures that fail at the relying party while the signer reports success — so the store signs one token at construction and verifies it against the configured public half, failing boot with a message naming both likely causes. `verifyOnConstruction: false` opts out where a provider call at boot is itself the problem.
+
+  **No `HS256` variant, deliberately.** A shared secret has no public half, so "the key never leaves the boundary" cannot be true of it. Offering it would let a deployment believe it had moved key material out of reach when every verifier still needs the same bytes.
+
+  **The `KeyStore` port now has a conformance suite** (`keyStore.contract.mts`), run against all three implementations — the two in-config stores that already shipped and the new one. Running it against the existing pair is what makes it a description of the port rather than of the new adapter, and it is what an out-of-tree KMS binding imports to prove itself. It is expressed in terms an implementation cannot fake: tokens are verified with the public key the store itself publishes, so signing with one key and publishing another fails there rather than in production.
+
+  Complements #282, which hardened the in-config path; this adds the path where raw key bytes need never be present at all.
+
 - **Redis adapters for `SubjectSessionIndex` and `SubjectRevocation` — subject-level revocation now works on a multi-replica deployment (`@o3co/auth-provider-redis`).** #296 landed `revokeAllForSubject` with in-memory adapters only, bundled into `memorySessionStoresModule`. A deployment on `redisSessionStoresModule` filled **neither** slot, so a password reset answered `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked nothing — visible rather than silent, deliberately, but nothing revoked all the same, and on exactly the deployments that need it since the in-memory pair is single-process only (#321).
 
   `redisSessionStoresModule` now provides six stores rather than four, with two new key subprefixes (`ss:sub:`, `ss:rev:`). They are their own namespaces rather than sharing one with the sid-keyed stores: those are keyed by session id and these by subject, and one namespace holding both would let a sid collide with a subject. Also exported individually as `createRedisSubjectSessionIndex` / `createRedisSubjectRevocation` with matching `AdapterBuilder`s, for compositions that wire per adapter.
@@ -75,6 +89,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   **Migration:** an external RP that pinned `id+jwt` must accept `JWT`. Anything minted by this provider since v0.10.0 already carries `JWT`; only tokens issued before the flip are affected, and this repository has shipped no deployment that could hold one.
 
 ### Fixed
+
+- **The in-memory access-token denylist no longer grows without bound (`@o3co/auth-provider-core`) (#293 item 6).** GC was lazy on `has` alone: an entry was reclaimed only if someone presented that exact `jti` again *after* it expired. For a **revoked** token that is precisely the request that stops coming, so nothing was ever reclaimed and every revocation became a permanent `Map` entry on a long-running single-process deployment.
+
+  The sibling in-memory stores are bounded by what they key on — the rate limiter caps buckets and evicts, the subject stores are keyed by subject, so both are bounded by population. This one is keyed by `jti`, where nothing bounds it but time, so the sweep has to be its own step rather than a side effect of a lucky read.
+
+  Amortized on `add` (every `sweepInterval` calls, default 1000) rather than on a timer: a background interval would need lifecycle registration to avoid holding the process open, and `add` is the only operation that grows the map, which makes it the honest place to pay for the growth. The guarantee is bounded growth, not zero-lag reclamation — an expired entry is dropped **within** an interval, and `has` keeps answering correctly for one not yet swept.
+
+  `createMemoryAccessTokenDenylist` takes an optional `{ sweepInterval }` and now exposes `size`, so a deployment can see the bound holding rather than inferring it. New exports: `DEFAULT_MEMORY_DENYLIST_SWEEP_INTERVAL`, `MemoryAccessTokenDenylist`, `MemoryAccessTokenDenylistOptions`. No behaviour change for callers: `add` and `has` answer exactly as before.
 
 - **Introspection carries token metadata only, and that is now an invariant rather than a habit (`@o3co/auth-provider-oauth`) (#318).** #297 asked for `email_verified` in the id_token, `/userinfo` and introspection. The first two ship; the third was split out because it is a design decision, not a gap — and the decision is **no**.
 
