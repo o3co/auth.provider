@@ -241,6 +241,51 @@ describe("derToJoseEcdsaSignature (#303)", () => {
 	it("rejects something that is not a DER SEQUENCE", () => {
 		expect(() => derToJoseEcdsaSignature(new Uint8Array([0x01, 0x02]))).toThrow(/DER SEQUENCE/);
 	});
+
+	/*
+	 * The parser's refusals, which are the paths a malformed provider response
+	 * actually takes. A byte parser that returns garbage instead of throwing
+	 * produces a signature that fails at the relying party, which is the same
+	 * far-from-the-cause failure the DER trap itself causes.
+	 */
+	it("rejects a SEQUENCE whose first element is not an INTEGER", () => {
+		// 0x30 len, then 0x04 (OCTET STRING) where R should be.
+		expect(() =>
+			derToJoseEcdsaSignature(new Uint8Array([0x30, 0x04, 0x04, 0x02, 0x01, 0x02])),
+		).toThrow(/INTEGER/);
+	});
+
+	it("rejects a truncated INTEGER", () => {
+		// 0x02 with no length byte following.
+		expect(() => derToJoseEcdsaSignature(new Uint8Array([0x30, 0x01, 0x02]))).toThrow(
+			/truncated INTEGER/,
+		);
+	});
+
+	it("rejects an INTEGER wider than the field size", () => {
+		// A 4-byte R against size 2 — wider than the curve allows, and not
+		// merely a leading-zero pad that could be trimmed.
+		const der = new Uint8Array([0x30, 0x08, 0x02, 0x04, 0x11, 0x22, 0x33, 0x44, 0x02, 0x00]);
+		expect(() => derToJoseEcdsaSignature(der, 2)).toThrow(/wider than the field size/);
+	});
+
+	it("reads a long-form SEQUENCE length", () => {
+		// 0x81 marks one length byte following. Real P-256 signatures are
+		// short-form, but P-521's are not, and the branch should not be
+		// reachable only by curve.
+		const body = [0x02, 0x01, 0x07, 0x02, 0x01, 0x09];
+		const der = new Uint8Array([0x30, 0x81, body.length, ...body]);
+		const out = derToJoseEcdsaSignature(der, 1);
+		expect(Array.from(out)).toEqual([0x07, 0x09]);
+	});
+
+	it("trims the DER sign-padding byte rather than shifting the value", () => {
+		// 0x00 prefix keeps a DER INTEGER positive; carrying it into the JWS
+		// half would shift every byte and silently corrupt the signature.
+		const body = [0x02, 0x02, 0x00, 0xff, 0x02, 0x01, 0x01];
+		const der = new Uint8Array([0x30, body.length, ...body]);
+		expect(Array.from(derToJoseEcdsaSignature(der, 1))).toEqual([0xff, 0x01]);
+	});
 });
 
 // --- what this store refuses to be -----------------------------------------
