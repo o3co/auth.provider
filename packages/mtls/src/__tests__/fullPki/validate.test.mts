@@ -1,0 +1,702 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * `mode = "full-pki"` — the checks #341 enumerated, and the revocation
+ * behaviour that is the reason the issue was filed.
+ *
+ * Each `it` maps to one item on the issue's list, and the revocation block
+ * exercises the distinction the issue insists on: "the CRL endpoint is down"
+ * and "the certificate is revoked" must be separable, operator-chosen
+ * outcomes.
+ */
+
+import { describe, expect, it, vi } from "vitest";
+import {
+	checkAlgorithmPolicy,
+	DEFAULT_SIGNATURE_ALGORITHMS,
+	SIGNATURE_ALGORITHM_OIDS,
+} from "#/fullPki/algorithms.mjs";
+import { FULL_PKI_DEFAULTS, resolveFullPkiTuning } from "#/fullPki/defaults.mjs";
+import type { FullPkiOptions, RevocationPolicy } from "#/fullPki/validate.mjs";
+import { createFullPkiValidator } from "#/fullPki/validate.mjs";
+import { mtlsConfigSchema } from "#/module.mjs";
+import type { Minted } from "./pkiFactory.mjs";
+import {
+	basicConstraints,
+	clientAuthEku,
+	criticalClientAuthEku,
+	crlDistributionPoints,
+	dnsSan,
+	emptyCriticalKeyUsage,
+	KEY_USAGE,
+	keyUsage,
+	mint,
+	mintCa,
+	mintCrl,
+	mintIntermediate,
+	mintLeaf,
+	nameConstraints,
+	serverAuthEku,
+	unknownCriticalExtension,
+	unparseableCriticalKeyUsage,
+} from "./pkiFactory.mjs";
+
+const NOW = new Date("2027-01-01T00:00:00Z");
+/** The intermediate issues the leaf, so the leaf's CRL is published by it. */
+const INT_CRL_URL = "http://crl.test/int.crl";
+/** The root issues the intermediate, so the intermediate's CRL comes from the root. */
+const ROOT_CRL_URL = "http://crl.test/root.crl";
+
+const REVOCATION_OFF: RevocationPolicy = { mode: "disabled" };
+
+const crlPolicy = (onUnavailable: "reject" | "allow"): RevocationPolicy => ({
+	mode: "crl",
+	onUnavailable,
+	allowedHosts: ["crl.test"],
+	fetchTimeoutMs: 1_000,
+	cacheTtlSeconds: 3_600,
+	maxResponseBytes: 1_000_000,
+});
+
+/**
+ * A `fetch` that answers from a fixed table and records every call, so a test
+ * can assert not only what came back but whether a request happened at all —
+ * which is the whole point of the allowlist and of validating before
+ * fetching.
+ */
+const stubFetch = (table: Record<string, Uint8Array | number>) => {
+	const calls: string[] = [];
+	const impl = (async (input: URL | RequestInfo) => {
+		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+		calls.push(url);
+		const entry = table[url];
+		if (entry === undefined) return new Response(null, { status: 404 });
+		if (typeof entry === "number") return new Response(null, { status: entry });
+		return new Response(entry as unknown as BodyInit, { status: 200 });
+	}) as unknown as typeof globalThis.fetch;
+	return { impl, calls };
+};
+
+const validator = (trustedCas: readonly Minted[], overrides: Partial<FullPkiOptions> = {}) =>
+	createFullPkiValidator({
+		trustedCas: trustedCas.map((ca) => ca.x509),
+		algorithms: { signatureAlgorithms: DEFAULT_SIGNATURE_ALGORITHMS, minRsaKeyBits: 2048 },
+		maxChainDepth: 6,
+		revocation: REVOCATION_OFF,
+		...overrides,
+	});
+
+// ---------------------------------------------------------------------------
+// Path validation — the RFC 5280 checks the narrow mode could not express
+// ---------------------------------------------------------------------------
+
+describe("full-pki path validation", () => {
+	it("accepts leaf → intermediate → root", async () => {
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root);
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result).toEqual({ ok: true });
+	});
+
+	it("rejects a chain whose anchor is not configured", async () => {
+		const root = await mintCa("Root", 1);
+		const rogue = await mintCa("Rogue Root", 100);
+		const int = await mintIntermediate("Intermediate", 2, rogue);
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("no path to trust anchor");
+	});
+
+	it("rejects an unrecognised CRITICAL extension (#341 item 4, RFC 5280 §6.1.2)", async () => {
+		// The narrow mode ignored these, which is the exact opposite of what
+		// "critical" means: the issuer marked the extension as one a validator
+		// must understand before trusting the certificate.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), clientAuthEku(), unknownCriticalExtension()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+	});
+
+	it("rejects an issuer whose keyUsage omits keyCertSign (#341 item 5)", async () => {
+		// RFC 5280 §4.2.1.3: when keyUsage is present on a CA it MUST include
+		// keyCertSign to sign certificates. Node's X509Certificate.keyUsage
+		// returns *extended* key usage, so the narrow mode could not see this.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [basicConstraints(true), keyUsage(KEY_USAGE.digitalSignature)],
+		});
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result.ok).toBe(false);
+	});
+
+	it("rejects a path deeper than pathLenConstraint permits (#341 item 6)", async () => {
+		// `pathlen:0` on the root says "no sub-CAs beneath me". The chain below
+		// has one, so the root's own statement forbids it. pkijs does not
+		// implement this check — `checkPathLength` in validate.mts does.
+		const root = await mintCa("Root", 1, {
+			extensions: [basicConstraints(true, 0), keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign)],
+		});
+		const int = await mintIntermediate("Intermediate", 2, root);
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("pathLenConstraint exceeded");
+	});
+
+	it("accepts a path exactly at pathLenConstraint", async () => {
+		// The boundary in the other direction: `pathlen:0` on the *intermediate*
+		// permits the leaf directly beneath it. An off-by-one here would reject
+		// every ordinary two-hop chain.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [basicConstraints(true, 0), keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign)],
+		});
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result).toEqual({ ok: true });
+	});
+
+	it("enforces excluded name constraints (#341 item 3)", async () => {
+		// A trust anchor constrained to a namespace was treated as unconstrained
+		// by the narrow mode — an intermediate could issue for anything.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				nameConstraints({ excludedDns: ["forbidden.test"] }),
+			],
+		});
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: int,
+			extensions: [basicConstraints(false), clientAuthEku(), dnsSan(["host.forbidden.test"])],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result.ok).toBe(false);
+	});
+
+	it("accepts a name inside the permitted subtree", async () => {
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				nameConstraints({ permittedDns: ["allowed.test"] }),
+			],
+		});
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: int,
+			extensions: [basicConstraints(false), clientAuthEku(), dnsSan(["host.allowed.test"])],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result).toEqual({ ok: true });
+	});
+
+	it("refuses a CRITICAL keyUsage whose value is not parseable DER", async () => {
+		// The other half of RFC 5280 §6.1.2: the rule covers an unrecognised
+		// critical extension *or* one "that contains information that it cannot
+		// process". The OID here is recognised, so a check that compares only
+		// OIDs accepts it — while nothing has actually read the restriction.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), clientAuthEku(), unparseableCriticalKeyUsage()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("unparseable critical extension");
+	});
+
+	it("refuses a CRITICAL keyUsage that parses but carries no bits", async () => {
+		// The subtler form: everything parses, and an empty bit string reads as
+		// "no restrictions" — the inverse of what a critical restriction means.
+		// Absence of the extension is unconstrained; an unreadable value is not.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), clientAuthEku(), emptyCriticalKeyUsage()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("unparseable leaf keyUsage");
+	});
+
+	it("refuses a critical extendedKeyUsage on a CA, which would mean EKU chaining", async () => {
+		// Recognised on the leaf, where `checkClientLeafProfile` acts on it.
+		// On a CA it asks for a constraint RFC 5280 does not define and this
+		// module does not implement, so "critical" must mean refused.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				criticalClientAuthEku(),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("unrecognised critical extension");
+	});
+
+	it("keeps the narrow mode's leaf profile: a CA certificate is not a client credential", async () => {
+		// The stricter arm must not be weaker anywhere. `full-pki` imports the
+		// same `checkClientLeafProfile` `mode = "pki"` uses rather than
+		// restating it.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(true), clientAuthEku()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toContain("CA=true");
+	});
+
+	it("keeps the narrow mode's leaf profile: a serverAuth-only certificate is refused", async () => {
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), serverAuthEku()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toContain("clientAuth");
+	});
+
+	it("refuses a leaf whose keyUsage excludes digitalSignature", async () => {
+		// A client certificate authenticates by signing in the handshake, so
+		// this keyUsage describes a key that cannot do what the certificate is
+		// being presented to do.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), keyUsage(KEY_USAGE.keyEncipherment), clientAuthEku()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("leaf keyUsage excludes digitalSignature");
+	});
+
+	it("accepts a leaf with no keyUsage extension at all", async () => {
+		// RFC 5280 §4.2.1.3 makes the extension a restriction, not a grant.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), clientAuthEku()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result).toEqual({ ok: true });
+	});
+
+	it("refuses a chain longer than maxChainDepth before verifying any signature", async () => {
+		const root = await mintCa("Root", 1);
+		const leaf = await mintLeaf("client", 10, root);
+		const filler = Array.from({ length: 8 }, () => leaf.x509);
+
+		const result = await validator([root], { maxChainDepth: 3 }).validate(leaf.x509, filler, NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("chain too long");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Algorithm policy (#341 item 8)
+// ---------------------------------------------------------------------------
+
+describe("full-pki algorithm policy", () => {
+	it("rejects an RSA key below the configured minimum", async () => {
+		const root = await mintCa("Root", 1);
+		const leaf = await mintLeaf("client", 10, root, { algorithm: "rsa-1024" });
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("rsa key too small");
+	});
+
+	it("accepts an RSA key at the configured minimum", async () => {
+		const root = await mintCa("Root", 1);
+		const leaf = await mintLeaf("client", 10, root, { algorithm: "rsa-2048" });
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result).toEqual({ ok: true });
+	});
+
+	it("rejects a signature algorithm outside the allowlist", async () => {
+		// Unit-level rather than through the engine: whether Node's WebCrypto
+		// will even verify a SHA-1 ECDSA signature is a platform detail, and the
+		// policy must hold regardless of which layer notices first.
+		const root = await mintCa("Root", 1);
+		const check = checkAlgorithmPolicy(root.x509, "1.2.840.10045.4.1", {
+			signatureAlgorithms: DEFAULT_SIGNATURE_ALGORITHMS,
+			minRsaKeyBits: 2048,
+		});
+		expect(check.ok).toBe(false);
+	});
+
+	it("applies the allowlist to every certificate on the path, not only the leaf", async () => {
+		// A chain is as strong as its weakest hop. Narrowing the policy to
+		// EdDSA rejects an ECDSA root even though the leaf is unchanged.
+		const root = await mintCa("Root", 1);
+		const leaf = await mintLeaf("client", 10, root);
+
+		const result = await validator([root], {
+			algorithms: { signatureAlgorithms: ["ed25519"], minRsaKeyBits: 2048 },
+		}).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("signature algorithm not permitted");
+	});
+
+	it("has no name for SHA-1 at all, so no configuration can allow it", () => {
+		expect(Object.values(SIGNATURE_ALGORITHM_OIDS)).not.toContain("1.2.840.10045.4.1");
+		expect(Object.values(SIGNATURE_ALGORITHM_OIDS)).not.toContain("1.2.840.113549.1.1.5");
+	});
+});
+
+describe("full-pki tuning defaults", () => {
+	it("bounds the chain even when max-chain-depth never reaches the validator", async () => {
+		// A composition root that builds the mechanism by hand bypasses
+		// `mtlsConfigSchema` and its defaults. An absent depth arriving as
+		// `undefined` makes `presented > undefined` evaluate to `false`, so the
+		// bound silently stops existing — a fail-open with nothing raised at
+		// boot. `resolveFullPkiTuning` is what stops that.
+		const resolved = resolveFullPkiTuning(undefined);
+		expect(resolved.maxChainDepth).toBe(FULL_PKI_DEFAULTS.maxChainDepth);
+		expect(resolved.minRsaKeyBits).toBe(FULL_PKI_DEFAULTS.minRsaKeyBits);
+		expect(resolved.signatureAlgorithms.length).toBeGreaterThan(0);
+	});
+
+	it("keeps the values a caller did supply", async () => {
+		const resolved = resolveFullPkiTuning({
+			"max-chain-depth": 3,
+			"min-rsa-key-bits": 4096,
+			"signature-algorithms": ["ed25519"],
+		});
+		expect(resolved).toEqual({
+			maxChainDepth: 3,
+			minRsaKeyBits: 4096,
+			signatureAlgorithms: ["ed25519"],
+		});
+	});
+
+	it("treats an empty signature-algorithms list as unset rather than as 'permit nothing'", async () => {
+		// An empty allowlist would reject every certificate at every hop. That
+		// is a configuration mistake, not a policy, and failing every request
+		// with no boot signal is the worst way to report it.
+		const resolved = resolveFullPkiTuning({ "signature-algorithms": [] });
+		expect(resolved.signatureAlgorithms).toEqual(FULL_PKI_DEFAULTS.signatureAlgorithms);
+	});
+
+	it("the schema default and the code default are the same value", async () => {
+		// Two consumers, one source. Written twice they would eventually
+		// disagree, and only the path nobody tests by default would notice.
+		const parsed = mtlsConfigSchema.parse({
+			oauth: {
+				mtls: {
+					enabled: true,
+					mode: "full-pki",
+					"full-pki": { revocation: { mode: "disabled", "on-unavailable": "reject" } },
+				},
+			},
+		});
+		expect(parsed.oauth.mtls["full-pki"]?.["max-chain-depth"]).toBe(
+			FULL_PKI_DEFAULTS.maxChainDepth,
+		);
+		expect(parsed.oauth.mtls["full-pki"]?.["min-rsa-key-bits"]).toBe(
+			FULL_PKI_DEFAULTS.minRsaKeyBits,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Revocation (#341 item 1) — the reason the issue exists
+// ---------------------------------------------------------------------------
+
+describe("full-pki revocation", () => {
+	/**
+	 * Every certificate on the path except the anchor needs its own revocation
+	 * answer, and a CRL only covers what its issuer issued — so the
+	 * intermediate's status comes from a root-signed CRL, not from the one it
+	 * publishes itself.
+	 */
+	const buildChain = async () => {
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				crlDistributionPoints([ROOT_CRL_URL]),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				crlDistributionPoints([INT_CRL_URL]),
+			],
+		});
+		return { root, int, leaf };
+	};
+
+	/** A root-signed CRL revoking nothing — the intermediate's clean status. */
+	const cleanRootCrl = (root: Minted) => mintCrl({ issuer: root, revoked: [] });
+
+	it("rejects a certificate listed on a valid CRL", async () => {
+		const { root, int, leaf } = await buildChain();
+		const crl = await mintCrl({ issuer: int, revoked: [leaf] });
+		const { impl } = stubFetch({ [INT_CRL_URL]: crl, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("certificate revoked");
+	});
+
+	it("accepts a certificate absent from a valid CRL", async () => {
+		const { root, int, leaf } = await buildChain();
+		const crl = await mintCrl({ issuer: int, revoked: [] });
+		const { impl } = stubFetch({ [INT_CRL_URL]: crl, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+	});
+
+	it("REJECTS when the CRL cannot be fetched and the policy is 'reject'", async () => {
+		// The finding this whole arm turns on. pkijs, handed no CRLs, skips its
+		// revocation block and returns `valid` — so "the CRL server is down" and
+		// "not revoked" reach the engine as the same input. If this test ever
+		// passes for the wrong reason, a revoked certificate goes on working
+		// during exactly the outage an attacker would arrange.
+		const { root, int, leaf } = await buildChain();
+		const { impl, calls } = stubFetch({ [INT_CRL_URL]: 503, [ROOT_CRL_URL]: 503 });
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("revocation status unavailable");
+		expect(calls).toContain(INT_CRL_URL);
+	});
+
+	it("allows the same unreachable CRL when the policy is 'allow', and logs it", async () => {
+		const { root, int, leaf } = await buildChain();
+		const { impl } = stubFetch({ [INT_CRL_URL]: 503, [ROOT_CRL_URL]: 503 });
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		// Soft-fail is a choice, not a silence: an operator who picked "allow"
+		// must still be able to see how often it fires.
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ reason: "fetch_failed" }),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it("treats a certificate with no distribution point as unavailable, not as clean", async () => {
+		const root = await mintCa("Root", 1);
+		const leaf = await mintLeaf("client", 10, root);
+		const { impl, calls } = stubFetch({});
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.detail).toContain("no_distribution_point");
+		expect(calls).toEqual([]);
+	});
+
+	it("treats an expired CRL as unavailable rather than authoritative", async () => {
+		const { root, int, leaf } = await buildChain();
+		const stale = await mintCrl({
+			issuer: int,
+			revoked: [],
+			thisUpdate: new Date("2026-01-01T00:00:00Z"),
+			nextUpdate: new Date("2026-02-01T00:00:00Z"),
+		});
+		const { impl } = stubFetch({ [INT_CRL_URL]: stale, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.detail).toContain("stale");
+	});
+
+	it("treats a CRL with no nextUpdate as unavailable", async () => {
+		// Without nextUpdate there is no way to tell a current CRL from one
+		// captured before a revocation and replayed.
+		const { root, int, leaf } = await buildChain();
+		const undated = await mintCrl({ issuer: int, revoked: [], nextUpdate: null });
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: undated,
+			[ROOT_CRL_URL]: await cleanRootCrl(root),
+		});
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.detail).toContain("no_next_update");
+	});
+
+	it("does not honour a CRL signed by the wrong key", async () => {
+		// A forged CRL that omits a revoked serial would otherwise be a way to
+		// un-revoke a certificate. pkijs verifies the CRL against its issuer;
+		// this pins that we depend on it doing so.
+		const { root, int, leaf } = await buildChain();
+		const impostor = await mintCa("Impostor", 900);
+		const forged = await mintCrl({
+			issuer: int,
+			revoked: [],
+			signingKeys: impostor.keys,
+		});
+		const genuine = await mintCrl({ issuer: int, revoked: [leaf] });
+		const { impl } = stubFetch({ [INT_CRL_URL]: forged, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		// The forged CRL is discarded, leaving no usable revocation values —
+		// which under "reject" is a refusal, not an acceptance.
+		expect(result.ok).toBe(false);
+		expect(genuine.byteLength).toBeGreaterThan(0);
+	});
+
+	it("makes no outbound request at all when revocation is disabled", async () => {
+		const { root, int, leaf } = await buildChain();
+		const { impl, calls } = stubFetch({});
+
+		const result = await validator([root], {
+			revocation: REVOCATION_OFF,
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(calls).toEqual([]);
+	});
+
+	it("caches a fetched CRL instead of re-fetching per request", async () => {
+		const { root, int, leaf } = await buildChain();
+		const crl = await mintCrl({ issuer: int, revoked: [] });
+		const { impl, calls } = stubFetch({
+			[INT_CRL_URL]: crl,
+			[ROOT_CRL_URL]: await cleanRootCrl(root),
+		});
+		const v = validator([root], { revocation: crlPolicy("reject"), fetchImpl: impl });
+
+		await v.validate(leaf.x509, [int.x509], NOW);
+		const firstCallCount = calls.length;
+		await v.validate(leaf.x509, [int.x509], NOW);
+
+		expect(calls.length).toBe(firstCallCount);
+		expect(v.crlCacheSize()).toBe(2);
+	});
+
+	it("never fetches a distribution point outside the host allowlist", async () => {
+		// A URL inside a certificate is a destination someone else chose. The
+		// allowlist is the layer that stops trusting a CA to issue certificates
+		// from also meaning trusting it to name destinations inside this network.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				crlDistributionPoints(["http://169.254.169.254/latest/meta-data/"]),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				crlDistributionPoints(["http://169.254.169.254/latest/meta-data/"]),
+			],
+		});
+		const { impl, calls } = stubFetch({});
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		expect(calls).toEqual([]);
+	});
+});

@@ -44,10 +44,14 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
 import { MtlsError } from "./errors.mjs";
+import type { SignatureAlgorithmName } from "./fullPki/algorithms.mjs";
+import { type FullPkiTuning, resolveFullPkiTuning } from "./fullPki/defaults.mjs";
+import { createFullPkiValidator, type FullPkiValidator } from "./fullPki/validate.mjs";
 import { type CertHeaderDialect, parseEnvoyXfccHeader, parsePlainPemHeader } from "./headers.mjs";
 import { pemToDer } from "./pem.mjs";
 import { validateCertChain } from "./pki.mjs";
 import { computeCertThumbprint } from "./thumbprint.mjs";
+import { type DetailedPeerCertificateLike, peerChainFrom } from "./tlsChain.mjs";
 
 // ---------------------------------------------------------------------------
 // Public type
@@ -74,8 +78,27 @@ export interface MtlsMechanismOptions {
 	 * `source === "header"`, ignored otherwise.
 	 */
 	readonly trustedProxies?: readonly string[];
-	readonly mode: "self-signed" | "pki";
+	readonly mode: "self-signed" | "pki" | "full-pki";
 	readonly trustedCas?: readonly string[];
+	/**
+	 * Settings for `mode = "full-pki"` (#341). Required when that mode is
+	 * selected; `mtlsModule` refuses boot without the revocation decision, so
+	 * reaching here without it means a hand-built composition root, which is
+	 * caught at construction below.
+	 */
+	readonly fullPki?: {
+		readonly "max-chain-depth"?: number;
+		readonly "signature-algorithms"?: readonly SignatureAlgorithmName[];
+		readonly "min-rsa-key-bits"?: number;
+		readonly revocation?: {
+			readonly mode: "crl" | "disabled";
+			readonly "on-unavailable": "reject" | "allow";
+			readonly "allowed-hosts": readonly string[];
+			readonly "fetch-timeout-ms": number;
+			readonly "cache-ttl-seconds": number;
+			readonly "max-response-bytes": number;
+		};
+	};
 	readonly logger?: Logger;
 }
 
@@ -110,7 +133,7 @@ const DEFAULT_SOURCE = "tls-layer" as const;
  * non-TLS socket through type narrowing).
  */
 interface TlsLikeSocket {
-	getPeerCertificate?: () => { readonly raw?: Buffer } | undefined;
+	getPeerCertificate?: (detailed?: boolean) => DetailedPeerCertificateLike | undefined;
 }
 
 const isTlsLikeSocket = (s: unknown): s is TlsLikeSocket =>
@@ -157,6 +180,56 @@ const peerAddressOf = (req: Request): string | undefined =>
  *
  * Per spec §8 + §11.2.
  */
+/**
+ * Translate the `full-pki` config slice into the validator's options.
+ *
+ * The revocation block has no defaults by design (see `mtlsModule`'s boot
+ * checks), so its absence here means a composition root bypassed the module
+ * manifest. Refusing to construct is the only safe reading: silently choosing
+ * either policy would be exactly the invisible decision the config surface
+ * exists to prevent.
+ */
+const buildFullPkiValidator = (
+	options: MtlsMechanismOptions,
+	trustedCas: readonly X509Certificate[],
+	tuning: FullPkiTuning,
+): FullPkiValidator => {
+	// `tuning` is resolved by the caller rather than read from `cfg` here, so
+	// the depth the peer-chain walk uses and the depth the validator enforces
+	// cannot come from two different reads of the same optional field. Only
+	// the revocation block is taken straight from config, because it has no
+	// defaults to resolve — its absence is a refusal, not a fallback.
+	const cfg = options.fullPki;
+	if (cfg?.revocation === undefined) {
+		throw new Error(
+			'createMtlsMechanism: mode = "full-pki" requires fullPki.revocation.mode and ' +
+				".on-unavailable. There is no default: whether an unreachable CRL endpoint " +
+				"blocks logins or is waved through is a decision only the operator can make.",
+		);
+	}
+	const revocation = cfg.revocation;
+	return createFullPkiValidator({
+		trustedCas,
+		algorithms: {
+			signatureAlgorithms: tuning.signatureAlgorithms,
+			minRsaKeyBits: tuning.minRsaKeyBits,
+		},
+		maxChainDepth: tuning.maxChainDepth,
+		revocation:
+			revocation.mode === "disabled"
+				? { mode: "disabled" }
+				: {
+						mode: "crl",
+						onUnavailable: revocation["on-unavailable"],
+						allowedHosts: revocation["allowed-hosts"],
+						fetchTimeoutMs: revocation["fetch-timeout-ms"],
+						cacheTtlSeconds: revocation["cache-ttl-seconds"],
+						maxResponseBytes: revocation["max-response-bytes"],
+					},
+		...(options.logger ? { logger: options.logger } : {}),
+	});
+};
+
 export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBindingMechanism => {
 	const certHeader = options.certHeader ?? DEFAULT_CERT_HEADER;
 	const dialect: CertHeaderDialect = options.certHeaderDialect ?? DEFAULT_DIALECT;
@@ -190,22 +263,25 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			? createTrustedProxyMatcher(options.trustedProxies ?? [], { label: "trusted-proxies" })
 			: () => false as boolean;
 
-	if (mode === "pki") {
+	if (mode === "pki" || mode === "full-pki") {
 		const trustedCas = options.trustedCas;
 		if (!trustedCas || trustedCas.length === 0) {
 			throw new Error(
-				'createMtlsMechanism: mode = "pki" requires a non-empty trustedCas list. ' +
+				`createMtlsMechanism: mode = "${mode}" requires a non-empty trustedCas list. ` +
 					"Without trusted CAs, chain validation cannot proceed.",
 			);
 		}
-		if (source === "tls-layer") {
+		// `full-pki` reads the peer chain from the TLS session (`tlsChain.mts`),
+		// so this restriction is the narrow mode's alone (#341).
+		if (mode === "pki" && source === "tls-layer") {
 			throw new Error(
-				'createMtlsMechanism: mode = "pki" with source = "tls-layer" is not supported in Phase 3. ' +
+				'createMtlsMechanism: mode = "pki" with source = "tls-layer" is not supported. ' +
 					"The narrow PKI mode requires the intermediate chain (e.g., the Envoy XFCC " +
-					"Chain= parameter); TLS-layer full-chain extraction is deferred. Use " +
+					"Chain= parameter). Use " +
 					'source = "header" with certHeaderDialect = "envoy" and a trustedProxies ' +
 					"allowlist for PKI mode, or use " +
-					'mode = "self-signed" with TLS-layer source.',
+					'mode = "self-signed" with TLS-layer source, or mode = "full-pki" which ' +
+					"reads the chain from the TLS session (#341).",
 			);
 		}
 	}
@@ -215,8 +291,8 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 	// synchronously at boot — the latter mirrors the operator-friendly form
 	// documented in reference.conf and spec §7.1.
 	const trustedCaCerts: readonly X509Certificate[] =
-		mode === "pki"
-			? // biome-ignore lint/style/noNonNullAssertion: boot-time check above guarantees defined when mode === "pki"
+		mode === "pki" || mode === "full-pki"
+			? // biome-ignore lint/style/noNonNullAssertion: boot-time check above guarantees defined for both PKI modes
 				options.trustedCas!.map((entry, index) => {
 					const pem = resolveTrustedCaEntry(entry, index);
 					try {
@@ -229,6 +305,23 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				})
 			: [];
 
+	// Built once: the CRL cache lives in the validator, so a per-request
+	// validator would re-fetch every distribution point on every token request
+	// — turning revocation checking into an amplifier pointed at the CA.
+	// Resolved once, and used by BOTH the validator and the TLS peer-chain
+	// walk below. They must agree: the walk truncates at its depth, so a walk
+	// bound that was larger than the validator's would make the validator's
+	// refusal unreachable, and one that was smaller would silently drop the
+	// anchor and report "no path to trust anchor" for a chain that was merely
+	// long. A second hardcoded copy of the default is how that divergence
+	// starts.
+	const fullPkiTuning = mode === "full-pki" ? resolveFullPkiTuning(options.fullPki) : null;
+	const fullPkiValidator: FullPkiValidator | null =
+		mode === "full-pki"
+			? // biome-ignore lint/style/noNonNullAssertion: set together with the mode above
+				buildFullPkiValidator(options, trustedCaCerts, fullPkiTuning!)
+			: null;
+
 	return {
 		kind: "mtls",
 		intentExplicit: false,
@@ -238,6 +331,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			let certPem: string | undefined;
 			let chainPem: string | undefined;
 			let leafDer: Uint8Array | undefined;
+			let tlsChainCerts: readonly Uint8Array[] = [];
 
 			if (source === "header") {
 				const headerValue = req.get(certHeader);
@@ -298,12 +392,31 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 						"request socket does not expose getPeerCertificate() — mTLS requires a TLS-terminated connection",
 					);
 				}
-				const peer = socket.getPeerCertificate();
+				// `full-pki` needs the intermediates, and only the detailed form
+				// carries them. The narrow form stays the default everywhere else
+				// so the cheaper call is what a self-signed deployment makes.
+				const wantsChain = mode === "full-pki";
+				const peer = socket.getPeerCertificate(wantsChain);
 				if (!peer?.raw || peer.raw.length === 0) {
 					// Ambient — no client cert presented at TLS layer.
 					return null;
 				}
-				leafDer = new Uint8Array(peer.raw);
+				if (wantsChain) {
+					// One more than the validator's bound, deliberately: the walk
+					// must be able to *present* an over-long chain so the validator
+					// is the thing that refuses it, with a message that says so.
+					// Truncating at exactly the bound would turn "chain too long"
+					// into "no path to trust anchor", which sends the operator
+					// looking at their trust anchors for a depth problem.
+					const chain = peerChainFrom(peer, (fullPkiTuning?.maxChainDepth ?? 6) + 1);
+					// `peerChainFrom` returns null only for the empty-raw case the
+					// branch above already answered, so this is the same absence.
+					if (chain === null) return null;
+					leafDer = chain.leafDer;
+					tlsChainCerts = chain.chainDer;
+				} else {
+					leafDer = new Uint8Array(peer.raw);
+				}
 			}
 
 			// --- Step 3: PEM → DER (header) or already-DER (tls-layer) ---
@@ -326,6 +439,17 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				x509 = new X509Certificate(der);
 			} catch (err) {
 				throw new MtlsError("cert_decode_failed", `DER parse failed: ${(err as Error).message}`);
+			}
+
+			if (tlsChainCerts.length > 0) {
+				try {
+					chainCerts = tlsChainCerts.map((der) => new X509Certificate(der));
+				} catch (err) {
+					throw new MtlsError(
+						"cert_decode_failed",
+						`TLS peer chain DER parse failed: ${(err as Error).message}`,
+					);
+				}
 			}
 
 			if (chainPem !== undefined) {
@@ -359,8 +483,21 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				);
 			}
 
-			// --- Step 5: PKI chain validation (mode === "pki" only) ---
-			if (mode === "pki") {
+			// --- Step 5: chain validation (both PKI modes) ---
+			if (fullPkiValidator !== null) {
+				const result = await fullPkiValidator.validate(x509, chainCerts, now);
+				if (!result.ok) {
+					logger?.warn(
+						{ step: result.step, detail: result.detail },
+						"mtls_full_pki_validation_failed",
+					);
+					throw new MtlsError(
+						"chain_validation_failed",
+						`client certificate failed RFC 5280 path validation: ${result.step}`,
+						{ step: result.step, detail: result.detail },
+					);
+				}
+			} else if (mode === "pki") {
 				const result = validateCertChain(x509, chainCerts, trustedCaCerts, now);
 				if (!result.ok) {
 					logger?.warn({ step: result.step }, "mtls_chain_validation_failed");

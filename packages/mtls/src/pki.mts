@@ -62,7 +62,9 @@ import type { X509Certificate } from "node:crypto";
  *
  * Per spec §7.2 + §7.3 (checks NOT performed) + §7.4 (RFC 8705 §7.4 alignment).
  */
-type ValidationResult = { readonly ok: true } | { readonly ok: false; readonly step: string };
+export type ValidationResult =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly step: string };
 
 /**
  * Probe `basicConstraints` for `CA: TRUE`. Node's `X509Certificate.ca`
@@ -116,7 +118,7 @@ const EKU_ANY = "2.5.29.37.0";
  * `keyCertSign` check on issuers is therefore NOT implementable from this
  * accessor and is tracked in #341 with the rest of the path-validation gap.
  */
-const checkLeafProfile = (leaf: X509Certificate): ValidationResult => {
+export const checkClientLeafProfile = (leaf: X509Certificate): ValidationResult => {
 	if (leaf.ca === true) {
 		return {
 			ok: false,
@@ -184,7 +186,7 @@ export const validateCertChain = (
 	// server certificate presented as a client credential reports that, rather
 	// than reporting "no path to trust anchor" and sending the operator to look
 	// at their CA configuration instead of the certificate they issued.
-	const profile = checkLeafProfile(leaf);
+	const profile = checkClientLeafProfile(leaf);
 	if (!profile.ok) return profile;
 
 	// Step 3: chain walk. Track fingerprints to detect cycles — a malicious
