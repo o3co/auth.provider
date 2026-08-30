@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`oauth.mtls.mode = "full-pki"` — RFC 5280 path validation with revocation (`@o3co/auth-provider-mtls`) (#341).** `mode = "pki"` performs a narrow chain walk and checks **no revocation at all**: a client certificate that has been revoked keeps binding tokens until it expires. The new arm closes that and the rest of #341's list. `mode = "pki"` is untouched — a deployment on it gets exactly the behaviour it had.
+
+  Path validation is delegated to [`pkijs`](https://pkijs.org)'s `CertificateChainValidationEngine` per [RFC 8705 §7.5](https://www.rfc-editor.org/rfc/rfc8705#section-7.5) ("SHOULD use an established and well-tested X.509 library"), which brings name constraints (#341 item 3), `keyCertSign` on issuers (item 5), and the certificate-policy tree (item 7). Four things it does **not** do are implemented here rather than assumed:
+
+  - **`pathLenConstraint`** (item 6) — not implemented by the engine, so a CA that published `pathlen:0` to stop sub-CAs being minted under it would have said so for nothing.
+  - **Algorithm policy** (item 8) — left to local policy by the RFC, which in practice means whatever the OpenSSL build accepts. Applied to **every** certificate on the path, anchors included. SHA-1 has no name in the config vocabulary, so no configuration can permit it.
+  - **Critical extension processing** (item 4) — the engine applies RFC 5280 §6.1.2 only to the CA certificates in the path; **the leaf is skipped**, so a client certificate carrying a critical extension nobody understands validated cleanly. Now applied uniformly across the path.
+  - **Revocation availability** — see below.
+
+  The leaf-certificate profile is the *same* `checkClientLeafProfile` the narrow mode runs, imported rather than restated, so the stricter arm cannot silently become weaker than the looser one on the leaf.
+
+- **`oauth.mtls.mode = "full-pki"` works with `source = "tls-layer"` (#341).** #280 made `tls-layer` the default source while `mode = "pki"` still rejected that combination at boot, which left the RFC 8705 §3 shape — terminate TLS here, take the certificate from the handshake — unable to use PKI validation at all. `full-pki` reads the peer chain from the TLS session via `getPeerCertificate(true)`, walking `issuerCertificate` with loop detection (a self-signed anchor's `issuerCertificate` points at itself) and a depth bound, since the list is peer-supplied. An anchor the peer sends is kept in the chain and **not** treated as trusted; trust still comes from `trusted-cas` alone. The narrow mode's restriction is unchanged.
+
+### Security
+
+- **Revocation has no default, and `mode = "full-pki"` fails boot without one (`@o3co/auth-provider-mtls`) (#341).** `pkijs` skips its revocation block entirely when handed no CRLs and returns *valid* — so "the CRL server is down" and "this certificate is not revoked" reach the engine as the same input and produce the same verdict. That is the most dangerous default in this area, and the reason revocation here is a two-pass affair with the availability decision made **before** the engine is consulted rather than one call with some CRLs attached.
+
+  `full-pki.revocation.mode` and `.on-unavailable` must both be stated or boot fails, naming the config keys. Whether an unreachable CRL endpoint blocks logins or is waved through depends on whether a revoked certificate continuing to work is worse than an availability incident — which only the operator knows, and a library that picks silently picks wrong for half of its deployments, invisibly, and only during the outage that makes it matter. `mode = "disabled"` is accepted as an explicit acceptance of the gap; `"ocsp"` is **refused** rather than accepted and ignored, because OCSP is not implemented.
+
+  A certificate counts as *unavailable* when it names no distribution point, when the CRL cannot be fetched or parsed, when it has expired, when it carries no `nextUpdate` (without one there is no way to tell a current CRL from one captured before a revocation and replayed), or when its signature does not verify against the issuing CA. `"allow"` is logged at `warn` on every use.
+
+- **Fetching a CRL distribution point is guarded as the SSRF sink it is (`@o3co/auth-provider-mtls`) (#341).** A distribution point is a URL chosen by someone else, and retrieving it makes the auth server issue a request from inside its own network; `http://169.254.169.254/…` is reachable from most cloud workloads and does not need to return a parseable CRL to be useful to an attacker. Two layers bound it: **path validation runs first**, so distribution points are read only from a path that already chains to a configured trust anchor and an arbitrary client certificate cannot cause an outbound request; and **`revocation.allowed-hosts` is required non-empty** for `mode = "crl"`, drawing the same line `trusted-proxies` draws — trusting a CA to issue certificates is not trusting it to name destinations inside your network. Redirects are never followed, responses are capped by an incrementally-counted byte limit rather than the responder's `Content-Length` claim, fetches time out, URL credentials are refused, and only `http`/`https` are spoken.
+
+
 ### Fixed
 
 - **BREAKING: `/authorize` refuses `request` and `request_uri` instead of ignoring them, and the discovery document stops claiming to support the latter (`@o3co/auth-provider-oauth`) (#284).** This is the security half of "the OIDC surface is overclaimed", and the issue did not name it. A signed request object exists to make the authorization parameters tamper-proof; `/authorize` never read either parameter, so it processed the query string instead — handing an attacker who can rewrite that query exactly what the request object was there to prevent, while the RP believed its signed request had been honoured. Silence was the worst of the three possible answers. Both now answer OIDC Core's `request_not_supported` / `request_uri_not_supported`, before anything interprets the parameters.

@@ -160,7 +160,10 @@ Either way, add the address nginx or Envoy reaches the auth provider from to `oa
 
 ## PKI Mode Scope
 
-`mode = "pki"` enables a **narrow** chain-validation check set — **NOT full [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) path validation**. Operators needing full path validation MUST keep `mtlsModule` disabled until a future `mode = "full-pki"` arm lands (see [RFC 8705 §7.5](https://www.rfc-editor.org/rfc/rfc8705#section-7.5)).
+There are two PKI arms, and the difference between them is not a matter of degree.
+
+- **`mode = "pki"`** — a **narrow** chain-validation check set, **not full [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) path validation** and with **no revocation**. Unchanged since #280.
+- **`mode = "full-pki"`** — RFC 5280 §6 path validation with revocation, added by [#341](https://github.com/o3co/auth.provider/issues/341). This is the arm to use when a revoked certificate must stop working.
 
 ### Checks performed in `mode = "pki"`
 
@@ -177,7 +180,9 @@ For each presented chain `leaf → intermediate₁ → … → intermediateₙ �
 
 The narrow mode does **not** check:
 
-- **CRL / OCSP revocation** (RFC 5280 §6.3 + RFC 6960). **A revoked client certificate keeps binding tokens until it expires.** Rely on short cert lifetimes and key rotation. Tracked with the rest of this list in [#341](https://github.com/o3co/auth.provider/issues/341).
+Everything in this list is checked by `mode = "full-pki"`, except where noted.
+
+- **CRL / OCSP revocation** (RFC 5280 §6.3 + RFC 6960). **A revoked client certificate keeps binding tokens until it expires.** Rely on short cert lifetimes and key rotation, or use `full-pki`, which checks CRLs. (OCSP remains unimplemented in both arms.)
 - **Name constraints** (RFC 5280 §4.2.1.10) — CRITICAL extension. If a trust anchor carries `nameConstraints`, the chain walk does not enforce them.
 - **Policy constraints / policy mappings / inhibit-anyPolicy** (RFC 5280 §4.2.1.11–13).
 - **Full critical-extension handling** (RFC 5280 §6.1.2 requires every critical extension to be processed; narrow mode handles only the ones explicitly listed above).
@@ -210,7 +215,7 @@ A missing file or unparseable PEM aborts boot with an index-prefixed error messa
 
 Use `mode = "self-signed"` (the default) when the AS controls all client certs — the [Self-Signed Mutual-TLS](https://www.rfc-editor.org/rfc/rfc8705#section-2.2) profile from RFC 8705 §2.2. The binding remains secure because the SHA-256 thumbprint of the leaf cert acts as the credential — no chain trust is needed for the binding to work.
 
-**Recommend keeping `mtlsModule` disabled** for deployments requiring regulatory-grade path validation, until a future `mode = "full-pki"` arm ships backed by a real path-validation library.
+Deployments requiring regulatory-grade path validation should use `mode = "full-pki"` below rather than `"pki"`.
 
 ### RFC 8705 §7.4 — trust-anchor scope
 
@@ -222,17 +227,69 @@ The `trusted-cas` config is a manual allowlist — operators are responsible for
 
 > "Implementors SHOULD use an established and well-tested X.509 library … and SHOULD NOT attempt to write their own X.509 certificate validation procedures."
 
-The parsing layer satisfies this SHOULD (everything routes through `node:crypto`'s `X509Certificate`). The **path-validation orchestration is hand-rolled** in this package because Phase 3 explicitly defers the full RFC 5280 procedure. The future `mode = "full-pki"` arm will close the gap by delegating path validation to a library such as `pkijs` or a `node-forge`-based wrapper.
+In `mode = "pki"` the parsing layer satisfies this SHOULD (everything routes through `node:crypto`'s `X509Certificate`) but the **path-validation orchestration is hand-rolled**.
+
+`mode = "full-pki"` closes that: path validation is delegated to [`pkijs`](https://pkijs.org)'s `CertificateChainValidationEngine`, which implements RFC 5280 §6 including the policy tree and name-constraint processing. What is *not* delegated is listed explicitly in the next section — silently assuming a library covers something it does not is the failure mode this SHOULD exists to prevent.
+
+## `mode = "full-pki"` (#341)
+
+RFC 5280 §6 path validation with revocation. Requires a non-empty `trusted-cas` and an explicit `full-pki.revocation` block. Works with either `source`; under `tls-layer` the chain is read from the TLS session via `getPeerCertificate(true)`.
+
+### What the library does, and what this package still owns
+
+`pkijs` performs path building, per-hop signature verification, validity windows, `basicConstraints`, `keyUsage` (`keyCertSign` / `cRLSign`) on CAs, name constraints, and the certificate-policy tree. Four things it does **not** do are implemented here, and it is worth being precise about why:
+
+1. **`pathLenConstraint`** (§4.2.1.9) — not implemented by the engine at all. A CA that published `pathlen:0` precisely to stop sub-CAs being minted under it would otherwise have said so for nothing.
+2. **Algorithm policy** (§6.1.4) — left to local policy by the RFC, which in practice means whatever the OpenSSL build accepts. Applied here to **every** certificate on the path, anchors included: a chain is only as strong as its weakest hop. SHA-1 has no name in the config vocabulary, so no configuration can permit it.
+3. **Critical extension processing** (§6.1.2) — the engine applies this rule only to the CA certificates in the path. **The leaf is skipped.** So a client certificate carrying a critical extension nobody understands would validate cleanly. This package applies the rule uniformly to the whole path.
+4. **Revocation availability.** The engine skips its revocation block entirely when handed no CRLs, and returns *valid*. "The CRL server is down" and "this certificate is not revoked" therefore reach it as the same input. That is the single most dangerous default in this area, and it is why revocation here is a two-pass affair with the availability decision made **before** the engine is consulted.
+
+The leaf-certificate profile (`CA:FALSE`, and `clientAuth` when `extendedKeyUsage` is present) is the *same code* the narrow mode runs — imported, not restated, so the stricter arm cannot silently become weaker than the looser one on the leaf.
+
+### Revocation has no defaults, on purpose
+
+`mode = "full-pki"` **fails boot** unless `full-pki.revocation.mode` and `.on-unavailable` are both set.
+
+"The CRL endpoint is unreachable" and "the certificate is not revoked" are different facts. Whether an outage should block logins or be waved through depends on whether a revoked certificate continuing to work for a while is worse than an availability incident — which only the operator knows. A library that picks silently picks wrong for half its deployments, invisibly, and only during the outage that makes it matter. So it is stated, or boot fails:
+
+```hocon
+oauth.mtls {
+  mode = "full-pki"
+  trusted-cas = ["file:/etc/auth-provider/ca/private-root.pem"]
+  full-pki.revocation {
+    mode = "crl"              # or "disabled" — an explicit acceptance of the gap
+    on-unavailable = "reject" # or "allow", logged at warn on every use
+    allowed-hosts = ["crl.example.com"]
+  }
+}
+```
+
+`mode = "ocsp"` is **refused at boot**, not accepted and ignored. OCSP is not implemented. (Note also that stapled OCSP is not an option here even in principle: `status_request` stapling covers the *server's* certificate, and Node exposes no stapled response for a **client** certificate on the server side. An OCSP arm would be responder-fetch only.)
+
+A certificate is treated as *unavailable* — and therefore subject to `on-unavailable` — when it names no distribution point, when the CRL cannot be fetched or parsed, when the CRL has expired, when it carries no `nextUpdate` at all (without one there is no way to distinguish a current CRL from one captured before a revocation and replayed), or when its signature does not verify against the issuing CA.
+
+### Fetching a URL out of a certificate
+
+A CRL distribution point is a URL chosen by someone else, and retrieving it makes this process issue a request from inside your network — the classic SSRF shape, with `http://169.254.169.254/…` reachable from most cloud workloads. Two layers bound it:
+
+1. **Path validation runs first.** Distribution points are read only from a path that has already been validated to a configured trust anchor, so an arbitrary client certificate cannot cause an outbound request at all.
+2. **`revocation.allowed-hosts`**, which is **required and non-empty** when `mode = "crl"`. Layer 1 makes the URL come from a CA you trust; this layer means trusting a CA to *issue certificates* is not the same as trusting it to *name destinations inside your network*. It is the same separation `trusted-proxies` draws for forwarded certificate headers.
+
+On top of those: redirects are never followed (a redirect names a second destination neither layer vetted), responses are capped by byte count read incrementally rather than by the responder's `Content-Length` claim, fetches time out, credentials in the URL are refused, and only `http`/`https` are spoken. CRLs are cached until `nextUpdate` or `cache-ttl-seconds`, whichever is sooner; a stale CRL is deliberately not cached, so a responder that has stopped publishing cannot pin us to it.
 
 ## Boot-time fail-loud invariants
 
-`mtlsModule` rejects three specific misconfigurations at boot rather than failing silently at runtime:
+`mtlsModule` rejects five specific misconfigurations at boot rather than failing silently at runtime:
 
 1. **`source = "header"` with an empty `trusted-proxies`** — the forwarded header would then be the credential, accepted from anyone routable to the process. There is no safe default here: an empty list cannot mean "trust the usual proxies", and trusting none of them at runtime would fail every request with no boot signal. See [#280](https://github.com/o3co/auth.provider/issues/280).
 
 2. **`mode = "pki"` with an empty `trusted-cas`** — without trust anchors, chain validation cannot proceed. Failing boot directs the operator straight to the misconfig instead of either silently failing open (no validation) or failing closed on every request (no audit signal).
 
-3. **`mode = "pki"` with `source = "tls-layer"`** — the narrow PKI mode requires the intermediate chain (e.g., the Envoy XFCC `Chain=` parameter). TLS-layer full-chain extraction is deferred. The combination would fail-open or fail-closed without operator visibility; rejecting at boot prevents the ambiguity. Use `source = "header"` with `cert-header-dialect = "envoy"` and a `trusted-proxies` allowlist for PKI mode, or use `mode = "self-signed"` with the `tls-layer` source. Now that `tls-layer` is the default source this combination is easier to reach; lifting it is part of [#341](https://github.com/o3co/auth.provider/issues/341).
+3. **`mode = "pki"` with `source = "tls-layer"`** — the *narrow* PKI mode requires the intermediate chain (e.g., the Envoy XFCC `Chain=` parameter), and reads it from nowhere else. Use `source = "header"` with `cert-header-dialect = "envoy"` and a `trusted-proxies` allowlist, use `mode = "self-signed"` with the `tls-layer` source, or use **`mode = "full-pki"`, which reads the chain from the TLS session** and is not subject to this restriction (#341).
+
+4. **`mode = "full-pki"` without `full-pki.revocation.mode` and `.on-unavailable`** — see "Revocation has no defaults, on purpose" above.
+
+5. **`mode = "full-pki"` with `revocation.mode = "crl"` and an empty `revocation.allowed-hosts`** — an empty allowlist would mean "fetch from any destination a certificate names".
 
 ## Hash algorithm
 

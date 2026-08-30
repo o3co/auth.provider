@@ -30,6 +30,12 @@
  *     matcher, and anything that does need one imports core's so a second,
  *     subtly different notion of "trusted proxy" cannot appear.
  *   - `pemToDer`, `derToPem` — internal codec; surface minimization.
+ *   - the `fullPki/` internals (`createFullPkiValidator`, the CRL resolver,
+ *     the guarded fetch) — `mode = "full-pki"` is reached through config, not
+ *     by assembling the validator by hand. Only the algorithm vocabulary is
+ *     exported, because an operator writing
+ *     `oauth.mtls.full-pki.signature-algorithms` needs to know what the legal
+ *     values are, and a list in prose drifts from the one the schema enforces.
  *
  * Per Wave 2 Phase 3 spec §5.1.
  */
@@ -37,6 +43,11 @@
 export type { ClientCertificate } from "./certificate.mjs";
 export { MtlsError, type MtlsErrorCode, type MtlsReasonCode } from "./errors.mjs";
 export { createMtlsMechanism, type MtlsMechanismOptions } from "./extractor.mjs";
+export {
+	DEFAULT_SIGNATURE_ALGORITHMS,
+	SIGNATURE_ALGORITHM_NAMES,
+	type SignatureAlgorithmName,
+} from "./fullPki/algorithms.mjs";
 export type { CertHeaderDialect } from "./headers.mjs";
 export { mtlsConfigSchema, mtlsModule } from "./module.mjs";
 export { computeCertThumbprint } from "./thumbprint.mjs";

@@ -49,6 +49,8 @@
 		}
 	},
 	"dependencies": {
+		"asn1js": "^3.0.6",
+		"pkijs": "^3.4.0",
 		"zod": "^4.3.6"
 	},
 	"devDependencies": {

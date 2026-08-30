@@ -42,6 +42,11 @@
 import { defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMtlsMechanism } from "./extractor.mjs";
+import {
+	DEFAULT_SIGNATURE_ALGORITHMS,
+	SIGNATURE_ALGORITHM_NAMES,
+	type SignatureAlgorithmName,
+} from "./fullPki/algorithms.mjs";
 
 // ---------------------------------------------------------------------------
 // Config schema
@@ -87,10 +92,50 @@ export const mtlsConfigSchema = z.object({
 				 * boot.
 				 */
 				"trusted-proxies": z.array(z.string()).readonly().default([]),
-				/** Trust posture: "self-signed" accepts any well-formed cert; "pki" requires trusted-cas. */
-				mode: z.enum(["self-signed", "pki"]).default("self-signed"),
-				/** Trust anchors for mode = "pki". Each entry: literal PEM or "file:<path>". */
+				/**
+				 * Trust posture. `"self-signed"` accepts any well-formed cert;
+				 * `"pki"` runs the narrow chain walk; `"full-pki"` runs RFC 5280
+				 * path validation with revocation (#341). The latter two require
+				 * `trusted-cas`.
+				 */
+				mode: z.enum(["self-signed", "pki", "full-pki"]).default("self-signed"),
+				/** Trust anchors for mode = "pki" / "full-pki". Each entry: literal PEM or "file:<path>". */
 				"trusted-cas": z.array(z.string()).readonly().default([]),
+				/**
+				 * Settings that apply only to `mode = "full-pki"` (#341).
+				 *
+				 * `revocation.mode` and `revocation.on-unavailable` have **no
+				 * defaults**. Both encode a decision about what a deployment does
+				 * when revocation status cannot be obtained, and there is no
+				 * answer that is right for every deployment — so the schema makes
+				 * the operator write one down rather than inheriting one silently.
+				 * This is #363's absence-policy discipline applied to a config
+				 * value: optional to wire, not optional to decide.
+				 */
+				"full-pki": z
+					.object({
+						/** Maximum certificates in a path, leaf and anchor included. */
+						"max-chain-depth": z.number().int().min(2).max(16).default(6),
+						/** Signature algorithms permitted at every hop. */
+						"signature-algorithms": z
+							.array(z.enum(SIGNATURE_ALGORITHM_NAMES as unknown as [string, ...string[]]))
+							.readonly()
+							.default(DEFAULT_SIGNATURE_ALGORITHMS as unknown as string[]),
+						/** Minimum RSA modulus in bits. Ignored for EC and EdDSA keys. */
+						"min-rsa-key-bits": z.number().int().min(1024).default(2048),
+						revocation: z
+							.object({
+								mode: z.enum(["crl", "disabled"]),
+								"on-unavailable": z.enum(["reject", "allow"]),
+								/** Hosts revocation material may be fetched from. */
+								"allowed-hosts": z.array(z.string()).readonly().default([]),
+								"fetch-timeout-ms": z.number().int().min(1).default(3000),
+								"cache-ttl-seconds": z.number().int().min(0).default(3600),
+								"max-response-bytes": z.number().int().min(1).default(1_048_576),
+							})
+							.optional(),
+					})
+					.optional(),
 			})
 			.default(() => ({
 				enabled: false,
@@ -200,8 +245,21 @@ export const mtlsModule = defineModule<"config", "logger">({
 							"cert-header": string;
 							"cert-header-dialect": "envoy" | "plain-pem";
 							"trusted-proxies": readonly string[];
-							mode: "self-signed" | "pki";
+							mode: "self-signed" | "pki" | "full-pki";
 							"trusted-cas": readonly string[];
+							"full-pki"?: {
+								"max-chain-depth": number;
+								"signature-algorithms": readonly SignatureAlgorithmName[];
+								"min-rsa-key-bits": number;
+								revocation?: {
+									mode: "crl" | "disabled";
+									"on-unavailable": "reject" | "allow";
+									"allowed-hosts": readonly string[];
+									"fetch-timeout-ms": number;
+									"cache-ttl-seconds": number;
+									"max-response-bytes": number;
+								};
+							};
 						};
 					};
 				};
@@ -226,14 +284,54 @@ export const mtlsModule = defineModule<"config", "logger">({
 				}
 
 				// --- Boot-time fail-loud check 1: PKI mode requires trusted-cas. ---
-				if (cfg.mode === "pki" && cfg["trusted-cas"].length === 0) {
+				if ((cfg.mode === "pki" || cfg.mode === "full-pki") && cfg["trusted-cas"].length === 0) {
 					throw new Error(
-						'mtlsModule: config.oauth.mtls.mode = "pki" requires a non-empty oauth.mtls.trusted-cas. ' +
+						`mtlsModule: config.oauth.mtls.mode = "${cfg.mode}" requires a non-empty oauth.mtls.trusted-cas. ` +
 							"Without trusted CAs, chain validation cannot proceed.",
 					);
 				}
 
-				// --- Boot-time fail-loud check 2: PKI + tls-layer is not supported. ---
+				// --- Boot-time fail-loud checks for full-pki (#341). ---
+				//
+				// The two revocation settings have no defaults, and this is where
+				// that shows up. "The CRL endpoint is unreachable" and "the
+				// certificate is not revoked" are different facts, and a library
+				// that quietly picks which one a deployment acts on picks wrong
+				// for half of them — invisibly, and only during the outage that
+				// makes it matter.
+				if (cfg.mode === "full-pki") {
+					const fullPki = cfg["full-pki"];
+					if (fullPki?.revocation === undefined) {
+						throw new Error(
+							'mtlsModule: config.oauth.mtls.mode = "full-pki" requires ' +
+								"oauth.mtls.full-pki.revocation.mode and .on-unavailable to be set " +
+								'explicitly. Set mode = "crl" to check CRLs, or mode = "disabled" ' +
+								"to state that this deployment accepts that a revoked certificate " +
+								"keeps binding tokens until it expires. There is no default because " +
+								"both are defensible and only the operator knows which applies.",
+						);
+					}
+					if (
+						fullPki.revocation.mode === "crl" &&
+						fullPki.revocation["allowed-hosts"].length === 0
+					) {
+						throw new Error(
+							'mtlsModule: oauth.mtls.full-pki.revocation.mode = "crl" requires a ' +
+								"non-empty oauth.mtls.full-pki.revocation.allowed-hosts. A CRL " +
+								"distribution point is a URL inside a certificate, so fetching one " +
+								"makes this process issue a request to a destination someone else " +
+								"chose. List the hosts your CA publishes CRLs on — the same " +
+								"separation oauth.mtls.trusted-proxies draws for forwarded headers.",
+						);
+					}
+				}
+
+				// --- Boot-time fail-loud check 2: narrow PKI + tls-layer is not supported. ---
+				//
+				// Unchanged for `mode = "pki"`, whose walk still takes its
+				// intermediates from the XFCC `Chain=` parameter. `full-pki` reads
+				// the chain from the TLS session (`tlsChain.mts`), so it is not
+				// subject to this restriction.
 				if (cfg.mode === "pki" && cfg.source === "tls-layer") {
 					throw new Error(
 						'mtlsModule: config.oauth.mtls.mode = "pki" with source = "tls-layer" is not supported in Phase 3. ' +
@@ -251,6 +349,7 @@ export const mtlsModule = defineModule<"config", "logger">({
 					trustedProxies: cfg["trusted-proxies"],
 					mode: cfg.mode,
 					trustedCas: cfg["trusted-cas"],
+					...(cfg["full-pki"] ? { fullPki: cfg["full-pki"] } : {}),
 					logger: deps.logger,
 				});
 			},
