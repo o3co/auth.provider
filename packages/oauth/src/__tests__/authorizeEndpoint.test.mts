@@ -638,6 +638,20 @@ describe("/authorize — prompt=none (#284)", () => {
 		]);
 	});
 
+	it("refuses a repeated prompt parameter instead of picking one", async () => {
+		// `?prompt=none&prompt=login` parses to an array, not a string. Reading
+		// one element of it would let an attacker who can append to the query
+		// choose which directive the AS sees; taking the whole thing as a
+		// single value would then reject a legitimate `prompt=none`. Neither
+		// is a decision this endpoint should be making on the RP's behalf.
+		const { app } = await makeApp({});
+		const params = redirectParams(
+			await authorize(app, { ...baseQuery, prompt: ["none", "login"] }),
+		);
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toContain("single string");
+	});
+
 	it("treats an absent prompt exactly as before", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, baseQuery);
