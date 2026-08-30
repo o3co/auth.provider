@@ -1,4 +1,4 @@
-import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +37,20 @@ cpSync(src, dest, {
 	recursive: true,
 	filter: shouldCopy,
 });
+
+// #407: npm drops a file literally named `.gitignore` from a published
+// package, so the template's copy is staged here under a dot-less name and
+// `scaffold()` renames it back when it writes the project. The source of truth
+// stays `templates/standalone/.gitignore`, where it also does its own job for
+// anyone working on the template in-tree.
+//
+// Verified rather than assumed: `published-package.test.mts` packs this
+// package, scaffolds from the tarball, and asserts the scaffolded project has
+// a `.gitignore` — which is how the omission was found in the first place.
+const stagedGitignore = resolve(dest, ".gitignore");
+if (existsSync(stagedGitignore)) {
+	renameSync(stagedGitignore, resolve(dest, "gitignore"));
+}
 
 // Embed package versions so they're available at runtime without
 // traversing the monorepo source tree (which won't exist in published tarballs).

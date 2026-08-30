@@ -7,8 +7,21 @@
 #   - "none":                public client — no clientSecret; PKCE/S256 mandatory at /authorize
 #
 # Secret format (only for confidential clients — basic / post):
-#   - Plain text: "my-secret"
-#   - Bcrypt hash: "$2b$10$..." (generate with: node -e "require('bcrypt').hash('secret',10).then(console.log)")
+#   - Bcrypt hash: "$2b$10$..."  <-- use this
+#   - Plain text: "my-secret"     <-- accepted, for local development only
+#
+# Generate a real one:
+#   SECRET=$(openssl rand -base64 32)
+#   node -e "require('bcrypt').hash(process.argv[1],10).then(console.log)" "$SECRET"
+# Give $SECRET to the client; put the hash in this file.
+#
+# #407: the schema accepts any non-empty string here, unlike `session.secret`
+# and the JWT signing secret, which have carried a 256-bit floor since #282.
+# That is deliberate — this field also holds a bcrypt hash, whose shape those
+# floors would reject — but it means NOTHING stops you from shipping
+# `clientSecret: "changeme"`. A client secret authenticates a confidential
+# client at the token endpoint; treat it as you would any other credential
+# and give it 256 bits of randomness.
 #
 # `firstParty` (#267): REQUIRED to be `true` for a client to use `/authorize`.
 #   `/authorize` mints a code as soon as the session is authenticated, with no

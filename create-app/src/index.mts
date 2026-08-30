@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { shouldCopyTemplateEntry } from "./internal/template-filter.mjs";
@@ -58,6 +58,17 @@ export const scaffold = (targetDir: string, projectName: string): void => {
 		recursive: true,
 		filter: (source) => shouldCopyTemplateEntry(source, TEMPLATES_DIR),
 	});
+
+	// #407: npm drops a file literally named `.gitignore` from a published
+	// package, so `copy-templates.mjs` stages it dot-less and it is restored
+	// here. Without it the first `git add .` in a scaffolded project commits
+	// the `.env` and the signing key the README's own setup steps say to
+	// create — and it would have shipped that way silently, because the file
+	// is present in the repository and only missing from the tarball.
+	const stagedGitignore = resolve(targetDir, "gitignore");
+	if (existsSync(stagedGitignore)) {
+		renameSync(stagedGitignore, resolve(targetDir, ".gitignore"));
+	}
 
 	// Rewrite package.json
 	const pkgPath = resolve(targetDir, "package.json");
