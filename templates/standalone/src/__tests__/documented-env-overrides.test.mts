@@ -94,6 +94,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH: "3",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 	OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
+	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 
 	// --- oauth.grants -------------------------------------------------
 	OAUTH_GRANTS_SESSION_ENABLED: "false",

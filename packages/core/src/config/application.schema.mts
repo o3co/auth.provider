@@ -661,6 +661,33 @@ export const CoreConfigSchema = z.object({
 		tokenBinding: z
 			.object({
 				"dispatch-policy": z.enum(["intent-explicit", "strict-mutual-exclusion"]),
+				// #275: bind a CONFIDENTIAL client's refresh token to the
+				// presented DPoP key / client certificate, which is otherwise
+				// done only for public clients.
+				//
+				// Neither RFC requires the public-client restriction and neither
+				// forbids lifting it. RFC 9449 §5's "refresh tokens issued to
+				// confidential clients ... are not bound" is descriptive prose
+				// with no RFC 2119 keyword, next to three MUSTs for public
+				// clients; RFC 8705 §7.1 says the same about certificates. Their
+				// rationale — a confidential client authenticates when it
+				// refreshes, so the RT is already constrained — holds for this
+				// implementation, which refuses an unauthenticated caller and an
+				// RT whose `azp` is not the authenticated client.
+				//
+				// So this is hardening for one specific shape: a deployment
+				// whose DPoP key is better protected than its client secret (key
+				// in an HSM or TPM, secret in an environment variable), where
+				// leaking the secret alone is then not enough. Off by default,
+				// because a bound RT pins the client to one key or certificate
+				// for the RT's whole lifetime and rotating mid-lifetime breaks
+				// refresh.
+				//
+				// Lives here rather than under `oauth.dpop` for the reason
+				// `dispatch-policy` does: it applies across every installed
+				// binding mechanism, so one home keeps the mechanisms from
+				// drifting apart.
+				bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
 			})
 			.optional(),
 	}),

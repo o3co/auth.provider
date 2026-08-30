@@ -503,7 +503,36 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// (mTLS keeps "Bearer" per RFC 8705 §3).
 			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
 			const isPublicClient = ctx.authenticatedClient.tokenEndpointAuthMethod === "none";
-			const bindNewRefreshToken = (bindingIsDpop || bindingIsMtls) && isPublicClient;
+			// #275: `bindConfidentialClientRefreshTokens` opts a deployment out of
+			// the `isPublicClient` restriction.
+			//
+			// Neither RFC requires the restriction and neither forbids lifting
+			// it. RFC 9449 §5's "refresh tokens issued to confidential clients
+			// ... are not bound" is descriptive prose with no RFC 2119 keyword,
+			// sitting next to three MUSTs for public clients; RFC 8705 §7.1 says
+			// the same about certificates. Their shared rationale holds here —
+			// this grant refuses an unauthenticated caller and refuses an RT
+			// whose `azp` is not the authenticated client — so a stolen RT is
+			// unusable without the client's own credential and binding buys
+			// nothing against the threat as usually stated.
+			//
+			// It buys something only where the two credentials are protected
+			// differently: a client secret in an environment variable, a DPoP
+			// key in an HSM or TPM. Leaking the secret alone is then not enough.
+			// Off by default because the cost is real in the other direction — a
+			// bound RT pins the client to one key or certificate for the RT's
+			// whole lifetime, so rotating mid-lifetime breaks refresh.
+			//
+			// Mechanism-neutral, because the gate is and because
+			// `oauth.tokenBinding` is where cross-mechanism policy already
+			// lives. Nothing else is needed to make it mean something: the
+			// refresh-time continuity matrix runs off the RT's own `cnf`, so a
+			// confidential client's newly bound RT is enrolled in it by the same
+			// rule that already covers public clients.
+			const bindConfidentialClients =
+				config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
+			const bindNewRefreshToken =
+				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
 			const newAccessToken = await generateToken(
 				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },

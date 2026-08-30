@@ -17,6 +17,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   **Absence denies outright rather than falling back to an implied set.** RFC 7591 §2 takes the other route — an omitted `grant_types` there means `["authorization_code"]` alone — and that is good evidence absence should not mean "everything". But an implied set is still a decision nobody wrote down, which is the shape #363 exists to refuse, and a deployment that turns this on can name its grants.
 
   **Migration: none.** The default preserves current behaviour exactly. To adopt it, add `allowedGrantTypes` to every client registration, then set `oauth.requireGrantTypeAllowlist = true` (env `OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST`). `isGrantTypeAllowed` gains an optional third argument, `{ requireAllowlist }`, defaulting to the old behaviour — existing callers are unaffected.
+- **`oauth.tokenBinding.bindConfidentialClientRefreshTokens` — opt-in refresh-token binding for confidential clients (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** Refresh tokens are DPoP-/certificate-bound only for public clients; a confidential client's RT is issued plain, so an attacker holding a stolen RT could establish their own binding on rotation (#275).
+
+  **That restriction is what both RFCs describe, and neither requires it.** RFC 9449 §5's *"refresh tokens issued to confidential clients … are not bound to the DPoP proof public key because they are already sender-constrained with a different existing mechanism"* is descriptive prose with no RFC 2119 keyword, sitting beside three `MUST`s that are all about public clients; RFC 8705 §7.1 says the same about certificates (*"indirectly certificate-bound by way of the client ID and the associated requirement for (certificate-based) authentication"*). So lifting it is hardening beyond the specs, not a deviation from them.
+
+  **Their shared rationale does hold for this implementation**, which is why it stays the default: the refresh grant refuses an unauthenticated caller (`401 invalid_client`) and refuses an RT whose `azp` is not the authenticated client, so a stolen RT is unusable without the client's own credential. Against the threat as usually stated — an RT leaking through logs or a compromised backend — binding adds nothing, because whoever has the secret has the DPoP key too.
+
+  **What the flag buys is the case where the two credentials are protected differently**: a client secret in an environment variable, a DPoP key in an HSM or TPM. There, leaking the secret alone is not enough. **What it costs** is why it is off by default: a bound RT pins the client to one key or certificate for the RT's whole lifetime — days — so rotating mid-lifetime breaks refresh until the client re-authenticates.
+
+  Applied at both sites that mint an RT (`authorization_code` and `refresh_token`), which carried the identical `isPublicClient` gate — reading it in one place only would have issued a plain RT at first mint and a bound one on first rotation. Mechanism-neutral, like the gate it modifies and like `oauth.tokenBinding.dispatch-policy` next to it. Nothing else was needed to give it teeth: the refresh-time continuity matrix already runs off the RT's own `cnf`, so a newly bound confidential-client RT is enrolled by the same rule that covers public clients.
+
+  **Migration: none.** The default preserves current behaviour exactly.
+
 
 ### Changed
 

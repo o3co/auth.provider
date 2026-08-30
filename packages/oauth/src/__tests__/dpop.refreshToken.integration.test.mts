@@ -76,6 +76,21 @@ const mockDeps: GrantDependencies = {
 	keyStore,
 };
 
+/**
+ * `mockDeps` with `oauth.tokenBinding.bindConfidentialClientRefreshTokens`
+ * set — the #275 opt-in.
+ */
+const depsWithConfidentialBinding = (enabled: boolean): GrantDependencies => ({
+	...mockDeps,
+	config: {
+		...(mockConfig as unknown as Record<string, unknown>),
+		oauth: {
+			...(mockConfig as unknown as { oauth: Record<string, unknown> }).oauth,
+			tokenBinding: { bindConfidentialClientRefreshTokens: enabled },
+		},
+	} as unknown as GrantDependencies["config"],
+});
+
 const confidentialAuthClient = {
 	clientId: CONFIDENTIAL_CLIENT_ID,
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
@@ -371,5 +386,119 @@ describe("DPoP refresh-token mechanism boundary", () => {
 		expect((newRtPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
 			"MTLS-RT-THUMB",
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #275 — opt-in RT binding for confidential clients
+// ---------------------------------------------------------------------------
+
+/*
+ * Both RFCs stop short of requiring this, and neither forbids it.
+ *
+ * RFC 9449 §5: "Refresh tokens issued to confidential clients ... are not
+ * bound to the DPoP proof public key because they are already
+ * sender-constrained with a different existing mechanism" — descriptive prose,
+ * no RFC 2119 keyword, next to three MUSTs for public clients. RFC 8705 §7.1
+ * says the same for certificates: confidential-client refresh tokens are
+ * "indirectly certificate-bound by way of the client ID and the associated
+ * requirement for (certificate-based) authentication".
+ *
+ * The rationale both give holds here — this grant refuses an unauthenticated
+ * caller outright and refuses an RT whose `azp` is not the authenticated
+ * client — so a stolen RT is unusable without the client's credential, and
+ * binding buys nothing against the threat as usually stated.
+ *
+ * What it does buy is the case where the two credentials are protected
+ * differently: a client secret in an environment variable and a DPoP key in an
+ * HSM or TPM. There, leaking the secret alone is not enough. The cost is real
+ * and is why this is off by default — a bound RT pins the client to one key or
+ * certificate for the RT's whole lifetime, so a key rotation mid-lifetime
+ * breaks refresh.
+ *
+ * The flag is mechanism-neutral because the gate it modifies is
+ * (`(bindingIsDpop || bindingIsMtls) && isPublicClient`) and because
+ * `oauth.tokenBinding` is where cross-mechanism policy already lives.
+ */
+describe("confidential-client RT binding — opt-in (#275)", () => {
+	it("is off by default: a confidential client's new RT stays plain", async () => {
+		const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
+		const { result } = await createRefreshTokenGrant(mockDeps).handle(
+			buildCtx({
+				refreshToken: rt,
+				authenticatedClient: confidentialAuthClient,
+				tokenBinding: dpopBinding("PROOF-JKT-CONF"),
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodeJwt(result.tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+
+	it("stays off when the key is present and false", async () => {
+		const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
+		const { result } = await createRefreshTokenGrant(depsWithConfidentialBinding(false)).handle(
+			buildCtx({
+				refreshToken: rt,
+				authenticatedClient: confidentialAuthClient,
+				tokenBinding: dpopBinding("PROOF-JKT-CONF"),
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodeJwt(result.tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+
+	it("binds a confidential client's new RT when turned on", async () => {
+		const rt = await mintRefreshToken({ clientId: CONFIDENTIAL_CLIENT_ID });
+		const { result } = await createRefreshTokenGrant(depsWithConfidentialBinding(true)).handle(
+			buildCtx({
+				refreshToken: rt,
+				authenticatedClient: confidentialAuthClient,
+				tokenBinding: dpopBinding("PROOF-JKT-CONF"),
+			}),
+		);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		const newRt = decodeJwt(result.tokens.refresh_token as string);
+		expect((newRt.cnf as { jkt?: string } | undefined)?.jkt).toBe("PROOF-JKT-CONF");
+	});
+
+	// The continuity matrix is what makes the binding mean anything, and it
+	// already runs off the RT's own cnf — so turning the flag on enrolls
+	// confidential clients in it with no second rule to keep in step.
+	it("enforces continuity on the RT it just bound", async () => {
+		const rt = await mintRefreshToken({
+			clientId: CONFIDENTIAL_CLIENT_ID,
+			cnfJkt: "PROOF-JKT-CONF",
+		});
+		const { result } = await createRefreshTokenGrant(depsWithConfidentialBinding(true)).handle(
+			buildCtx({
+				refreshToken: rt,
+				authenticatedClient: confidentialAuthClient,
+				tokenBinding: dpopBinding("A-DIFFERENT-KEY"),
+			}),
+		);
+		expect(result.status).toBe(400);
+		if ("tokens" in result) expect.fail("Expected a rejection");
+		expect(result.error).toBe("invalid_grant");
+	});
+
+	// A public client was already bound; the flag must not reach it.
+	it("leaves the public-client rule exactly as it was", async () => {
+		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
+		for (const deps of [mockDeps, depsWithConfidentialBinding(false)]) {
+			const { result } = await createRefreshTokenGrant(deps).handle(
+				buildCtx({
+					refreshToken: rt,
+					authenticatedClient: publicAuthClient,
+					tokenBinding: dpopBinding("PROOF-JKT-PUB"),
+				}),
+			);
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			const newRt = decodeJwt(result.tokens.refresh_token as string);
+			expect((newRt.cnf as { jkt?: string } | undefined)?.jkt).toBe("PROOF-JKT-PUB");
+		}
 	});
 });
