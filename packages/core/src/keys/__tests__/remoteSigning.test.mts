@@ -139,6 +139,21 @@ describe("createRemoteSigningKeyStore — the private key stays out of process (
 		).rejects.toThrow(/does not verify against publicKeyPem/);
 	});
 
+	it("tailors the signature-form hint to the algorithm", async () => {
+		// Pointing an EdDSA operator at a DER conversion sends them to look at
+		// the one thing that cannot be their problem.
+		const wrongKey = generateKeyPairSync("ed25519");
+		const err = await build({
+			signer: {
+				async sign(_kid: string, data: Uint8Array) {
+					return new Uint8Array(nodeSign(null, data, wrongKey.privateKey));
+				},
+			},
+		}).catch((e: unknown) => e as Error);
+		expect(err.message).toMatch(/EdDSA expects the raw signature bytes/);
+		expect(err.message).not.toMatch(/DER/);
+	});
+
 	it("names the two causes that account for almost all of these", async () => {
 		const wrongKey = generateKeyPairSync("ed25519");
 		const err = await build({
@@ -267,6 +282,34 @@ describe("derToJoseEcdsaSignature (#303)", () => {
 		// merely a leading-zero pad that could be trimmed.
 		const der = new Uint8Array([0x30, 0x08, 0x02, 0x04, 0x11, 0x22, 0x33, 0x44, 0x02, 0x00]);
 		expect(() => derToJoseEcdsaSignature(der, 2)).toThrow(/wider than the field size/);
+	});
+
+	it("rejects the indefinite-length form, which DER forbids", () => {
+		// BER allows 0x80; DER does not. Treating it as a zero-byte long form
+		// would silently misparse rather than refuse.
+		expect(() => derToJoseEcdsaSignature(new Uint8Array([0x30, 0x80, 0x02, 0x01, 0x01]))).toThrow(
+			/indefinite-length/,
+		);
+	});
+
+	it("rejects a SEQUENCE claiming more bytes than it was given", () => {
+		expect(() => derToJoseEcdsaSignature(new Uint8Array([0x30, 0x40, 0x02, 0x01, 0x01]))).toThrow(
+			/exceeds the bytes provided/,
+		);
+	});
+
+	it("rejects a truncated long-form length header", () => {
+		expect(() => derToJoseEcdsaSignature(new Uint8Array([0x30, 0x82, 0x00]))).toThrow(
+			/truncated long-form/,
+		);
+	});
+
+	it("rejects trailing bytes after R and S", () => {
+		// A plausible-looking half-pair that verifies nowhere is the exact
+		// far-from-the-cause failure this module exists to prevent.
+		const body = [0x02, 0x01, 0x07, 0x02, 0x01, 0x09, 0xff, 0xff];
+		const der = new Uint8Array([0x30, body.length, ...body]);
+		expect(() => derToJoseEcdsaSignature(der, 1)).toThrow(/trailing bytes/);
 	});
 
 	it("reads a long-form SEQUENCE length", () => {

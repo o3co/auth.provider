@@ -106,8 +106,38 @@ export function derToJoseEcdsaSignature(der: Uint8Array, size = 32): Uint8Array 
 	if (der[0] !== 0x30) {
 		throw new Error("derToJoseEcdsaSignature: not a DER SEQUENCE (expected 0x30)");
 	}
-	// Skip SEQUENCE tag + length (short or long form).
-	let offset = der[1] !== undefined && der[1] < 0x80 ? 2 : 2 + (der[1]! & 0x7f);
+	const lengthByte = der[1];
+	if (lengthByte === undefined) {
+		throw new Error("derToJoseEcdsaSignature: truncated SEQUENCE header");
+	}
+	// DER forbids the indefinite form (0x80) — BER allows it, DER does not, and
+	// treating it as a zero-byte long form would silently misparse rather than
+	// refuse. Every refusal in this parser exists for that reason: a lenient
+	// byte reader hands back a plausible signature that verifies nowhere, which
+	// is the far-from-the-cause failure this whole module is built to avoid.
+	if (lengthByte === 0x80) {
+		throw new Error("derToJoseEcdsaSignature: indefinite-length SEQUENCE is not valid DER");
+	}
+	let contentLength: number;
+	let offset: number;
+	if (lengthByte < 0x80) {
+		contentLength = lengthByte;
+		offset = 2;
+	} else {
+		const lengthOfLength = lengthByte & 0x7f;
+		offset = 2 + lengthOfLength;
+		if (der.length < offset) {
+			throw new Error("derToJoseEcdsaSignature: truncated long-form SEQUENCE length");
+		}
+		contentLength = 0;
+		for (let i = 0; i < lengthOfLength; i += 1) {
+			contentLength = contentLength * 256 + (der[2 + i] ?? 0);
+		}
+	}
+	const contentEnd = offset + contentLength;
+	if (der.length < contentEnd) {
+		throw new Error("derToJoseEcdsaSignature: SEQUENCE length exceeds the bytes provided");
+	}
 
 	const readInteger = (): Uint8Array => {
 		if (der[offset] !== 0x02) {
@@ -133,6 +163,15 @@ export function derToJoseEcdsaSignature(der: Uint8Array, size = 32): Uint8Array 
 
 	const r = readInteger();
 	const s = readInteger();
+	// Extra bytes mean this is not the two-INTEGER SEQUENCE an ECDSA signature
+	// is. Accepting them would return a well-formed-looking JWS half-pair that
+	// never verifies — the signer reports success and every relying party
+	// rejects the token, far from the cause.
+	if (offset !== contentEnd) {
+		throw new Error(
+			"derToJoseEcdsaSignature: trailing bytes after R and S — not an ECDSA signature",
+		);
+	}
 	const out = new Uint8Array(size * 2);
 	out.set(r, 0);
 	out.set(s, size);
@@ -252,12 +291,21 @@ export async function createRemoteSigningKeyStore(
 		try {
 			await jwtVerify(probe, publicKey as never);
 		} catch (cause) {
+			// The form hint is algorithm-specific. `ES256` is the one that
+			// actually bites — providers return DER there and nowhere else — so
+			// pointing an RS256 or EdDSA operator at a DER conversion sends them
+			// to look at the one thing that cannot be their problem.
+			const formHint =
+				algorithm === "ES256"
+					? "the signature is not in JWS form (ES256 providers return DER, not the raw " +
+						"R || S concatenation — see derToJoseEcdsaSignature)"
+					: `the signature is not in JWS form (${algorithm} expects the raw signature ` +
+						"bytes, unwrapped)";
 			throw new Error(
 				"createRemoteSigningKeyStore: the signer's output does not verify against " +
 					`publicKeyPem for kid "${kid}". Two causes account for almost all of these: ` +
-					"the signature is not in JWS form (ES256 providers return DER — see " +
-					"derToJoseEcdsaSignature), or the signer is using a different key than the " +
-					"public half configured here.",
+					`${formHint}, or the signer is using a different key than the public half ` +
+					"configured here.",
 				{ cause },
 			);
 		}
