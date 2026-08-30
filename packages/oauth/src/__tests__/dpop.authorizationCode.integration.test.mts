@@ -98,9 +98,23 @@ const mockClientRepository: ClientRepository = {
 // deps helpers
 // ---------------------------------------------------------------------------
 
-function makeDeps(consumeByCodeImpl: CodeRepository["consumeByCode"]) {
+function makeDeps(
+	consumeByCodeImpl: CodeRepository["consumeByCode"],
+	options: { readonly bindConfidentialClientRefreshTokens?: boolean } = {},
+) {
 	return {
-		config: mockConfig,
+		config:
+			options.bindConfidentialClientRefreshTokens === undefined
+				? mockConfig
+				: ({
+						...(mockConfig as unknown as Record<string, unknown>),
+						oauth: {
+							...(mockConfig as unknown as { oauth: Record<string, unknown> }).oauth,
+							tokenBinding: {
+								bindConfidentialClientRefreshTokens: options.bindConfidentialClientRefreshTokens,
+							},
+						},
+					} as unknown as GrantDependencies["config"]),
 		keyStore: createSymmetricKeyStore("test-secret-ac"),
 		codeRepository: {
 			consumeByCode: consumeByCodeImpl,
@@ -316,5 +330,69 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			const rtPayload = decodePayload(result.tokens.refresh_token as string);
 			expect(rtPayload.cnf).toBeUndefined();
 		});
+	});
+});
+
+/*
+ * #275 — the same opt-in the refresh grant carries, at the point the RT is
+ * first minted. Both sites had the identical `isPublicClient` gate, so both
+ * have to read the same key or a confidential client would be issued a plain
+ * RT here and a bound one on its first rotation.
+ *
+ * See `dpop.refreshToken.integration.test.mts` for why neither RFC forbids
+ * this and why it is off by default.
+ */
+describe("confidential-client RT binding — opt-in, authorization_code (#275)", () => {
+	const withBinding = (bind?: boolean) =>
+		createAuthorizationGrant(
+			makeDeps(
+				vi.fn().mockResolvedValue({ ...validCode }),
+				bind === undefined ? {} : { bindConfidentialClientRefreshTokens: bind },
+			),
+		);
+
+	const dpopCtx = (): GrantContext => ({
+		...baseCtxConfidential,
+		tokenBinding: { kind: "dpop", confirmation: { jkt: "AC-JKT" } },
+	});
+
+	it("is off by default: the minted RT stays plain", async () => {
+		const { result } = await withBinding().handle(dpopCtx());
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+
+	it("stays off when the key is present and false", async () => {
+		const { result } = await withBinding(false).handle(dpopCtx());
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+
+	it("binds the minted RT when turned on", async () => {
+		const { result } = await withBinding(true).handle(dpopCtx());
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		const rt = decodePayload(result.tokens.refresh_token as string);
+		expect((rt.cnf as { jkt?: string } | undefined)?.jkt).toBe("AC-JKT");
+	});
+
+	it("binds an mTLS-authenticated confidential client's RT too", async () => {
+		const { result } = await withBinding(true).handle({
+			...baseCtxConfidential,
+			tokenBinding: { kind: "mtls", confirmation: { "x5t#S256": "AC-X5T" } },
+		});
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		const rt = decodePayload(result.tokens.refresh_token as string);
+		expect((rt.cnf as Record<string, string> | undefined)?.["x5t#S256"]).toBe("AC-X5T");
+	});
+
+	it("leaves an unbound request unbound — the flag never invents a binding", async () => {
+		const { result } = await withBinding(true).handle({ ...baseCtxConfidential } as GrantContext);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
 	});
 });
