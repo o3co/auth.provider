@@ -103,20 +103,39 @@ describe("verifyJwt — the #394 id_token typ window (closed by #402)", () => {
 		expect(verified.header.typ).toBe("JWT");
 	});
 
-	it('accepts the pre-#394 "id+jwt" for id_token, warning on each acceptance', async () => {
+	it('refuses the pre-#394 "id+jwt" on id_token — the #394 window is closed (#402)', async () => {
+		// #394 flipped the id_token `typ` to the standard `JWT` and accepted
+		// both spellings for a migration window, so id_tokens already in the
+		// wild kept their logout-hint value. Closing that window is #402's job
+		// and its own conditions gate it: one refresh-token lifetime after the
+		// release that shipped the flip, and the legacy-acceptance log line
+		// gone quiet. Neither applies to a provider with no deployment behind
+		// it — there is no population of `id+jwt` tokens to protect — so the
+		// window is closed rather than left open on a schedule nobody is
+		// waiting out.
+		const jwt = await signValidAccessToken({ typ: "id+jwt" }, keyStore);
+		await expect(verifyJwt(jwt, keyStore, { ...baseOptions, type: "id_token" })).rejects.toThrow(
+			/typ/,
+		);
+	});
+
+	it("reports the refusal as a typ mismatch, not as a special legacy case", async () => {
+		// `id+jwt` is now one more wrong spelling. A caller catching on
+		// `reason` must not have to know it was ever special.
+		const jwt = await signValidAccessToken({ typ: "id+jwt" }, keyStore);
+		await expect(
+			verifyJwt(jwt, keyStore, { ...baseOptions, type: "id_token" }),
+		).rejects.toMatchObject({ reason: "typ" });
+	});
+
+	it("logs no legacy-acceptance warning, because nothing is accepted", async () => {
 		const warn = vi.fn();
 		const logger = { warn, error: vi.fn(), info: vi.fn(), debug: vi.fn() } as unknown as Logger;
 		const jwt = await signValidAccessToken({ typ: "id+jwt" }, keyStore);
-		const verified = await verifyJwt(jwt, keyStore, {
-			...baseOptions,
-			type: "id_token",
-			logger,
-		});
-		expect(verified.header.typ).toBe("id+jwt");
-		expect(warn).toHaveBeenCalledWith(
-			expect.objectContaining({ reason: "typ", typ: "id+jwt", expectedTyp: "JWT" }),
-			"jwt_verify_legacy_id_token_typ",
-		);
+		await expect(
+			verifyJwt(jwt, keyStore, { ...baseOptions, type: "id_token", logger }),
+		).rejects.toThrow();
+		expect(warn).not.toHaveBeenCalledWith(expect.anything(), "jwt_verify_legacy_id_token_typ");
 	});
 
 	it("does not widen any other type: id+jwt still fails an access_token surface", async () => {

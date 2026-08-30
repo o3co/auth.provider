@@ -41,8 +41,9 @@ const keyStore = createSymmetricKeyStore(SECRET);
 const secretKey = createSecretKey(Buffer.from(SECRET));
 
 /** Mint an id_token with the given claims. */
-// #394: new mints carry typ JWT; `typ` stays overridable so the window test
-// below can mint a pre-#394 id+jwt hint.
+// #394: mints carry typ JWT. `typ` stays overridable so the suite can present
+// a wrong spelling — including the pre-#394 `id+jwt`, which #402 made one more
+// wrong spelling rather than a special case.
 async function mintIdToken(extra: Record<string, unknown> = {}, typ = "JWT"): Promise<string> {
 	return new SignJWT({
 		sub: "u-1",
@@ -64,7 +65,7 @@ async function mintOldIdToken(): Promise<string> {
 		aud: "client-1",
 		sid: "sid-1",
 	})
-		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
 		.setExpirationTime("1h")
 		.setIssuedAt(oldIat)
 		.setIssuer("https://auth.example.com")
@@ -289,11 +290,28 @@ describe("POST /oauth/logout", () => {
 		});
 	});
 
-	describe("#394 dual-accept window (closed by #402)", () => {
-		it("still honors a pre-#394 id_token_hint carrying typ id+jwt", async () => {
+	describe("#394 dual-accept window, closed (#402)", () => {
+		it("refuses a pre-#394 id_token_hint carrying typ id+jwt", async () => {
+			// This is the endpoint the window existed for: an id_token already
+			// in the wild loses its logout-hint value the moment the spelling
+			// stops being accepted. #402's own conditions gate that — one
+			// refresh-token lifetime after the release, and the legacy log line
+			// gone quiet — and neither means anything for a provider with no
+			// deployment behind it. There are no such id_tokens.
 			const sessionStore = makeSessionStore();
 			const app = buildApp({ sessionStore });
 			const token = await mintIdToken({}, "id+jwt");
+
+			const res = await postLogout(app, { id_token_hint: token });
+
+			expect(res.status).toBe(400);
+			expect(sessionStore.delete).not.toHaveBeenCalled();
+		});
+
+		it("accepts the standard spelling", async () => {
+			const sessionStore = makeSessionStore();
+			const app = buildApp({ sessionStore });
+			const token = await mintIdToken();
 
 			const res = await postLogout(app, { id_token_hint: token });
 
@@ -301,10 +319,9 @@ describe("POST /oauth/logout", () => {
 			expect(res.body).toEqual({ logged_out: true });
 		});
 
-		it("keeps refusing a typ that is neither JWT nor id+jwt", async () => {
-			// The window widens the accepted set by exactly one legacy value —
-			// an at+jwt (or anything else) presented as an id_token_hint is
-			// still cross-type confusion and still refused.
+		it("refuses at+jwt, as it always did", async () => {
+			// The accepted set is back to exactly one value, and cross-type
+			// confusion is refused the same way it was through the window.
 			const app = buildApp({});
 			const token = await mintIdToken({}, "at+jwt");
 
@@ -346,7 +363,7 @@ describe("POST /oauth/logout", () => {
 			const app = buildApp();
 			// Mint a token without sid
 			const token = await new SignJWT({ sub: "u-1", aud: "client-1" })
-				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "id+jwt" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "JWT" })
 				.setIssuer("https://auth.example.com")
 				.setExpirationTime("1h")
 				.setIssuedAt()
