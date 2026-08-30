@@ -212,6 +212,45 @@ export const nameConstraints = (opts: {
 };
 
 /**
+ * A CRITICAL `keyUsage` that parses but carries no bits.
+ *
+ * RFC 5280 §6.1.2 covers an unrecognised critical extension **or** "a
+ * critical extension that contains information that it cannot process". This
+ * is the second half in its subtler form: everything parses, and the
+ * restriction simply reads as empty — which is indistinguishable from
+ * "unconstrained" unless the absent-vs-unreadable distinction is made
+ * explicitly.
+ */
+export const emptyCriticalKeyUsage = (): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.keyUsage,
+		critical: true,
+		// Well-formed DER, zero content octets. `parsedValue` is populated, so
+		// the "did it parse" check passes — and the bit string then yields no
+		// bits, which reads as "no restrictions" unless something says
+		// otherwise.
+		extnValue: new asn1js.BitString({
+			valueHex: new ArrayBuffer(0),
+			unusedBits: 0,
+		}).toBER(false),
+	});
+
+/**
+ * A CRITICAL `keyUsage` whose value is not valid DER at all, so pkijs leaves
+ * `parsedValue` undefined.
+ *
+ * The OID is recognised, so a check that only compares OIDs waves it through
+ * — the RFC 5280 §6.1.2 "cannot process" case for an extension whose *name*
+ * is known.
+ */
+export const unparseableCriticalKeyUsage = (): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.keyUsage,
+		critical: true,
+		extnValue: new Uint8Array([0xff, 0xff, 0xff]).buffer as ArrayBuffer,
+	});
+
+/**
  * An extension whose OID nothing recognises, marked CRITICAL.
  *
  * RFC 5280 §6.1.2: a validator that does not recognise a critical extension

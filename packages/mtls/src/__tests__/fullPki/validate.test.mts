@@ -30,8 +30,10 @@ import {
 	DEFAULT_SIGNATURE_ALGORITHMS,
 	SIGNATURE_ALGORITHM_OIDS,
 } from "#/fullPki/algorithms.mjs";
+import { FULL_PKI_DEFAULTS, resolveFullPkiTuning } from "#/fullPki/defaults.mjs";
 import type { FullPkiOptions, RevocationPolicy } from "#/fullPki/validate.mjs";
 import { createFullPkiValidator } from "#/fullPki/validate.mjs";
+import { mtlsConfigSchema } from "#/module.mjs";
 import type { Minted } from "./pkiFactory.mjs";
 import {
 	basicConstraints,
@@ -39,6 +41,7 @@ import {
 	criticalClientAuthEku,
 	crlDistributionPoints,
 	dnsSan,
+	emptyCriticalKeyUsage,
 	KEY_USAGE,
 	keyUsage,
 	mint,
@@ -49,6 +52,7 @@ import {
 	nameConstraints,
 	serverAuthEku,
 	unknownCriticalExtension,
+	unparseableCriticalKeyUsage,
 } from "./pkiFactory.mjs";
 
 const NOW = new Date("2027-01-01T00:00:00Z");
@@ -222,6 +226,41 @@ describe("full-pki path validation", () => {
 		expect(result).toEqual({ ok: true });
 	});
 
+	it("refuses a CRITICAL keyUsage whose value is not parseable DER", async () => {
+		// The other half of RFC 5280 §6.1.2: the rule covers an unrecognised
+		// critical extension *or* one "that contains information that it cannot
+		// process". The OID here is recognised, so a check that compares only
+		// OIDs accepts it — while nothing has actually read the restriction.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), clientAuthEku(), unparseableCriticalKeyUsage()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("unparseable critical extension");
+	});
+
+	it("refuses a CRITICAL keyUsage that parses but carries no bits", async () => {
+		// The subtler form: everything parses, and an empty bit string reads as
+		// "no restrictions" — the inverse of what a critical restriction means.
+		// Absence of the extension is unconstrained; an unreadable value is not.
+		const root = await mintCa("Root", 1);
+		const leaf = await mint({
+			cn: "client",
+			serial: 10,
+			issuer: root,
+			extensions: [basicConstraints(false), clientAuthEku(), emptyCriticalKeyUsage()],
+		});
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("unparseable leaf keyUsage");
+	});
+
 	it("refuses a critical extendedKeyUsage on a CA, which would mean EKU chaining", async () => {
 		// Recognised on the leaf, where `checkClientLeafProfile` acts on it.
 		// On a CA it asks for a constraint RFC 5280 does not define and this
@@ -364,6 +403,61 @@ describe("full-pki algorithm policy", () => {
 	it("has no name for SHA-1 at all, so no configuration can allow it", () => {
 		expect(Object.values(SIGNATURE_ALGORITHM_OIDS)).not.toContain("1.2.840.10045.4.1");
 		expect(Object.values(SIGNATURE_ALGORITHM_OIDS)).not.toContain("1.2.840.113549.1.1.5");
+	});
+});
+
+describe("full-pki tuning defaults", () => {
+	it("bounds the chain even when max-chain-depth never reaches the validator", async () => {
+		// A composition root that builds the mechanism by hand bypasses
+		// `mtlsConfigSchema` and its defaults. An absent depth arriving as
+		// `undefined` makes `presented > undefined` evaluate to `false`, so the
+		// bound silently stops existing — a fail-open with nothing raised at
+		// boot. `resolveFullPkiTuning` is what stops that.
+		const resolved = resolveFullPkiTuning(undefined);
+		expect(resolved.maxChainDepth).toBe(FULL_PKI_DEFAULTS.maxChainDepth);
+		expect(resolved.minRsaKeyBits).toBe(FULL_PKI_DEFAULTS.minRsaKeyBits);
+		expect(resolved.signatureAlgorithms.length).toBeGreaterThan(0);
+	});
+
+	it("keeps the values a caller did supply", async () => {
+		const resolved = resolveFullPkiTuning({
+			"max-chain-depth": 3,
+			"min-rsa-key-bits": 4096,
+			"signature-algorithms": ["ed25519"],
+		});
+		expect(resolved).toEqual({
+			maxChainDepth: 3,
+			minRsaKeyBits: 4096,
+			signatureAlgorithms: ["ed25519"],
+		});
+	});
+
+	it("treats an empty signature-algorithms list as unset rather than as 'permit nothing'", async () => {
+		// An empty allowlist would reject every certificate at every hop. That
+		// is a configuration mistake, not a policy, and failing every request
+		// with no boot signal is the worst way to report it.
+		const resolved = resolveFullPkiTuning({ "signature-algorithms": [] });
+		expect(resolved.signatureAlgorithms).toEqual(FULL_PKI_DEFAULTS.signatureAlgorithms);
+	});
+
+	it("the schema default and the code default are the same value", async () => {
+		// Two consumers, one source. Written twice they would eventually
+		// disagree, and only the path nobody tests by default would notice.
+		const parsed = mtlsConfigSchema.parse({
+			oauth: {
+				mtls: {
+					enabled: true,
+					mode: "full-pki",
+					"full-pki": { revocation: { mode: "disabled", "on-unavailable": "reject" } },
+				},
+			},
+		});
+		expect(parsed.oauth.mtls["full-pki"]?.["max-chain-depth"]).toBe(
+			FULL_PKI_DEFAULTS.maxChainDepth,
+		);
+		expect(parsed.oauth.mtls["full-pki"]?.["min-rsa-key-bits"]).toBe(
+			FULL_PKI_DEFAULTS.minRsaKeyBits,
+		);
 	});
 });
 

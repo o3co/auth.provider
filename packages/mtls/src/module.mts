@@ -47,6 +47,10 @@ import {
 	SIGNATURE_ALGORITHM_NAMES,
 	type SignatureAlgorithmName,
 } from "./fullPki/algorithms.mjs";
+import {
+	FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH,
+	FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS,
+} from "./fullPki/defaults.mjs";
 
 // ---------------------------------------------------------------------------
 // Config schema
@@ -115,14 +119,23 @@ export const mtlsConfigSchema = z.object({
 				"full-pki": z
 					.object({
 						/** Maximum certificates in a path, leaf and anchor included. */
-						"max-chain-depth": z.number().int().min(2).max(16).default(6),
+						"max-chain-depth": z
+							.number()
+							.int()
+							.min(2)
+							.max(16)
+							.default(FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH),
 						/** Signature algorithms permitted at every hop. */
 						"signature-algorithms": z
 							.array(z.enum(SIGNATURE_ALGORITHM_NAMES as unknown as [string, ...string[]]))
 							.readonly()
 							.default(DEFAULT_SIGNATURE_ALGORITHMS as unknown as string[]),
 						/** Minimum RSA modulus in bits. Ignored for EC and EdDSA keys. */
-						"min-rsa-key-bits": z.number().int().min(1024).default(2048),
+						"min-rsa-key-bits": z
+							.number()
+							.int()
+							.min(1024)
+							.default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
 						revocation: z
 							.object({
 								mode: z.enum(["crl", "disabled"]),
@@ -248,9 +261,9 @@ export const mtlsModule = defineModule<"config", "logger">({
 							mode: "self-signed" | "pki" | "full-pki";
 							"trusted-cas": readonly string[];
 							"full-pki"?: {
-								"max-chain-depth": number;
-								"signature-algorithms": readonly SignatureAlgorithmName[];
-								"min-rsa-key-bits": number;
+								"max-chain-depth"?: number;
+								"signature-algorithms"?: readonly SignatureAlgorithmName[];
+								"min-rsa-key-bits"?: number;
 								revocation?: {
 									mode: "crl" | "disabled";
 									"on-unavailable": "reject" | "allow";

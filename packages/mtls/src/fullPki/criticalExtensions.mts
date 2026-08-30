@@ -96,18 +96,40 @@ export const checkCriticalExtensions = (
 ): CriticalExtensionCheck => {
 	for (const [index, certificate] of path.entries()) {
 		const isLeaf = index === 0;
+		const where = isLeaf ? "leaf" : `CA at depth ${index}`;
 		for (const extension of certificate.extensions ?? []) {
 			if (!extension.critical) continue;
-			if (PROCESSED_ANYWHERE.has(extension.extnID)) continue;
-			if (isLeaf && PROCESSED_ON_LEAF_ONLY.has(extension.extnID)) continue;
-			return {
-				ok: false,
-				step: "unrecognised critical extension",
-				detail:
-					`${isLeaf ? "leaf" : `CA at depth ${index}`} carries critical extension ` +
-					`${extension.extnID}, which this validator does not process ` +
-					"(RFC 5280 §6.1.2 requires rejection rather than ignoring it)",
-			};
+
+			const recognised =
+				PROCESSED_ANYWHERE.has(extension.extnID) ||
+				(isLeaf && PROCESSED_ON_LEAF_ONLY.has(extension.extnID));
+			if (!recognised) {
+				return {
+					ok: false,
+					step: "unrecognised critical extension",
+					detail:
+						`${where} carries critical extension ${extension.extnID}, which this ` +
+						"validator does not process (RFC 5280 §6.1.2 requires rejection " +
+						"rather than ignoring it)",
+				};
+			}
+
+			// §6.1.2 has two halves, and the second is easy to lose: the rule
+			// covers an unrecognised critical extension "**or** a critical
+			// extension that contains information that it cannot process". A
+			// recognised OID whose value did not parse is exactly that case —
+			// knowing an extension's name is not the same as having read it, and
+			// treating a restriction we could not decode as satisfied is how an
+			// unparseable `keyUsage` becomes an unconstrained key.
+			if (extension.parsedValue === undefined || extension.parsedValue === null) {
+				return {
+					ok: false,
+					step: "unparseable critical extension",
+					detail:
+						`${where} carries critical extension ${extension.extnID} whose value ` +
+						"could not be parsed, so the restriction it states cannot be honoured",
+				};
+			}
 		}
 	}
 	return { ok: true };
@@ -132,9 +154,23 @@ export const checkLeafKeyUsage = (leaf: pkijs.Certificate): CriticalExtensionChe
 		| { valueBlock?: { valueHexView?: Uint8Array } }
 		| undefined;
 	const bytes = parsed?.valueBlock?.valueHexView;
-	if (bytes === undefined || bytes.length === 0) return { ok: true };
+	// A `keyUsage` that is present but yields no bits is not "unconstrained" —
+	// it is a restriction that could not be read. Absence is unconstrained
+	// (handled above); an unreadable value is a refusal, because the
+	// alternative is treating a stated restriction as satisfied because we
+	// could not decode it. `keyUsage` is usually CRITICAL, which makes this the
+	// §6.1.2 "cannot process" case as well.
+	if (bytes === undefined || bytes.length === 0) {
+		return {
+			ok: false,
+			step: "unparseable leaf keyUsage",
+			detail:
+				"the leaf carries a keyUsage extension whose bit string could not be read, " +
+				"so the restriction it states cannot be honoured",
+		};
+	}
 	const DIGITAL_SIGNATURE = 0x80;
-	if ((bytes[0] & DIGITAL_SIGNATURE) === DIGITAL_SIGNATURE) return { ok: true };
+	if (((bytes[0] ?? 0) & DIGITAL_SIGNATURE) === DIGITAL_SIGNATURE) return { ok: true };
 	return {
 		ok: false,
 		step: "leaf keyUsage excludes digitalSignature",

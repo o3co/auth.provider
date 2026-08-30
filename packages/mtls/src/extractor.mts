@@ -45,6 +45,7 @@ import {
 import type { Request } from "express";
 import { MtlsError } from "./errors.mjs";
 import type { SignatureAlgorithmName } from "./fullPki/algorithms.mjs";
+import { type FullPkiTuning, resolveFullPkiTuning } from "./fullPki/defaults.mjs";
 import { createFullPkiValidator, type FullPkiValidator } from "./fullPki/validate.mjs";
 import { type CertHeaderDialect, parseEnvoyXfccHeader, parsePlainPemHeader } from "./headers.mjs";
 import { pemToDer } from "./pem.mjs";
@@ -86,9 +87,9 @@ export interface MtlsMechanismOptions {
 	 * caught at construction below.
 	 */
 	readonly fullPki?: {
-		readonly "max-chain-depth": number;
-		readonly "signature-algorithms": readonly SignatureAlgorithmName[];
-		readonly "min-rsa-key-bits": number;
+		readonly "max-chain-depth"?: number;
+		readonly "signature-algorithms"?: readonly SignatureAlgorithmName[];
+		readonly "min-rsa-key-bits"?: number;
 		readonly revocation?: {
 			readonly mode: "crl" | "disabled";
 			readonly "on-unavailable": "reject" | "allow";
@@ -191,7 +192,13 @@ const peerAddressOf = (req: Request): string | undefined =>
 const buildFullPkiValidator = (
 	options: MtlsMechanismOptions,
 	trustedCas: readonly X509Certificate[],
+	tuning: FullPkiTuning,
 ): FullPkiValidator => {
+	// `tuning` is resolved by the caller rather than read from `cfg` here, so
+	// the depth the peer-chain walk uses and the depth the validator enforces
+	// cannot come from two different reads of the same optional field. Only
+	// the revocation block is taken straight from config, because it has no
+	// defaults to resolve — its absence is a refusal, not a fallback.
 	const cfg = options.fullPki;
 	if (cfg?.revocation === undefined) {
 		throw new Error(
@@ -204,10 +211,10 @@ const buildFullPkiValidator = (
 	return createFullPkiValidator({
 		trustedCas,
 		algorithms: {
-			signatureAlgorithms: cfg["signature-algorithms"],
-			minRsaKeyBits: cfg["min-rsa-key-bits"],
+			signatureAlgorithms: tuning.signatureAlgorithms,
+			minRsaKeyBits: tuning.minRsaKeyBits,
 		},
-		maxChainDepth: cfg["max-chain-depth"],
+		maxChainDepth: tuning.maxChainDepth,
 		revocation:
 			revocation.mode === "disabled"
 				? { mode: "disabled" }
@@ -301,8 +308,19 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 	// Built once: the CRL cache lives in the validator, so a per-request
 	// validator would re-fetch every distribution point on every token request
 	// — turning revocation checking into an amplifier pointed at the CA.
+	// Resolved once, and used by BOTH the validator and the TLS peer-chain
+	// walk below. They must agree: the walk truncates at its depth, so a walk
+	// bound that was larger than the validator's would make the validator's
+	// refusal unreachable, and one that was smaller would silently drop the
+	// anchor and report "no path to trust anchor" for a chain that was merely
+	// long. A second hardcoded copy of the default is how that divergence
+	// starts.
+	const fullPkiTuning = mode === "full-pki" ? resolveFullPkiTuning(options.fullPki) : null;
 	const fullPkiValidator: FullPkiValidator | null =
-		mode === "full-pki" ? buildFullPkiValidator(options, trustedCaCerts) : null;
+		mode === "full-pki"
+			? // biome-ignore lint/style/noNonNullAssertion: set together with the mode above
+				buildFullPkiValidator(options, trustedCaCerts, fullPkiTuning!)
+			: null;
 
 	return {
 		kind: "mtls",
@@ -384,7 +402,13 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 					return null;
 				}
 				if (wantsChain) {
-					const chain = peerChainFrom(peer, options.fullPki?.["max-chain-depth"] ?? 6);
+					// One more than the validator's bound, deliberately: the walk
+					// must be able to *present* an over-long chain so the validator
+					// is the thing that refuses it, with a message that says so.
+					// Truncating at exactly the bound would turn "chain too long"
+					// into "no path to trust anchor", which sends the operator
+					// looking at their trust anchors for a depth problem.
+					const chain = peerChainFrom(peer, (fullPkiTuning?.maxChainDepth ?? 6) + 1);
 					// `peerChainFrom` returns null only for the empty-raw case the
 					// branch above already answered, so this is the same absence.
 					if (chain === null) return null;
