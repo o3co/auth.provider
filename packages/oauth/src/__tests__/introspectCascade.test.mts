@@ -487,7 +487,24 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
  * this comment first.
  */
 describe("/introspect carries token metadata only (#318)", () => {
-	/** Every member RFC 7662 §2.2 defines, plus the `cnf` mirror this AS adds. */
+	/**
+	 * Exactly what this AS answers with — an RFC 7662 §2.2 **subset plus two
+	 * extensions**, not the §2.2 set:
+	 *
+	 * - `username` and `nbf` are §2.2 members deliberately omitted (this AS
+	 *   issues `at+jwt` without `nbf` and does not persist a human-readable
+	 *   username — see `IntrospectResponse`).
+	 * - `azp` is not a §2.2 member; it mirrors RFC 9068's authorized-party
+	 *   claim.
+	 * - `cnf` is the confirmation mirror the token-binding work added.
+	 *
+	 * §2.2 permits both directions — every member is optional, and
+	 * "implementations MAY extend this structure with their own
+	 * service-specific response names". Naming the set precisely matters here
+	 * because the point of the guard is that it is a closed list: calling it
+	 * "the RFC set" would invite adding a §2.2 member (`username`) that this AS
+	 * has decided not to answer.
+	 */
 	const ALLOWED = new Set([
 		"active",
 		"exp",
@@ -503,7 +520,7 @@ describe("/introspect carries token metadata only (#318)", () => {
 		"cnf",
 	]);
 
-	it("returns no member outside the RFC 7662 §2.2 set", async () => {
+	it("returns no member outside the closed set this AS answers", async () => {
 		const token = await makeAccessToken({ client_id: "client1", jti: "jti-318" });
 		const app = await buildApp();
 		const res = await introspect(app, token);

@@ -76,6 +76,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Introspection carries token metadata only, and that is now an invariant rather than a habit (`@o3co/auth-provider-oauth`) (#318).** #297 asked for `email_verified` in the id_token, `/userinfo` and introspection. The first two ship; the third was split out because it is a design decision, not a gap — and the decision is **no**.
+
+  RFC 7662 §2.2 defines the response as meta-information about the *token*, and §5 is explicit about the cost of going further: *"Omitting privacy-sensitive information from an introspection response is the simplest way of minimizing privacy issues"*, alongside a `MUST` to prevent disclosure of user identifiers to unintended parties. §2.2 carries the same instinct for scopes — an AS "MAY limit which scopes from a given token are returned for each protected resource to prevent a protected resource from learning more about the larger network than necessary."
+
+  Both ways to answer differently cost something and neither buys what `/userinfo` does not already give a resource server holding the token: minting user claims into every access token spreads PII into a credential that transits more places than an id_token and goes stale the moment the Store flips it, while reading the session store from the introspect handler turns a session-store outage into an introspection outage on a hot path resource servers call per request.
+
+  No behaviour change. Four tests pin it: no member outside the closed set this AS answers — an RFC 7662 §2.2 subset (`username` and `nbf` are deliberately omitted) plus `azp` and the `cnf` mirror, both of which §2.2 permits as service-specific extensions — then no `email` / `email_verified`, no echo of user claims a token happens to carry, and nothing beyond `active: false` on the inactive path. A future change that makes introspection a second `/userinfo` fails there and has to argue with the reasoning recorded beside it.
+
 - **The in-memory access-token denylist no longer grows without bound (`@o3co/auth-provider-core`) (#293 item 6).** GC was lazy on `has` alone: an entry was reclaimed only if someone presented that exact `jti` again *after* it expired. For a **revoked** token that is precisely the request that stops coming, so nothing was ever reclaimed and every revocation became a permanent `Map` entry on a long-running single-process deployment.
 
   The sibling in-memory stores are bounded by what they key on — the rate limiter caps buckets and evicts, the subject stores are keyed by subject, so both are bounded by population. This one is keyed by `jti`, where nothing bounds it but time, so the sweep has to be its own step rather than a side effect of a lucky read.
