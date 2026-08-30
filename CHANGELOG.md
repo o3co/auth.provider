@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **The toolchain builds on TypeScript 6 (#60).** A devDependency bump with no runtime change, but two things TS 6 tightened had to be fixed rather than worked around, and both are the kind that only surface at the compiler upgrade:
+
+  **An ambient module augmentation now requires the module to be imported by the augmenting file.** `packages/oauth`'s `declare module "express-session"` resolved under 5.9 through node resolution alone; under 6 it reports `TS2664: Invalid module name in augmentation` and every `req.session` access downstream degrades to `Property 'session' does not exist on type 'Request'` — eleven errors from one unresolved specifier. Fixed with `import type {} from "express-session"` at the augmentation site plus the `express-session` devDependency the package was augmenting without declaring.
+
+  **`create-app` needs `"types": ["node"]` stated.** It declared `@types/node` and never named it, which 5.9's automatic `@types` inclusion covered; the thirty-two `Cannot find name 'process' / 'console' / 'node:fs'` errors are all that one omission.
+
+  No source behaviour changed and no test changed. Published `.d.ts` files are now emitted by TS 6 — consumers pinned to a TypeScript old enough to reject its output should upgrade alongside.
+
 ### Security
 
 - **BREAKING: `POST /session/login` holds `redirect_to` to an exact-match allowlist, and an absent allowlist is the empty allowlist (`@o3co/auth-provider-core`, `@o3co/auth-provider-session`, standalone template).** #278 replaced "any absolute http(s) URL, narrowed to the cookie domain **if one is configured**" with a fail-closed allowlist at the federation entry point. The login route kept the old rule verbatim: `session.domain` is nullable and defaults to `null`, so the shipped default accepted every absolute http(s) URL on the internet and stored it under `req.session.redirectTo` — the same vulnerability one route over, and the one this release's own CHANGELOG describes as *"an unset `sessionDomain` accepted every http(s) URL on earth"* (#405).

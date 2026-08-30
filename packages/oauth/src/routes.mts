@@ -48,6 +48,14 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+// Session data type augmentation
+//
+// D-1 (v0.5.1): `code_client_id`, `code_redirect_uri`, `granted_scopes` were
+// removed because /authorize no longer writes identity binding into the
+// session — `Code.client_id` and `Code.redirect_uri` carry it instead. `code`
+// is retained because the /token grant clears it from in-flight pre-v0.5.1
+// sessions (see authorization.mts `sessionMutation.clear`).
+import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
@@ -62,13 +70,6 @@ import {
 	isCompoundConfirmation,
 } from "./types/introspect.mjs";
 
-// Session data type augmentation
-//
-// D-1 (v0.5.1): `code_client_id`, `code_redirect_uri`, `granted_scopes` were
-// removed because /authorize no longer writes identity binding into the
-// session — `Code.client_id` and `Code.redirect_uri` carry it instead. `code`
-// is retained because the /token grant clears it from in-flight pre-v0.5.1
-// sessions (see authorization.mts `sessionMutation.clear`).
 declare module "express-session" {
 	interface SessionData {
 		client?: Record<string, unknown>;
