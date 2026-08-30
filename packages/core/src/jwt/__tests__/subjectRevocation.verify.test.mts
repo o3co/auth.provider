@@ -16,7 +16,7 @@
 
 import { SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
-import { verifyJwt } from "#/jwt/verify.mjs";
+import { isRevocationUnavailable, JwtVerificationError, verifyJwt } from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 import { createInMemorySubjectRevocation } from "#/user-sessions/memory/subjectRevocation.mjs";
 import type { SubjectRevocation } from "#/user-sessions/types.mjs";
@@ -36,7 +36,11 @@ const mint = async (
 	return builder.sign(new TextEncoder().encode("test-secret-at-least-32-chars!!"));
 };
 
-const verify = (token: string, subjectRevocation?: SubjectRevocation) =>
+const verify = (
+	token: string,
+	subjectRevocation?: SubjectRevocation,
+	opts: { subjectRevocationSkewMs?: number } = {},
+) =>
 	verifyJwt(token, keyStore, {
 		type: "access_token",
 		expectedIssuer: ISSUER,
@@ -44,7 +48,19 @@ const verify = (token: string, subjectRevocation?: SubjectRevocation) =>
 		// plays the role of a token-accepting surface, and those always
 		// forward what the composition wired (#367).
 		revocation: { subjectRevocation },
+		...(opts.subjectRevocationSkewMs === undefined
+			? {}
+			: { subjectRevocationSkewMs: opts.subjectRevocationSkewMs }),
 	});
+
+/** A store whose consult always fails — a transient outage, not a revocation. */
+const outageStore = (): SubjectRevocation => ({
+	kind: "outage",
+	async revokeBefore() {},
+	async revokedBefore() {
+		throw new Error("ECONNREFUSED");
+	},
+});
 
 describe("verifyJwt — subject revocation watermark (#296)", () => {
 	it("accepts a token when the subject has no watermark", async () => {
@@ -90,7 +106,9 @@ describe("verifyJwt — subject revocation watermark (#296)", () => {
 
 	it("fails closed when the store throws", async () => {
 		// An unreachable backend must not read as "not revoked" — the same
-		// stance the jti denylist takes.
+		// stance the jti denylist takes. Since #408 the *reason* separates the
+		// outage from a finding (see the outage suite below); the refusal
+		// itself is unchanged and is what this pins.
 		const token = await mint({ sub: "u1" });
 		const broken: SubjectRevocation = {
 			kind: "broken",
@@ -99,7 +117,9 @@ describe("verifyJwt — subject revocation watermark (#296)", () => {
 				throw new Error("redis down");
 			},
 		};
-		await expect(verify(token, broken)).rejects.toMatchObject({ reason: "revoked" });
+		await expect(verify(token, broken)).rejects.toMatchObject({
+			reason: "revocation_unavailable",
+		});
 	});
 
 	it("is inert when no store is wired", async () => {
@@ -137,5 +157,178 @@ describe("verifyJwt — the watermark needs both `sub` and `iat` to mean anythin
 		// compare against — an unrevoked subject sees no behavior change.
 		const token = await mint({ sub: "u1", omitIat: true });
 		await expect(verify(token, createInMemorySubjectRevocation())).resolves.toBeDefined();
+	});
+});
+
+/*
+ * #408 — a store outage is not a revocation.
+ *
+ * Failing closed on an unreachable store is right, but reporting it as
+ * `reason: "revoked"` makes it indistinguishable from a real one. The refresh
+ * grant maps every verification error to `400 invalid_grant`, and per RFC 6749
+ * §5.2 a client discards its refresh token on that — so a transient outage did
+ * not degrade the service, it force-logged-out every user who refreshed during
+ * it. A distinct reason is what lets a caller answer `503` instead.
+ *
+ * Not reachable before #321, which is why it shipped: the only adapter was
+ * in-process and could not fail. It became live the moment a Redis one existed.
+ */
+describe("verifyJwt — subject revocation store outage (#408)", () => {
+	it("reports a consult failure as revocation_unavailable, not revoked", async () => {
+		const token = await mint({ sub: "u1" });
+		await expect(verify(token, outageStore())).rejects.toMatchObject({
+			reason: "revocation_unavailable",
+		});
+	});
+
+	it("still fails closed — the token is refused either way", async () => {
+		const token = await mint({ sub: "u1" });
+		await expect(verify(token, outageStore())).rejects.toThrow();
+	});
+
+	it("names the store in the message so an operator can tell which one is down", async () => {
+		const token = await mint({ sub: "u1" });
+		await expect(verify(token, outageStore())).rejects.toMatchObject({
+			message: expect.stringContaining("subject revocation"),
+		});
+	});
+
+	it("keeps a genuine watermark hit reported as revoked", async () => {
+		// The two must stay distinguishable in both directions, or the caller's
+		// 503 branch would start swallowing real revocations.
+		const nowSec = Math.floor(Date.now() / 1000);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 60 });
+		const store = createInMemorySubjectRevocation();
+		await store.revokeBefore("u1", new Date(nowSec * 1000), new Date(Date.now() + 300_000));
+		await expect(verify(token, store)).rejects.toMatchObject({ reason: "revoked" });
+	});
+});
+
+/*
+ * #408 (related) — cross-replica clock skew around the watermark.
+ *
+ * The comparison is `iat <= floor(watermark / 1000)`: inclusive, but only to
+ * the same second. A minting replica whose clock runs a second or more ahead
+ * of the replica that wrote the watermark stamps `iat` past it, so tokens
+ * minted *just before* the credential change survive it — the exact case the
+ * inclusive comparison exists to catch, one second further out.
+ *
+ * The fix is not `clockSkewMs`. That defaults to five minutes (RFC 8725 §3.10,
+ * for `exp`/`nbf`), and applying it here would refuse every token minted in
+ * the five minutes after a reset — including the one from the re-login the
+ * reset sends the user to. The allowance is its own small value.
+ */
+describe("verifyJwt — watermark clock skew (#408)", () => {
+	const withWatermark = async (watermarkSec: number) => {
+		const store = createInMemorySubjectRevocation();
+		await store.revokeBefore("u1", new Date(watermarkSec * 1000), new Date(Date.now() + 300_000));
+		return store;
+	};
+
+	it("refuses a token one second past the watermark by default", async () => {
+		// The finding: a replica one second ahead used to mint survivors.
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 9 });
+		await expect(verify(token, store)).rejects.toMatchObject({ reason: "revoked" });
+	});
+
+	it("accepts a token past the default allowance", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 8 });
+		await expect(verify(token, store)).resolves.toBeDefined();
+	});
+
+	it("keeps the same-second inclusive comparison", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 10 });
+		await expect(verify(token, store)).rejects.toMatchObject({ reason: "revoked" });
+	});
+
+	it("restores the exact comparison at subjectRevocationSkewMs: 0", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 9 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: 0 })).resolves.toBeDefined();
+	});
+
+	it("does not borrow the five-minute clockSkewMs", async () => {
+		// The failure this guards: a re-login right after the reset is refused
+		// for the whole skew window, which is why the allowance is its own knob.
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 5 });
+		await expect(verify(token, store)).resolves.toBeDefined();
+	});
+
+	it("rounds a sub-second allowance up, never down", async () => {
+		// Truncating would make the guard weaker than what the operator asked
+		// for — 1500ms behaving as 1000ms — which is the wrong direction for an
+		// allowance that exists to catch a replica running ahead.
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 8 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: 1_500 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+
+	it("refuses to narrow the comparison below the watermark itself", async () => {
+		// A negative value would move the boundary *earlier* than the watermark
+		// and let pre-revocation tokens through — the opposite of the option's
+		// purpose, so it is clamped rather than trusted.
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 10 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: -60_000 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+
+	it("widens with an explicit allowance", async () => {
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 8 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: 3_000 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+});
+
+/*
+ * The predicate callers branch on. Exported rather than left as an inline
+ * `instanceof` + `reason` pair at each call site, because the answer changes
+ * what a caller says on the wire — `503` versus the `400 invalid_grant` that
+ * tells a client to discard its refresh token — and a wrong answer is
+ * invisible in a happy-path test.
+ */
+describe("isRevocationUnavailable (#408)", () => {
+	it("is true for the reason it names", () => {
+		expect(
+			isRevocationUnavailable(new JwtVerificationError("revocation_unavailable", "store down")),
+		).toBe(true);
+	});
+
+	it("is false for a genuine revocation", () => {
+		// The distinction the 503 branch rests on: if this were true, the
+		// refresh grant would answer 503 to a real credential change and the
+		// client would keep its revoked token.
+		expect(isRevocationUnavailable(new JwtVerificationError("revoked", "watermark"))).toBe(false);
+	});
+
+	it("is false for every other verification failure", () => {
+		for (const reason of ["signature", "expired", "typ", "azp", "kid_unknown"] as const) {
+			expect(isRevocationUnavailable(new JwtVerificationError(reason, "x"))).toBe(false);
+		}
+	});
+
+	it("is false for something that is not a verification error at all", () => {
+		expect(isRevocationUnavailable(new Error("revocation_unavailable"))).toBe(false);
+		expect(isRevocationUnavailable("revocation_unavailable")).toBe(false);
+		expect(isRevocationUnavailable({ reason: "revocation_unavailable" })).toBe(false);
+		expect(isRevocationUnavailable(undefined)).toBe(false);
+		expect(isRevocationUnavailable(null)).toBe(false);
 	});
 });

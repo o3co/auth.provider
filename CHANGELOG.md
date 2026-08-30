@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A subject-revocation store outage answers `503`, not a forced logout for everyone refreshing (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`).** `verifyJwt` fails closed when `subjectRevocation.revokedBefore` throws — an unreachable store must never read as "not revoked" — but it reported that as `reason: "revoked"`, and the refresh grant mapped every verification error to `400 invalid_grant`. Per RFC 6749 §5.2 a client discards its refresh token on `invalid_grant`, so a transient store outage did not degrade the service: it **force-logged-out every user who refreshed during it**, while the same handler already answered family-store outages with `503 temporarily_unavailable` a few hundred lines below (#408).
+
+  New `JwtVerificationReason` `"revocation_unavailable"`, and `isRevocationUnavailable` to test for it. The refresh grant answers `503 temporarily_unavailable` on that reason alone; every other verification failure — bad signature, wrong `typ`, expired, genuinely revoked — is still `invalid_grant`. Surfaces whose refusal does not cost the caller a credential (introspection answering `active: false`, a protected resource answering `401`) keep treating it as a refusal, deliberately: the token is refused either way, and only the refresh grant's answer told the client to throw the credential away.
+
+  Not reachable before #321 — the only `SubjectRevocation` adapter was in-process and could not fail. It went live the moment a Redis one existed, which is why it is fixed now.
+
+- **The watermark comparison allows a second of cross-replica clock skew (`@o3co/auth-provider-core`).** `iat <= floor(watermark / 1000)` is inclusive, but only to the same second. A minting replica whose clock runs a second or more ahead of the replica that wrote the watermark stamps `iat` past the boundary, so tokens minted *just before* a credential change survive it — the exact case the inclusive comparison exists to catch, one second further out (#408).
+
+  New `JwtVerifyOptions.subjectRevocationSkewMs`, default `1_000`. Deliberately **not** `clockSkewMs`: that is five minutes, sized for `exp`/`nbf` per RFC 8725 §3.10, and applying it here would refuse every token minted in the five minutes after a reset — including the one from the re-login the reset sends the user to. One second is the smallest value that covers a whole-second-ahead replica, since the comparison is already second-truncated, and every additional second is a second of post-reset logins refused. The cost is one-sided and bounded: a token minted within the allowance *after* a reset is refused, costing its holder one retry. Set `0` for the previous exact comparison. The value is rounded **up** to whole seconds — the comparison is in seconds, and truncating would make the guard weaker than what was configured — and a negative value is clamped to `0`, which would otherwise move the boundary earlier than the watermark itself.
+
 ### Added
 
 - **Redis adapters for `SubjectSessionIndex` and `SubjectRevocation` — subject-level revocation now works on a multi-replica deployment (`@o3co/auth-provider-redis`).** #296 landed `revokeAllForSubject` with in-memory adapters only, bundled into `memorySessionStoresModule`. A deployment on `redisSessionStoresModule` filled **neither** slot, so a password reset answered `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked nothing — visible rather than silent, deliberately, but nothing revoked all the same, and on exactly the deployments that need it since the in-memory pair is single-process only (#321).

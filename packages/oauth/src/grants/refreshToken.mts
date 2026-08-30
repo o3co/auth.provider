@@ -22,6 +22,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	isRevocationUnavailable,
 	matchConfirmation,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -98,7 +99,30 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				});
 				tokenPayload = verified.payload;
 				typ = verified.header.typ;
-			} catch {
+			} catch (err) {
+				// #408: a revocation store that could not be consulted is an
+				// outage, not a finding. The verifier fails closed either way —
+				// an unreachable store must never read as "not revoked" — but
+				// answering `invalid_grant` here told the client to discard its
+				// refresh token (RFC 6749 §5.2), so a transient Redis blip
+				// force-logged-out every user who refreshed during it. This
+				// handler already answers a family-store outage with `503`
+				// below; the same event class gets the same answer.
+				//
+				// Only this reason is remapped. Every other verification
+				// failure — a bad signature, the wrong `typ`, an expired or
+				// genuinely revoked token — is still the client's problem and
+				// still `invalid_grant`.
+				if (isRevocationUnavailable(err)) {
+					logger?.error({ err }, "refresh_token_revocation_store_unavailable");
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "revocation store unavailable",
+						},
+					};
+				}
 				return {
 					result: {
 						status: 400,
