@@ -298,6 +298,97 @@ export interface SessionSidSortedSetClient {
 	zRem(key: string, member: string): Promise<number>;
 }
 
+// --- Subject-keyed clients (#321) ------------------------------------------
+
+/**
+ * Backing client for the `SubjectSessionIndex` adapter (#321).
+ *
+ * A **new** interface rather than a widening of {@link SessionSidSortedSetClient},
+ * for two reasons. Widening would be a breaking change for every custom
+ * implementation of that interface — the call #269 already faced — and it would
+ * push score-range operations onto the sid-keyed adapters, which have no use
+ * for them: every member of a sid-keyed set shares the one session's expiry, so
+ * a single key-level TTL retires the whole set at once and `zRange` by rank is
+ * all they ever need.
+ *
+ * A subject-keyed set cannot make that assumption. One subject's sessions
+ * expire on their own clocks, so "the live ones" is a score range and pruning
+ * is a score range — which is exactly why `createMemorySidSortedSet` was not
+ * reused on the in-process side either.
+ *
+ * The score is the member's **expiry in epoch milliseconds**, so
+ * `zRangeByScore(key, now, "+inf")` is precisely "sessions still live" and
+ * `zRemRangeByScore(key, "-inf", now)` is precisely the GC sweep.
+ */
+export interface SubjectSessionIndexClient {
+	multi(): SubjectSessionIndexMultiClient;
+	zAdd(key: string, entry: { score: number; value: string }): Promise<number>;
+	/** Members whose score is in `[min, max]`, ascending. */
+	zRangeByScore(key: string, min: number | "-inf", max: number | "+inf"): Promise<string[]>;
+	/** Remove members whose score is in `[min, max]` — the GC sweep. */
+	zRemRangeByScore(key: string, min: number | "-inf", max: number | "+inf"): Promise<number>;
+	zRem(key: string, member: string): Promise<number>;
+	/**
+	 * Remove the key, reclaiming its memory on a background thread (Redis
+	 * `UNLINK`).
+	 *
+	 * `UNLINK` and not `DEL` for the reason #291 established: this key holds
+	 * every live session of one subject, and `removeBySubject` is called on the
+	 * credential-change path, on the connection every other adapter in this
+	 * package shares. `DEL` frees every member inline — a latency spike during
+	 * a password reset, paid by every other caller on the socket.
+	 */
+	unlink(key: string): Promise<number>;
+}
+
+/**
+ * Pipeline half of {@link SubjectSessionIndexClient}, carrying the **write**
+ * path only.
+ *
+ * A member and the key expiry that bounds it are queued together, because a
+ * mutation whose expiry silently failed is a key stranded with no TTL — the
+ * shape #269 paid for. Reads are not pipelined: `exec` hands back the driver's
+ * raw reply, and having the adapter reach into it would put one driver's
+ * `[error, result]` tuple shape into code that is supposed to be
+ * vendor-agnostic.
+ */
+export interface SubjectSessionIndexMultiClient {
+	zAdd(key: string, entry: { score: number; value: string }): SubjectSessionIndexMultiClient;
+	/** See {@link SessionSidSortedSetMultiClient.pExpireGT} for the NX+GT semantics. */
+	pExpireGT(key: string, msTimestamp: number): SubjectSessionIndexMultiClient;
+	/** See {@link SessionSidSortedSetMultiClient.exec} — MUST reject on a queued failure. */
+	exec(): Promise<unknown[] | null>;
+}
+
+/**
+ * Backing client for the `SubjectRevocation` adapter (#321).
+ *
+ * `setWatermarkMonotonic` is **not** `set(key, value, "PX", ttl)`, even though
+ * the value is one string and the shape looks like it should be. The watermark
+ * is monotonic: two credential changes in quick succession, the second computed
+ * on a replica whose clock is behind, must not move the line backwards and
+ * resurrect every token the first one killed. A last-writer-wins `SET` does
+ * exactly that, and a client-side read-compare-write loses the same race one
+ * round-trip later. The comparison therefore happens **on the server**, in one
+ * command, and the same guard covers the entry's own expiry — shortening an
+ * in-force watermark would retire the line while tokens it must refuse are
+ * still presentable.
+ */
+export interface SubjectRevocationClient {
+	get(key: string): Promise<string | null>;
+	/**
+	 * Atomically store `max(existing, beforeMs)` at `key` with expiry
+	 * `max(existing, expiresAtMs)`, creating the key when absent.
+	 *
+	 * An **expired** key is absent, so the guard does not resurrect a lapsed
+	 * watermark's larger value — a fresh reset after the previous watermark
+	 * timed out starts from the new value.
+	 *
+	 * Resolves with the watermark in force after the write.
+	 */
+	setWatermarkMonotonic(key: string, beforeMs: number, expiresAtMs: number): Promise<number>;
+}
+
 // --- FederationTokenStoreClient --------------------------------------------
 
 /**
@@ -484,6 +575,8 @@ declare module "@o3co/auth-provider-core" {
 		readonly sessionRPRegistryClient?: SessionRPRegistryClient;
 		readonly sessionFamilyIndexClient?: SessionSidSortedSetClient;
 		readonly sessionFederationIndexClient?: SessionSidSortedSetClient;
+		readonly subjectSessionIndexClient?: SubjectSessionIndexClient;
+		readonly subjectRevocationClient?: SubjectRevocationClient;
 		readonly federationTokenStoreClient?: FederationTokenStoreClient;
 		readonly rateLimiterClient?: RateLimiterClient;
 		readonly codeRepositoryClient?: CodeRepositoryClient;

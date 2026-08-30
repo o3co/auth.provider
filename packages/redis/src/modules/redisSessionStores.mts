@@ -19,6 +19,8 @@ import { z } from "zod";
 import { createRedisSessionFamilyIndex } from "../sessionFamilyIndex.mjs";
 import { createRedisSessionFederationIndex } from "../sessionFederationIndex.mjs";
 import { createRedisSessionRPRegistry } from "../sessionRPRegistry.mjs";
+import { createRedisSubjectRevocation } from "../subjectRevocation.mjs";
+import { createRedisSubjectSessionIndex } from "../subjectSessionIndex.mjs";
 import { createRedisUserSessionStore } from "../userSessionStore.mjs";
 
 const configSchema = z.object({
@@ -30,16 +32,29 @@ const configSchema = z.object({
 });
 
 /**
- * Bundled module providing all 4 redis-backed user-session stores against
+ * Bundled module providing all 6 redis-backed user-session stores against
  * the per-purpose ComponentMap slots `userSessionStoreClient`,
- * `sessionRPRegistryClient`, `sessionFamilyIndexClient`, and
- * `sessionFederationIndexClient` (declared in `@o3co/auth-provider-core`'s
+ * `sessionRPRegistryClient`, `sessionFamilyIndexClient`,
+ * `sessionFederationIndexClient`, `subjectSessionIndexClient` and
+ * `subjectRevocationClient` (declared in `@o3co/auth-provider-core`'s
  * `user-sessions/types.mts`). Per A4 §8.1 + §10.1.
  *
+ * The last two arrived with #321. #296 shipped `revokeAllForSubject` with
+ * in-memory adapters only, so a deployment on this module filled neither
+ * subject slot: `verifyJwt` skipped the watermark check, the #376
+ * refresh-redemption gate was inert, and a password reset answered
+ * `unavailable: ["subjectRevocation", "subjectSessionIndex"]` and revoked
+ * nothing — on exactly the deployments that need it, since the in-memory
+ * pair is single-process only.
+ *
  * `keyPrefix` is the OUTER namespace; the bundled module appends fixed
- * subprefixes per store (`us:` / `rp:` / `fi:` / `fed:`). Consumers that
- * need to override individual subprefixes use the per-adapter constructors
- * with custom keyPrefix values; bundled module enforces a consistent scheme.
+ * subprefixes per store (`us:` / `rp:` / `fi:` / `fed:` / `sub:` / `rev:`).
+ * The two subject stores get their own subprefixes rather than sharing one
+ * with the sid-keyed stores: those are keyed by session id and these by
+ * subject, and one namespace holding both would let a sid collide with a
+ * subject. Consumers that need to override individual subprefixes use the
+ * per-adapter constructors with custom keyPrefix values; the bundled module
+ * enforces a consistent scheme.
  *
  * Recurring issue class 2: `requires` includes `"config"` because
  * `deps.config` is read in `provides`.
@@ -51,6 +66,8 @@ export const redisSessionStoresModule = defineModule({
 		"sessionRPRegistryClient",
 		"sessionFamilyIndexClient",
 		"sessionFederationIndexClient",
+		"subjectSessionIndexClient",
+		"subjectRevocationClient",
 		"config",
 	] as const,
 	configSchema,
@@ -85,6 +102,22 @@ export const redisSessionStoresModule = defineModule({
 			return createRedisSessionFederationIndex({
 				client: deps.sessionFederationIndexClient,
 				keyPrefix: `${cfg.keyPrefix}fed:`,
+			});
+		},
+		subjectSessionIndex: (deps) => {
+			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
+				.redisSessionStores;
+			return createRedisSubjectSessionIndex({
+				client: deps.subjectSessionIndexClient,
+				keyPrefix: `${cfg.keyPrefix}sub:`,
+			});
+		},
+		subjectRevocation: (deps) => {
+			const cfg = (deps.config as unknown as { redisSessionStores: { keyPrefix: string } })
+				.redisSessionStores;
+			return createRedisSubjectRevocation({
+				client: deps.subjectRevocationClient,
+				keyPrefix: `${cfg.keyPrefix}rev:`,
 			});
 		},
 	},

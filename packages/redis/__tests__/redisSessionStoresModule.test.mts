@@ -45,24 +45,31 @@ const minBoot = (extra: Record<string, unknown>) =>
 	}) as never;
 
 describe("redisSessionStoresModule manifest", () => {
-	it("declares requires: 4 per-purpose client slots + config", () => {
+	it("declares requires: 6 per-purpose client slots + config", () => {
+		// The two subject slots arrived with #321. They are `requires`, not
+		// optional: a deployment on this module that filled neither got
+		// `revokeAllForSubject` answering `unavailable` and revoking nothing.
 		expect(new Set(redisSessionStoresModule.requires)).toEqual(
 			new Set([
 				"userSessionStoreClient",
 				"sessionRPRegistryClient",
 				"sessionFamilyIndexClient",
 				"sessionFederationIndexClient",
+				"subjectSessionIndexClient",
+				"subjectRevocationClient",
 				"config",
 			]),
 		);
 	});
 
-	it("provides 4 components", () => {
+	it("provides 6 components", () => {
 		const provides = redisSessionStoresModule.provides as Record<string, unknown>;
 		expect(typeof provides.userSessionStore).toBe("function");
 		expect(typeof provides.sessionRPRegistry).toBe("function");
 		expect(typeof provides.sessionFamilyIndex).toBe("function");
 		expect(typeof provides.sessionFederationIndex).toBe("function");
+		expect(typeof provides.subjectSessionIndex).toBe("function");
+		expect(typeof provides.subjectRevocation).toBe("function");
 	});
 
 	it("configSchema parses defaults under redisSessionStores key", () => {
@@ -74,7 +81,7 @@ describe("redisSessionStoresModule manifest", () => {
 });
 
 describe("redisSessionStoresModule wiring", () => {
-	it("createApp wires all 4 components against per-purpose client slots", async () => {
+	it("createApp wires all 6 components against per-purpose client slots", async () => {
 		// Activator pattern (no `activate` field on ModuleSpec): use contributes.routes
 		// to force closure root inclusion, then read from handle.components after boot.
 		const activator = defineModule({
@@ -84,6 +91,8 @@ describe("redisSessionStoresModule wiring", () => {
 				"sessionRPRegistry",
 				"sessionFamilyIndex",
 				"sessionFederationIndex",
+				"subjectSessionIndex",
+				"subjectRevocation",
 			] as never,
 			contributes: {
 				routes: [
@@ -101,7 +110,7 @@ describe("redisSessionStoresModule wiring", () => {
 			bootstrapComponents: {
 				config: minBoot({ redisSessionStores: { keyPrefix: "wire:" } }),
 				pathResolver: (p: string) => p,
-				// Spread all 9 per-purpose wrappers; the module only consumes its 4.
+				// Spread every per-purpose wrapper; the module consumes its 6.
 				...makeIoredisClients(raw),
 			} as never,
 		});
@@ -112,6 +121,8 @@ describe("redisSessionStoresModule wiring", () => {
 			expect((components.sessionRPRegistry as { kind: string }).kind).toBe("redis");
 			expect((components.sessionFamilyIndex as { kind: string }).kind).toBe("redis");
 			expect((components.sessionFederationIndex as { kind: string }).kind).toBe("redis");
+			expect((components.subjectSessionIndex as { kind: string }).kind).toBe("redis");
+			expect((components.subjectRevocation as { kind: string }).kind).toBe("redis");
 		} finally {
 			await handle.dispose();
 		}
