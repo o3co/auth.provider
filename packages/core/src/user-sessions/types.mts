@@ -245,6 +245,41 @@ export interface SubjectSessionIndex {
  * sizing the watermark to the access-token TTL retires the backstop minutes
  * after a cascade failure while the RT it exists to catch lives for days.
  */
+/**
+ * The declared-absence policy for **both** subject-level revocation slots
+ * (#406) — the one silent no-op #363 did not close.
+ *
+ * #363 gave `auditSink` and `accessTokenDenylist` policies so an unfilled
+ * optional slot has to be a stated decision at boot, and its own doc cites "a
+ * subject-revocation watermark nothing consulted (#322)" as motivation.
+ * {@link SubjectRevocation} and {@link SubjectSessionIndex} did not get one,
+ * and the consequence reached every shape this repository ships: a scaffolded
+ * deployment got `subjectRevocation: undefined`, so `verifyJwt` skipped the
+ * watermark check, the #376 refresh-redemption gate was inert, and
+ * `revokeAllForSubject` reported `unavailable` — with no boot-time signal in
+ * either direction.
+ *
+ * **One policy for two keys, on purpose.** They are two components but one
+ * capability: subject-level revocation needs the index to enumerate what to
+ * cascade and the watermark to refuse what the cascade missed. A deployment
+ * that has neither has one thing to say, not two, and #321's adapters fill
+ * them together for the same reason. The declared-absence guard compares
+ * policies per key, so sharing one constant across both is exactly what keeps
+ * the boot error's advice from depending on which module tripped it.
+ */
+export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
+	configKey: ["oauth", "revocation", "subject"],
+	absentValue: "unsupported",
+	hint:
+		"Without these a credential change cannot invalidate what was already issued: a " +
+		"password reset leaves every existing session and access token working until it " +
+		'expires. Wire both (`userSessionStores.adapter = "redis"` in the standalone ' +
+		"template, or core's memorySessionStoresModule for a single-process deployment), " +
+		'or declare `"unsupported"` to state that this deployment has no subject-level ' +
+		"revocation. Refresh-token family revocation runs off the family store and is " +
+		"unaffected either way.",
+} as const;
+
 export interface SubjectRevocation {
 	readonly kind: string;
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;

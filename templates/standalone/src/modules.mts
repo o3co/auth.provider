@@ -22,6 +22,8 @@ import {
 	createInMemorySessionFamilyIndex,
 	createInMemorySessionFederationIndex,
 	createInMemorySessionRPRegistry,
+	createInMemorySubjectRevocation,
+	createInMemorySubjectSessionIndex,
 	createInMemoryUserSessionStore,
 	createKeyStoreFactory,
 	createRepositoryFactories,
@@ -198,6 +200,20 @@ export const inMemorySessionStoresModule: Module = defineModule({
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
 		sessionFamilyIndex: () => createInMemorySessionFamilyIndex(),
 		sessionFederationIndex: () => createInMemorySessionFederationIndex(),
+		// #406: the two subject-level revocation slots. They were missing here
+		// on both branches, so a scaffolded deployment got
+		// `subjectRevocation: undefined` — `verifyJwt` skipped the watermark,
+		// the #376 refresh gate was inert, and `revokeAllForSubject` reported
+		// `unavailable`. Nothing failed and nothing warned, which is what #406
+		// is about; the boot guard now refuses that state, and the scaffold's
+		// answer is to wire them rather than to declare the capability absent.
+		//
+		// Single-process only, like every other store on this branch. The
+		// redis branch swaps in `redisSessionStoresModule`, which has provided
+		// both since #321 — before that there was no distributed adapter to
+		// point at, which is why this gap outlived #296.
+		subjectSessionIndex: () => createInMemorySubjectSessionIndex(),
+		subjectRevocation: () => createInMemorySubjectRevocation(),
 	},
 });
 

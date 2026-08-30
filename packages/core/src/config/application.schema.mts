@@ -645,6 +645,17 @@ export const CoreConfigSchema = z.object({
 		revocation: z
 			.object({
 				accessToken: z.enum(["denylist", "unsupported"]),
+				// #406: the declared-absence spelling for BOTH subject-level
+				// revocation slots (`subjectRevocation`, `subjectSessionIndex`).
+				// One key because they are one capability — the index enumerates
+				// what a credential change cascades over, the watermark refuses
+				// what the cascade missed — and a deployment that has neither has
+				// one thing to say.
+				//
+				// `.optional()` and unvalued by default, like `accessToken`: the
+				// guard reads it only when a slot is unfilled, and a deployment
+				// that wires both never has to write it.
+				subject: z.enum(["watermark", "unsupported"]).optional(),
 			})
 			.optional(),
 		// Wave 2 cross-mechanism dispatch refactor: declared in core (single

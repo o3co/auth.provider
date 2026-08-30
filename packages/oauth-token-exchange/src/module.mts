@@ -19,6 +19,7 @@ import {
 	defineModule,
 	type GrantHandler,
 	type Module,
+	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "./grant.mjs";
@@ -113,7 +114,14 @@ export const tokenExchangeModule: Module = defineModule({
 	],
 	// #375: same policy constant as oauthModule — an unfilled denylist slot
 	// must be declared with oauth.revocation.accessToken = "unsupported".
-	absencePolicies: { accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY },
+	// #406: subject-level revocation is optional to wire, not optional to
+	// decide. Its absence must be declared with
+	// oauth.revocation.subject = "unsupported", or a credential change
+	// silently invalidates nothing that was already issued.
+	absencePolicies: {
+		accessTokenDenylist: ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
+		subjectRevocation: SUBJECT_REVOCATION_ABSENCE_POLICY,
+	},
 	contributes: {
 		grants: {
 			[TOKEN_EXCHANGE_GRANT_TYPE]: ((deps: AnyDeps) => createTokenExchangeGrant(deps)) as (

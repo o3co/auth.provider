@@ -119,6 +119,18 @@ export function makeValidCoreConfig() {
 				// off unless the deployment explicitly enables M2M.
 			},
 			oidcMode: "oidc-required",
+			// #406: the same move #363 made for `auditSink`, for the two
+			// subject-level revocation slots. Test compositions rarely wire
+			// them, so the fixture declares the capability absent explicitly —
+			// which is also what it is: this fixture has no subject-level
+			// revocation, on purpose. A test exercising the guard itself
+			// removes the key.
+			//
+			// `accessToken` comes along because the schema requires it once the
+			// `revocation` object exists, and `"denylist"` is the reading #277
+			// already gives an omitted key — so this restates the fixture's
+			// behaviour rather than changing it.
+			revocation: { accessToken: "denylist", subject: "unsupported" },
 			// #330: `oauth.authorize` is gone from the required surface — the
 			// `allowUnmarkedClients` migration flag was removed, and /authorize
 			// enforces the first-party invariant unconditionally.
