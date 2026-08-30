@@ -331,11 +331,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// honoured, which is the more caller-actionable classification and
 			// what the refresh path already returns for the same rows.
 			//
-			// Enforcement covers `subject_token` only. A request carries exactly
-			// one `ctx.tokenBinding` — one DPoP proof, one client certificate —
-			// so when a subject and an actor token are bound to different keys no
-			// caller could satisfy both, and requiring it would break legitimate
-			// delegation. The residual actor-token gap is tracked separately in #309.
+			// `actor_token` is held to this same matrix further down (#309). A
+			// request carries exactly one `ctx.tokenBinding` — one DPoP proof,
+			// one client certificate — so a subject and an actor bound to
+			// *different* keys cannot both be satisfied; that shape is refused
+			// rather than waved through, and the multi-proof extension it would
+			// need has no RFC 9449 token-endpoint precedent.
 			// Each cnf member is compared only against a binding whose `kind`
 			// owns it — see `core/grants/confirmationMatch.mts` for the
 			// kind-boundary and thumbprint-timing rationale.
@@ -480,7 +481,69 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
+			// #309: the actor half of the matrices above, and the residual #265
+			// named. `buildActClaim` folds the actor's identity into the issued
+			// token's `act` claim (RFC 8693 §4.1), so an `actor_token` accepted
+			// with no proof-of-possession let a stolen bound token forge the
+			// delegation chain the issued token records — the same laundering
+			// #265 closed for the subject, one parameter over.
+			//
+			// The rule is the subject's, applied to the actor: match the
+			// presented binding or be refused. It is the strictest rule that is
+			// physically expressible here. `AuthenticatedClient` carries no
+			// certificate thumbprint of its own — for an mTLS-authenticated
+			// client the certificate IS `ctx.tokenBinding` — so there is no
+			// second credential an actor's `cnf` could be checked against, and
+			// a request carries exactly one binding.
+			//
+			// The cost is stated rather than worked around: delegation where the
+			// actor and the subject are bound to **different** keys can no longer
+			// be exchanged. It never could be satisfied — one proof cannot answer
+			// two keys — so what changes is that it now fails closed instead of
+			// silently skipping the actor's binding. Supporting it needs more
+			// than one proof per request, which RFC 9449 has no token-endpoint
+			// precedent for; #309 keeps that as the future path rather than
+			// approximating it with a rule that enforces nothing.
+			//
+			// Evaluated before `may_act` and every store round-trip, matching
+			// the subject matrix's short-circuit ordering.
 			if (actorValidated) {
+				const actorMatch = matchConfirmation(actorValidated.claims.cnf, ctx.tokenBinding);
+				if (actorMatch.status === "compound") {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription:
+								"actor_token has compound cnf binding which is not supported (Stage 1)",
+						},
+					};
+				}
+				if (actorMatch.status === "no-proof") {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription:
+								actorMatch.member === "jkt"
+									? "actor_token requires a DPoP proof"
+									: "actor_token requires a client certificate",
+						},
+					};
+				}
+				if (actorMatch.status === "mismatch") {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription:
+								actorMatch.member === "jkt"
+									? "DPoP proof does not match actor_token binding"
+									: "client certificate does not match actor_token binding",
+						},
+					};
+				}
+
 				const subjectMayAct = subjectValidated.claims.may_act;
 				if (
 					subjectMayAct !== undefined &&

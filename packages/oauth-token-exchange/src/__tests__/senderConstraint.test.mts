@@ -236,3 +236,164 @@ describe("token exchange — cnf edge cases (#265)", () => {
 		expect(res.cnf).toBeUndefined();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Actor matrix (#309) — the residual #265 deliberately left open
+// ---------------------------------------------------------------------------
+
+/**
+ * `exchange` with an `actor_token` alongside the subject.
+ *
+ * The subject is left unbound in every actor row so the outcome is driven by
+ * the actor's `cnf` alone — a bound subject would consume the single
+ * `ctx.tokenBinding` and confound which token caused the rejection.
+ */
+const exchangeWithActor = async (
+	actorClaims: Record<string, unknown>,
+	tokenBinding?: TokenBinding,
+	subjectClaims: Record<string, unknown> = {},
+): Promise<{ status: number; error?: string; errorDescription?: string; act?: unknown }> => {
+	const subjectToken = await signSelfIssuedAccessToken(subjectClaims);
+	const actorToken = await signSelfIssuedAccessToken({ sub: "actor-1", ...actorClaims });
+	const context: GrantContext = {
+		body: {
+			client_id: "client-a",
+			client_secret: "s",
+			subject_token: subjectToken,
+			subject_token_type: ACCESS_TOKEN_TYPE,
+			actor_token: actorToken,
+			actor_token_type: ACCESS_TOKEN_TYPE,
+		},
+		session: {},
+		issuer: ISSUER,
+		metadata: {},
+		authenticatedClient: null,
+		...(tokenBinding ? { tokenBinding } : {}),
+	};
+	const { result } = await buildGrant().handle(context);
+	if ("tokens" in result) {
+		const claims = decodeJwt(result.tokens.access_token as string);
+		return { status: result.status, act: (claims as { act?: unknown }).act };
+	}
+	return {
+		status: result.status,
+		error: result.error,
+		errorDescription: result.errorDescription,
+	};
+};
+
+/*
+ * #265 enforced the subject's `cnf` and named the actor as a tracked residual:
+ * a request carries exactly one `ctx.tokenBinding`, so "enforce both" is not a
+ * rule any caller could satisfy when the two tokens are bound to different
+ * keys. The consequence was that a sender-constrained `actor_token` was
+ * accepted with no proof-of-possession at all, while `buildActClaim` folded
+ * its identity into the issued token's `act` claim (RFC 8693 §4.1) — a stolen
+ * bound actor token forged the delegation chain recorded on the issued token.
+ *
+ * The rule below is the subject matrix applied to the actor, and it is the
+ * strictest one that is physically expressible: match the presented binding or
+ * be refused. `AuthenticatedClient` carries no certificate thumbprint of its
+ * own — for an mTLS-authenticated client the certificate IS `ctx.tokenBinding`
+ * — so there is no second credential to check an actor's `cnf` against.
+ *
+ * What this deliberately does not support: delegation where the actor and the
+ * subject are bound to *different* keys. That needs more than one proof per
+ * request, which RFC 9449 has no token-endpoint precedent for; it stays out of
+ * scope rather than being approximated by a rule that enforces nothing.
+ */
+describe("token exchange — actor_token DPoP binding matrix (#309)", () => {
+	it("unbound actor, no proof → exchanges and records the delegation", async () => {
+		const res = await exchangeWithActor({});
+		expect(res.status).toBe(200);
+		expect(res.act).toMatchObject({ sub: "actor-1" });
+	});
+
+	it("unbound actor, proof presented → exchanges", async () => {
+		const res = await exchangeWithActor({}, dpopBinding);
+		expect(res.status).toBe(200);
+	});
+
+	// The #309 finding itself.
+	it("bound actor, no proof → invalid_grant", async () => {
+		const res = await exchangeWithActor({ cnf: { jkt: JKT } });
+		expect(res.status).toBe(400);
+		expect(res.error).toBe("invalid_grant");
+		expect(res.errorDescription).toContain("actor_token");
+	});
+
+	it("bound actor, proof from a different key → invalid_grant", async () => {
+		const res = await exchangeWithActor({ cnf: { jkt: JKT } }, otherDpopBinding);
+		expect(res.status).toBe(400);
+		expect(res.error).toBe("invalid_grant");
+		expect(res.errorDescription).toContain("actor_token");
+	});
+
+	it("bound actor, matching proof → exchanges and records the delegation", async () => {
+		const res = await exchangeWithActor({ cnf: { jkt: JKT } }, dpopBinding);
+		expect(res.status).toBe(200);
+		expect(res.act).toMatchObject({ sub: "actor-1" });
+	});
+
+	it("does not let an mTLS binding satisfy a jkt-bound actor", async () => {
+		const res = await exchangeWithActor({ cnf: { jkt: JKT } }, mtlsBinding);
+		expect(res.status).toBe(400);
+		expect(res.error).toBe("invalid_grant");
+	});
+});
+
+describe("token exchange — actor_token mTLS binding matrix (#309)", () => {
+	it("bound actor, no certificate → invalid_grant", async () => {
+		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } });
+		expect(res.status).toBe(400);
+		expect(res.error).toBe("invalid_grant");
+		expect(res.errorDescription).toContain("actor_token");
+	});
+
+	it("bound actor, different certificate → invalid_grant", async () => {
+		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } }, otherMtlsBinding);
+		expect(res.status).toBe(400);
+		expect(res.error).toBe("invalid_grant");
+	});
+
+	it("bound actor, matching certificate → exchanges", async () => {
+		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } }, mtlsBinding);
+		expect(res.status).toBe(200);
+		expect(res.act).toMatchObject({ sub: "actor-1" });
+	});
+
+	it("does not let a DPoP binding satisfy an x5t#S256-bound actor", async () => {
+		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } }, dpopBinding);
+		expect(res.status).toBe(400);
+		expect(res.error).toBe("invalid_grant");
+	});
+});
+
+describe("token exchange — actor_token cnf edge cases (#309)", () => {
+	it("rejects an actor token carrying a compound cnf", async () => {
+		const res = await exchangeWithActor({ cnf: { jkt: JKT, "x5t#S256": X5T } }, dpopBinding);
+		expect(res.status).toBe(400);
+		expect(res.error).toBe("invalid_grant");
+		expect(res.errorDescription).toContain("actor_token");
+	});
+
+	it("treats an actor cnf that names no known binding as unbound", async () => {
+		const res = await exchangeWithActor({ cnf: { unknown_member: "x" } });
+		expect(res.status).toBe(200);
+	});
+
+	it("treats a non-object actor cnf as unbound rather than crashing", async () => {
+		const res = await exchangeWithActor({ cnf: "not-an-object" });
+		expect(res.status).toBe(200);
+	});
+
+	// Both bound to the same key is the one delegation shape a single
+	// `ctx.tokenBinding` can carry, and it must keep working.
+	it("accepts a bound subject and a bound actor when both name the presented key", async () => {
+		const res = await exchangeWithActor({ cnf: { jkt: JKT } }, dpopBinding, {
+			cnf: { jkt: JKT },
+		});
+		expect(res.status).toBe(200);
+		expect(res.act).toMatchObject({ sub: "actor-1" });
+	});
+});
