@@ -182,6 +182,23 @@ function narrowPreviousSecretsArray(value: unknown): SymmetricPreviousSecret[] {
 	});
 }
 
+/**
+ * Registers the `local` builder — the in-config path.
+ *
+ * There is deliberately no `remote` builder here (#303). A
+ * `createRemoteSigningKeyStore` needs a `RemoteSigner`, which is a function
+ * calling out to AWS KMS, a PKCS#11 token or a Vault transit key, and there is
+ * no HOCON spelling for a function. A deployment that signs remotely builds
+ * the store in its composition root and supplies it as the `keyStore`
+ * component, the same way it supplies any other adapter that needs code rather
+ * than configuration.
+ *
+ * Inventing a `remote` config type here would mean either bundling a vendor
+ * SDK into `core` — which every deployment would then carry, including the
+ * ones signing with a different vendor — or a plugin-lookup layer whose only
+ * job is to turn a string back into the callback the composition root already
+ * had.
+ */
 export function registerBuiltinKeyStores(factory: KeyStoreFactory): void {
 	factory.register("local", async (config) => {
 		const rawAlgorithm = config.algorithm;

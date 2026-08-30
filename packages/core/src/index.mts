@@ -234,6 +234,18 @@ export {
 	ExpiredKidError,
 	UnknownKidError,
 } from "./keys/KeyStore.mjs";
+// #303: the KeyStore whose private key never enters this process. Wired by a
+// composition root rather than selected in config — a `RemoteSigner` is a
+// function, and there is no HOCON spelling for one.
+export type {
+	RemoteSigner,
+	RemoteSigningKeyStoreOptions,
+	RemoteSigningPreviousKey,
+} from "./keys/remoteSigning.mjs";
+export {
+	createRemoteSigningKeyStore,
+	derToJoseEcdsaSignature,
+} from "./keys/remoteSigning.mjs";
 // Shared-secret entropy floor (#282). Exported so a composition root that
 // builds its own KeyStore — or accepts any other HMAC secret from an
 // operator — can apply the same check the built-in `local` builder does.
