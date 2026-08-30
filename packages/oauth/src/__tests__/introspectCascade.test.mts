@@ -455,3 +455,100 @@ describe("oauthModule — refreshTokenFamilyRevocation composition (C1) via crea
 		await handle.dispose();
 	});
 });
+
+/*
+ * #318 — introspection describes the TOKEN, and stays that way.
+ *
+ * #297 asked for `email_verified` in the id_token, `/userinfo` and
+ * introspection. The first two ship; the third was split out because it is a
+ * design decision, not a gap. The decision is **no**, and this pins it as an
+ * invariant rather than leaving it as prose someone has to find.
+ *
+ * RFC 7662 §2.2 defines the response as meta-information about the token, and
+ * §5 is explicit about the cost of going further: *"Omitting privacy-sensitive
+ * information from an introspection response is the simplest way of minimizing
+ * privacy issues"*, alongside a `MUST` to prevent disclosure of user
+ * identifiers to unintended parties. §2.2 carries the same instinct for scopes
+ * — an AS "MAY limit which scopes from a given token are returned for each
+ * protected resource to prevent a protected resource from learning more about
+ * the larger network than necessary."
+ *
+ * Both ways to answer differently have a real cost, and neither buys anything
+ * `/userinfo` does not already give a resource server holding the token:
+ * minting user claims into every access token spreads PII into a credential
+ * that transits more places than an id_token and goes stale the moment the
+ * Store flips it (access tokens are not re-derived); reading the session store
+ * from the introspect handler turns a session-store outage into an
+ * introspection outage, on a hot path resource servers call per request.
+ *
+ * So the guard is the deliverable: a token whose subject has user claims in
+ * the Store still introspects to token metadata alone. A future change that
+ * makes introspection a second `/userinfo` fails here and has to argue with
+ * this comment first.
+ */
+describe("/introspect carries token metadata only (#318)", () => {
+	/** Every member RFC 7662 §2.2 defines, plus the `cnf` mirror this AS adds. */
+	const ALLOWED = new Set([
+		"active",
+		"exp",
+		"iat",
+		"iss",
+		"aud",
+		"sub",
+		"azp",
+		"client_id",
+		"scope",
+		"token_type",
+		"jti",
+		"cnf",
+	]);
+
+	it("returns no member outside the RFC 7662 §2.2 set", async () => {
+		const token = await makeAccessToken({ client_id: "client1", jti: "jti-318" });
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.status).toBe(200);
+		expect(res.body.active).toBe(true);
+		const unexpected = Object.keys(res.body).filter((k) => !ALLOWED.has(k));
+		expect(unexpected).toEqual([]);
+	});
+
+	it("does not carry email_verified — the claim #318 asked about", async () => {
+		const token = await makeAccessToken({ client_id: "client1" });
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.body.email_verified).toBeUndefined();
+		expect(res.body.email).toBeUndefined();
+	});
+
+	it("does not echo user claims that a token happens to carry", async () => {
+		// The other direction: even if something upstream minted profile claims
+		// into an access token, introspection must not forward them. Otherwise
+		// the invariant would hold only for as long as minting stays clean.
+		const token = await makeAccessToken({
+			client_id: "client1",
+			email: "alice@example.com",
+			email_verified: true,
+			name: "Alice Example",
+		});
+		const app = await buildApp();
+		const res = await introspect(app, token);
+
+		expect(res.status).toBe(200);
+		expect(res.body.active).toBe(true);
+		const unexpected = Object.keys(res.body).filter((k) => !ALLOWED.has(k));
+		expect(unexpected).toEqual([]);
+	});
+
+	it("says nothing at all beyond active=false for an inactive token", async () => {
+		// RFC 7662 §2.2: an inactive response must not reveal why. A leaked
+		// `sub` here would tell a caller the token existed.
+		const app = await buildApp();
+		const res = await introspect(app, "not-a-token");
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ active: false });
+	});
+});
