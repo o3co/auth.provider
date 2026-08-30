@@ -199,6 +199,11 @@ export interface JwtVerifyOptions {
 	 * The cost is bounded and one-sided: a token minted within the allowance
 	 * *after* a reset is refused, which costs its holder one retry. Set to `0`
 	 * for the pre-#408 exact comparison.
+	 *
+	 * Rounded **up** to whole seconds, because the comparison is in seconds and
+	 * truncating would make the guard weaker than the configured value. A
+	 * negative value is clamped to `0`: it would move the boundary earlier than
+	 * the watermark itself and let pre-revocation tokens through.
 	 */
 	readonly subjectRevocationSkewMs?: number;
 	/**
@@ -661,10 +666,20 @@ export async function verifyJwt(
 			// survive it. The allowance is its own small value and not
 			// `clockSkewMs` — five minutes here would refuse the re-login the
 			// credential change sends the user to.
+			//
+			// `ceil`, not `floor`, and clamped at zero. The comparison is in
+			// whole seconds, so a sub-second remainder has to round *up* or the
+			// guard is weaker than what the operator configured — 1500ms would
+			// behave as 1000ms, which is the wrong direction for an allowance
+			// whose whole job is to catch a replica that is ahead. A negative
+			// value would move the boundary earlier than the watermark itself
+			// and let pre-revocation tokens through, so it is floored at zero
+			// rather than trusted.
 			const watermarkBoundarySeconds =
 				watermark === null
 					? 0
-					: Math.floor(watermark.getTime() / 1000) + Math.floor(subjectRevocationSkewMs / 1000);
+					: Math.floor(watermark.getTime() / 1000) +
+						Math.max(0, Math.ceil(subjectRevocationSkewMs / 1000));
 			if (watermark !== null && iat !== undefined && iat <= watermarkBoundarySeconds) {
 				const err = new JwtVerificationError(
 					"revoked",

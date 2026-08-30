@@ -263,6 +263,30 @@ describe("verifyJwt — watermark clock skew (#408)", () => {
 		await expect(verify(token, store)).resolves.toBeDefined();
 	});
 
+	it("rounds a sub-second allowance up, never down", async () => {
+		// Truncating would make the guard weaker than what the operator asked
+		// for — 1500ms behaving as 1000ms — which is the wrong direction for an
+		// allowance that exists to catch a replica running ahead.
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 8 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: 1_500 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+
+	it("refuses to narrow the comparison below the watermark itself", async () => {
+		// A negative value would move the boundary *earlier* than the watermark
+		// and let pre-revocation tokens through — the opposite of the option's
+		// purpose, so it is clamped rather than trusted.
+		const nowSec = Math.floor(Date.now() / 1000);
+		const store = await withWatermark(nowSec - 10);
+		const token = await mint({ sub: "u1", iatSeconds: nowSec - 10 });
+		await expect(verify(token, store, { subjectRevocationSkewMs: -60_000 })).rejects.toMatchObject({
+			reason: "revoked",
+		});
+	});
+
 	it("widens with an explicit allowance", async () => {
 		const nowSec = Math.floor(Date.now() / 1000);
 		const store = await withWatermark(nowSec - 10);
