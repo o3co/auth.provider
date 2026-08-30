@@ -202,6 +202,19 @@ export const createOAuthRouter = async (
 				})
 			: (_req, _res, next) => next();
 
+	// #284: one handler instance behind both methods, so a check can never be
+	// mounted on GET and forgotten on POST.
+	const authorizeHandler = createAuthorizeHandler({
+		clientRepository,
+		codeRepository,
+		grantPolicy,
+		auditSink,
+		logger,
+		issuer: canonicalIssuer,
+		loginUrl: () => config.endpoints.login.url,
+		oauth: options,
+	});
+
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
@@ -676,20 +689,14 @@ export const createOAuthRouter = async (
 		// guard is mounted ahead of it, same position the inline handler ran its
 		// check; the handler consumes the composition-time-resolved `options` —
 		// no request re-reads config.
-		.get(
-			"/authorize",
-			rateLimitGuard("authorize"),
-			createAuthorizeHandler({
-				clientRepository,
-				codeRepository,
-				grantPolicy,
-				auditSink,
-				logger,
-				issuer: canonicalIssuer,
-				loginUrl: () => config.endpoints.login.url,
-				oauth: options,
-			}),
-		);
+		// #284: OIDC Core §3.1.2.1 — "Authorization Servers MUST support the use
+		// of the HTTP GET and POST methods". POST is how an RP sends a request
+		// too large for a URL, and standard libraries reach for it. The handler
+		// reads its parameters through one accessor (`authorizeParams`), so both
+		// methods run the identical sequence of checks rather than a POST path
+		// that quietly skips one. The router already parses form bodies.
+		.get("/authorize", rateLimitGuard("authorize"), authorizeHandler)
+		.post("/authorize", rateLimitGuard("authorize"), authorizeHandler);
 
 	// OIDC Core §5.3 — UserInfo endpoint
 	router.use(

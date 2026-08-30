@@ -111,6 +111,23 @@ server.listen(config.http.port);
 await handle.dispose();
 ```
 
+## The OIDC surface, stated (#284)
+
+This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party** deployment needs. Where it stops is deliberate, and saying so is part of the contract — an RP that discovers what is here should not have to find the edges by hitting them.
+
+**`/oauth/authorize` accepts GET and POST** (OIDC Core §3.1.2.1). Both run the identical sequence of checks: the handler reads its parameters through one accessor, so a check cannot be mounted on one method and forgotten on the other.
+
+**`prompt=none` is supported.** No session answers `login_required` at the client's `redirect_uri` — which is the point, since a hidden renewal iframe cannot act on a login page. A session proceeds silently.
+
+**`prompt=login`, `consent` and `select_account` are refused** with `invalid_request` naming the value, not ignored:
+
+- There is no consent step or account picker, by design. `/authorize` admits only clients marked `firstParty: true` (#267), and consent is a question about a third party you are being asked to trust. For a client you operate, an auto-consent model is the honest one — but that makes `prompt=consent` impossible to honour, and returning a token an RP believes was freshly consented to is worse than refusing.
+- `prompt=login` needs a way to know that a forced re-authentication just happened, or the user comes back from the login page with the same parameter and loops. That marker is `auth_time`, which arrives with `max_age`; a looping implementation would be worse than the refusal.
+
+**`request` and `request_uri` are refused** with `request_not_supported` / `request_uri_not_supported`. Ignoring them was the pre-#284 behaviour and the dangerous one: a signed request object exists to make the parameters tamper-proof, so processing the query string instead gives an attacker precisely what the object was there to prevent while the RP believes it was honoured. The discovery document now says `request_uri_parameter_supported: false` for the same reason — OIDC Discovery **defaults that field to `true`**, so omitting it was a claim.
+
+**Not implemented:** `max_age` / `auth_time`, the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document already tells the truth about them by saying nothing.
+
 ## Token-binding cnf flow (Wave 2)
 
 When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `@o3co/auth-provider-mtls`), the grants here emit RFC 7800 `cnf` claims and the introspect handler echoes them back to resource servers.
