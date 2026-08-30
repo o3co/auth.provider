@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import { fileURLToPath } from "node:url";
-import { gracefulShutdown } from "@o3co/auth.utils";
 import {
 	type AppConfig,
 	AppConfigSchema,
@@ -30,6 +29,7 @@ import { buildModules } from "./buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
+import { installGracefulShutdown } from "./shutdown.mjs";
 import { createTerminalErrorHandler } from "./terminalError.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
@@ -154,5 +154,14 @@ await (async (): Promise<void> => {
 	// Step 6: Graceful shutdown — handle.dispose() runs reverse-topological
 	// per-component cleanup (per A2-β §8.1) plus D-5 LifecycleRegistrar drain
 	// (Redis clients, interval timers).
-	gracefulShutdown(server, () => handle.dispose());
+	//
+	// #290: in the template rather than a dependency, because "does SIGTERM
+	// wait for in-flight requests, and for how long?" has to be answerable
+	// from the code you deploy. See `shutdown.mts` for the stated guarantees
+	// and for the deadline the previous implementation did not have. Size
+	// `drainTimeoutMs` below your orchestrator's kill grace period.
+	installGracefulShutdown(server, {
+		logger,
+		cleanup: () => handle.dispose(),
+	});
 })();

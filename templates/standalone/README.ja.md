@@ -271,8 +271,20 @@ const handle = await createApp({
 
 app.use(handle.router);
 const server = app.listen(config.http.port);
-gracefulShutdown(server, () => handle.dispose());
+installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 ```
+
+### シャットダウンの保証
+
+`src/shutdown.mts` は依存パッケージではなく scaffold 側に置いてある (#290)。全ユーザーセッションを終端するコンポーネントについて「SIGTERM は in-flight リクエストを待つのか、待つなら何秒か」は、デプロイするコード自体から答えられる必要があるため。
+
+1. **`SIGTERM` / `SIGINT`** のどちらでも開始する。2 回目のシグナルは無視する（1 回目の dispose に重ねて 2 回目を走らせない）。
+2. **新規接続は即座に停止**し、idle な keep-alive ソケットは解放する。リクエストを持たないまま server を開いたままにするソケットなので、解放しないと閑散時に deadline を丸ごと待つことになる。
+3. **in-flight リクエストには `drainTimeoutMs`**(既定 **10 秒**)を与える。
+4. **deadline を超えたら残接続を切り、プロセスは非ゼロ終了する。** 常に `0` しか見えない orchestrator では、正常な drain と時間切れの強制切断を区別できない。
+5. **`cleanup` は drain 後・exit 前**に走る(`handle.dispose()` = 逆トポロジカルなコンポーネント cleanup + Redis/タイマーの drain)。失敗はこのサービス自身の logger(他の行と同じ NDJSON)に出し、exit code にも反映する。dispose が throw してもプロセスは終了する。
+
+**`drainTimeoutMs` は orchestrator の kill grace period より短く設定すること** — Kubernetes の `terminationGracePeriodSeconds`、compose の `stop_grace_period` はいずれも既定 30 秒。他人の都合の `SIGKILL` が来る前に、自分の都合で閉じるのが目的。
 
 ## npm スクリプト
 

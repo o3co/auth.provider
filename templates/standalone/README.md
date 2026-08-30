@@ -460,8 +460,20 @@ const handle = await createApp({
 
 app.use(handle.router);
 const server = app.listen(config.http.port);
-gracefulShutdown(server, () => handle.dispose());
+installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 ```
+
+### Shutdown guarantees
+
+`src/shutdown.mts` is deliberately part of the scaffold rather than a dependency (#290): for the component that terminates every user session, *"does SIGTERM wait for in-flight requests, and for how long?"* has to be answerable from the code you deploy.
+
+1. **`SIGTERM` and `SIGINT`** both start it. A second signal is ignored rather than starting a second dispose over the first one's stores.
+2. **New connections stop immediately**, and idle keep-alive sockets are released — they hold the server open with no request behind them, so a quiet server would otherwise wait out the whole deadline for nothing.
+3. **In-flight requests get `drainTimeoutMs`** (default **10s**) to finish.
+4. **Past the deadline the remaining connections are cut and the process exits non-zero.** An orchestrator that only ever sees `0` cannot tell a clean drain from one that ran out of time.
+5. **`cleanup` runs after draining, before exit** — `handle.dispose()`, i.e. reverse-topological component cleanup plus the Redis/timer drain. A failure there is logged through this service's own logger (NDJSON, like every other line) and reflected in the exit code. A dispose that throws still exits; it never wedges the process.
+
+**Size `drainTimeoutMs` below your orchestrator's kill grace period** — Kubernetes `terminationGracePeriodSeconds` and compose `stop_grace_period` are both 30s by default. The point is to close on your terms before `SIGKILL` arrives on someone else's.
 
 ## npm Scripts
 

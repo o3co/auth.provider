@@ -419,9 +419,6 @@ importers:
       '@o3co/auth-provider-session':
         specifier: workspace:*
         version: link:../../packages/session
-      '@o3co/auth.utils':
-        specifier: ^0.0.4
-        version: 0.0.4(express@5.2.1)(pino@10.3.1)
       '@o3co/ts.hocon':
         specifier: ^1.12.0
         version: 1.12.0(yaml@2.9.0)(zod@4.4.3)
@@ -818,16 +815,6 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
-
-  '@o3co/auth.utils@0.0.4':
-    resolution: {integrity: sha512-PGhKQaeCwHYOVF/K5Ff+u1iOrjvBax01cT3ofKDFUyUNBBdLA42L8EsEyi0yX+iWDycyavlmhT45tY8FNNHMdQ==}
-    engines: {node: '>=18.19.0'}
-    peerDependencies:
-      express: ^5.0.0
-      pino: ^10.0.0
-    peerDependenciesMeta:
-      pino:
-        optional: true
 
   '@o3co/ts.hocon@1.12.0':
     resolution: {integrity: sha512-JgR8xrzRUT1PPih9b+qmShGBPXwwT7U+yf+xFjZEXkQPXDhgVXf+F/2FrIHdkiYPmSR3Fqv832583cNEr0K+9g==}
@@ -2894,12 +2881,6 @@ snapshots:
     optional: true
 
   '@noble/hashes@1.8.0': {}
-
-  '@o3co/auth.utils@0.0.4(express@5.2.1)(pino@10.3.1)':
-    dependencies:
-      express: 5.2.1
-    optionalDependencies:
-      pino: 10.3.1
 
   '@o3co/ts.hocon@1.12.0(yaml@2.9.0)(zod@4.4.3)':
     optionalDependencies:
