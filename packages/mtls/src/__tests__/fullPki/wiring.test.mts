@@ -31,8 +31,6 @@ import { FULL_PKI_DEFAULTS } from "#/fullPki/defaults.mjs";
 import {
 	basicConstraints,
 	clientAuthEku,
-	KEY_USAGE,
-	keyUsage,
 	mint,
 	mintCa,
 	mintIntermediate,
