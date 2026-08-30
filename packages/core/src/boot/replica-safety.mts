@@ -74,6 +74,8 @@ const REPLICA_UNSAFE_MODULE_REASONS: Readonly<Record<string, string>> = {
 		"WebAuthn challenges fork per replica — a ceremony started on one replica cannot be completed on another",
 	"core-webauthn-credential-store-memory":
 		"registered WebAuthn credentials fork per replica — a passkey registered on one replica does not exist on the others",
+	"core-device-code-store-memory":
+		"pending device authorizations fork per replica — the human approves a code on the replica that served the verification page, while the device polls a replica that has never heard of it and is told the code does not exist (#298)",
 	"core-federation-token-store-memory":
 		"upstream federation tokens fork per replica — a token stored on one replica is missing on the others",
 };

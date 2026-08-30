@@ -633,6 +633,35 @@ export { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } from "./access-token-denylist/ty
 export { constantTimeStringEqual } from "./security/timingSafe.mjs";
 
 // ===========================================================================
+// Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628, #298)
+// ===========================================================================
+
+export {
+	createMemoryDeviceCodeStore,
+	type MemoryDeviceCodeStore,
+	type MemoryDeviceCodeStoreOptions,
+} from "./device-authorization/memory.mjs";
+export { memoryDeviceCodeStoreModule } from "./device-authorization/module.mjs";
+export {
+	type ApproveDeviceAuthorizationInput,
+	type CreateDeviceAuthorizationInput,
+	DEVICE_CODE_STORE_ABSENCE_POLICY,
+	type DeviceAuthorization,
+	type DeviceAuthorizationStatus,
+	type DeviceCodeStore,
+	type DeviceDecisionOutcome,
+	type DevicePollOutcome,
+} from "./device-authorization/types.mjs";
+export {
+	formatUserCode,
+	generateDeviceCode,
+	generateUserCode,
+	normaliseUserCode,
+	USER_CODE_ALPHABET,
+	USER_CODE_LENGTH,
+} from "./device-authorization/userCode.mjs";
+
+// ===========================================================================
 // Wave 1 — WebAuthnCredential + WebAuthnCredentialStore (spec §2.3.1)
 // ===========================================================================
 

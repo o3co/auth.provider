@@ -1,0 +1,61 @@
+{
+	"name": "@o3co/auth-provider-device-grant",
+	"description": "RFC 8628 OAuth 2.0 Device Authorization Grant for auth.provider",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		},
+		"./reference.conf": "./src/reference.conf"
+	},
+	"files": [
+		"dist",
+		"src/reference.conf",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/device-grant"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"zod": "^4.3.6"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "^0.0.0",
+		"express": "^5.0.0"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@types/express": "^5.0.6",
+		"@types/supertest": "^7.2.1",
+		"@vitest/coverage-v8": "^4.1.10",
+		"express": "^5.0.0",
+		"supertest": "^7.2.2",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.10"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

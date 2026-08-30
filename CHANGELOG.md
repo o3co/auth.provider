@@ -8,6 +8,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`@o3co/auth-provider-device-grant` — OAuth 2.0 Device Authorization Grant, RFC 8628 (#298).** The device-code flow for input-constrained clients: TV apps, CLIs, IoT. A new optional package alongside `oauth-token-exchange`, off until `oauth.deviceAuthorization.enabled = true`.
+
+  `POST /oauth/device_authorization` issues the code pair, `POST /oauth/device/verification` is where an authenticated human answers, and `grant_type=urn:ietf:params:oauth:grant-type:device_code` at the token endpoint is where the device collects. `device_authorization_endpoint` and the grant type are contributed to the discovery document, because a client has no other way to find the first of those (§4).
+
+  **The library provides the API; the deployment provides the page.** `verification-uri` is configuration rather than a route this package mounts — the boundary `/authorize` already draws when it redirects to a configured login URL rather than rendering a login form. There is no default for it: the device displays the string verbatim to people who need to reach it, so boot fails instead of guessing.
+
+  **`lookup`, `approve` and `deny` are one endpoint**, because all three take a `user_code` and all three are the same brute-force oracle. One route means one rate-limiter call and no way to add a fourth entry point that forgets it.
+
+- **`DeviceCodeStore` port + in-memory adapter + conformance suite (`@o3co/auth-provider-core`) (#298).** The port is written as **atomic operations rather than read-then-write pairs**: `poll` enforces the interval, reads the status *and* consumes an approval in one indivisible step. A `find`-then-`delete` implementation passes a naive unit test and issues **two access tokens from one human approval** under concurrency — the shared conformance suite races two polls for exactly that.
+
+  Only the memory adapter ships. It is registered in core's replica-unsafe list, so `deployment.mode = "multi"` refuses to boot with it: pending authorizations fork per replica, and the human approves on the replica that served the verification page while the device polls one that has never heard of the code. Mounting the module with no store at all fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement (#363).
+
+### Security
+
+- **The device grant refuses to boot without a rate limiter (`@o3co/auth-provider-device-grant`) (#298).** RFC 8628 §5.1 sizes the user code's entropy **against** a rate limit: an 8-character base-20 code carries "roughly 34.5 bits of entropy", which the RFC calls sufficient only where "the rate-limiting interval and validity period would need to only allow 5 attempts". The entropy and the limit are two halves of one mitigation, so a deployment without a limiter is not running a slower version of a limited one — it is running 34.5 bits against an unbounded attacker. That is a refusal, not a degraded mode.
+
+  Every attempt counts, malformed codes included — excluding them would hand an attacker an unmetered way to probe which shapes the endpoint accepts. The key is `device_verification:user:<subject>`, keyed on the authenticated user rather than the code: keying on the code would spend whichever code the attacker happened to hit, which is nobody's budget.
+
+- **`verification_uri_complete` is off by default (#298).** §5.4: with it "it is particularly important to confirm that the device is in the user's possession, as the user no longer has to type in the code". The typing *is* the proof of proximity, and removing it without replacing that confirmation is what makes remote phishing work.
+
+- **A device code is redeemable only by the client it was issued to (#298).** Checked against the authenticated client identity, never the request body. Without it a leaked device code is redeemable by any other registered client, converting a leak into a full impersonation of the user's approval.
+
+- **User codes are drawn with rejection sampling, not modulo (#298).** 256 is not a multiple of 20, so `randomBytes() % 20` biases toward the first 16 characters of the alphabet — quietly costing about a bit of the 34.5 the rate-limit budget is computed from. The base-20 consonant alphabet from §6.1 also means no code can spell a word, and no digit can be confused with a letter (`0`/`O`, `1`/`I`, `5`/`S`, `8`/`B`, `2`/`Z`). Input normalisation **rejects** an out-of-alphabet character rather than stripping it: a `0` typed for an `O` is a mistake, and stripping would turn an 8-character mistake into a 7-character lookup that fails invisibly or matches a different code.
+
+
+### Added
+
 - **`oauth.mtls.mode = "full-pki"` — RFC 5280 path validation with revocation (`@o3co/auth-provider-mtls`) (#341).** `mode = "pki"` performs a narrow chain walk and checks **no revocation at all**: a client certificate that has been revoked keeps binding tokens until it expires. The new arm closes that and the rest of #341's list. `mode = "pki"` is untouched — a deployment on it gets exactly the behaviour it had.
 
   Path validation is delegated to [`pkijs`](https://pkijs.org)'s `CertificateChainValidationEngine` per [RFC 8705 §7.5](https://www.rfc-editor.org/rfc/rfc8705#section-7.5) ("SHOULD use an established and well-tested X.509 library"), which brings name constraints (#341 item 3), `keyCertSign` on issuers (item 5), and the certificate-policy tree (item 7). Four things it does **not** do are implemented here rather than assumed:

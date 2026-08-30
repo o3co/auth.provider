@@ -1,0 +1,132 @@
+# @o3co/auth-provider-device-grant
+
+OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
+
+Optional. Nothing here is active until `oauth.deviceAuthorization.enabled = true`.
+
+## The flow
+
+```text
+  device                     authorization server                 human
+    │                                                               │
+    ├── POST /oauth/device_authorization ──────►                    │
+    │◄── device_code, user_code, verification_uri, interval ────    │
+    │                                                               │
+    │    "go to example.com/device and enter BCDF-GHJK" ────────────►
+    │                                                               │
+    │                    ◄── POST /oauth/device/verification ───────┤
+    │                        { action: "lookup",  user_code }       │
+    │                        { action: "approve", user_code }       │
+    │                                                               │
+    ├── POST /oauth/token ─────────────────────►                    │
+    │    grant_type=…:device_code&device_code=…                     │
+    │◄── authorization_pending / slow_down / access_denied …        │
+    │◄── access_token (once approved)                               │
+```
+
+## Quick start
+
+```hocon
+oauth.deviceAuthorization {
+  enabled = true
+  verification-uri = "https://example.com/device"
+}
+
+# Required — see "Rate limiting is half the security argument" below.
+rateLimit.adapters.default.limits.device_verification {
+  limit = 5
+  windowSeconds = 300
+}
+```
+
+```ts
+import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
+import { memoryDeviceCodeStoreModule } from "@o3co/auth-provider-core";
+
+const app = await createApp({
+  modules: [oauthModule, deviceGrantModule, memoryDeviceCodeStoreModule /* dev only */],
+  bootstrapComponents: { config, clientRepository, keyStore, rateLimiter },
+});
+```
+
+## The library provides the API, the deployment provides the page
+
+There is no HTML in this package, and `verification-uri` is configuration rather than a route it mounts.
+
+That is the boundary `/authorize` already draws — it redirects to a deployment-configured login URL rather than rendering a login form — and drawing it differently for this one ceremony would mean the library ships a page for one and not the other. What it does ship is the JSON API that page calls.
+
+### `POST /oauth/device/verification`
+
+Requires an authenticated end-user session. Body: `{ action, user_code }`.
+
+| action | 200 response | notes |
+| --- | --- | --- |
+| `lookup` | `{ client_id, scope, expires_at }` | What to show the user before they commit |
+| `approve` | `{ status: "approved", client_id }` | |
+| `deny` | `{ status: "denied", client_id }` | |
+
+Errors: `401 login_required`, `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`.
+
+**One endpoint, three actions**, because all three take a `user_code` and **all three are the same brute-force oracle** — a `lookup` route that answered "which client is this?" without counting against the same budget would be a free oracle sitting beside a limited one. One route means one limiter call, and no way to add a fourth entry point that forgets it.
+
+The code is accepted as displayed (`BCDF-GHJK`), lower-cased, or unseparated. A character *outside* the alphabet is rejected rather than stripped: a `0` typed for an `O` is a mistake, and silently removing it would turn an 8-character mistake into a 7-character lookup that fails invisibly — or matches a different code.
+
+## Rate limiting is half the security argument, not a nicety
+
+**Enabling this grant requires a `rateLimiter` component.** Boot fails without one.
+
+RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit: an 8-character base-20 code has "roughly 34.5 bits of entropy", which the RFC calls sufficient only where "the rate-limiting interval and validity period would need to only allow 5 attempts". The entropy and the limit are two halves of one mitigation. A deployment without a limiter is not running a slower version of a limited one — it is running 34.5 bits against an unbounded attacker, which is why this is a refusal rather than a degraded mode.
+
+Every attempt counts, malformed codes included: excluding them would hand an attacker an unmetered way to probe which shapes the endpoint accepts. The key is `device_verification:user:<subject>` — keyed on the **authenticated user**, not the code. Keying on the code would spend whichever code the attacker happened to hit, which is nobody's budget; keying on the subject means an attacker needs an account and burns their own.
+
+## The user code (§6.1)
+
+`BCDFGHJKLMNPQRSTVWXZ` — the consonants. Two properties, neither arbitrary:
+
+- **No vowels**, so no arrangement can spell a word. A code that reads as an obscenity gets screenshotted rather than typed.
+- **No digits**, so `0`/`O`, `1`/`I`/`l`, `5`/`S`, `8`/`B` and `2`/`Z` cannot arise.
+
+Codes are drawn with `randomInt`, not `randomBytes() % 20`: 256 is not a multiple of 20, so the modulo would bias toward the first 16 characters and quietly cost about a bit of the 34.5 the rate-limit budget is computed from.
+
+`device_code` is the opposite problem — nobody types it — so it is 256 bits of base64url, per §5.2's "a very high entropy code SHOULD be used".
+
+## `verification_uri_complete` is off by default
+
+RFC 8628 §3.3.1 defines a URI with the code embedded, so a QR code can carry it. §5.4: with it "it is particularly important to confirm that the device is in the user's possession, as the user no longer has to type in the code".
+
+The typing **is** the proof of proximity. Removing it without replacing that confirmation is what makes remote phishing work, so `verification-uri-complete` defaults to `false`. Turn it on only if the verification page displays the code and asks the user to confirm the device is showing the same one.
+
+## Polling
+
+The store enforces the interval, not the handler: the check and the state change have to be one operation, and a handler that read the record, compared timestamps and wrote back would let two concurrent polls both pass the gate.
+
+`slow_down` widens the interval **the server measures against**, by 5 seconds each time. §3.5 addresses that increase to the client, but a server that says `slow_down` while continuing to measure against the original interval is asking for a change it does not itself observe — a compliant client would then be told to slow down forever.
+
+The four error codes are kept distinct because a client library's whole control flow is built on telling them apart:
+
+| code | client behaviour |
+| --- | --- |
+| `authorization_pending` | keep polling |
+| `slow_down` | keep polling, more slowly |
+| `access_denied` | stop — the user said no |
+| `expired_token` | stop — the window closed |
+
+Collapsing any pair into `invalid_grant` turns a client that would have shown "you denied this on your phone" into one that retries forever.
+
+## Single use, and bound to one client
+
+`DeviceCodeStore.poll` reads the status **and consumes an approved authorization in the same operation**. A `find`-then-`delete` implementation passes a naive unit test and issues two access tokens from one human approval under concurrency; the shared conformance suite in core has a test that races two polls for exactly this reason.
+
+A device code is redeemable only by the client it was issued to, checked against the authenticated client identity rather than the request body. Without that, a leaked device code is redeemable by any other registered client — converting a leak into a full impersonation of the user's approval.
+
+## Storage
+
+The `DeviceCodeStore` port lives in `@o3co/auth-provider-core`, not here, so an adapter author depends on core alone.
+
+**Only the in-memory adapter ships today** (`memoryDeviceCodeStoreModule`). It is registered in core's replica-unsafe module list, so a composition with `deployment.mode = "multi"` **refuses to boot** with it: pending authorizations fork per replica, and the human approves a code on the replica that served the verification page while the device polls one that has never heard of it. A Redis adapter is tracked separately.
+
+Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363).
+
+## License
+
+Apache-2.0

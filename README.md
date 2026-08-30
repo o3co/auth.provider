@@ -49,7 +49,7 @@ pnpm build
 - **session** — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.
 - **federation-google / federation-github** — Concrete OAuth federation providers. Optional — install only the providers you register.
 - **foundation** — Production HTTP user-authentication adapter (client of "the Store"). Optional.
-- **webauthn / dpop / mtls / oauth-token-exchange / redis** — Optional capability and adapter modules; see [Packages](#packages).
+- **webauthn / dpop / mtls / oauth-token-exchange / device-grant / redis** — Optional capability and adapter modules; see [Packages](#packages).
 
 ## Packages
 
@@ -58,6 +58,7 @@ pnpm build
 | [`packages/core`](packages/core/) | `@o3co/auth-provider-core` | Core abstractions all other packages build on: module system, token service, repository interfaces, config schemas |
 | [`packages/oauth`](packages/oauth/) | `@o3co/auth-provider-oauth` | OAuth 2.0 routes module: `/oauth/token`, `/oauth/authorize`, `/oauth/introspect` |
 | [`packages/oauth-token-exchange`](packages/oauth-token-exchange/) | `@o3co/auth-provider-oauth-token-exchange` | RFC 8693 Token Exchange grant — on-behalf-of, delegation (`act`), scope/audience narrowing |
+| [`packages/device-grant`](packages/device-grant/) | `@o3co/auth-provider-device-grant` | RFC 8628 Device Authorization Grant — the device-code flow for TVs, CLIs and IoT |
 | [`packages/session`](packages/session/) | `@o3co/auth-provider-session` | Session and federation routes module: login, logout, OAuth 2.0 federation |
 | [`packages/webauthn`](packages/webauthn/) | `@o3co/auth-provider-webauthn` | Passkey (WebAuthn) credential lifecycle + authentication grant, AS-scope only |
 | [`packages/dpop`](packages/dpop/) | `@o3co/auth-provider-dpop` | DPoP (RFC 9449) sender-constrained access tokens |
