@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **`create-app` needs `"types": ["node"]` stated.** It declared `@types/node` and never named it, which 5.9's automatic `@types` inclusion covered; the thirty-two `Cannot find name 'process' / 'console' / 'node:fs'` errors are all that one omission.
 
+  **`express-session` becomes a peerDependency of `@o3co/auth-provider-oauth`.** The augmentation reaches consumers: it is emitted into the published `.d.ts`, so anyone typechecking against this package needs `express-session` resolvable. It was only a devDependency, which made that requirement invisible until a downstream build failed. `@o3co/auth-provider-session` already declared it this way, and the two now agree.
+
   No source behaviour changed and no test changed. Published `.d.ts` files are now emitted by TS 6 — consumers pinned to a TypeScript old enough to reject its output should upgrade alongside.
 
 ### Security
