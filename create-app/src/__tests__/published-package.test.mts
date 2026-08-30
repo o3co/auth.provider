@@ -70,6 +70,21 @@ describe("published-package install context (e2e)", () => {
 		expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
 		expect(existsSync(join(targetDir, "config", "application.conf"))).toBe(true);
 
+		// #407: the scaffold must arrive with a .gitignore, or the first
+		// `git add .` commits the `.env` and the signing key the README's own
+		// setup steps tell the operator to create right there. Asserted from
+		// the PACKED tarball rather than the working tree, because npm has a
+		// long history of dropping a file literally named `.gitignore` from a
+		// published package — a check against the repo would pass while every
+		// real `npx` scaffold shipped without one.
+		const gitignorePath = join(targetDir, ".gitignore");
+		expect(existsSync(gitignorePath)).toBe(true);
+		const gitignore = readFileSync(gitignorePath, "utf-8");
+		expect(gitignore).toContain(".env");
+		expect(gitignore).toContain("*.pem");
+		// `.env.example` is the documentation and must survive the `.env.*` rule.
+		expect(gitignore).toMatch(/^!\.env\.example$/m);
+
 		const pkg = JSON.parse(readFileSync(join(targetDir, "package.json"), "utf-8"));
 		expect(pkg.name).toBe("my-test-project");
 		for (const section of ["dependencies", "devDependencies", "peerDependencies"] as const) {

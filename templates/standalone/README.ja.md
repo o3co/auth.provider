@@ -42,7 +42,7 @@ overlay の値は `application.conf` を上書きします。scaffold には
 | 変数 | デフォルト | 説明 |
 |---|---|---|
 | `HTTP_PORT` | `3000` | サーバーがリッスンするポート |
-| `HTTP_TRUST_PROXY` | `false` | リバースプロキシの背後で動作する場合は `true` に設定。**ロードバランサ配下では必須** — 未設定だと `req.ip` が LB のアドレスになり、IP をキーとする全ての rate limit が全ユーザーで 1 バケットを共有する |
+| `HTTP_TRUST_PROXY` | `false` | Express の `trust proxy`。`false` / アドレス・CIDR のリスト (`10.0.0.0/8,loopback`) / ホップ数 (`1`) / `true` のいずれか。**ロードバランサ配下では必須** — 未設定だと `req.ip` が LB のアドレスになり、IP をキーとする全ての rate limit が全ユーザーで 1 バケットを共有する。`true` ではなく**実際のプロキシを名指しする**こと (#292): `true` は「接続してきた相手が誰であれ、その X-Forwarded-For の先頭を信じる」という意味で、プロセスに直接到達できる相手が自分で `req.ip` を選べてしまう。詳細は [Multi-replica deployments](#multi-replica-deployments) |
 
 ### OAuth JWT
 
@@ -114,7 +114,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 
 設定上の注意が 2 点:
 
-- TLS 終端プロキシの背後では `HTTP_TRUST_PROXY=true` を設定する。設定しないと `req.protocol` は `http` のままでブラウザは `Origin: https://…` を送るため、origin 側の判定が全リクエストを拒否する。
+- TLS 終端プロキシの背後では `HTTP_TRUST_PROXY` にそのプロキシのアドレス／CIDR を設定する (例: `HTTP_TRUST_PROXY=10.0.0.0/8`)。設定しないと `req.protocol` は `http` のままでブラウザは `Origin: https://…` を送るため、origin 側の判定が全リクエストを拒否する。`true` は「プロキシ以外が絶対にプロセスへ到達できない」と言い切れる場合にのみ正しい (#292) — 英語版 README も同じ指針。
 - ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON の `session.csrf.trustedOrigins` に列挙する。`cors.allowedOrigins` は CSRF 信頼を与えなくなった。
 
 ### Google フェデレーション

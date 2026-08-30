@@ -38,7 +38,16 @@ services:
       target: runtime
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # Loopback-bound on purpose (#407). This file assumes TLS is terminated
+      # in front, and the README says to keep `/metrics` off the public
+      # listener — a bare "3000:3000" publishes on every interface and
+      # contradicts both. A reverse proxy on the same host reaches it here.
+      #
+      # If your load balancer is on another host, publish it instead
+      # (`- "3000:3000"`) and put the access control somewhere real: a
+      # security group, a firewall rule, or the proxy's own network. Do not
+      # widen this line and call it done.
+      - "127.0.0.1:3000:3000"
     depends_on:
       redis:
         condition: service_healthy
@@ -88,6 +97,13 @@ services:
       RATE_LIMITER_ADAPTER: redis
 
   redis:
+    # Tag-pinned, not digest-pinned. The Dockerfile argues for digests (#289)
+    # and that argument holds here too — a tag is mutable, so two `up`s a month
+    # apart can run different Redis builds. Pin the digest for a production
+    # deployment you need to reproduce:
+    #   image: redis:7.2-alpine@sha256:<digest>
+    # Left as a tag in the template because a digest goes stale the week it is
+    # written and a scaffold that ships a stale one teaches nothing (#407).
     image: redis:7.2-alpine
     restart: unless-stopped
     # No `ports:`, deliberately — the app reaches Redis over the compose

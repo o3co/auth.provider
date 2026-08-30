@@ -16,6 +16,13 @@ services:
         required: false
 
   redis:
+    # Tag-pinned, not digest-pinned. The Dockerfile argues for digests (#289)
+    # and that argument holds here too — a tag is mutable, so two `up`s a month
+    # apart can run different Redis builds. Pin the digest for a production
+    # deployment you need to reproduce:
+    #   image: redis:7.2-alpine@sha256:<digest>
+    # Left as a tag in the template because a digest goes stale the week it is
+    # written and a scaffold that ships a stale one teaches nothing (#407).
     image: redis:7.2-alpine
     ports:
       - "127.0.0.1:6379:6379"
