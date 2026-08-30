@@ -35,18 +35,24 @@
  * that changes it is consent (#284).
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
 	type AppConfig,
+	ClientEntrySchema,
 	type ClientRepository,
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type GrantHandler,
+	InMemoryClientRepository,
+	loadYamlMap,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 
 const CLIENT_ID = "client-a";
@@ -223,5 +229,110 @@ describe("/authorize first-party invariant — the migration flag is removed (#3
 	it("still admits a marked client when the stale flag is present", async () => {
 		const app = await makeApp({ firstParty: true, staleAllowUnmarkedClients: true });
 		expect(errorOf(await authorize(app))).not.toBe("unauthorized_client");
+	});
+});
+
+/*
+ * #343 — the same invariant, driven through the repository a real deployment
+ * actually uses.
+ *
+ * Every case above hand-stubs a `ClientRepository` returning an object literal.
+ * That is how #342 shipped: `firstParty` could not be set on any file-backed
+ * registration, `/authorize` was unusable with the standalone template, and CI
+ * was green the whole time — the stubs pass against a repository whose schema
+ * could not represent the field.
+ *
+ * `entrySchemaConformance.test.mts` in core catches that class mechanically.
+ * This is the other half the issue asks for: at least one path through the YAML
+ * loader and `InMemoryClientRepository`, end to end, so the file-backed shape
+ * is exercised rather than assumed.
+ */
+describe("/authorize first-party invariant, through a file-backed registry (#343)", () => {
+	let tmpDir: string;
+
+	beforeEach(() => {
+		tmpDir = mkdtempSync(join(tmpdir(), "first-party-yaml-"));
+	});
+
+	afterEach(() => {
+		rmSync(tmpDir, { recursive: true, force: true });
+	});
+
+	/** Write a clients.yaml and boot the router on the repository it produces. */
+	const makeFileBackedApp = async (clientsYaml: string) => {
+		const yamlPath = join(tmpDir, "clients.yaml");
+		writeFileSync(yamlPath, clientsYaml, "utf8");
+		const clientRepository = new InMemoryClientRepository(loadYamlMap(yamlPath, ClientEntrySchema));
+
+		const registry = new GrantRegistry();
+		registry.register("authorization_code", alwaysGrant());
+
+		const { router } = await createOAuthRouter(express, {
+			registry,
+			config: makeConfig(false),
+			clientRepository,
+			codeRepository: {
+				createCode: async () => ({
+					code: "code-x",
+					client_id: CLIENT_ID,
+					redirect_uri: REDIRECT_URI,
+				}),
+				findByCode: async () => null,
+				consumeByCode: async () => null,
+				removeByCode: async () => {},
+			} as CodeRepository,
+			keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+		});
+
+		const app = express();
+		app.use(express.json());
+		app.use((req, _res, next) => {
+			(req as unknown as { session: Record<string, unknown> }).session = {
+				isAuthenticated: true,
+				user: { id: "user-1" },
+			};
+			next();
+		});
+		app.use("/oauth", router);
+		return app;
+	};
+
+	const yamlFor = (marking?: string): string =>
+		[
+			`${CLIENT_ID}:`,
+			"  tokenEndpointAuthMethod: none",
+			"  allowedRedirectUris:",
+			`    - ${REDIRECT_URI}`,
+			"  allowedScopes:",
+			"    - read",
+			...(marking === undefined ? [] : [`  ${marking}`]),
+			"",
+		].join(String.fromCharCode(10));
+
+	it("admits a YAML-registered client marked first-party", async () => {
+		// The #342 regression, at the level that would have caught it: the stub
+		// tests passed while this path answered `unauthorized_client` for every
+		// registration a deployment could actually write.
+		const app = await makeFileBackedApp(yamlFor("firstParty: true"));
+		expect(errorOf(await authorize(app))).not.toBe("unauthorized_client");
+	});
+
+	it("refuses a YAML-registered client that omits the marking", async () => {
+		const app = await makeFileBackedApp(yamlFor());
+		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
+	});
+
+	it("refuses a YAML-registered client marked firstParty: false", async () => {
+		const app = await makeFileBackedApp(yamlFor("firstParty: false"));
+		expect(errorOf(await authorize(app))).toBe("unauthorized_client");
+	});
+
+	it("refuses to boot on a misspelled marking rather than silently ignoring it", async () => {
+		// `.strict()` earning its keep: an operator who writes `frstParty: true`
+		// and sees `/authorize` refuse would otherwise have no way to tell a
+		// typo from a rule they misunderstood.
+		const yamlPath = join(tmpDir, "clients.yaml");
+		writeFileSync(yamlPath, yamlFor("frstParty: true"), "utf8");
+		expect(() => loadYamlMap(yamlPath, ClientEntrySchema)).toThrow(/frstParty/);
 	});
 });
