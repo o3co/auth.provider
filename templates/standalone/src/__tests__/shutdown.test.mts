@@ -31,14 +31,15 @@
  */
 
 import type { Server } from "node:http";
+import type { Logger } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import { installGracefulShutdown } from "../shutdown.mjs";
 
 /** A `Server` double whose `close` callback fires only when we say so. */
 function makeServer() {
-	let closeCallback: (() => void) | undefined;
+	let closeCallback: ((err?: Error) => void) | undefined;
 	const server = {
-		close: vi.fn((cb?: () => void) => {
+		close: vi.fn((cb?: (err?: Error) => void) => {
 			closeCallback = cb;
 			return server;
 		}),
@@ -50,28 +51,43 @@ function makeServer() {
 		spies: server,
 		/** Simulate the last in-flight request finishing. */
 		finishDraining: () => closeCallback?.(),
+		/** Simulate `close` reporting a failure through its callback. */
+		failClose: (err: Error) => closeCallback?.(err),
 		get drained() {
 			return closeCallback !== undefined;
 		},
 	};
 }
 
-const makeLogger = () => ({
-	info: vi.fn(),
-	warn: vi.fn(),
-	error: vi.fn(),
-	debug: vi.fn(),
-});
+/**
+ * A `Logger`-shaped spy. Typed rather than cast: `as never` would hide a real
+ * mismatch the day the port gains a method, which is the whole reason the
+ * shutdown path logs through the app logger instead of `console`.
+ */
+const makeLogger = () => {
+	const spy = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		// `child` returns a Logger; returning this one keeps a child's calls
+		// visible on the same spies, which is what a test wants.
+		child: vi.fn(() => spy as unknown as Logger),
+	};
+	return spy satisfies Logger;
+};
 
 /** Drive one shutdown without touching the real `process` or exiting. */
 function install(opts: { cleanup?: () => void | Promise<void>; drainTimeoutMs?: number } = {}) {
-	const { server, spies, finishDraining } = makeServer();
+	const { server, spies, finishDraining, failClose } = makeServer();
 	const logger = makeLogger();
 	const exit = vi.fn();
 	const signals = new Map<string, () => void>();
 
 	installGracefulShutdown(server, {
-		logger: logger as never,
+		logger,
 		cleanup: opts.cleanup ?? (() => {}),
 		...(opts.drainTimeoutMs === undefined ? {} : { drainTimeoutMs: opts.drainTimeoutMs }),
 		exit,
@@ -79,7 +95,7 @@ function install(opts: { cleanup?: () => void | Promise<void>; drainTimeoutMs?: 
 		offSignal: (name) => signals.delete(name),
 	});
 
-	return { spies, logger, exit, signals, finishDraining };
+	return { spies, logger, exit, signals, finishDraining, failClose };
 }
 
 describe("installGracefulShutdown (#290)", () => {
@@ -190,6 +206,32 @@ describe("installGracefulShutdown (#290)", () => {
 		signals.get("SIGTERM")?.();
 		finishDraining();
 		await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+	});
+
+	it("does not report a failed close as a clean drain", async () => {
+		// `server.close` reports through its callback -- "Server is not running"
+		// is the common one, but any listener teardown failure lands there.
+		// Exiting 0 on it would tell an orchestrator the listener came down
+		// when it did not.
+		const { exit, logger, signals, failClose } = install();
+		signals.get("SIGTERM")?.();
+		failClose(new Error("Server is not running"));
+		await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.any(Error) }),
+			expect.stringContaining("close"),
+		);
+	});
+
+	it("still runs cleanup when close reports a failure", async () => {
+		// The listener failing to come down is no reason to leak the Redis
+		// connections behind it.
+		const cleanup = vi.fn();
+		const { exit, signals, failClose } = install({ cleanup });
+		signals.get("SIGTERM")?.();
+		failClose(new Error("teardown failed"));
+		await vi.waitFor(() => expect(exit).toHaveBeenCalled());
+		expect(cleanup).toHaveBeenCalledTimes(1);
 	});
 
 	it("removes its own signal listeners once shutting down", async () => {
