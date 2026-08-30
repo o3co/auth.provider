@@ -234,6 +234,23 @@ function resolveScope(
 		return { scopes: (ceilings[0] as readonly string[]).filter(within) };
 	}
 
+	// A request with NO ceiling to bound it is refused, not granted.
+	//
+	// `within` is `ceilings.every(...)`, and `[].every(...)` is `true` — so
+	// without this branch a caller with an assertion that names no scope and no
+	// authenticated client would receive whatever scope they asked for, which
+	// is the over-grant #396 removed elsewhere and which the paragraph above
+	// claims not to do. Vacuous truth, in the one place it is most expensive.
+	if (ceilings.length === 0) {
+		return {
+			status: 400,
+			error: "invalid_scope",
+			errorDescription:
+				"scope was requested but nothing bounds it: the assertion names no scope and " +
+				"no authenticated client supplies an allowlist",
+		};
+	}
+
 	const requested = raw.split(" ").filter((s) => s.length > 0);
 	const refused = requested.filter((s) => !within(s));
 	if (refused.length > 0) {

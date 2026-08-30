@@ -260,6 +260,43 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => 
 		expect(decodeJwt(result.tokens.access_token as string).scope).toBeUndefined();
 	});
 
+	it("refuses a requested scope when nothing bounds it", async () => {
+		// The fail-OPEN this had: `within` is `ceilings.every(...)` and
+		// `[].every(...)` is true, so an assertion that names no scope plus no
+		// authenticated client meant the caller got whatever they asked for.
+		// Found in review; the comment two paragraphs up claimed the opposite.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d" }),
+		}).handle(ctx({ scope: "admin" }, { authenticatedClient: null }));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("says why nothing bounds it, rather than just refusing", async () => {
+		const { result } = await build({}).handle(ctx({ scope: "read" }));
+		const description = "errorDescription" in result ? result.errorDescription : "";
+		expect(description).toMatch(/assertion names no scope/);
+		expect(description).toMatch(/no authenticated client/);
+	});
+
+	it("still grants nothing — not everything — when no scope is requested either", async () => {
+		const { result } = await build({}).handle(ctx());
+		if (!("tokens" in result)) expect.fail("expected tokens");
+		expect(decodeJwt(result.tokens.access_token as string).scope).toBeUndefined();
+	});
+
+	it("accepts a request bounded by the client alone", async () => {
+		// One ceiling is enough; the refusal above is about having none.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d" }),
+		}).handle(
+			ctx({ scope: "read" }, {
+				authenticatedClient: { clientId: "c1", allowedScopes: ["read", "write"] },
+			} as never),
+		);
+		expect(result.status).toBe(200);
+	});
+
 	it("rejects a non-string scope", async () => {
 		const { result } = await build({}).handle(ctx({ scope: ["read"] }));
 		expect("error" in result && result.error).toBe("invalid_request");
@@ -293,10 +330,19 @@ describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
 		return (contributed ?? {}) as Record<string, (d: unknown) => unknown>;
 	};
 
+	/** Everything the grant needs except the one slot under test. */
+	const depsWithout = (missing: "assertionVerifier" | "userRepository") => ({
+		config: configWith(true),
+		keyStore,
+		...(missing === "assertionVerifier"
+			? { userRepository: userRepoFor({ id: "u-1" }) }
+			: { assertionVerifier: verifierFor({ subjectHandle: "d" }) }),
+	});
+
 	it("refuses to build the grant when the verifier is missing", () => {
 		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
 		expect(factory).toBeDefined();
-		expect(() => factory?.({ config: configWith(true), keyStore })).toThrow(
+		expect(() => factory?.(depsWithout("assertionVerifier"))).toThrow(
 			/no assertionVerifier is wired/,
 		);
 	});
@@ -306,12 +352,20 @@ describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
 		expect(factory).toBeDefined();
 		let message = "did not throw";
 		try {
-			factory?.({ config: configWith(true), keyStore });
+			factory?.(depsWithout("assertionVerifier"));
 		} catch (e) {
 			message = (e as Error).message;
 		}
 		expect(message).toMatch(/createJwtAssertionVerifier/);
 		expect(message).toMatch(/disable the grant/);
+	});
+
+	it("refuses to build the grant when the userRepository is missing", () => {
+		// The grant resolves the verified handle through `authenticateByToken`;
+		// without it the first request would fail at the call rather than at
+		// boot, which is the wrong place to learn about a wiring gap.
+		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
+		expect(() => factory?.(depsWithout("userRepository"))).toThrow(/no userRepository is wired/);
 	});
 
 	it("does not register the grant at all when it is not enabled", () => {

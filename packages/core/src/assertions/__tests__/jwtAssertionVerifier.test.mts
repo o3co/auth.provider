@@ -166,6 +166,13 @@ describe("createJwtAssertionVerifier — construction (#301)", () => {
 		expect(() => verifier({ audience: "" })).toThrow(/issuer and audience are required/);
 	});
 
+	it("refuses to build without an algorithm list", () => {
+		// Omitting it lets jose accept anything the key can verify, which is
+		// wider than configuring one key means — and the docstring promised
+		// otherwise before this was required.
+		expect(() => verifier({ algorithms: [] })).toThrow(/at least one algorithm/);
+	});
+
 	it("reports its kind", () => {
 		expect(verifier().kind).toBe("jwt");
 	});

@@ -93,6 +93,15 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// than registering one that would accept anything.
 	if (isExplicitlyEnabled(grantsCfg["urn:ietf:params:oauth:grant-type:jwt-bearer"]?.enabled)) {
 		grants[JWT_BEARER_GRANT_TYPE] = (deps) => {
+			if (!deps.userRepository) {
+				throw new Error(
+					`${JWT_BEARER_GRANT_TYPE} is enabled but no userRepository is wired. ` +
+						"The grant resolves the verified handle through " +
+						"`authenticateByToken`, so without it there is nothing to resolve " +
+						"against and the first request would fail at the call rather than " +
+						"at boot.",
+				);
+			}
 			if (!deps.assertionVerifier) {
 				throw new Error(
 					`${JWT_BEARER_GRANT_TYPE} is enabled but no assertionVerifier is wired. ` +

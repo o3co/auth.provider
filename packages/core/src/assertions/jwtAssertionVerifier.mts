@@ -47,7 +47,15 @@ export interface JwtAssertionVerifierOptions {
 	 * *different* service can be replayed here.
 	 */
 	readonly audience: string;
-	readonly algorithms?: readonly string[];
+	/**
+	 * Signature algorithms accepted, e.g. `["EdDSA"]`.
+	 *
+	 * Required, with no default. jose otherwise accepts anything the supplied
+	 * key can verify, which is a wider contract than a deployment means when it
+	 * configures one key — and "accepts whatever fits" is how an assertion
+	 * signed with an unintended algorithm gets through.
+	 */
+	readonly algorithms: readonly string[];
 	/** Clock skew for `exp` / `nbf`, in seconds. Default 60. */
 	readonly clockToleranceSeconds?: number;
 	/** Defaults to reading `sub`. */
@@ -82,8 +90,9 @@ const defaultReadScope = (claims: JWTPayload): readonly string[] | undefined =>
  *   another service is replayable here without it.
  * - **A claims set with no usable handle** — `null`. A verified signature over
  *   a token naming nobody is not an authentication.
- * - **`alg: none` and every unlisted algorithm** — the algorithms list has no
- *   permissive default, so a deployment names what it accepts.
+ * - **`alg: none` and every unlisted algorithm** — `algorithms` is required
+ *   with no default, so a deployment names what it accepts rather than
+ *   inheriting "anything this key can verify".
  *
  * A verification that could not be *attempted* is not modelled here: this
  * implementation is local and cannot fail that way. A vendor-backed verifier
@@ -109,6 +118,13 @@ export function createJwtAssertionVerifier(
 				"without a pinned audience is replayable from another service (RFC 7523 §3).",
 		);
 	}
+	if (algorithms.length === 0) {
+		throw new Error(
+			"createJwtAssertionVerifier: algorithms must name at least one algorithm — " +
+				"omitting it lets jose accept anything the key can verify, which is wider " +
+				"than configuring one key means.",
+		);
+	}
 
 	return {
 		kind: "jwt",
@@ -120,7 +136,7 @@ export function createJwtAssertionVerifier(
 					issuer,
 					audience,
 					clockTolerance: clockToleranceSeconds,
-					...(algorithms ? { algorithms: [...algorithms] } : {}),
+					algorithms: [...algorithms],
 				}));
 			} catch {
 				// Not verified. Deliberately not rethrown: a caller must not be
