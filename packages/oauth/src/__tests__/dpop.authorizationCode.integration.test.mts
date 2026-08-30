@@ -110,7 +110,11 @@ function makeDeps(
 						...(mockConfig as unknown as Record<string, unknown>),
 						oauth: {
 							...(mockConfig as unknown as { oauth: Record<string, unknown> }).oauth,
+							// `dispatch-policy` is required by CoreConfigSchema and comes
+							// from reference.conf in a real deployment. Restated here so
+							// the stub stays a shape the schema would accept.
 							tokenBinding: {
+								"dispatch-policy": "intent-explicit",
 								bindConfidentialClientRefreshTokens: options.bindConfidentialClientRefreshTokens,
 							},
 						},
