@@ -39,8 +39,8 @@
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"accepts": "^2.0.0",
-		"jose": "^6.2.7",
-		"zod": "^4.3.6"
+		"jose": "^6.2.10",
+		"zod": "^4.5.4"
 	},
 	"peerDependencies": {
 		"express": "^5.0.0",

@@ -39,7 +39,7 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"zod": "^4.3.6"
+		"zod": "^4.5.4"
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "^0.0.0",
