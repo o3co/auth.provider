@@ -99,6 +99,9 @@ importers:
       '@o3co/auth-provider-oauth':
         specifier: workspace:*
         version: link:../oauth
+      '@o3co/auth-provider-session':
+        specifier: workspace:*
+        version: link:../session
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6

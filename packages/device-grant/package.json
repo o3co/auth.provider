@@ -44,11 +44,13 @@
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",
 		"@o3co/auth-provider-oauth": "workspace:^",
+		"@o3co/auth-provider-session": "workspace:^",
 		"express": "^5.0.0"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-oauth": "workspace:*",
+		"@o3co/auth-provider-session": "workspace:*",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",
 		"@vitest/coverage-v8": "^4.1.10",

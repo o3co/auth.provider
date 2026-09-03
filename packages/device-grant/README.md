@@ -44,7 +44,10 @@ import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { memoryDeviceCodeStoreModule } from "@o3co/auth-provider-core";
 
 const app = await createApp({
-  modules: [oauthModule, deviceGrantModule, memoryDeviceCodeStoreModule /* dev only */],
+  // `sessionModule` is what puts the end user on `req.session`, and its
+  // `session.*` config is what the verification route's CSRF guard is built
+  // from — see "JSON only, behind the session CSRF guard" below.
+  modules: [oauthModule, sessionModule, deviceGrantModule, memoryDeviceCodeStoreModule /* dev only */],
   bootstrapComponents: { config, clientRepository, keyStore, rateLimiter },
 });
 ```
@@ -65,7 +68,15 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 | `approve` | `{ status: "approved", client_id }` | |
 | `deny` | `{ status: "denied", client_id }` | |
 
-Errors: `401 login_required`, `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`.
+Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`.
+
+**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the route accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not), and runs the same `createCsrfGuard` as `POST /session/login` (#272):
+
+- a foreign `Origin` / `Referer` is refused with `403 access_denied` and logged as `csrf_origin_rejected`;
+- the provider's own origin, or one listed in `session.csrf.trustedOrigins`, is accepted — a verification page served from another origin is declared there, on the same list the login form uses;
+- a request with no origin signal at all (a non-browser client) must present the signed double-submit token from `GET /session/csrf`: the `<session.name>.csrf` cookie echoed in the `x-csrf-token` header.
+
+The guard is built from the `session.*` config slice, so enabling the grant without one fails at boot. This is why the package depends on `@o3co/auth-provider-session`: one CSRF policy for the product, not a second origin check that can drift from it.
 
 **One endpoint, three actions**, because all three take a `user_code` and **all three are the same brute-force oracle** — a `lookup` route that answered "which client is this?" without counting against the same budget would be a free oracle sitting beside a limited one. One route means one limiter call, and no way to add a fourth entry point that forgets it.
 

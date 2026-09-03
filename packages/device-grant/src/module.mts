@@ -39,10 +39,37 @@
  * code's entropy budget *against* a rate limit, so an unlimited deployment is
  * not a slower version of a limited one, it is 34.5 bits against an unbounded
  * attacker. Both fail at boot rather than at the first request.
+ *
+ * ### The verification endpoint is a CSRF target, and is guarded as one
+ *
+ * `POST /oauth/device/verification` authorises on the end-user session cookie
+ * — the one credential a browser attaches to a request some other site made.
+ * That is the whole of RFC 8628 §5.4's remote-phishing attack: any public
+ * `client_id` obtains a `user_code`, a page on the attacker's origin
+ * auto-submits `action=approve&user_code=…` from the victim's browser, and
+ * the attacker's device collects the victim's token. Turning
+ * `verification_uri_complete` off keeps the *user* typing the code; a forged
+ * POST types it for them.
+ *
+ * So the route the module mounts is JSON-only — a form body is a "simple"
+ * request the browser sends without a preflight, `application/json` is not —
+ * and sits behind the same `createCsrfGuard` `/session/login` runs (#272):
+ * a foreign `Origin` / `Referer` is refused outright, the server's own origin
+ * or one on `session.csrf.trustedOrigins` is accepted, and a request with no
+ * origin signal must carry the session's signed double-submit token. That is
+ * one CSRF policy for the product rather than a second one that can drift,
+ * which is why this package depends on `@o3co/auth-provider-session` rather
+ * than restating an origin check. The guard is built from the `session.*`
+ * config slice, so enabling the grant without one fails at boot.
  */
 
 import { DEVICE_CODE_STORE_ABSENCE_POLICY, defineModule } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
+import {
+	createCsrfGuard,
+	createCsrfProtectionFromConfig,
+	type SessionCsrfConfigSlice,
+} from "@o3co/auth-provider-session";
 import express from "express";
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
@@ -155,6 +182,32 @@ const disabledRoute = (id: string, mountPath: string) => {
 	return { id, mountPath, handler: router };
 };
 
+/**
+ * The `session.*` slice the verification route's CSRF guard is built from.
+ *
+ * Checked structurally rather than declared in `configSchema`: the slice is
+ * the session module's to validate, and every deployment that can reach this
+ * endpoint mounts that module — `req.session.isAuthenticated` is its field.
+ * What is refused here is the composition that enables the grant with no
+ * session at all, where the guard would have no signing key and no cookie
+ * name and the endpoint would be mounted with no CSRF defence.
+ */
+const requireSessionSlice = (deps: AnyDeps): SessionCsrfConfigSlice => {
+	const session = deps.config?.session as SessionCsrfConfigSlice | undefined;
+	if (session === undefined || typeof session.secret !== "string" || session.secret === "") {
+		throw new Error(
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires the " +
+				"`session` config slice (session.secret, session.name, ...). " +
+				"POST /oauth/device/verification runs inside the end-user session and is " +
+				"guarded by the same CSRF policy as /session/login — a signed double-submit " +
+				"token derived from session.secret, and an Origin/Referer check against " +
+				"session.csrf.trustedOrigins — so without the slice the guard cannot be built " +
+				"and the endpoint cannot be mounted safely.",
+		);
+	}
+	return session;
+};
+
 const requireRateLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> => {
 	if (deps.rateLimiter === undefined) {
 		throw new Error(
@@ -256,10 +309,26 @@ export const deviceGrantModule = defineModule({
 					return disabledRoute("device-verification", "/oauth/device/verification");
 				}
 				const router = express.Router();
+				// JSON only, deliberately — see the file header. A form body is
+				// a "simple" request a browser sends cross-site with the
+				// victim's cookie and no preflight; JSON is not. With no form
+				// parser mounted, a forged form POST carries no `action` even
+				// if it reached the handler.
 				router.use(express.json({ limit: "16kb" }));
-				router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+				// The session guard, verbatim: foreign origin refused, same
+				// origin or `session.csrf.trustedOrigins` accepted, no origin
+				// signal → the signed double-submit token `GET /session/csrf`
+				// mints. On the whole route rather than on `approve` / `deny`
+				// alone, for the reason the three actions are one route: no
+				// way to add a fourth that forgets it.
+				const sessionSlice = requireSessionSlice(deps);
 				router.post(
 					"/",
+					createCsrfGuard({
+						csrf: createCsrfProtectionFromConfig(sessionSlice),
+						trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],
+						...(deps.logger ? { logger: deps.logger } : {}),
+					}),
 					createDeviceVerificationHandler({
 						store: deps.deviceCodeStore,
 						rateLimiter: requireRateLimiter(deps),

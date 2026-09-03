@@ -28,7 +28,7 @@ import {
 	createMemoryRateLimiter,
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
-import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
+import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -63,9 +63,14 @@ interface Overrides {
 
 const makeBoot = (overrides: Overrides): BootstrapMap => {
 	const core = makeValidCoreConfig();
+	const full = makeValidFullSections();
 	return {
 		config: {
 			...core,
+			// The verification route's CSRF guard is built from `session.*`, the
+			// same slice `/session/login` reads; enabling the grant without it
+			// is a boot refusal, so the fixture carries the standard one.
+			session: full.session,
 			oauth: {
 				...core.oauth,
 				deviceAuthorization: {
@@ -217,6 +222,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 					"polling-interval-seconds": 5,
 				},
 			},
+			session: makeValidFullSections().session,
 		},
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
