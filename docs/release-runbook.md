@@ -192,5 +192,5 @@ Sibling peers are therefore declared as `workspace:^`, which `pnpm pack` / `pnpm
 pnpm -r exec pnpm version 0.0.0-check --no-git-tag-version --no-commit-hooks
 (cd packages/dpop && pnpm pack --pack-destination /tmp/tarballs)
 tar -xzOf /tmp/tarballs/o3co-auth-provider-dpop-0.0.0-check.tgz package/package.json | jq .peerDependencies
-git checkout -- package.json '**/package.json'
+git checkout -- ':(glob)**/package.json'
 ```
