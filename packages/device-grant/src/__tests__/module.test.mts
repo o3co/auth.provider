@@ -21,7 +21,7 @@
  * reasons — and both reasons are the point of the test.
  */
 
-import type { BootstrapMap, ClientRepository } from "@o3co/auth-provider-core";
+import type { BootstrapMap, ClientRepository, RateLimitSpec } from "@o3co/auth-provider-core";
 import {
 	createApp,
 	createMemoryDeviceCodeStore,
@@ -73,6 +73,9 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			// same slice `/session/login` reads; enabling the grant without it
 			// is a boot refusal, so the fixture carries the standard one.
 			session: full.session,
+			// The device_authorization guard reads the product-wide outage
+			// policy, `rateLimit.failMode`, like every other guarded route.
+			rateLimit: full.rateLimit,
 			// #363: the module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
 			// with no sink must say so — which is what this fixture is.
 			...(overrides.withoutAuditDeclaration === true ? {} : { audit: full.audit }),
@@ -224,7 +227,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		return app;
 	};
 
-	const enabledDeps = () => ({
+	const enabledDeps = (overrides: { limits?: Record<string, RateLimitSpec> } = {}) => ({
 		config: {
 			oauth: {
 				jwt: { issuer: "https://as.example.test" },
@@ -238,11 +241,15 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 				},
 			},
 			session: makeValidFullSections().session,
+			rateLimit: makeValidFullSections().rateLimit,
 		},
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
 		rateLimiter: createMemoryRateLimiter({
-			limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+			limits: {
+				device_verification: { limit: 5, windowSeconds: 300 },
+				...(overrides.limits ?? {}),
+			},
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		}),
 	});
@@ -275,6 +282,42 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 		expect(res.status).toBe(200);
 		expect(typeof res.body.device_code).toBe("string");
+	});
+
+	it("rate-limits the mounted device_authorization route, ahead of client authentication", async () => {
+		// Every other public entry point sits behind `createRateLimitGuard`;
+		// this one did not, and its store is what an unthrottled caller fills.
+		// The guard is mounted BEFORE client auth (the token endpoint's D-6
+		// ordering): the second unauthenticated hit is throttled, not 401'd,
+		// which is what bounds repository lookups from a caller with no
+		// credentials at all.
+		const app = mountContributedRoute(
+			0,
+			enabledDeps({ limits: { device_authorization: { limit: 1, windowSeconds: 60 } } }),
+		);
+
+		const first = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+		expect(first.status).toBe(401);
+		expect(first.headers["ratelimit-limit"]).toBe("1");
+
+		const second = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+		expect(second.status).toBe(429);
+		expect(second.body.error).toBe("rate_limited");
+		expect(second.headers["retry-after"]).toBeDefined();
+	});
+
+	it("refuses to mount device_authorization without the outage policy, rateLimit.failMode", () => {
+		// The guard's fail-open / fail-closed choice is the product's, made
+		// once in config. Defaulting it here would be a second policy.
+		const deps = enabledDeps();
+		const factory = deviceGrantModule.contributes?.routes?.[0] as (d: unknown) => unknown;
+		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
+			/rateLimit\.failMode/,
+		);
 	});
 
 	it("answers 404 with no-store when the grant is disabled", async () => {

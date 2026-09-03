@@ -24,6 +24,13 @@ export const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_c
 /** Key prefix this package rate-limits the verification endpoint under. */
 export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
 
+/**
+ * Key prefix `POST /oauth/device_authorization` is throttled under, keyed
+ * `device_authorization:ip:<ip>` by `createRateLimitGuard` like the other
+ * public entry points (`token`, `authorize`, `introspect`).
+ */
+export const DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX = "device_authorization";
+
 export interface DeviceAuthorizationSettings {
 	/**
 	 * Where the end user goes to type the code. Required when the grant is

@@ -638,6 +638,8 @@ export { constantTimeStringEqual } from "./security/timingSafe.mjs";
 
 export {
 	createMemoryDeviceCodeStore,
+	DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES,
+	DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL,
 	type MemoryDeviceCodeStore,
 	type MemoryDeviceCodeStoreOptions,
 } from "./device-authorization/memory.mjs";

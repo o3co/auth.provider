@@ -90,6 +90,8 @@ RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit: an 8-charac
 
 Every attempt counts, malformed codes included: excluding them would hand an attacker an unmetered way to probe which shapes the endpoint accepts. The key is `device_verification:user:<subject>` — keyed on the **authenticated user**, not the code. Keying on the code would spend whichever code the attacker happened to hit, which is nobody's budget; keying on the subject means an attacker needs an account and burns their own.
 
+`POST /oauth/device_authorization` is throttled as well, under `device_authorization:ip:<ip>` — the same `createRateLimitGuard` and key shape as `/oauth/token`, mounted **ahead of client authentication** so unauthenticated repeats are bounded before they reach a repository lookup. It uses the adapter's `defaultLimit` unless `memoryRateLimiter.limits.device_authorization` (or the Redis equivalent) declares one, and it honours the product's `rateLimit.failMode` outage policy.
+
 ## The decision is an audit event
 
 `approve` emits `device.approved`, `deny` emits `device.denied`, and a subject who exhausts the verification budget emits `device.rate_limited` — the signal that an account is being used to guess codes. Each carries the subject, the client, the scope and the request's `ip` / `userAgent`; none carries the user code (the value being brute-forced) or the device code (a bearer credential). The names are part of core's `BUILT_IN_AUDIT_EVENT_TYPES` inventory.
@@ -141,6 +143,8 @@ A device code is redeemable only by the client it was issued to, checked against
 The `DeviceCodeStore` port lives in `@o3co/auth-provider-core`, not here, so an adapter author depends on core alone.
 
 **Only the in-memory adapter ships today** (`memoryDeviceCodeStoreModule`). It is registered in core's replica-unsafe module list, so a composition with `deployment.mode = "multi"` **refuses to boot** with it: pending authorizations fork per replica, and the human approves a code on the replica that served the verification page while the device polls one that has never heard of it. A Redis adapter is tracked separately.
+
+The memory store is bounded three ways: every read path drops an expired record it finds, `create` sweeps expired records every 1000 calls, and `maxEntries` (default 10 000) caps the resident set — at the cap, expired records are pruned first and then the live record closest to expiry is evicted. Its `dispose` is registered with the boot planner's lifecycle registrar.
 
 Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363).
 

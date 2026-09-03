@@ -65,8 +65,10 @@
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
+	type RateLimitFailMode,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import {
@@ -78,7 +80,7 @@ import express from "express";
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
-import { DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
+import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
 export const deviceGrantConfigSchema = z.object({
@@ -212,6 +214,24 @@ const requireSessionSlice = (deps: AnyDeps): SessionCsrfConfigSlice => {
 	return session;
 };
 
+/**
+ * OR-5: the outage policy for a limiter-backend failure is `rateLimit.failMode`
+ * — one decision for the product, read by every guarded route. Defaulting it
+ * here would be a second policy, so its absence is a boot refusal.
+ */
+const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
+	const failMode = deps.config?.rateLimit?.failMode;
+	if (failMode !== "open" && failMode !== "closed") {
+		throw new Error(
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
+				'rateLimit.failMode ("open" | "closed"). POST /oauth/device_authorization ' +
+				"runs behind the shared rate-limit guard, and what the guard does when the " +
+				"limiter backend is down is the product's outage policy, not this module's.",
+		);
+	}
+	return failMode;
+};
+
 const requireRateLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> => {
 	if (deps.rateLimiter === undefined) {
 		throw new Error(
@@ -278,6 +298,22 @@ export const deviceGrantModule = defineModule({
 				// WebAuthn routes: `createApp` installs no global parser.
 				router.use(express.json({ limit: "16kb" }));
 				router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+				// Throttled like every other public entry point (#325), and
+				// AHEAD of client authentication — the token endpoint's D-6
+				// ordering — so repeated unauthenticated hits are bounded before
+				// they reach a repository lookup, and so a public client cannot
+				// fill the device-code store by asking. Keyed
+				// `device_authorization:ip:<ip>`; the adapter resolves the spec
+				// by that prefix and falls back to its default.
+				router.use(
+					createRateLimitGuard({
+						limiter: requireRateLimiter(deps),
+						tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
+						failMode: requireFailMode(deps),
+						...(deps.logger ? { logger: deps.logger } : {}),
+						auditSink: deps.auditSink,
+					}),
+				);
 				// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
 				// requirements to this endpoint, and §5.6 expects device clients
 				// to be public. `allowPublicClients: true` is exactly that pair:
