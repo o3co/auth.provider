@@ -59,9 +59,10 @@ const build = (opts: {
 	verifier?: AssertionVerifier;
 	userRepository?: UserRepository;
 	logger?: unknown;
+	config?: AppConfig;
 }) =>
 	createJwtBearerGrant({
-		config,
+		config: opts.config ?? config,
 		keyStore,
 		assertionVerifier: opts.verifier ?? verifierFor({ subjectHandle: "device:abc" }),
 		userRepository: opts.userRepository ?? userRepoFor({ id: "u-1" }),
@@ -173,6 +174,62 @@ describe("jwt-bearer grant — what it refuses (#301)", () => {
 		const { result } = await build({ userRepository: userRepoFor({ id: "" }) }).handle(ctx());
 		expect(result.status).toBe(400);
 		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+});
+
+describe("jwt-bearer grant — oauth.requireEmailVerified (#297)", () => {
+	// The third point that holds a resolved user at issuance, after
+	// `/authorize` and the `session` grant. A deployment that turned the gate
+	// on would otherwise find two paths gated and this one wide open.
+	const gated = {
+		...config,
+		oauth: { ...config.oauth, requireEmailVerified: true },
+	} as unknown as AppConfig;
+
+	it("refuses when the gate is on and the Store published no verification", async () => {
+		const { result } = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1" }),
+		}).handle(ctx());
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("refuses when the Store published an explicit false", async () => {
+		const { result } = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1", emailVerified: false }),
+		}).handle(ctx());
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("admits when the Store published true", async () => {
+		const { result } = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1", emailVerified: true }),
+		}).handle(ctx());
+		expect(result.status).toBe(200);
+	});
+
+	it("is inert when the gate is off, whatever the Store published", async () => {
+		// Off is the default, and a Store that does not model the field must be
+		// entirely unaffected.
+		const { result } = await build({
+			userRepository: userRepoFor({ id: "u-1", emailVerified: false }),
+		}).handle(ctx());
+		expect(result.status).toBe(200);
+	});
+
+	it("answers exactly what an unknown handle answers, so it cannot be probed", async () => {
+		// A different description would tell a caller that this handle resolves
+		// to a real, merely unverified, account.
+		const unverified = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1" }),
+		}).handle(ctx());
+		const unknown = await build({ userRepository: userRepoFor(null) }).handle(ctx());
+		expect(unverified.result).toEqual(unknown.result);
 	});
 });
 

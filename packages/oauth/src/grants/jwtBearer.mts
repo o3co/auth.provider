@@ -22,7 +22,8 @@ import type {
 	GrantHandlerResult,
 	UserRepository,
 } from "@o3co/auth-provider-core";
-import { generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
+import { generateToken, generateTokenResponse, isEmailVerified } from "@o3co/auth-provider-core";
+import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
 /** RFC 7523 §2.1. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -69,9 +70,10 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *
  * - Missing/blank `assertion` → `invalid_request` (RFC 6749 §5.2: a missing
  *   parameter is not a bad grant).
- * - Verifier returns `null`, or the Store does not resolve the handle →
- *   `invalid_grant`, identically. Distinguishing them would let a caller probe
- *   for live device identifiers.
+ * - Verifier returns `null`, the Store does not resolve the handle, or the
+ *   resolved user fails `oauth.requireEmailVerified` (#297) → `invalid_grant`,
+ *   identically. Distinguishing them would let a caller probe for live device
+ *   identifiers, or for which of them are linked to a real account.
  * - Verifier or Store **throws** → `503 temporarily_unavailable`. An
  *   attestation service or a Store being unreachable is an outage, not a bad
  *   credential, and answering `invalid_grant` would send an operator to
@@ -84,6 +86,9 @@ export const createJwtBearerGrant = (
 	},
 ): GrantHandler => {
 	const { config, keyStore, assertionVerifier, userRepository } = deps;
+	// #297: deployment config, resolved once at construction like the session
+	// grant does — `resolveOAuthOptions` owns the defensive read.
+	const { requireEmailVerified } = resolveOAuthOptions(config);
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -155,6 +160,27 @@ export const createJwtBearerGrant = (
 				// bind. Issuing a token with an empty `sub` would produce a
 				// credential naming nobody, so this fails closed.
 				deps.logger?.error({ kind: assertionVerifier.kind }, "jwt_bearer_resolved_user_has_no_id");
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "assertion did not verify",
+					},
+				};
+			}
+
+			// #297: this grant resolves a user and mints for them, which makes it
+			// the third point (after `/authorize` and the `session` grant) that
+			// holds the user at issuance and therefore the third the gate has to
+			// cover. Without it a deployment requiring a verified email would
+			// find the browser paths gated and the device path wide open.
+			//
+			// Same answer as an unknown handle, on purpose: a distinct
+			// description would tell a caller that this handle resolves to a
+			// real, merely unverified, account. The log line is for the
+			// operator who turned the gate on and now sees devices refused.
+			if (requireEmailVerified && !isEmailVerified(user)) {
+				deps.logger?.info({ kind: assertionVerifier.kind }, "jwt_bearer_email_not_verified");
 				return {
 					result: {
 						status: 400,
