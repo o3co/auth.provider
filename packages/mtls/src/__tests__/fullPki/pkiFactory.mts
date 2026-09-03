@@ -53,6 +53,9 @@ const OID = {
 	clientAuth: "1.3.6.1.5.5.7.3.2",
 	serverAuth: "1.3.6.1.5.5.7.3.1",
 	subjectAltName: "2.5.29.17",
+	deltaCRLIndicator: "2.5.29.27",
+	issuingDistributionPoint: "2.5.29.28",
+	certificateIssuer: "2.5.29.29",
 } as const;
 
 /** `KeyUsage` bit positions, MSB-first within the first octet (RFC 5280 §4.2.1.3). */
@@ -148,21 +151,62 @@ export const criticalClientAuthEku = (): pkijs.Extension =>
 		extnValue: new pkijs.ExtKeyUsage({ keyPurposes: [OID.clientAuth] }).toSchema().toBER(false),
 	});
 
-export const crlDistributionPoints = (urls: readonly string[]): pkijs.Extension =>
+const distributionPointsExtension = (points: readonly pkijs.DistributionPoint[]): pkijs.Extension =>
 	new pkijs.Extension({
 		extnID: OID.crlDistributionPoints,
 		critical: false,
-		extnValue: new pkijs.CRLDistributionPoints({
-			distributionPoints: urls.map(
-				(url) =>
-					new pkijs.DistributionPoint({
-						distributionPoint: [new pkijs.GeneralName({ type: 6, value: url })],
-					}),
-			),
-		})
+		extnValue: new pkijs.CRLDistributionPoints({ distributionPoints: [...points] })
 			.toSchema()
 			.toBER(false),
 	});
+
+const uriName = (url: string): pkijs.GeneralName => new pkijs.GeneralName({ type: 6, value: url });
+
+/**
+ * A `cRLDistributionPoints` extension. Each entry is one distribution point:
+ * a string names it by a single URI, an array by several — which RFC 5280
+ * §4.2.1.13 defines as alternative ways to obtain the *same* CRL.
+ */
+export const crlDistributionPoints = (
+	points: readonly (string | readonly string[])[],
+): pkijs.Extension =>
+	distributionPointsExtension(
+		points.map(
+			(point) =>
+				new pkijs.DistributionPoint({
+					distributionPoint: (typeof point === "string" ? [point] : point).map(uriName),
+				}),
+		),
+	);
+
+/**
+ * A distribution point carrying `reasons` — the CA partitions its revocation
+ * information by reason code across several CRLs (RFC 5280 §4.2.1.13), so no
+ * single one of them is the whole answer.
+ */
+export const reasonPartitionedCrlDistributionPoint = (url: string): pkijs.Extension =>
+	distributionPointsExtension([
+		new pkijs.DistributionPoint({
+			distributionPoint: [uriName(url)],
+			// ReasonFlags with keyCompromise (bit 1) set.
+			reasons: new asn1js.BitString({ valueHex: new Uint8Array([0x40]).buffer, unusedBits: 0 }),
+		}),
+	]);
+
+/**
+ * A distribution point naming a `cRLIssuer` — the CRL there is signed by
+ * someone other than the certificate's issuer (an indirect CRL).
+ */
+export const indirectCrlDistributionPoint = (url: string, crlIssuerCn: string): pkijs.Extension => {
+	const issuer = new pkijs.RelativeDistinguishedNames();
+	setCommonName(issuer, crlIssuerCn);
+	return distributionPointsExtension([
+		new pkijs.DistributionPoint({
+			distributionPoint: [uriName(url)],
+			cRLIssuer: [new pkijs.GeneralName({ type: 4, value: issuer })],
+		}),
+	]);
+};
 
 export const ocspAia = (url: string): pkijs.Extension =>
 	new pkijs.Extension({
@@ -263,6 +307,78 @@ export const unknownCriticalExtension = (): pkijs.Extension =>
 		critical: true,
 		extnValue: new asn1js.OctetString({ valueHex: new Uint8Array([1, 2, 3]).buffer }).toBER(false),
 	});
+
+/**
+ * An extension whose OID nothing recognises, marked non-critical — which RFC
+ * 5280 §5.2 (for a CRL) and §4.2 (for a certificate) let a validator ignore.
+ */
+export const unknownNonCriticalExtension = (): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: "1.3.6.1.4.1.99999.1.2",
+		critical: false,
+		extnValue: new asn1js.OctetString({ valueHex: new Uint8Array([4, 5, 6]).buffer }).toBER(false),
+	});
+
+// ---------------------------------------------------------------------------
+// CRL extensions
+// ---------------------------------------------------------------------------
+
+/**
+ * `deltaCRLIndicator` (RFC 5280 §5.2.4), CRITICAL as the RFC requires: the CRL
+ * lists only what changed since base CRL number `baseCrlNumber`.
+ */
+export const deltaCrlIndicator = (baseCrlNumber: number): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.deltaCRLIndicator,
+		critical: true,
+		extnValue: new asn1js.Integer({ value: baseCrlNumber }).toBER(false),
+	});
+
+export interface IssuingDistributionPointOptions {
+	/** Scope the CRL to the certificates that name this distribution point. */
+	readonly distributionPointUrl?: string;
+	readonly onlyContainsUserCerts?: boolean;
+	readonly onlyContainsCACerts?: boolean;
+	/** A `ReasonFlags` octet; the CRL covers only these reason codes. */
+	readonly onlySomeReasons?: number;
+	readonly indirectCRL?: boolean;
+}
+
+/** `issuingDistributionPoint` (RFC 5280 §5.2.5), CRITICAL as the RFC requires. */
+export const issuingDistributionPoint = (opts: IssuingDistributionPointOptions): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.issuingDistributionPoint,
+		critical: true,
+		extnValue: new pkijs.IssuingDistributionPoint({
+			...(opts.distributionPointUrl === undefined
+				? {}
+				: { distributionPoint: [uriName(opts.distributionPointUrl)] }),
+			onlyContainsUserCerts: opts.onlyContainsUserCerts ?? false,
+			onlyContainsCACerts: opts.onlyContainsCACerts ?? false,
+			...(opts.onlySomeReasons === undefined ? {} : { onlySomeReasons: opts.onlySomeReasons }),
+			indirectCRL: opts.indirectCRL ?? false,
+			onlyContainsAttributeCerts: false,
+		})
+			.toSchema()
+			.toBER(false),
+	});
+
+/**
+ * `certificateIssuer` (RFC 5280 §5.3.3) — a CRL *entry* extension, CRITICAL,
+ * stating that the entry and those after it were issued by someone other
+ * than the CRL issuer. Only meaningful inside an indirect CRL.
+ */
+export const certificateIssuerEntryExtension = (cn: string): pkijs.Extension => {
+	const name = new pkijs.RelativeDistinguishedNames();
+	setCommonName(name, cn);
+	return new pkijs.Extension({
+		extnID: OID.certificateIssuer,
+		critical: true,
+		extnValue: new pkijs.GeneralNames({ names: [new pkijs.GeneralName({ type: 4, value: name })] })
+			.toSchema()
+			.toBER(false),
+	});
+};
 
 // ---------------------------------------------------------------------------
 // Minting
@@ -385,6 +501,10 @@ export interface MintCrlOptions {
 	readonly nextUpdate?: Date | null;
 	/** Sign with this key instead of the issuer's — for the forged-CRL test. */
 	readonly signingKeys?: CryptoKeyPair;
+	/** The CRL's own extensions (`crlExtensions`). */
+	readonly extensions?: readonly pkijs.Extension[];
+	/** CRL *entry* extensions, attached to every revoked entry. */
+	readonly entryExtensions?: readonly pkijs.Extension[];
 }
 
 /** Returns the DER bytes of a signed CRL. */
@@ -412,8 +532,18 @@ export const mintCrl = async (options: MintCrlOptions): Promise<Uint8Array> => {
 						type: 0,
 						value: options.thisUpdate ?? DEFAULT_NOT_BEFORE,
 					}),
+					...(options.entryExtensions === undefined
+						? {}
+						: {
+								crlEntryExtensions: new pkijs.Extensions({
+									extensions: [...options.entryExtensions],
+								}),
+							}),
 				}),
 		);
+	}
+	if (options.extensions !== undefined && options.extensions.length > 0) {
+		crl.crlExtensions = new pkijs.Extensions({ extensions: [...options.extensions] });
 	}
 	await crl.sign((options.signingKeys ?? options.issuer.keys).privateKey, "SHA-256", crypto);
 	return new Uint8Array(crl.toSchema(true).toBER(false));

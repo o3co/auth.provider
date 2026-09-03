@@ -41,6 +41,9 @@
  * Only extensions this deployment actually acts on. Listing an OID that
  * nothing processes would be a worse bug than not listing it: it would turn a
  * refusal into an acceptance while looking like diligence.
+ *
+ * The same rule, with the same listing discipline, is applied to CRLs at the
+ * bottom of this file (RFC 5280 §5.2 and §5.3) on behalf of `crl.mts`.
  */
 
 import type * as pkijs from "pkijs";
@@ -79,6 +82,27 @@ const PROCESSED_ANYWHERE: ReadonlySet<string> = new Set([
  */
 const PROCESSED_ON_LEAF_ONLY: ReadonlySet<string> = new Set([
 	"2.5.29.37", // extKeyUsage
+]);
+
+/**
+ * Critical CRL extensions `crl.mts` processes (RFC 5280 §5.2).
+ *
+ * §5.2 is §6.1.2's twin — "if a CRL contains a critical extension that the
+ * application cannot process, then the application MUST NOT use that CRL to
+ * determine the status of certificates" — and the listing discipline is the
+ * same: only what is acted on. Both entries are acted on by being *refused*:
+ * `crl.mts` reads them to recognise a delta or a scoped CRL and reports it as
+ * unsupported, which is processing the extension, not ignoring it.
+ *
+ * pkijs applies this rule inside `CertificateRevocationList.verify`, against
+ * its own longer list, and answers `false` — the same answer as a forged
+ * signature. Every OID here is on that list, so a CRL this check passes is
+ * never refused by pkijs on this ground, and the two cannot disagree in the
+ * direction that would resurrect #447.
+ */
+const CRL_PROCESSED: ReadonlySet<string> = new Set([
+	"2.5.29.27", // deltaCRLIndicator — recognised, and refused as a delta CRL
+	"2.5.29.28", // issuingDistributionPoint — recognised, and refused when it scopes the CRL
 ]);
 
 /** OID of `keyUsage`. */
@@ -178,4 +202,72 @@ export const checkLeafKeyUsage = (leaf: pkijs.Certificate): CriticalExtensionChe
 			"the leaf's keyUsage does not permit digitalSignature, which TLS client " +
 			"authentication requires (RFC 5280 §4.2.1.3)",
 	};
+};
+
+/**
+ * Whether pkijs managed to read the extension's value.
+ *
+ * pkijs reports failure two ways: `parsedValue` is `undefined` when the value
+ * is not valid DER at all, and — for an OID it has a class for — an *empty
+ * instance carrying `parsingError`* when the DER did not fit that class. The
+ * second is the subtler one: the object is there, every field reads as its
+ * default, and a check that only tests for `undefined` treats "could not
+ * decode the restriction" as "no restriction".
+ */
+export const extensionValueParsed = (extension: pkijs.Extension): boolean => {
+	const value: unknown = extension.parsedValue;
+	if (value === undefined || value === null) return false;
+	return !(
+		typeof value === "object" &&
+		"parsingError" in value &&
+		value.parsingError !== undefined
+	);
+};
+
+export type CrlCriticalExtensionCheck =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly detail: string };
+
+/**
+ * RFC 5280 §5.2 for the CRL's own extensions and §5.3 for its entries'. The
+ * entry half matters because pkijs's `verify` never looks at entry extensions
+ * at all: a critical `certificateIssuer` — the marker that an indirect CRL's
+ * entries were issued by someone else — would otherwise be ignored, and the
+ * serial matched against the wrong issuer. No entry extension is processed
+ * here, so any critical one is a refusal.
+ */
+export const checkCrlCriticalExtensions = (
+	crl: pkijs.CertificateRevocationList,
+): CrlCriticalExtensionCheck => {
+	for (const extension of crl.crlExtensions?.extensions ?? []) {
+		if (!extension.critical) continue;
+		if (!CRL_PROCESSED.has(extension.extnID)) {
+			return {
+				ok: false,
+				detail:
+					`the CRL carries critical extension ${extension.extnID}, which this validator ` +
+					"does not process (RFC 5280 §5.2 forbids using the CRL)",
+			};
+		}
+		if (!extensionValueParsed(extension)) {
+			return {
+				ok: false,
+				detail:
+					`the CRL carries critical extension ${extension.extnID} whose value could not ` +
+					"be parsed, so what it states cannot be honoured",
+			};
+		}
+	}
+	for (const entry of crl.revokedCertificates ?? []) {
+		for (const extension of entry.crlEntryExtensions?.extensions ?? []) {
+			if (!extension.critical) continue;
+			return {
+				ok: false,
+				detail:
+					`a CRL entry carries critical extension ${extension.extnID}, which this validator ` +
+					"does not process (RFC 5280 §5.3 forbids using the CRL)",
+			};
+		}
+	}
+	return { ok: true };
 };

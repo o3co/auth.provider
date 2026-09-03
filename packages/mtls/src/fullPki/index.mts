@@ -25,12 +25,15 @@ export {
 	type SignatureAlgorithmName,
 } from "./algorithms.mjs";
 export {
+	type CrlDistributionPoints,
 	type CrlLookup,
+	type CrlPointUnavailable,
 	type CrlResolver,
 	type CrlResolverOptions,
 	type CrlUnavailableReason,
 	createCrlResolver,
-	crlDistributionUrls,
+	crlDistributionPoints,
+	describeUnavailable,
 } from "./crl.mjs";
 export {
 	createGuardedFetch,

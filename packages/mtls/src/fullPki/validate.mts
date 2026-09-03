@@ -68,8 +68,10 @@
  * meant a CRL the engine discarded for a bad signature never reached the
  * logged availability branch. Deciding here makes `on-unavailable` mean what
  * the configuration says: `"reject"` refuses on the first certificate whose
- * status is unknown, `"allow"` skips exactly those certificates and logs each
- * one, and a status that *was* determined as revoked is refused under both.
+ * status is unknown — or only partly known, because one of the distribution
+ * points it names could not be used (#446) — `"allow"` skips exactly those
+ * certificates and logs each one, and a status that *was* determined as
+ * revoked is refused under both.
  *
  * The ordering — validate, then fetch — is a security property, not an
  * optimisation. A distribution point is a URL inside a certificate, and
@@ -95,7 +97,13 @@ import * as pkijs from "pkijs";
 import { checkClientLeafProfile } from "../pki.mjs";
 import { type AlgorithmPolicy, checkAlgorithmPolicy } from "./algorithms.mjs";
 import { checkCriticalExtensions, checkLeafKeyUsage } from "./criticalExtensions.mjs";
-import { type CrlLookup, type CrlResolver, createCrlResolver } from "./crl.mjs";
+import {
+	type CrlLookup,
+	type CrlPointUnavailable,
+	type CrlResolver,
+	createCrlResolver,
+	describeUnavailable,
+} from "./crl.mjs";
 import { createGuardedFetch } from "./fetchGuard.mjs";
 
 /** OID of `basicConstraints` (RFC 5280 §4.2.1.9). */
@@ -394,6 +402,40 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 						"mtls_revocation_unavailable_allowed",
 					);
 					continue;
+				}
+
+				// A certificate may name several distribution points, and the
+				// resolver reports the ones it could not use alongside the CRLs
+				// it did obtain. Whether that partial answer is an answer is this
+				// policy's call, not the resolver's (#446). Under "reject" it is
+				// not: this process cannot tell from one fetched CRL that the
+				// CA's other points were redundant — a CA that partitions its
+				// list without saying so publishes exactly this shape — and
+				// "reject" is the operator's instruction not to guess in the
+				// permissive direction. Under "allow" that guess is what was
+				// chosen, so the CRLs that were obtained are consulted and the
+				// gap is logged — under its own message, because "checked
+				// against part of its revocation material" and "not checked at
+				// all" are different facts on an operator's dashboard.
+				if (lookup.unavailable.length > 0) {
+					const subject = toNode(certificate).subject;
+					const last = lookup.unavailable[lookup.unavailable.length - 1] as CrlPointUnavailable;
+					const detail = describeUnavailable(lookup.unavailable);
+					if (options.revocation.onUnavailable === "reject") {
+						options.logger?.warn(
+							{ subject, reason: last.reason, detail },
+							"mtls_revocation_unavailable_rejected",
+						);
+						return {
+							ok: false,
+							step: "revocation status unavailable",
+							detail: `${subject}: ${last.reason} — ${detail}`,
+						};
+					}
+					options.logger?.warn(
+						{ subject, reason: last.reason, detail },
+						"mtls_revocation_partially_unavailable_allowed",
+					);
 				}
 
 				// A status that *was* determined is not softened by the policy:
