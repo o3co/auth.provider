@@ -39,16 +39,65 @@
  * code's entropy budget *against* a rate limit, so an unlimited deployment is
  * not a slower version of a limited one, it is 34.5 bits against an unbounded
  * attacker. Both fail at boot rather than at the first request.
+ *
+ * ### The verification endpoint is a CSRF target, and is guarded as one
+ *
+ * `POST /oauth/device/verification` authorises on the end-user session cookie
+ * — the one credential a browser attaches to a request some other site made.
+ * That is the whole of RFC 8628 §5.4's remote-phishing attack: any public
+ * `client_id` obtains a `user_code`, a page on the attacker's origin
+ * auto-submits `action=approve&user_code=…` from the victim's browser, and
+ * the attacker's device collects the victim's token. Turning
+ * `verification_uri_complete` off keeps the *user* typing the code; a forged
+ * POST types it for them.
+ *
+ * So the route the module mounts is JSON-only — a form body is a "simple"
+ * request the browser sends without a preflight, `application/json` is not —
+ * and sits behind the same `createCsrfGuard` `/session/login` runs (#272):
+ * a foreign `Origin` / `Referer` is refused outright, the server's own origin
+ * or one on `session.csrf.trustedOrigins` is accepted, and a request with no
+ * origin signal must carry the session's signed double-submit token. That is
+ * one CSRF policy for the product rather than a second one that can drift,
+ * which is why this package depends on `@o3co/auth-provider-session` rather
+ * than restating an origin check. The guard is built from the `session.*`
+ * config slice, so enabling the grant without one fails at boot.
  */
 
-import { DEVICE_CODE_STORE_ABSENCE_POLICY, defineModule } from "@o3co/auth-provider-core";
+import {
+	AUDIT_SINK_ABSENCE_POLICY,
+	createRateLimitGuard,
+	DEVICE_CODE_STORE_ABSENCE_POLICY,
+	defineModule,
+	type RateLimitFailMode,
+} from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
+import {
+	createCsrfGuard,
+	createCsrfProtectionFromConfig,
+	type SessionCsrfConfigSlice,
+} from "@o3co/auth-provider-session";
 import express from "express";
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
-import { DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
+import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
+
+/**
+ * `oauth.deviceAuthorization.rateLimit` — the budget RFC 8628 §5.1 sizes the
+ * user code against. `.int().positive()` is load-bearing: `0` is what an
+ * empty environment variable coerces to, and a zero-attempt budget locks
+ * every user out while a zero window is not a window. Core's
+ * `resolveDeviceVerificationLimitSpec` screens the same bounds structurally
+ * for configs that never passed this schema.
+ */
+const rateLimitSpecSchema = z.object({
+	limit: z.number().int().positive(),
+	windowSeconds: z.number().int().positive(),
+});
+
+/** §5.1's worked example: "only allow 5 attempts"; five minutes is half the default code lifetime. */
+const DEFAULT_VERIFICATION_RATE_LIMIT = { limit: 5, windowSeconds: 300 } as const;
 
 export const deviceGrantConfigSchema = z.object({
 	oauth: z.object({
@@ -77,6 +126,15 @@ export const deviceGrantConfigSchema = z.object({
 				/** Advertised as `interval`; also what the store enforces. */
 				"polling-interval-seconds": z.number().int().min(1).max(60).default(5),
 				/**
+				 * The verification endpoint's budget per authenticated subject,
+				 * seeded into whichever rate-limiter adapter is wired under the
+				 * `device_verification` prefix (an operator-declared
+				 * `limits.device_verification` on the adapter still wins). This
+				 * is the number the "requires a rateLimiter" boot refusal
+				 * reasons from, so it has to be the number the limiter applies.
+				 */
+				rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
+				/**
 				 * Declared absence for the `deviceCodeStore` slot (#363).
 				 * `"unsupported"` is the only value; anything else is a typo that
 				 * would otherwise read as a declaration.
@@ -88,6 +146,7 @@ export const deviceGrantConfigSchema = z.object({
 				"verification-uri-complete": false,
 				"code-lifetime-seconds": 600,
 				"polling-interval-seconds": 5,
+				rateLimit: DEFAULT_VERIFICATION_RATE_LIMIT,
 			})),
 	}),
 });
@@ -98,6 +157,8 @@ interface DeviceAuthorizationConfigSlice {
 	readonly "verification-uri-complete": boolean;
 	readonly "code-lifetime-seconds": number;
 	readonly "polling-interval-seconds": number;
+	/** Read by core's limiter modules when they seed `limits`, not here. */
+	readonly rateLimit?: { readonly limit: number; readonly windowSeconds: number };
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`
@@ -155,6 +216,62 @@ const disabledRoute = (id: string, mountPath: string) => {
 	return { id, mountPath, handler: router };
 };
 
+/**
+ * The `session.*` slice the verification route's CSRF guard is built from.
+ *
+ * Checked structurally rather than declared in `configSchema`: the slice is
+ * the session module's to validate, and every deployment that can reach this
+ * endpoint mounts that module — `req.session.isAuthenticated` is its field.
+ * What is refused here is the composition that enables the grant with no
+ * session at all, where the guard would have no signing key and no cookie
+ * name and the endpoint would be mounted with no CSRF defence.
+ */
+const SAME_SITE_VALUES: ReadonlySet<unknown> = new Set(["lax", "strict", "none"]);
+
+const requireSessionSlice = (deps: AnyDeps): SessionCsrfConfigSlice => {
+	const session = deps.config?.session as Partial<SessionCsrfConfigSlice> | undefined;
+	// Every field `createCsrfProtectionFromConfig` reads is checked here, not
+	// just the secret: a slice with no `name` would mint a cookie called
+	// `undefined.csrf`, and one with no `secure`/`sameSite` would set cookie
+	// attributes the operator never chose. Refuse the whole slice instead.
+	const missing: string[] = [];
+	if (typeof session?.secret !== "string" || session.secret === "") missing.push("session.secret");
+	if (typeof session?.name !== "string" || session.name === "") missing.push("session.name");
+	if (typeof session?.secure !== "boolean") missing.push("session.secure");
+	if (!SAME_SITE_VALUES.has(session?.sameSite)) missing.push("session.sameSite");
+	if (missing.length > 0) {
+		throw new Error(
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires the " +
+				`\`session\` config slice; missing or invalid: ${missing.join(", ")}. ` +
+				"POST /oauth/device/verification runs inside the end-user session and is " +
+				"guarded by the same CSRF policy as /session/login — a signed double-submit " +
+				"token derived from session.secret, a cookie named from session.name with " +
+				"session.secure / session.sameSite, and an Origin/Referer check against " +
+				"session.csrf.trustedOrigins — so without the slice the guard cannot be built " +
+				"and the endpoint cannot be mounted safely.",
+		);
+	}
+	return session as SessionCsrfConfigSlice;
+};
+
+/**
+ * OR-5: the outage policy for a limiter-backend failure is `rateLimit.failMode`
+ * — one decision for the product, read by every guarded route. Defaulting it
+ * here would be a second policy, so its absence is a boot refusal.
+ */
+const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
+	const failMode = deps.config?.rateLimit?.failMode;
+	if (failMode !== "open" && failMode !== "closed") {
+		throw new Error(
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
+				'rateLimit.failMode ("open" | "closed"). POST /oauth/device_authorization ' +
+				"runs behind the shared rate-limit guard, and what the guard does when the " +
+				"limiter backend is down is the product's outage policy, not this module's.",
+		);
+	}
+	return failMode;
+};
+
 const requireRateLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> => {
 	if (deps.rateLimiter === undefined) {
 		throw new Error(
@@ -173,9 +290,13 @@ export const deviceGrantModule = defineModule({
 	name: "device-grant",
 	configSchema: deviceGrantConfigSchema,
 	requires: ["config", "clientRepository", "keyStore"],
-	optional: ["deviceCodeStore", "rateLimiter", "logger"],
+	optional: ["deviceCodeStore", "rateLimiter", "logger", "auditSink"],
+	// #363: optional to wire, not optional to decide. A composition with no
+	// sink discards every device approval — a consent event — with no
+	// symptom, so it has to write `audit.sink.type = "none"` to say so.
 	absencePolicies: {
 		deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
+		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 	},
 	contributes: {
 		grants: {
@@ -217,6 +338,22 @@ export const deviceGrantModule = defineModule({
 				// WebAuthn routes: `createApp` installs no global parser.
 				router.use(express.json({ limit: "16kb" }));
 				router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+				// Throttled like every other public entry point (#325), and
+				// AHEAD of client authentication — the token endpoint's D-6
+				// ordering — so repeated unauthenticated hits are bounded before
+				// they reach a repository lookup, and so a public client cannot
+				// fill the device-code store by asking. Keyed
+				// `device_authorization:ip:<ip>`; the adapter resolves the spec
+				// by that prefix and falls back to its default.
+				router.use(
+					createRateLimitGuard({
+						limiter: requireRateLimiter(deps),
+						tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
+						failMode: requireFailMode(deps),
+						...(deps.logger ? { logger: deps.logger } : {}),
+						auditSink: deps.auditSink,
+					}),
+				);
 				// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
 				// requirements to this endpoint, and §5.6 expects device clients
 				// to be public. `allowPublicClients: true` is exactly that pair:
@@ -256,10 +393,26 @@ export const deviceGrantModule = defineModule({
 					return disabledRoute("device-verification", "/oauth/device/verification");
 				}
 				const router = express.Router();
+				// JSON only, deliberately — see the file header. A form body is
+				// a "simple" request a browser sends cross-site with the
+				// victim's cookie and no preflight; JSON is not. With no form
+				// parser mounted, a forged form POST carries no `action` even
+				// if it reached the handler.
 				router.use(express.json({ limit: "16kb" }));
-				router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+				// The session guard, verbatim: foreign origin refused, same
+				// origin or `session.csrf.trustedOrigins` accepted, no origin
+				// signal → the signed double-submit token `GET /session/csrf`
+				// mints. On the whole route rather than on `approve` / `deny`
+				// alone, for the reason the three actions are one route: no
+				// way to add a fourth that forgets it.
+				const sessionSlice = requireSessionSlice(deps);
 				router.post(
 					"/",
+					createCsrfGuard({
+						csrf: createCsrfProtectionFromConfig(sessionSlice),
+						trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],
+						...(deps.logger ? { logger: deps.logger } : {}),
+					}),
 					createDeviceVerificationHandler({
 						store: deps.deviceCodeStore,
 						rateLimiter: requireRateLimiter(deps),
@@ -270,6 +423,7 @@ export const deviceGrantModule = defineModule({
 							pollingIntervalSeconds: slice["polling-interval-seconds"],
 						},
 						logger: deps.logger,
+						auditSink: deps.auditSink,
 					}),
 				);
 				return {

@@ -49,12 +49,29 @@
  * living beside the canonical one, differing in exactly the ways nobody
  * notices until one of them is wrong — the drift #292 removed when it moved
  * the trusted-proxy vocabulary into a single shared matcher.
+ *
+ * ### The client must be allowed the grant it is starting
+ *
+ * The token endpoint refuses the `device_code` exchange for a client whose
+ * `allowedGrantTypes` do not name it — and, because the grant declares
+ * `requiresExplicitGrantAllowlist` (#326), for a client that declares no
+ * allowlist at all. This endpoint applies the same rule with the same shared
+ * predicate, `isGrantTypeAllowed`. Without it a client registered for nothing
+ * but `authorization_code` could still open pending authorizations: a real
+ * `user_code`, a real `verification_uri`, a real-looking prompt on the
+ * verification page — the exact material a phishing page needs — for a grant
+ * that can never complete.
  */
 
 import type { AuthenticatedClient } from "@o3co/auth-provider-core";
-import { generateDeviceCode, generateUserCode, normaliseUserCode } from "@o3co/auth-provider-core";
+import {
+	generateDeviceCode,
+	generateUserCode,
+	isGrantTypeAllowed,
+	normaliseUserCode,
+} from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
-import type { DeviceGrantDependencies } from "./types.mjs";
+import { DEVICE_CODE_GRANT_TYPE, type DeviceGrantDependencies } from "./types.mjs";
 
 interface OAuthErrorBody {
 	readonly error: string;
@@ -146,6 +163,25 @@ export const createDeviceAuthorizationHandler = (
 			fail(res, 401, {
 				error: "invalid_client",
 				error_description: "client authentication is required",
+			});
+			return;
+		}
+
+		// The token endpoint's rule, applied where the flow starts. Deny by
+		// absence, as dispatch does for a grant that declares
+		// `requiresExplicitGrantAllowlist` — otherwise the two endpoints
+		// disagree about who may start what only one of them will finish.
+		// RFC 6749 §5.2 `unauthorized_client`, the same code and wording the
+		// token endpoint answers with.
+		if (
+			!isGrantTypeAllowed(client.allowedGrantTypes, DEVICE_CODE_GRANT_TYPE, {
+				requireAllowlist: true,
+			})
+		) {
+			options.logger?.warn({ clientId: client.clientId }, "device_authorization_grant_not_allowed");
+			fail(res, 400, {
+				error: "unauthorized_client",
+				error_description: `client is not authorized for ${DEVICE_CODE_GRANT_TYPE}`,
 			});
 			return;
 		}

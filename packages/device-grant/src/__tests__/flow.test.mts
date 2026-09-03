@@ -24,6 +24,8 @@
  */
 
 import type {
+	AuditEvent,
+	AuditSink,
 	AuthenticatedClient,
 	ClientRepository,
 	GrantContext,
@@ -42,6 +44,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "#/grant.mjs";
+import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { createDeviceVerificationHandler } from "#/verificationEndpoint.mjs";
 
 const CLIENT_ID = "tv-app";
@@ -54,6 +57,24 @@ const client = {
 	allowedScopes: ["openid", "profile"],
 	defaultScopes: ["openid"],
 	allowedAudiences: ["https://api.example.test"],
+	allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
+} as unknown as AuthenticatedClient;
+
+/** Registered, but never for this grant — one with an allowlist that omits it, one with none. */
+const OTHER_GRANTS_ID = "web-app";
+const otherGrantsClient = {
+	clientId: OTHER_GRANTS_ID,
+	tokenEndpointAuthMethod: "none" as const,
+	allowedScopes: ["openid"],
+	defaultScopes: ["openid"],
+	allowedGrantTypes: ["authorization_code"],
+} as unknown as AuthenticatedClient;
+const NO_ALLOWLIST_ID = "legacy-app";
+const noAllowlistClient = {
+	clientId: NO_ALLOWLIST_ID,
+	tokenEndpointAuthMethod: "none" as const,
+	allowedScopes: ["openid"],
+	defaultScopes: ["openid"],
 } as unknown as AuthenticatedClient;
 
 /**
@@ -69,12 +90,15 @@ const confidentialClient = {
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
 	allowedScopes: ["openid"],
 	defaultScopes: ["openid"],
+	allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
 } as unknown as AuthenticatedClient;
 
 const clientRepository: ClientRepository = {
 	findById: async (id) => {
 		if (id === CLIENT_ID) return client as never;
 		if (id === CONFIDENTIAL_ID) return confidentialClient as never;
+		if (id === OTHER_GRANTS_ID) return otherGrantsClient as never;
+		if (id === NO_ALLOWLIST_ID) return noAllowlistClient as never;
 		return null;
 	},
 	authenticate: async (id, secret) =>
@@ -104,6 +128,7 @@ const makeHarness = (
 		settings?: Partial<typeof settings>;
 		rateLimiter?: RateLimiter;
 		session?: Record<string, unknown>;
+		auditSink?: AuditSink;
 	} = {},
 ) => {
 	const clock = makeClock();
@@ -145,6 +170,7 @@ const makeHarness = (
 			settings: resolved,
 			rateLimiter,
 			now: clock.now,
+			...(overrides.auditSink ? { auditSink: overrides.auditSink } : {}),
 		}),
 	);
 
@@ -259,6 +285,29 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		const res = await startDevice(app, { client_id: "not-registered" });
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("invalid_client");
+	});
+
+	it("refuses a client whose allowedGrantTypes omit the device grant", async () => {
+		// The token endpoint would refuse the device_code exchange for this
+		// client, so letting it open a pending authorization only produces a
+		// real-looking prompt — the exact material a phishing page needs —
+		// for a grant that can never complete.
+		const { app } = makeHarness();
+		const res = await startDevice(app, { client_id: OTHER_GRANTS_ID });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+		expect(res.body.error_description).toContain(DEVICE_CODE_GRANT_TYPE);
+	});
+
+	it("refuses a client with no allowedGrantTypes at all (#326: never acquired by omission)", async () => {
+		// The grant declares requiresExplicitGrantAllowlist, so the token
+		// endpoint denies by absence for it. The authorization endpoint
+		// applies the same rule, or the two disagree about who may start
+		// what only one of them will finish.
+		const { app } = makeHarness();
+		const res = await startDevice(app, { client_id: NO_ALLOWLIST_ID });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
 	});
 
 	it("refuses a scope the client is not registered for", async () => {
@@ -383,6 +432,110 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 			"device_verification:user:user-1",
 			expect.objectContaining({ userId: "user-1" }),
 		);
+	});
+});
+
+describe("audit trail for the human's decision", () => {
+	// The decision that turns a code into a token used to reach nothing but
+	// `logger.info` — optional, unstructured, and not the pipeline the rest of
+	// the product's security events flow through. A device authorization is
+	// a consent event with a subject and a client; it belongs in the sink.
+	const makeSink = () => {
+		const events: AuditEvent[] = [];
+		const sink: AuditSink = {
+			kind: "test",
+			record: async (event) => {
+				events.push(event);
+			},
+		};
+		return { sink, events };
+	};
+
+	/** The sink is fire-and-forget, so give the detached promise a turn. */
+	const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+	it("records device.approved with the subject, the client and the scope", async () => {
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({ auditSink: sink });
+		const started = await startDevice(app, { scope: "openid profile" });
+
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+		await settle();
+
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			type: "device.approved",
+			subject: "user-1",
+			clientId: CLIENT_ID,
+			details: { scope: "openid profile" },
+		});
+		expect(events[0]?.timestamp).toBeInstanceOf(Date);
+	});
+
+	it("records device.denied", async () => {
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({ auditSink: sink });
+		const started = await startDevice(app);
+
+		await verify(app, { action: "deny", user_code: started.body.user_code });
+		await settle();
+
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			type: "device.denied",
+			subject: "user-1",
+			clientId: CLIENT_ID,
+		});
+	});
+
+	it("records device.rate_limited when the subject's budget runs out", async () => {
+		// The 429 is the signal that someone is guessing codes from an account
+		// — exactly what a dashboard wants to see, and exactly what a
+		// `logger.warn` nobody tails does not deliver.
+		const { sink, events } = makeSink();
+		const rateLimiter = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const { app } = makeHarness({ auditSink: sink, rateLimiter });
+
+		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		await settle();
+
+		expect(limited.status).toBe(429);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			type: "device.rate_limited",
+			subject: "user-1",
+			details: { action: "lookup" },
+		});
+	});
+
+	it("never puts the code itself in an event", async () => {
+		// The user code is the thing being brute-forced and the device code is
+		// a bearer credential; an audit pipeline is not a place for either.
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({ auditSink: sink });
+		const started = await startDevice(app);
+		const displayed = started.body.user_code as string;
+
+		await verify(app, { action: "approve", user_code: displayed });
+		await settle();
+
+		const serialised = JSON.stringify(events);
+		expect(serialised).not.toContain(displayed);
+		expect(serialised).not.toContain(normaliseUserCode(displayed));
+		expect(serialised).not.toContain(started.body.device_code);
+	});
+
+	it("records nothing — and still decides — when no sink is wired", async () => {
+		const { app, clock, poll } = makeHarness();
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(200);
+		clock.advance(10_000);
+		expect((await poll(started.body.device_code as string)).result.status).toBe(200);
 	});
 });
 

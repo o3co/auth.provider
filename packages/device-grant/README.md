@@ -30,21 +30,24 @@ Optional. Nothing here is active until `oauth.deviceAuthorization.enabled = true
 oauth.deviceAuthorization {
   enabled = true
   verification-uri = "https://example.com/device"
-}
 
-# Required — see "Rate limiting is half the security argument" below.
-rateLimit.adapters.default.limits.device_verification {
-  limit = 5
-  windowSeconds = 300
+  # The verification budget — RFC 8628 §5.1's "5 attempts". These are the
+  # defaults; see "Rate limiting is half the security argument" below.
+  rateLimit { limit = 5, windowSeconds = 300 }
 }
 ```
 
 ```ts
 import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { memoryDeviceCodeStoreModule } from "@o3co/auth-provider-core";
+import { oauthModule } from "@o3co/auth-provider-oauth";
+import { sessionModule } from "@o3co/auth-provider-session";
 
 const app = await createApp({
-  modules: [oauthModule, deviceGrantModule, memoryDeviceCodeStoreModule /* dev only */],
+  // `sessionModule` is what puts the end user on `req.session`, and its
+  // `session.*` config is what the verification route's CSRF guard is built
+  // from — see "JSON only, behind the session CSRF guard" below.
+  modules: [oauthModule, sessionModule, deviceGrantModule, memoryDeviceCodeStoreModule /* dev only */],
   bootstrapComponents: { config, clientRepository, keyStore, rateLimiter },
 });
 ```
@@ -65,7 +68,15 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 | `approve` | `{ status: "approved", client_id }` | |
 | `deny` | `{ status: "denied", client_id }` | |
 
-Errors: `401 login_required`, `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`.
+Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`.
+
+**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the route accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not), and runs the same `createCsrfGuard` as `POST /session/login` (#272):
+
+- a foreign `Origin` / `Referer` is refused with `403 access_denied` and logged as `csrf_origin_rejected`;
+- the provider's own origin, or one listed in `session.csrf.trustedOrigins`, is accepted — a verification page served from another origin is declared there, on the same list the login form uses;
+- a request with no origin signal at all (a non-browser client) must present the signed double-submit token from `GET /session/csrf`: the `<session.name>.csrf` cookie echoed in the `x-csrf-token` header.
+
+The guard is built from the `session.*` config slice, so enabling the grant without one fails at boot. This is why the package depends on `@o3co/auth-provider-session`: one CSRF policy for the product, not a second origin check that can drift from it.
 
 **One endpoint, three actions**, because all three take a `user_code` and **all three are the same brute-force oracle** — a `lookup` route that answered "which client is this?" without counting against the same budget would be a free oracle sitting beside a limited one. One route means one limiter call, and no way to add a fourth entry point that forgets it.
 
@@ -78,6 +89,16 @@ The code is accepted as displayed (`BCDF-GHJK`), lower-cased, or unseparated. A 
 RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit: an 8-character base-20 code has "roughly 34.5 bits of entropy", which the RFC calls sufficient only where "the rate-limiting interval and validity period would need to only allow 5 attempts". The entropy and the limit are two halves of one mitigation. A deployment without a limiter is not running a slower version of a limited one — it is running 34.5 bits against an unbounded attacker, which is why this is a refusal rather than a degraded mode.
 
 Every attempt counts, malformed codes included: excluding them would hand an attacker an unmetered way to probe which shapes the endpoint accepts. The key is `device_verification:user:<subject>` — keyed on the **authenticated user**, not the code. Keying on the code would spend whichever code the attacker happened to hit, which is nobody's budget; keying on the subject means an attacker needs an account and burns their own.
+
+The budget is `oauth.deviceAuthorization.rateLimit { limit, windowSeconds }`, default `5` / `300`. Both bundled limiter adapters seed their `limits.device_verification` from it — the same way `login` is seeded from `rateLimit.login` — so the number the boot refusal reasons from is the number the limiter applies. Without the seed, the prefix fell through to the adapter's 60-per-minute default: twelve times the budget, silently. An operator-declared `memoryRateLimiter.limits.device_verification` (or the Redis equivalent) still wins; zero and fractional values are refused at the config boundary.
+
+`POST /oauth/device_authorization` is throttled as well, under `device_authorization:ip:<ip>` — the same `createRateLimitGuard` and key shape as `/oauth/token`, mounted **ahead of client authentication** so unauthenticated repeats are bounded before they reach a repository lookup. It uses the adapter's `defaultLimit` unless `memoryRateLimiter.limits.device_authorization` (or the Redis equivalent) declares one, and it honours the product's `rateLimit.failMode` outage policy.
+
+## The decision is an audit event
+
+`approve` emits `device.approved`, `deny` emits `device.denied`, and a subject who exhausts the verification budget emits `device.rate_limited` — the signal that an account is being used to guess codes. Each carries the subject, the client, the scope and the request's `ip` / `userAgent`; none carries the user code (the value being brute-forced) or the device code (a bearer credential). The names are part of core's `BUILT_IN_AUDIT_EVENT_TYPES` inventory.
+
+`auditSink` is optional to wire, not optional to decide (#363): a composition that mounts this module with no sink must write `audit.sink.type = "none"`, or boot refuses. A device approval is a consent, and a consent that vanishes with no symptom is the shape that rule exists to refuse.
 
 ## The user code (§6.1)
 
@@ -119,11 +140,15 @@ Collapsing any pair into `invalid_grant` turns a client that would have shown "y
 
 A device code is redeemable only by the client it was issued to, checked against the authenticated client identity rather than the request body. Without that, a leaked device code is redeemable by any other registered client — converting a leak into a full impersonation of the user's approval.
 
+A client must also be **allowed the grant before it can start it**: `POST /oauth/device_authorization` answers `400 unauthorized_client` unless the client's `allowedGrantTypes` names `urn:ietf:params:oauth:grant-type:device_code` — deny by absence, as the token endpoint does for this grant (#326). Otherwise a client registered for nothing but `authorization_code` could still open a pending authorization and put a real-looking prompt in front of a user for a grant that can never complete.
+
 ## Storage
 
 The `DeviceCodeStore` port lives in `@o3co/auth-provider-core`, not here, so an adapter author depends on core alone.
 
 **Only the in-memory adapter ships today** (`memoryDeviceCodeStoreModule`). It is registered in core's replica-unsafe module list, so a composition with `deployment.mode = "multi"` **refuses to boot** with it: pending authorizations fork per replica, and the human approves a code on the replica that served the verification page while the device polls one that has never heard of it. A Redis adapter is tracked separately.
+
+The memory store is bounded three ways: every read path drops an expired record it finds, `create` sweeps expired records every 1000 calls, and `maxEntries` (default 10 000) caps the resident set — at the cap, expired records are pruned first and then the live record closest to expiry is evicted. Its `dispose` is registered with the boot planner's lifecycle registrar.
 
 Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363).
 

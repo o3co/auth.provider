@@ -26,6 +26,30 @@
  * event loop means the body of each method runs without interleaving — but
  * the *shape* still matters, because it is the shape a Redis adapter has to
  * reproduce in a script rather than discover it needed to.
+ *
+ * ### Bounded, three ways
+ *
+ * The first cut was unbounded in practice: the module built it with no
+ * `sweepIntervalMs`, so the timer was null; `findPendingByUserCode`,
+ * `approve` and `deny` answered "expired" without dropping the record; only
+ * `poll` reclaimed. A device that asks for a code and never polls — or a
+ * caller who asks for ten thousand — left records resident until exit.
+ *
+ * Same fix the access-token denylist got (#293 item 6), plus the cap the
+ * rate limiter already had:
+ *
+ *   1. every read path drops an expired record it finds, so the ordinary
+ *      traffic of a verification page reclaims as it goes;
+ *   2. `create` — the one operation that grows the map — pays for the growth
+ *      with an amortized sweep every `sweepInterval` creates, so a record
+ *      nobody asks about again is reclaimed within one interval;
+ *   3. `maxEntries` caps the resident set outright. At the cap, expired
+ *      records are pruned first; if the set is still full, the live record
+ *      closest to expiry is evicted — the least harm under a flood, since it
+ *      is the one about to be reclaimed anyway.
+ *
+ * The optional timer stays for deployments that want zero-lag reclamation;
+ * it is no longer what bounds the store.
  */
 
 import type {
@@ -72,13 +96,43 @@ const toAuthorization = (entry: Entry): DeviceAuthorization => ({
  */
 const SLOW_DOWN_INCREMENT_SECONDS = 5;
 
+/**
+ * Ceiling on resident records. Ten thousand pending device authorizations is
+ * far past what a single-replica deployment serves in one code lifetime, and
+ * at a few hundred bytes each it is a bound an operator never notices.
+ */
+export const DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES = 10_000;
+
+/**
+ * `create` calls between amortized sweeps. A sweep is O(size), and every
+ * create is one rate-limited HTTP request, so the cost per request stays
+ * constant while the resident set is bounded at "live records, plus at most
+ * one interval of expired ones".
+ */
+export const DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL = 1_000;
+
 export interface MemoryDeviceCodeStoreOptions {
 	/**
-	 * How often to sweep expired entries, in milliseconds. Expired entries are
-	 * never *returned* regardless — the sweep only reclaims memory.
+	 * How often to sweep expired entries on a timer, in milliseconds. Off by
+	 * default: the amortized sweep on `create` and the reclaim-on-read paths
+	 * already bound the store, so the timer buys only zero-lag reclamation.
 	 */
 	readonly sweepIntervalMs?: number;
+	/**
+	 * Ceiling on resident records. A non-integer or non-positive value falls
+	 * back to the default rather than removing the cap — `0` is what an empty
+	 * environment variable coerces to.
+	 */
+	readonly maxEntries?: number;
+	/**
+	 * `create` calls between amortized sweeps. Same fallback rule as
+	 * `maxEntries`: a bad value must not disable the sweep.
+	 */
+	readonly sweepInterval?: number;
 }
+
+const positiveIntegerOr = (value: number | undefined, fallback: number): number =>
+	typeof value === "number" && Number.isInteger(value) && value > 0 ? value : fallback;
 
 export interface MemoryDeviceCodeStore extends DeviceCodeStore {
 	/** Entry count, for tests and for the sweep's own coverage. */
@@ -92,6 +146,15 @@ export const createMemoryDeviceCodeStore = (
 ): MemoryDeviceCodeStore => {
 	const byDeviceCode = new Map<string, Entry>();
 	const byUserCode = new Map<string, Entry>();
+	const maxEntries = positiveIntegerOr(
+		options.maxEntries,
+		DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES,
+	);
+	const sweepInterval = positiveIntegerOr(
+		options.sweepInterval,
+		DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL,
+	);
+	let createsSinceSweep = 0;
 
 	const drop = (entry: Entry): void => {
 		byDeviceCode.delete(entry.deviceCode);
@@ -102,6 +165,36 @@ export const createMemoryDeviceCodeStore = (
 		for (const entry of [...byDeviceCode.values()]) {
 			if (entry.expiresAtMs <= nowMs) drop(entry);
 		}
+	};
+
+	/**
+	 * Evict the record closest to expiry. A non-finite `expiresAtMs` compares
+	 * false against everything, so it is dropped on sight rather than left to
+	 * win every comparison — that is what keeps the caller's
+	 * `while (size >= max)` loop making progress. The loop only runs on a
+	 * non-empty map, so one of the two branches always drops something.
+	 */
+	const evictEarliestExpiring = (): void => {
+		let victim: Entry | undefined;
+		for (const entry of byDeviceCode.values()) {
+			if (!Number.isFinite(entry.expiresAtMs)) {
+				drop(entry);
+				return;
+			}
+			if (victim === undefined || entry.expiresAtMs < victim.expiresAtMs) victim = entry;
+		}
+		if (victim !== undefined) drop(victim);
+	};
+
+	/** Read-path reclamation: an expired record is dropped by whoever finds it. */
+	const livePendingByUserCode = (userCode: string, nowMs: number): Entry | "expired" | null => {
+		const entry = byUserCode.get(userCode);
+		if (entry === undefined) return null;
+		if (entry.expiresAtMs <= nowMs) {
+			drop(entry);
+			return "expired";
+		}
+		return entry;
 	};
 
 	const timer =
@@ -124,6 +217,15 @@ export const createMemoryDeviceCodeStore = (
 			if (byDeviceCode.has(input.deviceCode) || byUserCode.has(input.userCode)) {
 				throw new Error("device authorization code collision");
 			}
+			createsSinceSweep += 1;
+			if (createsSinceSweep >= sweepInterval) {
+				createsSinceSweep = 0;
+				sweep(Date.now());
+			}
+			if (byDeviceCode.size >= maxEntries) {
+				sweep(Date.now());
+				while (byDeviceCode.size >= maxEntries) evictEarliestExpiring();
+			}
 			const entry: Entry = {
 				deviceCode: input.deviceCode,
 				userCode: input.userCode,
@@ -138,17 +240,16 @@ export const createMemoryDeviceCodeStore = (
 		},
 
 		findPendingByUserCode: async (userCode: string, nowMs: number) => {
-			const entry = byUserCode.get(userCode);
-			if (entry === undefined) return null;
-			if (entry.expiresAtMs <= nowMs) return null;
+			const entry = livePendingByUserCode(userCode, nowMs);
+			if (entry === null || entry === "expired") return null;
 			if (entry.status !== "pending") return null;
 			return toAuthorization(entry);
 		},
 
 		approve: async (input: ApproveDeviceAuthorizationInput): Promise<DeviceDecisionOutcome> => {
-			const entry = byUserCode.get(input.userCode);
-			if (entry === undefined) return { status: "not_found" };
-			if (entry.expiresAtMs <= input.nowMs) return { status: "expired" };
+			const entry = livePendingByUserCode(input.userCode, input.nowMs);
+			if (entry === null) return { status: "not_found" };
+			if (entry === "expired") return { status: "expired" };
 			if (entry.status !== "pending") {
 				return { status: "already_decided", current: entry.status };
 			}
@@ -167,9 +268,9 @@ export const createMemoryDeviceCodeStore = (
 		},
 
 		deny: async (userCode: string, nowMs: number): Promise<DeviceDecisionOutcome> => {
-			const entry = byUserCode.get(userCode);
-			if (entry === undefined) return { status: "not_found" };
-			if (entry.expiresAtMs <= nowMs) return { status: "expired" };
+			const entry = livePendingByUserCode(userCode, nowMs);
+			if (entry === null) return { status: "not_found" };
+			if (entry === "expired") return { status: "expired" };
 			if (entry.status !== "pending") {
 				return { status: "already_decided", current: entry.status };
 			}

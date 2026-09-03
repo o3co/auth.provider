@@ -16,13 +16,24 @@
 
 /** Shared types for the RFC 8628 device authorization grant (#298). */
 
-import type { DeviceCodeStore, RateLimiter } from "@o3co/auth-provider-core";
+import type { AuditSink, DeviceCodeStore, RateLimiter } from "@o3co/auth-provider-core";
 
 /** The grant type URN. RFC 8628 §3.4. */
 export const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
-/** Key prefix this package rate-limits the verification endpoint under. */
-export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
+/**
+ * Key prefix this package rate-limits the verification endpoint under.
+ * Defined in core beside the seed that reads `oauth.deviceAuthorization.rateLimit`,
+ * so the endpoint and the seed cannot spell the prefix differently.
+ */
+export { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX } from "@o3co/auth-provider-core";
+
+/**
+ * Key prefix `POST /oauth/device_authorization` is throttled under, keyed
+ * `device_authorization:ip:<ip>` by `createRateLimitGuard` like the other
+ * public entry points (`token`, `authorize`, `introspect`).
+ */
+export const DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX = "device_authorization";
 
 export interface DeviceAuthorizationSettings {
 	/**
@@ -49,6 +60,12 @@ export interface DeviceGrantDependencies {
 	readonly store: DeviceCodeStore;
 	readonly settings: DeviceAuthorizationSettings;
 	readonly rateLimiter?: RateLimiter;
+	/**
+	 * Where `device.approved` / `device.denied` / `device.rate_limited` go.
+	 * Optional to wire; the module attaches `AUDIT_SINK_ABSENCE_POLICY`, so a
+	 * composition with no sink has to say `audit.sink.type = "none"` (#363).
+	 */
+	readonly auditSink?: AuditSink;
 	readonly logger?: {
 		warn(obj: Record<string, unknown>, msg: string): void;
 		info?(obj: Record<string, unknown>, msg: string): void;
