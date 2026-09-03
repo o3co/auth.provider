@@ -210,6 +210,25 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 		expect(await store.findPendingByUserCode("new-uc-3", Date.now())).not.toBeNull();
 	});
 
+	it("sweeps at most once per create, even where the cadence and the cap coincide", async () => {
+		// Copilot on #451: the amortized boundary and the cap both wanted the
+		// expired records gone and each asked for its own O(n) pass — two
+		// sweeps on the one create where they coincide, on the refusal path a
+		// flood exercises. A second pass straight after the first has nothing
+		// left to find. `sweep` is the only reader of the clock inside
+		// `create`, so one clock read per create is one sweep per create.
+		const store = createMemoryDeviceCodeStore({ sweepInterval: 3, maxEntries: 2 });
+		const base = Date.now();
+		await store.create(entry(1, base + 600_000, "live"));
+		await store.create(entry(2, base + 600_000, "live"));
+		const third = entry(3, base + 600_000, "live");
+
+		const clock = vi.spyOn(Date, "now");
+		await expect(store.create(third)).rejects.toMatchObject({ reason: "full" });
+		expect(clock).toHaveBeenCalledTimes(1);
+		clock.mockRestore();
+	});
+
 	it("falls back to the defaults for a non-positive cap or interval", async () => {
 		// `0` from an empty env var must not mean "no cap" or "sweep never".
 		const store = createMemoryDeviceCodeStore({ maxEntries: 0, sweepInterval: -1 });

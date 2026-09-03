@@ -232,22 +232,24 @@ export const createMemoryDeviceCodeStore = (
 				throw new Error("device authorization code collision");
 			}
 			createsSinceSweep += 1;
-			if (createsSinceSweep >= sweepInterval) {
+			// At most one O(n) pass per create (Copilot on #451). The amortized
+			// cadence and the cap both want the same thing — expired records
+			// gone before anything else is decided — and a second pass straight
+			// after the first has nothing left to find. The interval therefore
+			// counts creates since the last sweep, whichever reason ran it.
+			if (createsSinceSweep >= sweepInterval || byDeviceCode.size >= maxEntries) {
 				createsSinceSweep = 0;
 				sweep(Date.now());
 			}
 			if (byDeviceCode.size >= maxEntries) {
-				sweep(Date.now());
-				if (byDeviceCode.size >= maxEntries) {
-					// Every resident record is live. See "Why the cap refuses
-					// instead of evicting" in the file header (#445).
-					throw new DeviceCodeStoreError({
-						reason: "full",
-						message:
-							`memory DeviceCodeStore is at its cap of ${maxEntries} live device ` +
-							"authorizations; refusing this one rather than evicting one already issued",
-					});
-				}
+				// Every resident record is live. See "Why the cap refuses
+				// instead of evicting" in the file header (#445).
+				throw new DeviceCodeStoreError({
+					reason: "full",
+					message:
+						`memory DeviceCodeStore is at its cap of ${maxEntries} live device ` +
+						"authorizations; refusing this one rather than evicting one already issued",
+				});
 			}
 			const entry: Entry = {
 				deviceCode: input.deviceCode,
