@@ -320,10 +320,11 @@ export const storesModule: Module = defineModule({
 
 /**
  * Shared ioredis clients module — opens ONE long-lived ioredis connection
- * per replica, wraps it via `makeIoredisClients()` (returns 11 typed
+ * per replica, wraps it via `makeIoredisClients()` (returns 13 typed
  * per-purpose clients), and exposes the slots consumed by the standalone's
  * Redis-backed adapters (refresh-token-family + 4 user-session stores +
- * rate limiter + code repository + access-token denylist).
+ * subject-level revocation index + watermark + rate limiter + code
+ * repository + access-token denylist).
  *
  * Per F4 PR1 (D-2 v2) + Wave 5d unification: the previous design opened a
  * separate ioredis socket per Redis-backed module (3+ sockets per replica).
@@ -422,6 +423,27 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		}) => {
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.accessTokenDenylistClient;
+		},
+		// #321: the two subject-level revocation client slots, off the same
+		// shared socket. `redisSessionStoresModule` requires both — the index
+		// enumerates what a credential change cascades over and the watermark
+		// refuses what the cascade missed — so without them the scaffold's
+		// Redis branch had no provider for the slots and stage-1 boot refused
+		// the manifest with `missing-required-component`. Nothing in the
+		// standalone consumes these slots directly; they exist so the module
+		// that does can be selected.
+		subjectSessionIndexClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.subjectSessionIndexClient;
+		},
+		subjectRevocationClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.subjectRevocationClient;
 		},
 	},
 });

@@ -469,6 +469,40 @@ describe("standalone smoke test", () => {
 			expect(names).not.toContain("standalone:stores");
 			expect(names).toContain("standalone:redis-clients");
 		});
+
+		// #321's `redisSessionStoresModule` requires the two subject-level client
+		// slots (`subjectSessionIndexClient`, `subjectRevocationClient`) its
+		// adapters consume, and the scaffold's shared ioredis module did not
+		// provide them — so `userSessionStores.adapter = "redis"`, the
+		// template's own multi-replica path, failed stage-1 boot with
+		// `missing-required-component`. Nothing here booted that branch: the
+		// tests above check which modules are selected, not whether the
+		// selection is satisfiable. This pins the invariant the shared clients
+		// module exists for: every `*Client` slot any selected module requires
+		// is one it provides.
+		it("standalone:redis-clients provides every *Client slot the Redis branches require", () => {
+			const allRedisConfig = {
+				...config,
+				userSessionStores: { adapter: "redis" as const },
+				rateLimiter: { adapter: "redis" as const },
+				accessTokenDenylist: { adapter: "redis" as const },
+				oauth: { ...config.oauth, code: { adapter: "redis" as const } },
+			};
+			const modules = buildModules(allRedisConfig, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			});
+			const clients = modules.find((m) => m.name === "standalone:redis-clients");
+			expect(clients).toBeDefined();
+			const provided = new Set(Object.keys(clients?.provides ?? {}));
+			const requiredClientSlots = new Set(
+				modules.flatMap((m) => [...(m.requires ?? [])]).filter((key) => key.endsWith("Client")),
+			);
+			expect(requiredClientSlots.size).toBeGreaterThan(0);
+			const missing = [...requiredClientSlots].filter((key) => !provided.has(key));
+			expect(missing).toEqual([]);
+		});
 	});
 
 	// #277: the scaffold used to wire NO access-token denylist, so the
