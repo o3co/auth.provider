@@ -18,6 +18,12 @@ import { createInMemoryFederationTokenStore } from "./adapters/memory.mjs";
  */
 export const memoryFederationTokenStoreModule = defineModule({
 	name: "core-federation-token-store-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"upstream federation tokens fork per replica — a token stored on one replica is missing on the others",
+	},
 	provides: {
 		federationTokenStore: () => createInMemoryFederationTokenStore(),
 	},

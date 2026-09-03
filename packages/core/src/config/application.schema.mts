@@ -1066,6 +1066,36 @@ export const fullSectionsSchema = z.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
+	// #456: adapter switch for the federation token store — the upstream IdP
+	// tokens held on behalf of a session. Default `"memory"` lives in HOCON,
+	// matching the switches above. This key was never declared here, so the
+	// switch the standalone README documented was stripped at parse time
+	// before `buildModules` could read it.
+	//
+	// `"memory"` forks per replica, and the standalone's memory module says so
+	// on its manifest (`replicaSafety`, #455), so `deployment.mode = "multi"`
+	// refuses it by name. `"redis"` mounts `redisFederationTokenStoreModule`,
+	// whose options live under `redisFederationTokenStore` below.
+	federationTokenStore: z
+		.object({
+			type: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// #456: module-internal config for `redisFederationTokenStoreModule`.
+	// Presence-only, for the same reason as `redisSessionStores` below: without
+	// a top-level entry `AppConfigSchema.parse(...)` strips the key — and with
+	// it the encryption key the store cannot start without — before the
+	// module's own `configSchema` sees it. Defaults live in `reference.conf`
+	// and in the module.
+	redisFederationTokenStore: z
+		.object({
+			keyPrefix: z.string().optional(),
+			ttl: z.coerce.number().int().positive().optional(),
+			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
+			encryptionKey: z.string().optional(),
+			scanFallback: z.boolean().optional(),
+		})
+		.optional(),
 	// #277: adapter switch for the RFC 7009 access-token denylist. Default
 	// `"memory"` lives in HOCON, matching `rateLimiter` / `userSessionStores`.
 	//

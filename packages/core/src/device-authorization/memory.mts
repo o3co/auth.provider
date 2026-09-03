@@ -17,10 +17,10 @@
 /**
  * In-process `DeviceCodeStore`. Development and single-replica only.
  *
- * Registered in `REPLICA_UNSAFE_MODULE_REASONS`: a device that polls a
- * different replica than the one holding its record is told its code does not
- * exist, and the human's approval lands on a replica the device may never
- * reach again.
+ * Declared replica-unsafe on its module's manifest (`replicaSafety`, #455): a
+ * device that polls a different replica than the one holding its record is
+ * told its code does not exist, and the human's approval lands on a replica
+ * the device may never reach again.
  *
  * The atomicity the port demands is free here — JavaScript's single-threaded
  * event loop means the body of each method runs without interleaving — but

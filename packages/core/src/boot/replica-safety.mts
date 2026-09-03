@@ -14,7 +14,17 @@
  * limitations under the License.
  */
 
+import { memoryAccessTokenDenylistModule } from "../access-token-denylist/module.mjs";
+import { memoryChallengeStoreModule } from "../challenges/module.mjs";
+import { memoryDeviceCodeStoreModule } from "../device-authorization/module.mjs";
+import { memoryFederationTokenStoreModule } from "../federation-tokens/module.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import type { Module, ReplicaSafetyDeclaration } from "../modules/manifest/index.mjs";
+import { memoryRateLimiterModule } from "../ratelimit/module.mjs";
+import { memoryRefreshTokenFamilyStoreModule } from "../refresh-token-family/module.mjs";
+import { memoryReplaySeenSetModule } from "../replay-seen-set/module.mjs";
+import { memorySessionStoresModule } from "../user-sessions/modules/memory.mjs";
+import { memoryWebAuthnCredentialStoreModule } from "../webauthn-credentials/module.mjs";
 import { BootError } from "./types.mjs";
 
 /**
@@ -46,64 +56,108 @@ import { BootError } from "./types.mjs";
  * renaming them would break every deployment that has declared its shape, to
  * buy a third name for a profile whose adapter does not exist.
  *
- * Bundled modules that hold state in this process's memory which **must** be
- * shared for a deployment to run more than one replica correctly (#271).
+ * ## Where the declaration lives (#455)
  *
- * Keyed by module name rather than by config, deliberately. The config
- * switches (`rateLimiter.adapter`, `userSessionStores.adapter`, …) are how
- * these modules get *selected* in the bundled composition, but a composition
- * root can wire a module directly, or hand-build a config that names none of
- * those keys. What is actually installed is the fact worth checking; what the
- * config says is a proxy for it.
+ * A module says on its own manifest that it holds state in this process's
+ * memory which **must** be shared for a deployment to run more than one
+ * replica correctly (#271): `replicaSafety: { unsafe: true, reason }`. The
+ * guard reads that off every installed manifest.
  *
- * Each entry names what diverges, because "use redis" is not by itself a
- * reason and an operator triaging a boot warning deserves the consequence.
+ * It used to read a table of module names kept in this file. The table was
+ * written against core's modules (#304), and the standalone template wires
+ * its *own* in-memory modules under names the table had never heard of —
+ * `standalone:in-memory-session-stores`, `standalone:in-memory-code-repository`,
+ * the memory federation store — so `deployment.mode = "multi"` booted with
+ * exactly the stores that fork per replica the worst (#455). Two vocabularies
+ * for "this module holds state in memory", one guard. The manifest is where
+ * the module is, so the manifest is where the fact is declared, and a
+ * composition root's module is covered the day it is written.
+ *
+ * Read off the installed modules rather than the config, deliberately. The
+ * config switches (`rateLimiter.adapter`, `userSessionStores.adapter`, …) are
+ * how these modules get *selected* in the bundled composition, but a
+ * composition root can wire a module directly, or hand-build a config that
+ * names none of those keys. What is actually installed is the fact worth
+ * checking; what the config says is a proxy for it.
  */
-const REPLICA_UNSAFE_MODULE_REASONS: Readonly<Record<string, string>> = {
-	memorySessionStores:
-		"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it (#321)",
-	"core-rate-limiter-memory":
-		"rate-limit counters fork per replica — every configured limit is effectively multiplied by the replica count, and resets on each deploy",
-	"core-access-token-denylist-memory":
-		"access-token revocation forks per replica — a revoked token keeps working on every replica that did not receive the revocation",
-	"core-replay-seen-set-memory":
-		"DPoP proof-replay detection forks per replica — a captured proof can be replayed once against each replica",
-	"core-refresh-token-family-store-memory":
-		"refresh-token families fork per replica — rotation replay detection and cascade revoke see only this replica's history",
-	"core-challenge-store-memory":
-		"WebAuthn challenges fork per replica — a ceremony started on one replica cannot be completed on another",
-	"core-webauthn-credential-store-memory":
-		"registered WebAuthn credentials fork per replica — a passkey registered on one replica does not exist on the others",
-	"core-device-code-store-memory":
-		"pending device authorizations fork per replica — the human approves a code on the replica that served the verification page, while the device polls a replica that has never heard of it and is told the code does not exist (#298)",
-	"core-federation-token-store-memory":
-		"upstream federation tokens fork per replica — a token stored on one replica is missing on the others",
-};
 
 /**
- * Names of the modules {@link checkReplicaSafety} refuses in multi-replica
- * mode. Exported so a composition root can run the same check itself, and so
- * the set is greppable from a deployment's own tests.
+ * The module manifest fields the guard reads. A full `Module` satisfies it;
+ * so does a name-only reference, which is answered from core's bundled
+ * declarations (see {@link replicaUnsafeReason}).
  */
-export const REPLICA_UNSAFE_MODULES: readonly string[] = Object.keys(REPLICA_UNSAFE_MODULE_REASONS);
+export interface ReplicaSafetyModuleRef {
+	readonly name: string;
+	readonly replicaSafety?: ReplicaSafetyDeclaration;
+}
 
 /**
- * What diverges per replica for `moduleName`, or `undefined` when the module is
- * not one this guard refuses.
+ * Core's bundled modules that declare `replicaSafety` on their manifest.
  *
- * Exported so the drift guard (#304) can check that every listed module has a
- * reason worth printing, and so a composition root running its own version of
- * this check can reuse the wording rather than inventing a second vocabulary
- * for the same failure.
+ * This list is not what the guard checks — the guard reads every installed
+ * manifest, including a composition root's own. It exists so
+ * {@link REPLICA_UNSAFE_MODULES} can still be exported for deployments that
+ * assert on the set from their tests, and so a caller handing in name-only
+ * references still gets core's answer. The drift guard
+ * (`replica-safety.drift.test.mts`) pins it to exactly the core modules whose
+ * manifests declare, so adding a tenth memory module without listing it here
+ * is a failing test rather than a quietly incomplete export.
  */
-export function replicaUnsafeReason(moduleName: string): string | undefined {
-	return Object.hasOwn(REPLICA_UNSAFE_MODULE_REASONS, moduleName)
-		? REPLICA_UNSAFE_MODULE_REASONS[moduleName]
-		: undefined;
+export const REPLICA_UNSAFE_BUNDLED_MODULES: readonly Module[] = [
+	memorySessionStoresModule,
+	memoryRateLimiterModule,
+	memoryAccessTokenDenylistModule,
+	memoryReplaySeenSetModule,
+	memoryRefreshTokenFamilyStoreModule,
+	memoryChallengeStoreModule,
+	memoryWebAuthnCredentialStoreModule,
+	memoryDeviceCodeStoreModule,
+	memoryFederationTokenStoreModule,
+];
+
+/**
+ * A `Map`, not a plain object: `Object.hasOwn` was needed on the old table so
+ * that a module named "toString" or "constructor" did not match a prototype
+ * key and carry a function where its reason text should be. A `Map` has no
+ * prototype keys to collide with.
+ */
+const BUNDLED_REASONS_BY_NAME: ReadonlyMap<string, string> = new Map(
+	REPLICA_UNSAFE_BUNDLED_MODULES.flatMap((m) =>
+		m.replicaSafety?.unsafe === true ? [[m.name, m.replicaSafety.reason] as const] : [],
+	),
+);
+
+/**
+ * Names of core's bundled modules that {@link checkReplicaSafety} refuses in
+ * multi-replica mode. Exported so the set is greppable from a deployment's
+ * own tests.
+ *
+ * Since #455 this is derived from the modules' own manifests rather than
+ * maintained here, and it covers **core's** modules only: a composition
+ * root's module declares `replicaSafety` on itself and is refused by the
+ * guard without appearing in this list. A deployment asserting that nothing
+ * replica-unsafe is wired should ask each manifest — `replicaUnsafeReason(m)`
+ * — rather than this list.
+ */
+export const REPLICA_UNSAFE_MODULES: readonly string[] = [...BUNDLED_REASONS_BY_NAME.keys()];
+
+/**
+ * What diverges per replica for `module`, or `undefined` when it is not one
+ * this guard refuses.
+ *
+ * The manifest's own declaration answers first. A name-only reference — a
+ * normalised module list, a test handing in `{ name }` — is answered from
+ * core's bundled declarations, so a composition root running its own version
+ * of this check gets the same wording either way rather than inventing a
+ * second vocabulary for the same failure.
+ */
+export function replicaUnsafeReason(module: ReplicaSafetyModuleRef): string | undefined {
+	if (module.replicaSafety?.unsafe === true) return module.replicaSafety.reason;
+	return BUNDLED_REASONS_BY_NAME.get(module.name);
 }
 
 export interface CheckReplicaSafetyInput {
-	readonly modules: readonly { readonly name: string }[];
+	readonly modules: readonly ReplicaSafetyModuleRef[];
 	/** Parsed application config; only `deployment.mode` is read. */
 	readonly config: unknown;
 	readonly logger?: Logger;
@@ -137,30 +191,29 @@ export interface CheckReplicaSafetyInput {
  * mode is for operators who have declared their shape.
  */
 export function checkReplicaSafety({ modules, config, logger }: CheckReplicaSafetyInput): void {
-	// `Object.hasOwn`, not `in`: `in` walks the prototype chain, so a module
-	// named "toString" or "constructor" would match and then carry a function
-	// where its reason text should be.
-	const offenders = modules
-		.map((m) => m.name)
-		.filter((name) => Object.hasOwn(REPLICA_UNSAFE_MODULE_REASONS, name));
+	const offenders = modules.flatMap((m) => {
+		const reason = replicaUnsafeReason(m);
+		return reason === undefined ? [] : [{ name: m.name, reason }];
+	});
 	if (offenders.length === 0) return;
 
 	const mode = (config as { deployment?: { mode?: unknown } } | undefined)?.deployment?.mode;
-	const reasons = offenders.map((name) => `${name}: ${REPLICA_UNSAFE_MODULE_REASONS[name]}`);
+	const names = offenders.map((o) => o.name);
+	const reasons = offenders.map((o) => `${o.name}: ${o.reason}`);
 
 	if (mode === "multi") {
 		throw new BootError({
 			stage: "validateManifests",
 			reason: "replica-unsafe-adapter",
 			message: `deployment.mode is "multi" but ${offenders.length === 1 ? "an in-memory store is" : `${offenders.length} in-memory stores are`} wired, which cannot be shared across replicas. Wire the Redis-backed equivalents, or set deployment.mode = "single". Offenders — ${reasons.join("; ")}`,
-			details: { reason: "replica-unsafe-adapter", modules: offenders },
+			details: { reason: "replica-unsafe-adapter", modules: names },
 		});
 	}
 
 	if (mode === "single") return;
 
 	logger?.warn(
-		{ modules: offenders, reasons },
+		{ modules: names, reasons },
 		// One event, all offenders: an operator reading boot logs should get the
 		// whole picture in one line rather than reconstructing it from N.
 		"replica_unsafe_adapters",

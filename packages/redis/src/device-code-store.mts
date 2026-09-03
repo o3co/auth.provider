@@ -248,7 +248,7 @@ export const redisDeviceCodeStoreBuilder: AdapterBuilder<DeviceCodeStore> = (con
  * `defineModule` manifest for the Redis DeviceCodeStore. Static composition
  * path (§8.1). For runtime-config-driven selection use the builder above.
  *
- * Not in `REPLICA_UNSAFE_MODULE_REASONS`, which is the point: a composition
+ * Declares no `replicaSafety`, which is the point: a composition
  * that mounts `deviceGrantModule` with this store may declare
  * `deployment.mode = "multi"`. The `deviceCodeStoreClient` slot it requires
  * comes from `makeIoredisClients` (or the standalone's shared clients module).

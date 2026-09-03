@@ -32,6 +32,12 @@ import { createInMemoryUserSessionStore } from "../memory/userSessionStore.mjs";
  */
 export const memorySessionStoresModule = defineModule({
 	name: "memorySessionStores",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it (#321)",
+	},
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),

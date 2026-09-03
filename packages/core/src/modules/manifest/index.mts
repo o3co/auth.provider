@@ -43,6 +43,7 @@ export type {
 	ConfigSchema,
 	Module,
 	ModuleSpec,
+	ReplicaSafetyDeclaration,
 } from "./module-spec.mjs";
 export type { Provider, ProviderDeps } from "./provider.mjs";
 export type {

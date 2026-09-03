@@ -31,6 +31,7 @@ import {
 import {
 	redisAccessTokenDenylistModule,
 	redisCodeRepositoryModule,
+	redisFederationTokenStoreModule,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 	redisSessionStoresModule,
@@ -38,9 +39,9 @@ import {
 import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
 import {
 	auditSinkModule,
-	federationTokenStoreModule,
 	googleFederationConfigModule,
 	inMemoryCodeRepositoryModule,
+	inMemoryFederationTokenStoreModule,
 	inMemorySessionStoresModule,
 	keyStoreModule,
 	repositoriesModule,
@@ -117,6 +118,12 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// endpoint would answer 200 while the token kept working. The switch here is
 	// only over WHICH denylist.
 	const accessTokenDenylistAdapter = config.accessTokenDenylist?.adapter ?? "memory";
+	// #456: adapter switch for the federation token store. `"memory"` by
+	// default, the template's local-dev shape; `"redis"` mounts
+	// `redisFederationTokenStoreModule` off the shared socket — what the README
+	// promised and what the previous factory-based module never delivered: it
+	// built the Redis store without a client and failed at boot.
+	const federationTokenStoreAdapter = config.federationTokenStore?.type ?? "memory";
 
 	// OR-9: effective code-repo adapter. `oauth.code.adapter` is the
 	// authoritative switch; the legacy `repositories.code.type = "redis"`
@@ -154,12 +161,14 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		rateLimiterAdapter === "redis" ||
 		userSessionStoresAdapter === "redis" ||
 		codeRepositoryAdapter === "redis" ||
-		accessTokenDenylistAdapter === "redis";
+		accessTokenDenylistAdapter === "redis" ||
+		federationTokenStoreAdapter === "redis";
 
-	// Federation-token store is always wired; only the 4 user-session
-	// stores switch on the adapter. Pre-Wave-5d the redis branch dropped
-	// the federation-token-store provider entirely (Copilot review on
-	// PR #121); splitting `storesModule` fixes that boot failure.
+	// The four user-session stores switch on `userSessionStores.adapter`; the
+	// federation-token store is always wired and switches on its own key
+	// below (#456). Pre-Wave-5d the redis branch dropped the
+	// federation-token-store provider entirely (Copilot review on PR #121);
+	// splitting `storesModule` fixed that boot failure.
 	const sessionStoresModules: Module[] =
 		userSessionStoresAdapter === "redis"
 			? [redisSessionStoresModule]
@@ -187,6 +196,17 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		accessTokenDenylistAdapter === "redis"
 			? [redisAccessTokenDenylistModule]
 			: [memoryAccessTokenDenylistModule];
+
+	// #455 / #456: mutually-exclusive federation-token-store pair, the same
+	// shape as the session stores. One module per adapter, so the memory one
+	// can declare `replicaSafety` on its manifest and the Redis one can
+	// `require` its client slot. The previous single module chose the adapter
+	// at runtime under one name — the replica guard could not tell the two
+	// apart, and the Redis branch had no client to hand the builder.
+	const federationTokenStoreModules: Module[] =
+		federationTokenStoreAdapter === "redis"
+			? [redisFederationTokenStoreModule]
+			: [inMemoryFederationTokenStoreModule];
 
 	return [
 		// D-5: sessionStoreModule wires the express-session middleware into the
@@ -220,11 +240,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// actually needs Redis. Memory-only deployments skip this so they
 		// don't open an unused socket.
 		...(usingRedisAnywhere ? [standaloneRedisClientsModule] : []),
-		// Federation-token store — always wired; independent of the
-		// `userSessionStores.adapter` switch. Was bundled into `storesModule`
-		// pre-Wave-5d; split so the redis session-stores branch doesn't
-		// drop the provider.
-		federationTokenStoreModule,
+		// Federation-token store: redis (multi-replica) or memory (dev). Always
+		// wired, independent of the `userSessionStores.adapter` switch — it was
+		// bundled into `storesModule` pre-Wave-5d, and the redis session-stores
+		// branch dropped the provider.
+		...federationTokenStoreModules,
 		// User-session-store family: redis (multi-replica) or memory (dev).
 		...sessionStoresModules,
 		// OAuth-endpoint rate limiter: redis (shared counters) or memory.

@@ -23,6 +23,12 @@ const rateLimitSpecSchema = z.object({
  */
 export const memoryRateLimiterModule = defineModule({
 	name: "core-rate-limiter-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"rate-limit counters fork per replica — every configured limit is effectively multiplied by the replica count, and resets on each deploy",
+	},
 	requires: ["config"] as const,
 	configSchema: z.object({
 		memoryRateLimiter: z
