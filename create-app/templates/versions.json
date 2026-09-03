@@ -1,0 +1,7 @@
+{
+	"@o3co/auth-provider-core": "0.0.0",
+	"@o3co/auth-provider-did": "0.0.0",
+	"@o3co/auth-provider-oauth": "0.0.0",
+	"@o3co/auth-provider-session": "0.0.0",
+	"@o3co/auth-provider-foundation": "0.0.0"
+}

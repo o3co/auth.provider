@@ -1,0 +1,81 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>createRefreshTokenFamilyRotation | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">createRefreshTokenFamilyRotation</a></li></ul>
+<h1>Function createRefreshTokenFamilyRotation</h1></div>
+<section class="tsd-panel">
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="createrefreshtokenfamilyrotation"><span class="tsd-kind-call-signature">createRefreshTokenFamilyRotation</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">deps</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/_o3co_auth-provider-core..RefreshTokenFamilyRotationDeps.html" class="tsd-signature-type tsd-kind-interface">RefreshTokenFamilyRotationDeps</a><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <a href="../interfaces/_o3co_auth-provider-core..RefreshTokenFamilyRotation.html" class="tsd-signature-type tsd-kind-interface">RefreshTokenFamilyRotation</a><a href="#createrefreshtokenfamilyrotation" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>RefreshTokenFamilyRotation composition: builds a fresh
+RefreshTokenFamily aggregate on <code>register</code>, and translates
+RefreshTokenFamilyStore.updateFamily outcomes into the 4-variant
+RefreshTokenFamilyRotationOutcome on <code>rotate</code>.</p>
+<h2 id="replay-is-revoked-inside-the-cas-not-after-it-274" class="tsd-anchor-link">Replay is revoked inside the CAS, not after it (#274)<a href="#replay-is-revoked-inside-the-cas-not-after-it-274" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>The replay branch used to abort the CAS and report <code>replayed</code>, leaving the
+caller (<code>packages/oauth/src/grants/refreshToken.mts</code>) to revoke the family
+in a SECOND store write. RFC 6819 §5.2.2.3 wants the whole family dead on
+replay, and two writes cannot deliver that: between &quot;replay detected,
+aborted&quot; and &quot;family revoked&quot; a parallel request holding the still-active
+sibling token could complete its rotation and walk away with a fresh access
+token, which is most of what the family-revoke defence exists to stop.</p>
+<p>So the replay branch now COMMITS <code>{ ...current, revoked: true }</code> and tags
+the decision <code>REASON_REPLAY_REVOKED</code>. The store's compare-and-swap does the
+rest: the revocation is applied to exactly the state that was inspected, or
+the CAS loses and re-reads. A sibling rotation is therefore ordered either
+strictly before the replay was classified (in which case it was a
+legitimate rotation of the then-active token) or strictly after the family
+was revoked (in which case it is refused). There is no longer an &quot;in
+between&quot; for it to land in.</p>
+<p>This is also why the return contract needed a third state: a committed
+replay-revocation and a committed ordinary rotation are the same
+<code>{ outcome: &quot;committed&quot; }</code>, and a closure variable cannot tell them apart
+given the adapter is free to invoke the updater more than once per call.</p>
+<p>The already-revoked branch still ABORTS — there is nothing to write, and
+re-committing an unchanged aggregate would amplify writes on the one path
+an attacker can drive at will.</p>
+<p>Defence-in-depth on the aborted branch: any abort whose reason is not
+<code>REASON_ALREADY_REVOKED</code> classifies as <code>replayed</code>. If a future code path
+adds an abort case and forgets its reason, the safest classification is a
+reject-class outcome (the caller rejects either way, and <code>replayed</code> also
+drives the family-revoke fallback).</p>
+<p>Per A3 §6.1 + #274.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">deps</span>: <a href="../interfaces/_o3co_auth-provider-core..RefreshTokenFamilyRotationDeps.html" class="tsd-signature-type tsd-kind-interface">RefreshTokenFamilyRotationDeps</a></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <a href="../interfaces/_o3co_auth-provider-core..RefreshTokenFamilyRotation.html" class="tsd-signature-type tsd-kind-interface">RefreshTokenFamilyRotation</a></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/refresh-token-family/rotation.mts#L84">packages/core/src/refresh-token-family/rotation.mts:84</a></li></ul></aside></div></li></ul></section></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#replay-is-revoked-inside-the-cas-not-after-it-274"><span>Replay is revoked inside the <wbr/>CAS, not after it (#274)</span></a></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

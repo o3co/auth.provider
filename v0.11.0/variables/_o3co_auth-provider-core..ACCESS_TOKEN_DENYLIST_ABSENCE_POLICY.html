@@ -1,0 +1,63 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY</a></li></ul>
+<h1>Variable ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY<code class="tsd-tag">Const</code></h1></div>
+<div class="tsd-signature"><span class="tsd-kind-variable">ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">{</span><br/>    <span class="tsd-kind-property">absentValue</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">&quot;unsupported&quot;</span><span class="tsd-signature-symbol">;</span><br/>    <span class="tsd-kind-property">configKey</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-symbol">[</span><span class="tsd-signature-type">&quot;oauth&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">&quot;revocation&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">&quot;accessToken&quot;</span><span class="tsd-signature-symbol">]</span><span class="tsd-signature-symbol">;</span><br/>    <span class="tsd-kind-property">hint</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol"> = ...</span></div>
+<div class="tsd-comment tsd-typography"><p>The declared-absence policy the bundled modules that read
+<code>accessTokenDenylist</code> attach to it (#375, folding #277's bespoke boot
+check onto the #363 vocabulary).</p>
+<p>RFC 7009 §2.2 makes <code>POST /oauth/revoke</code> answer 200 for a well-formed
+request, so the 200 is the operator's only signal that anything happened —
+and with no denylist wired, nothing does: the endpoint verified the token,
+logged a warning nobody reads mid-incident, and the JWT kept verifying
+everywhere until expiry. #277 refused boot for that state with a bespoke
+stage (&quot;13.9&quot;); this policy is the same refusal through the generic
+declared-absence guard. Omission of <code>oauth.revocation.accessToken</code> means
+NOT declared — every config written before #277 omits the key, and those
+are exactly the deployments whose revocation endpoint answered 200 with
+nothing behind it — so only an explicit <code>&quot;unsupported&quot;</code> excuses the
+missing slot, and the endpoint then answers <code>unsupported_token_type</code>
+instead of a hollow 200.</p>
+<p>One shared constant, like <code>AUDIT_SINK_ABSENCE_POLICY</code>: the boot error's
+advice must not depend on which module tripped it, and the
+declared-absence guard refuses policies that disagree.</p>
+</div>
+<div class="tsd-type-declaration">
+<h4>Type Declaration</h4>
+<ul class="tsd-parameters">
+<li class="tsd-parameter">
+<h5 id="absentvalue"><code class="tsd-tag">Readonly</code><span class="tsd-kind-property">absentValue</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">&quot;unsupported&quot;</span></h5></li>
+<li class="tsd-parameter">
+<h5 id="configkey"><code class="tsd-tag">Readonly</code><span class="tsd-kind-property">configKey</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-symbol">[</span><span class="tsd-signature-type">&quot;oauth&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">&quot;revocation&quot;</span><span class="tsd-signature-symbol">,</span> <span class="tsd-signature-type">&quot;accessToken&quot;</span><span class="tsd-signature-symbol">]</span></h5></li>
+<li class="tsd-parameter">
+<h5 id="hint"><code class="tsd-tag">Readonly</code><span class="tsd-kind-property">hint</span><span class="tsd-signature-symbol">: </span><span class="tsd-signature-type">string</span></h5></li></ul></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/d4671c1817ef172b598b09823fb96bf1fcbf1fb9/packages/core/src/access-token-denylist/types.mts#L52">packages/core/src/access-token-denylist/types.mts:52</a></li></ul></aside></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>
