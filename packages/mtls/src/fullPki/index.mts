@@ -41,7 +41,22 @@ export {
 	type FetchRejection,
 	type GuardedFetch,
 	type GuardedFetchOptions,
+	type GuardedRequest,
 } from "./fetchGuard.mjs";
+export {
+	checkMustStaple,
+	createOcspResolver,
+	OCSP_CLOCK_SKEW_MS,
+	OCSP_NEGATIVE_CACHE_TTL_MS,
+	OCSP_UNDATED_RESPONSE_MAX_AGE_MS,
+	type OcspCertificateStatus,
+	type OcspLookup,
+	type OcspResolver,
+	type OcspResolverOptions,
+	type OcspResponders,
+	type OcspUnavailableReason,
+	ocspResponders,
+} from "./ocsp.mjs";
 export {
 	createFullPkiValidator,
 	type FullPkiOptions,
@@ -49,4 +64,5 @@ export {
 	type FullPkiValidator,
 	type OnRevocationUnavailable,
 	type RevocationPolicy,
+	type RevocationSource,
 } from "./validate.mjs";

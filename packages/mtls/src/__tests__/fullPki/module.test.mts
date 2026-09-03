@@ -149,6 +149,51 @@ describe("mode = full-pki — boot invariants (#341)", () => {
 		).rejects.toThrow(/allowed-hosts/);
 	});
 
+	it.each(["ocsp", "both"] as const)(
+		"refuses revocation.mode = %s with no allowed-hosts (#431)",
+		async (mode) => {
+			// A responder URL is a destination inside a certificate exactly as a
+			// distribution point is; the same second layer applies.
+			await expect(
+				boot({
+					"full-pki": {
+						...FULL_PKI_DEFAULTS,
+						revocation: {
+							mode,
+							"on-unavailable": "reject",
+							"allowed-hosts": [],
+							"fetch-timeout-ms": 3000,
+							"cache-ttl-seconds": 3600,
+							"max-response-bytes": 1_048_576,
+							"ocsp-require-nonce": true,
+						},
+					},
+				}),
+			).rejects.toThrow(/allowed-hosts/);
+		},
+	);
+
+	it.each(["ocsp", "both"] as const)(
+		"boots with revocation.mode = %s and an allowlist (#431)",
+		async (mode) => {
+			const handle = await boot({
+				"full-pki": {
+					...FULL_PKI_DEFAULTS,
+					revocation: {
+						mode,
+						"on-unavailable": "reject",
+						"allowed-hosts": ["ocsp.example.test"],
+						"fetch-timeout-ms": 3000,
+						"cache-ttl-seconds": 3600,
+						"max-response-bytes": 1_048_576,
+						"ocsp-require-nonce": true,
+					},
+				},
+			});
+			await handle.dispose();
+		},
+	);
+
 	it("boots when revocation is explicitly disabled", async () => {
 		// "disabled" is a statement, not an omission — and it is accepted,
 		// because an operator who has written it down has made the decision.
@@ -196,18 +241,80 @@ describe("mode = full-pki — boot invariants (#341)", () => {
 describe("mtlsConfigSchema — full-pki (#341)", () => {
 	const parse = (mtls: Record<string, unknown>) => mtlsConfigSchema.safeParse({ oauth: { mtls } });
 
-	it("refuses revocation.mode = ocsp rather than accepting and ignoring it", () => {
-		// OCSP is not implemented. Naming it and having it silently do nothing
-		// is the shape #283 and #284 were both about: a claim the code does not
-		// honour is worse than an absent feature.
+	it.each(["ocsp", "both"] as const)(
+		"accepts revocation.mode = %s now that OCSP is implemented (#431)",
+		(mode) => {
+			// Until #431 this value was refused rather than accepted and ignored —
+			// the #283/#284 posture. Accepting it now is the same posture: the
+			// code honours the claim.
+			const result = parse({
+				enabled: true,
+				mode: "full-pki",
+				"full-pki": {
+					revocation: { mode, "on-unavailable": "reject", "allowed-hosts": ["ocsp.example.test"] },
+				},
+			});
+			expect(result.success).toBe(true);
+		},
+	);
+
+	it("still refuses a revocation mode it does not implement", () => {
 		const result = parse({
 			enabled: true,
 			mode: "full-pki",
 			"full-pki": {
-				revocation: { mode: "ocsp", "on-unavailable": "reject" },
+				revocation: { mode: "stapled", "on-unavailable": "reject" },
 			},
 		});
 		expect(result.success).toBe(false);
+	});
+
+	it("requires on-unavailable for OCSP exactly as for CRL", () => {
+		const result = parse({
+			enabled: true,
+			mode: "full-pki",
+			"full-pki": {
+				revocation: { mode: "ocsp", "allowed-hosts": ["ocsp.example.test"] },
+			},
+		});
+		expect(result.success).toBe(false);
+	});
+
+	it("requires the nonce by default (RFC 8954), and lets an operator state otherwise", () => {
+		const strict = mtlsConfigSchema.parse({
+			oauth: {
+				mtls: {
+					enabled: true,
+					mode: "full-pki",
+					"full-pki": {
+						revocation: {
+							mode: "ocsp",
+							"on-unavailable": "reject",
+							"allowed-hosts": ["ocsp.example.test"],
+						},
+					},
+				},
+			},
+		});
+		expect(strict.oauth.mtls["full-pki"]?.revocation?.["ocsp-require-nonce"]).toBe(true);
+
+		const lenient = mtlsConfigSchema.parse({
+			oauth: {
+				mtls: {
+					enabled: true,
+					mode: "full-pki",
+					"full-pki": {
+						revocation: {
+							mode: "ocsp",
+							"on-unavailable": "reject",
+							"allowed-hosts": ["ocsp.example.test"],
+							"ocsp-require-nonce": false,
+						},
+					},
+				},
+			},
+		});
+		expect(lenient.oauth.mtls["full-pki"]?.revocation?.["ocsp-require-nonce"]).toBe(false);
 	});
 
 	it("refuses an unknown signature algorithm rather than matching nothing", () => {

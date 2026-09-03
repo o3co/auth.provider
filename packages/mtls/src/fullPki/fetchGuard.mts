@@ -47,6 +47,16 @@
  * cannot exhaust memory before the check fires, a wall-clock timeout, and no
  * credentials.
  *
+ * ### GET and POST
+ *
+ * A CRL is fetched with a GET. An OCSP request is a POST whose body is the
+ * DER `OCSPRequest` (RFC 6960 Appendix A.1) — the GET form base64-encodes
+ * the request into the path, which is both larger and, once a nonce is in
+ * it, uncacheable, so there is no reason to speak it. Every guard above is
+ * applied to a POST exactly as to a GET; the only additions are the body,
+ * its `Content-Type`, and an optional check that the responder answered with
+ * the media type it was asked for (#431).
+ *
  * ### Why a bespoke client rather than the platform default
  *
  * `fetch` follows redirects, has no size limit, and has no notion of an
@@ -63,6 +73,7 @@ export type FetchRejection =
 	| "redirect_refused"
 	| "http_error"
 	| "response_too_large"
+	| "unexpected_content_type"
 	| "timeout"
 	| "network_error";
 
@@ -88,7 +99,38 @@ export interface GuardedFetchOptions {
 	readonly fetchImpl?: typeof globalThis.fetch;
 }
 
-export type GuardedFetch = (url: string) => Promise<FetchOutcome>;
+/**
+ * What to send. Omitted, the fetch is a plain GET for a CRL. An OCSP request
+ * sets `method: "POST"` with the DER request as `body`, its `contentType`,
+ * and the media type it expects back.
+ */
+export interface GuardedRequest {
+	readonly method?: "GET" | "POST";
+	readonly body?: Uint8Array;
+	/** `Content-Type` of `body`. */
+	readonly contentType?: string;
+	/** `Accept` header. Defaults to the CRL media types. */
+	readonly accept?: string;
+	/**
+	 * Media type the response must declare — compared case-insensitively and
+	 * without parameters; anything else is `unexpected_content_type`. Omitted,
+	 * the response's type is not checked: distribution points answer with
+	 * `application/pkix-crl`, `application/octet-stream`, or nothing useful,
+	 * and the bytes are what count.
+	 */
+	readonly expectContentType?: string;
+}
+
+export type GuardedFetch = (url: string, request?: GuardedRequest) => Promise<FetchOutcome>;
+
+const CRL_ACCEPT = "application/pkix-crl, application/octet-stream, */*";
+
+/** The media type of a `Content-Type` value, lower-cased, parameters dropped. */
+const mediaTypeOf = (contentType: string | null): string | null => {
+	if (contentType === null) return null;
+	const media = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+	return media === "" ? null : media;
+};
 
 /**
  * The one form both sides of the allowlist comparison are reduced to:
@@ -210,7 +252,7 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 
 	const defaultPort = (url: URL): string => (url.protocol === "https:" ? "443" : "80");
 
-	return async (rawUrl: string): Promise<FetchOutcome> => {
+	return async (rawUrl: string, request: GuardedRequest = {}): Promise<FetchOutcome> => {
 		let url: URL;
 		try {
 			url = new URL(rawUrl);
@@ -232,21 +274,41 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 			return { ok: false, reason: "host_not_allowed", detail: url.host };
 		}
 
+		const headers: Record<string, string> = { accept: request.accept ?? CRL_ACCEPT };
+		if (request.contentType !== undefined) headers["content-type"] = request.contentType;
+
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), options.timeoutMs);
 		try {
 			const response = await fetchImpl(url, {
-				method: "GET",
+				method: request.method ?? "GET",
 				// A redirect names a second destination that the allowlist never
 				// vetted, and following one is how an allowlisted host becomes an
 				// open proxy into everything it can reach.
 				redirect: "error",
 				signal: controller.signal,
 				credentials: "omit",
-				headers: { accept: "application/pkix-crl, application/octet-stream, */*" },
+				headers,
+				...(request.body === undefined
+					? {}
+					: { body: request.body as unknown as NonNullable<Parameters<typeof fetch>[1]>["body"] }),
 			});
 			if (!response.ok) {
 				return { ok: false, reason: "http_error", detail: `HTTP ${response.status}` };
+			}
+			if (request.expectContentType !== undefined) {
+				// Checked before the body is read: a captive portal or an error
+				// page answering 200 with HTML is "the responder did not answer
+				// as a responder", and this is where that is named rather than
+				// surfacing later as a parse failure.
+				const declared = mediaTypeOf(response.headers.get("content-type"));
+				if (declared !== request.expectContentType.toLowerCase()) {
+					return {
+						ok: false,
+						reason: "unexpected_content_type",
+						detail: `expected ${request.expectContentType}, got ${declared ?? "no Content-Type"}`,
+					};
+				}
 			}
 			const body = await readCapped(response, options.maxBytes);
 			if (!body.ok) {

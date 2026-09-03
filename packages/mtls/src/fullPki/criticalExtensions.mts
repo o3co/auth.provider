@@ -42,8 +42,9 @@
  * nothing processes would be a worse bug than not listing it: it would turn a
  * refusal into an acceptance while looking like diligence.
  *
- * The same rule, with the same listing discipline, is applied to CRLs at the
- * bottom of this file (RFC 5280 §5.2 and §5.3) on behalf of `crl.mts`.
+ * The same rule, with the same listing discipline, is applied to CRLs (RFC
+ * 5280 §5.2 and §5.3) on behalf of `crl.mts`, and to OCSP responses (RFC
+ * 6960 §4.4) on behalf of `ocsp.mts`, at the bottom of this file.
  */
 
 import type * as pkijs from "pkijs";
@@ -72,16 +73,31 @@ const PROCESSED_ANYWHERE: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * `extendedKeyUsage` is processed **only on the leaf**, by
- * `checkClientLeafProfile` in `pki.mts`.
+ * Extensions processed **only on the leaf**.
  *
- * On a CA it would mean EKU chaining — constraining what purposes the CA may
- * issue for — which RFC 5280 does not define and this module does not
- * implement. A CA that marks it critical is asking for enforcement there is
- * none of, so it is refused rather than waved through.
+ * - `extendedKeyUsage` — by `checkClientLeafProfile` in `pki.mts`. On a CA
+ *   it would mean EKU chaining — constraining what purposes the CA may issue
+ *   for — which RFC 5280 does not define and this module does not implement.
+ *   A CA that marks it critical is asking for enforcement there is none of,
+ *   so it is refused rather than waved through.
+ * - `tlsfeature` (RFC 7633) — by `checkMustStaple` in `ocsp.mts`, which
+ *   refuses a leaf demanding a stapled OCSP response (#431). Processed by
+ *   being refused, as the CRL scope extensions are.
  */
 const PROCESSED_ON_LEAF_ONLY: ReadonlySet<string> = new Set([
 	"2.5.29.37", // extKeyUsage
+	"1.3.6.1.5.5.7.1.24", // tlsfeature — read, and refused when it demands must-staple
+]);
+
+/**
+ * Extensions pkijs has no class for, whose value this package decodes
+ * itself. The `parsedValue` requirement below does not apply to them: pkijs
+ * leaves it undefined for every one, parseable or not, and the reader is
+ * what decides whether the value could be honoured — `checkMustStaple`
+ * refuses an undecodable `tlsfeature` on its own.
+ */
+const PARSED_LOCALLY: ReadonlySet<string> = new Set([
+	"1.3.6.1.5.5.7.1.24", // tlsfeature
 ]);
 
 /**
@@ -137,6 +153,8 @@ export const checkCriticalExtensions = (
 						"rather than ignoring it)",
 				};
 			}
+
+			if (PARSED_LOCALLY.has(extension.extnID)) continue;
 
 			// §6.1.2 has two halves, and the second is easy to lose: the rule
 			// covers an unrecognised critical extension "**or** a critical
@@ -267,6 +285,48 @@ export const checkCrlCriticalExtensions = (
 					`a CRL entry carries critical extension ${extension.extnID}, which this validator ` +
 					"does not process (RFC 5280 §5.3 forbids using the CRL)",
 			};
+		}
+	}
+	return { ok: true };
+};
+
+/**
+ * Critical OCSP response extensions `ocsp.mts` processes (RFC 6960 §4.4).
+ *
+ * §4.4: "unrecognized critical extensions in the response MUST be
+ * rejected". Only the nonce is acted on — it is compared against the one the
+ * request carried. The other extensions the RFC defines for a response
+ * (`crlID`, `archiveCutoff`, `serviceLocator`, extended-revoke) are
+ * informational and always non-critical; none is read, so none is listed.
+ */
+const OCSP_PROCESSED: ReadonlySet<string> = new Set([
+	"1.3.6.1.5.5.7.48.1.2", // id-pkix-ocsp-nonce
+]);
+
+/**
+ * The response-level extensions and the single response's own, for the one
+ * single response that is about the certificate in question. Other single
+ * responses in the same message are not consulted, so their extensions are
+ * not either.
+ */
+export const checkOcspCriticalExtensions = (
+	responseExtensions: readonly pkijs.Extension[],
+	singleExtensions: readonly pkijs.Extension[],
+): CrlCriticalExtensionCheck => {
+	for (const [where, extensions] of [
+		["response", responseExtensions],
+		["single response", singleExtensions],
+	] as const) {
+		for (const extension of extensions) {
+			if (!extension.critical) continue;
+			if (!OCSP_PROCESSED.has(extension.extnID)) {
+				return {
+					ok: false,
+					detail:
+						`the OCSP ${where} carries critical extension ${extension.extnID}, which this ` +
+						"validator does not process (RFC 6960 §4.4 requires rejection)",
+				};
+			}
 		}
 	}
 	return { ok: true };

@@ -91,12 +91,14 @@ export interface MtlsMechanismOptions {
 		readonly "signature-algorithms"?: readonly SignatureAlgorithmName[];
 		readonly "min-rsa-key-bits"?: number;
 		readonly revocation?: {
-			readonly mode: "crl" | "disabled";
+			readonly mode: "crl" | "ocsp" | "both" | "disabled";
 			readonly "on-unavailable": "reject" | "allow";
 			readonly "allowed-hosts": readonly string[];
 			readonly "fetch-timeout-ms": number;
 			readonly "cache-ttl-seconds": number;
 			readonly "max-response-bytes": number;
+			/** OCSP only. Defaults to `true` (RFC 8954). */
+			readonly "ocsp-require-nonce"?: boolean;
 		};
 	};
 	readonly logger?: Logger;
@@ -219,12 +221,15 @@ const buildFullPkiValidator = (
 			revocation.mode === "disabled"
 				? { mode: "disabled" }
 				: {
-						mode: "crl",
+						mode: revocation.mode,
 						onUnavailable: revocation["on-unavailable"],
 						allowedHosts: revocation["allowed-hosts"],
 						fetchTimeoutMs: revocation["fetch-timeout-ms"],
 						cacheTtlSeconds: revocation["cache-ttl-seconds"],
 						maxResponseBytes: revocation["max-response-bytes"],
+						...(revocation["ocsp-require-nonce"] === undefined
+							? {}
+							: { ocspRequireNonce: revocation["ocsp-require-nonce"] }),
 					},
 		...(options.logger ? { logger: options.logger } : {}),
 	});

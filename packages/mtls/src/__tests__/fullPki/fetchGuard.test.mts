@@ -253,3 +253,96 @@ describe("guarded fetch — response limits", () => {
 		expect(await get("not a url")).toMatchObject({ ok: false, reason: "url_unparseable" });
 	});
 });
+
+describe("guarded fetch — POST, for OCSP (#431)", () => {
+	const body = new Uint8Array([0x30, 0x00]);
+	const ocspRequest = {
+		method: "POST" as const,
+		body,
+		contentType: "application/ocsp-request",
+		accept: "application/ocsp-response",
+		expectContentType: "application/ocsp-response",
+	};
+	const typed = (bytes: Uint8Array, contentType: string) =>
+		new Response(bytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": contentType },
+		});
+
+	it("sends the body with its content type and accept header, and still refuses redirects", async () => {
+		const fetchImpl = vi.fn(async (_url: unknown, init: RequestInit) => {
+			expect(init.method).toBe("POST");
+			expect(init.body).toBe(body);
+			expect(init.redirect).toBe("error");
+			expect(init.credentials).toBe("omit");
+			const headers = init.headers as Record<string, string>;
+			expect(headers["content-type"]).toBe("application/ocsp-request");
+			expect(headers.accept).toBe("application/ocsp-response");
+			return typed(new Uint8Array([1, 2]), "application/ocsp-response");
+		});
+		const post = createGuardedFetch({
+			...options,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		const result = await post("http://crl.example.test/ocsp", ocspRequest);
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(Array.from(result.bytes)).toEqual([1, 2]);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+	});
+
+	it("refuses a response whose Content-Type is not the one expected", async () => {
+		// A captive portal or an error page answers 200 with HTML. Reading that
+		// as an OCSP response only costs a parse failure, but the guard is
+		// where "the responder did not answer as a responder" is named.
+		const fetchImpl = vi.fn(async () => typed(new Uint8Array([1]), "text/html; charset=utf-8"));
+		const post = createGuardedFetch({
+			...options,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect(await post("http://crl.example.test/ocsp", ocspRequest)).toMatchObject({
+			ok: false,
+			reason: "unexpected_content_type",
+		});
+	});
+
+	it("matches the expected media type ignoring parameters and case", async () => {
+		const fetchImpl = vi.fn(async () =>
+			typed(new Uint8Array([1]), "Application/OCSP-Response; charset=binary"),
+		);
+		const post = createGuardedFetch({
+			...options,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect((await post("http://crl.example.test/ocsp", ocspRequest)).ok).toBe(true);
+	});
+
+	it("applies the host allowlist to a POST exactly as to a GET", async () => {
+		const fetchImpl = vi.fn();
+		const post = createGuardedFetch({
+			...options,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect(await post("http://169.254.169.254/latest/meta-data/", ocspRequest)).toMatchObject({
+			ok: false,
+			reason: "host_not_allowed",
+		});
+		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("does not check the content type when the caller expects none", async () => {
+		// The CRL path: distribution points answer with application/pkix-crl,
+		// application/octet-stream, or nothing useful, and the bytes are what
+		// count.
+		const fetchImpl = vi.fn(async () => typed(new Uint8Array([1]), "text/plain"));
+		const get = createGuardedFetch({
+			...options,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect((await get("http://crl.example.test/a.crl")).ok).toBe(true);
+	});
+});
