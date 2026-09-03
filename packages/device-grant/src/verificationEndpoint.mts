@@ -51,10 +51,28 @@
  * on the code would count an attacker's misses against whichever code they
  * happened to hit, which is nobody's budget; keying on the subject means an
  * attacker needs an account and burns their own budget guessing.
+ *
+ * ### The decision is an audit event
+ *
+ * An approval is a consent: a named subject grants a named client a scope,
+ * and a device somewhere turns that into a token. That belongs in the same
+ * sink as `authorize.granted`, not in an optional `logger.info` nobody tails
+ * — so `approve` emits `device.approved`, `deny` emits `device.denied`, and a
+ * subject who exhausts the budget emits `device.rate_limited`, which is the
+ * signal that an account is being used to guess codes. No event carries the
+ * user code or the device code: one is the value being brute-forced and the
+ * other is a bearer credential.
+ *
+ * ### Cross-site requests are the module's problem, and it handles them
+ *
+ * This handler never sees a body parser or an origin check; the router
+ * `deviceGrantModule` mounts is JSON-only and runs the session package's
+ * CSRF guard ahead of it (RFC 8628 §5.4 — see `module.mts`). A composition
+ * that mounts this handler by hand must do the same.
  */
 
 import type { RateLimiter } from "@o3co/auth-provider-core";
-import { normaliseUserCode } from "@o3co/auth-provider-core";
+import { emitAuditEvent, normaliseUserCode } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, type DeviceGrantDependencies } from "./types.mjs";
 
@@ -128,6 +146,14 @@ export const createDeviceVerificationHandler = (
 				{ subject, action, remaining: decision.remaining },
 				"device_verification_rate_limited",
 			);
+			emitAuditEvent(options.auditSink, {
+				timestamp: new Date(),
+				type: "device.rate_limited",
+				subject,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { action, remaining: decision.remaining },
+			});
 			respond(res, 429, {
 				error: "slow_down",
 				error_description: "too many device code attempts",
@@ -182,16 +208,43 @@ export const createDeviceVerificationHandler = (
 				: await options.store.deny(userCode, nowMs);
 
 		switch (outcome.status) {
-			case "ok":
+			case "ok": {
+				const { authorization } = outcome;
+				const scope = (authorization.grantedScope ?? authorization.requestedScope ?? []).join(" ");
 				options.logger?.info?.(
-					{ subject, clientId: outcome.authorization.clientId, action },
+					{ subject, clientId: authorization.clientId, action },
 					"device_authorization_decided",
 				);
+				// Two literal emission sites rather than a computed type: the
+				// inventory drift guard in core reads the `type:` literal at
+				// each call, and a ternary would hide one name from it.
+				if (action === "approve") {
+					emitAuditEvent(options.auditSink, {
+						timestamp: new Date(),
+						type: "device.approved",
+						subject,
+						clientId: authorization.clientId,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { scope },
+					});
+				} else {
+					emitAuditEvent(options.auditSink, {
+						timestamp: new Date(),
+						type: "device.denied",
+						subject,
+						clientId: authorization.clientId,
+						ip: req.ip,
+						userAgent: req.get("user-agent"),
+						details: { scope },
+					});
+				}
 				respond(res, 200, {
 					status: action === "approve" ? "approved" : "denied",
-					client_id: outcome.authorization.clientId,
+					client_id: authorization.clientId,
 				});
 				return;
+			}
 			case "expired":
 				respond(res, 410, {
 					error: "expired_token",

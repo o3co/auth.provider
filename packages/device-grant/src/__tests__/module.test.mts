@@ -59,6 +59,8 @@ interface Overrides {
 	readonly deviceAuthorization?: Record<string, unknown>;
 	readonly withStore?: boolean;
 	readonly withRateLimiter?: boolean;
+	/** Drop the `audit.sink.type = "none"` declaration the fixture carries. */
+	readonly withoutAuditDeclaration?: boolean;
 }
 
 const makeBoot = (overrides: Overrides): BootstrapMap => {
@@ -71,6 +73,9 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 			// same slice `/session/login` reads; enabling the grant without it
 			// is a boot refusal, so the fixture carries the standard one.
 			session: full.session,
+			// #363: the module attaches AUDIT_SINK_ABSENCE_POLICY, so a boot
+			// with no sink must say so — which is what this fixture is.
+			...(overrides.withoutAuditDeclaration === true ? {} : { audit: full.audit }),
 			oauth: {
 				...core.oauth,
 				deviceAuthorization: {
@@ -151,6 +156,16 @@ describe("deviceGrantModule — boot", () => {
 	it("boots with everything wired", async () => {
 		const handle = await boot({ deviceAuthorization: ENABLED });
 		await handle.dispose();
+	});
+
+	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
+		// #363's rule, applied to the decision that turns a code into a token:
+		// `auditSink` is optional to wire, not optional to decide. A composition
+		// that silently discards every device approval must have written that
+		// down.
+		await expect(
+			boot({ deviceAuthorization: ENABLED, withoutAuditDeclaration: true }),
+		).rejects.toThrow(/audit\.sink\.type/);
 	});
 });
 

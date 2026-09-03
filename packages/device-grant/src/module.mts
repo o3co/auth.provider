@@ -63,7 +63,11 @@
  * config slice, so enabling the grant without one fails at boot.
  */
 
-import { DEVICE_CODE_STORE_ABSENCE_POLICY, defineModule } from "@o3co/auth-provider-core";
+import {
+	AUDIT_SINK_ABSENCE_POLICY,
+	DEVICE_CODE_STORE_ABSENCE_POLICY,
+	defineModule,
+} from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import {
 	createCsrfGuard,
@@ -226,9 +230,13 @@ export const deviceGrantModule = defineModule({
 	name: "device-grant",
 	configSchema: deviceGrantConfigSchema,
 	requires: ["config", "clientRepository", "keyStore"],
-	optional: ["deviceCodeStore", "rateLimiter", "logger"],
+	optional: ["deviceCodeStore", "rateLimiter", "logger", "auditSink"],
+	// #363: optional to wire, not optional to decide. A composition with no
+	// sink discards every device approval — a consent event — with no
+	// symptom, so it has to write `audit.sink.type = "none"` to say so.
 	absencePolicies: {
 		deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
+		auditSink: AUDIT_SINK_ABSENCE_POLICY,
 	},
 	contributes: {
 		grants: {
@@ -339,6 +347,7 @@ export const deviceGrantModule = defineModule({
 							pollingIntervalSeconds: slice["polling-interval-seconds"],
 						},
 						logger: deps.logger,
+						auditSink: deps.auditSink,
 					}),
 				);
 				return {

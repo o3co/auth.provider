@@ -16,7 +16,7 @@
 
 /** Shared types for the RFC 8628 device authorization grant (#298). */
 
-import type { DeviceCodeStore, RateLimiter } from "@o3co/auth-provider-core";
+import type { AuditSink, DeviceCodeStore, RateLimiter } from "@o3co/auth-provider-core";
 
 /** The grant type URN. RFC 8628 §3.4. */
 export const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
@@ -49,6 +49,12 @@ export interface DeviceGrantDependencies {
 	readonly store: DeviceCodeStore;
 	readonly settings: DeviceAuthorizationSettings;
 	readonly rateLimiter?: RateLimiter;
+	/**
+	 * Where `device.approved` / `device.denied` / `device.rate_limited` go.
+	 * Optional to wire; the module attaches `AUDIT_SINK_ABSENCE_POLICY`, so a
+	 * composition with no sink has to say `audit.sink.type = "none"` (#363).
+	 */
+	readonly auditSink?: AuditSink;
 	readonly logger?: {
 		warn(obj: Record<string, unknown>, msg: string): void;
 		info?(obj: Record<string, unknown>, msg: string): void;

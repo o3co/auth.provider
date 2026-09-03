@@ -24,6 +24,8 @@
  */
 
 import type {
+	AuditEvent,
+	AuditSink,
 	AuthenticatedClient,
 	ClientRepository,
 	GrantContext,
@@ -104,6 +106,7 @@ const makeHarness = (
 		settings?: Partial<typeof settings>;
 		rateLimiter?: RateLimiter;
 		session?: Record<string, unknown>;
+		auditSink?: AuditSink;
 	} = {},
 ) => {
 	const clock = makeClock();
@@ -145,6 +148,7 @@ const makeHarness = (
 			settings: resolved,
 			rateLimiter,
 			now: clock.now,
+			...(overrides.auditSink ? { auditSink: overrides.auditSink } : {}),
 		}),
 	);
 
@@ -383,6 +387,110 @@ describe("rate limiting (RFC 8628 §5.1)", () => {
 			"device_verification:user:user-1",
 			expect.objectContaining({ userId: "user-1" }),
 		);
+	});
+});
+
+describe("audit trail for the human's decision", () => {
+	// The decision that turns a code into a token used to reach nothing but
+	// `logger.info` — optional, unstructured, and not the pipeline the rest of
+	// the product's security events flow through. A device authorization is
+	// a consent event with a subject and a client; it belongs in the sink.
+	const makeSink = () => {
+		const events: AuditEvent[] = [];
+		const sink: AuditSink = {
+			kind: "test",
+			record: async (event) => {
+				events.push(event);
+			},
+		};
+		return { sink, events };
+	};
+
+	/** The sink is fire-and-forget, so give the detached promise a turn. */
+	const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+	it("records device.approved with the subject, the client and the scope", async () => {
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({ auditSink: sink });
+		const started = await startDevice(app, { scope: "openid profile" });
+
+		await verify(app, { action: "approve", user_code: started.body.user_code });
+		await settle();
+
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			type: "device.approved",
+			subject: "user-1",
+			clientId: CLIENT_ID,
+			details: { scope: "openid profile" },
+		});
+		expect(events[0]?.timestamp).toBeInstanceOf(Date);
+	});
+
+	it("records device.denied", async () => {
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({ auditSink: sink });
+		const started = await startDevice(app);
+
+		await verify(app, { action: "deny", user_code: started.body.user_code });
+		await settle();
+
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			type: "device.denied",
+			subject: "user-1",
+			clientId: CLIENT_ID,
+		});
+	});
+
+	it("records device.rate_limited when the subject's budget runs out", async () => {
+		// The 429 is the signal that someone is guessing codes from an account
+		// — exactly what a dashboard wants to see, and exactly what a
+		// `logger.warn` nobody tails does not deliver.
+		const { sink, events } = makeSink();
+		const rateLimiter = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const { app } = makeHarness({ auditSink: sink, rateLimiter });
+
+		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		await settle();
+
+		expect(limited.status).toBe(429);
+		expect(events).toHaveLength(1);
+		expect(events[0]).toMatchObject({
+			type: "device.rate_limited",
+			subject: "user-1",
+			details: { action: "lookup" },
+		});
+	});
+
+	it("never puts the code itself in an event", async () => {
+		// The user code is the thing being brute-forced and the device code is
+		// a bearer credential; an audit pipeline is not a place for either.
+		const { sink, events } = makeSink();
+		const { app } = makeHarness({ auditSink: sink });
+		const started = await startDevice(app);
+		const displayed = started.body.user_code as string;
+
+		await verify(app, { action: "approve", user_code: displayed });
+		await settle();
+
+		const serialised = JSON.stringify(events);
+		expect(serialised).not.toContain(displayed);
+		expect(serialised).not.toContain(normaliseUserCode(displayed));
+		expect(serialised).not.toContain(started.body.device_code);
+	});
+
+	it("records nothing — and still decides — when no sink is wired", async () => {
+		const { app, clock, poll } = makeHarness();
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(200);
+		clock.advance(10_000);
+		expect((await poll(started.body.device_code as string)).result.status).toBe(200);
 	});
 });
 
