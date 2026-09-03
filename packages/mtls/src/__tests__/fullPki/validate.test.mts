@@ -561,6 +561,147 @@ describe("full-pki revocation", () => {
 		);
 	});
 
+	it("under 'allow', a forged CRL is soft-failed with the warn line, not accepted silently", async () => {
+		// Before the signature was checked locally, a forged CRL reached the
+		// engine, whose findCRL answered "no valid CRLs" — a status the
+		// soft-fail flag suppressed — and the certificate passed with no
+		// mtls_revocation_unavailable_allowed line at all. "allow" is a choice
+		// the operator must be able to watch being exercised.
+		const { root, int, leaf } = await buildChain();
+		const impostor = await mintCa("Impostor", 900);
+		const forged = await mintCrl({ issuer: int, revoked: [], signingKeys: impostor.keys });
+		const { impl } = stubFetch({ [INT_CRL_URL]: forged, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "bad_signature" }),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it("honours 'allow' in a partial outage: only the certificate whose CRL is down is waved through", async () => {
+		// The common outage shape — the leaf's distribution point is down, the
+		// intermediate's is up. Handing the engine the CRLs that *were* fetched
+		// made it throw noRevocation for the leaf because its issuer carries a
+		// CDP extension, so "allow" rejected. The lookup is now local, per
+		// certificate, and the policy applies to each one on its own.
+		const { root, int, leaf } = await buildChain();
+		const { impl } = stubFetch({ [INT_CRL_URL]: 503, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		// Exactly one soft-fail — the leaf's. The intermediate was checked and
+		// must not be reported as waved through.
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it("refuses the same partial outage under 'reject'", async () => {
+		const { root, int, leaf } = await buildChain();
+		const { impl } = stubFetch({ [INT_CRL_URL]: 503, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("revocation status unavailable");
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			"mtls_revocation_unavailable_rejected",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it.each(["reject", "allow"] as const)(
+		"refuses a revoked leaf under '%s'",
+		async (onUnavailable) => {
+			// Soft-fail covers a status that cannot be determined. A status that
+			// *was* determined, and is "revoked", is not softened by the policy.
+			const { root, int, leaf } = await buildChain();
+			const { impl } = stubFetch({
+				[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
+				[ROOT_CRL_URL]: await cleanRootCrl(root),
+			});
+
+			const result = await validator([root], {
+				revocation: crlPolicy(onUnavailable),
+				fetchImpl: impl,
+			}).validate(leaf.x509, [int.x509], NOW);
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.step).toBe("certificate revoked");
+		},
+	);
+
+	it.each(["reject", "allow"] as const)(
+		"refuses a revoked intermediate under '%s'",
+		async (onUnavailable) => {
+			// The intermediate's status comes from the root-signed CRL, and a
+			// revoked CA takes every certificate beneath it with it.
+			const { root, int, leaf } = await buildChain();
+			const { impl } = stubFetch({
+				[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+				[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [int] }),
+			});
+
+			const result = await validator([root], {
+				revocation: crlPolicy(onUnavailable),
+				fetchImpl: impl,
+			}).validate(leaf.x509, [int.x509], NOW);
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) {
+				expect(result.step).toBe("certificate revoked");
+				expect(result.detail).toContain("CN=Intermediate");
+			}
+		},
+	);
+
+	it("refuses a revoked leaf under 'allow' even while the intermediate's CRL is down", async () => {
+		// Two facts on one path: one certificate's status is unknown, the
+		// other's is "revoked". Waving the first through must not wave the
+		// second through with it.
+		const { root, int, leaf } = await buildChain();
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
+			[ROOT_CRL_URL]: 503,
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("certificate revoked");
+	});
+
 	it("treats a certificate with no distribution point as unavailable, not as clean", async () => {
 		const root = await mintCa("Root", 1);
 		const leaf = await mintLeaf("client", 10, root);

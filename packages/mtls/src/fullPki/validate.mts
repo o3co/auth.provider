@@ -43,24 +43,41 @@
  *  2. **Algorithm policy (§6.1.4).** Left to local policy by the RFC, which
  *     in practice means the OpenSSL build's policy. Applied here to every
  *     certificate on the path.
- *  3. **Revocation availability.** The engine skips its revocation block
- *     entirely when handed no CRLs, and returns *valid*. So a CRL endpoint
- *     that is down produces the same verdict as a certificate that is not
- *     revoked. That is the single most dangerous default in this area, and
- *     it is the reason revocation is a two-pass affair below rather than one
+ *  3. **Revocation.** The engine skips its revocation block entirely when
+ *     handed no CRLs, and returns *valid*. So a CRL endpoint that is down
+ *     produces the same verdict as a certificate that is not revoked. That is
+ *     the single most dangerous default in this area, and it is the reason
+ *     revocation is decided here, per certificate, rather than by one engine
  *     call with some CRLs attached.
  *
- * ### Why two passes
+ * ### Why the engine validates the path but does not decide revocation
  *
- * Pass 1 validates the path with no revocation material. Pass 2 re-runs it
- * with the CRLs that pass 1's path told us to fetch.
+ * Pass 1 hands the engine the presented chain with no revocation material and
+ * takes back the validated path. Pass 2 walks that path — anchor excluded —
+ * and, for each certificate, asks the resolver for the CRL its issuer
+ * published and checks the serial against it. The resolver has already
+ * verified the CRL's signature against that issuer (`crl.mts`), so the
+ * lookup is one comparison and the engine is not consulted again.
  *
- * The ordering is a security property, not an optimisation. A distribution
- * point is a URL inside a certificate, and fetching it makes this process
- * issue a request to a destination someone else chose. Validating first means
- * only a certificate that already chains to a configured trust anchor can
- * cause an outbound request at all — an arbitrary certificate presented by an
- * arbitrary client cannot. `fetchGuard.mts` holds the second layer.
+ * It used to be. The engine takes CRLs as one flat list and applies one rule
+ * to the whole path: a certificate with no usable CRL is refused whenever
+ * its issuer advertises a distribution point, regardless of
+ * `passedWhenNotRevValues`. That is the wrong shape for an operator policy
+ * meant to apply per certificate — with the leaf's distribution point down
+ * and the intermediate's up, the common outage, `"allow"` refused — and it
+ * meant a CRL the engine discarded for a bad signature never reached the
+ * logged availability branch. Deciding here makes `on-unavailable` mean what
+ * the configuration says: `"reject"` refuses on the first certificate whose
+ * status is unknown, `"allow"` skips exactly those certificates and logs each
+ * one, and a status that *was* determined as revoked is refused under both.
+ *
+ * The ordering — validate, then fetch — is a security property, not an
+ * optimisation. A distribution point is a URL inside a certificate, and
+ * fetching it makes this process issue a request to a destination someone
+ * else chose. Validating first means only a certificate that already chains
+ * to a configured trust anchor can cause an outbound request at all — an
+ * arbitrary certificate presented by an arbitrary client cannot.
+ * `fetchGuard.mts` holds the second layer.
  *
  * ### What is still not here
  *
@@ -176,7 +193,13 @@ const checkPathLength = (path: readonly pkijs.Certificate[]): FullPkiResult => {
 	return { ok: true };
 };
 
-/** Map the engine's outcome onto a short step name the audit trail can carry. */
+/**
+ * Map the engine's outcome onto a short step name the audit trail can carry.
+ *
+ * The engine is only ever run without revocation material, so its revocation
+ * codes (11–13) cannot occur here; revocation outcomes are named by the
+ * local pass below.
+ */
 const describeEngineFailure = (result: {
 	resultCode: number;
 	resultMessage: string;
@@ -193,12 +216,6 @@ const describeEngineFailure = (result: {
 		case 60:
 		case 97:
 			return { step: "no path to trust anchor", detail: result.resultMessage };
-		case 12:
-			return { step: "certificate revoked", detail: result.resultMessage };
-		case 11:
-			return { step: "revocation status unavailable", detail: result.resultMessage };
-		case 13:
-			return { step: "CRL issuer is not a CA with cRLSign", detail: result.resultMessage };
 		default:
 			return { step: "path validation failed", detail: result.resultMessage };
 	}
@@ -330,77 +347,56 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 
 			if (resolver === null || options.revocation.mode === "disabled") return { ok: true };
 
-			// --- Pass 2: revocation over the *validated* path. ---
+			// --- Pass 2: revocation over the *validated* path, decided here. ---
 			//
 			// The trust anchor is excluded: nothing in the path can revoke it, and
 			// an operator removing a compromised anchor from `trusted-cas` is the
 			// mechanism that actually applies there.
 			const subjects = path.slice(0, -1);
-			const crls: pkijs.CertificateRevocationList[] = [];
 			for (const [index, certificate] of subjects.entries()) {
 				// The next element up the path issued this one, so it is the key
 				// the CRL must verify against — the resolver refuses to hand back,
 				// or cache, a CRL that does not.
 				const issuer = path[index + 1] as pkijs.Certificate;
 				const lookup = await resolver.resolve(certificate, issuer, now);
-				if (lookup.ok) {
-					crls.push(...lookup.crls);
-					continue;
-				}
-				const subject = toNode(certificate).subject;
-				if (options.revocation.onUnavailable === "reject") {
+				if (!lookup.ok) {
+					const subject = toNode(certificate).subject;
+					if (options.revocation.onUnavailable === "reject") {
+						options.logger?.warn(
+							{ subject, reason: lookup.reason, detail: lookup.detail },
+							"mtls_revocation_unavailable_rejected",
+						);
+						return {
+							ok: false,
+							step: "revocation status unavailable",
+							detail: `${subject}: ${lookup.reason} — ${lookup.detail}`,
+						};
+					}
+					// Soft-fail. Logged at warn, never silently: an operator who chose
+					// "allow" still needs to see how often it is being used, because a
+					// permanent soft-fail is an unrevocable PKI wearing a revocation
+					// configuration.
 					options.logger?.warn(
 						{ subject, reason: lookup.reason, detail: lookup.detail },
-						"mtls_revocation_unavailable_rejected",
+						"mtls_revocation_unavailable_allowed",
 					);
+					continue;
+				}
+
+				// A status that *was* determined is not softened by the policy:
+				// "allow" covers an unknown status, not a known-revoked one. Every
+				// CRL here verified against `issuer`, whose subject is this
+				// certificate's issuer name, so the serial comparison is the whole
+				// check.
+				if (lookup.crls.some((crl) => crl.isCertificateRevoked(certificate))) {
 					return {
 						ok: false,
-						step: "revocation status unavailable",
-						detail: `${subject}: ${lookup.reason} — ${lookup.detail}`,
+						step: "certificate revoked",
+						detail:
+							`${toNode(certificate).subject}: listed on the CRL published by ` +
+							toNode(issuer).subject,
 					};
 				}
-				// Soft-fail. Logged at warn, never silently: an operator who chose
-				// "allow" still needs to see how often it is being used, because a
-				// permanent soft-fail is an unrevocable PKI wearing a revocation
-				// configuration.
-				options.logger?.warn(
-					{ subject, reason: lookup.reason, detail: lookup.detail },
-					"mtls_revocation_unavailable_allowed",
-				);
-			}
-
-			if (crls.length === 0) {
-				// Every certificate soft-failed. There is nothing for the engine to
-				// check, and running it with an empty list would return `valid` for
-				// the reason this module exists to avoid.
-				return { ok: true };
-			}
-
-			const revocationEngine = new pkijs.CertificateChainValidationEngine({
-				trustedCerts,
-				certs,
-				crls,
-				checkDate: now,
-			});
-			let second: Awaited<ReturnType<pkijs.CertificateChainValidationEngine["verify"]>>;
-			try {
-				// `passedWhenNotRevValues` mirrors the operator's choice: with
-				// "reject" the engine must also refuse a certificate it could not
-				// find revocation values for, even though the loop above already
-				// covers the cases this module can see.
-				second = await revocationEngine.verify({
-					passedWhenNotRevValues: options.revocation.onUnavailable === "allow",
-				});
-			} catch (err) {
-				return {
-					ok: false,
-					step: "revocation status unavailable",
-					detail: err instanceof Error ? err.message : String(err),
-				};
-			}
-			if (!second.result) {
-				const { step, detail } = describeEngineFailure(second);
-				return { ok: false, step, detail };
 			}
 
 			return { ok: true };
