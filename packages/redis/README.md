@@ -25,8 +25,8 @@ Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core
   custom `FederationTokenStoreClient` whose `compareAndDelete` uses an
   alternative atomic primitive (e.g., a Cluster-safe transaction).
 
-This package ships ten adapters covering every redis-backed component that
-`@o3co/auth-provider-core` exposes as a typed slot:
+This package ships fourteen adapters covering every redis-backed component
+that `@o3co/auth-provider-core` exposes as a typed slot:
 
 - `ChallengeStore` (challenges)
 - `ReplaySeenSet` (replay-seen-set)
@@ -38,10 +38,19 @@ This package ships ten adapters covering every redis-backed component that
   `RefreshTokenFamilyRevocation` (refresh-token-family)
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
   `SessionFederationIndex` (user sessions, A4 four-store split)
+- `SubjectSessionIndex` / `SubjectRevocation` (subject-level revocation,
+  #321) — bundled with the four above in `redisSessionStoresModule`
 - `FederationTokenStore` (federation tokens)
 - `RateLimiter` (rate-limiter)
 - `CodeRepository` (relocated from `@o3co/auth-provider-foundation` in
   v0.5.0; `redisCodeRepositoryBuilder` for AdapterFactory wiring)
+- `DeviceCodeStore` (device-code-store) — pending RFC 8628 device
+  authorizations for `@o3co/auth-provider-device-grant`. The in-process
+  alternative forks per replica — the human approves on the replica that
+  served the verification page while the device polls one that has never
+  heard of the code — so core refuses it under `deployment.mode = "multi"`;
+  this adapter is what lets the grant run scaled (#433). See "Device
+  authorizations share one slot" below before choosing it.
 
 ## Backing-client contract
 
@@ -101,7 +110,7 @@ individually instead of spreading.
 and opens none of its own (the exception is
 `refreshTokenFamilyClient.duplicate()`, one per refresh rotation).
 Connection-level ioredis options are
-therefore shared by all eleven purposes, and the ones governing how a partition
+therefore shared by all fourteen purposes, and the ones governing how a partition
 *ends* are the ones worth setting deliberately:
 
 - **`commandTimeout`** is the only option that bounds a command which never
@@ -133,6 +142,23 @@ Each redis adapter ships in two flavours:
   `redisCodeRepositoryBuilder`, etc.) for runtime-config-driven wiring
   via `factory.register("redis", redisXxxBuilder)` + `factory.create({
   type: "redis", ... })`.
+
+| Module | Requires | Provides | Config key | Builder |
+| --- | --- | --- | --- | --- |
+| `redisChallengeStoreModule` | `challengeStoreClient` | `challengeStore` | `redisChallengeStore` | `redisChallengeStoreBuilder` |
+| `redisReplaySeenSetModule` | `replaySeenSetClient` | `replaySeenSet` | `redisReplaySeenSet` | `redisReplaySeenSetBuilder` |
+| `redisAccessTokenDenylistModule` | `accessTokenDenylistClient` | `accessTokenDenylist` | `redisAccessTokenDenylist` | `redisAccessTokenDenylistBuilder` |
+| `redisRefreshTokenFamilyStoreModule` | `refreshTokenFamilyClient` | `refreshTokenFamilyStore` | `redisRefreshTokenFamilyStore` | `redisRefreshTokenFamilyStoreBuilder` |
+| `redisSessionStoresModule` | the six session/subject clients | the six session/subject stores | `redisSessionStores` | per-store builders |
+| `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redisFederationTokenStore` | `redisFederationTokenStoreBuilder` |
+| `redisRateLimiterModule` | `rateLimiterClient` | `rateLimiter` | `redisRateLimiter` | `redisRateLimiterBuilder` |
+| `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
+| `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redisDeviceCodeStore` | `redisDeviceCodeStoreBuilder` |
+
+Every module also requires `config`. The `*Client` column is the slot
+`makeIoredisClients` fills; a composition that wires a Redis-branch module
+without providing its client slot fails stage-1 boot with
+`missing-required-component` — named at boot, not at the first command.
 
 The Module pattern is canonical for v0.5.0+; the AdapterFactory pattern
 remains supported for HOCON-config-driven backend selection in the
@@ -189,6 +215,37 @@ keeps the old pattern scan running after the index-driven removal.
   the migration window has closed (see the root CHANGELOG for the release that
   performs the removal) — at which point the index-only behaviour becomes
   unconditional and `scanIterator` leaves `FederationTokenStoreClient`.
+
+## Device authorizations share one slot
+
+`redisDeviceCodeStoreModule` (#433) keeps a pending RFC 8628 authorization
+as two keys:
+
+| Key | Type | Holds |
+| --- | --- | --- |
+| `${keyPrefix}{devauth}:code:${device_code}` | hash | the record — status, expiry, interval, scope, subject |
+| `${keyPrefix}{devauth}:user:${user_code}` | string | the `device_code` it belongs to |
+
+`keyPrefix` is `redisDeviceCodeStore.keyPrefix` (default `devauth:`); the
+`{devauth}` segment is a constant **hash tag**. The record is keyed by the
+device code, `approve`/`deny` arrive with the user code, and both are
+independent random values — so a script that follows the index to the record
+has to find both keys in the one slot Redis Cluster routed it to. The tag is
+what puts them there, and the cost is that **every device authorization
+lands on the same slot**. For this flow's volume — a human-initiated
+ceremony, not per-request traffic — that is an acceptable trade, but it is a
+real one. The alternative, storing the record twice under each key, would
+make `approve` and `poll` non-atomic across the pair, which is precisely
+what the `DeviceCodeStore` port forbids.
+
+Each port operation is one Lua script (EVALSHA-first, `EVAL` on `NOSCRIPT`,
+like the others in this package), so `poll` reads the status and consumes an
+approval indivisibly — the conformance suite's "two polls racing for the
+same approval" case runs against a real Redis in this package's tests, and
+that is the case a `HGETALL`-then-`DEL` implementation fails. Both keys
+carry the authorization's `expiresAtMs` as their TTL so Redis reclaims them,
+but `poll` still answers `expired` from the timestamp: a record inside its
+TTL whose deadline has passed on the caller's clock expires, and is dropped.
 
 ## Internal helpers
 

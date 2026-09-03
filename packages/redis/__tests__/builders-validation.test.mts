@@ -17,11 +17,13 @@ import { describe, expect, it } from "vitest";
 import { redisChallengeStoreBuilder } from "../src/challenges.mjs";
 import type {
 	ChallengeStoreClient,
+	DeviceCodeStoreClient,
 	ReplaySeenSetClient,
 	SessionRPRegistryClient,
 	SessionSidSortedSetClient,
 	UserSessionStoreClient,
 } from "../src/clients.mjs";
+import { redisDeviceCodeStoreBuilder } from "../src/device-code-store.mjs";
 import { redisReplaySeenSetBuilder } from "../src/replay-seen-set.mjs";
 import { redisSessionFamilyIndexBuilder } from "../src/sessionFamilyIndex.mjs";
 import { redisSessionFederationIndexBuilder } from "../src/sessionFederationIndex.mjs";
@@ -175,5 +177,34 @@ describe("AS-9: redisUserSessionStoreBuilder — client guard", () => {
 		);
 		expect(adapter).toBeDefined();
 		expect(adapter.kind).toBe("redis");
+	});
+});
+
+// #433: the Redis DeviceCodeStore builder. Same boot-time guard as the
+// builders above — a missing `client` is named at boot, not at the first
+// device poll.
+
+const noopDeviceCodeStoreClient: DeviceCodeStoreClient = {
+	create: async () => true,
+	findPending: async () => null,
+	decide: async () => ({ kind: "not_found" }),
+	poll: async () => ({ kind: "not_found" }),
+	remove: async () => {},
+};
+
+describe("#433: redisDeviceCodeStoreBuilder — client guard", () => {
+	it("throws when 'client' option is missing (config = {})", () => {
+		expect(() =>
+			redisDeviceCodeStoreBuilder({} as never, { lifecycle: undefined } as never),
+		).toThrow("redisDeviceCodeStoreBuilder: 'client' option is required");
+	});
+
+	it("succeeds when 'client' is present", async () => {
+		const store = await redisDeviceCodeStoreBuilder(
+			{ client: noopDeviceCodeStoreClient } as never,
+			{ lifecycle: undefined } as never,
+		);
+		expect(store).toBeDefined();
+		expect(store.kind).toBe("redis");
 	});
 });

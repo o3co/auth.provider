@@ -9,6 +9,7 @@ import { describe, expectTypeOf, it } from "vitest";
 // between `index.mts` re-exports and `clients.mts` definitions fails here.
 import type {
 	ChallengeStoreClient,
+	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,
@@ -26,8 +27,9 @@ import type { makeIoredisClients } from "../src/ioredis.mjs";
 type IoredisClientsReturn = ReturnType<typeof makeIoredisClients>;
 
 describe("makeIoredisClients return shape", () => {
-	it("exposes all 9 per-purpose client slots", () => {
+	it("exposes the per-purpose client slots, the device-code store's included (#433)", () => {
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("challengeStoreClient");
+		expectTypeOf<IoredisClientsReturn>().toHaveProperty("deviceCodeStoreClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("replaySeenSetClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("refreshTokenFamilyClient");
 		expectTypeOf<IoredisClientsReturn>().toHaveProperty("userSessionStoreClient");
@@ -98,6 +100,15 @@ describe("makeIoredisClients return shape", () => {
 	it("rateLimiterClient satisfies RateLimiterClient", () => {
 		expectTypeOf<IoredisClientsReturn["rateLimiterClient"]>().toMatchTypeOf<RateLimiterClient>();
 	});
+
+	// #433: the device-code store's client is semantic (create / findPending /
+	// decide / poll / remove), not a raw `eval` — the Lua stays behind the
+	// interface so a custom client can satisfy it with any atomic primitive.
+	it("deviceCodeStoreClient satisfies DeviceCodeStoreClient", () => {
+		expectTypeOf<
+			IoredisClientsReturn["deviceCodeStoreClient"]
+		>().toMatchTypeOf<DeviceCodeStoreClient>();
+	});
 });
 
 describe("ComponentMap declaration-merge — per-purpose client slots", () => {
@@ -152,6 +163,12 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 	it("rateLimiterClient slot is optional and of RateLimiterClient type", () => {
 		expectTypeOf<ComponentMap["rateLimiterClient"]>().toEqualTypeOf<
 			RateLimiterClient | undefined
+		>();
+	});
+
+	it("deviceCodeStoreClient slot is optional and of DeviceCodeStoreClient type (#433)", () => {
+		expectTypeOf<ComponentMap["deviceCodeStoreClient"]>().toEqualTypeOf<
+			DeviceCodeStoreClient | undefined
 		>();
 	});
 });

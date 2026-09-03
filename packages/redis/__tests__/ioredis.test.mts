@@ -391,6 +391,10 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 		await c.federationTokenStoreClient.get("ft");
 		await c.rateLimiterClient.incrementWithTtl("token:ip:1.2.3.4", 60);
 		await c.codeRepositoryClient.getDel("code");
+		await c.deviceCodeStoreClient.remove(
+			{ codeKeyPrefix: "devauth:{devauth}:code:", userKeyPrefix: "devauth:{devauth}:user:" },
+			"dc",
+		);
 
 		const fake = io as unknown as Record<string, ReturnType<typeof vi.fn>>;
 		for (const method of ["pttl", "exists", "get", "hset", "zrange", "zrem", "getdel", "eval"]) {
@@ -403,5 +407,88 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 		// `refreshTokenFamilyClient.duplicate()`, per rotation — not per purpose,
 		// and not at construction.
 		expect(fake.duplicate).not.toHaveBeenCalled();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #433 — the device-code store's scripts take the same EVALSHA-first path as
+// `compareAndDelete`, through one shared runner rather than a fifth inline
+// copy of the NOSCRIPT dance. The runner is what these pin: a cold cache is
+// recovered by EVAL, and anything that is not NOSCRIPT is the caller's error.
+// ---------------------------------------------------------------------------
+
+describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRIPT fallback (#433)", () => {
+	const keys = {
+		codeKeyPrefix: "devauth:{devauth}:code:",
+		userKeyPrefix: "devauth:{devauth}:user:",
+	};
+
+	it("NOSCRIPT on EVALSHA falls back to EVAL and re-warms the cache", async () => {
+		const io = makeFakeIoredis({
+			evalsha: vi.fn().mockResolvedValue(["pending"]),
+			eval: vi.fn().mockResolvedValue(["pending"]),
+		});
+		const { deviceCodeStoreClient } = makeIoredisClients(io);
+
+		// Warmup: whatever the script's residency flag was, it ends true.
+		await deviceCodeStoreClient.poll(keys, "dc", 1_000, 5);
+		const evalAfterWarmup = io.eval.mock.calls.length;
+
+		io.evalsha
+			.mockReset()
+			.mockRejectedValueOnce(new Error("NOSCRIPT No matching script. Please use EVAL."))
+			.mockResolvedValue(["pending"]);
+
+		expect(await deviceCodeStoreClient.poll(keys, "dc", 2_000, 5)).toEqual({ kind: "pending" });
+		expect(io.evalsha.mock.calls.length).toBe(1);
+		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup + 1);
+
+		expect(await deviceCodeStoreClient.poll(keys, "dc", 3_000, 5)).toEqual({ kind: "pending" });
+		expect(io.evalsha.mock.calls.length).toBe(2);
+		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup + 1);
+	});
+
+	it("non-NOSCRIPT errors from EVALSHA propagate (no silent fallback)", async () => {
+		const io = makeFakeIoredis({
+			evalsha: vi.fn().mockResolvedValue(["pending"]),
+			eval: vi.fn().mockResolvedValue(["pending"]),
+		});
+		const { deviceCodeStoreClient } = makeIoredisClients(io);
+		await deviceCodeStoreClient.poll(keys, "dc", 1_000, 5);
+		const evalAfterWarmup = io.eval.mock.calls.length;
+
+		io.evalsha.mockReset().mockRejectedValue(new Error("ECONNRESET: connection lost"));
+
+		await expect(deviceCodeStoreClient.poll(keys, "dc", 2_000, 5)).rejects.toThrow(/ECONNRESET/);
+		expect(io.eval.mock.calls.length).toBe(evalAfterWarmup);
+	});
+
+	it("declares the record key and the index key to the script on create", async () => {
+		// Cluster routes a script by the keys it declares. `create` is the one
+		// operation that knows both keys up front, so it declares both; the
+		// others reach the second key through the shared hash tag.
+		const io = makeFakeIoredis({
+			evalsha: vi.fn().mockResolvedValue(1),
+			eval: vi.fn().mockResolvedValue(1),
+		});
+		const { deviceCodeStoreClient } = makeIoredisClients(io);
+		await deviceCodeStoreClient.create(keys, {
+			deviceCode: "dc",
+			userCode: "BCDFGHJK",
+			expiresAtMs: 5_000,
+			fields: {
+				userCode: "BCDFGHJK",
+				clientId: "tv",
+				expiresAtMs: "5000",
+				intervalSeconds: "5",
+				status: "pending",
+			},
+		});
+		const call = [...io.eval.mock.calls, ...io.evalsha.mock.calls].at(-1) as unknown[];
+		expect(call.slice(1, 4)).toEqual([
+			2,
+			"devauth:{devauth}:code:dc",
+			"devauth:{devauth}:user:BCDFGHJK",
+		]);
 	});
 });

@@ -3,7 +3,11 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { describe, expect, it } from "vitest";
-import { redisChallengeStoreModule, redisReplaySeenSetModule } from "../src/index.mjs";
+import {
+	redisChallengeStoreModule,
+	redisDeviceCodeStoreModule,
+	redisReplaySeenSetModule,
+} from "../src/index.mjs";
 
 describe("redisChallengeStoreModule", () => {
 	it("has the canonical module name 'redis-challenge-store'", () => {
@@ -42,5 +46,24 @@ describe("redisReplaySeenSetModule", () => {
 			redisReplaySeenSet?: { keyPrefix?: string };
 		};
 		expect(parsed?.redisReplaySeenSet?.keyPrefix).toBe("replay:");
+	});
+});
+
+describe("redisDeviceCodeStoreModule (#433)", () => {
+	it("has the canonical module name 'redis-device-code-store'", () => {
+		expect(redisDeviceCodeStoreModule.name).toBe("redis-device-code-store");
+	});
+
+	it("requires both 'deviceCodeStoreClient' and 'config'", () => {
+		const reqs = redisDeviceCodeStoreModule.requires ?? [];
+		expect(new Set(reqs)).toEqual(new Set(["deviceCodeStoreClient", "config"]));
+	});
+
+	it("declares a Zod configSchema with module-namespaced 'redisDeviceCodeStore' top-level key only", () => {
+		expect(redisDeviceCodeStoreModule.configSchema).toBeDefined();
+		const parsed = redisDeviceCodeStoreModule.configSchema?.parse({}) as {
+			redisDeviceCodeStore?: { keyPrefix?: string };
+		};
+		expect(parsed?.redisDeviceCodeStore?.keyPrefix).toBe("devauth:");
 	});
 });
