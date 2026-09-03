@@ -31,7 +31,11 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import type { AuditEvent, AuditSink } from "#/audit/types.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
-import { createRateLimitGuard } from "#/ratelimit/guard.mjs";
+import {
+	checkWithFailMode,
+	createRateLimitGuard,
+	rateLimiterUnavailableEnvelope,
+} from "#/ratelimit/guard.mjs";
 import type { RateLimitDecision, RateLimiter } from "#/ratelimit/types.mjs";
 
 /** A limiter that records every key/ctx it is asked about and answers to script. */
@@ -341,5 +345,88 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open" })),
 		);
 		expect(res.status).toBe(200);
+	});
+});
+
+describe("checkWithFailMode — the guard's check + outage policy, for a route that is not a middleware (#457)", () => {
+	// `POST /oauth/device/verification` keys its budget on the authenticated
+	// subject and needs the request's `action` for its own 429 audit event, so
+	// it cannot sit behind the guard as a middleware. What it can share is the
+	// check with the outage policy attached, and this is that half of the guard.
+
+	it("hands back the limiter's decision when the backend answers", async () => {
+		const limiter = scriptedLimiter(() => ({ allowed: false, remaining: 0, reason: "spent" }));
+		const outcome = await checkWithFailMode(
+			{ limiter, tag: "device_verification", failMode: "closed" },
+			"device_verification:user:user-1",
+			{ userId: "user-1", ip: "203.0.113.9" },
+		);
+		expect(outcome).toEqual({
+			status: "decided",
+			decision: { allowed: false, remaining: 0, reason: "spent" },
+		});
+		expect(limiter.keys).toEqual(["device_verification:user:user-1"]);
+		expect(limiter.contexts).toEqual([{ userId: "user-1", ip: "203.0.113.9" }]);
+	});
+
+	it.each(["open", "closed"] as const)(
+		"reports an outage under failMode=%s exactly as the guard does, and hands the policy back",
+		async (failMode) => {
+			const logger = makeLogger();
+			const { sink, events } = spyAuditSink();
+			const limiter = scriptedLimiter(() => new Error("redis down"));
+
+			const outcome = await checkWithFailMode(
+				{ limiter, tag: "device_verification", failMode, logger, auditSink: sink },
+				"device_verification:user:user-1",
+				{ userId: "user-1", ip: "203.0.113.9", userAgent: "guard-test/1.0" },
+			);
+			await settleAudit();
+
+			expect(outcome).toEqual({ status: "unavailable", failMode });
+			expect(logger.error).toHaveBeenCalledWith(
+				{ error: "redis down", mode: failMode, tag: "device_verification", ip: "203.0.113.9" },
+				failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
+			);
+			expect(events).toHaveLength(1);
+			expect(events[0]).toMatchObject({
+				type: "rate_limit.unavailable",
+				ip: "203.0.113.9",
+				userAgent: "guard-test/1.0",
+				details: { tag: "device_verification", error: "redis down" },
+			});
+		},
+	);
+
+	it("normalises a missing ip to 'unknown' in the outage report, as the guard does", async () => {
+		const logger = makeLogger();
+		const { sink, events } = spyAuditSink();
+		const limiter = scriptedLimiter(() => new Error("redis down"));
+		await checkWithFailMode(
+			{ limiter, tag: "device_verification", failMode: "open", logger, auditSink: sink },
+			"device_verification:user:user-1",
+			{ userId: "user-1" },
+		);
+		await settleAudit();
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ ip: "unknown" }),
+			"rate_limiter_failed_open",
+		);
+		expect(events[0]?.ip).toBe("unknown");
+	});
+
+	it("rateLimiterUnavailableEnvelope() is the body the guard answers under failMode='closed'", async () => {
+		// The point of sharing: a caller that renders the 503 itself answers
+		// the same envelope the guard does, so a client sees one outage shape.
+		const limiter = scriptedLimiter(() => new Error("redis down"));
+		const res = await hit(
+			makeApp(createRateLimitGuard({ limiter, tag: "login", failMode: "closed" })),
+		);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(rateLimiterUnavailableEnvelope());
+		expect(rateLimiterUnavailableEnvelope()).toEqual({
+			error: "service_unavailable",
+			error_description: "Rate limiter temporarily unavailable",
+		});
 	});
 });

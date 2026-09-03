@@ -21,7 +21,12 @@
  * reasons — and both reasons are the point of the test.
  */
 
-import type { BootstrapMap, ClientRepository, RateLimitSpec } from "@o3co/auth-provider-core";
+import type {
+	BootstrapMap,
+	ClientRepository,
+	RateLimiter,
+	RateLimitSpec,
+} from "@o3co/auth-provider-core";
 import {
 	createApp,
 	createMemoryDeviceCodeStore,
@@ -321,6 +326,75 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			/rateLimit\.failMode/,
 		);
 	});
+
+	it("refuses to mount device/verification without the outage policy, rateLimit.failMode (#457)", () => {
+		// The verification endpoint applies the same policy from the same key
+		// (#457). A composition that enables the grant with no `failMode` is
+		// refused for this route too, not only for device_authorization — or
+		// the refusal would depend on which factory the planner ran first.
+		const deps = enabledDeps();
+		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
+			/rateLimit\.failMode/,
+		);
+	});
+
+	/** Mount the contributed verification route behind a fixed end-user session. */
+	const mountVerificationRoute = (deps: Record<string, unknown>) => {
+		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => {
+			mountPath: string;
+			handler: express.RequestHandler;
+		};
+		const route = factory(deps);
+		const app = express();
+		app.use((req, _res, next) => {
+			(req as unknown as { session: unknown }).session = {
+				isAuthenticated: true,
+				user: { id: "user-1" },
+			};
+			next();
+		});
+		app.use(route.mountPath, route.handler);
+		return app;
+	};
+
+	/** A limiter whose backend is down: every check rejects, as a Redis client would. */
+	const brokenLimiter: RateLimiter = {
+		kind: "broken",
+		check: async () => {
+			throw new Error("redis down");
+		},
+	};
+
+	it.each([
+		// Under `closed` the outage is the answer; under `open` the lookup
+		// proceeds to the store, which has never heard of the code.
+		["closed", 503, "service_unavailable"],
+		["open", 404, "invalid_user_code"],
+	] as const)(
+		"applies rateLimit.failMode = %s from config on the mounted device/verification route (#457)",
+		async (failMode, status, error) => {
+			// What no test of the handler alone can observe: that the module
+			// reads `rateLimit.failMode` and hands it to this route. Before
+			// #457 a limiter outage here was an unhandled throw — Express's
+			// default 500, whatever the config said.
+			const deps = enabledDeps();
+			const app = mountVerificationRoute({
+				...deps,
+				config: { ...deps.config, rateLimit: { failMode } },
+				rateLimiter: brokenLimiter,
+			});
+
+			const res = await request(app)
+				.post("/oauth/device/verification")
+				.set("Host", "as.example.test")
+				.set("Origin", "http://as.example.test")
+				.send({ action: "lookup", user_code: "BCDF-GHJK" });
+
+			expect(res.status).toBe(status);
+			expect(res.body.error).toBe(error);
+		},
+	);
 
 	/** `enabledDeps()` with `oauth.deviceAuthorization.rateLimit` replaced. */
 	const withVerificationBudget = (rateLimit: unknown) => {

@@ -52,6 +52,23 @@
  * happened to hit, which is nobody's budget; keying on the subject means an
  * attacker needs an account and burns their own budget guessing.
  *
+ * ### A limiter outage is the product's outage policy, not a 500 (#457)
+ *
+ * The check cannot sit behind `createRateLimitGuard` as a middleware: the
+ * budget is keyed on the subject rather than the IP, and the 429's audit
+ * event needs the `action` — so what this endpoint shares with the guarded
+ * routes is the guard's check-plus-outage-policy as a function,
+ * `checkWithFailMode`. When the limiter backend itself fails,
+ * `rateLimit.failMode` decides here exactly as it does on `/oauth/token`:
+ * `"closed"` answers the guard's `503 service_unavailable`, `"open"` serves
+ * the request, and either way `rate_limiter_failed_*` is logged and
+ * `rate_limit.unavailable` is emitted. Before #457 the call was bare, so an
+ * outage was an unhandled throw — `500 server_error` through the terminal
+ * handler, `failMode` ignored, and no audit event for the alert operators
+ * page on — on the one endpoint whose limit is half of its security argument.
+ * A `limited` decision is not an outage: it stays a 429 under either mode,
+ * and stays the `device.rate_limited` signal (#443).
+ *
  * ### The decision is an audit event
  *
  * An approval is a consent: a named subject grants a named client a scope,
@@ -71,8 +88,18 @@
  * that mounts this handler by hand must do the same.
  */
 
-import type { RateLimiter } from "@o3co/auth-provider-core";
-import { emitAuditEvent, normaliseUserCode } from "@o3co/auth-provider-core";
+import type {
+	RateLimitContext,
+	RateLimiter,
+	RateLimitFailMode,
+	RateLimitOutageLogger,
+} from "@o3co/auth-provider-core";
+import {
+	checkWithFailMode,
+	emitAuditEvent,
+	normaliseUserCode,
+	rateLimiterUnavailableEnvelope,
+} from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, type DeviceGrantDependencies } from "./types.mjs";
 
@@ -100,6 +127,31 @@ const subjectOf = (req: Request): string | null => {
 	return typeof id === "string" && id !== "" ? id : null;
 };
 
+/**
+ * The check context: the subject the budget is keyed on, plus the request
+ * details the outage report carries (`rate_limit.unavailable` names the `ip`
+ * and `userAgent`, as the guard's does).
+ */
+const contextOf = (req: Request, subject: string): RateLimitContext => {
+	const userAgent = req.get("user-agent");
+	return {
+		userId: subject,
+		...(req.ip === undefined ? {} : { ip: req.ip }),
+		...(userAgent === undefined ? {} : { userAgent }),
+	};
+};
+
+/**
+ * The dependency's logger is a duck type with `warn` required and the rest
+ * optional; the outage line is written through `error`. A logger without one
+ * is left out so the shared check falls back to core's console logger rather
+ * than losing the line.
+ */
+const hasErrorChannel = (
+	logger: DeviceGrantDependencies["logger"],
+): logger is NonNullable<DeviceGrantDependencies["logger"]> & RateLimitOutageLogger =>
+	typeof logger?.error === "function";
+
 export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencies {
 	/**
 	 * Required. See the file header: the code's entropy budget is calculated
@@ -107,12 +159,26 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 * ceiling.
 	 */
 	readonly rateLimiter: RateLimiter;
+	/**
+	 * Required, like the limiter, and not defaulted for the same reason the
+	 * module refuses to: what this endpoint does when the limiter backend is
+	 * down is `rateLimit.failMode`, one policy for the product (#457).
+	 */
+	readonly failMode: RateLimitFailMode;
 }
 
 export const createDeviceVerificationHandler = (
 	options: DeviceVerificationHandlerOptions,
 ): RequestHandler => {
 	const now = options.now ?? Date.now;
+	// The guard's check with its outage policy attached — see the file header.
+	const policy = {
+		limiter: options.rateLimiter,
+		tag: DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+		failMode: options.failMode,
+		logger: hasErrorChannel(options.logger) ? options.logger : undefined,
+		auditSink: options.auditSink,
+	};
 
 	return async (req: Request, res: Response): Promise<void> => {
 		const subject = subjectOf(req);
@@ -137,11 +203,23 @@ export const createDeviceVerificationHandler = (
 		// Counted before the code is even parsed. A malformed code is still an
 		// attempt, and excluding it would hand an attacker an unmetered way to
 		// probe which shapes the endpoint accepts.
-		const decision = await options.rateLimiter.check(
+		const budget = await checkWithFailMode(
+			policy,
 			`${DEVICE_VERIFICATION_RATE_LIMIT_PREFIX}:user:${subject}`,
-			{ userId: subject, ...(req.ip === undefined ? {} : { ip: req.ip }) },
+			contextOf(req, subject),
 		);
-		if (!decision.allowed) {
+		if (budget.status === "unavailable") {
+			// The limiter had no answer, so `rateLimit.failMode` is the answer
+			// (#457). The outage is already logged and audited by the shared
+			// check; `open` serves the request exactly as the guard would.
+			if (budget.failMode === "closed") {
+				respond(res, 503, { ...rateLimiterUnavailableEnvelope() });
+				return;
+			}
+		} else if (!budget.decision.allowed) {
+			// A limiter that answered "no" is not an outage: this is the #443
+			// signal that an account is guessing codes, under either fail mode.
+			const { decision } = budget;
 			options.logger?.warn(
 				{ subject, action, remaining: decision.remaining },
 				"device_verification_rate_limited",
