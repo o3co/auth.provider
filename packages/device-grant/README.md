@@ -30,12 +30,10 @@ Optional. Nothing here is active until `oauth.deviceAuthorization.enabled = true
 oauth.deviceAuthorization {
   enabled = true
   verification-uri = "https://example.com/device"
-}
 
-# Required — see "Rate limiting is half the security argument" below.
-rateLimit.adapters.default.limits.device_verification {
-  limit = 5
-  windowSeconds = 300
+  # The verification budget — RFC 8628 §5.1's "5 attempts". These are the
+  # defaults; see "Rate limiting is half the security argument" below.
+  rateLimit { limit = 5, windowSeconds = 300 }
 }
 ```
 
@@ -89,6 +87,8 @@ The code is accepted as displayed (`BCDF-GHJK`), lower-cased, or unseparated. A 
 RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit: an 8-character base-20 code has "roughly 34.5 bits of entropy", which the RFC calls sufficient only where "the rate-limiting interval and validity period would need to only allow 5 attempts". The entropy and the limit are two halves of one mitigation. A deployment without a limiter is not running a slower version of a limited one — it is running 34.5 bits against an unbounded attacker, which is why this is a refusal rather than a degraded mode.
 
 Every attempt counts, malformed codes included: excluding them would hand an attacker an unmetered way to probe which shapes the endpoint accepts. The key is `device_verification:user:<subject>` — keyed on the **authenticated user**, not the code. Keying on the code would spend whichever code the attacker happened to hit, which is nobody's budget; keying on the subject means an attacker needs an account and burns their own.
+
+The budget is `oauth.deviceAuthorization.rateLimit { limit, windowSeconds }`, default `5` / `300`. Both bundled limiter adapters seed their `limits.device_verification` from it — the same way `login` is seeded from `rateLimit.login` — so the number the boot refusal reasons from is the number the limiter applies. Without the seed, the prefix fell through to the adapter's 60-per-minute default: twelve times the budget, silently. An operator-declared `memoryRateLimiter.limits.device_verification` (or the Redis equivalent) still wins; zero and fractional values are refused at the config boundary.
 
 `POST /oauth/device_authorization` is throttled as well, under `device_authorization:ip:<ip>` — the same `createRateLimitGuard` and key shape as `/oauth/token`, mounted **ahead of client authentication** so unauthenticated repeats are bounded before they reach a repository lookup. It uses the adapter's `defaultLimit` unless `memoryRateLimiter.limits.device_authorization` (or the Redis equivalent) declares one, and it honours the product's `rateLimit.failMode` outage policy.
 

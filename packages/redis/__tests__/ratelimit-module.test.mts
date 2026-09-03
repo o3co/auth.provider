@@ -19,6 +19,34 @@ describe("redisRateLimiterModule", () => {
 		expect(typeof redisRateLimiterModule.provides?.rateLimiter).toBe("function");
 	});
 
+	it("seeds device_verification from oauth.deviceAuthorization.rateLimit", async () => {
+		// The same seed the memory adapter applies, so the documented budget
+		// holds whichever adapter a deployment picks.
+		const counts = new Map<string, number>();
+		const client = {
+			async incrementWithTtl(key: string, _ttlSeconds: number) {
+				const next = (counts.get(key) ?? 0) + 1;
+				counts.set(key, next);
+				return next;
+			},
+		};
+		const config = {
+			redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
+			oauth: { deviceAuthorization: { rateLimit: { limit: 2, windowSeconds: 300 } } },
+		};
+		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
+			config,
+			rateLimiterClient: client,
+		} as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		const key = "device_verification:user:u1";
+		const first = await limiter.check(key, { userId: "u1" });
+		expect(first.allowed).toBe(true);
+		expect(first.limit).toBe(2);
+		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(true);
+		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(false);
+	});
+
 	it("declares a configSchema with redisRateLimiter namespaced key", () => {
 		const schema = redisRateLimiterModule.configSchema;
 		expect(schema).toBeDefined();

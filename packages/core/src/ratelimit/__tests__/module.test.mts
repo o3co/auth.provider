@@ -47,6 +47,28 @@ describe("memoryRateLimiterModule", () => {
 		expect(c.allowed).toBe(false);
 	});
 
+	it("seeds device_verification from oauth.deviceAuthorization.rateLimit", async () => {
+		// Without the seed a `device_verification:` key falls through to the
+		// 60/60s default — twelve times the budget RFC 8628 §5.1's entropy
+		// argument (and the boot refusal that cites it) assumes.
+		const cfg = {
+			memoryRateLimiter: {
+				limits: {},
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: 10_000,
+			},
+			oauth: { deviceAuthorization: { rateLimit: { limit: 2, windowSeconds: 300 } } },
+		};
+		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		const key = "device_verification:user:u1";
+		const first = await limiter.check(key, { userId: "u1" });
+		expect(first.allowed).toBe(true);
+		expect(first.limit).toBe(2);
+		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(true);
+		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(false);
+	});
+
 	it("bounds bucket growth with memoryRateLimiter.maxBuckets", async () => {
 		vi.useFakeTimers();
 		try {

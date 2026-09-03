@@ -83,6 +83,22 @@ import { createDeviceCodeGrant } from "./grant.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
+/**
+ * `oauth.deviceAuthorization.rateLimit` — the budget RFC 8628 §5.1 sizes the
+ * user code against. `.int().positive()` is load-bearing: `0` is what an
+ * empty environment variable coerces to, and a zero-attempt budget locks
+ * every user out while a zero window is not a window. Core's
+ * `resolveDeviceVerificationLimitSpec` screens the same bounds structurally
+ * for configs that never passed this schema.
+ */
+const rateLimitSpecSchema = z.object({
+	limit: z.number().int().positive(),
+	windowSeconds: z.number().int().positive(),
+});
+
+/** §5.1's worked example: "only allow 5 attempts"; five minutes is half the default code lifetime. */
+const DEFAULT_VERIFICATION_RATE_LIMIT = { limit: 5, windowSeconds: 300 } as const;
+
 export const deviceGrantConfigSchema = z.object({
 	oauth: z.object({
 		deviceAuthorization: z
@@ -110,6 +126,15 @@ export const deviceGrantConfigSchema = z.object({
 				/** Advertised as `interval`; also what the store enforces. */
 				"polling-interval-seconds": z.number().int().min(1).max(60).default(5),
 				/**
+				 * The verification endpoint's budget per authenticated subject,
+				 * seeded into whichever rate-limiter adapter is wired under the
+				 * `device_verification` prefix (an operator-declared
+				 * `limits.device_verification` on the adapter still wins). This
+				 * is the number the "requires a rateLimiter" boot refusal
+				 * reasons from, so it has to be the number the limiter applies.
+				 */
+				rateLimit: rateLimitSpecSchema.default(DEFAULT_VERIFICATION_RATE_LIMIT),
+				/**
 				 * Declared absence for the `deviceCodeStore` slot (#363).
 				 * `"unsupported"` is the only value; anything else is a typo that
 				 * would otherwise read as a declaration.
@@ -121,6 +146,7 @@ export const deviceGrantConfigSchema = z.object({
 				"verification-uri-complete": false,
 				"code-lifetime-seconds": 600,
 				"polling-interval-seconds": 5,
+				rateLimit: DEFAULT_VERIFICATION_RATE_LIMIT,
 			})),
 	}),
 });
@@ -131,6 +157,8 @@ interface DeviceAuthorizationConfigSlice {
 	readonly "verification-uri-complete": boolean;
 	readonly "code-lifetime-seconds": number;
 	readonly "polling-interval-seconds": number;
+	/** Read by core's limiter modules when they seed `limits`, not here. */
+	readonly rateLimit?: { readonly limit: number; readonly windowSeconds: number };
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`

@@ -21,8 +21,12 @@ import type { AuditSink, DeviceCodeStore, RateLimiter } from "@o3co/auth-provide
 /** The grant type URN. RFC 8628 §3.4. */
 export const DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code";
 
-/** Key prefix this package rate-limits the verification endpoint under. */
-export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
+/**
+ * Key prefix this package rate-limits the verification endpoint under.
+ * Defined in core beside the seed that reads `oauth.deviceAuthorization.rateLimit`,
+ * so the endpoint and the seed cannot spell the prefix differently.
+ */
+export { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX } from "@o3co/auth-provider-core";
 
 /**
  * Key prefix `POST /oauth/device_authorization` is throttled under, keyed

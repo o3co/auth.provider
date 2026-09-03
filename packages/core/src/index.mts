@@ -402,6 +402,10 @@ export type {
 	GrantPolicyRequest,
 } from "./policy/types.mjs";
 export {
+	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+	resolveDeviceVerificationLimitSpec,
+} from "./ratelimit/deviceVerificationSpec.mjs";
+export {
 	createRateLimiterFactory,
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
@@ -419,6 +423,7 @@ export {
 	type MemoryRateLimiterOptions,
 } from "./ratelimit/memory.mjs";
 export { memoryRateLimiterModule } from "./ratelimit/module.mjs";
+export { resolveSeededLimitSpecs } from "./ratelimit/seededSpecs.mjs";
 // Rate limiter. Backing client interface (RateLimiterClient) lives in
 // @o3co/auth-provider-redis (S3).
 export type {

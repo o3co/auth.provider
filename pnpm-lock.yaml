@@ -102,6 +102,9 @@ importers:
       '@o3co/auth-provider-session':
         specifier: workspace:*
         version: link:../session
+      '@o3co/ts.hocon':
+        specifier: ^1.13.0
+        version: 1.13.0(yaml@2.9.0)(zod@4.5.4)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
