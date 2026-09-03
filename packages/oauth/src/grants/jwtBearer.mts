@@ -297,7 +297,7 @@ function resolveScope(
 		return {
 			status: 400,
 			error: "invalid_request",
-			errorDescription: "scope must be a string",
+			errorDescription: "scope must be a space-delimited string",
 		};
 	}
 	const client = ctx.authenticatedClient;
