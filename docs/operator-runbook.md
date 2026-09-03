@@ -472,7 +472,7 @@ If you build the socket yourself, attach an `error` listener: an `EventEmitter`
 | `kid` (`OAUTH_JWT_KID`) | the key id stamped in every token header; default `v0` |
 | `privateKeyPath` / `publicKeyPath` (or inline `privateKey` / `publicKey`) | PEM pair for the asymmetric algorithms; the file path wins when both are given |
 | `secret` (`OAUTH_JWT_SECRET`) | HS256 only, ≥ 32 bytes decoded |
-| `previousKeys = [ { kid, publicKeyPath \| publicKey, expiresAt } ]` | asymmetric only — additional **verification** keys, published in JWKS until `expiresAt` (an ISO date; invalid fails boot) |
+| `previousKeys = [ { kid, publicKeyPath, expiresAt } ]` (or inline `publicKey` instead of `publicKeyPath`) | asymmetric only — additional **verification** keys, published in JWKS until `expiresAt` (an ISO date; invalid fails boot) |
 | `previousSecrets = [ { kid, secret, expiresAt } ]` | HS256 only — each secret clears the same 32-byte floor |
 
 The two rotation shapes are a discriminated union in the schema
