@@ -91,6 +91,32 @@ const stubFetch = (table: Record<string, Uint8Array | number>) => {
 	return { impl, calls };
 };
 
+/**
+ * `stubFetch` that records each request immediately but answers none of them
+ * until `release()` — to observe what is in flight while nothing has answered.
+ */
+const deferredFetch = (table: Record<string, Uint8Array | number>) => {
+	const inner = stubFetch(table);
+	const calls: string[] = [];
+	const gate = { release: (): void => {} };
+	const opened = new Promise<void>((resolve) => {
+		gate.release = resolve;
+	});
+	const impl = (async (input: URL | RequestInfo, init?: RequestInit) => {
+		calls.push(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+		await opened;
+		return inner.impl(input, init);
+	}) as unknown as typeof globalThis.fetch;
+	return { impl, calls, release: () => gate.release() };
+};
+
+/** Let queued I/O callbacks run, up to `ticks` times or until `done()` holds. */
+const waitFor = async (done: () => boolean, ticks = 200): Promise<void> => {
+	for (let i = 0; i < ticks && !done(); i++) {
+		await new Promise<void>((resolve) => setImmediate(resolve));
+	}
+};
+
 const validator = (trustedCas: readonly Minted[], overrides: Partial<FullPkiOptions> = {}) =>
 	createFullPkiValidator({
 		trustedCas: trustedCas.map((ca) => ca.x509),
@@ -856,6 +882,30 @@ describe("full-pki revocation", () => {
 
 		expect(calls.length).toBe(firstCallCount);
 		expect(v.crlCacheSize()).toBe(2);
+	});
+
+	it("resolves the path's CRLs concurrently rather than one after another", async () => {
+		// Serial lookups put a fetch-timeout-ms latency floor *per certificate*
+		// on the token endpoint during an outage. Both distribution points
+		// must be in flight before either has answered.
+		const { root, int, leaf } = await buildChain();
+		const { impl, calls, release } = deferredFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await cleanRootCrl(root),
+		});
+		const pending = validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		await waitFor(() => calls.length >= 1);
+		// Give a serial implementation every chance to issue its second request
+		// — it cannot, because the first has not answered.
+		await waitFor(() => calls.length >= 2, 20);
+		expect(new Set(calls)).toEqual(new Set([INT_CRL_URL, ROOT_CRL_URL]));
+
+		release();
+		expect(await pending).toEqual({ ok: true });
 	});
 
 	it("never fetches a distribution point outside the host allowlist", async () => {

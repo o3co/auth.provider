@@ -95,7 +95,7 @@ import * as pkijs from "pkijs";
 import { checkClientLeafProfile } from "../pki.mjs";
 import { type AlgorithmPolicy, checkAlgorithmPolicy } from "./algorithms.mjs";
 import { checkCriticalExtensions, checkLeafKeyUsage } from "./criticalExtensions.mjs";
-import { type CrlResolver, createCrlResolver } from "./crl.mjs";
+import { type CrlLookup, type CrlResolver, createCrlResolver } from "./crl.mjs";
 import { createGuardedFetch } from "./fetchGuard.mjs";
 
 /** OID of `basicConstraints` (RFC 5280 §4.2.1.9). */
@@ -149,7 +149,10 @@ export interface FullPkiValidator {
 		chain: readonly X509Certificate[],
 		now: Date,
 	): Promise<FullPkiResult>;
-	/** Exposed for tests and for a future cache-size metric. */
+	/**
+	 * Entries in the CRL cache, usable and remembered-unavailable alike.
+	 * Exposed for tests and for a future cache-size metric.
+	 */
 	readonly crlCacheSize: () => number;
 }
 
@@ -352,13 +355,23 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// The trust anchor is excluded: nothing in the path can revoke it, and
 			// an operator removing a compromised anchor from `trusted-cas` is the
 			// mechanism that actually applies there.
+			//
+			// The next element up the path issued each certificate, so it is the
+			// key its CRL must verify against — the resolver refuses to hand
+			// back, or cache, a CRL that does not.
+			//
+			// Every lookup is issued at once. Awaiting them one after another
+			// would make the token endpoint's latency during an outage the *sum*
+			// of the distribution points' timeouts rather than the largest.
 			const subjects = path.slice(0, -1);
+			const lookups = await Promise.all(
+				subjects.map((certificate, index) =>
+					resolver.resolve(certificate, path[index + 1] as pkijs.Certificate, now),
+				),
+			);
 			for (const [index, certificate] of subjects.entries()) {
-				// The next element up the path issued this one, so it is the key
-				// the CRL must verify against — the resolver refuses to hand back,
-				// or cache, a CRL that does not.
 				const issuer = path[index + 1] as pkijs.Certificate;
-				const lookup = await resolver.resolve(certificate, issuer, now);
+				const lookup = lookups[index] as CrlLookup;
 				if (!lookup.ok) {
 					const subject = toNode(certificate).subject;
 					if (options.revocation.onUnavailable === "reject") {
