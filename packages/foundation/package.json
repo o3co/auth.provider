@@ -38,7 +38,7 @@
 		}
 	},
 	"peerDependencies": {
-		"@o3co/auth-provider-core": "^0.0.0"
+		"@o3co/auth-provider-core": "workspace:^"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
