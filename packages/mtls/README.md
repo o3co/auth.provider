@@ -182,7 +182,7 @@ The narrow mode does **not** check:
 
 Everything in this list is checked by `mode = "full-pki"`, except where noted.
 
-- **CRL / OCSP revocation** (RFC 5280 §6.3 + RFC 6960). **A revoked client certificate keeps binding tokens until it expires.** Rely on short cert lifetimes and key rotation, or use `full-pki`, which checks CRLs. (OCSP remains unimplemented in both arms.)
+- **CRL / OCSP revocation** (RFC 5280 §6.3 + RFC 6960). **A revoked client certificate keeps binding tokens until it expires.** Rely on short cert lifetimes and key rotation, or use `full-pki`, which checks CRLs and/or OCSP (`revocation.mode`).
 - **Name constraints** (RFC 5280 §4.2.1.10) — CRITICAL extension. If a trust anchor carries `nameConstraints`, the chain walk does not enforce them.
 - **Policy constraints / policy mappings / inhibit-anyPolicy** (RFC 5280 §4.2.1.11–13).
 - **Full critical-extension handling** (RFC 5280 §6.1.2 requires every critical extension to be processed; narrow mode handles only the ones explicitly listed above).
@@ -257,16 +257,19 @@ oauth.mtls {
   mode = "full-pki"
   trusted-cas = ["file:/etc/auth-provider/ca/private-root.pem"]
   full-pki.revocation {
-    mode = "crl"              # or "disabled" — an explicit acceptance of the gap
+    mode = "crl"              # "ocsp", "both", or "disabled" — the last an explicit acceptance of the gap
     on-unavailable = "reject" # or "allow", logged at warn on every use
-    allowed-hosts = ["crl.example.com"]
+    allowed-hosts = ["crl.example.com"]   # CRL distribution points and OCSP responders alike
+    # ocsp-require-nonce = true           # refuse responses that do not echo the request nonce
   }
 }
 ```
 
-`mode = "ocsp"` is **refused at boot**, not accepted and ignored. OCSP is not implemented. (Note also that stapled OCSP is not an option here even in principle: `status_request` stapling covers the *server's* certificate, and Node exposes no stapled response for a **client** certificate on the server side. An OCSP arm would be responder-fetch only.)
+**OCSP (RFC 6960) is responder-fetch only** ([#431](https://github.com/o3co/auth.provider/issues/431)). Stapling is not an option even in principle: `status_request` stapling covers the *server's* certificate, and Node exposes no stapled response for a **client** certificate on the server side. So `mode = "ocsp"` reads the responder URL from each certificate's `authorityInfoAccess` (`id-ad-ocsp`), POSTs a DER `OCSPRequest` for it — a SHA-1 `CertID`, which is the lookup identifier RFC 6960 §4.1.1 responders universally answer and has nothing to do with the signature-algorithm policy, plus a 16-byte nonce (§4.4.1) — and verifies the answer itself rather than handing it to the engine: the response must be `successful`, signed by the issuing CA or by a responder that CA delegated to (`id-kp-OCSPSigning`, honouring `id-pkix-ocsp-nocheck`, §4.2.2.2), carry the same `CertID`, echo the nonce (`ocsp-require-nonce = true` by default; an operator whose CA answers without one per RFC 8954 says so explicitly, and freshness then rests on `thisUpdate` / `nextUpdate` alone), and be current. A `good` answer is cached per certificate until its `nextUpdate` or `cache-ttl-seconds`, whichever is sooner — an answer with no `nextUpdate` for at most ten minutes — and **`unknown` is unavailable, never good**. `mode = "both"` asks the responder first and falls back to the CRL only when OCSP could not answer; a `revoked` from either source refuses, and the status is unavailable only when both are.
 
-A certificate is treated as *unavailable* — and therefore subject to `on-unavailable` — when it names no distribution point, when the CRL cannot be fetched or parsed, when the CRL has expired, when it carries no `nextUpdate` at all (without one there is no way to distinguish a current CRL from one captured before a revocation and replayed), when its signature does not verify against the issuing CA, or when it carries a critical extension this validator does not process (RFC 5280 §5.2 forbids using such a CRL, and pkijs would otherwise have reported it as a bad signature — [#447](https://github.com/o3co/auth.provider/issues/447)).
+**A client certificate that demands stapling is refused.** RFC 7633's `tlsfeature` extension with `status_request` (OCSP must-staple) states a requirement this process cannot meet for a client certificate, and a requirement that cannot be met is a refusal, not "unstapled" — the responder is not even asked.
+
+A certificate is treated as *unavailable* — and therefore subject to `on-unavailable` — when it names no distribution point (or, under `"ocsp"`, no responder), when the CRL or OCSP response cannot be fetched or parsed, when the responder answers anything but `successful` or reports `unknown`, when the response's signature, `CertID` or nonce does not check out, when the CRL has expired, when it carries no `nextUpdate` at all (without one there is no way to distinguish a current CRL from one captured before a revocation and replayed), when its signature does not verify against the issuing CA, or when it carries a critical extension this validator does not process (RFC 5280 §5.2 forbids using such a CRL, and pkijs would otherwise have reported it as a bad signature — [#447](https://github.com/o3co/auth.provider/issues/447)).
 
 **Partitioned, indirect and delta CRLs are not supported.** RFC 5280 lets a CA split its revocation information — by reason code across several distribution points (`reasons` on the point, `onlySomeReasons` on the CRL), by certificate type or distribution point (`issuingDistributionPoint`), into a base CRL plus deltas (`deltaCRLIndicator`), or by delegating publication to another issuer (`cRLIssuer`, `indirectCRL`). pkijs accepts every one of those extensions as well-known and then ignores them, which would read a CRL scoped to user certificates as the complete list for an intermediate, or a delta as the complete list for anyone. None of them is implemented here. Each is *recognised* and reported as unavailable under its own reason — `unsupported_distribution_point` for a point carrying `reasons` or `cRLIssuer` (nothing is fetched), `unsupported_crl_scope` for a delta or a CRL whose `issuingDistributionPoint` states any scope — and `on-unavailable` then applies: `"reject"` refuses the certificate, `"allow"` accepts it with the `mtls_revocation_unavailable_allowed` warn line. What never happens is such a CRL being read as authoritative. A base CRL that merely points at a delta (`freshestCRL`) is used as the base it is; the delta is not fetched, so a revocation published only in a delta is not seen until the next base CRL ([#446](https://github.com/o3co/auth.provider/issues/446)).
 
@@ -277,7 +280,7 @@ A certificate is treated as *unavailable* — and therefore subject to `on-unava
 A CRL distribution point is a URL chosen by someone else, and retrieving it makes this process issue a request from inside your network — the classic SSRF shape, with `http://169.254.169.254/…` reachable from most cloud workloads. Two layers bound it:
 
 1. **Path validation runs first.** Distribution points are read only from a path that has already been validated to a configured trust anchor, so an arbitrary client certificate cannot cause an outbound request at all.
-2. **`revocation.allowed-hosts`**, which is **required and non-empty** when `mode = "crl"`. Layer 1 makes the URL come from a CA you trust; this layer means trusting a CA to *issue certificates* is not the same as trusting it to *name destinations inside your network*. It is the same separation `trusted-proxies` draws for forwarded certificate headers.
+2. **`revocation.allowed-hosts`**, which is **required and non-empty** whenever revocation is fetched (`mode = "crl"`, `"ocsp"` or `"both"`); an OCSP responder URL is a destination inside a certificate exactly as a distribution point is. Layer 1 makes the URL come from a CA you trust; this layer means trusting a CA to *issue certificates* is not the same as trusting it to *name destinations inside your network*. It is the same separation `trusted-proxies` draws for forwarded certificate headers.
 
 On top of those: redirects are never followed (a redirect names a second destination neither layer vetted), responses are capped by byte count read incrementally rather than by the responder's `Content-Length` claim, fetches time out, credentials in the URL are refused, and only `http`/`https` are spoken. CRLs are cached until `nextUpdate` or `cache-ttl-seconds`, whichever is sooner; a stale CRL is deliberately not cached, so a responder that has stopped publishing cannot pin us to it. A distribution point that could not be used — unreachable, unparseable, stale, or serving a CRL of a shape listed above — is remembered as unavailable for a 30-second window, so an outage costs one probe per window rather than one per request; a CRL whose signature does not verify is the one outcome never remembered in either direction.
 
@@ -293,7 +296,7 @@ On top of those: redirects are never followed (a redirect names a second destina
 
 4. **`mode = "full-pki"` without `full-pki.revocation.mode` and `.on-unavailable`** — see "Revocation has no defaults, on purpose" above.
 
-5. **`mode = "full-pki"` with `revocation.mode = "crl"` and an empty `revocation.allowed-hosts`** — an empty allowlist would mean "fetch from any destination a certificate names".
+5. **`mode = "full-pki"` with `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` and an empty `revocation.allowed-hosts`** — an empty allowlist would mean "fetch from any destination a certificate names", whether that is a CRL distribution point or an OCSP responder.
 
 ## Hash algorithm
 

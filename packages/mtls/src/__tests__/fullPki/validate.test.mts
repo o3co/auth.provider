@@ -35,7 +35,7 @@ import { FULL_PKI_DEFAULTS, resolveFullPkiTuning } from "#/fullPki/defaults.mjs"
 import type { FullPkiOptions, RevocationPolicy } from "#/fullPki/validate.mjs";
 import { createFullPkiValidator } from "#/fullPki/validate.mjs";
 import { mtlsConfigSchema } from "#/module.mjs";
-import type { Minted } from "./pkiFactory.mjs";
+import type { Minted, MintOcspResponseOptions } from "./pkiFactory.mjs";
 import {
 	basicConstraints,
 	clientAuthEku,
@@ -51,9 +51,14 @@ import {
 	mintCrl,
 	mintIntermediate,
 	mintLeaf,
+	mintOcspResponse,
+	mustStaple,
 	nameConstraints,
+	nonceOf,
+	ocspAia,
 	reasonPartitionedCrlDistributionPoint,
 	serverAuthEku,
+	tlsFeature,
 	unknownCriticalExtension,
 	unparseableCriticalKeyUsage,
 } from "./pkiFactory.mjs";
@@ -81,18 +86,40 @@ const crlPolicy = (onUnavailable: "reject" | "allow"): RevocationPolicy => ({
  * which is the whole point of the allowlist and of validating before
  * fetching.
  */
-const stubFetch = (table: Record<string, Uint8Array | number>) => {
+type StubAnswer = Uint8Array | number | ((init: RequestInit | undefined) => Promise<Response>);
+
+const stubFetch = (table: Record<string, StubAnswer>) => {
 	const calls: string[] = [];
-	const impl = (async (input: URL | RequestInfo) => {
+	const inits: (RequestInit | undefined)[] = [];
+	const impl = (async (input: URL | RequestInfo, init?: RequestInit) => {
 		const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
 		calls.push(url);
+		inits.push(init);
 		const entry = table[url];
 		if (entry === undefined) return new Response(null, { status: 404 });
 		if (typeof entry === "number") return new Response(null, { status: entry });
+		if (typeof entry === "function") return entry(init);
 		return new Response(entry as unknown as BodyInit, { status: 200 });
 	}) as unknown as typeof globalThis.fetch;
-	return { impl, calls };
+	return { impl, calls, inits };
 };
+
+/**
+ * An OCSP responder as a `stubFetch` entry: mints a response from `options`,
+ * echoing the nonce of the request it was sent, with the media type the
+ * guard insists on.
+ */
+const ocspAnswer =
+	(options: Omit<MintOcspResponseOptions, "nonce">) =>
+	async (init: RequestInit | undefined): Promise<Response> => {
+		const body = init?.body;
+		const nonce = body instanceof Uint8Array ? nonceOf(body) : undefined;
+		const bytes = await mintOcspResponse({ ...options, ...(nonce === undefined ? {} : { nonce }) });
+		return new Response(bytes as unknown as BodyInit, {
+			status: 200,
+			headers: { "content-type": "application/ocsp-response" },
+		});
+	};
 
 /**
  * `stubFetch` that records each request immediately but answers none of them
@@ -1179,5 +1206,630 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		expect(v.crlCacheSize()).toBe(2);
 		await v.validate(leaf.x509, [int.x509], NOW);
 		expect(calls.filter((url) => url === INT_CRL_URL)).toHaveLength(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// OCSP (#431) — the item #341 left
+// ---------------------------------------------------------------------------
+
+const INT_OCSP_URL = "http://ocsp.test/int";
+const ROOT_OCSP_URL = "http://ocsp.test/root";
+
+const fetchingPolicy = (
+	mode: "crl" | "ocsp" | "both",
+	onUnavailable: "reject" | "allow",
+): RevocationPolicy => ({
+	mode,
+	onUnavailable,
+	allowedHosts: ["crl.test", "ocsp.test"],
+	fetchTimeoutMs: 1_000,
+	cacheTtlSeconds: 3_600,
+	maxResponseBytes: 1_000_000,
+});
+
+/** root → intermediate → leaf, each non-anchor carrying the revocation pointers given. */
+const chainPointing = async (pointers: {
+	readonly leaf: readonly pkijs.Extension[];
+	readonly int: readonly pkijs.Extension[];
+}) => {
+	const root = await mintCa("Root", 1);
+	const int = await mintIntermediate("Intermediate", 2, root, {
+		extensions: [
+			basicConstraints(true),
+			keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+			...pointers.int,
+		],
+	});
+	const leaf = await mintLeaf("client", 10, int, {
+		extensions: [
+			basicConstraints(false),
+			keyUsage(KEY_USAGE.digitalSignature),
+			clientAuthEku(),
+			...pointers.leaf,
+		],
+	});
+	return { root, int, leaf };
+};
+
+const ocspChain = () =>
+	chainPointing({ leaf: [ocspAia(INT_OCSP_URL)], int: [ocspAia(ROOT_OCSP_URL)] });
+
+const ocspAndCrlChain = () =>
+	chainPointing({
+		leaf: [ocspAia(INT_OCSP_URL), crlDistributionPoints([INT_CRL_URL])],
+		int: [ocspAia(ROOT_OCSP_URL), crlDistributionPoints([ROOT_CRL_URL])],
+	});
+
+describe("full-pki revocation — mode = ocsp (#431)", () => {
+	it("accepts a certificate the responder reports good, asking each issuer's responder by POST", async () => {
+		const { root, int, leaf } = await ocspChain();
+		const { impl, calls, inits } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(new Set(calls)).toEqual(new Set([INT_OCSP_URL, ROOT_OCSP_URL]));
+		expect(inits.every((init) => init?.method === "POST")).toBe(true);
+	});
+
+	it.each(["reject", "allow"] as const)(
+		"refuses a leaf the responder reports revoked under '%s'",
+		async (onUnavailable) => {
+			const { root, int, leaf } = await ocspChain();
+			const { impl } = stubFetch({
+				[INT_OCSP_URL]: ocspAnswer({
+					issuer: int,
+					subject: leaf,
+					status: "revoked",
+					revocationReason: 1,
+				}),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			});
+
+			const result = await validator([root], {
+				revocation: fetchingPolicy("ocsp", onUnavailable),
+				fetchImpl: impl,
+			}).validate(leaf.x509, [int.x509], NOW);
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) {
+				expect(result.step).toBe("certificate revoked");
+				expect(result.detail).toContain("CN=client");
+				expect(result.detail).toContain("keyCompromise");
+				expect(result.detail).toContain(INT_OCSP_URL);
+			}
+		},
+	);
+
+	it.each(["reject", "allow"] as const)(
+		"refuses a revoked intermediate under '%s'",
+		async (onUnavailable) => {
+			const { root, int, leaf } = await ocspChain();
+			const { impl } = stubFetch({
+				[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf }),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int, status: "revoked" }),
+			});
+
+			const result = await validator([root], {
+				revocation: fetchingPolicy("ocsp", onUnavailable),
+				fetchImpl: impl,
+			}).validate(leaf.x509, [int.x509], NOW);
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) {
+				expect(result.step).toBe("certificate revoked");
+				expect(result.detail).toContain("CN=Intermediate");
+			}
+		},
+	);
+
+	it("treats unknown as unavailable: refused under 'reject'", async () => {
+		const { root, int, leaf } = await ocspChain();
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("unknown");
+		}
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "unknown" }),
+			"mtls_revocation_unavailable_rejected",
+		);
+	});
+
+	it("treats unknown as unavailable: waved through and logged under 'allow'", async () => {
+		const { root, int, leaf } = await ocspChain();
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "unknown" }),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it("treats a certificate whose AIA names no responder as unavailable, without a request", async () => {
+		// The OCSP twin of no_distribution_point: a certificate this mode
+		// cannot ask about is an honest "cannot check", not a silent pass.
+		const root = await mintCa("Root", 1);
+		const leaf = await mintLeaf("client", 10, root);
+		const { impl, calls } = stubFetch({});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.detail).toContain("no_responder");
+		expect(calls).toEqual([]);
+	});
+
+	it("REJECTS a responder outage under 'reject', and logs it under 'allow'", async () => {
+		const { root, int, leaf } = await ocspChain();
+		const down = () =>
+			stubFetch({
+				[INT_OCSP_URL]: 503,
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			});
+
+		const rejected = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: down().impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+		expect(rejected.ok).toBe(false);
+		if (!rejected.ok) expect(rejected.step).toBe("revocation status unavailable");
+
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+		const allowed = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "allow"),
+			fetchImpl: down().impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+		expect(allowed).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it("caches the responder's answer per certificate instead of asking per request", async () => {
+		const { root, int, leaf } = await ocspChain();
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+		const v = validator([root], { revocation: fetchingPolicy("ocsp", "reject"), fetchImpl: impl });
+
+		await v.validate(leaf.x509, [int.x509], NOW);
+		const firstCallCount = calls.length;
+		await v.validate(leaf.x509, [int.x509], NOW);
+
+		expect(calls.length).toBe(firstCallCount);
+		expect(v.ocspCacheSize()).toBe(2);
+		expect(v.crlCacheSize()).toBe(0);
+	});
+
+	it("never asks a responder outside the host allowlist", async () => {
+		const { root, int, leaf } = await chainPointing({
+			leaf: [ocspAia("http://169.254.169.254/latest/meta-data/")],
+			int: [ocspAia(ROOT_OCSP_URL)],
+		});
+		const { impl, calls } = stubFetch({
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		expect(calls).not.toContain("http://169.254.169.254/latest/meta-data/");
+	});
+
+	it("does not ask a responder about a certificate that does not chain to a trust anchor", async () => {
+		// The two-pass ordering is a security property: a responder URL is a
+		// destination chosen by whoever minted the certificate, and only a
+		// certificate that already chains to a configured anchor may cause a
+		// request to it.
+		const root = await mintCa("Root", 1);
+		const rogue = await mintCa("Rogue Root", 100);
+		const int = await mintIntermediate("Intermediate", 2, rogue, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				ocspAia(ROOT_OCSP_URL),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				ocspAia(INT_OCSP_URL),
+			],
+		});
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: rogue, subject: int }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "allow"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("no path to trust anchor");
+		expect(calls).toEqual([]);
+	});
+
+	it("passes the nonce policy through: a nonce-less responder is refused unless told otherwise", async () => {
+		const { root, int, leaf } = await ocspChain();
+		const nonceless = () =>
+			stubFetch({
+				[INT_OCSP_URL]: async () =>
+					new Response(
+						(await mintOcspResponse({ issuer: int, subject: leaf })) as unknown as BodyInit,
+						{
+							status: 200,
+							headers: { "content-type": "application/ocsp-response" },
+						},
+					),
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			});
+
+		const strict = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: nonceless().impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+		expect(strict.ok).toBe(false);
+		if (!strict.ok) expect(strict.detail).toContain("nonce_missing");
+
+		const lenient = await validator([root], {
+			revocation: { ...fetchingPolicy("ocsp", "reject"), ocspRequireNonce: false },
+			fetchImpl: nonceless().impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+		expect(lenient).toEqual({ ok: true });
+	});
+});
+
+describe("full-pki revocation — mode = both (#431)", () => {
+	it("asks the responder first and does not fetch the CRL when it answers good", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(calls).not.toContain(INT_CRL_URL);
+		expect(calls).not.toContain(ROOT_CRL_URL);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("refuses on a revoked from the responder without consulting the CRL", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "revoked" }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			// A CRL that would have said otherwise — it must not be asked.
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "allow"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("certificate revoked");
+		expect(calls).not.toContain(INT_CRL_URL);
+	});
+
+	it("falls back to the CRL when the responder is unavailable, and logs the fallback once per certificate", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: 503,
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(calls).toContain(INT_CRL_URL);
+		expect(calls).not.toContain(ROOT_CRL_URL);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			"mtls_revocation_ocsp_fallback",
+		);
+	});
+
+	it("falls back to the CRL when the responder answers unknown", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(calls).toContain(INT_CRL_URL);
+	});
+
+	it.each(["reject", "allow"] as const)(
+		"refuses a certificate the CRL lists after the responder was unavailable, under '%s'",
+		async (onUnavailable) => {
+			const { root, int, leaf } = await ocspAndCrlChain();
+			const { impl } = stubFetch({
+				[INT_OCSP_URL]: 503,
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+				[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
+			});
+
+			const result = await validator([root], {
+				revocation: fetchingPolicy("both", onUnavailable),
+				fetchImpl: impl,
+			}).validate(leaf.x509, [int.x509], NOW);
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.step).toBe("certificate revoked");
+		},
+	);
+
+	it("is unavailable only when both are: 'reject' refuses naming both sources", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: 503,
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: 503,
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toMatch(/ocsp/i);
+			expect(result.detail).toMatch(/crl/i);
+		}
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			"mtls_revocation_unavailable_rejected",
+		);
+	});
+
+	it("is unavailable only when both are: 'allow' waves through with the unavailable line", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: 503,
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: 503,
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client" }),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it("consults the CRL silently for a certificate that names no responder at all", async () => {
+		// Under `both` a CA that publishes only CRLs for some certificates is
+		// a normal shape, not an OCSP outage; the fallback line is for a
+		// responder that was asked and did not answer.
+		const { root, int, leaf } = await chainPointing({
+			leaf: [crlDistributionPoints([INT_CRL_URL])],
+			int: [crlDistributionPoints([ROOT_CRL_URL])],
+		});
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("applies the CRL's per-point strictness once it has fallen back", async () => {
+		// Fallback lands in the same decision the CRL mode makes: one of the
+		// certificate's points down is a refusal under "reject" (#446).
+		const { root, int, leaf } = await chainPointing({
+			leaf: [
+				ocspAia(INT_OCSP_URL),
+				crlDistributionPoints([INT_CRL_URL, "http://crl.test/int-mirror.crl"]),
+			],
+			int: [ocspAia(ROOT_OCSP_URL)],
+		});
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: 503,
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			"http://crl.test/int-mirror.crl": 503,
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("revocation status unavailable");
+	});
+
+	it("counts entries in both caches", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: 503,
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+		const v = validator([root], { revocation: fetchingPolicy("both", "reject"), fetchImpl: impl });
+
+		expect(await v.validate(leaf.x509, [int.x509], NOW)).toEqual({ ok: true });
+		// One usable answer for the intermediate, one remembered-down responder.
+		expect(v.ocspCacheSize()).toBe(2);
+		expect(v.crlCacheSize()).toBe(1);
+	});
+});
+
+describe("full-pki — OCSP must-staple (RFC 7633, #431)", () => {
+	const leafWith = async (root: Minted, extension: pkijs.Extension) =>
+		mintLeaf("client", 10, root, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				ocspAia(ROOT_OCSP_URL),
+				extension,
+			],
+		});
+
+	it.each([
+		["disabled", REVOCATION_OFF],
+		["ocsp", fetchingPolicy("ocsp", "allow")],
+		["both", fetchingPolicy("both", "allow")],
+	] as const)(
+		"refuses a leaf demanding a stapled OCSP response, with revocation = %s",
+		async (_mode, revocation) => {
+			// Node has no stapled response for a client certificate to present, so
+			// the certificate's own requirement cannot be met — and a requirement
+			// that cannot be met is a refusal, not "unstapled". Even a responder
+			// that would answer good is not asked.
+			const root = await mintCa("Root", 1);
+			const leaf = await leafWith(root, mustStaple());
+			const { impl, calls } = stubFetch({
+				[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: leaf }),
+			});
+
+			const result = await validator([root], { revocation, fetchImpl: impl }).validate(
+				leaf.x509,
+				[],
+				NOW,
+			);
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) {
+				expect(result.step).toBe("OCSP must-staple cannot be satisfied");
+				expect(result.detail).toContain("RFC 7633");
+			}
+			expect(calls).toEqual([]);
+		},
+	);
+
+	it("refuses status_request_v2 as well", async () => {
+		const root = await mintCa("Root", 1);
+		const leaf = await leafWith(root, tlsFeature([17]));
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("OCSP must-staple cannot be satisfied");
+	});
+
+	it("refuses the same demand when the extension is marked critical, under the must-staple step", async () => {
+		// The OID is on the leaf's processed list precisely because this
+		// check reads it; a critical copy must land here, not in the generic
+		// unrecognised-critical-extension refusal.
+		const root = await mintCa("Root", 1);
+		const leaf = await leafWith(root, mustStaple(true));
+
+		const result = await validator([root]).validate(leaf.x509, [], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("OCSP must-staple cannot be satisfied");
+	});
+
+	it("ignores a TLS feature extension naming other features", async () => {
+		const root = await mintCa("Root", 1);
+		const leaf = await leafWith(root, tlsFeature([42]));
+
+		expect(await validator([root]).validate(leaf.x509, [], NOW)).toEqual({ ok: true });
+	});
+
+	it("still refuses a critical TLS feature extension on a CA as unrecognised", async () => {
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				mustStaple(true),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("unrecognised critical extension");
 	});
 });

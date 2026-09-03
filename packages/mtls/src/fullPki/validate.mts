@@ -81,15 +81,26 @@
  * arbitrary certificate presented by an arbitrary client cannot.
  * `fetchGuard.mts` holds the second layer.
  *
- * ### What is still not here
+ * ### OCSP, and `mode = "both"` (#431)
  *
- * OCSP (RFC 6960) is not implemented, and `revocation.mode` refuses to name
- * it rather than accepting the value and ignoring it. Note also that the
- * "stapled OCSP is the cheap path under `tls-layer`" idea in #341 does not
- * survive contact with Node: `status_request` stapling covers the *server's*
- * certificate, and Node exposes no stapled response for a **client**
- * certificate on the server side. An OCSP arm would therefore be
- * responder-fetch only, with the same guards as CRL fetching.
+ * OCSP (RFC 6960) takes the same slot: `ocsp.mts` asks the responders a
+ * certificate names and hands back a status, or an unavailability with a
+ * reason, and the decision below is the same one — a determined *revoked*
+ * refuses under both policies, an unavailable status is the operator's
+ * `on-unavailable` call. It is responder-fetch only: the "stapled OCSP is
+ * the cheap path under `tls-layer`" idea in #341 does not survive contact
+ * with Node, where `status_request` stapling covers the *server's*
+ * certificate and nothing is exposed for a **client** certificate. A leaf
+ * that carries OCSP must-staple (RFC 7633) is refused for exactly that
+ * reason, before any responder is asked.
+ *
+ * Under `"both"` the responder is asked first — one small request about one
+ * certificate, against a CRL that may be large — and the CRL is consulted
+ * only when OCSP could not answer: unreachable, `unknown`, unverifiable, or
+ * simply not named. A *revoked* from either source wins; a certificate is
+ * unavailable only when both sources are. The fallback is logged when a
+ * responder was actually asked and failed, so an OCSP outage is visible
+ * even while the CRL keeps revocation checking alive.
  */
 
 import { X509Certificate } from "node:crypto";
@@ -98,13 +109,13 @@ import { checkClientLeafProfile } from "../pki.mjs";
 import { type AlgorithmPolicy, checkAlgorithmPolicy } from "./algorithms.mjs";
 import { checkCriticalExtensions, checkLeafKeyUsage } from "./criticalExtensions.mjs";
 import {
-	type CrlLookup,
 	type CrlPointUnavailable,
 	type CrlResolver,
 	createCrlResolver,
 	describeUnavailable,
 } from "./crl.mjs";
 import { createGuardedFetch } from "./fetchGuard.mjs";
+import { checkMustStaple, createOcspResolver, type OcspResolver } from "./ocsp.mjs";
 
 /** OID of `basicConstraints` (RFC 5280 §4.2.1.9). */
 const OID_BASIC_CONSTRAINTS = "2.5.29.19";
@@ -125,15 +136,28 @@ export interface Logger {
  */
 export type OnRevocationUnavailable = "reject" | "allow";
 
+/**
+ * Where revocation status comes from. `"both"` asks the responder first and
+ * falls back to the CRL when OCSP could not answer (#431).
+ */
+export type RevocationSource = "crl" | "ocsp" | "both";
+
 export type RevocationPolicy =
 	| { readonly mode: "disabled" }
 	| {
-			readonly mode: "crl";
+			readonly mode: RevocationSource;
 			readonly onUnavailable: OnRevocationUnavailable;
 			readonly allowedHosts: readonly string[];
 			readonly fetchTimeoutMs: number;
 			readonly cacheTtlSeconds: number;
 			readonly maxResponseBytes: number;
+			/**
+			 * OCSP only: refuse a response that does not echo the request's
+			 * nonce. Defaults to `true` (RFC 8954); `false` is for a responder
+			 * that pre-produces its answers, and gives up replay protection
+			 * within the response's own validity window.
+			 */
+			readonly ocspRequireNonce?: boolean;
 	  };
 
 export interface FullPkiOptions {
@@ -162,7 +186,23 @@ export interface FullPkiValidator {
 	 * Exposed for tests and for a future cache-size metric.
 	 */
 	readonly crlCacheSize: () => number;
+	/** The same for the OCSP cache. */
+	readonly ocspCacheSize: () => number;
 }
+
+/**
+ * One certificate's revocation outcome, whatever source produced it. The
+ * policy below acts on the kind alone, so OCSP and CRL land in the same
+ * decision with the same strictness.
+ */
+type RevocationOutcome =
+	| { readonly kind: "revoked"; readonly detail: string }
+	| {
+			readonly kind: "determined";
+			/** CRL distribution points that could not be used, for the per-point strictness (#446). */
+			readonly unavailable: readonly CrlPointUnavailable[];
+	  }
+	| { readonly kind: "unavailable"; readonly reason: string; readonly detail: string };
 
 const toPkijs = (certificate: X509Certificate): pkijs.Certificate =>
 	pkijs.Certificate.fromBER(certificate.raw);
@@ -234,22 +274,113 @@ const describeEngineFailure = (result: {
 
 export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidator => {
 	const trustedCerts = options.trustedCas.map(toPkijs);
+	const revocation = options.revocation;
 
-	const resolver: CrlResolver | null =
-		options.revocation.mode === "crl"
-			? createCrlResolver({
-					fetch: createGuardedFetch({
-						allowedHosts: options.revocation.allowedHosts,
-						timeoutMs: options.revocation.fetchTimeoutMs,
-						maxBytes: options.revocation.maxResponseBytes,
-						...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
-					}),
-					cacheTtlSeconds: options.revocation.cacheTtlSeconds,
+	// One guarded fetch serves both resolvers: the allowlist, timeout and
+	// byte cap are properties of what this process may retrieve, not of
+	// which revocation mechanism asked.
+	const fetch =
+		revocation.mode === "disabled"
+			? null
+			: createGuardedFetch({
+					allowedHosts: revocation.allowedHosts,
+					timeoutMs: revocation.fetchTimeoutMs,
+					maxBytes: revocation.maxResponseBytes,
+					...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+				});
+	const crlResolver: CrlResolver | null =
+		fetch !== null && revocation.mode !== "disabled" && revocation.mode !== "ocsp"
+			? createCrlResolver({ fetch, cacheTtlSeconds: revocation.cacheTtlSeconds })
+			: null;
+	const ocspResolver: OcspResolver | null =
+		fetch !== null && revocation.mode !== "disabled" && revocation.mode !== "crl"
+			? createOcspResolver({
+					fetch,
+					cacheTtlSeconds: revocation.cacheTtlSeconds,
+					...(revocation.ocspRequireNonce === undefined
+						? {}
+						: { requireNonce: revocation.ocspRequireNonce }),
 				})
 			: null;
 
+	const byCrl = async (
+		certificate: pkijs.Certificate,
+		issuer: pkijs.Certificate,
+		now: Date,
+	): Promise<RevocationOutcome> => {
+		const lookup = await (crlResolver as CrlResolver).resolve(certificate, issuer, now);
+		if (!lookup.ok) return { kind: "unavailable", reason: lookup.reason, detail: lookup.detail };
+		// Every CRL here verified against `issuer`, whose subject is this
+		// certificate's issuer name, so the serial comparison is the whole
+		// check.
+		if (lookup.crls.some((crl) => crl.isCertificateRevoked(certificate))) {
+			return {
+				kind: "revoked",
+				detail:
+					`${toNode(certificate).subject}: listed on the CRL published by ` +
+					toNode(issuer).subject,
+			};
+		}
+		return { kind: "determined", unavailable: lookup.unavailable };
+	};
+
+	const byOcsp = async (
+		certificate: pkijs.Certificate,
+		issuer: pkijs.Certificate,
+		now: Date,
+	): Promise<RevocationOutcome> => {
+		const lookup = await (ocspResolver as OcspResolver).resolve(certificate, issuer, now);
+		if (!lookup.ok) return { kind: "unavailable", reason: lookup.reason, detail: lookup.detail };
+		if (lookup.status.status === "revoked") {
+			const reason = lookup.status.reason === undefined ? "" : ` (${lookup.status.reason})`;
+			return {
+				kind: "revoked",
+				detail:
+					`${toNode(certificate).subject}: reported revoked at ` +
+					`${lookup.status.revokedAt.toISOString()}${reason} by the OCSP responder at ` +
+					lookup.responder,
+			};
+		}
+		return { kind: "determined", unavailable: [] };
+	};
+
+	/**
+	 * The certificate's status from the configured source(s). Under `"both"`
+	 * the responder goes first and the CRL is consulted only when it could
+	 * not answer; a status either source determined is final, and the
+	 * certificate is unavailable only when both are.
+	 */
+	const decide = async (
+		certificate: pkijs.Certificate,
+		issuer: pkijs.Certificate,
+		now: Date,
+	): Promise<RevocationOutcome> => {
+		if (revocation.mode === "crl") return byCrl(certificate, issuer, now);
+		if (revocation.mode === "ocsp") return byOcsp(certificate, issuer, now);
+		const ocsp = await byOcsp(certificate, issuer, now);
+		if (ocsp.kind !== "unavailable") return ocsp;
+		// A certificate that names no responder is a normal shape under
+		// "both" — a CA that publishes only CRLs for some of its
+		// certificates — not an outage. A responder that was asked and did
+		// not answer is, and stays visible even while the CRL carries on.
+		if (ocsp.reason !== "no_responder") {
+			options.logger?.warn(
+				{ subject: toNode(certificate).subject, reason: ocsp.reason, detail: ocsp.detail },
+				"mtls_revocation_ocsp_fallback",
+			);
+		}
+		const crl = await byCrl(certificate, issuer, now);
+		if (crl.kind !== "unavailable") return crl;
+		return {
+			kind: "unavailable",
+			reason: crl.reason,
+			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crl.reason} (${crl.detail})`,
+		};
+	};
+
 	return {
-		crlCacheSize: () => resolver?.size() ?? 0,
+		crlCacheSize: () => crlResolver?.size() ?? 0,
+		ocspCacheSize: () => ocspResolver?.size() ?? 0,
 
 		validate: async (leaf, chain, now) => {
 			// Bound the work before any signature is verified: a caller-supplied
@@ -344,6 +475,13 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				return { ok: false, step: leafProfile.step, detail: leafProfile.step };
 			}
 
+			// A leaf demanding a stapled OCSP response (RFC 7633) asks for
+			// something no server can give a client certificate in Node. Its
+			// own requirement cannot be met, so it is refused here — under
+			// every revocation mode — rather than quietly treated as unstapled.
+			const staple = checkMustStaple(path[0] as pkijs.Certificate);
+			if (!staple.ok) return staple;
+
 			const pathLength = checkPathLength(path);
 			if (!pathLength.ok) return pathLength;
 
@@ -356,7 +494,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				if (!check.ok) return { ok: false, step: check.step, detail: check.detail };
 			}
 
-			if (resolver === null || options.revocation.mode === "disabled") return { ok: true };
+			if (revocation.mode === "disabled") return { ok: true };
 
 			// --- Pass 2: revocation over the *validated* path, decided here. ---
 			//
@@ -365,32 +503,44 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// mechanism that actually applies there.
 			//
 			// The next element up the path issued each certificate, so it is the
-			// key its CRL must verify against — the resolver refuses to hand
-			// back, or cache, a CRL that does not.
+			// key its CRL, or the responder's answer, must verify against — the
+			// resolvers refuse to hand back, or cache, anything that does not.
 			//
 			// Every lookup is issued at once. Awaiting them one after another
 			// would make the token endpoint's latency during an outage the *sum*
 			// of the distribution points' timeouts rather than the largest.
 			const subjects = path.slice(0, -1);
-			const lookups = await Promise.all(
+			const outcomes = await Promise.all(
 				subjects.map((certificate, index) =>
-					resolver.resolve(certificate, path[index + 1] as pkijs.Certificate, now),
+					decide(certificate, path[index + 1] as pkijs.Certificate, now),
 				),
 			);
 			for (const [index, certificate] of subjects.entries()) {
-				const issuer = path[index + 1] as pkijs.Certificate;
-				const lookup = lookups[index] as CrlLookup;
-				if (!lookup.ok) {
+				const outcome = outcomes[index] as RevocationOutcome;
+
+				// A status that *was* determined is not softened by the policy —
+				// "allow" covers an unknown status, not a known-revoked one — and
+				// it is consulted before any gap is judged: a CRL that was
+				// obtained and lists this certificate, or a responder that said
+				// so, settles the matter under both policies, whatever the
+				// certificate's other sources did. Refusing such a certificate as
+				// "unavailable" instead would tell the audit trail an outage where
+				// there was a revocation.
+				if (outcome.kind === "revoked") {
+					return { ok: false, step: "certificate revoked", detail: outcome.detail };
+				}
+
+				if (outcome.kind === "unavailable") {
 					const subject = toNode(certificate).subject;
-					if (options.revocation.onUnavailable === "reject") {
+					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: lookup.reason, detail: lookup.detail },
+							{ subject, reason: outcome.reason, detail: outcome.detail },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
 							ok: false,
 							step: "revocation status unavailable",
-							detail: `${subject}: ${lookup.reason} — ${lookup.detail}`,
+							detail: `${subject}: ${outcome.reason} — ${outcome.detail}`,
 						};
 					}
 					// Soft-fail. Logged at warn, never silently: an operator who chose
@@ -398,30 +548,10 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					// permanent soft-fail is an unrevocable PKI wearing a revocation
 					// configuration.
 					options.logger?.warn(
-						{ subject, reason: lookup.reason, detail: lookup.detail },
+						{ subject, reason: outcome.reason, detail: outcome.detail },
 						"mtls_revocation_unavailable_allowed",
 					);
 					continue;
-				}
-
-				// A status that *was* determined is not softened by the policy —
-				// "allow" covers an unknown status, not a known-revoked one — and
-				// it is consulted before any gap is judged: a CRL that was
-				// obtained and lists this certificate settles the matter under
-				// both policies, whatever the certificate's other distribution
-				// points did. Refusing such a certificate as "unavailable" instead
-				// would tell the audit trail an outage where there was a
-				// revocation. Every CRL here verified against `issuer`, whose
-				// subject is this certificate's issuer name, so the serial
-				// comparison is the whole check.
-				if (lookup.crls.some((crl) => crl.isCertificateRevoked(certificate))) {
-					return {
-						ok: false,
-						step: "certificate revoked",
-						detail:
-							`${toNode(certificate).subject}: listed on the CRL published by ` +
-							toNode(issuer).subject,
-					};
 				}
 
 				// Only a certificate absent from every CRL that was obtained is
@@ -438,11 +568,11 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				// — under its own message, because "checked against part of its
 				// revocation material" and "not checked at all" are different
 				// facts on an operator's dashboard.
-				if (lookup.unavailable.length > 0) {
+				if (outcome.unavailable.length > 0) {
 					const subject = toNode(certificate).subject;
-					const last = lookup.unavailable[lookup.unavailable.length - 1] as CrlPointUnavailable;
-					const detail = describeUnavailable(lookup.unavailable);
-					if (options.revocation.onUnavailable === "reject") {
+					const last = outcome.unavailable[outcome.unavailable.length - 1] as CrlPointUnavailable;
+					const detail = describeUnavailable(outcome.unavailable);
+					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
 							{ subject, reason: last.reason, detail },
 							"mtls_revocation_unavailable_rejected",

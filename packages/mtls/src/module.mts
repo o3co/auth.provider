@@ -138,13 +138,30 @@ export const mtlsConfigSchema = z.object({
 							.default(FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS),
 						revocation: z
 							.object({
-								mode: z.enum(["crl", "disabled"]),
+								/**
+								 * `"crl"` fetches distribution points, `"ocsp"` asks the
+								 * responders named in `authorityInfoAccess`, `"both"` asks OCSP
+								 * first and falls back to the CRL when the responder cannot
+								 * answer (#431). `"disabled"` is an explicit statement, not an
+								 * omission — see the boot check below.
+								 */
+								mode: z.enum(["crl", "ocsp", "both", "disabled"]),
 								"on-unavailable": z.enum(["reject", "allow"]),
 								/** Hosts revocation material may be fetched from. */
 								"allowed-hosts": z.array(z.string()).readonly().default([]),
 								"fetch-timeout-ms": z.number().int().min(1).default(3000),
 								"cache-ttl-seconds": z.number().int().min(0).default(3600),
 								"max-response-bytes": z.number().int().min(1).default(1_048_576),
+								/**
+								 * Refuse an OCSP response that does not echo the request's
+								 * nonce (RFC 6960 §4.4.1). On by default: without the nonce a
+								 * captured `good` answer replays until its `nextUpdate`, which
+								 * is exactly the window a freshly revoked certificate wants.
+								 * RFC 8954 lets a responder omit it; an operator whose CA does
+								 * says so here, knowingly, and freshness then rests on
+								 * `thisUpdate` / `nextUpdate` alone.
+								 */
+								"ocsp-require-nonce": z.boolean().default(true),
 							})
 							.optional(),
 					})
@@ -265,12 +282,13 @@ export const mtlsModule = defineModule<"config", "logger">({
 								"signature-algorithms"?: readonly SignatureAlgorithmName[];
 								"min-rsa-key-bits"?: number;
 								revocation?: {
-									mode: "crl" | "disabled";
+									mode: "crl" | "ocsp" | "both" | "disabled";
 									"on-unavailable": "reject" | "allow";
 									"allowed-hosts": readonly string[];
 									"fetch-timeout-ms": number;
 									"cache-ttl-seconds": number;
 									"max-response-bytes": number;
+									"ocsp-require-nonce": boolean;
 								};
 							};
 						};
@@ -318,23 +336,28 @@ export const mtlsModule = defineModule<"config", "logger">({
 						throw new Error(
 							'mtlsModule: config.oauth.mtls.mode = "full-pki" requires ' +
 								"oauth.mtls.full-pki.revocation.mode and .on-unavailable to be set " +
-								'explicitly. Set mode = "crl" to check CRLs, or mode = "disabled" ' +
+								'explicitly. Set mode = "crl", "ocsp" or "both" to check revocation, ' +
+								'or mode = "disabled" ' +
 								"to state that this deployment accepts that a revoked certificate " +
 								"keeps binding tokens until it expires. There is no default because " +
 								"both are defensible and only the operator knows which applies.",
 						);
 					}
 					if (
-						fullPki.revocation.mode === "crl" &&
+						fullPki.revocation.mode !== "disabled" &&
 						fullPki.revocation["allowed-hosts"].length === 0
 					) {
+						// One rule for every fetching mode (#431): an OCSP responder URL
+						// is a destination inside a certificate exactly as a CRL
+						// distribution point is, so the same second layer applies.
 						throw new Error(
-							'mtlsModule: oauth.mtls.full-pki.revocation.mode = "crl" requires a ' +
+							`mtlsModule: oauth.mtls.full-pki.revocation.mode = "${fullPki.revocation.mode}" requires a ` +
 								"non-empty oauth.mtls.full-pki.revocation.allowed-hosts. A CRL " +
-								"distribution point is a URL inside a certificate, so fetching one " +
-								"makes this process issue a request to a destination someone else " +
-								"chose. List the hosts your CA publishes CRLs on — the same " +
-								"separation oauth.mtls.trusted-proxies draws for forwarded headers.",
+								"distribution point or an OCSP responder is a URL inside a " +
+								"certificate, so fetching one makes this process issue a request " +
+								"to a destination someone else chose. List the hosts your CA " +
+								"publishes CRLs on or answers OCSP from — the same separation " +
+								"oauth.mtls.trusted-proxies draws for forwarded headers.",
 						);
 					}
 				}

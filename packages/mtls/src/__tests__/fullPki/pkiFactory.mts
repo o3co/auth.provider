@@ -56,6 +56,12 @@ const OID = {
 	deltaCRLIndicator: "2.5.29.27",
 	issuingDistributionPoint: "2.5.29.28",
 	certificateIssuer: "2.5.29.29",
+	caIssuers: "1.3.6.1.5.5.7.48.2",
+	ocspBasic: "1.3.6.1.5.5.7.48.1.1",
+	ocspNonce: "1.3.6.1.5.5.7.48.1.2",
+	ocspNoCheck: "1.3.6.1.5.5.7.48.1.5",
+	ocspSigning: "1.3.6.1.5.5.7.3.9",
+	tlsFeature: "1.3.6.1.5.5.7.1.24",
 } as const;
 
 /** `KeyUsage` bit positions, MSB-first within the first octet (RFC 5280 §4.2.1.3). */
@@ -90,6 +96,8 @@ const generateKeys = async (algorithm: KeyAlgorithm): Promise<CryptoKeyPair> => 
 		["sign", "verify"],
 	)) as CryptoKeyPair;
 };
+
+const uriName = (url: string): pkijs.GeneralName => new pkijs.GeneralName({ type: 6, value: url });
 
 const setCommonName = (name: pkijs.RelativeDistinguishedNames, cn: string): void => {
 	name.typesAndValues.push(
@@ -160,8 +168,6 @@ const distributionPointsExtension = (points: readonly pkijs.DistributionPoint[])
 			.toBER(false),
 	});
 
-const uriName = (url: string): pkijs.GeneralName => new pkijs.GeneralName({ type: 6, value: url });
-
 /**
  * A `cRLDistributionPoints` extension. Each entry is one distribution point:
  * a string names it by a single URI, an array by several — which RFC 5280
@@ -208,21 +214,63 @@ export const indirectCrlDistributionPoint = (url: string, crlIssuerCn: string): 
 	]);
 };
 
-export const ocspAia = (url: string): pkijs.Extension =>
+const aiaExtension = (descriptions: readonly pkijs.AccessDescription[]): pkijs.Extension =>
 	new pkijs.Extension({
 		extnID: OID.authorityInfoAccess,
 		critical: false,
-		extnValue: new pkijs.InfoAccess({
-			accessDescriptions: [
-				new pkijs.AccessDescription({
-					accessMethod: OID.ocsp,
-					accessLocation: new pkijs.GeneralName({ type: 6, value: url }),
-				}),
-			],
-		})
+		extnValue: new pkijs.InfoAccess({ accessDescriptions: [...descriptions] })
 			.toSchema()
 			.toBER(false),
 	});
+
+/**
+ * An `authorityInfoAccess` naming one or more `id-ad-ocsp` responders, in
+ * the order given (RFC 5280 §4.2.2.1 — several entries are alternatives).
+ */
+export const ocspAia = (url: string | readonly string[]): pkijs.Extension =>
+	aiaExtension(
+		(typeof url === "string" ? [url] : url).map(
+			(location) =>
+				new pkijs.AccessDescription({ accessMethod: OID.ocsp, accessLocation: uriName(location) }),
+		),
+	);
+
+/** An `authorityInfoAccess` naming only a `caIssuers` location — no responder at all. */
+export const caIssuersAia = (url: string): pkijs.Extension =>
+	aiaExtension([
+		new pkijs.AccessDescription({ accessMethod: OID.caIssuers, accessLocation: uriName(url) }),
+	]);
+
+/** `extendedKeyUsage` naming `id-kp-OCSPSigning` — what a delegated responder must carry (RFC 6960 §4.2.2.2). */
+export const ocspSigningEku = (): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.extKeyUsage,
+		critical: false,
+		extnValue: new pkijs.ExtKeyUsage({ keyPurposes: [OID.ocspSigning] }).toSchema().toBER(false),
+	});
+
+/** `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1): trust the responder for its certificate's lifetime. */
+export const ocspNoCheck = (): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.ocspNoCheck,
+		critical: false,
+		extnValue: new asn1js.Null().toBER(false),
+	});
+
+/**
+ * The TLS feature extension (RFC 7633). `features` are TLS extension type
+ * numbers; `[5]` (`status_request`) is OCSP must-staple.
+ */
+export const tlsFeature = (features: readonly number[], critical = false): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.tlsFeature,
+		critical,
+		extnValue: new asn1js.Sequence({
+			value: features.map((feature) => new asn1js.Integer({ value: feature })),
+		}).toBER(false),
+	});
+
+export const mustStaple = (critical = false): pkijs.Extension => tlsFeature([5], critical);
 
 /** A `subjectAltName` extension carrying dNSName entries — what name constraints match against. */
 export const dnsSan = (names: readonly string[]): pkijs.Extension =>
@@ -547,4 +595,186 @@ export const mintCrl = async (options: MintCrlOptions): Promise<Uint8Array> => {
 	}
 	await crl.sign((options.signingKeys ?? options.issuer.keys).privateKey, "SHA-256", crypto);
 	return new Uint8Array(crl.toSchema(true).toBER(false));
+};
+
+// ---------------------------------------------------------------------------
+// OCSP (#431)
+// ---------------------------------------------------------------------------
+
+/**
+ * A delegated OCSP responder certificate issued by `issuer`: an end entity
+ * with `id-kp-OCSPSigning` and `id-pkix-ocsp-nocheck`. Override `extensions`
+ * to mint one that lacks either.
+ */
+export const mintOcspResponder = (
+	cn: string,
+	serial: number,
+	issuer: Minted,
+	extra: Partial<MintOptions> = {},
+): Promise<Minted> =>
+	mint({
+		cn,
+		serial,
+		issuer,
+		extensions: [
+			basicConstraints(false),
+			keyUsage(KEY_USAGE.digitalSignature),
+			ocspSigningEku(),
+			ocspNoCheck(),
+		],
+		...extra,
+	});
+
+/** `OCSPResponseStatus` values (RFC 6960 §4.2.1). */
+export const OCSP_RESPONSE_STATUS = {
+	successful: 0,
+	malformedRequest: 1,
+	internalError: 2,
+	tryLater: 3,
+	sigRequired: 5,
+	unauthorized: 6,
+} as const;
+
+/**
+ * The nonce a DER `OCSPRequest` carries, as the extension's `extnValue`
+ * bytes — what a responder echoes back verbatim (RFC 6960 §4.4.1).
+ */
+export const nonceOf = (requestDer: Uint8Array): Uint8Array | undefined => {
+	const request = pkijs.OCSPRequest.fromBER(requestDer);
+	const extension = request.tbsRequest.requestExtensions?.find(
+		(ext) => ext.extnID === OID.ocspNonce,
+	);
+	return extension === undefined
+		? undefined
+		: new Uint8Array(extension.extnValue.valueBlock.valueHexView);
+};
+
+/** A nonce extension carrying exactly `extnValue` — the bytes a request's `nonceOf` returned. */
+export const ocspNonceExtension = (extnValue: Uint8Array): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.ocspNonce,
+		critical: false,
+		extnValue: extnValue.slice().buffer as ArrayBuffer,
+	});
+
+export interface MintOcspResponseOptions {
+	/** The CA that issued `subject`; the default signer, and what the `CertID` hashes. */
+	readonly issuer: Minted;
+	/** The certificate the single response is about. */
+	readonly subject: Minted;
+	readonly status?: "good" | "revoked" | "unknown";
+	readonly revokedAt?: Date;
+	/** A `CRLReason` value (RFC 5280 §5.3.1). */
+	readonly revocationReason?: number;
+	readonly thisUpdate?: Date;
+	/** `null` omits `nextUpdate` altogether. */
+	readonly nextUpdate?: Date | null;
+	readonly producedAt?: Date;
+	/** The nonce `extnValue` to echo; omit for a response with no nonce. */
+	readonly nonce?: Uint8Array;
+	/** Who signs — a delegated responder, or a stranger. Defaults to `issuer`. */
+	readonly signer?: Minted;
+	/** Attach the signer's certificate in `certs`. Defaults to true when the signer is not `issuer`. */
+	readonly attachSignerCertificate?: boolean;
+	/** Identify the responder `byKey` (SHA-1 of its public key) rather than `byName`. */
+	readonly responderIdByKey?: boolean;
+	/** Hash algorithm of the `CertID` in the single response. Defaults to SHA-1. */
+	readonly certIdHash?: "SHA-1" | "SHA-256";
+	/** Build the `CertID` for this certificate instead of `subject` — a response about someone else. */
+	readonly certIdFor?: Minted;
+	readonly responseExtensions?: readonly pkijs.Extension[];
+	readonly singleExtensions?: readonly pkijs.Extension[];
+	/** A non-`successful` status yields an `OCSPResponse` with no `responseBytes`. */
+	readonly responseStatus?: number;
+	/** Sign with this key instead of the signer's own. */
+	readonly signingKeys?: CryptoKeyPair;
+}
+
+const certStatusOf = (options: MintOcspResponseOptions): asn1js.BaseBlock => {
+	switch (options.status ?? "good") {
+		case "good":
+			return new asn1js.Primitive({ idBlock: { tagClass: 3, tagNumber: 0 } });
+		case "unknown":
+			return new asn1js.Primitive({ idBlock: { tagClass: 3, tagNumber: 2 } });
+		case "revoked":
+			return new asn1js.Constructed({
+				idBlock: { tagClass: 3, tagNumber: 1 },
+				value: [
+					new asn1js.GeneralizedTime({ valueDate: options.revokedAt ?? DEFAULT_NOT_BEFORE }),
+					...(options.revocationReason === undefined
+						? []
+						: [
+								new asn1js.Constructed({
+									idBlock: { tagClass: 3, tagNumber: 0 },
+									value: [new asn1js.Enumerated({ value: options.revocationReason })],
+								}),
+							]),
+				],
+			});
+	}
+};
+
+/** Returns the DER bytes of an `OCSPResponse`. */
+export const mintOcspResponse = async (options: MintOcspResponseOptions): Promise<Uint8Array> => {
+	const crypto = engine();
+	const responseStatus = options.responseStatus ?? OCSP_RESPONSE_STATUS.successful;
+	if (responseStatus !== OCSP_RESPONSE_STATUS.successful) {
+		const failed = new pkijs.OCSPResponse({
+			responseStatus: new asn1js.Enumerated({ value: responseStatus }),
+		});
+		return new Uint8Array(failed.toSchema().toBER(false));
+	}
+
+	const signer = options.signer ?? options.issuer;
+	const certID = await pkijs.CertID.create(
+		(options.certIdFor ?? options.subject).cert,
+		{ hashAlgorithm: options.certIdHash ?? "SHA-1", issuerCertificate: options.issuer.cert },
+		crypto,
+	);
+	const single = new pkijs.SingleResponse({
+		certID,
+		certStatus: certStatusOf(options),
+		thisUpdate: options.thisUpdate ?? new Date("2026-12-31T23:00:00Z"),
+		...(options.nextUpdate === null
+			? {}
+			: { nextUpdate: options.nextUpdate ?? new Date("2027-01-02T00:00:00Z") }),
+		...(options.singleExtensions === undefined
+			? {}
+			: { singleExtensions: [...options.singleExtensions] }),
+	});
+
+	const responderID = options.responderIdByKey
+		? new asn1js.OctetString({
+				valueHex: await crypto.digest(
+					{ name: "SHA-1" },
+					signer.cert.subjectPublicKeyInfo.subjectPublicKey.valueBlock.valueHexView,
+				),
+			})
+		: signer.cert.subject;
+	const responseExtensions = [
+		...(options.nonce === undefined ? [] : [ocspNonceExtension(options.nonce)]),
+		...(options.responseExtensions ?? []),
+	];
+	const tbsResponseData = new pkijs.ResponseData({
+		responderID,
+		producedAt: options.producedAt ?? options.thisUpdate ?? new Date("2026-12-31T23:00:00Z"),
+		responses: [single],
+		...(responseExtensions.length === 0 ? {} : { responseExtensions }),
+	});
+
+	const attach = options.attachSignerCertificate ?? signer !== options.issuer;
+	const basic = new pkijs.BasicOCSPResponse({
+		tbsResponseData,
+		...(attach ? { certs: [signer.cert] } : {}),
+	});
+	await basic.sign((options.signingKeys ?? signer.keys).privateKey, "SHA-256", crypto);
+
+	const response = new pkijs.OCSPResponse({
+		responseStatus: new asn1js.Enumerated({ value: responseStatus }),
+		responseBytes: new pkijs.ResponseBytes({
+			responseType: OID.ocspBasic,
+			response: new asn1js.OctetString({ valueHex: basic.toSchema().toBER(false) }),
+		}),
+	});
+	return new Uint8Array(response.toSchema().toBER(false));
 };
