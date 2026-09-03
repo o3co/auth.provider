@@ -566,6 +566,166 @@ export interface CodeRepositoryClient {
 	del(key: string): Promise<number>;
 }
 
+// --- DeviceCodeStoreClient (#433) ------------------------------------------
+
+/**
+ * Where one device authorization lives: `codeKeyPrefix + deviceCode` holds
+ * the record, `userKeyPrefix + userCode` holds the device code it belongs to.
+ *
+ * Every method takes both, because every mutation touches both — `create`
+ * writes the pair, `poll` consumes the pair, and `approve`/`deny` reach the
+ * record *through* the index. **The two prefixes must hash to the same
+ * slot.** A script may only touch keys in the slot it was routed to, and the
+ * key it derives from the index is not one the caller could declare up front.
+ * `createRedisDeviceCodeStore` guarantees this with one constant `{devauth}`
+ * hash tag in both prefixes; a custom keyspace has to guarantee it too.
+ */
+export interface DeviceCodeKeyspace {
+	readonly codeKeyPrefix: string;
+	readonly userKeyPrefix: string;
+}
+
+/**
+ * The record as it lives in Redis: one hash, every field a string. The field
+ * names are part of the contract because the scripts read them by name.
+ *
+ * Numbers are decimal strings and the scope lists are JSON arrays, so a scope
+ * value is stored byte-for-byte rather than split on a separator it might
+ * contain. Optional fields are *absent* rather than empty: the memory adapter
+ * distinguishes "asked for no scope" from "asked for `[]`", and so does this.
+ */
+export interface DeviceCodeRecordFields {
+	readonly userCode: string;
+	readonly clientId: string;
+	/** Epoch milliseconds. What `poll` measures `expired` against — not the TTL. */
+	readonly expiresAtMs: string;
+	/** Seconds. Grown in place by `poll` on `slow_down`, so the gate measures against the grown value. */
+	readonly intervalSeconds: string;
+	readonly status: "pending" | "approved" | "denied";
+	/** JSON array. Absent when the device asked for no scope at all. */
+	readonly requestedScope?: string;
+	/** Set by an approval. */
+	readonly subject?: string;
+	/** JSON array, set by an approval. */
+	readonly grantedScope?: string;
+	/** Epoch milliseconds of the previous poll. Absent until the first. */
+	readonly lastPolledAtMs?: string;
+}
+
+export interface CreateDeviceCodeRecordInput {
+	readonly deviceCode: string;
+	readonly userCode: string;
+	/** The deadline both keys expire at, in epoch milliseconds. */
+	readonly expiresAtMs: number;
+	readonly fields: DeviceCodeRecordFields;
+}
+
+export type DeviceCodeDecisionInput =
+	| { readonly decision: "denied" }
+	| {
+			readonly decision: "approved";
+			readonly subject: string;
+			/**
+			 * Omitted grants `requestedScope` whole. Supplied, it is intersected
+			 * with `requestedScope` **inside the operation** — the caller may
+			 * narrow, never widen, and reading the record first to intersect
+			 * client-side would be the second read the port rules out.
+			 */
+			readonly grantedScope?: readonly string[];
+	  };
+
+export type DeviceCodeDecisionReply =
+	| { readonly kind: "ok"; readonly fields: DeviceCodeRecordFields }
+	| { readonly kind: "not_found" }
+	| { readonly kind: "expired" }
+	| { readonly kind: "already_decided"; readonly status: "approved" | "denied" };
+
+export type DeviceCodePollReply =
+	| { readonly kind: "not_found" }
+	| { readonly kind: "expired" }
+	| { readonly kind: "denied" }
+	| { readonly kind: "pending" }
+	| { readonly kind: "slow_down"; readonly intervalSeconds: number }
+	| { readonly kind: "approved"; readonly fields: DeviceCodeRecordFields };
+
+/**
+ * Backing client for the `DeviceCodeStore` adapter (#433).
+ *
+ * Five semantic operations rather than a raw `eval`, the shape
+ * {@link RateLimiterClient} and {@link SubjectSessionIndexClient} use: the
+ * port's contract is that `create`, `approve`/`deny` and `poll` are
+ * **indivisible**, and a contract expressed as the Redis commands to issue
+ * would leave that indivisibility to the caller's discipline. Lua is the
+ * obvious implementation (see `makeIoredisClients`) but not required —
+ * anything atomic that reads and writes the pair satisfies this.
+ *
+ * Each operation says what it must guarantee. The one that matters most is
+ * `poll`: as `HGETALL` then `DEL`, two concurrent polls both observe
+ * `approved`, and one human approval becomes two access tokens.
+ */
+export interface DeviceCodeStoreClient {
+	/**
+	 * Write the record and the index, both insert-only, both expiring at
+	 * `expiresAtMs` — atomically. Resolves `false` when either key already
+	 * exists, and writes nothing in that case: a collision is a generator
+	 * failure, and overwriting would hand a new device the previous one's
+	 * pending approval.
+	 */
+	create(keys: DeviceCodeKeyspace, input: CreateDeviceCodeRecordInput): Promise<boolean>;
+	/**
+	 * The record behind `userCode`, or `null` when it is absent, past
+	 * `expiresAtMs` as of `nowMs`, or already decided. An expired record is
+	 * reclaimed on the way, as the memory adapter does.
+	 */
+	findPending(
+		keys: DeviceCodeKeyspace,
+		userCode: string,
+		nowMs: number,
+	): Promise<DeviceCodeRecordFields | null>;
+	/**
+	 * Move the record behind `userCode` from `pending` to the decision —
+	 * atomically with the check that it *is* pending. A second decision must
+	 * answer `already_decided` with the first, never overwrite it: a user who
+	 * denied a phishing prompt could otherwise be talked into "just trying
+	 * again".
+	 */
+	decide(
+		keys: DeviceCodeKeyspace,
+		userCode: string,
+		nowMs: number,
+		input: DeviceCodeDecisionInput,
+	): Promise<DeviceCodeDecisionReply>;
+	/**
+	 * Atomically: enforce the polling interval, read the status, and — when
+	 * approved or denied — delete the pair so the answer is given once.
+	 *
+	 * Required behaviour, in this order:
+	 *
+	 *   - absent → `not_found`
+	 *   - `expiresAtMs <= nowMs` → `expired`, and the pair is deleted. This is
+	 *     measured against the caller's clock, not the key's TTL: the port's
+	 *     contract is the timestamp, and a record still inside its TTL must
+	 *     answer `expired` once the timestamp has passed.
+	 *   - polled within `intervalSeconds` of the previous poll → `slow_down`,
+	 *     with `intervalSeconds` grown by `slowDownIncrementSeconds` **and
+	 *     written back**, so the next gate measures against the grown value
+	 *     (RFC 8628 §3.5: "increased by 5 seconds for this and all subsequent
+	 *     requests"). The gate runs before the status read, so an over-eager
+	 *     poller is not rewarded with `approved`.
+	 *   - `denied` → `denied`, and the pair is deleted
+	 *   - `pending` → `pending`
+	 *   - `approved` → `approved` with the record, and the pair is deleted
+	 */
+	poll(
+		keys: DeviceCodeKeyspace,
+		deviceCode: string,
+		nowMs: number,
+		slowDownIncrementSeconds: number,
+	): Promise<DeviceCodePollReply>;
+	/** Delete the record and its index together. Absence is not an error. */
+	remove(keys: DeviceCodeKeyspace, deviceCode: string): Promise<void>;
+}
+
 // ---------------------------------------------------------------------------
 // ComponentMap augmentations: backing-client slots consumed by redis adapters.
 //
@@ -589,5 +749,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly federationTokenStoreClient?: FederationTokenStoreClient;
 		readonly rateLimiterClient?: RateLimiterClient;
 		readonly codeRepositoryClient?: CodeRepositoryClient;
+		readonly deviceCodeStoreClient?: DeviceCodeStoreClient;
 	}
 }

@@ -37,6 +37,13 @@ export type {
 	AccessTokenDenylistClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
+	CreateDeviceCodeRecordInput,
+	DeviceCodeDecisionInput,
+	DeviceCodeDecisionReply,
+	DeviceCodeKeyspace,
+	DeviceCodePollReply,
+	DeviceCodeRecordFields,
+	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,
@@ -70,6 +77,17 @@ export {
 	redisCodeRepositoryBuilder,
 	redisCodeRepositoryModule,
 } from "./code-repository.mjs";
+// ---------------------------------------------------------------------------
+// DeviceCodeStore (#433). The Redis half of the RFC 8628 device grant's
+// storage: the memory adapter in core is refused under `deployment.mode =
+// "multi"`, so this is what makes the grant usable in a scaled deployment.
+// ---------------------------------------------------------------------------
+export {
+	createRedisDeviceCodeStore,
+	type RedisDeviceCodeStoreOptions,
+	redisDeviceCodeStoreBuilder,
+	redisDeviceCodeStoreModule,
+} from "./device-code-store.mjs";
 // ---------------------------------------------------------------------------
 // DPoP replay store adapter (Wave 2 Phase 2 Sub-PR 2a) is exposed on the
 // dedicated `@o3co/auth-provider-redis/dpop` subpath rather than re-exported

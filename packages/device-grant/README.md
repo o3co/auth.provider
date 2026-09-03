@@ -47,7 +47,9 @@ const app = await createApp({
   // `sessionModule` is what puts the end user on `req.session`, and its
   // `session.*` config is what the verification route's CSRF guard is built
   // from — see "JSON only, behind the session CSRF guard" below.
-  modules: [oauthModule, sessionModule, deviceGrantModule, memoryDeviceCodeStoreModule /* dev only */],
+  // `memoryDeviceCodeStoreModule` is dev-only; a scaled deployment wires
+  // `redisDeviceCodeStoreModule` from `@o3co/auth-provider-redis` instead — see "Storage".
+  modules: [oauthModule, sessionModule, deviceGrantModule, memoryDeviceCodeStoreModule],
   bootstrapComponents: { config, clientRepository, keyStore, rateLimiter },
 });
 ```
@@ -144,11 +146,17 @@ A client must also be **allowed the grant before it can start it**: `POST /oauth
 
 ## Storage
 
-The `DeviceCodeStore` port lives in `@o3co/auth-provider-core`, not here, so an adapter author depends on core alone.
+The `DeviceCodeStore` port lives in `@o3co/auth-provider-core`, not here, so an adapter author depends on core alone. Two adapters ship, and which one is wired decides whether the deployment can scale:
 
-**Only the in-memory adapter ships today** (`memoryDeviceCodeStoreModule`). It is registered in core's replica-unsafe module list, so a composition with `deployment.mode = "multi"` **refuses to boot** with it: pending authorizations fork per replica, and the human approves a code on the replica that served the verification page while the device polls one that has never heard of it. A Redis adapter is tracked separately.
+- **`memoryDeviceCodeStoreModule`** (`@o3co/auth-provider-core`) — in-process; development and single-replica only. It is registered in core's replica-unsafe module list, so a composition with `deployment.mode = "multi"` **refuses to boot** with it: pending authorizations fork per replica, and the human approves a code on the replica that served the verification page while the device polls one that has never heard of it. The store is bounded three ways: every read path drops an expired record it finds, `create` sweeps expired records every 1000 calls, and `maxEntries` (default 10 000) caps the resident set — at the cap, expired records are pruned first and then the live record closest to expiry is evicted. Its `dispose` is registered with the boot planner's lifecycle registrar.
+- **`redisDeviceCodeStoreModule`** (`@o3co/auth-provider-redis`, #433) — what a scaled deployment runs. It requires the `deviceCodeStoreClient` slot, which `makeIoredisClients` provides off the shared connection, and is configured under `redisDeviceCodeStore.keyPrefix` (default `devauth:`). Every operation the port marks atomic is one Lua script, so the conformance suite's "two polls racing for one approval" case passes against a real Redis rather than only in sequence. With it wired, `deployment.mode = "multi"` boots.
 
-The memory store is bounded three ways: every read path drops an expired record it finds, `create` sweeps expired records every 1000 calls, and `maxEntries` (default 10 000) caps the resident set — at the cap, expired records are pruned first and then the live record closest to expiry is evicted. Its `dispose` is registered with the boot planner's lifecycle registrar.
+Two things about the Redis adapter are worth knowing before choosing it:
+
+- **Every device authorization shares one Redis Cluster slot.** The record is keyed by `device_code` and the `user_code → device_code` index by `user_code`; both are independent random values, and a script that follows the index to the record has to find both keys in the slot it was routed to. So both live under one constant hash tag — `devauth:{devauth}:code:<device_code>` and `devauth:{devauth}:user:<user_code>` — which concentrates the flow on a single slot. For a human-initiated ceremony that is an acceptable trade; this is not per-request traffic. The alternative, storing the record twice under each key, would make `approve`/`poll` non-atomic across the pair, which is what the port forbids.
+- **The TTL is not the expiry.** Both keys carry the authorization's `expiresAtMs` as their TTL so Redis reclaims them without a sweep, but `poll` answers `expired` from the timestamp: a record still inside its TTL whose deadline has passed on the caller's clock expires, and is dropped.
+
+The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceGrantModule` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
 
 Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363).
 

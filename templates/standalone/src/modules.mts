@@ -445,6 +445,19 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.subjectRevocationClient;
 		},
+		// #433: the device-code store client, off the same shared socket.
+		// `redisDeviceCodeStoreModule` requires it. This template does not
+		// mount the device grant, so nothing in `buildModules` selects that
+		// module today; the slot is provided anyway, because a deployment that
+		// adds `deviceGrantModule` to this manifest and picks the Redis store
+		// must not hit the `missing-required-component` boot failure the
+		// subject-level slots above already paid for (#439) — a Redis-branch
+		// module whose client slot this module did not provide, caught only by
+		// the umbrella e2e.
+		deviceCodeStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.deviceCodeStoreClient;
+		},
 	},
 });
 
