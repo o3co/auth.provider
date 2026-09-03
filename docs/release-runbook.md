@@ -166,6 +166,18 @@ until s=$(gh run view "$RUN" --json status --jq '.status'); [ "$s" = "completed"
 
 `gh run watch <run-id>` streams the workflow live and exits when the run completes. Prefer this over polling — it handles cancellation and shows live step progress.
 
+### Rebase artifacts in `## [Unreleased]`
+
+A rebase onto `develop` can leave the Unreleased section with a second `### Fixed` (or `### Added`, `### Security`) heading and entries repeated verbatim — the v0.11 pre-cut review found three entries duplicated up to four times. R6 step 2 renames the section as-is, so check before stamping:
+
+```bash
+# one heading per type under Unreleased, and no repeated entry openers
+awk '/^## \[Unreleased\]/{f=1} /^## \[[0-9]/{f=0} f && /^### /' CHANGELOG.md | sort | uniq -d
+awk '/^## \[Unreleased\]/{f=1} /^## \[[0-9]/{f=0} f && /^- \*\*/' CHANGELOG.md | sort | uniq -d
+```
+
+Both commands print nothing when the section is clean. Order is Added / Changed / Removed / Fixed / Security (as in `v0.9.0`).
+
 ### Dependency bumps merged just before tag
 
 Dependabot PRs landing between the audit and the tag invalidate the audit's diff range. Re-run the cumulative audit if any non-trivial dependency change lands after the audit started.
