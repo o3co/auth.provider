@@ -57,6 +57,14 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * what makes resolving it through a pluggable {@link AssertionVerifier} a
  * conforming choice rather than a deviation.
  *
+ * ## Who may use it
+ *
+ * An authenticated client needs `allowedGrantTypes` to name this grant: the
+ * handler declares `requiresExplicitGrantAllowlist`, so an absent allowlist
+ * denies at dispatch (#326) rather than admitting by omission, the rule
+ * `client_credentials` and the device grant already follow. A caller with no
+ * client identity is outside that check by construction.
+ *
  * ## The boundary this does not cross
  *
  * Verification proves **possession**; the Store decides **identity**. This
@@ -95,6 +103,14 @@ export const createJwtBearerGrant = (
 	const { requireEmailVerified } = resolveOAuthOptions(config);
 
 	return {
+		// #326: a device credential is a standing capability of a registration,
+		// not a per-user ceremony — like `client_credentials` and the device
+		// grant, a client registered before `allowedGrantTypes` existed must
+		// not acquire this grant by omission. Dispatch enforces the denial
+		// before `handle` runs; an unauthenticated caller (RFC 7523 §3 makes
+		// client authentication optional) has no allowlist to consult and is
+		// unaffected.
+		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const rawAssertion = ctx.body.assertion;
 			if (typeof rawAssertion !== "string" || rawAssertion.length === 0) {

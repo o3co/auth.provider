@@ -121,6 +121,16 @@ describe("jwt-bearer grant — the happy path (#301)", () => {
 		expect(authenticateByToken).toHaveBeenCalledWith("device:from-verifier");
 	});
 
+	it("declares requiresExplicitGrantAllowlist: true on the handler contract (#326)", () => {
+		// A device credential is a standing capability of a registration, not a
+		// per-user ceremony: like client_credentials and the device grant, a
+		// client registered before `allowedGrantTypes` existed must not acquire
+		// it by omission. Dispatch refuses an absent allowlist for handlers
+		// that declare this; an unauthenticated caller has no allowlist to
+		// consult and is unaffected.
+		expect(build({}).requiresExplicitGrantAllowlist).toBe(true);
+	});
+
 	it("works without an authenticated client — RFC 7523 §3 makes that optional", async () => {
 		// The property token exchange refuses ("does not support public
 		// clients") and the reason this is a separate grant.
