@@ -174,6 +174,7 @@ out-of-tree adapter can import and run:
 | `SubjectRevocation` | `packages/core/src/user-sessions/__tests__/subjectRevocation.contract.mts` |
 | `AccessTokenDenylist` | `packages/core/src/access-token-denylist/__tests__/adapters.contract.mts` |
 | `ChallengeStore` | `packages/core/src/challenges/__tests__/adapters.contract.mts` |
+| `DeviceCodeStore` | `packages/core/src/device-authorization/__tests__/adapters.contract.mts` |
 | `ReplaySeenSet` | `packages/core/src/replay-seen-set/__tests__/adapters.contract.mts` |
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |
 | `WebAuthnCredentialStore` | `packages/core/src/webauthn-credentials/__tests__/adapters.contract.mts` |
