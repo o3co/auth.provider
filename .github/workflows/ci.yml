@@ -85,7 +85,7 @@ jobs:
           PATTERN='UserSessionStoreBase|RefreshTokenStoreBase|SingleUseTokenStore'
           HITS=$(grep -rnE "$PATTERN" packages/ templates/ create-app/ --include='*.mts' --include='*.ts' 2>/dev/null | grep -v '/dist/' | grep -vE ':[[:space:]]*(//|\*|/\*)' || true)
           if [ -n "$HITS" ]; then
-            echo "::error::Legacy v0.4.x slot types referenced in code (must be removed in v0.5.0):"
+            echo "::error::Legacy v0.4.x slot types referenced in code (removed in v0.5.0):"
             echo "$HITS"
             exit 1
           fi
