@@ -38,16 +38,24 @@ const otherAuthority = generateKeyPairSync("ed25519");
 
 const mint = async (
 	claims: Record<string, unknown> = {},
-	opts: { iss?: string; aud?: string; key?: typeof authority.privateKey; expSec?: number } = {},
+	opts: {
+		iss?: string;
+		aud?: string;
+		key?: typeof authority.privateKey;
+		/** `null` omits `exp` altogether — the RFC 7523 §3 item 4 refusal. */
+		expSec?: number | null;
+		iatSec?: number;
+	} = {},
 ): Promise<string> => {
 	const builder = new SignJWT({ ...claims })
 		.setProtectedHeader({ alg: "EdDSA" })
 		.setIssuer(opts.iss ?? ISSUER)
 		.setAudience(opts.aud ?? AUDIENCE)
-		.setIssuedAt();
-	return builder
-		.setExpirationTime(opts.expSec ?? Math.floor(Date.now() / 1000) + 300)
-		.sign(opts.key ?? authority.privateKey);
+		.setIssuedAt(opts.iatSec);
+	if (opts.expSec !== null) {
+		builder.setExpirationTime(opts.expSec ?? Math.floor(Date.now() / 1000) + 300);
+	}
+	return builder.sign(opts.key ?? authority.privateKey);
 };
 
 const verifier = (overrides: Record<string, unknown> = {}) =>
@@ -116,6 +124,27 @@ describe("createJwtAssertionVerifier — what it refuses (#301)", () => {
 			await mint({ sub: "device:abc" }, { expSec: Math.floor(Date.now() / 1000) - 3600 }),
 		);
 		expect(result).toBeNull();
+	});
+
+	it("refuses an assertion that carries no exp at all", async () => {
+		// RFC 7523 §3 item 4: "The JWT MUST contain an exp claim". jose only
+		// validates `exp` when it is present, so without naming it as required
+		// an assertion that simply omits it never expires — and a device
+		// credential that never expires is one whose theft is permanent.
+		expect(await verifier().verify(await mint({ sub: "device:abc" }, { expSec: null }))).toBeNull();
+	});
+
+	it("refuses an exp-less assertion however fresh its iat claims to be", async () => {
+		// The requirement is presence, not age: a freshly minted assertion
+		// without `exp` is refused exactly like a ten-year-old one. Otherwise
+		// `iat` would become a substitute lifetime the RFC never gave it.
+		const now = Math.floor(Date.now() / 1000);
+		const tenYears = 10 * 365 * 24 * 3600;
+		for (const iatSec of [now, now - tenYears]) {
+			expect(
+				await verifier().verify(await mint({ sub: "device:abc" }, { expSec: null, iatSec })),
+			).toBeNull();
+		}
 	});
 
 	it("refuses an assertion whose algorithm is not on the list", async () => {
