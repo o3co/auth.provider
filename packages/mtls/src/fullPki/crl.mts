@@ -226,7 +226,10 @@ const verifySignature = async (
 	try {
 		verified = await crl.verify({ issuerCertificate: issuer });
 	} catch (err) {
-		return { ok: false, detail: `signature check failed: ${(err as Error).message}` };
+		return {
+			ok: false,
+			detail: `signature check failed: ${err instanceof Error ? err.message : String(err)}`,
+		};
 	}
 	return verified
 		? { ok: true }
@@ -308,7 +311,7 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 			return {
 				ok: false,
 				reason: "unparseable",
-				detail: `not a DER CRL (${(err as Error).message})`,
+				detail: `not a DER CRL (${err instanceof Error ? err.message : String(err)})`,
 			};
 		}
 	};
