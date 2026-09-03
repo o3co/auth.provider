@@ -125,6 +125,49 @@ describe("guarded fetch — destination", () => {
 			reason: "redirect_refused",
 		});
 	});
+
+	it("names a refused redirect when the platform fetch wraps the reason in `cause`", async () => {
+		// undici — Node's fetch — surfaces `redirect: "error"` as
+		// TypeError("fetch failed") with the actual reason on `cause`. Matching
+		// only the top-level message read every refused redirect as a generic
+		// network error in production logs, which is the one limit the audit
+		// trail most needs to name.
+		const fetchImpl = vi.fn(async () => {
+			throw new TypeError("fetch failed", { cause: new Error("unexpected redirect") });
+		});
+		const get = createGuardedFetch({
+			...options,
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect(await get("http://crl.example.test/a.crl")).toMatchObject({
+			ok: false,
+			reason: "redirect_refused",
+		});
+	});
+
+	it("matches an IPv6 literal in the allowlist against the URL's bracketed hostname", async () => {
+		// WHATWG `URL.hostname` keeps the brackets on an IPv6 literal (`[::1]`)
+		// while the allowlist parser stripped them, so an IPv6 entry could never
+		// match. Both sides are normalised to the canonical bracket-less form.
+		const fetchImpl = vi.fn(async () => okResponse(new Uint8Array([1])));
+		const get = createGuardedFetch({
+			...options,
+			allowedHosts: ["[::1]:8080", "[fd00:0:0:0:0:0:0:7]", "2001:db8::1"],
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect((await get("http://[::1]:8080/a.crl")).ok).toBe(true);
+		// A port-qualified entry still refuses another port.
+		expect(await get("http://[::1]:9090/a.crl")).toMatchObject({
+			ok: false,
+			reason: "host_not_allowed",
+		});
+		// An entry in expanded form matches the URL's compressed serialisation.
+		expect((await get("http://[fd00::7]/a.crl")).ok).toBe(true);
+		// A bare literal without brackets is a host, not `host:port`.
+		expect((await get("http://[2001:db8::1]/a.crl")).ok).toBe(true);
+	});
 });
 
 describe("guarded fetch — response limits", () => {
