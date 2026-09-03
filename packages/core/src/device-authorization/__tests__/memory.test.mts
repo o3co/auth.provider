@@ -191,3 +191,43 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 		expect(DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES).toBeGreaterThan(2);
 	});
 });
+
+describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
+	const record = (n: number, expiresAtMs: number) => ({
+		deviceCode: `edge-dc-${n}`,
+		userCode: `edge-uc-${n}`,
+		clientId: "c",
+		expiresAtMs,
+		intervalSeconds: 5,
+	});
+
+	it("drops a record with a non-finite expiry on sight when the cap is reached", async () => {
+		// `Infinity` compares false against everything, so a closest-to-expiry
+		// scan would never pick it and the cap loop would never make progress.
+		// It is the record least entitled to stay, so it is the one evicted.
+		const base = Date.now();
+		const store = createMemoryDeviceCodeStore({ maxEntries: 1 });
+		await store.create(record(1, Number.POSITIVE_INFINITY));
+		await store.create(record(2, base + 100_000));
+
+		expect(store.size()).toBe(1);
+		expect(await store.findPendingByUserCode("edge-uc-1", base)).toBeNull();
+		expect(await store.findPendingByUserCode("edge-uc-2", base)).not.toBeNull();
+	});
+
+	it("answers already_decided when a decided record is denied", async () => {
+		const base = Date.now();
+		const store = createMemoryDeviceCodeStore();
+		await store.create(record(3, base + 100_000));
+		expect(await store.approve({ userCode: "edge-uc-3", subject: "u", nowMs: base })).toMatchObject(
+			{
+				status: "ok",
+			},
+		);
+
+		expect(await store.deny("edge-uc-3", base)).toEqual({
+			status: "already_decided",
+			current: "approved",
+		});
+	});
+});

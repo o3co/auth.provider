@@ -226,20 +226,32 @@ const disabledRoute = (id: string, mountPath: string) => {
  * session at all, where the guard would have no signing key and no cookie
  * name and the endpoint would be mounted with no CSRF defence.
  */
+const SAME_SITE_VALUES: ReadonlySet<unknown> = new Set(["lax", "strict", "none"]);
+
 const requireSessionSlice = (deps: AnyDeps): SessionCsrfConfigSlice => {
-	const session = deps.config?.session as SessionCsrfConfigSlice | undefined;
-	if (session === undefined || typeof session.secret !== "string" || session.secret === "") {
+	const session = deps.config?.session as Partial<SessionCsrfConfigSlice> | undefined;
+	// Every field `createCsrfProtectionFromConfig` reads is checked here, not
+	// just the secret: a slice with no `name` would mint a cookie called
+	// `undefined.csrf`, and one with no `secure`/`sameSite` would set cookie
+	// attributes the operator never chose. Refuse the whole slice instead.
+	const missing: string[] = [];
+	if (typeof session?.secret !== "string" || session.secret === "") missing.push("session.secret");
+	if (typeof session?.name !== "string" || session.name === "") missing.push("session.name");
+	if (typeof session?.secure !== "boolean") missing.push("session.secure");
+	if (!SAME_SITE_VALUES.has(session?.sameSite)) missing.push("session.sameSite");
+	if (missing.length > 0) {
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires the " +
-				"`session` config slice (session.secret, session.name, ...). " +
+				`\`session\` config slice; missing or invalid: ${missing.join(", ")}. ` +
 				"POST /oauth/device/verification runs inside the end-user session and is " +
 				"guarded by the same CSRF policy as /session/login — a signed double-submit " +
-				"token derived from session.secret, and an Origin/Referer check against " +
+				"token derived from session.secret, a cookie named from session.name with " +
+				"session.secure / session.sameSite, and an Origin/Referer check against " +
 				"session.csrf.trustedOrigins — so without the slice the guard cannot be built " +
 				"and the endpoint cannot be mounted safely.",
 		);
 	}
-	return session;
+	return session as SessionCsrfConfigSlice;
 };
 
 /**

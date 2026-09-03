@@ -168,9 +168,11 @@ export const createMemoryDeviceCodeStore = (
 	};
 
 	/**
-	 * Evict the record closest to expiry. Insertion order is the fallback
-	 * so the caller's `while (size >= max)` loop always makes progress —
-	 * a non-finite `expiresAtMs` compares false against everything.
+	 * Evict the record closest to expiry. A non-finite `expiresAtMs` compares
+	 * false against everything, so it is dropped on sight rather than left to
+	 * win every comparison — that is what keeps the caller's
+	 * `while (size >= max)` loop making progress. The loop only runs on a
+	 * non-empty map, so one of the two branches always drops something.
 	 */
 	const evictEarliestExpiring = (): void => {
 		let victim: Entry | undefined;
@@ -181,12 +183,7 @@ export const createMemoryDeviceCodeStore = (
 			}
 			if (victim === undefined || entry.expiresAtMs < victim.expiresAtMs) victim = entry;
 		}
-		if (victim !== undefined) {
-			drop(victim);
-			return;
-		}
-		const first = byDeviceCode.values().next().value;
-		if (first !== undefined) drop(first);
+		if (victim !== undefined) drop(victim);
 	};
 
 	/** Read-path reclamation: an expired record is dropped by whoever finds it. */

@@ -289,4 +289,19 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).toThrow(/session/);
 	});
+
+	it.each([
+		["name", { ...SESSION_SLICE, name: undefined }, /session\.name/],
+		["secure", { ...SESSION_SLICE, secure: "false" }, /session\.secure/],
+		["sameSite", { ...SESSION_SLICE, sameSite: "loose" }, /session\.sameSite/],
+		["secret", { ...SESSION_SLICE, secret: "" }, /session\.secret/],
+	])("refuses a session slice whose %s the guard would misuse", (_field, session, expected) => {
+		// `createCsrfProtectionFromConfig` reads secret, name, secure and
+		// sameSite. A slice that has the secret but not the rest would mint a
+		// cookie called `undefined.csrf` with attributes nobody chose; the
+		// refusal names the field so the operator knows what to add.
+		const { deps } = makeDeps({ session });
+		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).toThrow(expected);
+	});
 });

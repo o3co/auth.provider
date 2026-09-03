@@ -40,6 +40,8 @@ oauth.deviceAuthorization {
 ```ts
 import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { memoryDeviceCodeStoreModule } from "@o3co/auth-provider-core";
+import { oauthModule } from "@o3co/auth-provider-oauth";
+import { sessionModule } from "@o3co/auth-provider-session";
 
 const app = await createApp({
   // `sessionModule` is what puts the end user on `req.session`, and its
