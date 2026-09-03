@@ -40,8 +40,8 @@
 		"openid-client": "^6.8.7"
 	},
 	"peerDependencies": {
-		"@o3co/auth-provider-core": "^0.0.0",
-		"@o3co/auth-provider-session": "^0.0.0"
+		"@o3co/auth-provider-core": "workspace:^",
+		"@o3co/auth-provider-session": "workspace:^"
 	},
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",

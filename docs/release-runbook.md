@@ -181,3 +181,16 @@ Both commands print nothing when the section is clean. Order is Added / Changed 
 ### Dependency bumps merged just before tag
 
 Dependabot PRs landing between the audit and the tag invalidate the audit's diff range. Re-run the cumulative audit if any non-trivial dependency change lands after the audit started.
+
+### `pnpm version` rewrites only `version`
+
+Step 2 of `release.yml` sets every package's `version` from the tag and nothing else. A sibling range written as a literal (`"@o3co/auth-provider-core": "^0.0.0"`) is published verbatim — and `^0.0.0` means `<0.0.1`, which no released sibling satisfies: pnpm warns on install, npm 7+ fails `ERESOLVE`. `v0.10.0` shipped that way — `npm view @o3co/auth-provider-dpop@0.10.0 peerDependencies` still answers `^0.0.0`.
+
+Sibling peers are therefore declared as `workspace:^`, which `pnpm pack` / `pnpm publish` rewrite to `^<sibling version>` at pack time, so the range tracks the tag with no second rewrite step. The matching `devDependencies` stay `workspace:*` — that is what satisfies the peer inside the workspace and in the runtime image. The `publish-readiness` CI job asserts both the source spec and the packed manifest, so a package that copies a literal range fails on the PR rather than on the registry. To see what a tag would publish, run the version step locally and inspect a tarball, then restore:
+
+```bash
+pnpm -r exec pnpm version 0.0.0-check --no-git-tag-version --no-commit-hooks
+(cd packages/dpop && pnpm pack --pack-destination /tmp/tarballs)
+tar -xzOf /tmp/tarballs/o3co-auth-provider-dpop-0.0.0-check.tgz package/package.json | jq .peerDependencies
+git checkout -- ':(glob)**/package.json'
+```

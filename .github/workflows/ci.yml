@@ -251,6 +251,38 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
 
+      - name: Assert sibling peer ranges are workspace:^
+        run: |
+          set -euo pipefail
+          # Sibling packages must be declared as `workspace:^` in peerDependencies.
+          # release.yml sets the version with `pnpm version`, which rewrites only the
+          # `version` field — a literal range such as `^0.0.0` is published verbatim,
+          # and `^0.0.0` means `<0.0.1`, which no released sibling satisfies (pnpm
+          # warns, npm 7+ fails ERESOLVE). `workspace:^` is rewritten by `pnpm pack` /
+          # `pnpm publish` to `^<version>` of the sibling at pack time, so the range
+          # tracks the release without a second rewrite step. The tarball assertion
+          # below cannot catch this on its own: at 0.0.0 a literal `^0.0.0` and a
+          # rewritten `workspace:^` produce the same manifest.
+          node - <<'EOF'
+          const fs = require("node:fs");
+          const failures = [];
+          for (const dir of fs.readdirSync("packages")) {
+            const path = `packages/${dir}/package.json`;
+            if (!fs.existsSync(path)) continue;
+            const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
+            for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
+              if (!name.startsWith("@o3co/auth-provider-")) continue;
+              if (range !== "workspace:^") failures.push(`${path}: peerDependencies["${name}"] is "${range}"`);
+            }
+          }
+          if (failures.length > 0) {
+            console.error("::error::sibling peer ranges must be \"workspace:^\" so pnpm rewrites them to ^<version> at pack time:");
+            for (const f of failures) console.error(`  ${f}`);
+            process.exit(1);
+          }
+          console.log("OK: every @o3co/auth-provider-* peer range is workspace:^");
+          EOF
+
       - name: Pack all @o3co/auth-provider-* packages
         run: |
           set -euo pipefail
@@ -345,6 +377,51 @@ jobs:
             exit 1
           fi
           echo "OK: no '#/' subpath imports in any published tarball's dist/"
+
+      - name: Assert packed manifests carry ^<version> sibling peer ranges
+        run: |
+          set -euo pipefail
+          # The packed manifest is what a consumer installs, so assert the rewrite on
+          # it rather than trusting pnpm: every @o3co/auth-provider-* peer must be
+          # `^<version of that sibling's own tarball>`, and no `workspace:` protocol
+          # may survive in any dependency section (npm cannot install it —
+          # EUNSUPPORTEDPROTOCOL). Versions are read from the tarballs, not from the
+          # checkout, so the check holds at 0.0.0 on CI and at the tag version in a
+          # local release simulation alike.
+          TARBALL_DIR=/tmp/tarballs
+          node - "$TARBALL_DIR" <<'EOF'
+          const { execFileSync } = require("node:child_process");
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const dir = process.argv[2];
+          const manifests = fs
+            .readdirSync(dir)
+            .filter((f) => f.endsWith(".tgz"))
+            .map((f) => JSON.parse(execFileSync("tar", ["-xzOf", path.join(dir, f), "package/package.json"], { encoding: "utf8" })));
+          const packed = new Map(manifests.map((m) => [m.name, m.version]));
+          const failures = [];
+          for (const m of manifests) {
+            for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+              for (const [name, range] of Object.entries(m[section] ?? {})) {
+                if (String(range).startsWith("workspace:")) failures.push(`${m.name}@${m.version}: ${section}["${name}"] is "${range}" (workspace protocol survived packing)`);
+              }
+            }
+            for (const [name, range] of Object.entries(m.peerDependencies ?? {})) {
+              if (!name.startsWith("@o3co/auth-provider-")) continue;
+              const sibling = packed.get(name);
+              const expected = sibling === undefined ? undefined : `^${sibling}`;
+              if (expected === undefined) failures.push(`${m.name}@${m.version}: peer ${name} was not packed alongside it`);
+              else if (range !== expected) failures.push(`${m.name}@${m.version}: peerDependencies["${name}"] is "${range}", expected "${expected}"`);
+            }
+          }
+          if (manifests.length === 0) { console.error(`::error::no tarballs found in ${dir}`); process.exit(1); }
+          if (failures.length > 0) {
+            console.error("::error::published manifests would carry unsatisfiable or unresolvable sibling ranges:");
+            for (const f of failures) console.error(`  ${f}`);
+            process.exit(1);
+          }
+          console.log(`OK: ${manifests.length} packed manifests carry ^<version> sibling peer ranges and no workspace: protocol`);
+          EOF
 
       - name: Check versions.json sync
         run: node create-app/scripts/check-versions-json.mjs
