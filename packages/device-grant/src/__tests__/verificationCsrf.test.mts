@@ -87,6 +87,10 @@ const makeDeps = (overrides: { session?: unknown } = {}) => {
 					"verification-uri-complete": false,
 					"code-lifetime-seconds": 600,
 					"polling-interval-seconds": 5,
+					// Present because the module refuses to mount without it (#448);
+					// the limiter below declares the prefix explicitly, so the seed
+					// never runs here and the numbers need not agree.
+					rateLimit: { limit: 50, windowSeconds: 300 },
 				},
 			},
 			rateLimit: { failMode: "open" },

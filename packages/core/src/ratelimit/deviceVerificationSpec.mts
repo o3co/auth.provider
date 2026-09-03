@@ -24,6 +24,31 @@ import type { RateLimitSpec } from "./types.mjs";
  */
 export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
 
+const isPositiveInteger = (value: unknown): value is number =>
+	typeof value === "number" && Number.isInteger(value) && value > 0;
+
+/**
+ * Is `value` a budget the verification endpoint can be limited by — a
+ * positive-integer `limit` and `windowSeconds`?
+ *
+ * The one definition of that shape (#448). The seed below answers "leave the
+ * adapter's default in place" for anything else, and `deviceGrantModule`
+ * answers "refuse to boot" for anything else; with two definitions those
+ * two answers could be given for different inputs, and the gap between them
+ * is a deployment whose boot refusal reasons from five attempts while the
+ * limiter applies sixty. `docs/design-vocabulary.md` maps the concept here,
+ * and the drift guard keeps a second definition from appearing.
+ *
+ * `0` is what an empty environment variable coerces to; a zero-attempt
+ * budget locks every user out and a zero window is not a window. Both are
+ * refused for the same reason the device-grant schema refuses them.
+ */
+export const isDeviceVerificationRateLimitSpec = (value: unknown): value is RateLimitSpec => {
+	if (value === null || typeof value !== "object") return false;
+	const { limit, windowSeconds } = value as { limit?: unknown; windowSeconds?: unknown };
+	return isPositiveInteger(limit) && isPositiveInteger(windowSeconds);
+};
+
 /**
  * Seed a rate-limiter adapter's `limits` with the device-verification spec
  * drawn from `config.oauth.deviceAuthorization.rateLimit`.
@@ -44,9 +69,10 @@ export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
  * prefix explicitly — an explicit `limits.device_verification` is a statement
  * about this adapter and wins.
  *
- * The values are screened structurally even though the device-grant schema
- * validates them: a hand-built config never passed that schema, and a limit
- * invented from `0` or `"5"` is worse than the adapter's own default.
+ * The values are screened with `isDeviceVerificationRateLimitSpec` even
+ * though the device-grant schema validates them: a hand-built config never
+ * passed that schema, and a limit invented from `0` or `"5"` is worse than
+ * the adapter's own default.
  *
  * @param limits  The adapter's own configured limits.
  * @param config  The full application config (only
@@ -59,22 +85,13 @@ export const resolveDeviceVerificationLimitSpec = (
 	const result: Record<string, RateLimitSpec> = { ...limits };
 	if (result[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] !== undefined) return result;
 
-	const spec = (
-		config as
-			| {
-					oauth?: {
-						deviceAuthorization?: { rateLimit?: { limit?: unknown; windowSeconds?: unknown } };
-					};
-			  }
-			| undefined
-	)?.oauth?.deviceAuthorization?.rateLimit;
-	const limit = spec?.limit;
-	const windowSeconds = spec?.windowSeconds;
-	if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) return result;
-	if (typeof windowSeconds !== "number" || !Number.isInteger(windowSeconds) || windowSeconds <= 0) {
-		return result;
-	}
+	const spec = (config as { oauth?: { deviceAuthorization?: { rateLimit?: unknown } } } | undefined)
+		?.oauth?.deviceAuthorization?.rateLimit;
+	if (!isDeviceVerificationRateLimitSpec(spec)) return result;
 
-	result[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] = { limit, windowSeconds };
+	result[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] = {
+		limit: spec.limit,
+		windowSeconds: spec.windowSeconds,
+	};
 	return result;
 };

@@ -89,6 +89,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/config/removed-keys.mts",
 		definition: /(?:function|const)\s+withRemovedKeys\b/,
 	},
+	{
+		concept: "device-verification budget shape (#448)",
+		home: "packages/core/src/ratelimit/deviceVerificationSpec.mts",
+		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
+	},
 ];
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */

@@ -44,14 +44,39 @@
  *      with an amortized sweep every `sweepInterval` creates, so a record
  *      nobody asks about again is reclaimed within one interval;
  *   3. `maxEntries` caps the resident set outright. At the cap, expired
- *      records are pruned first; if the set is still full, the live record
- *      closest to expiry is evicted — the least harm under a flood, since it
- *      is the one about to be reclaimed anyway.
+ *      records are reclaimed first; if every resident record is still live,
+ *      `create` refuses with `DeviceCodeStoreError { reason: "full" }`
+ *      rather than evicting one.
  *
  * The optional timer stays for deployments that want zero-lag reclamation;
  * it is no longer what bounds the store.
+ *
+ * ### Why the cap refuses instead of evicting (#445)
+ *
+ * The first cut evicted the live record closest to expiry, on the argument
+ * that it was the least harm — the one about to be reclaimed anyway. Under
+ * the flood that actually reaches the cap that argument inverts: every
+ * attacker record carries the newest expiry, so the records closest to
+ * expiry are precisely the pre-existing ones — a human's pending approval,
+ * an approval a device has not yet polled for — and all of them were
+ * evicted before a single one of the attacker's. Roughly seventeen IPs at
+ * the default 60/min reach 10 000 inside one 600 s code lifetime.
+ *
+ * The sibling caps evict because what they hold is reconstructible: an
+ * evicted rate-limit bucket is a counter that resets, an evicted CRL cache
+ * entry is a fetch that repeats. A device authorization is neither —
+ * nothing can re-derive an approval the user already gave — so the answer
+ * is the fail-closed one every other refusal in this repository gives: keep
+ * what was issued, refuse what is new. The refused `create` comes from
+ * `POST /oauth/device_authorization`, which sits behind the per-IP
+ * rate-limit guard, so the flooder is the one told to come back later and a
+ * legitimate device retries into a slot the next expiry frees. Evicting
+ * same-`clientId` records first was considered and rejected: device clients
+ * are public (RFC 8628 §5.6), so a flood is sent *as* the legitimate client,
+ * and that policy would evict its real users first all the same.
  */
 
+import { DeviceCodeStoreError } from "./errors.mjs";
 import type {
 	ApproveDeviceAuthorizationInput,
 	CreateDeviceAuthorizationInput,
@@ -161,29 +186,18 @@ export const createMemoryDeviceCodeStore = (
 		byUserCode.delete(entry.userCode);
 	};
 
+	/**
+	 * Drop every record that can no longer be approved, plus any whose expiry
+	 * is not a finite number: `NaN` and `Infinity` never satisfy
+	 * `expiresAtMs <= now`, so without this they would sit in the map until
+	 * process exit and, under a cap that refuses rather than evicts, hold a
+	 * slot forever. A record that can never expire is the one least entitled
+	 * to stay.
+	 */
 	const sweep = (nowMs: number): void => {
 		for (const entry of [...byDeviceCode.values()]) {
-			if (entry.expiresAtMs <= nowMs) drop(entry);
+			if (!Number.isFinite(entry.expiresAtMs) || entry.expiresAtMs <= nowMs) drop(entry);
 		}
-	};
-
-	/**
-	 * Evict the record closest to expiry. A non-finite `expiresAtMs` compares
-	 * false against everything, so it is dropped on sight rather than left to
-	 * win every comparison — that is what keeps the caller's
-	 * `while (size >= max)` loop making progress. The loop only runs on a
-	 * non-empty map, so one of the two branches always drops something.
-	 */
-	const evictEarliestExpiring = (): void => {
-		let victim: Entry | undefined;
-		for (const entry of byDeviceCode.values()) {
-			if (!Number.isFinite(entry.expiresAtMs)) {
-				drop(entry);
-				return;
-			}
-			if (victim === undefined || entry.expiresAtMs < victim.expiresAtMs) victim = entry;
-		}
-		if (victim !== undefined) drop(victim);
 	};
 
 	/** Read-path reclamation: an expired record is dropped by whoever finds it. */
@@ -224,7 +238,16 @@ export const createMemoryDeviceCodeStore = (
 			}
 			if (byDeviceCode.size >= maxEntries) {
 				sweep(Date.now());
-				while (byDeviceCode.size >= maxEntries) evictEarliestExpiring();
+				if (byDeviceCode.size >= maxEntries) {
+					// Every resident record is live. See "Why the cap refuses
+					// instead of evicting" in the file header (#445).
+					throw new DeviceCodeStoreError({
+						reason: "full",
+						message:
+							`memory DeviceCodeStore is at its cap of ${maxEntries} live device ` +
+							"authorizations; refusing this one rather than evicting one already issued",
+					});
+				}
 			}
 			const entry: Entry = {
 				deviceCode: input.deviceCode,

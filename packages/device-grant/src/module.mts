@@ -68,7 +68,9 @@ import {
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
+	isDeviceVerificationRateLimitSpec,
 	type RateLimitFailMode,
+	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import {
@@ -88,8 +90,9 @@ import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
  * user code against. `.int().positive()` is load-bearing: `0` is what an
  * empty environment variable coerces to, and a zero-attempt budget locks
  * every user out while a zero window is not a window. Core's
- * `resolveDeviceVerificationLimitSpec` screens the same bounds structurally
- * for configs that never passed this schema.
+ * `isDeviceVerificationRateLimitSpec` states the same bounds structurally
+ * for configs that never passed this schema; the limiter-module seed and
+ * `requireVerificationRateLimit` below both read that one definition (#448).
  */
 const rateLimitSpecSchema = z.object({
 	limit: z.number().int().positive(),
@@ -157,8 +160,11 @@ interface DeviceAuthorizationConfigSlice {
 	readonly "verification-uri-complete": boolean;
 	readonly "code-lifetime-seconds": number;
 	readonly "polling-interval-seconds": number;
-	/** Read by core's limiter modules when they seed `limits`, not here. */
-	readonly rateLimit?: { readonly limit: number; readonly windowSeconds: number };
+	/**
+	 * Applied by core's limiter modules when they seed `limits`, not here;
+	 * here it is only required to be present and usable (#448).
+	 */
+	readonly rateLimit?: unknown;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`
@@ -286,6 +292,36 @@ const requireRateLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> 
 	return deps.rateLimiter;
 };
 
+/**
+ * #448: the budget the refusal above reasons from has to be one the limiter
+ * was actually seeded with.
+ *
+ * The limiter applies five attempts to `device_verification:` only because
+ * its adapter module seeded that prefix from
+ * `oauth.deviceAuthorization.rateLimit`, and the seed leaves the adapter's
+ * 60/60s default in place — deliberately — when the key is missing or
+ * unusable. A composition booted through `createApp` cannot reach here
+ * without the key, because the schema defaults it; a hand-built config never
+ * passed the schema, and its verification endpoint ran on twelve times the
+ * budget the `rateLimiter` requirement argues from, with no symptom. The
+ * check is the seed's own predicate, so what this refuses and what the seed
+ * declines to apply are the same set of inputs.
+ */
+const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): RateLimitSpec => {
+	const spec = slice.rateLimit;
+	if (!isDeviceVerificationRateLimitSpec(spec)) {
+		throw new Error(
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
+				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds } as positive " +
+				"integers. It is the budget RFC 8628 §5.1 sizes the user code against and " +
+				"the value the limiter adapter seeds `device_verification` from; without " +
+				"it POST /oauth/device/verification would run on the adapter's default " +
+				"budget, which is not the number the rateLimiter requirement reasons from.",
+		);
+	}
+	return spec;
+};
+
 export const deviceGrantModule = defineModule({
 	name: "device-grant",
 	configSchema: deviceGrantConfigSchema,
@@ -406,6 +442,10 @@ export const deviceGrantModule = defineModule({
 				// alone, for the reason the three actions are one route: no
 				// way to add a fourth that forgets it.
 				const sessionSlice = requireSessionSlice(deps);
+				// The budget this route is limited by is applied inside the
+				// limiter, seeded from config; asserting it here is what makes
+				// the `rateLimiter` requirement mean five attempts (#448).
+				requireVerificationRateLimit(slice);
 				router.post(
 					"/",
 					createCsrfGuard({

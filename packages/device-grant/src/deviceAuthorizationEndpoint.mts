@@ -65,6 +65,7 @@
 
 import type { AuthenticatedClient } from "@o3co/auth-provider-core";
 import {
+	DeviceCodeStoreError,
 	generateDeviceCode,
 	generateUserCode,
 	isGrantTypeAllowed,
@@ -199,6 +200,14 @@ export const createDeviceAuthorizationHandler = (
 		// store refuses it rather than overwriting, and the honest response to
 		// that is to draw again — not to hand the caller an error for a
 		// condition it did not cause and cannot fix.
+		//
+		// A full store is the other refusal, and the opposite response (#445):
+		// the store is at its cap with every record live and keeps those
+		// rather than evict one for this request, so the slot was refused,
+		// not the code, and re-drawing cannot help. RFC 6749 §5.2's
+		// `temporarily_unavailable` — "temporary overloading" — is exactly
+		// the condition; the per-IP guard mounted ahead of this handler
+		// bounds how often one caller can be told so.
 		let created: { deviceCode: string; userCode: string } | null = null;
 		let lastError: unknown = null;
 		for (let attempt = 0; attempt < CODE_COLLISION_RETRIES; attempt++) {
@@ -223,6 +232,14 @@ export const createDeviceAuthorizationHandler = (
 				created = { deviceCode, userCode: displayCode };
 				break;
 			} catch (err) {
+				if (err instanceof DeviceCodeStoreError && err.reason === "full") {
+					options.logger?.warn({ clientId: client.clientId }, "device_authorization_store_full");
+					fail(res, 503, {
+						error: "temporarily_unavailable",
+						error_description: "no capacity for a new device authorization; retry later",
+					});
+					return;
+				}
 				lastError = err;
 			}
 		}
