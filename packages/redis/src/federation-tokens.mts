@@ -3,6 +3,54 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+/**
+ * Redis-backed `FederationTokenStore`.
+ *
+ * ## What is written under `${keyPrefix}${sid}:${federationName}` (#293)
+ *
+ * One JSON wrapper carrying a format version and the record:
+ *
+ * ```
+ * mode = "required"         { "v": 2, "c": "<AES-256-GCM ciphertext of the JSON envelope>" }
+ * mode = "allow-plaintext"  { "v": 2, "p": { ...envelope } }
+ * ```
+ *
+ * The *whole* envelope — `accessToken`, `refreshToken`, `idToken`,
+ * `expiresAtMs`, `tokenType`, `scope`, `rawParams` — is one ciphertext.
+ * Earlier releases encrypted the three token fields individually and wrote
+ * the rest beside them in clear, which left `rawParams` readable in Redis
+ * (#293). `rawParams` is the upstream IdP's raw token response: unbounded,
+ * provider-specific, and it can carry anything the IdP chose to include —
+ * extra tokens, expiry hints, account hints, and routinely the very tokens
+ * again under their wire names. Sanitising it instead would mean maintaining
+ * an allowlist per federation forever. `tokenType` and `scope` are
+ * low-sensitivity, but nothing reads the stored record without decrypting
+ * it — `get` → `fromEnvelope` is the only reader; the per-session index
+ * under `${keyPrefix}idx:` is separate and carries only federation names.
+ * One ciphertext per record is simpler and closes the class rather than the
+ * instance. Under `mode = "allow-plaintext"` the envelope stays plain JSON
+ * inside the same wrapper; that mode is refused outside development by
+ * `validateEncryptionMode`.
+ *
+ * The ciphertext is bound to the Redis key it lives under — AES-GCM
+ * additional authenticated data = `${keyPrefix}${sid}:${federationName}` —
+ * so a value copied to another session's key (or another federation's, or
+ * another prefix) fails authentication and is handled as corrupt rather than
+ * read as that session's tokens.
+ *
+ * ### Legacy records
+ *
+ * A record without the `v: 2` wrapper (recognisable by `accessToken` at the
+ * top level) is the pre-#293 per-field shape. `get` treats it exactly like
+ * corrupt JSON or a decrypt failure: the key and its index member are
+ * removed and `null` is returned, which the session layer turns into
+ * re-authentication. There is deliberately no dual-read path — it would keep
+ * the plaintext-readable code alive — and no in-place migration: no
+ * deployment had written these records outside development when the format
+ * changed. Operator consequence: records written before this version are
+ * dropped on first read and the user re-federates.
+ */
+
 import {
 	type AdapterBuilder,
 	defineModule,
@@ -124,6 +172,12 @@ const DEFAULT_TTL_SECONDS = 86400;
  */
 const REMOVE_BATCH_SIZE = 100;
 
+/**
+ * The record as it exists inside {@link StoredRecord}: every field in clear.
+ * Under `mode = "required"` this object only ever exists as the plaintext
+ * side of one AES-256-GCM operation — it is never written to Redis as-is
+ * (#293).
+ */
 interface Envelope {
 	accessToken: string;
 	refreshToken?: string;
@@ -139,6 +193,24 @@ interface Envelope {
 	scope?: string;
 	rawParams?: Record<string, unknown>;
 }
+
+/**
+ * Format version of {@link StoredRecord}. Version 1 is the pre-#293 per-field
+ * shape, which had no version marker at all; bump this when the wrapper
+ * changes shape again, and let `open` refuse what it does not know.
+ */
+const RECORD_VERSION = 2;
+
+/**
+ * What is actually written to Redis — see the module docblock. `c` under
+ * `mode = "required"`, `p` under `mode = "allow-plaintext"`. A store in one
+ * mode does not read the other's shape: a `p` record under `required` would
+ * be a plaintext-readable path in production, and a `c` record under
+ * `allow-plaintext` has no key to be read with.
+ */
+type StoredRecord =
+	| { v: typeof RECORD_VERSION; c: string }
+	| { v: typeof RECORD_VERSION; p: Envelope };
 
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
@@ -208,22 +280,10 @@ export function createRedisFederationTokenStore(
 	});
 	const sidPattern = (sid: string) => `${prefix}${sid}:*`;
 
-	const encryptRequired = (v: string): string =>
-		opts.encryption.mode === "allow-plaintext" ? v : encryptTokenField(v, opts.encryption.key);
-
-	const encryptOptional = (v: string | undefined): string | undefined =>
-		v === undefined ? undefined : encryptRequired(v);
-
-	const decryptRequired = (v: string): string =>
-		opts.encryption.mode === "allow-plaintext" ? v : decryptTokenField(v, opts.encryption.key);
-
-	const decryptOptional = (v: string | undefined): string | undefined =>
-		v === undefined ? undefined : decryptRequired(v);
-
 	const toEnvelope = (t: FederationTokens): Envelope => ({
-		accessToken: encryptRequired(t.accessToken),
-		refreshToken: encryptOptional(t.refreshToken),
-		idToken: encryptOptional(t.idToken),
+		accessToken: t.accessToken,
+		refreshToken: t.refreshToken,
+		idToken: t.idToken,
 		expiresAtMs: t.expiresAt === null ? null : t.expiresAt.getTime(),
 		tokenType: t.tokenType,
 		scope: t.scope,
@@ -231,14 +291,55 @@ export function createRedisFederationTokenStore(
 	});
 
 	const fromEnvelope = (e: Envelope): FederationTokens => ({
-		accessToken: decryptRequired(e.accessToken),
-		refreshToken: decryptOptional(e.refreshToken),
-		idToken: decryptOptional(e.idToken),
+		accessToken: e.accessToken,
+		refreshToken: e.refreshToken,
+		idToken: e.idToken,
 		expiresAt: e.expiresAtMs === null ? null : new Date(e.expiresAtMs),
 		tokenType: e.tokenType,
 		scope: e.scope,
 		rawParams: e.rawParams,
 	});
+
+	/**
+	 * Wrap an envelope for the wire (#293). `key` is the Redis key the record
+	 * is about to be written under; under `mode = "required"` it is the AAD
+	 * the ciphertext is bound to.
+	 */
+	const seal = (key: string, env: Envelope): string => {
+		const record: StoredRecord =
+			opts.encryption.mode === "allow-plaintext"
+				? { v: RECORD_VERSION, p: env }
+				: {
+						v: RECORD_VERSION,
+						c: encryptTokenField(JSON.stringify(env), opts.encryption.key, key),
+					};
+		return JSON.stringify(record);
+	};
+
+	/**
+	 * Inverse of `seal`. Throws on anything that is not a record this store
+	 * wrote in its own mode — corrupt JSON, the pre-#293 per-field shape, a
+	 * plaintext record under `mode = "required"`, a ciphertext under
+	 * `mode = "allow-plaintext"`, or a ciphertext sealed for another key —
+	 * and `get` turns every throw into the same self-heal. One read path, no
+	 * shape sniffing: a legacy record is not "migrated", it is dropped.
+	 */
+	const open = (key: string, raw: string): Envelope => {
+		const record = JSON.parse(raw) as Partial<Record<"v" | "c" | "p", unknown>> | null;
+		if (record === null || typeof record !== "object" || record.v !== RECORD_VERSION) {
+			throw new Error("FederationTokenStore redis: not a v2 record");
+		}
+		if (opts.encryption.mode === "allow-plaintext") {
+			if (typeof record.p !== "object" || record.p === null) {
+				throw new Error("FederationTokenStore redis: not a plaintext v2 record");
+			}
+			return record.p as Envelope;
+		}
+		if (typeof record.c !== "string") {
+			throw new Error("FederationTokenStore redis: not an encrypted v2 record");
+		}
+		return JSON.parse(decryptTokenField(record.c, opts.encryption.key, key)) as Envelope;
+	};
 
 	const writeEnv = async (sid: string, name: string, env: Envelope) => {
 		// Index BEFORE the envelope. A failure between the two then leaves an
@@ -256,7 +357,8 @@ export function createRedisFederationTokenStore(
 		// token's expiresAt. The access token's expiry is preserved inside the
 		// envelope so F-6 consumers can decide to refresh; the record itself
 		// must outlive the access_token so the refresh_token remains available.
-		await opts.client.set(k(sid, name), JSON.stringify(env), "PX", storeTtlMs);
+		const key = k(sid, name);
+		await opts.client.set(key, seal(key, env), "PX", storeTtlMs);
 	};
 
 	/** Unlink `keys` in bounded batches. */
@@ -282,13 +384,15 @@ export function createRedisFederationTokenStore(
 			const v = await opts.client.get(key);
 			if (!v) return null;
 			try {
-				return fromEnvelope(JSON.parse(v) as Envelope);
+				return fromEnvelope(open(key, v));
 			} catch {
-				// Corrupt JSON or decrypt failure (e.g. rotated encryption key):
-				// self-heal by deleting the key, mirroring UserSessionStore redis
-				// adapter. Otherwise operators see repeated silent failures and
-				// key/crypto mismatches surface as "missing tokens" — hard to
-				// debug. Returning null after delete signals re_authentication.
+				// Corrupt JSON, a decrypt failure (rotated encryption key, or a
+				// ciphertext sealed for another key — #293 AAD), or the pre-#293
+				// per-field record: self-heal by deleting the key, mirroring the
+				// UserSessionStore redis adapter. Otherwise operators see repeated
+				// silent failures and key/crypto mismatches surface as "missing
+				// tokens" — hard to debug. Returning null after delete signals
+				// re_authentication.
 				await opts.client.del(key);
 				// Drop the index member too: the envelope it named is gone, and
 				// an index that outlives its records makes `removeBySid` do work

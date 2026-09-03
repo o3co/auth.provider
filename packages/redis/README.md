@@ -250,11 +250,20 @@ TTL whose deadline has passed on the caller's clock expires, and is dropped.
 ## Internal helpers
 
 `src/internal/lock.mts` (`createRedisLock`) and `src/internal/crypto.mts`
-(AES-256-GCM token-field crypto helpers) are private to this package.
+(the AES-256-GCM helpers) are private to this package.
 The lock embeds federation-tokens-specific options (`{ sid,
 federationName }`) in `AcquireLockOptions` and is not currently
 backend-agnostic; a public generic-lock API is on the roadmap for
 v0.6+.
+
+Since #293 the federation-token store seals the **whole** envelope —
+`rawParams`, `tokenType`, `scope` and the access-token expiry included, not
+just the three token fields — as one ciphertext, `{ "v": 2, "c": "…" }`, bound
+to its own Redis key as additional authenticated data (`allow-plaintext`,
+development only, writes `{ "v": 2, "p": { … } }`). A record without that
+wrapper is the pre-#293 per-field shape and is dropped on first read: `get`
+returns `null`, the key and its index member go, and the user re-federates.
+There is no dual-read path by design.
 
 `src/internal/redisSidHash.mts`, `redisSidSortedSet.mts` and `redisSidSet.mts`
 are the three sid-keyed structures the session and federation adapters are

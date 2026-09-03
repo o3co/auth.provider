@@ -10,6 +10,7 @@ import {
 	supportsLock,
 } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { encryptTokenField } from "#/internal/crypto.mjs";
 import type { FederationTokenStoreClient } from "../src/clients.mjs";
 import {
 	createRedisFederationTokenStore,
@@ -492,5 +493,218 @@ describe("redisFederationTokenStoreBuilder structural validator", () => {
 				{},
 			),
 		).toThrow(/missing required method.*compareAndDelete/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #293 — the whole envelope is encrypted, not just the token fields.
+//
+// Before this, `accessToken` / `refreshToken` / `idToken` were AES-256-GCM
+// ciphertext and everything around them — `tokenType`, `scope`, `expiresAtMs`
+// and above all `rawParams`, the upstream IdP's raw token response — sat in
+// Redis as plaintext JSON beside them. These pin the record shape that
+// replaces it (`{ v: 2, c: <ciphertext of the JSON envelope> }`), the
+// drop-on-read of the legacy per-field shape, and the AAD binding of a
+// ciphertext to the key it was written under.
+// ---------------------------------------------------------------------------
+
+// Every field FederationTokens can carry, with `rawParams` shaped like a real
+// IdP token response: it repeats the tokens and adds whatever the IdP felt
+// like including — the unbounded, provider-specific part #293 is about.
+const fullTokens: FederationTokens = {
+	accessToken: "at-secret",
+	refreshToken: "rt-secret",
+	idToken: "it-secret",
+	expiresAt: new Date(1_900_000_000_000),
+	tokenType: "Bearer",
+	scope: "openid email",
+	rawParams: {
+		access_token: "at-secret",
+		refresh_token: "rt-secret",
+		id_token: "it-secret",
+		token_type: "Bearer",
+		scope: "openid email",
+		expires_in: 3599,
+		account_hint: "user@example.com",
+		nested: { hint: "nested-hint" },
+	},
+};
+
+// Values that used to reach Redis in clear (or, for the tokens, that must
+// still not). Each is long enough that a chance match inside base64url
+// ciphertext is not a realistic flake.
+const plaintextMarkers = [
+	"at-secret",
+	"rt-secret",
+	"it-secret",
+	"openid email",
+	"user@example.com",
+	"nested-hint",
+];
+
+describe("#293 — mode=required stores one ciphertext over the whole envelope", () => {
+	let redis: ReturnType<typeof createFakeRedis>;
+	beforeEach(() => {
+		redis = createFakeRedis();
+	});
+	const requiredStore = () =>
+		createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "required", key: encryptionKey },
+		});
+
+	it("nothing but a version and a ciphertext reaches Redis", async () => {
+		await requiredStore().attach("sid-1", "google", fullTokens);
+		const raw = redis.data.get("ft:sid-1:google") as string;
+		for (const marker of plaintextMarkers) expect(raw).not.toContain(marker);
+		// The shape, not just the values: no envelope field name is visible.
+		const record = JSON.parse(raw) as Record<string, unknown>;
+		expect(Object.keys(record).sort()).toEqual(["c", "v"]);
+		expect(record.v).toBe(2);
+		expect(record.c).toMatch(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+	});
+
+	it("round-trips every field, rawParams included", async () => {
+		const store = requiredStore();
+		await store.attach("sid-1", "google", fullTokens);
+		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+	});
+
+	it("update() writes the same shape and round-trips too", async () => {
+		const store = requiredStore();
+		await store.attach("sid-1", "google", tokens);
+		await store.update("sid-1", "google", fullTokens);
+		const record = JSON.parse(redis.data.get("ft:sid-1:google") as string) as Record<
+			string,
+			unknown
+		>;
+		expect(Object.keys(record).sort()).toEqual(["c", "v"]);
+		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+	});
+
+	it("round-trips expiresAt: null inside the encrypted envelope", async () => {
+		const store = requiredStore();
+		await store.attach("sid-gh", "github", { ...fullTokens, expiresAt: null });
+		const round = await store.get("sid-gh", "github");
+		expect(round?.expiresAt).toBeNull();
+		expect(round?.rawParams).toEqual(fullTokens.rawParams);
+	});
+
+	it("drops a legacy per-field envelope on read: key gone, index member gone, null returned", async () => {
+		const store = requiredStore();
+		// Exactly what v0.11 and earlier wrote: token fields encrypted under the
+		// SAME key, the envelope around them in clear. Same key on purpose — it
+		// proves the record is dropped for its shape, not because it happens to
+		// be undecryptable.
+		redis.data.set(
+			"ft:sid-1:google",
+			JSON.stringify({
+				accessToken: encryptTokenField("at-secret", encryptionKey),
+				refreshToken: encryptTokenField("rt-secret", encryptionKey),
+				expiresAtMs: null,
+				tokenType: "Bearer",
+				scope: "openid email",
+				rawParams: { account_hint: "user@example.com" },
+			}),
+		);
+		redis.sets.set("ft:idx:sid-1", new Set(["google", "github"]));
+
+		expect(await store.get("sid-1", "google")).toBeNull();
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+		expect(redis.sets.get("ft:idx:sid-1")?.has("google")).toBe(false);
+		// The session's other federation is not collateral.
+		expect(redis.sets.get("ft:idx:sid-1")?.has("github")).toBe(true);
+	});
+
+	it("refuses a plaintext v2 record — mode=required has no plaintext-readable path", async () => {
+		const store = requiredStore();
+		redis.data.set(
+			"ft:sid-1:google",
+			JSON.stringify({ v: 2, p: { accessToken: "at-secret", expiresAtMs: null } }),
+		);
+		expect(await store.get("sid-1", "google")).toBeNull();
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+	});
+
+	it("a ciphertext copied under another session's key fails to decrypt and self-heals (AAD)", async () => {
+		const store = requiredStore();
+		await store.attach("sid-1", "google", fullTokens);
+		const bytes = redis.data.get("ft:sid-1:google") as string;
+
+		redis.data.set("ft:sid-2:google", bytes);
+		redis.sets.set("ft:idx:sid-2", new Set(["google"]));
+		expect(await store.get("sid-2", "google")).toBeNull();
+		expect(redis.data.has("ft:sid-2:google")).toBe(false);
+		expect(redis.sets.has("ft:idx:sid-2")).toBe(false);
+
+		// Same session, another federation name: still not the key it was sealed for.
+		redis.data.set("ft:sid-1:github", bytes);
+		expect(await store.get("sid-1", "github")).toBeNull();
+		expect(redis.data.has("ft:sid-1:github")).toBe(false);
+
+		// The record under its own key is untouched by all of that.
+		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+	});
+
+	it("the binding is to the full Redis key, keyPrefix included", async () => {
+		const writer = requiredStore();
+		await writer.attach("sid-1", "google", fullTokens);
+		const bytes = redis.data.get("ft:sid-1:google") as string;
+		redis.data.set("other:sid-1:google", bytes);
+		const reader = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "required", key: encryptionKey },
+			keyPrefix: "other:",
+		});
+		expect(await reader.get("sid-1", "google")).toBeNull();
+		expect(redis.data.has("other:sid-1:google")).toBe(false);
+	});
+});
+
+describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (development only)", () => {
+	let redis: ReturnType<typeof createFakeRedis>;
+	beforeEach(() => {
+		redis = createFakeRedis();
+	});
+	const plaintextStore = () =>
+		createRedisFederationTokenStore({ client: redis, encryption: { mode: "allow-plaintext" } });
+
+	it("round-trips every field, rawParams and expiresAt: null included", async () => {
+		const store = plaintextStore();
+		await store.attach("sid-1", "google", fullTokens);
+		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+		await store.attach("sid-gh", "github", { ...fullTokens, expiresAt: null });
+		expect((await store.get("sid-gh", "github"))?.expiresAt).toBeNull();
+	});
+
+	it("is readable in clear, under the same versioned wrapper", async () => {
+		await plaintextStore().attach("sid-1", "google", fullTokens);
+		const raw = redis.data.get("ft:sid-1:google") as string;
+		for (const marker of plaintextMarkers) expect(raw).toContain(marker);
+		const record = JSON.parse(raw) as Record<string, unknown>;
+		expect(Object.keys(record).sort()).toEqual(["p", "v"]);
+		expect(record.v).toBe(2);
+	});
+
+	it("drops a legacy per-field envelope here too — one read path, no shape sniffing", async () => {
+		const store = plaintextStore();
+		redis.data.set(
+			"ft:sid-1:google",
+			JSON.stringify({ accessToken: "at-secret", expiresAtMs: null, scope: "openid" }),
+		);
+		redis.sets.set("ft:idx:sid-1", new Set(["google"]));
+		expect(await store.get("sid-1", "google")).toBeNull();
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+		expect(redis.sets.has("ft:idx:sid-1")).toBe(false);
+	});
+
+	it("refuses a ciphertext record — allow-plaintext has no key to read it with", async () => {
+		const writer = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "required", key: encryptionKey },
+		});
+		await writer.attach("sid-1", "google", fullTokens);
+		expect(await plaintextStore().get("sid-1", "google")).toBeNull();
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
 });
