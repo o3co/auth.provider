@@ -126,3 +126,85 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 		expect((await limiter.check("login.ip:1.2.3.4", { ip: "1.2.3.4" })).remaining).toBe(2);
 	});
 });
+
+/**
+ * #458 — behind Redis the guard's 429 carried no `Retry-After`, because this
+ * adapter reported no `resetAt` while the memory adapter did. The Lua script
+ * now hands back the counter key's PTTL with the count, and the limiter turns
+ * it into the moment the window ends.
+ */
+describe("createRedisRateLimiter — resetAt (#458)", () => {
+	/**
+	 * A client on the two-method contract, whose window started
+	 * `windowAgeMs` ago — so the PTTL it reports is the window minus that.
+	 */
+	const fakeRedisWithPttl = (windowAgeMs: number) => {
+		const counts = new Map<string, number>();
+		return {
+			async incrementWithTtl(key: string, ttlSeconds: number) {
+				return (await this.incrementWithTtlAndPttl(key, ttlSeconds)).count;
+			},
+			async incrementWithTtlAndPttl(key: string, ttlSeconds: number) {
+				const next = (counts.get(key) ?? 0) + 1;
+				counts.set(key, next);
+				return { count: next, pttl: ttlSeconds * 1000 - windowAgeMs };
+			},
+		};
+	};
+	const key = "token:ip:1.2.3.4";
+	const limits = { token: { limit: 1, windowSeconds: 60 } };
+
+	it("reports resetAt from the counter's remaining TTL, inside the window", async () => {
+		const limiter = createRedisRateLimiter({ client: fakeRedisWithPttl(15_000), limits });
+		const before = Date.now();
+		await limiter.check(key, { ip: "1.2.3.4" });
+		const denied = await limiter.check(key, { ip: "1.2.3.4" });
+		const after = Date.now();
+
+		expect(denied.allowed).toBe(false);
+		// 45 s remain of a 60 s window that started 15 s ago.
+		const resetAt = denied.resetAt?.getTime() ?? Number.NaN;
+		expect(resetAt).toBeGreaterThanOrEqual(before + 45_000);
+		expect(resetAt).toBeLessThanOrEqual(after + 45_000);
+	});
+
+	it("carries resetAt on the allow path too, so RateLimit-Reset is emitted", async () => {
+		const limiter = createRedisRateLimiter({ client: fakeRedisWithPttl(0), limits });
+		const before = Date.now();
+		const allowed = await limiter.check(key, { ip: "1.2.3.4" });
+
+		expect(allowed.allowed).toBe(true);
+		expect(allowed.resetAt?.getTime() ?? Number.NaN).toBeGreaterThanOrEqual(before + 60_000);
+	});
+
+	it("reports no resetAt for a client on the one-method contract", async () => {
+		// A custom client written against the original `incrementWithTtl`-only
+		// contract keeps working; it just cannot say when the window ends.
+		const limiter = createRedisRateLimiter({ client: fakeRedis(), limits });
+		await limiter.check(key, { ip: "1.2.3.4" });
+		const denied = await limiter.check(key, { ip: "1.2.3.4" });
+
+		expect(denied.allowed).toBe(false);
+		expect(denied.resetAt).toBeUndefined();
+	});
+
+	it("reports no resetAt when the client hands back a PTTL with no expiry", async () => {
+		// -1 (no expiry) / -2 (no key) cannot follow a script that just set the
+		// TTL; a client answering them broke the contract, and no reset time is
+		// better than a wrong one.
+		const limiter = createRedisRateLimiter({
+			client: {
+				async incrementWithTtl() {
+					return 1;
+				},
+				async incrementWithTtlAndPttl() {
+					return { count: 1, pttl: -1 };
+				},
+			},
+			limits,
+		});
+		const decision = await limiter.check(key, { ip: "1.2.3.4" });
+
+		expect(decision.resetAt).toBeUndefined();
+	});
+});

@@ -148,12 +148,26 @@ module `provides` it. The boot planner resolves the graph topologically and
 refuses a module whose `requires` cannot be met.
 
 **Absence is a decision, not a default.** An `optional` slot means *optional to
-wire*, never *optional to decide*. Three slots carry an `AbsencePolicy` (#363):
-`auditSink`, `accessTokenDenylist`, and the subject-revocation pair. Leaving one
-unfilled without declaring it in config refuses boot, naming the config line to
+wire*, never *optional to decide*. The slots below carry an `AbsencePolicy`
+(#363; `packages/core/src/modules/manifest/absence-policy.mts`). Leaving one
+unfilled without writing its declaration refuses boot, naming the config line to
 write. This is deliberately stronger than defaulting to something harmless — a
 default hands a capability to a composition that never asked for it and calls
 that safety.
+
+| Slot | Policy | Declared absent by |
+| --- | --- | --- |
+| `auditSink` | `AUDIT_SINK_ABSENCE_POLICY` | `audit.sink.type = "none"` |
+| `accessTokenDenylist` | `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` | `oauth.revocation.accessToken = "unsupported"` |
+| `subjectRevocation` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
+| `subjectSessionIndex` | `SUBJECT_REVOCATION_ABSENCE_POLICY` | `oauth.revocation.subject = "unsupported"` |
+| `deviceCodeStore` | `DEVICE_CODE_STORE_ABSENCE_POLICY` | `oauth.deviceAuthorization.store = "unsupported"` |
+
+The subject-revocation pair shares one policy on purpose: two components, one
+capability, so a deployment without them has one thing to declare rather than
+two. `deviceCodeStore` joined with #443, which this paragraph missed while it
+still said "three"; the table is now checked against the manifests that attach
+each policy, the same way the slot table is (#458).
 
 **Replica safety.** In-process state stores are correct on one node and wrong on
 several. `deployment.mode = "multi"` with one wired refuses boot, naming each

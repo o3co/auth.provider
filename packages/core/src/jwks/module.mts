@@ -31,7 +31,10 @@ import { resolveJwksPath } from "./path.mjs";
  * JWKS publishing is a key-management concern: it depends ONLY on the
  * `keyStore` and is mounted whenever the provider signs tokens, independent
  * of whether an OIDC issuer is configured. For HS256 (symmetric) the route
- * returns an empty key set — the secret is never published.
+ * answers `404 jwks_not_published` with `Cache-Control: no-store` (#282) —
+ * the secret is never published, and an empty key set would read to a
+ * verifier as "a provider with no keys" and get cached as such. This comment
+ * described the pre-#282 empty set until #458.
  *
  * The route registers an absolute path, so the contribution mounts at "/"
  * to avoid path doubling.

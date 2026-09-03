@@ -140,3 +140,86 @@ describe("adapter-surface inventory (#305)", () => {
 		expect(citedPaths().filter((p) => p.includes("contract")).length).toBeGreaterThan(3);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Absence policies (#458)
+//
+// The lifecycle section says which optional slots carry an `AbsencePolicy`.
+// That sentence was written for #363's three and never learned about
+// `deviceCodeStore` (#443) — the same "reads as authoritative while omitting
+// the one you are looking for" failure as a stale slot table, and the slot
+// guard above could not see it because it checks names, not this list. So
+// the list is a table now, checked the same way: one row per `slot: <POLICY>`
+// attachment in a module manifest, quoting the config line each policy's
+// constant names as the declaration.
+// ---------------------------------------------------------------------------
+
+interface AbsencePolicyInventory {
+	/** `"<slot> -> <POLICY>"`, sorted. */
+	readonly attachments: string[];
+	/** Policy constant → the config line that declares the absence. */
+	readonly declarations: Record<string, string>;
+}
+
+/** Attachments and declarations as the source has them, from every package's `src/`. */
+function absencePoliciesInSource(): AbsencePolicyInventory {
+	const attachments = new Set<string>();
+	const declarations: Record<string, string> = {};
+	const walk = (dir: string): void => {
+		for (const entry of readdirSync(dir)) {
+			if (entry === "node_modules" || entry === "dist" || entry === "__tests__") continue;
+			const full = join(dir, entry);
+			if (statSync(full).isDirectory()) {
+				walk(full);
+				continue;
+			}
+			if (!entry.endsWith(".mts")) continue;
+			const source = readFileSync(full, "utf8");
+			// `absencePolicies: { auditSink: AUDIT_SINK_ABSENCE_POLICY, … }` in a
+			// manifest. A type annotation (`X_ABSENCE_POLICY: AbsencePolicy`) has
+			// the constant on the wrong side of the colon and does not match.
+			for (const match of source.matchAll(/\b(\w+):\s*(\w+_ABSENCE_POLICY)\b/g)) {
+				attachments.add(`${match[1]} -> ${match[2]}`);
+			}
+			// `export const X_ABSENCE_POLICY = { configKey: [...], absentValue: "..." }`.
+			// `[^;]*?` keeps each match inside its own statement.
+			for (const match of source.matchAll(
+				/export const (\w+_ABSENCE_POLICY)\b[^;]*?configKey:\s*\[([^\]]*)\][^;]*?absentValue:\s*"([^"]*)"/g,
+			)) {
+				const path = [...(match[2] ?? "").matchAll(/"([^"]+)"/g)].map((k) => k[1]).join(".");
+				declarations[match[1] as string] = `${path} = "${match[3]}"`;
+			}
+		}
+	};
+	walk(join(repoRoot, "packages"));
+	return { attachments: [...attachments].sort(), declarations };
+}
+
+/** The doc's absence-policy table: `| \`slot\` | \`POLICY\` | \`key = "value"\` |`. */
+function absencePoliciesInDoc(): AbsencePolicyInventory {
+	const attachments: string[] = [];
+	const declarations: Record<string, string> = {};
+	for (const match of doc.matchAll(/^\| `(\w+)` \| `(\w+_ABSENCE_POLICY)` \| `([^`]+)` \|/gm)) {
+		attachments.push(`${match[1]} -> ${match[2]}`);
+		declarations[match[2] as string] = match[3] as string;
+	}
+	return { attachments: attachments.sort(), declarations };
+}
+
+describe("adapter-surface absence policies (#458)", () => {
+	const source = absencePoliciesInSource();
+	const documented = absencePoliciesInDoc();
+
+	it("finds attachments at all — the scan is not vacuously passing", () => {
+		expect(source.attachments.length).toBeGreaterThan(3);
+		expect(source.attachments).toContain("deviceCodeStore -> DEVICE_CODE_STORE_ABSENCE_POLICY");
+	});
+
+	it("lists exactly the slots that carry a policy, with the policy each carries", () => {
+		expect(documented.attachments).toEqual(source.attachments);
+	});
+
+	it("quotes the config line that declares each absence", () => {
+		expect(documented.declarations).toEqual(source.declarations);
+	});
+});

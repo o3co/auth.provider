@@ -237,10 +237,13 @@ refresh grant takes care to answer `503` for outages.
 Two cross-cutting facts about these rows:
 
 - **Rate-limit `429`s carry `Retry-After` only when the adapter reports a
-  reset time.** The memory adapter does; the Redis adapter reports `remaining`
-  and `limit` but no `resetAt` (`packages/redis/src/ratelimit.mts`), so behind
-  Redis the client gets `RateLimit-Limit` / `RateLimit-Remaining` and no
-  `Retry-After` (`packages/core/src/ratelimit/guard.mts`).
+  reset time.** Both bundled adapters do: the memory adapter from its bucket,
+  the Redis adapter from the counter key's PTTL, returned by the same Lua
+  script as the count (`packages/redis/src/ratelimit.mts`, #458). A custom
+  adapter whose decision has no `resetAt` — or a custom `RateLimiterClient`
+  that implements only `incrementWithTtl` — still gets `RateLimit-Limit` /
+  `RateLimit-Remaining` and no `Retry-After`
+  (`packages/core/src/ratelimit/guard.mts`).
 - **`/session/login` and the WebAuthn options route never run unguarded.**
   With no `rateLimiter` wired they fall back to a per-process memory limiter
   and say so once at boot (`login_rate_limiter_not_shared`,
