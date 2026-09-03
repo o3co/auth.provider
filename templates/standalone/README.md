@@ -31,6 +31,8 @@ my-app:
 
 ## Multi-replica deployments
 
+The [operator runbook](../../docs/operator-runbook.md) covers the operational side end to end — boot refusals, probes, dependency failures, alerts, Redis sizing, key rotation. This section is the multi-replica checklist.
+
 When running multiple instances of the standalone server behind a load balancer, point `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` at a **shared** Redis 7.2+ instance. Without a shared Redis URL, every replica holds refresh-token families in its own connection (and any local-only Redis), so a refresh request that lands on a replica that did not issue the token returns `invalid_grant` on every other request in a round-robin LB.
 
 **Set `HTTP_TRUST_PROXY` to your proxy's address behind a load balancer.** It defaults to `false`, which makes `req.ip` the *load balancer's* address rather than the client's. Every rate limit keyed by IP — the OAuth endpoint limiters and the `POST /session/login` brute-force guard — then shares **one bucket across all users**: the first 20 login attempts from anyone exhaust the window and every subsequent user gets `429`. The failure reads like an attack rather than a misconfiguration, which is what makes it expensive to diagnose at 3am. Set it whenever anything terminates TLS or proxies in front of this service, and make sure that hop is the one setting `X-Forwarded-For`.
@@ -486,6 +488,7 @@ installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 
 ## See Also
 
+- [Operator runbook](../../docs/operator-runbook.md) — deployment shapes and boot refusals, probes, what each dependency failure looks like, events to alert on, Redis key families and failure timing, key rotation, upgrading and rollback
 - [`@o3co/auth-provider-core`](../../packages/core) — Application factory and config schema
 - [`@o3co/auth-provider-oauth`](../../packages/oauth) — OAuth module
 - [`@o3co/auth-provider-session`](../../packages/session) — Session module
