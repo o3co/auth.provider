@@ -614,29 +614,77 @@ describe("full-pki revocation", () => {
 		if (!result.ok) expect(result.detail).toContain("no_next_update");
 	});
 
-	it("does not honour a CRL signed by the wrong key", async () => {
+	it("treats a CRL signed by the wrong key as unavailable, and never caches it", async () => {
 		// A forged CRL that omits a revoked serial would otherwise be a way to
-		// un-revoke a certificate. pkijs verifies the CRL against its issuer;
-		// this pins that we depend on it doing so.
-		const { root, int, leaf } = await buildChain();
-		const impostor = await mintCa("Impostor", 900);
-		const forged = await mintCrl({
-			issuer: int,
-			revoked: [],
-			signingKeys: impostor.keys,
+		// un-revoke a certificate — and a forged CRL that is *cached* is a way
+		// to refuse every client of that distribution point for up to an hour
+		// from one injected response over plain http. The signature is checked
+		// against the issuing CA before the CRL is stored, and the failure is
+		// reported under its own name so the audit trail says what happened.
+		const root = await mintCa("Root", 1);
+		const leaf = await mintLeaf("client", 10, root, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				crlDistributionPoints([ROOT_CRL_URL]),
+			],
 		});
-		const genuine = await mintCrl({ issuer: int, revoked: [leaf] });
-		const { impl } = stubFetch({ [INT_CRL_URL]: forged, [ROOT_CRL_URL]: await cleanRootCrl(root) });
+		const impostor = await mintCa("Impostor", 900);
+		const forged = await mintCrl({ issuer: root, revoked: [], signingKeys: impostor.keys });
+		const { impl, calls } = stubFetch({ [ROOT_CRL_URL]: forged });
+		const v = validator([root], { revocation: crlPolicy("reject"), fetchImpl: impl });
+
+		const result = await v.validate(leaf.x509, [], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("bad_signature");
+		}
+		// The forged CRL is not cached, so the next request goes back to the
+		// distribution point instead of being refused from memory.
+		expect(v.crlCacheSize()).toBe(0);
+		await v.validate(leaf.x509, [], NOW);
+		expect(calls).toEqual([ROOT_CRL_URL, ROOT_CRL_URL]);
+	});
+
+	it("refuses a CRL whose issuer's keyUsage omits cRLSign, even though the signature verifies", async () => {
+		// RFC 5280 §6.3.3 (f): a CRL issuer's keyUsage, when present, MUST
+		// include cRLSign. Being entitled to sign certificates is not being
+		// entitled to publish revocation lists; the bit is the CA's own
+		// statement about which of the two this key does.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign),
+				crlDistributionPoints([ROOT_CRL_URL]),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				crlDistributionPoints([INT_CRL_URL]),
+			],
+		});
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await cleanRootCrl(root),
+		});
 
 		const result = await validator([root], {
 			revocation: crlPolicy("reject"),
 			fetchImpl: impl,
 		}).validate(leaf.x509, [int.x509], NOW);
 
-		// The forged CRL is discarded, leaving no usable revocation values —
-		// which under "reject" is a refusal, not an acceptance.
 		expect(result.ok).toBe(false);
-		expect(genuine.byteLength).toBeGreaterThan(0);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("bad_signature");
+		}
 	});
 
 	it("makes no outbound request at all when revocation is disabled", async () => {

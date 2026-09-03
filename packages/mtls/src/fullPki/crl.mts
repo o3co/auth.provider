@@ -17,12 +17,26 @@
 /**
  * CRL retrieval, freshness and caching for `mode = "full-pki"`.
  *
- * `pkijs` verifies a CRL's signature against its issuer and ignores one whose
- * `nextUpdate` has passed — but it is given CRLs, it does not go and get
- * them. Everything between "this certificate names a distribution point" and
- * "here is a CRL object" lives here: reading the extension, fetching under
- * the guards in `fetchGuard.mts`, parsing, judging freshness, and caching so
- * a busy token endpoint does not re-fetch per request.
+ * `pkijs` is given CRLs; it does not go and get them. Everything between
+ * "this certificate names a distribution point" and "here is a CRL this
+ * issuer actually published" lives here: reading the extension, fetching
+ * under the guards in `fetchGuard.mts`, parsing, **verifying the signature
+ * against the issuing CA**, judging freshness, and caching so a busy token
+ * endpoint does not re-fetch per request.
+ *
+ * ### Why the signature is checked here and not left to the engine
+ *
+ * The engine does verify a CRL's signature — but only when it is finally
+ * consulted, which is after this module has already decided whether to cache
+ * the bytes. A CRL that is cached first and verified later is a forged CRL
+ * that stays in memory for up to `cache-ttl-seconds`: one injected response
+ * over the plain-http transport most distribution points use would refuse
+ * every client of that distribution point until the entry expired. So
+ * nothing is stored, and nothing is returned, until the signature verifies
+ * against the key of the certificate's issuer and that issuer's `keyUsage`
+ * (when present) includes `cRLSign` (RFC 5280 §6.3.3). A failure is its own
+ * outcome, `bad_signature`, and is deliberately never cached in either
+ * direction: it must not pin a refusal, and it must not pin an acceptance.
  *
  * ### The failure that matters
  *
@@ -35,11 +49,18 @@
  * `on-unavailable` policy before the engine is ever consulted.
  */
 
+import { createHash } from "node:crypto";
 import * as pkijs from "pkijs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
 
 /** OID of the `cRLDistributionPoints` extension (RFC 5280 §4.2.1.13). */
 const OID_CRL_DISTRIBUTION_POINTS = "2.5.29.31";
+
+/** OID of `keyUsage` (RFC 5280 §4.2.1.3). */
+const OID_KEY_USAGE = "2.5.29.15";
+
+/** `cRLSign` bit of `keyUsage`, MSB-first within the first octet. */
+const KEY_USAGE_CRL_SIGN = 0x02;
 
 /** `GeneralName` tag for `uniformResourceIdentifier`. */
 const GENERAL_NAME_URI = 6;
@@ -49,7 +70,8 @@ export type CrlUnavailableReason =
 	| "fetch_failed"
 	| "unparseable"
 	| "no_next_update"
-	| "stale";
+	| "stale"
+	| "bad_signature";
 
 export type CrlLookup =
 	| { readonly ok: true; readonly crls: readonly pkijs.CertificateRevocationList[] }
@@ -104,13 +126,75 @@ export interface CrlResolverOptions {
 }
 
 export interface CrlResolver {
-	/** Fetch (or reuse) the CRLs covering `certificate`. */
-	resolve(certificate: pkijs.Certificate, now: Date): Promise<CrlLookup>;
+	/**
+	 * Fetch (or reuse) the CRLs covering `certificate`, verified against
+	 * `issuer` — the certificate that issued it, i.e. the next element up the
+	 * validated path. Only a CRL whose signature verifies against `issuer`'s
+	 * key is ever returned or cached.
+	 */
+	resolve(certificate: pkijs.Certificate, issuer: pkijs.Certificate, now: Date): Promise<CrlLookup>;
 	/** Entry count — for tests and for a future metric. */
 	size(): number;
 }
 
 const DEFAULT_MAX_CACHE_ENTRIES = 256;
+
+/**
+ * Whether `issuer` is entitled to sign CRLs at all: RFC 5280 §6.3.3 (f) — its
+ * `keyUsage`, when present, MUST include `cRLSign`. Being entitled to sign
+ * certificates is not being entitled to publish revocation lists, and the
+ * bit is the CA's own statement about which of the two this key does.
+ * Absence is unconstrained, as for every other `keyUsage` check in this arm.
+ */
+const issuerMaySignCrls = (issuer: pkijs.Certificate): boolean => {
+	const extension = issuer.extensions?.find((ext) => ext.extnID === OID_KEY_USAGE);
+	if (extension === undefined) return true;
+	const parsed = extension.parsedValue as
+		| { valueBlock?: { valueHexView?: Uint8Array } }
+		| undefined;
+	const bytes = parsed?.valueBlock?.valueHexView;
+	// Present but unreadable is a restriction that cannot be honoured, not an
+	// absent one — the same distinction `checkLeafKeyUsage` draws.
+	if (bytes === undefined || bytes.length === 0) return false;
+	return ((bytes[0] ?? 0) & KEY_USAGE_CRL_SIGN) === KEY_USAGE_CRL_SIGN;
+};
+
+/**
+ * Verify that `issuer` published `crl`. `verify` also answers `false` when
+ * the CRL's issuer name is not `issuer`'s subject and when the CRL carries a
+ * critical extension pkijs does not know — both of which are "not a CRL this
+ * issuer published", which is the question being asked.
+ */
+const verifySignature = async (
+	crl: pkijs.CertificateRevocationList,
+	issuer: pkijs.Certificate,
+): Promise<{ ok: true } | { ok: false; detail: string }> => {
+	if (!issuerMaySignCrls(issuer)) {
+		return { ok: false, detail: "the issuing CA's keyUsage omits cRLSign (RFC 5280 §6.3.3)" };
+	}
+	let verified: boolean;
+	try {
+		verified = await crl.verify({ issuerCertificate: issuer });
+	} catch (err) {
+		return { ok: false, detail: `signature check failed: ${(err as Error).message}` };
+	}
+	return verified
+		? { ok: true }
+		: { ok: false, detail: "signature does not verify against the issuing CA" };
+};
+
+/**
+ * A cache entry is keyed by the distribution point *and* the key the CRL was
+ * verified against. Two CAs can share a subject name — a key rollover keeps
+ * the DN — and a CRL accepted for one must never be handed to a certificate
+ * the other issued.
+ */
+const issuerKeyId = (issuer: pkijs.Certificate): string =>
+	createHash("sha256")
+		.update(new Uint8Array(issuer.subjectPublicKeyInfo.toSchema().toBER(false)))
+		.digest("hex");
+
+const cacheKey = (url: string, issuerId: string): string => `${url}\n${issuerId}`;
 
 export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 	const cache = new Map<string, CacheEntry>();
@@ -150,7 +234,7 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 	return {
 		size: () => cache.size,
 
-		resolve: async (certificate, now) => {
+		resolve: async (certificate, issuer, now) => {
 			const urls = crlDistributionUrls(certificate);
 			if (urls.length === 0) {
 				return {
@@ -160,12 +244,14 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 				};
 			}
 
+			const issuerId = issuerKeyId(issuer);
 			const crls: pkijs.CertificateRevocationList[] = [];
 			const problems: string[] = [];
 			let lastReason: CrlUnavailableReason = "fetch_failed";
 
 			for (const url of urls) {
-				const cached = cache.get(url);
+				const key = cacheKey(url, issuerId);
+				const cached = cache.get(key);
 				if (cached !== undefined && cached.expiresAt > now.getTime()) {
 					crls.push(cached.crl);
 					continue;
@@ -187,6 +273,15 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 					continue;
 				}
 
+				// Nothing an unverified CRL says is acted on — not even its dates —
+				// so the signature comes before freshness.
+				const signature = await verifySignature(crl, issuer);
+				if (!signature.ok) {
+					lastReason = "bad_signature";
+					problems.push(`${url}: bad_signature (${signature.detail})`);
+					continue;
+				}
+
 				const fresh = freshness(crl, now);
 				if (!fresh.ok) {
 					lastReason = fresh.reason;
@@ -197,7 +292,7 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 					continue;
 				}
 
-				store(url, { crl, expiresAt: fresh.expiresAt });
+				store(key, { crl, expiresAt: fresh.expiresAt });
 				crls.push(crl);
 			}
 

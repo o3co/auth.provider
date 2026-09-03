@@ -337,8 +337,12 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// mechanism that actually applies there.
 			const subjects = path.slice(0, -1);
 			const crls: pkijs.CertificateRevocationList[] = [];
-			for (const certificate of subjects) {
-				const lookup = await resolver.resolve(certificate, now);
+			for (const [index, certificate] of subjects.entries()) {
+				// The next element up the path issued this one, so it is the key
+				// the CRL must verify against — the resolver refuses to hand back,
+				// or cache, a CRL that does not.
+				const issuer = path[index + 1] as pkijs.Certificate;
+				const lookup = await resolver.resolve(certificate, issuer, now);
 				if (lookup.ok) {
 					crls.push(...lookup.crls);
 					continue;
