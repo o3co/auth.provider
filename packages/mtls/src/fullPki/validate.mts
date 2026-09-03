@@ -404,19 +404,40 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					continue;
 				}
 
-				// A certificate may name several distribution points, and the
-				// resolver reports the ones it could not use alongside the CRLs
-				// it did obtain. Whether that partial answer is an answer is this
-				// policy's call, not the resolver's (#446). Under "reject" it is
-				// not: this process cannot tell from one fetched CRL that the
-				// CA's other points were redundant — a CA that partitions its
-				// list without saying so publishes exactly this shape — and
-				// "reject" is the operator's instruction not to guess in the
-				// permissive direction. Under "allow" that guess is what was
-				// chosen, so the CRLs that were obtained are consulted and the
-				// gap is logged — under its own message, because "checked
-				// against part of its revocation material" and "not checked at
-				// all" are different facts on an operator's dashboard.
+				// A status that *was* determined is not softened by the policy —
+				// "allow" covers an unknown status, not a known-revoked one — and
+				// it is consulted before any gap is judged: a CRL that was
+				// obtained and lists this certificate settles the matter under
+				// both policies, whatever the certificate's other distribution
+				// points did. Refusing such a certificate as "unavailable" instead
+				// would tell the audit trail an outage where there was a
+				// revocation. Every CRL here verified against `issuer`, whose
+				// subject is this certificate's issuer name, so the serial
+				// comparison is the whole check.
+				if (lookup.crls.some((crl) => crl.isCertificateRevoked(certificate))) {
+					return {
+						ok: false,
+						step: "certificate revoked",
+						detail:
+							`${toNode(certificate).subject}: listed on the CRL published by ` +
+							toNode(issuer).subject,
+					};
+				}
+
+				// Only a certificate absent from every CRL that was obtained is
+				// subject to the gap. A certificate may name several distribution
+				// points, and the resolver reports the ones it could not use
+				// alongside the CRLs it did obtain. Whether that partial answer is
+				// an answer is this policy's call, not the resolver's (#446).
+				// Under "reject" it is not: this process cannot tell from one
+				// fetched CRL that the CA's other points were redundant — a CA
+				// that partitions its list without saying so publishes exactly
+				// this shape — and "reject" is the operator's instruction not to
+				// guess in the permissive direction. Under "allow" that guess is
+				// what was chosen, so the certificate passes and the gap is logged
+				// — under its own message, because "checked against part of its
+				// revocation material" and "not checked at all" are different
+				// facts on an operator's dashboard.
 				if (lookup.unavailable.length > 0) {
 					const subject = toNode(certificate).subject;
 					const last = lookup.unavailable[lookup.unavailable.length - 1] as CrlPointUnavailable;
@@ -436,21 +457,6 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 						{ subject, reason: last.reason, detail },
 						"mtls_revocation_partially_unavailable_allowed",
 					);
-				}
-
-				// A status that *was* determined is not softened by the policy:
-				// "allow" covers an unknown status, not a known-revoked one. Every
-				// CRL here verified against `issuer`, whose subject is this
-				// certificate's issuer name, so the serial comparison is the whole
-				// check.
-				if (lookup.crls.some((crl) => crl.isCertificateRevoked(certificate))) {
-					return {
-						ok: false,
-						step: "certificate revoked",
-						detail:
-							`${toNode(certificate).subject}: listed on the CRL published by ` +
-							toNode(issuer).subject,
-					};
 				}
 			}
 

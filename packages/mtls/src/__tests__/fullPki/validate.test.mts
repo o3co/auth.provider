@@ -1030,25 +1030,38 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		);
 	});
 
-	it("under 'allow', a certificate listed on the CRL one point produced is refused while another point is down", async () => {
-		// A status that *was* determined is not softened by a gap elsewhere.
-		const { root, int, leaf } = await chainWith(
-			crlDistributionPoints([INT_CRL_URL, INT_CRL_MIRROR_URL]),
-		);
-		const { impl } = stubFetch({
-			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
-			[INT_CRL_MIRROR_URL]: 503,
-			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
-		});
+	it.each(["reject", "allow"] as const)(
+		"under '%s', a certificate listed on the CRL one point produced is refused as revoked, not as unavailable, while another point is down",
+		async (onUnavailable) => {
+			// A status that *was* determined is not softened by a gap elsewhere
+			// — nor renamed by it. Under "reject" the strict-unavailable refusal
+			// must come *after* the CRLs that were obtained have been consulted:
+			// reporting a certificate an issuer has already revoked as merely
+			// "unavailable" tells the audit trail an outage where there was a
+			// revocation.
+			const { root, int, leaf } = await chainWith(
+				crlDistributionPoints([INT_CRL_URL, INT_CRL_MIRROR_URL]),
+			);
+			const { impl } = stubFetch({
+				[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
+				[INT_CRL_MIRROR_URL]: 503,
+				[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+			});
+			const logger = { warn: vi.fn(), debug: vi.fn() };
 
-		const result = await validator([root], {
-			revocation: crlPolicy("allow"),
-			fetchImpl: impl,
-		}).validate(leaf.x509, [int.x509], NOW);
+			const result = await validator([root], {
+				revocation: crlPolicy(onUnavailable),
+				fetchImpl: impl,
+				logger,
+			}).validate(leaf.x509, [int.x509], NOW);
 
-		expect(result.ok).toBe(false);
-		if (!result.ok) expect(result.step).toBe("certificate revoked");
-	});
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.step).toBe("certificate revoked");
+			// Nothing was waved through and nothing was refused for being
+			// unknown, so neither availability line is emitted.
+			expect(logger.warn).not.toHaveBeenCalled();
+		},
+	);
 
 	it("does not refuse a certificate whose distribution point lists one dead mirror among its URIs", async () => {
 		// RFC 5280 §4.2.1.13: several names within one point are ways to
