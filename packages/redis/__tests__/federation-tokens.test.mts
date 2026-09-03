@@ -708,3 +708,96 @@ describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (develo
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// #293 (PR #450 review) — the inner envelope is validated, not just the wrapper.
+//
+// `open()` checked only `{ v: 2, c | p }`. A v2 record whose inner envelope
+// was malformed — an array, no `accessToken`, `expiresAtMs: "soon"` — got past
+// it, and `fromEnvelope()` then returned `{ accessToken: undefined,
+// expiresAt: Invalid Date }` instead of throwing, so the self-heal in `get()`
+// never ran and the corrupt record stayed in Redis, returned on every read.
+// Every malformed shape below must take the same path as corrupt JSON: key
+// gone, index member gone, `null` returned — in both modes.
+// ---------------------------------------------------------------------------
+
+describe("#293 — a v2 record with a malformed inner envelope self-heals like corrupt JSON", () => {
+	let redis: ReturnType<typeof createFakeRedis>;
+	beforeEach(() => {
+		redis = createFakeRedis();
+	});
+
+	type Mode = "required" | "allow-plaintext";
+	const storeFor = (mode: Mode) =>
+		createRedisFederationTokenStore({
+			client: redis,
+			encryption: mode === "required" ? { mode, key: encryptionKey } : { mode: "allow-plaintext" },
+		});
+
+	// Write a well-formed v2 wrapper around `innerJson` under `key`. Under
+	// `required` the inner JSON is sealed with the right key and the right
+	// AAD, so the only thing wrong with the record is its inner shape. The
+	// inner bytes are spliced in verbatim in both modes — a JSON round-trip
+	// here would turn `1e999` into `null` and hide the non-finite case.
+	const writeV2 = (mode: Mode, key: string, innerJson: string) => {
+		redis.data.set(
+			key,
+			mode === "required"
+				? JSON.stringify({ v: 2, c: encryptTokenField(innerJson, encryptionKey, key) })
+				: `{"v":2,"p":${innerJson}}`,
+		);
+	};
+
+	const malformed: ReadonlyArray<[label: string, innerJson: string]> = [
+		["an array", "[]"],
+		["a string", '"at"'],
+		["null", "null"],
+		["missing accessToken", '{"expiresAtMs":null}'],
+		["accessToken not a string", '{"accessToken":42,"expiresAtMs":null}'],
+		["accessToken empty", '{"accessToken":"","expiresAtMs":null}'],
+		["missing expiresAtMs", '{"accessToken":"at"}'],
+		["expiresAtMs a string", '{"accessToken":"at","expiresAtMs":"soon"}'],
+		// JSON.parse turns 1e999 into Infinity; new Date(Infinity) is Invalid Date.
+		["expiresAtMs not finite", '{"accessToken":"at","expiresAtMs":1e999}'],
+		["refreshToken not a string", '{"accessToken":"at","expiresAtMs":null,"refreshToken":42}'],
+		["idToken not a string", '{"accessToken":"at","expiresAtMs":null,"idToken":{}}'],
+		["tokenType not a string", '{"accessToken":"at","expiresAtMs":null,"tokenType":1}'],
+		["scope not a string", '{"accessToken":"at","expiresAtMs":null,"scope":["openid"]}'],
+		["rawParams an array", '{"accessToken":"at","expiresAtMs":null,"rawParams":[]}'],
+		["rawParams a string", '{"accessToken":"at","expiresAtMs":null,"rawParams":"x"}'],
+		["rawParams null", '{"accessToken":"at","expiresAtMs":null,"rawParams":null}'],
+	];
+
+	for (const mode of ["required", "allow-plaintext"] as const) {
+		describe(`mode=${mode}`, () => {
+			it.each(malformed)("inner envelope is %s", async (_label, innerJson) => {
+				const store = storeFor(mode);
+				writeV2(mode, "ft:sid-1:google", innerJson);
+				redis.sets.set("ft:idx:sid-1", new Set(["google", "github"]));
+
+				expect(await store.get("sid-1", "google")).toBeNull();
+				expect(redis.data.has("ft:sid-1:google")).toBe(false);
+				expect(redis.sets.get("ft:idx:sid-1")?.has("google")).toBe(false);
+				expect(redis.sets.get("ft:idx:sid-1")?.has("github")).toBe(true);
+			});
+
+			it("still reads the minimal valid envelope — optional fields may be absent", async () => {
+				const store = storeFor(mode);
+				writeV2(mode, "ft:sid-1:google", '{"accessToken":"at","expiresAtMs":null}');
+				expect(await store.get("sid-1", "google")).toEqual({
+					accessToken: "at",
+					expiresAt: null,
+				});
+				expect(redis.data.has("ft:sid-1:google")).toBe(true);
+			});
+
+			it("still reads a finite expiresAtMs as a Date", async () => {
+				const store = storeFor(mode);
+				writeV2(mode, "ft:sid-1:google", '{"accessToken":"at","expiresAtMs":1900000000000}');
+				expect((await store.get("sid-1", "google"))?.expiresAt).toEqual(
+					new Date(1_900_000_000_000),
+				);
+			});
+		});
+	}
+});

@@ -212,6 +212,45 @@ type StoredRecord =
 	| { v: typeof RECORD_VERSION; c: string }
 	| { v: typeof RECORD_VERSION; p: Envelope };
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+	typeof v === "object" && v !== null && !Array.isArray(v);
+
+const isOptionalString = (v: unknown): v is string | undefined =>
+	v === undefined || typeof v === "string";
+
+/**
+ * Minimal shape check on the inner envelope, applied after the wrapper has
+ * been unwrapped or decrypted (PR #450 review). Checking only the wrapper
+ * let a malformed inner envelope — an array, no `accessToken`,
+ * `expiresAtMs: "soon"` — reach `fromEnvelope`, which returned
+ * `{ accessToken: undefined, expiresAt: Invalid Date }` instead of
+ * throwing; `get`'s self-heal then never ran and the corrupt record was
+ * served on every read. Rejecting it here routes it into the same delete +
+ * index-drop as corrupt JSON.
+ *
+ * `expiresAtMs` must be present: `null` is the explicit "no finite expiry"
+ * and a missing field is the "unknown" the `Envelope` doc keeps distinct
+ * from it. Hand-written rather than zod so the read path stays
+ * dependency-free.
+ */
+function isEnvelope(value: unknown): value is Envelope {
+	if (!isPlainObject(value)) return false;
+	if (typeof value.accessToken !== "string" || value.accessToken.length === 0) return false;
+	const expiresAtMs = value.expiresAtMs;
+	if (expiresAtMs !== null && !(typeof expiresAtMs === "number" && Number.isFinite(expiresAtMs))) {
+		return false;
+	}
+	if (
+		!isOptionalString(value.refreshToken) ||
+		!isOptionalString(value.idToken) ||
+		!isOptionalString(value.tokenType) ||
+		!isOptionalString(value.scope)
+	) {
+		return false;
+	}
+	return value.rawParams === undefined || isPlainObject(value.rawParams);
+}
+
 export function createRedisFederationTokenStore(
 	opts: RedisFederationTokenStoreOptions,
 ): FederationTokenStore & SupportsLock {
@@ -320,25 +359,34 @@ export function createRedisFederationTokenStore(
 	 * Inverse of `seal`. Throws on anything that is not a record this store
 	 * wrote in its own mode — corrupt JSON, the pre-#293 per-field shape, a
 	 * plaintext record under `mode = "required"`, a ciphertext under
-	 * `mode = "allow-plaintext"`, or a ciphertext sealed for another key —
-	 * and `get` turns every throw into the same self-heal. One read path, no
-	 * shape sniffing: a legacy record is not "migrated", it is dropped.
+	 * `mode = "allow-plaintext"`, a ciphertext sealed for another key, or a
+	 * wrapper whose inner envelope is not one (`isEnvelope`) — and `get`
+	 * turns every throw into the same self-heal. One read path, no shape
+	 * sniffing: a legacy record is not "migrated", it is dropped.
 	 */
 	const open = (key: string, raw: string): Envelope => {
 		const record = JSON.parse(raw) as Partial<Record<"v" | "c" | "p", unknown>> | null;
 		if (record === null || typeof record !== "object" || record.v !== RECORD_VERSION) {
 			throw new Error("FederationTokenStore redis: not a v2 record");
 		}
+		let inner: unknown;
 		if (opts.encryption.mode === "allow-plaintext") {
-			if (typeof record.p !== "object" || record.p === null) {
-				throw new Error("FederationTokenStore redis: not a plaintext v2 record");
+			inner = record.p;
+		} else {
+			if (typeof record.c !== "string") {
+				throw new Error("FederationTokenStore redis: not an encrypted v2 record");
 			}
-			return record.p as Envelope;
+			inner = JSON.parse(decryptTokenField(record.c, opts.encryption.key, key));
 		}
-		if (typeof record.c !== "string") {
-			throw new Error("FederationTokenStore redis: not an encrypted v2 record");
+		// The wrapper says whose record this is; this says whether what is
+		// inside can be handed to `fromEnvelope` at all. Under `required` the
+		// AEAD tag already vouches that these are bytes this store sealed, so
+		// a mismatch here is a bug or a hand-edited dev record — either way
+		// the self-heal is the right answer, not an Invalid Date.
+		if (!isEnvelope(inner)) {
+			throw new Error("FederationTokenStore redis: malformed envelope");
 		}
-		return JSON.parse(decryptTokenField(record.c, opts.encryption.key, key)) as Envelope;
+		return inner;
 	};
 
 	const writeEnv = async (sid: string, name: string, env: Envelope) => {
