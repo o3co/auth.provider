@@ -17,12 +17,40 @@
 /**
  * CRL retrieval, freshness and caching for `mode = "full-pki"`.
  *
- * `pkijs` verifies a CRL's signature against its issuer and ignores one whose
- * `nextUpdate` has passed — but it is given CRLs, it does not go and get
- * them. Everything between "this certificate names a distribution point" and
- * "here is a CRL object" lives here: reading the extension, fetching under
- * the guards in `fetchGuard.mts`, parsing, judging freshness, and caching so
- * a busy token endpoint does not re-fetch per request.
+ * `pkijs` is given CRLs; it does not go and get them. Everything between
+ * "this certificate names a distribution point" and "here is a CRL this
+ * issuer actually published" lives here: reading the extension, fetching
+ * under the guards in `fetchGuard.mts`, parsing, **verifying the signature
+ * against the issuing CA**, judging freshness, and caching so a busy token
+ * endpoint does not re-fetch per request.
+ *
+ * ### Why the signature is checked here and not left to the engine
+ *
+ * The engine does verify a CRL's signature — but only when it is finally
+ * consulted, which is after this module has already decided whether to cache
+ * the bytes. A CRL that is cached first and verified later is a forged CRL
+ * that stays in memory for up to `cache-ttl-seconds`: one injected response
+ * over the plain-http transport most distribution points use would refuse
+ * every client of that distribution point until the entry expired. So
+ * nothing is stored, and nothing is returned, until the signature verifies
+ * against the key of the certificate's issuer and that issuer's `keyUsage`
+ * (when present) includes `cRLSign` (RFC 5280 §6.3.3). A failure is its own
+ * outcome, `bad_signature`, and is deliberately never cached in either
+ * direction: it must not pin a refusal, and it must not pin an acceptance.
+ *
+ * ### One fetch per distribution point, not one per request
+ *
+ * A cache miss on a busy token endpoint is many requests missing at once,
+ * and an outage is a miss on every request for as long as it lasts. Two
+ * bounds keep that from becoming one guarded fetch per request, each holding
+ * a connection for up to `fetch-timeout-ms`:
+ *
+ *  - concurrent lookups of the same URL share one in-flight fetch;
+ *  - a URL that could not be used — unreachable, unparseable, or serving a
+ *    CRL that is stale or undated — is remembered as unavailable for
+ *    `CRL_NEGATIVE_CACHE_TTL_MS`, so a stuck endpoint costs one probe per
+ *    window rather than one per request. `bad_signature` is exempt, per the
+ *    section above.
  *
  * ### The failure that matters
  *
@@ -32,14 +60,22 @@
  * that is acceptable is an operator's decision about their threat model, not
  * something a library gets to make silently — so this module reports
  * unavailability as its own outcome, and the caller applies the configured
- * `on-unavailable` policy before the engine is ever consulted.
+ * `on-unavailable` policy to each certificate on the path itself; the engine
+ * is never handed revocation material at all.
  */
 
+import { createHash } from "node:crypto";
 import * as pkijs from "pkijs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
 
 /** OID of the `cRLDistributionPoints` extension (RFC 5280 §4.2.1.13). */
 const OID_CRL_DISTRIBUTION_POINTS = "2.5.29.31";
+
+/** OID of `keyUsage` (RFC 5280 §4.2.1.3). */
+const OID_KEY_USAGE = "2.5.29.15";
+
+/** `cRLSign` bit of `keyUsage`, MSB-first within the first octet. */
+const KEY_USAGE_CRL_SIGN = 0x02;
 
 /** `GeneralName` tag for `uniformResourceIdentifier`. */
 const GENERAL_NAME_URI = 6;
@@ -49,11 +85,24 @@ export type CrlUnavailableReason =
 	| "fetch_failed"
 	| "unparseable"
 	| "no_next_update"
-	| "stale";
+	| "stale"
+	| "bad_signature";
 
 export type CrlLookup =
 	| { readonly ok: true; readonly crls: readonly pkijs.CertificateRevocationList[] }
 	| { readonly ok: false; readonly reason: CrlUnavailableReason; readonly detail: string };
+
+/**
+ * How long a distribution point that could not be used is remembered as
+ * unavailable, in milliseconds.
+ *
+ * Not a configuration knob, deliberately. The window exists to absorb a
+ * burst — a cache expiry or an outage must not turn into one fetch per
+ * request, each waiting up to `fetch-timeout-ms` on the token endpoint's
+ * critical path — not to remember the outage: a CA that comes back must be
+ * noticed in seconds, not in the hours `cache-ttl-seconds` is measured in.
+ */
+export const CRL_NEGATIVE_CACHE_TTL_MS = 30_000;
 
 /**
  * Collect the HTTP(S) distribution-point URLs a certificate advertises.
@@ -84,11 +133,32 @@ export const crlDistributionUrls = (certificate: pkijs.Certificate): readonly st
 	return urls;
 };
 
-interface CacheEntry {
-	readonly crl: pkijs.CertificateRevocationList;
-	/** Epoch millis after which this entry must be re-fetched. */
-	readonly expiresAt: number;
-}
+/** Reasons that are remembered for the negative window. */
+type RememberedReason = Exclude<CrlUnavailableReason, "no_distribution_point" | "bad_signature">;
+
+type CacheEntry =
+	| {
+			readonly kind: "crl";
+			readonly crl: pkijs.CertificateRevocationList;
+			/** Epoch millis after which this entry must be re-fetched. */
+			readonly expiresAt: number;
+	  }
+	| {
+			readonly kind: "unavailable";
+			readonly reason: RememberedReason;
+			readonly detail: string;
+			/** Epoch millis after which the distribution point is tried again. */
+			readonly expiresAt: number;
+	  };
+
+/** What fetching and parsing one distribution point produced, before any verification. */
+type Loaded =
+	| { readonly ok: true; readonly crl: pkijs.CertificateRevocationList }
+	| {
+			readonly ok: false;
+			readonly reason: "fetch_failed" | "unparseable";
+			readonly detail: string;
+	  };
 
 export interface CrlResolverOptions {
 	readonly fetch: GuardedFetch;
@@ -104,17 +174,92 @@ export interface CrlResolverOptions {
 }
 
 export interface CrlResolver {
-	/** Fetch (or reuse) the CRLs covering `certificate`. */
-	resolve(certificate: pkijs.Certificate, now: Date): Promise<CrlLookup>;
-	/** Entry count — for tests and for a future metric. */
+	/**
+	 * Fetch (or reuse) the CRLs covering `certificate`, verified against
+	 * `issuer` — the certificate that issued it, i.e. the next element up the
+	 * validated path. Only a CRL whose signature verifies against `issuer`'s
+	 * key is ever returned or cached. Concurrent calls for the same
+	 * distribution point share one fetch, and a distribution point that could
+	 * not be used is not retried within `CRL_NEGATIVE_CACHE_TTL_MS`.
+	 */
+	resolve(certificate: pkijs.Certificate, issuer: pkijs.Certificate, now: Date): Promise<CrlLookup>;
+	/** Entry count, usable and remembered-unavailable alike — for tests and for a future metric. */
 	size(): number;
 }
 
 const DEFAULT_MAX_CACHE_ENTRIES = 256;
 
+/**
+ * Whether `issuer` is entitled to sign CRLs at all: RFC 5280 §6.3.3 (f) — its
+ * `keyUsage`, when present, MUST include `cRLSign`. Being entitled to sign
+ * certificates is not being entitled to publish revocation lists, and the
+ * bit is the CA's own statement about which of the two this key does.
+ * Absence is unconstrained, as for every other `keyUsage` check in this arm.
+ */
+const issuerMaySignCrls = (issuer: pkijs.Certificate): boolean => {
+	const extension = issuer.extensions?.find((ext) => ext.extnID === OID_KEY_USAGE);
+	if (extension === undefined) return true;
+	const parsed = extension.parsedValue as
+		| { valueBlock?: { valueHexView?: Uint8Array } }
+		| undefined;
+	const bytes = parsed?.valueBlock?.valueHexView;
+	// Present but unreadable is a restriction that cannot be honoured, not an
+	// absent one — the same distinction `checkLeafKeyUsage` draws.
+	if (bytes === undefined || bytes.length === 0) return false;
+	return ((bytes[0] ?? 0) & KEY_USAGE_CRL_SIGN) === KEY_USAGE_CRL_SIGN;
+};
+
+/**
+ * Verify that `issuer` published `crl`. `verify` also answers `false` when
+ * the CRL's issuer name is not `issuer`'s subject and when the CRL carries a
+ * critical extension pkijs does not know — both of which are "not a CRL this
+ * issuer published", which is the question being asked.
+ */
+const verifySignature = async (
+	crl: pkijs.CertificateRevocationList,
+	issuer: pkijs.Certificate,
+): Promise<{ ok: true } | { ok: false; detail: string }> => {
+	if (!issuerMaySignCrls(issuer)) {
+		return { ok: false, detail: "the issuing CA's keyUsage omits cRLSign (RFC 5280 §6.3.3)" };
+	}
+	let verified: boolean;
+	try {
+		verified = await crl.verify({ issuerCertificate: issuer });
+	} catch (err) {
+		return {
+			ok: false,
+			detail: `signature check failed: ${err instanceof Error ? err.message : String(err)}`,
+		};
+	}
+	return verified
+		? { ok: true }
+		: { ok: false, detail: "signature does not verify against the issuing CA" };
+};
+
+/**
+ * A cache entry is keyed by the distribution point *and* the key the CRL was
+ * verified against. Two CAs can share a subject name — a key rollover keeps
+ * the DN — and a CRL accepted for one must never be handed to a certificate
+ * the other issued.
+ */
+const issuerKeyId = (issuer: pkijs.Certificate): string =>
+	createHash("sha256")
+		.update(new Uint8Array(issuer.subjectPublicKeyInfo.toSchema().toBER(false)))
+		.digest("hex");
+
+const usableKey = (url: string, issuerId: string): string => `crl:${url}\n${issuerId}`;
+
+/**
+ * Unavailability is a property of the distribution point, not of who asked,
+ * so it is remembered per URL.
+ */
+const unavailableKey = (url: string): string => `down:${url}`;
+
 export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 	const cache = new Map<string, CacheEntry>();
 	const maxEntries = options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
+	/** Fetches in progress, so concurrent misses on one URL issue one request. */
+	const inFlight = new Map<string, Promise<Loaded>>();
 
 	/**
 	 * A CRL with no `nextUpdate` is treated as unusable rather than as
@@ -136,21 +281,54 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		};
 	};
 
-	const store = (url: string, entry: CacheEntry): void => {
-		if (cache.size >= maxEntries && !cache.has(url)) {
+	const store = (key: string, entry: CacheEntry): void => {
+		if (cache.size >= maxEntries && !cache.has(key)) {
 			// Oldest insertion first — Map preserves insertion order. A CRL cache
 			// has no hot/cold distinction worth a real eviction policy; the bound
 			// exists so the map cannot grow without limit, not to maximise hits.
 			const oldest = cache.keys().next();
 			if (!oldest.done) cache.delete(oldest.value);
 		}
-		cache.set(url, entry);
+		cache.set(key, entry);
+	};
+
+	const remember = (url: string, reason: RememberedReason, detail: string, now: Date): void =>
+		store(unavailableKey(url), {
+			kind: "unavailable",
+			reason,
+			detail,
+			expiresAt: now.getTime() + CRL_NEGATIVE_CACHE_TTL_MS,
+		});
+
+	const fetchAndParse = async (url: string): Promise<Loaded> => {
+		const fetched = await options.fetch(url);
+		if (!fetched.ok) {
+			return { ok: false, reason: "fetch_failed", detail: `${fetched.reason} (${fetched.detail})` };
+		}
+		try {
+			return { ok: true, crl: pkijs.CertificateRevocationList.fromBER(fetched.bytes) };
+		} catch (err) {
+			return {
+				ok: false,
+				reason: "unparseable",
+				detail: `not a DER CRL (${err instanceof Error ? err.message : String(err)})`,
+			};
+		}
+	};
+
+	/** Fetch `url`, joining a fetch of it that is already in progress. */
+	const load = (url: string): Promise<Loaded> => {
+		const existing = inFlight.get(url);
+		if (existing !== undefined) return existing;
+		const pending = fetchAndParse(url).finally(() => inFlight.delete(url));
+		inFlight.set(url, pending);
+		return pending;
 	};
 
 	return {
 		size: () => cache.size,
 
-		resolve: async (certificate, now) => {
+		resolve: async (certificate, issuer, now) => {
 			const urls = crlDistributionUrls(certificate);
 			if (urls.length === 0) {
 				return {
@@ -160,45 +338,61 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 				};
 			}
 
+			const issuerId = issuerKeyId(issuer);
 			const crls: pkijs.CertificateRevocationList[] = [];
 			const problems: string[] = [];
 			let lastReason: CrlUnavailableReason = "fetch_failed";
 
 			for (const url of urls) {
-				const cached = cache.get(url);
-				if (cached !== undefined && cached.expiresAt > now.getTime()) {
-					crls.push(cached.crl);
+				const usable = cache.get(usableKey(url, issuerId));
+				if (usable?.kind === "crl" && usable.expiresAt > now.getTime()) {
+					crls.push(usable.crl);
+					continue;
+				}
+				const unavailable = cache.get(unavailableKey(url));
+				if (unavailable?.kind === "unavailable" && unavailable.expiresAt > now.getTime()) {
+					lastReason = unavailable.reason;
+					problems.push(`${url}: ${unavailable.reason} (${unavailable.detail}; not retried yet)`);
 					continue;
 				}
 
-				const fetched = await options.fetch(url);
-				if (!fetched.ok) {
-					lastReason = "fetch_failed";
-					problems.push(`${url}: ${fetched.reason} (${fetched.detail})`);
+				const loaded = await load(url);
+				if (!loaded.ok) {
+					remember(url, loaded.reason, loaded.detail, now);
+					lastReason = loaded.reason;
+					problems.push(`${url}: ${loaded.reason} (${loaded.detail})`);
 					continue;
 				}
 
-				let crl: pkijs.CertificateRevocationList;
-				try {
-					crl = pkijs.CertificateRevocationList.fromBER(fetched.bytes);
-				} catch (err) {
-					lastReason = "unparseable";
-					problems.push(`${url}: not a DER CRL (${(err as Error).message})`);
+				// Nothing an unverified CRL says is acted on — not even its dates —
+				// so the signature comes before freshness, and a failure here is
+				// the one outcome that is never remembered: a single injected
+				// response must not pin a refusal for anyone.
+				const signature = await verifySignature(loaded.crl, issuer);
+				if (!signature.ok) {
+					lastReason = "bad_signature";
+					problems.push(`${url}: bad_signature (${signature.detail})`);
 					continue;
 				}
 
-				const fresh = freshness(crl, now);
+				const fresh = freshness(loaded.crl, now);
 				if (!fresh.ok) {
+					// Not stored as usable. The failure is remembered for the negative
+					// window only, so a responder that has stopped publishing costs
+					// one probe per window rather than one per request — and is
+					// noticed within seconds once it publishes again.
+					remember(url, fresh.reason, fresh.reason, now);
 					lastReason = fresh.reason;
 					problems.push(`${url}: ${fresh.reason}`);
-					// A stale CRL is deliberately not cached: caching it would let a
-					// responder that has stopped publishing keep us from ever
-					// retrying.
 					continue;
 				}
 
-				store(url, { crl, expiresAt: fresh.expiresAt });
-				crls.push(crl);
+				store(usableKey(url, issuerId), {
+					kind: "crl",
+					crl: loaded.crl,
+					expiresAt: fresh.expiresAt,
+				});
+				crls.push(loaded.crl);
 			}
 
 			if (crls.length === 0) {

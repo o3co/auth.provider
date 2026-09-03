@@ -74,7 +74,9 @@ export interface GuardedFetchOptions {
 	/**
 	 * Hosts this deployment will retrieve revocation material from. Each entry
 	 * is `host` or `host:port`, matched case-insensitively against the URL's
-	 * authority. An entry without a port matches any port.
+	 * authority. An entry without a port matches any port. An IPv6 literal may
+	 * be written bracketed (`[::1]`, `[::1]:8080`) or, without a port, bare
+	 * (`::1`), expanded or compressed.
 	 *
 	 * Never empty: an empty allowlist would mean "any destination", and the
 	 * module refuses that at boot rather than accepting it here.
@@ -89,26 +91,68 @@ export interface GuardedFetchOptions {
 export type GuardedFetch = (url: string) => Promise<FetchOutcome>;
 
 /**
+ * The one form both sides of the allowlist comparison are reduced to:
+ * lower-case, and for an IPv6 literal bracket-less in the WHATWG
+ * serialisation.
+ *
+ * `URL.hostname` keeps the brackets on an IPv6 literal (`[::1]`) and always
+ * serialises it compressed, while an operator may write the entry bracketed
+ * or bare, expanded or compressed. Comparing raw strings meant an IPv6 entry
+ * could never match. Routing the entry through `URL` gives it exactly the
+ * serialisation the URL side will have; a literal `URL` rejects is kept as
+ * written, where it matches nothing rather than something unintended.
+ */
+const canonicalHost = (host: string): string => {
+	const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+	if (!bare.includes(":")) return bare.toLowerCase();
+	try {
+		return new URL(`http://[${bare}]/`).hostname.slice(1, -1);
+	} catch {
+		return bare.toLowerCase();
+	}
+};
+
+/**
  * Parse an allowlist entry into its host and optional port.
  *
- * Bracketed IPv6 (`[::1]:8080`) is handled by locating the last colon after
- * the closing bracket, so an address's own colons are not read as a port
- * separator.
+ * Bracketed IPv6 (`[::1]:8080`) is handled by locating the port after the
+ * closing bracket, so an address's own colons are not read as a separator;
+ * a bare literal (`::1`) has more than one colon and no brackets, and a port
+ * cannot be attached to that form, so it is read as a host alone.
  */
 const splitHostPort = (entry: string): { host: string; port: string | null } => {
 	const trimmed = entry.trim().toLowerCase();
 	if (trimmed.startsWith("[")) {
 		const close = trimmed.indexOf("]");
-		if (close === -1) return { host: trimmed, port: null };
+		if (close === -1) return { host: canonicalHost(trimmed), port: null };
 		const rest = trimmed.slice(close + 1);
 		return {
-			host: trimmed.slice(1, close),
+			host: canonicalHost(trimmed.slice(1, close)),
 			port: rest.startsWith(":") ? rest.slice(1) : null,
 		};
 	}
 	const colon = trimmed.lastIndexOf(":");
-	if (colon === -1) return { host: trimmed, port: null };
-	return { host: trimmed.slice(0, colon), port: trimmed.slice(colon + 1) };
+	if (colon === -1 || trimmed.indexOf(":") !== colon) {
+		return { host: canonicalHost(trimmed), port: null };
+	}
+	return { host: canonicalHost(trimmed.slice(0, colon)), port: trimmed.slice(colon + 1) };
+};
+
+/**
+ * Every message on an error's `cause` chain, outermost first.
+ *
+ * undici — Node's `fetch` — reports most failures as `TypeError("fetch
+ * failed")` with the actual reason on `cause`; the top-level message alone
+ * tells an audit log nothing.
+ */
+const describeError = (err: unknown): string => {
+	const messages: string[] = [];
+	let current: unknown = err;
+	for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
+		messages.push(current.message);
+		current = current.cause;
+	}
+	return messages.length > 0 ? messages.join(": ") : String(err);
 };
 
 /**
@@ -160,7 +204,7 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 
 	const hostAllowed = (url: URL): boolean =>
 		allowed.some((entry) => {
-			if (entry.host !== url.hostname.toLowerCase()) return false;
+			if (entry.host !== canonicalHost(url.hostname)) return false;
 			return entry.port === null || entry.port === (url.port === "" ? defaultPort(url) : url.port);
 		});
 
@@ -214,12 +258,13 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 			}
 			return { ok: true, bytes: body.bytes };
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			const message = describeError(err);
 			if (controller.signal.aborted) {
 				return { ok: false, reason: "timeout", detail: `${options.timeoutMs}ms` };
 			}
-			// `redirect: "error"` surfaces as a TypeError from fetch; naming it
-			// separately keeps the audit trail honest about which limit fired.
+			// `redirect: "error"` surfaces as a TypeError from fetch — with the
+			// reason on `cause` under undici; naming it separately keeps the
+			// audit trail honest about which limit fired.
 			if (/redirect/i.test(message)) {
 				return { ok: false, reason: "redirect_refused", detail: message };
 			}
