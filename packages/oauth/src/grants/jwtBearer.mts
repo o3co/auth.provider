@@ -190,7 +190,7 @@ export const createJwtBearerGrant = (
 				};
 			}
 
-			const scopes = resolveScope(ctx, verified.scope, ctx.authenticatedClient?.allowedScopes);
+			const scopes = resolveScope(ctx, verified.scope);
 			if ("error" in scopes) return { result: scopes };
 
 			const scopeClaim = scopes.scopes.length > 0 ? scopes.scopes.join(" ") : null;
@@ -231,11 +231,20 @@ export const createJwtBearerGrant = (
  * everything — the distinction #396 drew for `defaultScopes`. A requested scope
  * outside any present ceiling is `invalid_scope` rather than silently dropped,
  * so a caller learns their token is narrower than they asked for.
+ *
+ * An **omitted** scope is the case #396 is about, and it is answered the way
+ * `client_credentials` answers it: an authenticated client's *declared*
+ * `defaultScopes` — never its whole allowlist — filtered by that allowlist and
+ * by the assertion. A client with an allowlist and no declared default gets
+ * `invalid_scope`; one with an empty allowlist keeps the empty grant, since
+ * there is nothing to over-grant. Without an authenticated client there is no
+ * registration to declare a default, so the assertion's own `scope` claim —
+ * the issuing authority's statement — is what an omitted request receives,
+ * and nothing at all when it names none.
  */
 function resolveScope(
 	ctx: GrantContext,
 	assertionScope: readonly string[] | undefined,
-	clientAllowed: readonly string[] | undefined,
 ):
 	| { scopes: readonly string[] }
 	| { status: 400; error: "invalid_scope" | "invalid_request"; errorDescription: string } {
@@ -247,17 +256,37 @@ function resolveScope(
 			errorDescription: "scope must be a string",
 		};
 	}
-	const ceilings = [assertionScope, clientAllowed].filter(
+	const client = ctx.authenticatedClient;
+	const ceilings = [assertionScope, client?.allowedScopes].filter(
 		(c): c is readonly string[] => c !== undefined,
 	);
 	const within = (s: string): boolean => ceilings.every((c) => c.includes(s));
 
-	if (raw === undefined || raw.length === 0) {
-		// No request: the token gets the intersection of the ceilings that
-		// exist. With none, it gets nothing — there is no allowlist to draw on
-		// and inventing one would be the over-grant #396 removed.
-		if (ceilings.length === 0) return { scopes: [] };
-		return { scopes: (ceilings[0] as readonly string[]).filter(within) };
+	if (raw === undefined || raw.trim().length === 0) {
+		if (client) {
+			// #396, mirrored from `client_credentials`: an omitted scope draws
+			// on the client's DECLARED default, never on the whole allowlist —
+			// "forgot to send scope" must not be the maximum grant. The
+			// assertion stays a ceiling on that default (`within`), and the
+			// allowlist filter is applied even so: schema-validated
+			// registrations are ⊆ by boot, custom repositories are under no
+			// such obligation.
+			const allowed = client.allowedScopes ?? [];
+			if (client.defaultScopes !== undefined) {
+				return { scopes: client.defaultScopes.filter((s) => allowed.includes(s) && within(s)) };
+			}
+			if (allowed.length === 0) return { scopes: [] };
+			return {
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "scope is required: this client declares no defaultScopes",
+			};
+		}
+		// No client: the assertion's issuer is the only authority present, and
+		// its `scope` claim is the declared default. With none, the token gets
+		// nothing — there is no allowlist to draw on and inventing one would be
+		// the over-grant #396 removed.
+		return { scopes: assertionScope ?? [] };
 	}
 
 	// A request with NO ceiling to bound it is refused, not granted.

@@ -360,6 +360,93 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => 
 	});
 });
 
+describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never the allowlist (#396)", () => {
+	const client = (over: Record<string, unknown>) =>
+		({ authenticatedClient: { clientId: "c1", ...over } }) as never;
+	const scopeOf = (result: { status: number } & Record<string, unknown>) =>
+		"tokens" in result
+			? decodeJwt((result.tokens as { access_token: string }).access_token).scope
+			: expect.fail("expected tokens");
+
+	it("refuses an omitted scope for a client that declares no defaultScopes", async () => {
+		// The over-grant #396 removed from client_credentials: "forgot to send
+		// scope" used to be the maximum grant. An authenticated client with an
+		// allowlist and no declared default gets invalid_scope, not the
+		// allowlist.
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedScopes: ["read", "write"] })),
+		);
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+		expect("errorDescription" in result && result.errorDescription).toMatch(/defaultScopes/);
+	});
+
+	it("refuses it even when the assertion names a scope — the assertion is a ceiling, not a default", async () => {
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read"] }),
+		}).handle(ctx({}, client({ allowedScopes: ["read", "write"] })));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("grants the client's defaultScopes when scope is omitted", async () => {
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedScopes: ["read", "write"], defaultScopes: ["read"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("bounds the defaultScopes by what the assertion authorizes", async () => {
+		// The assertion stays a ceiling on the declared default: a device whose
+		// credential says "read" does not get "write" because the client's
+		// registration would default to it.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read"] }),
+		}).handle(
+			ctx({}, client({ allowedScopes: ["read", "write"], defaultScopes: ["read", "write"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("filters the defaultScopes by the allowlist even so", async () => {
+		// Schema-validated registrations are a subset by boot; a custom
+		// repository is under no such obligation.
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedScopes: ["read"], defaultScopes: ["read", "admin"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("keeps the empty grant for a scope-less client (empty allowlist, no defaults)", async () => {
+		// Nothing to over-grant, so nothing to refuse.
+		const { result } = await build({}).handle(ctx({}, client({ allowedScopes: [] })));
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBeUndefined();
+	});
+
+	it("treats a blank scope exactly like an omitted one", async () => {
+		const { result } = await build({}).handle(
+			ctx({ scope: "" }, client({ allowedScopes: ["read", "write"] })),
+		);
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("without a client, an omitted scope receives what the assertion itself declares", async () => {
+		// No registration is present to declare a default, so the assertion's
+		// issuer is the only authority in the room and its `scope` claim is the
+		// declared default. Unchanged from #428, pinned so it is a decision.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read"] }),
+		}).handle(ctx({}, { authenticatedClient: null }));
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+});
+
 /*
  * #301 — enabling the grant without a verifier must fail at composition.
  *
