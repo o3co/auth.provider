@@ -46,11 +46,41 @@
  * a connection for up to `fetch-timeout-ms`:
  *
  *  - concurrent lookups of the same URL share one in-flight fetch;
- *  - a URL that could not be used — unreachable, unparseable, or serving a
- *    CRL that is stale or undated — is remembered as unavailable for
- *    `CRL_NEGATIVE_CACHE_TTL_MS`, so a stuck endpoint costs one probe per
- *    window rather than one per request. `bad_signature` is exempt, per the
- *    section above.
+ *  - a URL that could not be used — unreachable, unparseable, serving a CRL
+ *    that is stale or undated, or serving one this resolver does not process
+ *    (an unsupported critical extension, a delta, a scoped CRL) — is
+ *    remembered as unavailable for `CRL_NEGATIVE_CACHE_TTL_MS`, so a stuck
+ *    endpoint costs one probe per window rather than one per request.
+ *    `bad_signature` is exempt, per the section above.
+ *
+ * The last group is why a CRL's extensions are inspected *before* its
+ * signature (#447). pkijs's `verify` answers `false` for a critical extension
+ * outside its own list — indistinguishable from a forged signature — and
+ * `bad_signature` is never remembered, so a CA publishing such a CRL cost one
+ * guarded fetch per request under both policies, with the window unable to
+ * help. Inspecting first gives the outcome its own name. Remembering it on
+ * bytes that have not been verified is safe for the same reason remembering
+ * `unparseable` is: the decision depends only on the bytes' structure, and it
+ * is only ever a decision *not* to use the CRL. Nothing an attacker injects
+ * can pin an acceptance this way, and a pinned refusal is bounded by the
+ * window exactly as an injected 503 already is.
+ *
+ * ### What a CRL may say about its own scope
+ *
+ * RFC 5280 lets a CA split its revocation information: by reason code across
+ * several distribution points (`reasons` on the point, `onlySomeReasons` on
+ * the CRL), by certificate type or by distribution point
+ * (`issuingDistributionPoint`), into a base CRL plus deltas
+ * (`deltaCRLIndicator`), or by delegating publication to another issuer
+ * (`cRLIssuer`, `indirectCRL`). pkijs accepts every one of those extensions
+ * as well-known and then ignores them — `isCertificateRevoked` compares
+ * serial numbers — so a CRL saying "user certificates only" or "changes since
+ * base 41" would be read as the complete list for any certificate at all.
+ * None of them is implemented here. Each is *recognised* and reported as
+ * unsupported, so that `on-unavailable` applies, rather than half-honoured
+ * (#446). A `freshestCRL` pointer is the one exception: the base CRL that
+ * carries it is complete as of its own `thisUpdate`, so it is used as such
+ * and the delta it points to is simply not fetched.
  *
  * ### The failure that matters
  *
@@ -61,11 +91,15 @@
  * something a library gets to make silently — so this module reports
  * unavailability as its own outcome, and the caller applies the configured
  * `on-unavailable` policy to each certificate on the path itself; the engine
- * is never handed revocation material at all.
+ * is never handed revocation material at all. A certificate may also name
+ * several distribution points; the lookup reports the ones it could not use
+ * alongside the CRLs it did obtain, and leaves it to the caller whether a
+ * partial answer is an answer — under `"reject"` it is not.
  */
 
 import { createHash } from "node:crypto";
 import * as pkijs from "pkijs";
+import { checkCrlCriticalExtensions, extensionValueParsed } from "./criticalExtensions.mjs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
 
 /** OID of the `cRLDistributionPoints` extension (RFC 5280 §4.2.1.13). */
@@ -74,23 +108,63 @@ const OID_CRL_DISTRIBUTION_POINTS = "2.5.29.31";
 /** OID of `keyUsage` (RFC 5280 §4.2.1.3). */
 const OID_KEY_USAGE = "2.5.29.15";
 
+/** OID of `deltaCRLIndicator` (RFC 5280 §5.2.4). */
+const OID_DELTA_CRL_INDICATOR = "2.5.29.27";
+
+/** OID of `issuingDistributionPoint` (RFC 5280 §5.2.5). */
+const OID_ISSUING_DISTRIBUTION_POINT = "2.5.29.28";
+
 /** `cRLSign` bit of `keyUsage`, MSB-first within the first octet. */
 const KEY_USAGE_CRL_SIGN = 0x02;
 
 /** `GeneralName` tag for `uniformResourceIdentifier`. */
 const GENERAL_NAME_URI = 6;
 
+/**
+ * Why a certificate's revocation status could not be determined. Values are
+ * stable — audit logs read them.
+ *
+ * The `unsupported_*` reasons are shapes RFC 5280 permits and this resolver
+ * recognises but does not implement: a distribution point that partitions by
+ * reason or names another issuer, a delta or scoped CRL, a critical extension
+ * nothing here processes. Each is reported rather than read as authoritative
+ * (#446, #447).
+ */
 export type CrlUnavailableReason =
 	| "no_distribution_point"
+	| "unsupported_distribution_point"
 	| "fetch_failed"
 	| "unparseable"
+	| "unsupported_critical_extension"
+	| "unsupported_crl_scope"
 	| "no_next_update"
 	| "stale"
 	| "bad_signature";
 
+/** One distribution-point URI that yielded no usable CRL, and why. */
+export interface CrlPointUnavailable {
+	readonly url: string;
+	readonly reason: CrlUnavailableReason;
+	readonly detail: string;
+}
+
 export type CrlLookup =
-	| { readonly ok: true; readonly crls: readonly pkijs.CertificateRevocationList[] }
+	| {
+			readonly ok: true;
+			readonly crls: readonly pkijs.CertificateRevocationList[];
+			/**
+			 * Distribution points that yielded no CRL, one entry per URI tried —
+			 * empty when every point the certificate names was used. A lookup
+			 * can be `ok` and incomplete at once; whether that is an answer is
+			 * the caller's `on-unavailable` decision, not this module's (#446).
+			 */
+			readonly unavailable: readonly CrlPointUnavailable[];
+	  }
 	| { readonly ok: false; readonly reason: CrlUnavailableReason; readonly detail: string };
+
+/** One audit-trail line per URI that could not be used. */
+export const describeUnavailable = (points: readonly CrlPointUnavailable[]): string =>
+	points.map((point) => `${point.url}: ${point.reason} (${point.detail})`).join("; ");
 
 /**
  * How long a distribution point that could not be used is remembered as
@@ -104,37 +178,94 @@ export type CrlLookup =
  */
 export const CRL_NEGATIVE_CACHE_TTL_MS = 30_000;
 
+export type CrlDistributionPoints =
+	| {
+			readonly ok: true;
+			/** One entry per distribution point: that point's HTTP(S) URIs, in order. */
+			readonly points: readonly (readonly string[])[];
+	  }
+	| {
+			readonly ok: false;
+			readonly reason: "no_distribution_point" | "unsupported_distribution_point";
+			readonly detail: string;
+	  };
+
+const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
+
 /**
- * Collect the HTTP(S) distribution-point URLs a certificate advertises.
+ * Read the distribution points a certificate advertises, one URI list per
+ * point.
  *
- * A `DistributionPoint` can also carry a `cRLIssuer` or name the CRL by a
- * relative name; both are ignored here. Anything not expressible as a
- * fetchable absolute URI produces no URL, which the caller sees as
- * `no_distribution_point` — an honest "cannot check" rather than a silent
- * pass.
+ * The shape is kept rather than flattened because it carries meaning:
+ * several names within one point are alternative ways to obtain the *same*
+ * CRL (RFC 5280 §4.2.1.13), while separate points are not known to be. The
+ * resolver tries a point's names until one answers, and reports a point none
+ * of whose names did.
+ *
+ * Only absolute HTTP(S) URIs are kept. A point with none — an LDAP URI, a
+ * directory name, a name relative to the issuer — is one this resolver
+ * cannot consult at all, so it is left out rather than counted as failed: a
+ * directory-backed CA that lists an LDAP point beside an HTTP one must not
+ * become unavailable under `"reject"` for it. A certificate left with no
+ * point is `no_distribution_point`, an honest "cannot check" rather than a
+ * silent pass.
+ *
+ * A point carrying `reasons` or `cRLIssuer` makes the whole extension
+ * unsupported, before anything is fetched. With `reasons`, no single CRL is
+ * the complete answer and the reasons-mask bookkeeping of §6.3.3 is not
+ * implemented; with `cRLIssuer`, the CRL is signed by someone other than the
+ * certificate's issuer, and the signature here is verified against the
+ * issuer only. Either read as complete would be a partial or foreign list
+ * standing in for the whole (#446).
  */
-export const crlDistributionUrls = (certificate: pkijs.Certificate): readonly string[] => {
+export const crlDistributionPoints = (certificate: pkijs.Certificate): CrlDistributionPoints => {
 	const extension = certificate.extensions?.find(
 		(ext) => ext.extnID === OID_CRL_DISTRIBUTION_POINTS,
 	);
 	const parsed = extension?.parsedValue as pkijs.CRLDistributionPoints | undefined;
-	if (!parsed?.distributionPoints) return [];
-
-	const urls: string[] = [];
-	for (const point of parsed.distributionPoints) {
+	const points: (readonly string[])[] = [];
+	for (const point of parsed?.distributionPoints ?? []) {
+		if (point.reasons !== undefined) {
+			return {
+				ok: false,
+				reason: "unsupported_distribution_point",
+				detail:
+					"a distribution point carries reasons: the CA partitions revocation by reason " +
+					"code across several CRLs, which this validator does not support",
+			};
+		}
+		if (point.cRLIssuer !== undefined) {
+			return {
+				ok: false,
+				reason: "unsupported_distribution_point",
+				detail:
+					"a distribution point names a cRLIssuer: its CRL is published by someone other " +
+					"than the certificate's issuer (an indirect CRL), which this validator does not support",
+			};
+		}
 		const name = point.distributionPoint;
 		if (!Array.isArray(name)) continue;
-		for (const generalName of name) {
-			if (generalName.type === GENERAL_NAME_URI && typeof generalName.value === "string") {
-				urls.push(generalName.value);
-			}
-		}
+		const urls = name
+			.filter((generalName) => generalName.type === GENERAL_NAME_URI)
+			.map((generalName) => generalName.value)
+			.filter((value): value is string => typeof value === "string" && isHttpUrl(value));
+		if (urls.length > 0) points.push(urls);
 	}
-	return urls;
+	if (points.length === 0) {
+		return {
+			ok: false,
+			reason: "no_distribution_point",
+			detail: "certificate advertises no cRLDistributionPoints HTTP(S) URI",
+		};
+	}
+	return { ok: true, points };
 };
 
 /** Reasons that are remembered for the negative window. */
-type RememberedReason = Exclude<CrlUnavailableReason, "no_distribution_point" | "bad_signature">;
+type RememberedReason = Exclude<
+	CrlUnavailableReason,
+	"no_distribution_point" | "unsupported_distribution_point" | "bad_signature"
+>;
 
 type CacheEntry =
 	| {
@@ -160,6 +291,11 @@ type Loaded =
 			readonly detail: string;
 	  };
 
+/** What one distribution-point URI produced, after every check. */
+type UrlOutcome =
+	| { readonly ok: true; readonly crl: pkijs.CertificateRevocationList }
+	| { readonly ok: false; readonly reason: CrlUnavailableReason; readonly detail: string };
+
 export interface CrlResolverOptions {
 	readonly fetch: GuardedFetch;
 	/**
@@ -175,12 +311,13 @@ export interface CrlResolverOptions {
 
 export interface CrlResolver {
 	/**
-	 * Fetch (or reuse) the CRLs covering `certificate`, verified against
-	 * `issuer` — the certificate that issued it, i.e. the next element up the
-	 * validated path. Only a CRL whose signature verifies against `issuer`'s
-	 * key is ever returned or cached. Concurrent calls for the same
-	 * distribution point share one fetch, and a distribution point that could
-	 * not be used is not retried within `CRL_NEGATIVE_CACHE_TTL_MS`.
+	 * Fetch (or reuse) the CRLs covering `certificate` — one per distribution
+	 * point it names — verified against `issuer`, the certificate that issued
+	 * it, i.e. the next element up the validated path. Only a CRL whose
+	 * signature verifies against `issuer`'s key is ever returned or cached.
+	 * Concurrent calls for the same distribution point share one fetch, and a
+	 * distribution point that could not be used is not retried within
+	 * `CRL_NEGATIVE_CACHE_TTL_MS`.
 	 */
 	resolve(certificate: pkijs.Certificate, issuer: pkijs.Certificate, now: Date): Promise<CrlLookup>;
 	/** Entry count, usable and remembered-unavailable alike — for tests and for a future metric. */
@@ -211,9 +348,10 @@ const issuerMaySignCrls = (issuer: pkijs.Certificate): boolean => {
 
 /**
  * Verify that `issuer` published `crl`. `verify` also answers `false` when
- * the CRL's issuer name is not `issuer`'s subject and when the CRL carries a
- * critical extension pkijs does not know — both of which are "not a CRL this
- * issuer published", which is the question being asked.
+ * the CRL's issuer name is not `issuer`'s subject — "not a CRL this issuer
+ * published", which is the question being asked. It would answer `false` for
+ * a critical extension outside its own list too, but none reaches it:
+ * `checkCrlCriticalExtensions` runs first and passes only OIDs on that list.
  */
 const verifySignature = async (
 	crl: pkijs.CertificateRevocationList,
@@ -234,6 +372,60 @@ const verifySignature = async (
 	return verified
 		? { ok: true }
 		: { ok: false, detail: "signature does not verify against the issuing CA" };
+};
+
+/**
+ * Whether the CRL claims a scope this resolver can honour.
+ *
+ * RFC 5280 §6.3.3 (b) has a validator match a CRL's
+ * `issuingDistributionPoint` against the certificate and the point it was
+ * fetched from, and (c) combine a delta with its base. Neither is
+ * implemented. A CRL stating a scope narrower than "everything this issuer
+ * issued" is reported as unsupported rather than read as complete, and so is
+ * a delta, which by definition lists only the changes since a base this
+ * resolver has not fetched. pkijs accepts both extensions as well-known and
+ * then ignores them, so without this check a CRL saying "user certificates
+ * only" was authoritative for an intermediate (#446).
+ *
+ * Neither extension is looked up by criticality: both MUST be critical per
+ * the RFC, but a CA that marks one non-critical has still scoped its CRL.
+ */
+const checkScope = (
+	crl: pkijs.CertificateRevocationList,
+): { ok: true } | { ok: false; detail: string } => {
+	const extensions = crl.crlExtensions?.extensions ?? [];
+	if (extensions.some((ext) => ext.extnID === OID_DELTA_CRL_INDICATOR)) {
+		return {
+			ok: false,
+			detail:
+				"a delta CRL (deltaCRLIndicator): it lists only the changes since a base CRL, " +
+				"and delta CRLs are not supported",
+		};
+	}
+	const idp = extensions.find((ext) => ext.extnID === OID_ISSUING_DISTRIBUTION_POINT);
+	if (idp === undefined) return { ok: true };
+	const parsed: unknown = idp.parsedValue;
+	if (!(parsed instanceof pkijs.IssuingDistributionPoint) || !extensionValueParsed(idp)) {
+		return {
+			ok: false,
+			detail: "its issuingDistributionPoint could not be parsed, so the scope it states is unknown",
+		};
+	}
+	const restrictions = [
+		parsed.distributionPoint !== undefined ? "distributionPoint" : null,
+		parsed.onlyContainsUserCerts ? "onlyContainsUserCerts" : null,
+		parsed.onlyContainsCACerts ? "onlyContainsCACerts" : null,
+		parsed.onlySomeReasons !== undefined ? "onlySomeReasons" : null,
+		parsed.indirectCRL ? "indirectCRL" : null,
+		parsed.onlyContainsAttributeCerts ? "onlyContainsAttributeCerts" : null,
+	].filter((field): field is string => field !== null);
+	if (restrictions.length === 0) return { ok: true };
+	return {
+		ok: false,
+		detail:
+			`its issuingDistributionPoint scopes it (${restrictions.join(", ")}); partitioned ` +
+			"and indirect CRLs are not supported",
+	};
 };
 
 /**
@@ -271,10 +463,24 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 	const freshness = (
 		crl: pkijs.CertificateRevocationList,
 		now: Date,
-	): { ok: true; expiresAt: number } | { ok: false; reason: "no_next_update" | "stale" } => {
+	):
+		| { ok: true; expiresAt: number }
+		| { ok: false; reason: "no_next_update" | "stale"; detail: string } => {
 		const nextUpdate = crl.nextUpdate?.value;
-		if (nextUpdate === undefined) return { ok: false, reason: "no_next_update" };
-		if (nextUpdate.getTime() <= now.getTime()) return { ok: false, reason: "stale" };
+		if (nextUpdate === undefined) {
+			return {
+				ok: false,
+				reason: "no_next_update",
+				detail: "the CRL carries no nextUpdate (RFC 5280 §5.1.2.5)",
+			};
+		}
+		if (nextUpdate.getTime() <= now.getTime()) {
+			return {
+				ok: false,
+				reason: "stale",
+				detail: `the CRL's nextUpdate ${nextUpdate.toISOString()} has passed`,
+			};
+		}
 		return {
 			ok: true,
 			expiresAt: Math.min(nextUpdate.getTime(), now.getTime() + options.cacheTtlSeconds * 1000),
@@ -325,80 +531,115 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		return pending;
 	};
 
+	/** What `url` yields for a certificate `issuer` issued — from the cache, or by fetching now. */
+	const lookup = async (
+		url: string,
+		issuer: pkijs.Certificate,
+		issuerId: string,
+		now: Date,
+	): Promise<UrlOutcome> => {
+		const usable = cache.get(usableKey(url, issuerId));
+		if (usable?.kind === "crl" && usable.expiresAt > now.getTime()) {
+			return { ok: true, crl: usable.crl };
+		}
+		const unavailable = cache.get(unavailableKey(url));
+		if (unavailable?.kind === "unavailable" && unavailable.expiresAt > now.getTime()) {
+			return {
+				ok: false,
+				reason: unavailable.reason,
+				detail: `${unavailable.detail}; not retried yet`,
+			};
+		}
+
+		const loaded = await load(url);
+		if (!loaded.ok) {
+			remember(url, loaded.reason, loaded.detail, now);
+			return loaded;
+		}
+
+		// Extensions before the signature, so that a CRL this resolver cannot
+		// use is named as such and remembered — see the module header (#447).
+		// Nothing the CRL *says* is acted on here, only what it is shaped
+		// like, and the answer is at most "do not use it".
+		const critical = checkCrlCriticalExtensions(loaded.crl);
+		if (!critical.ok) {
+			remember(url, "unsupported_critical_extension", critical.detail, now);
+			return { ok: false, reason: "unsupported_critical_extension", detail: critical.detail };
+		}
+		const scope = checkScope(loaded.crl);
+		if (!scope.ok) {
+			remember(url, "unsupported_crl_scope", scope.detail, now);
+			return { ok: false, reason: "unsupported_crl_scope", detail: scope.detail };
+		}
+
+		// Nothing an unverified CRL says is acted on — not even its dates — so
+		// the signature comes before freshness, and a failure here is the one
+		// outcome that is never remembered: a single injected response must
+		// not pin a refusal for anyone.
+		const signature = await verifySignature(loaded.crl, issuer);
+		if (!signature.ok) {
+			return { ok: false, reason: "bad_signature", detail: signature.detail };
+		}
+
+		const fresh = freshness(loaded.crl, now);
+		if (!fresh.ok) {
+			// Not stored as usable. The failure is remembered for the negative
+			// window only, so a responder that has stopped publishing costs one
+			// probe per window rather than one per request — and is noticed
+			// within seconds once it publishes again.
+			remember(url, fresh.reason, fresh.detail, now);
+			return { ok: false, reason: fresh.reason, detail: fresh.detail };
+		}
+
+		store(usableKey(url, issuerId), {
+			kind: "crl",
+			crl: loaded.crl,
+			expiresAt: fresh.expiresAt,
+		});
+		return { ok: true, crl: loaded.crl };
+	};
+
 	return {
 		size: () => cache.size,
 
 		resolve: async (certificate, issuer, now) => {
-			const urls = crlDistributionUrls(certificate);
-			if (urls.length === 0) {
-				return {
-					ok: false,
-					reason: "no_distribution_point",
-					detail: "certificate advertises no cRLDistributionPoints URI",
-				};
-			}
+			const points = crlDistributionPoints(certificate);
+			if (!points.ok) return points;
 
 			const issuerId = issuerKeyId(issuer);
 			const crls: pkijs.CertificateRevocationList[] = [];
-			const problems: string[] = [];
-			let lastReason: CrlUnavailableReason = "fetch_failed";
+			const unavailable: CrlPointUnavailable[] = [];
 
-			for (const url of urls) {
-				const usable = cache.get(usableKey(url, issuerId));
-				if (usable?.kind === "crl" && usable.expiresAt > now.getTime()) {
-					crls.push(usable.crl);
-					continue;
+			for (const urls of points.points) {
+				// Within one point the names are alternatives (RFC 5280
+				// §4.2.1.13): the first that yields a CRL answers for the point
+				// and the rest are not fetched. A point none of whose names
+				// yields one is reported with every name's failure, and the
+				// next point is still tried — the caller sees the whole
+				// picture, and decides.
+				const failures: CrlPointUnavailable[] = [];
+				let found: pkijs.CertificateRevocationList | undefined;
+				for (const url of urls) {
+					const outcome = await lookup(url, issuer, issuerId, now);
+					if (outcome.ok) {
+						found = outcome.crl;
+						break;
+					}
+					failures.push({ url, reason: outcome.reason, detail: outcome.detail });
 				}
-				const unavailable = cache.get(unavailableKey(url));
-				if (unavailable?.kind === "unavailable" && unavailable.expiresAt > now.getTime()) {
-					lastReason = unavailable.reason;
-					problems.push(`${url}: ${unavailable.reason} (${unavailable.detail}; not retried yet)`);
-					continue;
-				}
-
-				const loaded = await load(url);
-				if (!loaded.ok) {
-					remember(url, loaded.reason, loaded.detail, now);
-					lastReason = loaded.reason;
-					problems.push(`${url}: ${loaded.reason} (${loaded.detail})`);
-					continue;
-				}
-
-				// Nothing an unverified CRL says is acted on — not even its dates —
-				// so the signature comes before freshness, and a failure here is
-				// the one outcome that is never remembered: a single injected
-				// response must not pin a refusal for anyone.
-				const signature = await verifySignature(loaded.crl, issuer);
-				if (!signature.ok) {
-					lastReason = "bad_signature";
-					problems.push(`${url}: bad_signature (${signature.detail})`);
-					continue;
-				}
-
-				const fresh = freshness(loaded.crl, now);
-				if (!fresh.ok) {
-					// Not stored as usable. The failure is remembered for the negative
-					// window only, so a responder that has stopped publishing costs
-					// one probe per window rather than one per request — and is
-					// noticed within seconds once it publishes again.
-					remember(url, fresh.reason, fresh.reason, now);
-					lastReason = fresh.reason;
-					problems.push(`${url}: ${fresh.reason}`);
-					continue;
-				}
-
-				store(usableKey(url, issuerId), {
-					kind: "crl",
-					crl: loaded.crl,
-					expiresAt: fresh.expiresAt,
-				});
-				crls.push(loaded.crl);
+				if (found === undefined) unavailable.push(...failures);
+				else crls.push(found);
 			}
 
 			if (crls.length === 0) {
-				return { ok: false, reason: lastReason, detail: problems.join("; ") };
+				const last = unavailable[unavailable.length - 1];
+				return {
+					ok: false,
+					reason: last?.reason ?? "fetch_failed",
+					detail: describeUnavailable(unavailable),
+				};
 			}
-			return { ok: true, crls };
+			return { ok: true, crls, unavailable };
 		},
 	};
 };

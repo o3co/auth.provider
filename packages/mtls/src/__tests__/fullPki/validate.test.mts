@@ -24,6 +24,7 @@
  * outcomes.
  */
 
+import type * as pkijs from "pkijs";
 import { describe, expect, it, vi } from "vitest";
 import {
 	checkAlgorithmPolicy,
@@ -42,6 +43,7 @@ import {
 	crlDistributionPoints,
 	dnsSan,
 	emptyCriticalKeyUsage,
+	issuingDistributionPoint,
 	KEY_USAGE,
 	keyUsage,
 	mint,
@@ -50,6 +52,7 @@ import {
 	mintIntermediate,
 	mintLeaf,
 	nameConstraints,
+	reasonPartitionedCrlDistributionPoint,
 	serverAuthEku,
 	unknownCriticalExtension,
 	unparseableCriticalKeyUsage,
@@ -937,5 +940,214 @@ describe("full-pki revocation", () => {
 
 		expect(result.ok).toBe(false);
 		expect(calls).toEqual([]);
+	});
+});
+
+describe("full-pki revocation — distribution points and CRL shapes the resolver does not speak (#446, #447)", () => {
+	const INT_CRL_MIRROR_URL = "http://crl.test/int-mirror.crl";
+
+	/** root → intermediate → leaf, the leaf carrying `leafPoints` as its cRLDistributionPoints. */
+	const chainWith = async (leafPoints: pkijs.Extension) => {
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [
+				basicConstraints(true),
+				keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign),
+				crlDistributionPoints([ROOT_CRL_URL]),
+			],
+		});
+		const leaf = await mintLeaf("client", 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				leafPoints,
+			],
+		});
+		return { root, int, leaf };
+	};
+
+	it("under 'reject', refuses a certificate one of whose distribution points is down even though another produced a CRL", async () => {
+		// "One point answered" used to be reported as ok, so a point that was
+		// down was skipped silently under the policy whose whole meaning is
+		// "do not guess". This process cannot tell from one fetched CRL that
+		// the CA's other points were redundant — a CA that partitions its
+		// list without saying so publishes exactly this shape — and "reject"
+		// is the operator's instruction not to guess in the permissive
+		// direction.
+		const { root, int, leaf } = await chainWith(
+			crlDistributionPoints([INT_CRL_URL, INT_CRL_MIRROR_URL]),
+		);
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain(INT_CRL_MIRROR_URL);
+		}
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			"mtls_revocation_unavailable_rejected",
+		);
+	});
+
+	it("under 'allow', checks the same certificate against the CRL it did obtain and logs the point it did not", async () => {
+		// The permissive guess is what "allow" chose. It is still logged —
+		// distinctly from a certificate that was not checked at all, because
+		// the two are different facts on an operator's dashboard.
+		const { root, int, leaf } = await chainWith(
+			crlDistributionPoints([INT_CRL_URL, INT_CRL_MIRROR_URL]),
+		);
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			"mtls_revocation_partially_unavailable_allowed",
+		);
+	});
+
+	it("under 'allow', a certificate listed on the CRL one point produced is refused while another point is down", async () => {
+		// A status that *was* determined is not softened by a gap elsewhere.
+		const { root, int, leaf } = await chainWith(
+			crlDistributionPoints([INT_CRL_URL, INT_CRL_MIRROR_URL]),
+		);
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
+			[INT_CRL_MIRROR_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("certificate revoked");
+	});
+
+	it("does not refuse a certificate whose distribution point lists one dead mirror among its URIs", async () => {
+		// RFC 5280 §4.2.1.13: several names within one point are ways to
+		// obtain the same CRL, so one of them answering is the point
+		// answering. Strictness is per point, not per URI, or a redundant
+		// mirror would make the certificate *less* available.
+		const { root, int, leaf } = await chainWith(
+			crlDistributionPoints([[INT_CRL_MIRROR_URL, INT_CRL_URL]]),
+		);
+		const { impl } = stubFetch({
+			[INT_CRL_MIRROR_URL]: 503,
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("treats a certificate whose distribution point carries reasons as unavailable, without fetching it", async () => {
+		const { root, int, leaf } = await chainWith(reasonPartitionedCrlDistributionPoint(INT_CRL_URL));
+		const { impl, calls } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("unsupported_distribution_point");
+		}
+		expect(calls).not.toContain(INT_CRL_URL);
+	});
+
+	it("treats a CRL scoped by issuingDistributionPoint as unavailable rather than authoritative", async () => {
+		// The root publishes a CRL scoped to user certificates at the point
+		// the *intermediate* names. pkijs would have accepted it as the
+		// intermediate's complete list; it is not, and the intermediate's
+		// status is therefore unknown.
+		const { root, int, leaf } = await chainWith(crlDistributionPoints([INT_CRL_URL]));
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({
+				issuer: root,
+				revoked: [],
+				extensions: [issuingDistributionPoint({ onlyContainsUserCerts: true })],
+			}),
+		});
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("CN=Intermediate");
+			expect(result.detail).toContain("unsupported_crl_scope");
+		}
+	});
+
+	it("names a CRL with an unsupported critical extension under its own reason, and does not re-fetch it within the negative window (#447)", async () => {
+		// Reported as bad_signature, it was never remembered, and cost one
+		// guarded fetch per request under both policies.
+		const { root, int, leaf } = await chainWith(crlDistributionPoints([INT_CRL_URL]));
+		const { impl, calls } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({
+				issuer: int,
+				revoked: [],
+				extensions: [unknownCriticalExtension()],
+			}),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const v = validator([root], { revocation: crlPolicy("reject"), fetchImpl: impl });
+
+		const result = await v.validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("unsupported_critical_extension");
+			expect(result.detail).not.toContain("bad_signature");
+		}
+		// One usable root CRL, one remembered-unavailable intermediate CRL.
+		expect(v.crlCacheSize()).toBe(2);
+		await v.validate(leaf.x509, [int.x509], NOW);
+		expect(calls.filter((url) => url === INT_CRL_URL)).toHaveLength(1);
 	});
 });

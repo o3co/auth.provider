@@ -20,23 +20,33 @@
  * is down. `validate.test.mts` covers the policy decisions built on top.
  */
 
+import type * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
 import { CRL_NEGATIVE_CACHE_TTL_MS, createCrlResolver } from "#/fullPki/crl.mjs";
 import type { GuardedFetch } from "#/fullPki/fetchGuard.mjs";
+import type { IssuingDistributionPointOptions, Minted } from "./pkiFactory.mjs";
 import {
 	basicConstraints,
+	certificateIssuerEntryExtension,
 	clientAuthEku,
 	crlDistributionPoints,
+	deltaCrlIndicator,
+	indirectCrlDistributionPoint,
+	issuingDistributionPoint,
 	KEY_USAGE,
 	keyUsage,
 	mintCa,
 	mintCrl,
 	mintIntermediate,
 	mintLeaf,
+	reasonPartitionedCrlDistributionPoint,
+	unknownCriticalExtension,
+	unknownNonCriticalExtension,
 } from "./pkiFactory.mjs";
 
 const NOW = new Date("2027-01-01T00:00:00Z");
 const INT_CRL_URL = "http://crl.test/int.crl";
+const INT_CRL_MIRROR_URL = "http://crl.test/int-mirror.crl";
 const ROOT_CRL_URL = "http://crl.test/root.crl";
 
 /** root → intermediate → leaf, each non-anchor naming its issuer's distribution point. */
@@ -59,6 +69,17 @@ const chain = async () => {
 	});
 	return { root, int, leaf };
 };
+
+/** A leaf under `int` whose `cRLDistributionPoints` is exactly `extension`. */
+const leafWithPoints = (int: Minted, extension: pkijs.Extension) =>
+	mintLeaf("client", 11, int, {
+		extensions: [
+			basicConstraints(false),
+			keyUsage(KEY_USAGE.digitalSignature),
+			clientAuthEku(),
+			extension,
+		],
+	});
 
 /**
  * A `GuardedFetch` answering from a table. `"down"` answers as an HTTP error,
@@ -197,5 +218,279 @@ describe("CRL resolver — one fetch per distribution point, not one per caller"
 		// outage: a CA that comes back must be noticed in seconds, not hours.
 		expect(CRL_NEGATIVE_CACHE_TTL_MS).toBeGreaterThan(0);
 		expect(CRL_NEGATIVE_CACHE_TTL_MS).toBeLessThanOrEqual(60_000);
+	});
+});
+
+describe("CRL resolver — extensions it does not process (#447, #446)", () => {
+	it("remembers a CRL carrying an unsupported critical extension for the negative window, under its own name", async () => {
+		// pkijs's `verify` answers `false` for a critical extension outside its
+		// known list — the same answer as a forged signature — and that used to
+		// surface as bad_signature, the one outcome deliberately never
+		// remembered. A CA publishing such a CRL therefore cost one guarded
+		// fetch per request under both policies, the exact pattern the
+		// negative window exists to bound. The extensions are inspected
+		// first, so the outcome has its own name and is remembered like any
+		// other unusable response.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({
+			issuer: int,
+			revoked: [],
+			extensions: [unknownCriticalExtension()],
+		});
+		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const first = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(first).toMatchObject({ ok: false, reason: "unsupported_critical_extension" });
+		if (!first.ok) expect(first.detail).toContain("1.3.6.1.4.1.99999.1.1");
+		expect(resolver.size()).toBe(1);
+
+		const withinWindow = new Date(NOW.getTime() + CRL_NEGATIVE_CACHE_TTL_MS - 1);
+		expect(await resolver.resolve(leaf.cert, int.cert, withinWindow)).toMatchObject({
+			ok: false,
+			reason: "unsupported_critical_extension",
+		});
+		expect(calls).toEqual([INT_CRL_URL]);
+
+		const afterWindow = new Date(NOW.getTime() + CRL_NEGATIVE_CACHE_TTL_MS);
+		await resolver.resolve(leaf.cert, int.cert, afterWindow);
+		expect(calls).toEqual([INT_CRL_URL, INT_CRL_URL]);
+	});
+
+	it("still uses a CRL whose unrecognised extension is non-critical", async () => {
+		// RFC 5280 §5.2 lets a validator ignore a non-critical extension it does
+		// not recognise, and pkijs does. The inspection must not be stricter
+		// than the engine here, or a harmless extension becomes a refusal.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({
+			issuer: int,
+			revoked: [],
+			extensions: [unknownNonCriticalExtension()],
+		});
+		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
+			ok: true,
+			unavailable: [],
+		});
+	});
+
+	it("applies the same rule to a critical extension on a CRL entry (RFC 5280 §5.3)", async () => {
+		// pkijs's `verify` never looks at entry extensions. A critical
+		// certificateIssuer — the marker that an indirect CRL's entries were
+		// issued by someone else — would otherwise be ignored, and the serial
+		// matched against the wrong issuer.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({
+			issuer: int,
+			revoked: [leaf],
+			entryExtensions: [certificateIssuerEntryExtension("Someone Else")],
+		});
+		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
+			ok: false,
+			reason: "unsupported_critical_extension",
+		});
+		expect(resolver.size()).toBe(1);
+		await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(calls).toEqual([INT_CRL_URL]);
+	});
+
+	it("reports a delta CRL as unsupported_crl_scope, and remembers it", async () => {
+		// A delta lists only what changed since a base CRL this resolver has
+		// not fetched. pkijs accepts deltaCRLIndicator as well-known and then
+		// ignores it, so the delta would otherwise have read as the complete
+		// list — with every revocation on the base silently missing.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({ issuer: int, revoked: [], extensions: [deltaCrlIndicator(7)] });
+		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "unsupported_crl_scope" });
+		if (!result.ok) expect(result.detail).toContain("delta");
+		expect(resolver.size()).toBe(1);
+		await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(calls).toEqual([INT_CRL_URL]);
+	});
+
+	it.each<[string, IssuingDistributionPointOptions]>([
+		["onlyContainsUserCerts", { onlyContainsUserCerts: true }],
+		["onlyContainsCACerts", { onlyContainsCACerts: true }],
+		["onlySomeReasons", { onlySomeReasons: 0x40 }],
+		["indirectCRL", { indirectCRL: true }],
+		["a distribution-point name", { distributionPointUrl: INT_CRL_URL }],
+	])(
+		"reports a CRL whose issuingDistributionPoint carries %s as unsupported_crl_scope",
+		async (_label, scope) => {
+			// pkijs accepts issuingDistributionPoint as well-known and ignores
+			// it, so a CRL scoped to user certificates would have been read as
+			// authoritative for an intermediate. The scope is recognised and
+			// refused rather than half-honoured.
+			const { int, leaf } = await chain();
+			const crl = await mintCrl({
+				issuer: int,
+				revoked: [],
+				extensions: [issuingDistributionPoint(scope)],
+			});
+			const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+			const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+			const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+			expect(result).toMatchObject({ ok: false, reason: "unsupported_crl_scope" });
+			if (!result.ok) expect(result.detail).toContain("issuingDistributionPoint");
+			expect(resolver.size()).toBe(1);
+		},
+	);
+
+	it("still uses a CRL whose issuingDistributionPoint states no scope at all", async () => {
+		// The extension is on the processed list because its *contents* are
+		// read; an empty one restricts nothing, and refusing it would be
+		// stricter than the engine for no gain.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({
+			issuer: int,
+			revoked: [],
+			extensions: [issuingDistributionPoint({})],
+		});
+		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
+	});
+});
+
+describe("CRL resolver — several distribution points on one certificate (#446)", () => {
+	it("refuses a distribution point carrying reasons, without fetching it", async () => {
+		// With reasons, no single CRL is the complete answer, and the
+		// reasons-mask bookkeeping of RFC 5280 §6.3.3 is not implemented. The
+		// point is reported before anything is fetched, so nothing partial is
+		// ever mistaken for complete.
+		const { int } = await chain();
+		const leaf = await leafWithPoints(int, reasonPartitionedCrlDistributionPoint(INT_CRL_URL));
+		const { fetch, calls } = stubGuardedFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "unsupported_distribution_point" });
+		if (!result.ok) expect(result.detail).toContain("reasons");
+		expect(calls).toEqual([]);
+		expect(resolver.size()).toBe(0);
+	});
+
+	it("refuses a distribution point naming a cRLIssuer, without fetching it", async () => {
+		// The CRL there is signed by someone other than the certificate's
+		// issuer, and this resolver verifies against the issuer only.
+		const { int } = await chain();
+		const leaf = await leafWithPoints(
+			int,
+			indirectCrlDistributionPoint(INT_CRL_URL, "Someone Else"),
+		);
+		const { fetch, calls } = stubGuardedFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "unsupported_distribution_point" });
+		if (!result.ok) expect(result.detail).toContain("cRLIssuer");
+		expect(calls).toEqual([]);
+	});
+
+	it("reports a distribution point that yielded no CRL alongside the CRLs the others did", async () => {
+		// "One of them answered" and "all of them answered" are different
+		// facts, and which one is enough is the caller's on-unavailable
+		// decision. The lookup therefore keeps both: the CRLs it obtained and
+		// the points it could not use.
+		const { int } = await chain();
+		const leaf = await leafWithPoints(
+			int,
+			crlDistributionPoints([INT_CRL_URL, INT_CRL_MIRROR_URL]),
+		);
+		const { fetch } = stubGuardedFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: "down",
+		});
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.crls).toHaveLength(1);
+			expect(result.unavailable).toEqual([
+				expect.objectContaining({ url: INT_CRL_MIRROR_URL, reason: "fetch_failed" }),
+			]);
+		}
+	});
+
+	it("treats the URIs within one distribution point as alternatives for the same CRL", async () => {
+		// RFC 5280 §4.2.1.13: several names in one point are ways to obtain
+		// the same CRL. The first that yields one answers for the point; a
+		// dead mirror is not a gap in the certificate's status, and is not
+		// fetched again within the negative window.
+		const { int } = await chain();
+		const leaf = await leafWithPoints(
+			int,
+			crlDistributionPoints([[INT_CRL_MIRROR_URL, INT_CRL_URL]]),
+		);
+		const { fetch, calls } = stubGuardedFetch({
+			[INT_CRL_MIRROR_URL]: "down",
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: true, unavailable: [] });
+		if (result.ok) expect(result.crls).toHaveLength(1);
+		expect(calls).toEqual([INT_CRL_MIRROR_URL, INT_CRL_URL]);
+
+		await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(calls).toEqual([INT_CRL_MIRROR_URL, INT_CRL_URL]);
+	});
+
+	it("does not fetch a second URI of a point whose first already answered", async () => {
+		const { int } = await chain();
+		const leaf = await leafWithPoints(
+			int,
+			crlDistributionPoints([[INT_CRL_URL, INT_CRL_MIRROR_URL]]),
+		);
+		const { fetch, calls } = stubGuardedFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
+		expect(calls).toEqual([INT_CRL_URL]);
+	});
+
+	it("ignores a distribution point that names no HTTP(S) URI rather than counting it as failed", async () => {
+		// An LDAP point beside an HTTP one is the shape a directory-backed CA
+		// publishes. This resolver does not speak LDAP; a point it cannot
+		// consult at all is outside its remit, not a failed lookup, and must
+		// not make every such certificate unavailable under "reject".
+		const { int } = await chain();
+		const leaf = await leafWithPoints(
+			int,
+			crlDistributionPoints([
+				"ldap://directory.test/cn=int?certificateRevocationList",
+				INT_CRL_URL,
+			]),
+		);
+		const { fetch, calls } = stubGuardedFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
+			ok: true,
+			unavailable: [],
+		});
+		expect(calls).toEqual([INT_CRL_URL]);
 	});
 });
