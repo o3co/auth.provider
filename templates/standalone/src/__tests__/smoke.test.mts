@@ -488,10 +488,12 @@ describe("standalone smoke test", () => {
 				accessTokenDenylist: { adapter: "redis" as const },
 				oauth: { ...config.oauth, code: { adapter: "redis" as const } },
 			};
+			// No `refreshTokenFamilyModules` override: the default is the Redis
+			// RT-family store, so `refreshTokenFamilyClient` is part of what the
+			// invariant covers. Still hermetic — buildModules opens no socket.
 			const modules = buildModules(allRedisConfig, {
 				keyStoreModule: testKeyStoreModule,
 				repositoriesModule: testRepositoriesModule,
-				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
 			});
 			const clients = modules.find((m) => m.name === "standalone:redis-clients");
 			expect(clients).toBeDefined();
