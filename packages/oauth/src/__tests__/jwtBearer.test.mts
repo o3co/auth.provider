@@ -30,6 +30,8 @@ import {
 	type AssertionVerifier,
 	createSymmetricKeyStore,
 	type GrantContext,
+	type GrantPolicyDecision,
+	type GrantPolicyHook,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
@@ -60,6 +62,7 @@ const build = (opts: {
 	userRepository?: UserRepository;
 	logger?: unknown;
 	config?: AppConfig;
+	grantPolicy?: GrantPolicyHook;
 }) =>
 	createJwtBearerGrant({
 		config: opts.config ?? config,
@@ -67,6 +70,7 @@ const build = (opts: {
 		assertionVerifier: opts.verifier ?? verifierFor({ subjectHandle: "device:abc" }),
 		userRepository: opts.userRepository ?? userRepoFor({ id: "u-1" }),
 		...(opts.logger ? { logger: opts.logger } : {}),
+		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	} as never);
 
 const ctx = (body: Record<string, unknown> = {}, extra: Partial<GrantContext> = {}): GrantContext =>
@@ -444,6 +448,124 @@ describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never th
 		}).handle(ctx({}, { authenticatedClient: null }));
 		expect(result.status).toBe(200);
 		expect(scopeOf(result)).toBe("read");
+	});
+});
+
+describe("jwt-bearer grant — grantPolicy is consulted, fail-closed (CP-18)", () => {
+	// Every other minting path evaluates `grantPolicy`; this one did not, so
+	// a deployment's policy hook saw client_credentials, refresh_token, the
+	// code flow and token exchange — and never a device login.
+	const policyOf = (
+		evaluate: (...args: Parameters<GrantPolicyHook["evaluate"]>) => Promise<GrantPolicyDecision>,
+	): GrantPolicyHook => ({ kind: "stub", evaluate });
+	const allow = (extra: Record<string, unknown> = {}) =>
+		policyOf(async () => ({ outcome: "allow", ...extra }) as GrantPolicyDecision);
+	const authed = {
+		authenticatedClient: {
+			clientId: "c1",
+			allowedScopes: ["read", "write"],
+			defaultScopes: ["read", "write"],
+		},
+	} as never;
+	const scopeOf = (result: { status: number } & Record<string, unknown>) =>
+		"tokens" in result
+			? decodeJwt((result.tokens as { access_token: string }).access_token).scope
+			: expect.fail("expected tokens");
+
+	it("evaluates the policy with the grant type, the client and the resolved subject", async () => {
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({
+			grantPolicy: policyOf(evaluate),
+			userRepository: userRepoFor({ id: "user-42" }),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(evaluate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				grantType: JWT_BEARER_GRANT_TYPE,
+				clientId: "c1",
+				subject: "user-42",
+				requestedScope: ["read"],
+			}),
+			expect.objectContaining({ issuer: "https://auth.example" }),
+		);
+	});
+
+	it("consults the policy for an unauthenticated caller too, with no clientId", async () => {
+		// RFC 7523 §3 makes client authentication optional; policy is not.
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({ grantPolicy: policyOf(evaluate) }).handle(ctx({}, { authenticatedClient: null }));
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ clientId: undefined, subject: "u-1" });
+	});
+
+	it("passes an omitted scope to the policy as undefined, not as an empty list", async () => {
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({ grantPolicy: policyOf(evaluate) }).handle(ctx());
+		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ requestedScope: undefined });
+	});
+
+	it("denies with the policy's own error and description", async () => {
+		const { result } = await build({
+			grantPolicy: policyOf(async () => ({
+				outcome: "deny",
+				error: "access_denied",
+				errorDescription: "device is quarantined",
+			})),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("access_denied");
+		expect("errorDescription" in result && result.errorDescription).toBe("device is quarantined");
+	});
+
+	it("answers 503 when the policy throws — fail closed, never open", async () => {
+		// Policy is a security boundary: if it cannot answer, the pre-policy
+		// ceiling must not become the grant.
+		const { result } = await build({
+			grantPolicy: policyOf(async () => {
+				throw new Error("policy service unreachable");
+			}),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(result.status).toBe(503);
+		expect("error" in result && result.error).toBe("temporarily_unavailable");
+	});
+
+	it("narrows the scope to what the policy grants", async () => {
+		const { result } = await build({ grantPolicy: allow({ grantedScope: ["read"] }) }).handle(
+			ctx({ scope: "read write" }, authed),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("honours an empty grantedScope as strip-all", async () => {
+		const { result } = await build({ grantPolicy: allow({ grantedScope: [] }) }).handle(
+			ctx({ scope: "read write" }, authed),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBeUndefined();
+	});
+
+	it("refuses a policy that widens past the effective scope, even within the allowlist", async () => {
+		// `write` is in the client's allowlist but was not requested: a policy
+		// returning it is scope expansion, and a compromised policy must not
+		// be able to hand out more than the caller asked for.
+		const { result } = await build({
+			grantPolicy: allow({ grantedScope: ["read", "write"] }),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("leaves the effective scope alone when the policy says nothing about it", async () => {
+		const { result } = await build({ grantPolicy: allow() }).handle(
+			ctx({ scope: "read write" }, authed),
+		);
+		expect(scopeOf(result)).toBe("read write");
+	});
+
+	it("runs after the identity gates: an unverified assertion never reaches the policy", async () => {
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({ grantPolicy: policyOf(evaluate), verifier: verifierFor(null) }).handle(ctx());
+		expect(evaluate).not.toHaveBeenCalled();
 	});
 });
 

@@ -24,6 +24,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { generateToken, generateTokenResponse, isEmailVerified } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
+import { evaluateGrantPolicy } from "./_grantPolicy.mjs";
 
 /** RFC 7523 §2.1. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -78,6 +79,9 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   attestation service or a Store being unreachable is an outage, not a bad
  *   credential, and answering `invalid_grant` would send an operator to
  *   re-enrol a device that was fine — the distinction #408 drew for revocation.
+ * - `grantPolicy`, when wired, runs after all of the above and fails closed
+ *   (throw → `503`, deny → its own error, a widened scope → `invalid_scope`)
+ *   — see `evaluateGrantPolicy`.
  */
 export const createJwtBearerGrant = (
 	deps: GrantDependencies & {
@@ -192,9 +196,33 @@ export const createJwtBearerGrant = (
 
 			const scopes = resolveScope(ctx, verified.scope);
 			if ("error" in scopes) return { result: scopes };
-
-			const scopeClaim = scopes.scopes.length > 0 ? scopes.scopes.join(" ") : null;
+			let effectiveScopes = scopes.scopes;
 			const clientId = ctx.authenticatedClient?.clientId;
+
+			// CP-18: the policy gate every other minting path applies, after
+			// the identity gates and the scope ceilings so it sees a resolved
+			// subject and an already-narrowed request. Consulted whenever it is
+			// wired, as the refresh grant and `/authorize` do. `grantedAudience`
+			// is not applied: this grant mints `aud` as the authenticated
+			// client (or none) and has no `allowedAudiences` ceiling of its own
+			// to validate a policy audience against.
+			if (deps.grantPolicy) {
+				const policy = await evaluateGrantPolicy(
+					deps.grantPolicy,
+					{
+						grantType: JWT_BEARER_GRANT_TYPE,
+						clientId,
+						subject,
+						requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
+					effectiveScopes,
+				);
+				if (!policy.ok) return { result: policy.result };
+				effectiveScopes = policy.scopes;
+			}
+
+			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 			const confirmation = ctx.tokenBinding?.confirmation;
 			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
 
