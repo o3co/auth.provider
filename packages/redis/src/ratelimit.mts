@@ -66,7 +66,8 @@ interface CreateRedisRateLimiterOptions {
 
 /**
  * Redis-backed RateLimiter. One atomic increment-and-expire per check, via
- * `RateLimiterClient.incrementWithTtl`.
+ * `RateLimiterClient.incrementWithTtlAndPttl` (or the count-only
+ * `incrementWithTtl` for a client that predates it — see #458).
  *
  * It used to be `INCR` followed by a separate `EXPIRE`, issued only when the
  * count came back as 1. A process death or an `EXPIRE` error in between left
@@ -99,19 +100,32 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 		kind: "redis",
 		async check(key) {
 			const spec = limits[keyPrefix(key)] ?? defaultLimit;
-			const count = await client.incrementWithTtl(key, spec.windowSeconds);
+			// #458: take the PTTL with the count when the client offers it, so the
+			// decision can say when the window ends — without `resetAt` the guard's
+			// 429 carries no `Retry-After` behind Redis while the memory adapter's
+			// does. A client on the one-method contract still works, minus that.
+			const { count, pttl } = client.incrementWithTtlAndPttl
+				? await client.incrementWithTtlAndPttl(key, spec.windowSeconds)
+				: { count: await client.incrementWithTtl(key, spec.windowSeconds), pttl: undefined };
+			// -1 / -2 cannot follow a script that just guaranteed the expiry; a
+			// client answering them broke the contract, and no reset time beats a
+			// wrong one.
+			const resetAt =
+				pttl !== undefined && pttl > 0 ? { resetAt: new Date(Date.now() + pttl) } : {};
 			if (count > spec.limit) {
 				return {
 					allowed: false,
 					remaining: 0,
 					reason: `limit:${keyPrefix(key)}`,
 					limit: spec.limit,
+					...resetAt,
 				};
 			}
 			return {
 				allowed: true,
 				remaining: spec.limit - count,
 				limit: spec.limit,
+				...resetAt,
 			};
 		},
 	};

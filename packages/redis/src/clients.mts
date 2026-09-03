@@ -544,6 +544,29 @@ export interface RateLimiterClient {
 	 *   would turn the limiter into a no-op.
 	 */
 	incrementWithTtl(key: string, ttlSeconds: number): Promise<number>;
+
+	/**
+	 * `incrementWithTtl`, also reporting the key's remaining window (#458).
+	 *
+	 * Same required behaviour, plus: return the counter key's `PTTL` after
+	 * the increment, read in the same indivisible step. The limiter turns it
+	 * into `RateLimitDecision.resetAt`, and the guard turns that into the
+	 * `Retry-After` on a 429 — which behind Redis was missing altogether,
+	 * while the memory adapter had it.
+	 *
+	 * Optional so a custom client written against the one-method contract
+	 * keeps compiling and working; a limiter given such a client reports no
+	 * reset time, which is exactly what it reported before.
+	 */
+	incrementWithTtlAndPttl?(key: string, ttlSeconds: number): Promise<RateLimitIncrement>;
+}
+
+/** What {@link RateLimiterClient.incrementWithTtlAndPttl} answers. */
+export interface RateLimitIncrement {
+	/** The post-increment count. */
+	readonly count: number;
+	/** The counter key's remaining TTL in milliseconds (`PTTL`), read after the increment. */
+	readonly pttl: number;
 }
 
 // --- CodeRepositoryClient --------------------------------------------------

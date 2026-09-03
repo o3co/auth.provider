@@ -219,12 +219,16 @@ const LEGACY_JWT_FIELDS = [
  * targeted error instead of having their flag silently stripped by Zod's
  * default `unknown-key strip` behavior.
  *
- * The `removedIn` field carries the released tag plus internal phase marker
- * (e.g., `v0.6.0 (Phase G / M4)`) so the operator-facing error message names
- * the release that performed the removal and the CHANGELOG entry that
- * documents it. Per docs/release-policy.md R5, the released-tag portion is
- * filled in at release-cut time (R6 step 5) — entries added on HEAD between
- * cuts use a neutral value like `"Phase G / M4"` until the next cut.
+ * The `removedIn` field carries the released tag plus a marker — the phase
+ * (`v0.6.0 (Phase G / M4)`) or the PR (`v0.10.0 (#330)`) — so the
+ * operator-facing error message names the release that performed the removal
+ * and the CHANGELOG entry that documents it. Per docs/release-policy.md R5,
+ * the released-tag portion is filled in at release-cut time (R6 step 5) — an
+ * entry added on HEAD between cuts reads `"this release (#NNN)"` until then.
+ * The PR number is not decoration: `removedIn.drift.test.mts` (#458) accepts
+ * a placeholder only while the CHANGELOG lists that PR under `[Unreleased]`,
+ * so the cut that ships it cannot forget the stamp again — `"this release
+ * (#330)"` went out in v0.10.0 and v0.11.0 before that guard existed.
  */
 const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [
 	{
@@ -248,7 +252,7 @@ const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [
 const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 	{
 		name: "allowUnmarkedClients",
-		removedIn: "this release (#330)",
+		removedIn: "v0.10.0 (#330)",
 		note:
 			"The one-time migration flag for the /authorize first-party invariant (#316/#317) is " +
 			"gone: a client whose registration does not carry `firstParty: true` is now always " +
@@ -291,10 +295,13 @@ const jwtSchemaBase = z.object({
 	// Keep well below the key-overlap window so a rotated kid propagates to
 	// caching verifiers in time. See `core/src/jwks/cache.mts`.
 	jwksCacheMaxAge: z.number().int().nonnegative().optional(),
-	// SF-1 (v0.5.1): when true (default in HOCON), the central JWT verifier
-	// accepts tokens whose `typ` header is absent and emits a deprecation
-	// warning. v0.6+ should set this to false and reject typ-less tokens.
-	// Per the v0.5.1 ADR the literal default lives in `reference.conf`.
+	// SF-1 (v0.5.1): when true, the central JWT verifier accepts tokens whose
+	// `typ` header is absent and emits a deprecation warning. No schema
+	// default — per the v0.5.1 ADR the literal lives in `reference.conf`,
+	// which ships `false` (a typ-less token is refused as a misconfiguration
+	// or downgrade signal); `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is the bounded
+	// migration override. This comment called `true` the default long after
+	// reference.conf flipped it (#458).
 	//
 	// #288: `coerceBooleanFromEnv`, not `z.boolean()`. This section is wrapped
 	// in `z.preprocess` (see `jwtSchema` below), which the hocon zod bridge
@@ -932,11 +939,13 @@ export const fullSectionsSchema = z.object({
 	rateLimit: z.object({
 		login: rateLimitSchema,
 		// OR-5: fail-mode policy for the OAuth-endpoint rate limiter when
-		// the limiter backend itself errors. `"open"` (default in HOCON)
-		// preserves existing fail-open behavior + adds `logger.error`
-		// emission so operators see the outage even when the audit sink
-		// is also down. `"closed"` returns HTTP 503 + logs — recommended
-		// for security-sensitive deployments. No `.default()` per ADR.
+		// the limiter backend itself errors. No `.default()` per ADR — the
+		// literal lives in `reference.conf`, which ships `"closed"`: HTTP 503
+		// plus a log line, secure-by-default load shedding. `"open"` lets
+		// traffic through and still emits `logger.error`, so operators see
+		// the outage even when the audit sink is also down; deployments that
+		// prefer availability set it (`RATE_LIMIT_FAIL_MODE=open`). This
+		// comment called `"open"` the default (#458).
 		failMode: z.enum(["open", "closed"]),
 	}),
 	federations: z.record(z.string(), federationEntrySchema),

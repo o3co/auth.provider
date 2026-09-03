@@ -7,7 +7,7 @@ Deployable server template for auth.provider. This is the composition root — i
 - **Node.js** `>=22.0.0`
 - **`bcrypt` native binary**: this template depends transitively on `bcrypt@6.x`, which ships **prebuilt N-API binaries** for `darwin-arm64`, `darwin-x64`, `linux-x64` (glibc and musl), `linux-arm64` (glibc and musl), `linux-arm`, `win32-x64`, and `win32-arm64`. On these platforms `pnpm install` succeeds without compiling from source, and no extra toolchain is required (the `darwin-*`, `node:*-alpine`, and `node:*-bookworm` images all match a shipped prebuild). On platforms or libc/arch combinations that have no matching prebuild, `pnpm install` falls back to compiling, which then requires a C++ compiler and Python (the standard Node.js native-addon toolchain): Debian/Ubuntu `apt-get install build-essential python3`, Alpine `apk add make g++ python3`, macOS `xcode-select --install`. The pnpm 10 `onlyBuiltDependencies` allowlist for `bcrypt` lives in `pnpm-workspace.yaml` — pnpm ≥10.29 reads it only from there, in single-package projects too. `create-auth-provider` writes that file into the project it scaffolds (inside this monorepo, the allowlist sits in the workspace root's `pnpm-workspace.yaml`); without it a fresh `pnpm install` silently skips the install hook on those platforms.
 - **Redis 7.2 LTS or later** for any Redis-backed adapter (refresh token family store, code repository, federation token store, session store). The `pExpireGT` flag pair on which several adapters depend was introduced in Redis 7.0+; 7.2 LTS is the tested floor. Tested against AWS ElastiCache for Redis 7.2, Upstash Redis, Redis Cloud 7.2, and self-managed `redis:7.2-alpine`.
-- **ioredis** `^5.4.1` (direct runtime dependency, used by the refresh-token-family client). Other Redis-backed adapters in this template still use the `redis` npm package; ioredis is added for the RT family store specifically.
+- **ioredis** `^6.0.0` (direct runtime dependency). Every `@o3co/auth-provider-redis` adapter this template wires — refresh-token families, authorization codes, rate-limit counters, the access-token denylist, the user-session stores — runs off the one ioredis connection `standaloneRedisClientsModule` opens per replica (`makeIoredisClients`). The `redis` npm package (`^6.2.1`) stays a dependency for one thing: `connect-redis` takes a node-redis client, so the `express-session` store behind `SESSION_STORAGE_TYPE=redis` is a second, separate connection (the `session-store` probe in `/readyz`).
 
 ## First-party clients
 
@@ -60,8 +60,9 @@ Be aware of what this check *cannot* do: if you scale to N replicas without ever
 
 Other multi-replica considerations covered by the default modules:
 
-- The session store is wired via `redisSessionStoresModule`; set the corresponding session-store Redis URL (per `session.storage.redis.url`).
-- The code repository defaults to Redis when `repositories.code.type = "redis"`; set `CLIENT_CODE_ENDPOINT_URI` to a shared Redis instance.
+- The `express-session` store (`sessionStoreModule`) is its own connection: `SESSION_STORAGE_TYPE=redis` with `SESSION_STORAGE_REDIS_URL` (`session.storage.redis.url`) pointing at the shared instance.
+- The user-session stores switch on `userSessionStores.adapter = "redis"` (`USER_SESSION_STORES_ADAPTER`), which wires `redisSessionStoresModule` off the shared ioredis connection — the one `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` configures.
+- The authorization-code repository switches on `oauth.code.adapter` (`OAUTH_CODE_ADAPTER`); the template ships `"redis"`, on that same connection. The older `repositories.code.type = "redis"` (`CLIENT_CODE_TYPE`) switch is still honoured with a deprecation warning at boot. `CLIENT_CODE_ENDPOINT_URI` (`repositories.code.redis.endpointUri`) is still bound by `config/application.conf` but nothing reads it: the Redis code repository has run on the shared connection since the `{ endpointUri }` builder shape was retired, so there is one Redis URL for every adapter and that variable is legacy.
 - The federation token store defaults to memory. Set `FEDERATION_TOKEN_STORE_TYPE=redis` (`federationTokenStore.type = "redis"`) and supply `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 bytes, base64-encoded (`openssl rand -base64 32`); the store encrypts the upstream refresh tokens it holds. It shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`. See [Federation Token Store](#federation-token-store).
 
 ## Usage
@@ -240,8 +241,8 @@ or the response cap is unusable, rather than at the first login attempt.
 
 | Variable | Default | Description |
 |---|---|---|
-| `CLIENT_CODE_TYPE` | `redis` | Authorization code store backend: `redis` |
-| `CLIENT_CODE_ENDPOINT_URI` | — | Redis connection URI for code storage |
+| `CLIENT_CODE_TYPE` | `redis` | Deprecated alias of `OAUTH_CODE_ADAPTER` (`repositories.code.type`); honoured with a boot warning |
+| `CLIENT_CODE_ENDPOINT_URI` | — | Legacy; bound to `repositories.code.redis.endpointUri` but not read — codes use the shared `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` connection |
 | `CLIENT_CODE_PASSWORD` | — | Redis password for code storage |
 | `CLIENT_CODE_DEFAULT_EXPIRES_IN` | `600` | Default authorization code lifetime in seconds |
 
@@ -291,21 +292,36 @@ per-provider (`FEDERATIONS_GOOGLE_CALLBACK_URL`).
 
 ## Module Composition Order
 
-Modules are registered in the following order. Each module registers its own routes and grant types.
+`src/buildModules.mts` is the single source of truth for the manifest; this is its order. The boot planner resolves `requires` / `provides` topologically, so list position matters only where a module says so — `sessionStoreModule` must stay first, because it wires the `express-session` middleware every session-consuming route needs. Entries marked *adapter switch* are one of a memory/Redis pair, chosen by config; both provide the same slot, so exactly one is wired.
 
-1. **`oauthModule`** — Core OAuth 2.0 endpoints: `POST /oauth/token`, `POST /oauth/introspect`, `GET /oauth/authorize`
-2. **`sessionModule`** — Session-based login/logout and federation: `POST /session/login`, `POST /session/logout`, `GET/POST /session/oauth/federation/*`
-3. **`oauthSessionModule`** — Session grant type (exchanges a valid session for a token)
-4. **`oauthAuthorizationModule`** — Authorization code and refresh token grant types
+1. **`sessionStoreModule`** (`@o3co/auth-provider-session`) — `express-session` middleware and its store (`session.storage.type`)
+2. **`oauthModule`** — `POST /oauth/token`, `POST /oauth/introspect`, `POST /oauth/revoke`, `GET /oauth/authorize`, and OIDC discovery when an issuer is configured
+3. **`oauthSessionModule`** — session grant (exchanges an authenticated session for a token)
+4. **`oauthAuthorizationModule`** — authorization-code and refresh-token grants
+5. **`jwksModule`** (`@o3co/auth-provider-core`) — `GET /.well-known/jwks.json` (or `oauth.jwt.jwksPath`); a signing provider publishes its verification keys whether or not an issuer is set
+6. **`sessionModule`** — `POST /session/login`, `POST /session/logout`, `GET/POST /session/oauth/federation/*`
+7. **`googleFederationModule`** + **`googleFederationConfigModule`** — only when `federations.google.enabled = true`
+8. **`keyStoreModule`** — the signing key store from `oauth.jwt.signingKey`
+9. **`repositoriesModule`** — client and user repositories from `repositories.client` / `repositories.user`
+10. **`auditSinkModule`** — always wired; `audit.sink.type` picks `logger` (default) or `console`
+11. **`standaloneRedisClientsModule`** — the one shared ioredis connection; present whenever any switch below is `"redis"`
+12. **`redisFederationTokenStoreModule`** / **`inMemoryFederationTokenStoreModule`** — *adapter switch*: upstream federation tokens per session (`federationTokenStore.type`; see [Multi-replica deployments](#multi-replica-deployments))
+13. **`redisSessionStoresModule`** / **`inMemorySessionStoresModule`** — *adapter switch*: user-session stores (`userSessionStores.adapter`)
+14. **`redisRateLimiterModule`** / **`memoryRateLimiterModule`** — *adapter switch*: the rate limiter behind the OAuth endpoints and `POST /session/login` (`rateLimiter.adapter`)
+15. **`redisCodeRepositoryModule`** / **`inMemoryCodeRepositoryModule`** — *adapter switch*: authorization codes (`oauth.code.adapter`)
+16. **`redisAccessTokenDenylistModule`** / **`memoryAccessTokenDenylistModule`** — *adapter switch*: RFC 7009 access-token denylist (`accessTokenDenylist.adapter`)
+17. **`redisRefreshTokenFamilyStoreModule`** — refresh-token families; Redis unless a test override swaps in the memory store
+18. **`defaultRefreshTokenFamilyRotationModule`**, **`defaultRefreshTokenFamilyRevocationModule`** — rotation and revocation policies over the family store
 
 ## Built-in Routes
 
-The following routes are registered outside of the module system:
+`src/app.mts` mounts these on the host app ahead of the composed auth router, so they keep answering while the auth pipeline is degraded — which is when an operator needs them. The JWKS route is not one of them: `jwksModule` contributes it (see above).
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check endpoint |
-| `GET` | `/.well-known/jwks.json` | Public key set (JWKS) for token verification |
+| `GET` | `/_healthcheck` | Liveness — `200 {"status":"ok"}` whenever the process is up, whatever Redis is doing. See [Health endpoints](#health-endpoints) |
+| `GET` | `/readyz` | Readiness — runs every registered dependency probe (`redis`, `session-store`, …) under `HTTP_READINESS_TIMEOUT_MS`; `200 {"status":"ready"}` or `503 {"status":"unready"}`, never cached |
+| `GET` | `/metrics` | Prometheus text exposition; dependency gauges are re-probed on every scrape. Keep it off the public listener — see [Metrics](#metrics) |
 
 ## Docker
 

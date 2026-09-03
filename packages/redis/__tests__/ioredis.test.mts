@@ -376,7 +376,8 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 			zrange: vi.fn().mockResolvedValue([]),
 			zrem: vi.fn().mockResolvedValue(0),
 			getdel: vi.fn().mockResolvedValue(null),
-			eval: vi.fn().mockResolvedValue(1),
+			// The increment script answers `{count, pttl}` (#458).
+			eval: vi.fn().mockResolvedValue([1, 60_000]),
 		} as never);
 		const c = makeIoredisClients(io);
 
@@ -490,5 +491,32 @@ describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRI
 			"devauth:{devauth}:code:dc",
 			"devauth:{devauth}:user:BCDFGHJK",
 		]);
+	});
+});
+
+describe("makeIoredisClients rateLimiterClient (#458)", () => {
+	// The script returns `{count, pttl}` as one reply, PTTL read inside the
+	// script after the increment, so the pair describes a single counter
+	// state — a separate PTTL round-trip could observe a key the window had
+	// already expired out from under.
+	it("incrementWithTtlAndPttl evaluates the script once and returns the {count, pttl} pair", async () => {
+		const io = makeFakeIoredis({ eval: vi.fn().mockResolvedValue([3, 45_000]) });
+		const c = makeIoredisClients(io);
+
+		await expect(
+			c.rateLimiterClient.incrementWithTtlAndPttl?.("token:ip:1.2.3.4", 60),
+		).resolves.toEqual({ count: 3, pttl: 45_000 });
+
+		const fake = io as unknown as { eval: ReturnType<typeof vi.fn> };
+		expect(fake.eval).toHaveBeenCalledTimes(1);
+		expect(fake.eval.mock.calls[0]?.[0]).toMatch(/PTTL/);
+		expect(fake.eval.mock.calls[0]?.slice(1)).toEqual([1, "token:ip:1.2.3.4", "60"]);
+	});
+
+	it("incrementWithTtl still answers the bare count, off the same script", async () => {
+		const io = makeFakeIoredis({ eval: vi.fn().mockResolvedValue([3, 45_000]) });
+		const c = makeIoredisClients(io);
+
+		await expect(c.rateLimiterClient.incrementWithTtl("token:ip:1.2.3.4", 60)).resolves.toBe(3);
 	});
 });

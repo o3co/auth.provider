@@ -47,6 +47,7 @@ export type {
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,
+	RateLimitIncrement,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,

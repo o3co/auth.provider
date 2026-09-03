@@ -14,6 +14,7 @@ import type {
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
 	RateLimiterClient,
+	RateLimitIncrement,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
@@ -43,13 +44,20 @@ import type {
  *
  * `TTL` rather than `EXPIRE ... NX`: the NX flag is Redis 7.0+, and this
  * package is used against whatever Redis the consumer runs.
+ *
+ * Returns `{count, pttl}` — the post-increment count and the key's remaining
+ * window in milliseconds (#458). The PTTL is read inside the script, after
+ * the increment, so the pair describes one counter state; a separate PTTL
+ * round-trip could observe a key the window had already expired out from
+ * under. The limiter turns it into `resetAt`, which is what the guard needs
+ * to put a `Retry-After` on the 429 — behind Redis it had none.
  */
 const LUA_INCREMENT_WITH_TTL = `
 local count = redis.call('INCR', KEYS[1])
 if redis.call('TTL', KEYS[1]) < 0 then
   redis.call('EXPIRE', KEYS[1], ARGV[1])
 end
-return count
+return {count, redis.call('PTTL', KEYS[1])}
 `.trim();
 
 /**
@@ -882,9 +890,21 @@ export function makeIoredisClients(
 		},
 	};
 
+	const incrementWithTtlAndPttl = async (
+		k: string,
+		ttlSeconds: number,
+	): Promise<RateLimitIncrement> => {
+		const [count, pttl] = (await io.eval(LUA_INCREMENT_WITH_TTL, 1, k, String(ttlSeconds))) as [
+			number,
+			number,
+		];
+		return { count, pttl };
+	};
 	const rateLimiterClient: RateLimiterClient = {
-		incrementWithTtl: async (k, ttlSeconds) =>
-			(await io.eval(LUA_INCREMENT_WITH_TTL, 1, k, String(ttlSeconds))) as number,
+		// One script for both: the count-only method is the original contract,
+		// kept for callers that hold this client directly (#458).
+		incrementWithTtl: async (k, ttlSeconds) => (await incrementWithTtlAndPttl(k, ttlSeconds)).count,
+		incrementWithTtlAndPttl,
 	};
 
 	// OR-9: code-repository client. Codes are short-TTL (60-600s) high-volume
