@@ -22,7 +22,9 @@ import type {
 	GrantHandlerResult,
 	UserRepository,
 } from "@o3co/auth-provider-core";
-import { generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
+import { generateToken, generateTokenResponse, isEmailVerified } from "@o3co/auth-provider-core";
+import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
+import { evaluateGrantPolicy } from "./_grantPolicy.mjs";
 
 /** RFC 7523 §2.1. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -55,6 +57,14 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * what makes resolving it through a pluggable {@link AssertionVerifier} a
  * conforming choice rather than a deviation.
  *
+ * ## Who may use it
+ *
+ * An authenticated client needs `allowedGrantTypes` to name this grant: the
+ * handler declares `requiresExplicitGrantAllowlist`, so an absent allowlist
+ * denies at dispatch (#326) rather than admitting by omission, the rule
+ * `client_credentials` and the device grant already follow. A caller with no
+ * client identity is outside that check by construction.
+ *
  * ## The boundary this does not cross
  *
  * Verification proves **possession**; the Store decides **identity**. This
@@ -69,13 +79,17 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *
  * - Missing/blank `assertion` → `invalid_request` (RFC 6749 §5.2: a missing
  *   parameter is not a bad grant).
- * - Verifier returns `null`, or the Store does not resolve the handle →
- *   `invalid_grant`, identically. Distinguishing them would let a caller probe
- *   for live device identifiers.
+ * - Verifier returns `null`, the Store does not resolve the handle, or the
+ *   resolved user fails `oauth.requireEmailVerified` (#297) → `invalid_grant`,
+ *   identically. Distinguishing them would let a caller probe for live device
+ *   identifiers, or for which of them are linked to a real account.
  * - Verifier or Store **throws** → `503 temporarily_unavailable`. An
  *   attestation service or a Store being unreachable is an outage, not a bad
  *   credential, and answering `invalid_grant` would send an operator to
  *   re-enrol a device that was fine — the distinction #408 drew for revocation.
+ * - `grantPolicy`, when wired, runs after all of the above and fails closed
+ *   (throw → `503`, deny → its own error, a widened scope → `invalid_scope`)
+ *   — see `evaluateGrantPolicy`.
  */
 export const createJwtBearerGrant = (
 	deps: GrantDependencies & {
@@ -84,8 +98,19 @@ export const createJwtBearerGrant = (
 	},
 ): GrantHandler => {
 	const { config, keyStore, assertionVerifier, userRepository } = deps;
+	// #297: deployment config, resolved once at construction like the session
+	// grant does — `resolveOAuthOptions` owns the defensive read.
+	const { requireEmailVerified } = resolveOAuthOptions(config);
 
 	return {
+		// #326: a device credential is a standing capability of a registration,
+		// not a per-user ceremony — like `client_credentials` and the device
+		// grant, a client registered before `allowedGrantTypes` existed must
+		// not acquire this grant by omission. Dispatch enforces the denial
+		// before `handle` runs; an unauthenticated caller (RFC 7523 §3 makes
+		// client authentication optional) has no allowlist to consult and is
+		// unaffected.
+		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const rawAssertion = ctx.body.assertion;
 			if (typeof rawAssertion !== "string" || rawAssertion.length === 0) {
@@ -164,11 +189,56 @@ export const createJwtBearerGrant = (
 				};
 			}
 
-			const scopes = resolveScope(ctx, verified.scope, ctx.authenticatedClient?.allowedScopes);
-			if ("error" in scopes) return { result: scopes };
+			// #297: this grant resolves a user and mints for them, which makes it
+			// the third point (after `/authorize` and the `session` grant) that
+			// holds the user at issuance and therefore the third the gate has to
+			// cover. Without it a deployment requiring a verified email would
+			// find the browser paths gated and the device path wide open.
+			//
+			// Same answer as an unknown handle, on purpose: a distinct
+			// description would tell a caller that this handle resolves to a
+			// real, merely unverified, account. The log line is for the
+			// operator who turned the gate on and now sees devices refused.
+			if (requireEmailVerified && !isEmailVerified(user)) {
+				deps.logger?.info({ kind: assertionVerifier.kind }, "jwt_bearer_email_not_verified");
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription: "assertion did not verify",
+					},
+				};
+			}
 
-			const scopeClaim = scopes.scopes.length > 0 ? scopes.scopes.join(" ") : null;
+			const scopes = resolveScope(ctx, verified.scope);
+			if ("error" in scopes) return { result: scopes };
+			let effectiveScopes = scopes.scopes;
 			const clientId = ctx.authenticatedClient?.clientId;
+
+			// CP-18: the policy gate every other minting path applies, after
+			// the identity gates and the scope ceilings so it sees a resolved
+			// subject and an already-narrowed request. Consulted whenever it is
+			// wired, as the refresh grant and `/authorize` do. `grantedAudience`
+			// is not applied: this grant mints `aud` as the authenticated
+			// client (or none) and has no `allowedAudiences` ceiling of its own
+			// to validate a policy audience against.
+			if (deps.grantPolicy) {
+				const policy = await evaluateGrantPolicy(
+					deps.grantPolicy,
+					{
+						grantType: JWT_BEARER_GRANT_TYPE,
+						clientId,
+						subject,
+						requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
+					effectiveScopes,
+				);
+				if (!policy.ok) return { result: policy.result };
+				effectiveScopes = policy.scopes;
+			}
+
+			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 			const confirmation = ctx.tokenBinding?.confirmation;
 			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
 
@@ -205,11 +275,20 @@ export const createJwtBearerGrant = (
  * everything — the distinction #396 drew for `defaultScopes`. A requested scope
  * outside any present ceiling is `invalid_scope` rather than silently dropped,
  * so a caller learns their token is narrower than they asked for.
+ *
+ * An **omitted** scope is the case #396 is about, and it is answered the way
+ * `client_credentials` answers it: an authenticated client's *declared*
+ * `defaultScopes` — never its whole allowlist — filtered by that allowlist and
+ * by the assertion. A client with an allowlist and no declared default gets
+ * `invalid_scope`; one with an empty allowlist keeps the empty grant, since
+ * there is nothing to over-grant. Without an authenticated client there is no
+ * registration to declare a default, so the assertion's own `scope` claim —
+ * the issuing authority's statement — is what an omitted request receives,
+ * and nothing at all when it names none.
  */
 function resolveScope(
 	ctx: GrantContext,
 	assertionScope: readonly string[] | undefined,
-	clientAllowed: readonly string[] | undefined,
 ):
 	| { scopes: readonly string[] }
 	| { status: 400; error: "invalid_scope" | "invalid_request"; errorDescription: string } {
@@ -218,20 +297,40 @@ function resolveScope(
 		return {
 			status: 400,
 			error: "invalid_request",
-			errorDescription: "scope must be a string",
+			errorDescription: "scope must be a space-delimited string",
 		};
 	}
-	const ceilings = [assertionScope, clientAllowed].filter(
+	const client = ctx.authenticatedClient;
+	const ceilings = [assertionScope, client?.allowedScopes].filter(
 		(c): c is readonly string[] => c !== undefined,
 	);
 	const within = (s: string): boolean => ceilings.every((c) => c.includes(s));
 
-	if (raw === undefined || raw.length === 0) {
-		// No request: the token gets the intersection of the ceilings that
-		// exist. With none, it gets nothing — there is no allowlist to draw on
-		// and inventing one would be the over-grant #396 removed.
-		if (ceilings.length === 0) return { scopes: [] };
-		return { scopes: (ceilings[0] as readonly string[]).filter(within) };
+	if (raw === undefined || raw.trim().length === 0) {
+		if (client) {
+			// #396, mirrored from `client_credentials`: an omitted scope draws
+			// on the client's DECLARED default, never on the whole allowlist —
+			// "forgot to send scope" must not be the maximum grant. The
+			// assertion stays a ceiling on that default (`within`), and the
+			// allowlist filter is applied even so: schema-validated
+			// registrations are ⊆ by boot, custom repositories are under no
+			// such obligation.
+			const allowed = client.allowedScopes ?? [];
+			if (client.defaultScopes !== undefined) {
+				return { scopes: client.defaultScopes.filter((s) => allowed.includes(s) && within(s)) };
+			}
+			if (allowed.length === 0) return { scopes: [] };
+			return {
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "scope is required: this client declares no defaultScopes",
+			};
+		}
+		// No client: the assertion's issuer is the only authority present, and
+		// its `scope` claim is the declared default. With none, the token gets
+		// nothing — there is no allowlist to draw on and inventing one would be
+		// the over-grant #396 removed.
+		return { scopes: assertionScope ?? [] };
 	}
 
 	// A request with NO ceiling to bound it is refused, not granted.

@@ -30,6 +30,8 @@ import {
 	type AssertionVerifier,
 	createSymmetricKeyStore,
 	type GrantContext,
+	type GrantPolicyDecision,
+	type GrantPolicyHook,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
@@ -59,13 +61,16 @@ const build = (opts: {
 	verifier?: AssertionVerifier;
 	userRepository?: UserRepository;
 	logger?: unknown;
+	config?: AppConfig;
+	grantPolicy?: GrantPolicyHook;
 }) =>
 	createJwtBearerGrant({
-		config,
+		config: opts.config ?? config,
 		keyStore,
 		assertionVerifier: opts.verifier ?? verifierFor({ subjectHandle: "device:abc" }),
 		userRepository: opts.userRepository ?? userRepoFor({ id: "u-1" }),
 		...(opts.logger ? { logger: opts.logger } : {}),
+		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 	} as never);
 
 const ctx = (body: Record<string, unknown> = {}, extra: Partial<GrantContext> = {}): GrantContext =>
@@ -114,6 +119,16 @@ describe("jwt-bearer grant — the happy path (#301)", () => {
 			userRepository: { authenticate: async () => null, authenticateByToken } as never,
 		}).handle(ctx({ subject_handle: "device:attacker", sub: "admin" }));
 		expect(authenticateByToken).toHaveBeenCalledWith("device:from-verifier");
+	});
+
+	it("declares requiresExplicitGrantAllowlist: true on the handler contract (#326)", () => {
+		// A device credential is a standing capability of a registration, not a
+		// per-user ceremony: like client_credentials and the device grant, a
+		// client registered before `allowedGrantTypes` existed must not acquire
+		// it by omission. Dispatch refuses an absent allowlist for handlers
+		// that declare this; an unauthenticated caller has no allowlist to
+		// consult and is unaffected.
+		expect(build({}).requiresExplicitGrantAllowlist).toBe(true);
 	});
 
 	it("works without an authenticated client — RFC 7523 §3 makes that optional", async () => {
@@ -173,6 +188,62 @@ describe("jwt-bearer grant — what it refuses (#301)", () => {
 		const { result } = await build({ userRepository: userRepoFor({ id: "" }) }).handle(ctx());
 		expect(result.status).toBe(400);
 		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+});
+
+describe("jwt-bearer grant — oauth.requireEmailVerified (#297)", () => {
+	// The third point that holds a resolved user at issuance, after
+	// `/authorize` and the `session` grant. A deployment that turned the gate
+	// on would otherwise find two paths gated and this one wide open.
+	const gated = {
+		...config,
+		oauth: { ...config.oauth, requireEmailVerified: true },
+	} as unknown as AppConfig;
+
+	it("refuses when the gate is on and the Store published no verification", async () => {
+		const { result } = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1" }),
+		}).handle(ctx());
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("refuses when the Store published an explicit false", async () => {
+		const { result } = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1", emailVerified: false }),
+		}).handle(ctx());
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("admits when the Store published true", async () => {
+		const { result } = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1", emailVerified: true }),
+		}).handle(ctx());
+		expect(result.status).toBe(200);
+	});
+
+	it("is inert when the gate is off, whatever the Store published", async () => {
+		// Off is the default, and a Store that does not model the field must be
+		// entirely unaffected.
+		const { result } = await build({
+			userRepository: userRepoFor({ id: "u-1", emailVerified: false }),
+		}).handle(ctx());
+		expect(result.status).toBe(200);
+	});
+
+	it("answers exactly what an unknown handle answers, so it cannot be probed", async () => {
+		// A different description would tell a caller that this handle resolves
+		// to a real, merely unverified, account.
+		const unverified = await build({
+			config: gated,
+			userRepository: userRepoFor({ id: "u-1" }),
+		}).handle(ctx());
+		const unknown = await build({ userRepository: userRepoFor(null) }).handle(ctx());
+		expect(unverified.result).toEqual(unknown.result);
 	});
 });
 
@@ -300,6 +371,211 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => 
 	it("rejects a non-string scope", async () => {
 		const { result } = await build({}).handle(ctx({ scope: ["read"] }));
 		expect("error" in result && result.error).toBe("invalid_request");
+	});
+});
+
+describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never the allowlist (#396)", () => {
+	const client = (over: Record<string, unknown>) =>
+		({ authenticatedClient: { clientId: "c1", ...over } }) as never;
+	const scopeOf = (result: { status: number } & Record<string, unknown>) =>
+		"tokens" in result
+			? decodeJwt((result.tokens as { access_token: string }).access_token).scope
+			: expect.fail("expected tokens");
+
+	it("refuses an omitted scope for a client that declares no defaultScopes", async () => {
+		// The over-grant #396 removed from client_credentials: "forgot to send
+		// scope" used to be the maximum grant. An authenticated client with an
+		// allowlist and no declared default gets invalid_scope, not the
+		// allowlist.
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedScopes: ["read", "write"] })),
+		);
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+		expect("errorDescription" in result && result.errorDescription).toMatch(/defaultScopes/);
+	});
+
+	it("refuses it even when the assertion names a scope — the assertion is a ceiling, not a default", async () => {
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read"] }),
+		}).handle(ctx({}, client({ allowedScopes: ["read", "write"] })));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("grants the client's defaultScopes when scope is omitted", async () => {
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedScopes: ["read", "write"], defaultScopes: ["read"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("bounds the defaultScopes by what the assertion authorizes", async () => {
+		// The assertion stays a ceiling on the declared default: a device whose
+		// credential says "read" does not get "write" because the client's
+		// registration would default to it.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read"] }),
+		}).handle(
+			ctx({}, client({ allowedScopes: ["read", "write"], defaultScopes: ["read", "write"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("filters the defaultScopes by the allowlist even so", async () => {
+		// Schema-validated registrations are a subset by boot; a custom
+		// repository is under no such obligation.
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedScopes: ["read"], defaultScopes: ["read", "admin"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("keeps the empty grant for a scope-less client (empty allowlist, no defaults)", async () => {
+		// Nothing to over-grant, so nothing to refuse.
+		const { result } = await build({}).handle(ctx({}, client({ allowedScopes: [] })));
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBeUndefined();
+	});
+
+	it("treats a blank scope exactly like an omitted one", async () => {
+		const { result } = await build({}).handle(
+			ctx({ scope: "" }, client({ allowedScopes: ["read", "write"] })),
+		);
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("without a client, an omitted scope receives what the assertion itself declares", async () => {
+		// No registration is present to declare a default, so the assertion's
+		// issuer is the only authority in the room and its `scope` claim is the
+		// declared default. Unchanged from #428, pinned so it is a decision.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read"] }),
+		}).handle(ctx({}, { authenticatedClient: null }));
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+});
+
+describe("jwt-bearer grant — grantPolicy is consulted, fail-closed (CP-18)", () => {
+	// Every other minting path evaluates `grantPolicy`; this one did not, so
+	// a deployment's policy hook saw client_credentials, refresh_token, the
+	// code flow and token exchange — and never a device login.
+	const policyOf = (
+		evaluate: (...args: Parameters<GrantPolicyHook["evaluate"]>) => Promise<GrantPolicyDecision>,
+	): GrantPolicyHook => ({ kind: "stub", evaluate });
+	const allow = (extra: Record<string, unknown> = {}) =>
+		policyOf(async () => ({ outcome: "allow", ...extra }) as GrantPolicyDecision);
+	const authed = {
+		authenticatedClient: {
+			clientId: "c1",
+			allowedScopes: ["read", "write"],
+			defaultScopes: ["read", "write"],
+		},
+	} as never;
+	const scopeOf = (result: { status: number } & Record<string, unknown>) =>
+		"tokens" in result
+			? decodeJwt((result.tokens as { access_token: string }).access_token).scope
+			: expect.fail("expected tokens");
+
+	it("evaluates the policy with the grant type, the client and the resolved subject", async () => {
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({
+			grantPolicy: policyOf(evaluate),
+			userRepository: userRepoFor({ id: "user-42" }),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(evaluate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				grantType: JWT_BEARER_GRANT_TYPE,
+				clientId: "c1",
+				subject: "user-42",
+				requestedScope: ["read"],
+			}),
+			expect.objectContaining({ issuer: "https://auth.example" }),
+		);
+	});
+
+	it("consults the policy for an unauthenticated caller too, with no clientId", async () => {
+		// RFC 7523 §3 makes client authentication optional; policy is not.
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({ grantPolicy: policyOf(evaluate) }).handle(ctx({}, { authenticatedClient: null }));
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ clientId: undefined, subject: "u-1" });
+	});
+
+	it("passes an omitted scope to the policy as undefined, not as an empty list", async () => {
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({ grantPolicy: policyOf(evaluate) }).handle(ctx());
+		expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ requestedScope: undefined });
+	});
+
+	it("denies with the policy's own error and description", async () => {
+		const { result } = await build({
+			grantPolicy: policyOf(async () => ({
+				outcome: "deny",
+				error: "access_denied",
+				errorDescription: "device is quarantined",
+			})),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("access_denied");
+		expect("errorDescription" in result && result.errorDescription).toBe("device is quarantined");
+	});
+
+	it("answers 503 when the policy throws — fail closed, never open", async () => {
+		// Policy is a security boundary: if it cannot answer, the pre-policy
+		// ceiling must not become the grant.
+		const { result } = await build({
+			grantPolicy: policyOf(async () => {
+				throw new Error("policy service unreachable");
+			}),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(result.status).toBe(503);
+		expect("error" in result && result.error).toBe("temporarily_unavailable");
+	});
+
+	it("narrows the scope to what the policy grants", async () => {
+		const { result } = await build({ grantPolicy: allow({ grantedScope: ["read"] }) }).handle(
+			ctx({ scope: "read write" }, authed),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBe("read");
+	});
+
+	it("honours an empty grantedScope as strip-all", async () => {
+		const { result } = await build({ grantPolicy: allow({ grantedScope: [] }) }).handle(
+			ctx({ scope: "read write" }, authed),
+		);
+		expect(result.status).toBe(200);
+		expect(scopeOf(result)).toBeUndefined();
+	});
+
+	it("refuses a policy that widens past the effective scope, even within the allowlist", async () => {
+		// `write` is in the client's allowlist but was not requested: a policy
+		// returning it is scope expansion, and a compromised policy must not
+		// be able to hand out more than the caller asked for.
+		const { result } = await build({
+			grantPolicy: allow({ grantedScope: ["read", "write"] }),
+		}).handle(ctx({ scope: "read" }, authed));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_scope");
+	});
+
+	it("leaves the effective scope alone when the policy says nothing about it", async () => {
+		const { result } = await build({ grantPolicy: allow() }).handle(
+			ctx({ scope: "read write" }, authed),
+		);
+		expect(scopeOf(result)).toBe("read write");
+	});
+
+	it("runs after the identity gates: an unverified assertion never reaches the policy", async () => {
+		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
+		await build({ grantPolicy: policyOf(evaluate), verifier: verifierFor(null) }).handle(ctx());
+		expect(evaluate).not.toHaveBeenCalled();
 	});
 });
 

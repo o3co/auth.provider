@@ -88,6 +88,17 @@ const defaultReadScope = (claims: JWTPayload): readonly string[] | undefined =>
  * - **A bad signature, a wrong `iss`, a wrong `aud`, an expired assertion** —
  *   `null`, i.e. not verified. `aud` in particular: an assertion addressed to
  *   another service is replayable here without it.
+ * - **An assertion with no `exp`** — `null`. RFC 7523 §3 item 4 makes it
+ *   mandatory, and jose does not: it validates `exp` only when present, so an
+ *   assertion that omits it would otherwise be accepted for ever. There is
+ *   no lifetime ceiling beyond `exp` itself (no `maxTokenAge`): the RFC gives
+ *   the issuing authority that decision, and this verifier has no knob for
+ *   second-guessing it.
+ * - **Replay within `exp` is not detected here.** RFC 7523 §3 item 7 lets
+ *   an AS track `jti` to refuse a second presentation; this verifier does
+ *   not, and neither does the grant that consumes it. An assertion is
+ *   accepted as many times as it is presented until it expires, so an
+ *   authority should mint short-lived assertions.
  * - **A claims set with no usable handle** — `null`. A verified signature over
  *   a token naming nobody is not an authentication.
  * - **`alg: none` and every unlisted algorithm** — `algorithms` is required
@@ -137,6 +148,12 @@ export function createJwtAssertionVerifier(
 					audience,
 					clockTolerance: clockToleranceSeconds,
 					algorithms: [...algorithms],
+					// RFC 7523 §3 item 4: `exp` is mandatory. jose validates it only
+					// when present, so without naming it here an assertion that
+					// simply omits `exp` never expires — a credential whose theft
+					// is permanent. `iat` and `nbf` stay optional (items 5 and 6
+					// are MAYs), and both are validated when present.
+					requiredClaims: ["exp"],
 				}));
 			} catch {
 				// Not verified. Deliberately not rethrown: a caller must not be

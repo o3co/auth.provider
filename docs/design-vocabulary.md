@@ -44,6 +44,7 @@ second definition it was never shown; a drift guard can.
 | Built-in audit-event names | `packages/core/src/audit/types.mts` (`BUILT_IN_AUDIT_EVENT_TYPES`) | every `emitAuditEvent` / sink `record` site | #369 | yes (`audit/__tests__/auditEventInventory.drift.test.mts`, both directions) |
 | Retired config key — how a removed key dies | `packages/core/src/config/removed-keys.mts` (`withRemovedKeys`; decision rule in `docs/release-policy.md` §"Retiring a config key") | `oauth.refreshToken` / `oauth.authorize` tombstones; warn-path stays with `INERT_PKCE_KEYS` per the rule | #366 | yes |
 | Declared absence — optional DI slot whose absence must be stated | `packages/core/src/modules/manifest/absence-policy.mts` (enforced by `checkDeclaredAbsence` in the post-config check registry) | `auditSink` via `AUDIT_SINK_ABSENCE_POLICY` (oauth, session, webauthn); `accessTokenDenylist` via `ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY` (oauth, token-exchange — #375 folded #277's bespoke check onto it) | #363, #375 | no |
+| Fail-closed grant-policy evaluation — throw → `503`, deny → `400` with the policy's error, `grantedScope` may only narrow the effective scope (CP-18 / CP-15) | `packages/oauth/src/grants/_grantPolicy.mts` (`evaluateGrantPolicy`) | jwt-bearer grant, `client_credentials`. `refresh_token`, `/authorize`, token exchange and the WebAuthn grant predate the home and still carry inline copies — migrating them is a follow-up, not a licence for a seventh | unreleased (jwt-bearer gates fix) | no |
 
 ## Provenance identifiers
 
