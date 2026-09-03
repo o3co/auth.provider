@@ -53,12 +53,16 @@ export type JwtVerificationReason =
 	// unknown kid is an attacker-fabricated header signal. SIEM filters can
 	// page differently on each.
 	| "kid_expired"
-	// Wave 1 (§4.5) / #296: a *finding* — the jti is on the AccessTokenDenylist
-	// (explicitly revoked via RFC 7009), or the token's `iat` is at or before
-	// the subject's revocation watermark. Distinct from `expired` so SIEM
-	// filters can tell natural expiry apart from an operator-initiated
-	// revocation event. Never emitted for a store that could not be consulted:
-	// that is `revocation_unavailable`, for both stores (#408, #459).
+	// Wave 1 (§4.5) / #296: a revocation *finding*, or a fail-closed refusal
+	// when the watermark cannot be compared — the jti is on the
+	// AccessTokenDenylist (explicitly revoked via RFC 7009); the token's `iat`
+	// is at or before the subject's revocation watermark; or a watermark is in
+	// force and the token carries no `iat` to compare against it (#376: a token
+	// that cannot prove it postdates a credential change is not honoured).
+	// Distinct from `expired` so SIEM filters can tell natural expiry apart
+	// from an operator-initiated revocation event. Never emitted for a store
+	// that could not be consulted: that is `revocation_unavailable`, for both
+	// stores (#408, #459).
 	| "revoked"
 	// #408 / #459: a revocation store — the subject watermark (#408) or the jti
 	// denylist (#459) — could not be consulted. Verification still fails closed
