@@ -36,6 +36,8 @@ export {
 	type CheckReplicaSafetyInput,
 	checkReplicaSafety,
 	REPLICA_UNSAFE_MODULES,
+	type ReplicaSafetyModuleRef,
+	replicaUnsafeReason,
 } from "./replica-safety.mjs";
 export type {
 	AppHandle,

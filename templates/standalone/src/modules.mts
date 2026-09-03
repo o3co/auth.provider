@@ -38,7 +38,6 @@ import {
 } from "@o3co/auth-provider-core";
 import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
-import { redisFederationTokenStoreBuilder } from "@o3co/auth-provider-redis";
 import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
 // Named import is required here, not default. ioredis is CJS and its entry
@@ -155,6 +154,14 @@ export const repositoriesModule: Module = defineModule({
  */
 export const inMemoryCodeRepositoryModule: Module = defineModule({
 	name: "standalone:in-memory-code-repository",
+	// #455: the replica-safety guard reads this off the manifest. Before it
+	// did, this module booted under `deployment.mode = "multi"` — the guard
+	// keyed on core's module names and had never heard of this one.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"authorization codes fork per replica — a code issued by the replica that served /authorize is unknown to the replica that receives the token request, so the exchange fails with invalid_grant everywhere but one replica, and a code redeemed on one replica can be redeemed again on another",
+	},
 	requires: ["config"] as const,
 	optional: ["lifecycleRegistrar"] as const,
 	provides: {
@@ -195,6 +202,15 @@ export const inMemoryCodeRepositoryModule: Module = defineModule({
  */
 export const inMemorySessionStoresModule: Module = defineModule({
 	name: "standalone:in-memory-session-stores",
+	// #455: the replica-safety guard reads this off the manifest. Before it
+	// did, `DEPLOYMENT_MODE=multi` with `USER_SESSION_STORES_ADAPTER=memory`
+	// booted — the guard keyed on core's `memorySessionStores`, and this
+	// module provides the same six slots under a name it had never heard of.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"user sessions, RP registrations, family indexes and the subject-level revocation pair fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others, and a credential change enumerates and watermarks only the replica that handled it (#321)",
+	},
 	provides: {
 		userSessionStore: () => createInMemoryUserSessionStore(),
 		sessionRPRegistry: () => createInMemorySessionRPRegistry(),
@@ -218,27 +234,43 @@ export const inMemorySessionStoresModule: Module = defineModule({
 });
 
 /**
- * Federation token store module — always wired (independent of the
- * `userSessionStores.adapter` switch). Pre-Wave-5d this slot was bundled
- * into the larger `storesModule`; that meant the redis session-stores
- * branch dropped the federation-token-store provider entirely and boot
- * failed on the missing component (Copilot review on PR #121). Splitting
- * the slot out lets both adapters reuse it unchanged.
+ * In-memory federation token store module — wired by `buildModules` only
+ * when `federationTokenStore.type = "memory"` (the default). The redis
+ * branch swaps in `redisFederationTokenStoreModule` from
+ * `@o3co/auth-provider-redis` (mutually exclusive — both provide the same
+ * `federationTokenStore` slot), off the shared ioredis socket.
+ *
+ * Until #455 / #456 this was one module for both adapters
+ * (`standalone:federation-token-store`), choosing at runtime through the
+ * adapter factory. That shape failed twice over: the replica-safety guard
+ * could not tell the memory store from the Redis one by name, so
+ * `deployment.mode = "multi"` booted with the memory store; and the Redis
+ * branch handed the builder no client, so `federationTokenStore.type =
+ * "redis"` — documented in the README — was a boot failure rather than a
+ * Redis-backed store. One module per adapter, like the session stores.
+ *
+ * The slot is always wired, independent of the `userSessionStores.adapter`
+ * switch: pre-Wave-5d it was bundled into the larger `storesModule`, and the
+ * redis session-stores branch dropped the provider entirely (Copilot review
+ * on PR #121).
+ *
+ * The memory adapter still comes through core's factory, unchanged: that is
+ * where its "dev/test only" boot warning lives.
  */
-export const federationTokenStoreModule: Module = defineModule({
-	name: "standalone:federation-token-store",
-	requires: ["config"] as const,
+export const inMemoryFederationTokenStoreModule: Module = defineModule({
+	name: "standalone:in-memory-federation-token-store",
+	// #455: read by the replica-safety guard. Before the split this module
+	// carried one name for both adapters, so no name could have carried it.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"upstream federation tokens fork per replica — a token stored by the replica that completed the federation callback is missing on the others, so a session cannot refresh its upstream token from another replica, and logout removes only the tokens the replica it lands on can see",
+	},
 	provides: {
-		federationTokenStore: async ({ config }) => {
+		federationTokenStore: async () => {
 			const factory = createFederationTokenStoreFactory();
 			registerBuiltinFederationTokenStores(factory);
-			factory.register("redis", redisFederationTokenStoreBuilder);
-			const slice = (
-				config as AppConfig & {
-					federationTokenStore?: { type: string } & Record<string, unknown>;
-				}
-			).federationTokenStore;
-			return factory.create(slice ? flattenAdapterConfig(slice) : { type: "memory" });
+			return factory.create({ type: "memory" });
 		},
 	},
 });
@@ -305,16 +337,24 @@ export const auditSinkModule: Module = defineModule({
 
 /**
  * @deprecated since Wave 5d (F4 PR2): split into `inMemorySessionStoresModule`
- * + `federationTokenStoreModule`. Re-exported for backward compatibility
- * with consumers that imported `storesModule` from this file. New code
- * should use the two split modules directly.
+ * + `inMemoryFederationTokenStoreModule`. Re-exported for backward
+ * compatibility with consumers that imported `storesModule` from this file.
+ * New code should use the two split modules directly.
  */
 export const storesModule: Module = defineModule({
 	name: "standalone:stores",
+	// #455: everything this bundle provides lives in process memory, so a
+	// composition still on it is refused under `deployment.mode = "multi"`
+	// like the split modules it stands in for.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"user sessions, RP registrations, family indexes, the subject-level revocation pair and upstream federation tokens fork per replica — back-channel logout reaches only the replica that received it, so a logged-out session stays valid on the others",
+	},
 	requires: ["config"] as const,
 	provides: {
 		...inMemorySessionStoresModule.provides,
-		...federationTokenStoreModule.provides,
+		...inMemoryFederationTokenStoreModule.provides,
 	},
 });
 
@@ -457,6 +497,19 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		deviceCodeStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.deviceCodeStoreClient;
+		},
+		// #456: the federation-token-store client, off the same shared socket.
+		// `redisFederationTokenStoreModule` requires it, and nothing provided
+		// it — which is why the Redis branch of the federation store could not
+		// boot in this template while the README said it could.
+		federationTokenStoreClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.federationTokenStoreClient;
 		},
 	},
 });

@@ -23,6 +23,12 @@ import { createMemoryAccessTokenDenylist } from "./memory.mjs";
  */
 export const memoryAccessTokenDenylistModule = defineModule({
 	name: "core-access-token-denylist-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"access-token revocation forks per replica — a revoked token keeps working on every replica that did not receive the revocation",
+	},
 	provides: {
 		accessTokenDenylist: () => createMemoryAccessTokenDenylist(),
 	},

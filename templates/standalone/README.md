@@ -50,7 +50,7 @@ An allowlist is a network control, not a cryptographic one. The edge must also *
 
 **Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. Since #270 the login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; both adapters seed their own `limits.login` from it, so there is nothing to restate.
 
-**Set `DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, DPoP proof-replay detection forking. With the mode unset you get one `replica_unsafe_adapters` warning at boot instead; with `DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica.
+**Set `DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, DPoP proof-replay detection forking. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`USER_SESSION_STORES_ADAPTER=memory`), the authorization-code repository (`OAUTH_CODE_ADAPTER=memory`) and the federation token store (`FEDERATION_TOKEN_STORE_TYPE=memory`, the default) — are refused by name too; before #455 they booted under `multi`. With the mode unset you get one `replica_unsafe_adapters` warning at boot instead; with `DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica.
 
 Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
 
@@ -60,7 +60,7 @@ Other multi-replica considerations covered by the default modules:
 
 - The session store is wired via `redisSessionStoresModule`; set the corresponding session-store Redis URL (per `session.storage.redis.url`).
 - The code repository defaults to Redis when `repositories.code.type = "redis"`; set `CLIENT_CODE_ENDPOINT_URI` to a shared Redis instance.
-- The federation token store can be backed by Redis via `federationTokenStore.type = "redis"` (deferred to operator config; default is in-memory).
+- The federation token store defaults to memory. Set `FEDERATION_TOKEN_STORE_TYPE=redis` (`federationTokenStore.type = "redis"`) and supply `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 bytes, base64-encoded (`openssl rand -base64 32`); the store encrypts the upstream refresh tokens it holds. It shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`. See [Federation Token Store](#federation-token-store).
 
 ## Usage
 
@@ -243,6 +243,24 @@ or the response cap is unusable, rather than at the first login attempt.
 | `CLIENT_CODE_PASSWORD` | — | Redis password for code storage |
 | `CLIENT_CODE_DEFAULT_EXPIRES_IN` | `600` | Default authorization code lifetime in seconds |
 
+### Federation Token Store
+
+The upstream IdP tokens (a Google refresh token, say) held on behalf of a
+session. Memory by default, which forks per replica and is refused under
+`DEPLOYMENT_MODE=multi`; the Redis store shares the socket configured by
+`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` and encrypts records at rest, so it
+needs a key.
+
+| Variable | Default | Description |
+|---|---|---|
+| `FEDERATION_TOKEN_STORE_TYPE` | `memory` | Federation token store backend: `memory` or `redis` |
+| `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` | — | AES-256-GCM key for records at rest: 32 bytes, base64-encoded (`openssl rand -base64 32`). **Required** with `redis` unless the mode below is `allow-plaintext` |
+| `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused under `NODE_ENV=production` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
+
+`ttl` (seconds; keep it above the upstream refresh-token lifetime) and the #291
+`scanFallback` migration flag live under `redisFederationTokenStore` in a
+config layer rather than behind an environment variable.
+
 ### Redis Namespacing
 
 For multi-tenant Redis clusters, set deployment-specific key prefixes so two
@@ -253,9 +271,10 @@ auth.provider instances cannot collide in the same database:
 | `REDIS_SESSION_STORES_KEY_PREFIX` | `ss:` | Outer prefix for user sessions, RP registry, session-family index, and session-federation index. |
 | `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | Prefix for refresh-token family records. |
 | `CLIENT_CODE_KEY_PREFIX` | `oauth:code:` | Prefix for OAuth authorization codes. |
+| `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX` | `ft:` | Prefix for federation token records, their per-session index and their lock keys. |
 
 Use values that include the deployment name, for example `tenant-a:ss:`,
-`tenant-a:rtfam:`, and `tenant-a:code:`.
+`tenant-a:rtfam:`, `tenant-a:code:`, and `tenant-a:ft:`.
 
 ### Endpoints
 

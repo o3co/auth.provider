@@ -58,6 +58,35 @@ export interface ComponentLifecycle<K extends ComponentKey> {
 }
 
 /**
+ * A module's statement that the state it provides lives in this process's
+ * memory and **must** be shared for a deployment to run more than one
+ * replica correctly (#455).
+ *
+ * The boot planner's replica-safety guard (#271) reads this off every
+ * installed manifest: `deployment.mode = "multi"` refuses boot naming the
+ * module, unset warns, `"single"` is silent. Until #455 the guard worked off a
+ * table of core's module names, so a composition root's own in-memory
+ * modules — the standalone template's, under names core had never seen —
+ * booted under `"multi"` with their state forking per replica. The module is
+ * where the fact is known, so the module is where it is declared.
+ *
+ * `reason` is quoted into the refused boot and the warning. Name what
+ * diverges and what that costs — "back-channel logout reaches only the
+ * replica that received it" — because "use redis" tells an operator what to
+ * type without telling them what breaks.
+ */
+export interface ReplicaSafetyDeclaration {
+	/**
+	 * Always `true`. The literal is here so the declaration reads as one at
+	 * the call site (`replicaSafety: { unsafe: true, reason }`) rather than as
+	 * an opaque string, and so a future exemption shape has somewhere to go.
+	 */
+	readonly unsafe: true;
+	/** What forks per replica, and the consequence for a user or operator. */
+	readonly reason: string;
+}
+
+/**
  * Parameterised manifest type. The R / O generics are inferred at the
  * call site of `defineModule(...)` and carry the literal key sets
  * declared in `requires` / `optional` so providers and contribution
@@ -101,6 +130,15 @@ export interface ModuleSpec<R extends ComponentKey = never, O extends ComponentK
 	 * `manifest/absence-policy.mts` for what a policy is and why it is data.
 	 */
 	readonly absencePolicies?: { readonly [K in O]?: AbsencePolicy };
+
+	/**
+	 * Declares that this module holds, in this process's memory, state that
+	 * must be shared across replicas (#455). Read by the replica-safety guard
+	 * at stage 1; see {@link ReplicaSafetyDeclaration} for what it means and
+	 * what to write in `reason`. Omit it on a module whose state lives in a
+	 * shared store — or that holds none.
+	 */
+	readonly replicaSafety?: ReplicaSafetyDeclaration;
 
 	/**
 	 * Component values this module materialises into the DI graph. Each

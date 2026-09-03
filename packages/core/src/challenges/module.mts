@@ -23,6 +23,12 @@ import { createChallengeCeremony } from "./ceremony.mjs";
  */
 export const memoryChallengeStoreModule = defineModule({
 	name: "core-challenge-store-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"WebAuthn challenges fork per replica — a ceremony started on one replica cannot be completed on another",
+	},
 	provides: {
 		challengeStore: () => createMemoryChallengeStore(),
 	},

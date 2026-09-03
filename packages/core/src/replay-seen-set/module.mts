@@ -22,6 +22,12 @@ import { createMemoryReplaySeenSet } from "./adapters/memory.mjs";
  */
 export const memoryReplaySeenSetModule = defineModule({
 	name: "core-replay-seen-set-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"DPoP proof-replay detection forks per replica — a captured proof can be replayed once against each replica",
+	},
 	provides: {
 		replaySeenSet: () => createMemoryReplaySeenSet(),
 	},

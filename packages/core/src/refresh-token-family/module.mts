@@ -26,6 +26,12 @@ import { createRefreshTokenFamilyRotation } from "./rotation.mjs";
  */
 export const memoryRefreshTokenFamilyStoreModule = defineModule({
 	name: "core-refresh-token-family-store-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"refresh-token families fork per replica — rotation replay detection and cascade revoke see only this replica's history",
+	},
 	provides: {
 		refreshTokenFamilyStore: () => createMemoryRefreshTokenFamilyStore(),
 	},

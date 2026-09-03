@@ -22,14 +22,27 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { checkReplicaSafety, REPLICA_UNSAFE_MODULES } from "#/boot/replica-safety.mjs";
+import {
+	checkReplicaSafety,
+	REPLICA_UNSAFE_MODULES,
+	replicaUnsafeReason,
+} from "#/boot/replica-safety.mjs";
 import type { BootstrapMap } from "#/boot/types.mjs";
 import { BootError } from "#/boot/types.mjs";
-import { createApp } from "#/index.mjs";
+import { createApp, defineModule } from "#/index.mjs";
 import { makeValidCoreConfig } from "#/testing/fixtures/valid-config.mjs";
 import { memorySessionStoresModule } from "#/user-sessions/modules/memory.mjs";
 
 const modules = (...names: string[]) => names.map((name) => ({ name }));
+
+/**
+ * #455: a module that says so on its own manifest, the way a composition
+ * root's module does — the guard has never heard its name.
+ */
+const declaring = (name: string, reason = `${name} forks per replica — a test consequence`) => ({
+	name,
+	replicaSafety: { unsafe: true as const, reason },
+});
 
 const logger = () => {
 	const warn = vi.fn();
@@ -177,6 +190,129 @@ describe("REPLICA_UNSAFE_MODULES", () => {
 });
 
 // ---------------------------------------------------------------------------
+// #455: the declaration lives on the manifest, not in a table of names
+// ---------------------------------------------------------------------------
+
+describe("checkReplicaSafety — modules that declare replicaSafety on their manifest (#455)", () => {
+	// The standalone template wires its own in-memory modules
+	// (`standalone:in-memory-session-stores`, …) under names the core table
+	// had never heard of, so `deployment.mode = "multi"` booted with them.
+	// A module's manifest is where it says what it holds; the guard reads it.
+
+	it("refuses a declaring module in multi mode, naming it", () => {
+		const { logger: log } = logger();
+		try {
+			checkReplicaSafety({
+				modules: [declaring("standalone:in-memory-session-stores"), ...modules("oauth")],
+				config: { deployment: { mode: "multi" } },
+				logger: log,
+			});
+			expect.unreachable("should have thrown");
+		} catch (err) {
+			expect(err).toBeInstanceOf(BootError);
+			const details = (err as BootError).details;
+			if (details.reason !== "replica-unsafe-adapter") expect.unreachable("wrong reason");
+			expect(details.modules).toEqual(["standalone:in-memory-session-stores"]);
+		}
+	});
+
+	it("quotes the declared reason into the refusal, like a table entry's", () => {
+		const { logger: log } = logger();
+		expect(() =>
+			checkReplicaSafety({
+				modules: [declaring("test:holds-state", "authorization codes are not shared")],
+				config: { deployment: { mode: "multi" } },
+				logger: log,
+			}),
+		).toThrow(/test:holds-state: authorization codes are not shared/);
+	});
+
+	it("warns about a declaring module when the mode is unset", () => {
+		const { logger: log, warn } = logger();
+		checkReplicaSafety({
+			modules: [declaring("test:holds-state", "a consequence an operator can act on")],
+			config: {},
+			logger: log,
+		});
+		expect(warn).toHaveBeenCalledOnce();
+		const [fields, message] = warn.mock.calls[0] as [
+			{ modules: string[]; reasons: string[] },
+			string,
+		];
+		expect(message).toBe("replica_unsafe_adapters");
+		expect(fields.modules).toEqual(["test:holds-state"]);
+		expect(fields.reasons).toEqual(["test:holds-state: a consequence an operator can act on"]);
+	});
+
+	it("stays silent about a declaring module in single mode", () => {
+		const { logger: log, warn } = logger();
+		checkReplicaSafety({
+			modules: [declaring("test:holds-state")],
+			config: { deployment: { mode: "single" } },
+			logger: log,
+		});
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it("names declaring modules and bundled modules together, in manifest order", () => {
+		const { logger: log } = logger();
+		try {
+			checkReplicaSafety({
+				modules: [
+					...modules("memorySessionStores"),
+					declaring("standalone:in-memory-code-repository"),
+					...modules("oauth"),
+				],
+				config: { deployment: { mode: "multi" } },
+				logger: log,
+			});
+			expect.unreachable("should have thrown");
+		} catch (err) {
+			const details = (err as BootError).details;
+			if (details.reason !== "replica-unsafe-adapter") expect.unreachable("wrong reason");
+			expect(details.modules).toEqual([
+				"memorySessionStores",
+				"standalone:in-memory-code-repository",
+			]);
+		}
+	});
+
+	it("does not refuse a module whose manifest carries no declaration", () => {
+		const { logger: log, warn } = logger();
+		expect(() =>
+			checkReplicaSafety({
+				modules: [{ name: "redis-federation-token-store" }],
+				config: { deployment: { mode: "multi" } },
+				logger: log,
+			}),
+		).not.toThrow();
+		expect(warn).not.toHaveBeenCalled();
+	});
+});
+
+describe("replicaUnsafeReason — reads the manifest (#455)", () => {
+	it("returns the declared reason for a declaring module", () => {
+		expect(replicaUnsafeReason(declaring("test:holds-state", "codes are not shared"))).toBe(
+			"codes are not shared",
+		);
+	});
+
+	it("returns the bundled module's own declaration", () => {
+		// The nine bundled modules carry their reason on themselves now, so a
+		// composition root reusing the wording gets it from the manifest.
+		expect(replicaUnsafeReason(memorySessionStoresModule)).toBe(
+			memorySessionStoresModule.replicaSafety?.reason,
+		);
+		expect(replicaUnsafeReason(memorySessionStoresModule)).toMatch(/back-channel logout/);
+	});
+
+	it("is undefined for a module that declares nothing", () => {
+		expect(replicaUnsafeReason({ name: "redis-federation-token-store" })).toBeUndefined();
+		expect(replicaUnsafeReason({ name: "toString" })).toBeUndefined();
+	});
+});
+
+// ---------------------------------------------------------------------------
 // The seam: the guard has to actually run during boot, not merely exist
 // ---------------------------------------------------------------------------
 
@@ -225,6 +361,62 @@ describe("checkReplicaSafety — wired into boot", () => {
 		});
 		expect(warn).toHaveBeenCalledWith(
 			expect.objectContaining({ modules: ["memorySessionStores"] }),
+			"replica_unsafe_adapters",
+		);
+	});
+
+	// #455: a composition root's own module, under a name core has never
+	// seen, declaring what it holds. Exactly the shape the standalone's
+	// `standalone:in-memory-session-stores` takes.
+	const holdsStateModule = defineModule({
+		name: "test:holds-state",
+		replicaSafety: {
+			unsafe: true,
+			reason:
+				"authorization codes are not shared — a code issued on one replica is unknown to the others",
+		},
+	});
+
+	it("fails boot in multi mode when a module declaring replicaSafety is installed", async () => {
+		await expect(
+			createApp({
+				modules: [holdsStateModule],
+				bootstrapComponents: boot("multi"),
+			}),
+		).rejects.toMatchObject({
+			reason: "replica-unsafe-adapter",
+			details: { modules: ["test:holds-state"] },
+		});
+	});
+
+	it("boots the declaring module in single mode", async () => {
+		await expect(
+			createApp({
+				modules: [holdsStateModule],
+				bootstrapComponents: boot("single"),
+			}),
+		).resolves.toBeDefined();
+	});
+
+	it("warns about the declaring module through the bootstrap logger when the mode is unset", async () => {
+		const warn = vi.fn();
+		await createApp({
+			modules: [holdsStateModule],
+			bootstrapComponents: boot(undefined, {
+				warn,
+				info: vi.fn(),
+				error: vi.fn(),
+				debug: vi.fn(),
+				trace: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			}),
+		});
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				modules: ["test:holds-state"],
+				reasons: [expect.stringContaining("authorization codes are not shared")],
+			}),
 			"replica_unsafe_adapters",
 		);
 	});

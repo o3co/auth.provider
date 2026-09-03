@@ -17,9 +17,9 @@
 /**
  * Built-in module providing the in-process `DeviceCodeStore` (#298).
  *
- * Development and single-replica only — see `memory.mts` and the entry in
- * `REPLICA_UNSAFE_MODULE_REASONS`, which is what makes a `deployment.mode =
- * "multi"` composition refuse to boot with this mounted.
+ * Development and single-replica only — see `memory.mts` and the
+ * `replicaSafety` declaration below (#455), which is what makes a
+ * `deployment.mode = "multi"` composition refuse to boot with this mounted.
  *
  * The store's `dispose` is registered with the boot planner's lifecycle
  * registrar (D-5), so `AppHandle.dispose()` stops a sweep timer rather than
@@ -31,6 +31,12 @@ import { createMemoryDeviceCodeStore } from "./memory.mjs";
 
 export const memoryDeviceCodeStoreModule = defineModule({
 	name: "core-device-code-store-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"pending device authorizations fork per replica — the human approves a code on the replica that served the verification page, while the device polls a replica that has never heard of it and is told the code does not exist (#298)",
+	},
 	optional: ["lifecycleRegistrar"] as const,
 	provides: {
 		deviceCodeStore: (deps) => {

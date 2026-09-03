@@ -193,18 +193,23 @@ describe("three-tier HOCON resolution (env → application.conf → reference.co
 			// every in-memory shared store, so the denylist this change adds has to
 			// come out of that environment as the Redis one — from the template's
 			// own config, since the compose file names no denylist variable.
-			// Asserted against the guard's own list rather than a module name, so a
-			// rename cannot quietly invalidate it.
-			const { REPLICA_UNSAFE_MODULES } = await import("@o3co/auth-provider-core");
+			// Asked of each manifest, the way the guard does (#455), so a rename
+			// cannot quietly invalidate it and the template's own memory modules
+			// — which no name list in core covers — count too.
+			const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
 			const config = buildResolvedConfig("production", {
 				USER_SESSION_STORES_ADAPTER: "redis",
 				RATE_LIMITER_ADAPTER: "redis",
 				OAUTH_CODE_ADAPTER: "redis",
+				// #456: the federation token store defaults to memory, and the
+				// memory module declares itself replica-unsafe (#455).
+				FEDERATION_TOKEN_STORE_TYPE: "redis",
+				REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 			});
-			const names = buildModules(config).map((m) => m.name);
-			expect(names).toContain("redis-access-token-denylist");
-			for (const name of names) {
-				expect(REPLICA_UNSAFE_MODULES).not.toContain(name);
+			const modules = buildModules(config);
+			expect(modules.map((m) => m.name)).toContain("redis-access-token-denylist");
+			for (const module of modules) {
+				expect(replicaUnsafeReason(module), module.name).toBeUndefined();
 			}
 		});
 

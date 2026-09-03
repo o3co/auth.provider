@@ -100,11 +100,16 @@ export type {
 // Boot planner — BootError catalogue. `createApp` is exported above (via app.mjs).
 // #271: replica-safety guard, exported so a custom composition root can run
 // the same check and so the module set is greppable from a deployment's tests.
+// #455: `replicaUnsafeReason` reads a module's own `replicaSafety`
+// declaration, so a deployment asserts on its manifests rather than on the
+// (core-only) name list.
 export {
 	BootError,
 	type CheckReplicaSafetyInput,
 	checkReplicaSafety,
 	REPLICA_UNSAFE_MODULES,
+	type ReplicaSafetyModuleRef,
+	replicaUnsafeReason,
 } from "./boot/index.mjs";
 // Configuration
 export {

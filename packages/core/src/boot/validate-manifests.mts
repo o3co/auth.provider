@@ -1675,10 +1675,14 @@ export const STAGE_ONE_POST_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChec
 		// composition root that configured one has already put it there, and
 		// the warning is worthless if it goes somewhere the operator is not
 		// reading.
+		//
+		// `rawModules`, not the normalised view: the guard reads each manifest's
+		// own `replicaSafety` declaration (#455), which normalisation does not
+		// carry.
 		run: (ctx) => {
 			const bootLogger = ctx.bootstrapComponents.logger;
 			checkReplicaSafety({
-				modules: ctx.modules,
+				modules: ctx.rawModules,
 				config: ctx.parsedConfig,
 				...(bootLogger !== undefined ? { logger: bootLogger } : {}),
 			});

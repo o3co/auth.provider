@@ -142,6 +142,12 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REFRESH_TOKEN_FAMILY_STORE_CAS_RETRY_LIMIT: "3",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis:6379",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_PASSWORD: "rt-family-password",
+	// #456: the federation token store's Redis branch, which the README
+	// documented and which could not boot.
+	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX: "ft:",
+	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "required",
+	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 
 	// --- federation ---------------------------------------------------
 	FEDERATIONS_GOOGLE_ENABLED: "true",
@@ -184,6 +190,14 @@ const DELIBERATELY_UNSET: Readonly<Record<string, string>> = {
  * so a parse failure here is a red umbrella build that this repository can see
  * first. `SESSION_SECURE=false` is the one it cannot run without: the suite
  * speaks plain HTTP.
+ *
+ * The two `FEDERATION_TOKEN_STORE` lines are what #455 / #456 **require the
+ * umbrella compose to add**: the federation token store defaults to memory,
+ * and the standalone's memory module now declares itself replica-unsafe, so
+ * the umbrella's `DEPLOYMENT_MODE=multi` refuses it by name until the compose
+ * selects the Redis store and supplies its encryption key. Until that lands
+ * in `o3co/auth`, this transcription is ahead of the file it transcribes on
+ * exactly those two lines.
  */
 const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
@@ -198,6 +212,8 @@ const UMBRELLA_E2E_ENV: Readonly<Record<string, string>> = {
 	USER_SESSION_STORES_ADAPTER: "redis",
 	RATE_LIMITER_ADAPTER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",
+	FEDERATION_TOKEN_STORE_TYPE: "redis",
+	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 	CLIENT_USER_TYPE: "yaml",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
 	OAUTH_REQUIRE_EMAIL_VERIFIED: "true",
@@ -306,10 +322,12 @@ describe("#288: the shipped config boots with every documented override supplied
 	it("wires nothing replica-unsafe for the umbrella E2E environment", async () => {
 		// `DEPLOYMENT_MODE=multi` makes the provider audit its own store wiring
 		// at boot, so a config that parses but wires a memory store still fails
-		// there. Assert against the guard's own list rather than module names.
-		const { REPLICA_UNSAFE_MODULES } = await import("@o3co/auth-provider-core");
-		for (const name of buildModules(buildResolvedConfig(UMBRELLA_E2E_ENV)).map((m) => m.name)) {
-			expect(REPLICA_UNSAFE_MODULES).not.toContain(name);
+		// there. Ask each manifest, the way the guard does (#455): the exported
+		// name list covers core's modules only, and the template's own memory
+		// modules are precisely the ones it could not see.
+		const { replicaUnsafeReason } = await import("@o3co/auth-provider-core");
+		for (const module of buildModules(buildResolvedConfig(UMBRELLA_E2E_ENV))) {
+			expect(replicaUnsafeReason(module), module.name).toBeUndefined();
 		}
 	});
 
