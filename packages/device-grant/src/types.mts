@@ -69,6 +69,14 @@ export interface DeviceGrantDependencies {
 	readonly logger?: {
 		warn(obj: Record<string, unknown>, msg: string): void;
 		info?(obj: Record<string, unknown>, msg: string): void;
+		/**
+		 * Where a limiter-backend outage is reported (#457):
+		 * `rate_limiter_failed_open` / `rate_limiter_failed_closed`, the lines
+		 * `createRateLimitGuard` writes. Optional so a warn-only logger keeps
+		 * compiling; without it the line goes to core's console logger rather
+		 * than nowhere.
+		 */
+		error?(obj: Record<string, unknown>, msg: string): void;
 	};
 	/** Injected in tests. */
 	readonly now?: () => number;

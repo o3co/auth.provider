@@ -416,11 +416,17 @@ export {
 	registerBuiltinRateLimiters,
 } from "./ratelimit/factory.mjs";
 // #325: single guard factory behind both the OAuth-endpoint throttles and
-// the /session/login brute-force guard.
+// the /session/login brute-force guard. #457: the guard's check + outage
+// policy on its own, for a route whose budget is not keyed on the IP.
 export {
+	checkWithFailMode,
 	createRateLimitGuard,
+	type RateLimitCheckOutcome,
 	type RateLimitFailMode,
 	type RateLimitGuardOptions,
+	type RateLimitOutageLogger,
+	type RateLimitPolicyOptions,
+	rateLimiterUnavailableEnvelope,
 } from "./ratelimit/guard.mjs";
 export { resolveLoginLimitSpec } from "./ratelimit/loginSpec.mjs";
 export {

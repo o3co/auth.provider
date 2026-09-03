@@ -17,10 +17,10 @@
 import type { Request, RequestHandler, Response } from "express";
 import { emitAuditEvent } from "../audit/factory.mjs";
 import type { AuditSink } from "../audit/types.mjs";
-import { errorEnvelope } from "../errors/envelope.mjs";
+import { type ErrorEnvelope, errorEnvelope } from "../errors/envelope.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
-import type { RateLimiter, RateLimitSpec } from "./types.mjs";
+import type { RateLimitContext, RateLimitDecision, RateLimiter, RateLimitSpec } from "./types.mjs";
 
 /**
  * How the guard behaves when the limiter backend itself errors — mirrors
@@ -63,6 +63,91 @@ export interface RateLimitGuardOptions {
 }
 
 /**
+ * The one method the outage report is written through. A full {@link Logger}
+ * satisfies it; so does a caller's narrower duck-typed logger.
+ */
+export interface RateLimitOutageLogger {
+	error(obj: Record<string, unknown>, msg: string): void;
+}
+
+/**
+ * What {@link checkWithFailMode} needs from {@link RateLimitGuardOptions}: the
+ * limiter, the endpoint tag, the OR-5 outage policy and its two channels.
+ */
+export type RateLimitPolicyOptions = Pick<
+	RateLimitGuardOptions,
+	"limiter" | "tag" | "failMode" | "auditSink"
+> & {
+	/** Operator-visible outage channel. Defaults to `consoleLogger`. */
+	readonly logger?: RateLimitOutageLogger;
+};
+
+/**
+ * What {@link checkWithFailMode} hands back: the limiter's decision, or the
+ * fact that it had none together with the policy the caller is to apply.
+ */
+export type RateLimitCheckOutcome =
+	| { readonly status: "decided"; readonly decision: RateLimitDecision }
+	| { readonly status: "unavailable"; readonly failMode: RateLimitFailMode };
+
+/**
+ * The guard's check with its outage policy attached, for a route that cannot
+ * be guarded by a middleware (#457).
+ *
+ * `POST /oauth/device/verification` keys its budget on the authenticated
+ * subject rather than the IP, and its 429 is its own audit event carrying the
+ * request's `action` — neither fits the `<tag>:ip:<ip>` middleware. Until
+ * #457 it therefore called `limiter.check` bare, and a limiter-backend outage
+ * there was an unhandled throw: a 500 through the terminal handler,
+ * `rateLimit.failMode` ignored, no `rate_limit.unavailable` event. This is
+ * the half of {@link createRateLimitGuard} such a route shares: the check,
+ * and on a throw the paired `logger.error` + audit emission described there.
+ * The caller renders the outcome — 503 with
+ * {@link rateLimiterUnavailableEnvelope} under `"closed"`, proceed under
+ * `"open"` — so that the policy and its reporting exist once, and the guard
+ * is this function plus HTTP framing.
+ *
+ * The outage report's `ip` / `userAgent` are read from `ctx`, so a caller
+ * that wants them on the audit event passes them in the check context, as
+ * the guard does.
+ */
+export const checkWithFailMode = async (
+	{ limiter, tag, failMode, logger = consoleLogger, auditSink }: RateLimitPolicyOptions,
+	key: string,
+	ctx: RateLimitContext,
+): Promise<RateLimitCheckOutcome> => {
+	try {
+		return { status: "decided", decision: await limiter.check(key, ctx) };
+	} catch (cause) {
+		const errorMessage = cause instanceof Error ? cause.message : String(cause);
+		const ip = ctx.ip ?? "unknown";
+		logger.error(
+			{ error: errorMessage, mode: failMode, tag, ip },
+			failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
+		);
+		emitAuditEvent(auditSink, {
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			ip,
+			userAgent: ctx.userAgent,
+			details: {
+				tag,
+				error: errorMessage,
+			},
+		});
+		return { status: "unavailable", failMode };
+	}
+};
+
+/**
+ * The 503 body the guard answers under `failMode = "closed"`, so a caller of
+ * {@link checkWithFailMode} that renders the outage itself answers the same
+ * envelope and a client sees one outage shape across every throttled route.
+ */
+export const rateLimiterUnavailableEnvelope = (): ErrorEnvelope =>
+	errorEnvelope("service_unavailable", "Rate limiter temporarily unavailable");
+
+/**
  * Middleware factory for the product's security throttles (#325).
  *
  * One implementation of the rate-limit check + outage policy shared by the
@@ -88,6 +173,9 @@ export interface RateLimitGuardOptions {
  *   `rate_limit.unavailable` audit event is kept for ops dashboards that
  *   consume it — the logger call is the operator-visible path, the audit
  *   event is the structured pipeline path.
+ *
+ * The check and the outage policy are {@link checkWithFailMode} (#457); this
+ * factory adds the `<tag>:ip:<ip>` key, the headers and the responses.
  */
 export const createRateLimitGuard = ({
 	limiter,
@@ -97,42 +185,25 @@ export const createRateLimitGuard = ({
 	auditSink,
 	headerFallback,
 }: RateLimitGuardOptions): RequestHandler => {
+	const policy: RateLimitPolicyOptions = { limiter, tag, failMode, logger, auditSink };
 	return async (req: Request, res: Response, next): Promise<void> => {
 		const ip = req.ip ?? "unknown";
-		let decision: Awaited<ReturnType<RateLimiter["check"]>>;
-		try {
-			// CP-10: pass the same normalized ip into the check context as the
-			// key derivation uses, so limiters that re-use ctx.ip for logging
-			// or secondary keying observe the same value.
-			decision = await limiter.check(`${tag}:ip:${ip}`, {
-				ip,
-				userAgent: req.get("user-agent"),
-			});
-		} catch (cause) {
-			const errorMessage = cause instanceof Error ? cause.message : String(cause);
-			logger.error(
-				{ error: errorMessage, mode: failMode, tag, ip },
-				failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
-			);
-			emitAuditEvent(auditSink, {
-				timestamp: new Date(),
-				type: "rate_limit.unavailable",
-				ip,
-				userAgent: req.get("user-agent"),
-				details: {
-					tag,
-					error: errorMessage,
-				},
-			});
-			if (failMode === "closed") {
-				res
-					.status(503)
-					.json(errorEnvelope("service_unavailable", "Rate limiter temporarily unavailable"));
+		// CP-10: pass the same normalized ip into the check context as the
+		// key derivation uses, so limiters that re-use ctx.ip for logging
+		// or secondary keying observe the same value.
+		const outcome = await checkWithFailMode(policy, `${tag}:ip:${ip}`, {
+			ip,
+			userAgent: req.get("user-agent"),
+		});
+		if (outcome.status === "unavailable") {
+			if (outcome.failMode === "closed") {
+				res.status(503).json(rateLimiterUnavailableEnvelope());
 				return;
 			}
 			next();
 			return;
 		}
+		const { decision } = outcome;
 
 		// The advertised limit is the one the adapter reports having *applied*,
 		// not the one configured by the caller. They differ whenever an operator

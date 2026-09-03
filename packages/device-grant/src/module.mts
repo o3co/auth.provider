@@ -61,6 +61,18 @@
  * which is why this package depends on `@o3co/auth-provider-session` rather
  * than restating an origin check. The guard is built from the `session.*`
  * config slice, so enabling the grant without one fails at boot.
+ *
+ * ### One outage policy for both routes (#457)
+ *
+ * Both routes are rate-limited, and both apply `rateLimit.failMode` when the
+ * limiter backend itself is down — `POST /oauth/device_authorization` through
+ * `createRateLimitGuard`, `POST /oauth/device/verification` through the same
+ * check the guard is built on (`checkWithFailMode`, because its budget is
+ * keyed on the subject and its 429 is its own audit event). The key is read
+ * by `requireFailMode` for each route factory, so a composition that enables
+ * the grant with no policy is refused whichever factory the planner runs
+ * first. Before #457 only the authorization route read it, and a limiter
+ * outage on the verification route was an unhandled throw.
  */
 
 import {
@@ -263,7 +275,9 @@ const requireSessionSlice = (deps: AnyDeps): SessionCsrfConfigSlice => {
 /**
  * OR-5: the outage policy for a limiter-backend failure is `rateLimit.failMode`
  * — one decision for the product, read by every guarded route. Defaulting it
- * here would be a second policy, so its absence is a boot refusal.
+ * here would be a second policy, so its absence is a boot refusal. Both
+ * route factories call this (#457), so the refusal does not depend on which
+ * one the planner happens to run first.
  */
 const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
 	const failMode = deps.config?.rateLimit?.failMode;
@@ -271,8 +285,9 @@ const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
 				'rateLimit.failMode ("open" | "closed"). POST /oauth/device_authorization ' +
-				"runs behind the shared rate-limit guard, and what the guard does when the " +
-				"limiter backend is down is the product's outage policy, not this module's.",
+				"and POST /oauth/device/verification both apply the shared rate-limit " +
+				"outage policy, and what that policy does when the limiter backend is " +
+				"down is the product's decision, not this module's.",
 		);
 	}
 	return failMode;
@@ -456,6 +471,11 @@ export const deviceGrantModule = defineModule({
 					createDeviceVerificationHandler({
 						store: deps.deviceCodeStore,
 						rateLimiter: requireRateLimiter(deps),
+						// The same outage policy the device_authorization guard
+						// applies, from the same key (#457): the handler keys
+						// its budget on the subject, so it runs the guard's
+						// check itself rather than the guard as a middleware.
+						failMode: requireFailMode(deps),
 						settings: {
 							verificationUri: requireVerificationUri(slice),
 							verificationUriComplete: slice["verification-uri-complete"],

@@ -70,7 +70,7 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 | `approve` | `{ status: "approved", client_id }` | |
 | `deny` | `{ status: "denied", client_id }` | |
 
-Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`.
+Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`, `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
 
 **JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the route accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not), and runs the same `createCsrfGuard` as `POST /session/login` (#272):
 
@@ -86,7 +86,7 @@ The code is accepted as displayed (`BCDF-GHJK`), lower-cased, or unseparated. A 
 
 ## Rate limiting is half the security argument, not a nicety
 
-**Enabling this grant requires a `rateLimiter` component.** Boot fails without one.
+**Enabling this grant requires a `rateLimiter` component and the product's `rateLimit.failMode`.** Boot fails without either.
 
 RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit: an 8-character base-20 code has "roughly 34.5 bits of entropy", which the RFC calls sufficient only where "the rate-limiting interval and validity period would need to only allow 5 attempts". The entropy and the limit are two halves of one mitigation. A deployment without a limiter is not running a slower version of a limited one — it is running 34.5 bits against an unbounded attacker, which is why this is a refusal rather than a degraded mode.
 
@@ -97,6 +97,12 @@ The budget is `oauth.deviceAuthorization.rateLimit { limit, windowSeconds }`, de
 The seed is deliberately quiet: handed a config with no usable budget it leaves the adapter's default in place rather than invent one. So the module asks for the budget itself — **enabling the grant with no valid `oauth.deviceAuthorization.rateLimit` fails boot**, naming the key (#448). A config that went through `createApp` always has one, because the schema defaults it; the refusal is for hand-built configs that never passed the schema, where the seed's silence used to mean a limiter arguing from five attempts while applying sixty. Both the seed and the refusal read one definition of "usable", `isDeviceVerificationRateLimitSpec` in core, so they cannot disagree about a value.
 
 `POST /oauth/device_authorization` is throttled as well, under `device_authorization:ip:<ip>` — the same `createRateLimitGuard` and key shape as `/oauth/token`, mounted **ahead of client authentication** so unauthenticated repeats are bounded before they reach a repository lookup. It uses the adapter's `defaultLimit` unless `memoryRateLimiter.limits.device_authorization` (or the Redis equivalent) declares one, and it honours the product's `rateLimit.failMode` outage policy.
+
+### A limiter outage is the product's outage policy on both routes
+
+`POST /oauth/device/verification` honours the same `rateLimit.failMode` (#457). Its budget is keyed on the subject and its 429 is its own audit event, so it cannot sit behind the guard as a middleware; it runs the guard's check through core's `checkWithFailMode` instead, which is the guard minus the HTTP framing. When the limiter backend is down, `failMode = "closed"` answers `503 service_unavailable` "Rate limiter temporarily unavailable" — the body every guarded route answers — and `"open"` serves the lookup, approval or denial as if allowed. Either way the outage is logged as `rate_limiter_failed_closed` / `rate_limiter_failed_open` with `tag: "device_verification"` and emitted as a `rate_limit.unavailable` audit event, so the alert the operator runbook pages on fires for this endpoint too. Before #457 the handler called the limiter bare: an outage was an unhandled throw, `500 server_error` in the standalone, `failMode` ignored, no audit event — on the one endpoint RFC 8628 §5.1 sizes the code against.
+
+A limiter that *answers* "no" is not an outage. `429 slow_down` and the `device.rate_limited` audit event (#443) are unchanged under either mode — `"open"` waves through a request the limiter could not judge, never one it refused. A hand-mounted `createDeviceVerificationHandler` takes `failMode` alongside `rateLimiter`; the module reads both from the composition, and enabling the grant with no `rateLimit.failMode` fails boot for this route as it does for `device_authorization`.
 
 ## The decision is an audit event
 

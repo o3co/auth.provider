@@ -30,6 +30,7 @@ import type {
 	ClientRepository,
 	GrantContext,
 	RateLimiter,
+	RateLimitFailMode,
 } from "@o3co/auth-provider-core";
 import {
 	createMemoryDeviceCodeStore,
@@ -127,8 +128,11 @@ const makeHarness = (
 	overrides: {
 		settings?: Partial<typeof settings>;
 		rateLimiter?: RateLimiter;
+		/** OR-5 outage policy; the harness defaults to the product's `closed`. */
+		failMode?: RateLimitFailMode;
 		session?: Record<string, unknown>;
 		auditSink?: AuditSink;
+		logger?: ReturnType<typeof makeLogger>;
 		store?: ReturnType<typeof createMemoryDeviceCodeStore>;
 	} = {},
 ) => {
@@ -170,8 +174,10 @@ const makeHarness = (
 			store,
 			settings: resolved,
 			rateLimiter,
+			failMode: overrides.failMode ?? "closed",
 			now: clock.now,
 			...(overrides.auditSink ? { auditSink: overrides.auditSink } : {}),
+			...(overrides.logger ? { logger: overrides.logger } : {}),
 		}),
 	);
 
@@ -201,6 +207,35 @@ const startDevice = async (app: express.Express, body: Record<string, unknown> =
 
 const verify = (app: express.Express, body: Record<string, unknown>) =>
 	request(app).post("/oauth/device/verification").send(body);
+
+const makeLogger = () => ({
+	warn: vi.fn(),
+	info: vi.fn(),
+	error: vi.fn(),
+	debug: vi.fn(),
+});
+
+const makeSink = () => {
+	const events: AuditEvent[] = [];
+	const sink: AuditSink = {
+		kind: "test",
+		record: async (event) => {
+			events.push(event);
+		},
+	};
+	return { sink, events };
+};
+
+/** The sink is fire-and-forget, so give the detached promise a turn. */
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+/** A limiter whose backend is down: every check rejects, as a Redis client would. */
+const brokenLimiter = (): RateLimiter => ({
+	kind: "broken",
+	check: async () => {
+		throw new Error("redis down");
+	},
+});
 
 describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 	it("returns the codes, the verification URI, and the polling contract", async () => {
@@ -441,19 +476,6 @@ describe("audit trail for the human's decision", () => {
 	// `logger.info` — optional, unstructured, and not the pipeline the rest of
 	// the product's security events flow through. A device authorization is
 	// a consent event with a subject and a client; it belongs in the sink.
-	const makeSink = () => {
-		const events: AuditEvent[] = [];
-		const sink: AuditSink = {
-			kind: "test",
-			record: async (event) => {
-				events.push(event);
-			},
-		};
-		return { sink, events };
-	};
-
-	/** The sink is fire-and-forget, so give the detached promise a turn. */
-	const settle = () => new Promise((resolve) => setImmediate(resolve));
 
 	it("records device.approved with the subject, the client and the scope", async () => {
 		const { sink, events } = makeSink();
@@ -494,24 +516,58 @@ describe("audit trail for the human's decision", () => {
 		// — exactly what a dashboard wants to see, and exactly what a
 		// `logger.warn` nobody tails does not deliver.
 		const { sink, events } = makeSink();
+		const logger = makeLogger();
 		const rateLimiter = createMemoryRateLimiter({
 			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		});
-		const { app } = makeHarness({ auditSink: sink, rateLimiter });
+		const spy = { check: vi.fn(rateLimiter.check), kind: rateLimiter.kind };
+		const { app } = makeHarness({ auditSink: sink, rateLimiter: spy as RateLimiter, logger });
 
 		await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		await settle();
 
 		expect(limited.status).toBe(429);
+		expect(limited.body.error).toBe("slow_down");
 		expect(events).toHaveLength(1);
 		expect(events[0]).toMatchObject({
 			type: "device.rate_limited",
 			subject: "user-1",
-			details: { action: "lookup" },
+			details: { action: "lookup", remaining: 0 },
 		});
+		// #457 moved the check behind the shared outage policy; the budget is
+		// still the subject's, and the operator-facing line still fires.
+		expect(spy.check.mock.calls.map(([key]) => key)).toEqual([
+			"device_verification:user:user-1",
+			"device_verification:user:user-1",
+		]);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "user-1", action: "lookup", remaining: 0 }),
+			"device_verification_rate_limited",
+		);
 	});
+
+	it.each(["open", "closed"] as const)(
+		"answers 429 for an exhausted budget under failMode = %s — the policy is for outages, not decisions",
+		async (failMode) => {
+			// `failMode = "open"` waves a request through when the limiter has
+			// no answer; a limiter that answered "no" is not that case.
+			const { sink, events } = makeSink();
+			const rateLimiter = createMemoryRateLimiter({
+				limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+			});
+			const { app } = makeHarness({ auditSink: sink, rateLimiter, failMode });
+
+			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+			const limited = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+			await settle();
+
+			expect(limited.status).toBe(429);
+			expect(events.map((e) => e.type)).toEqual(["device.rate_limited"]);
+		},
+	);
 
 	it("never puts the code itself in an event", async () => {
 		// The user code is the thing being brute-forced and the device code is
@@ -537,6 +593,132 @@ describe("audit trail for the human's decision", () => {
 		expect(res.status).toBe(200);
 		clock.advance(10_000);
 		expect((await poll(started.body.device_code as string)).result.status).toBe(200);
+	});
+});
+
+describe("limiter outage — rateLimit.failMode applies here too (#457)", () => {
+	// Until #457 this endpoint called `rateLimiter.check` outside
+	// `createRateLimitGuard`, so a limiter-backend outage was an unhandled
+	// throw: 500 through the terminal handler, `failMode` ignored, and no
+	// `rate_limit.unavailable` event for the alert operators page on — on the
+	// one endpoint RFC 8628 §5.1 sizes the user code's entropy against.
+
+	it('failMode = "closed": answers 503 with the guard\'s envelope and does not decide', async () => {
+		const { app, store, clock } = makeHarness({
+			rateLimiter: brokenLimiter(),
+			failMode: "closed",
+			logger: makeLogger(),
+		});
+		const started = await startDevice(app);
+
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+
+		expect(res.status).toBe(503);
+		// The same body every guarded route answers, so a client and a
+		// dashboard see one outage shape rather than two.
+		expect(res.body).toEqual({
+			error: "service_unavailable",
+			error_description: "Rate limiter temporarily unavailable",
+		});
+		expect(res.headers["cache-control"]).toContain("no-store");
+		// The approval did not happen: the code is still pending.
+		const userCode = normaliseUserCode(started.body.user_code as string) as string;
+		expect(await store.findPendingByUserCode(userCode, clock.now())).not.toBeNull();
+	});
+
+	it('failMode = "closed": emits rate_limit.unavailable with the guard\'s fields, and no device.rate_limited', async () => {
+		const { sink, events } = makeSink();
+		const logger = makeLogger();
+		const { app } = makeHarness({
+			rateLimiter: brokenLimiter(),
+			failMode: "closed",
+			auditSink: sink,
+			logger,
+		});
+
+		await request(app)
+			.post("/oauth/device/verification")
+			.set("User-Agent", "device-test/1.0")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+		await settle();
+
+		expect(events.map((e) => e.type)).toEqual(["rate_limit.unavailable"]);
+		expect(events[0]).toMatchObject({
+			type: "rate_limit.unavailable",
+			userAgent: "device-test/1.0",
+			details: { tag: "device_verification", error: "redis down" },
+		});
+		expect(typeof events[0]?.ip).toBe("string");
+		expect(events[0]?.timestamp).toBeInstanceOf(Date);
+		// An outage is not a subject guessing codes: the #443 signal stays
+		// reserved for a limiter that answered "no".
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ error: "redis down", mode: "closed", tag: "device_verification" }),
+			"rate_limiter_failed_closed",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"device_verification_rate_limited",
+		);
+	});
+
+	it.each(["lookup", "approve", "deny"] as const)(
+		'failMode = "open": lets %s proceed and reports the outage',
+		async (action) => {
+			const { sink, events } = makeSink();
+			const logger = makeLogger();
+			const { app } = makeHarness({
+				rateLimiter: brokenLimiter(),
+				failMode: "open",
+				auditSink: sink,
+				logger,
+			});
+			const started = await startDevice(app);
+
+			const res = await verify(app, { action, user_code: started.body.user_code });
+			await settle();
+
+			expect(res.status).toBe(200);
+			expect(res.body.client_id).toBe(CLIENT_ID);
+			expect(events.map((e) => e.type)).toContain("rate_limit.unavailable");
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({ error: "redis down", mode: "open", tag: "device_verification" }),
+				"rate_limiter_failed_open",
+			);
+		},
+	);
+
+	it('failMode = "open": an approval made during the outage is a real approval', async () => {
+		// Fail-open means the request is served as if allowed, all the way to
+		// the device collecting its token — not half-served.
+		const { app, poll, clock } = makeHarness({ rateLimiter: brokenLimiter(), failMode: "open" });
+		const started = await startDevice(app);
+
+		const approval = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(approval.status).toBe(200);
+
+		clock.advance(10_000);
+		expect((await poll(started.body.device_code as string)).result.status).toBe(200);
+	});
+
+	it("still answers 401 and 400 before consulting the limiter at all", async () => {
+		// The outage policy sits where the check sits: after the session and
+		// the action are validated. An anonymous caller during an outage is
+		// still told to log in, not that the limiter is down.
+		const anonymous = makeHarness({
+			rateLimiter: brokenLimiter(),
+			failMode: "closed",
+			session: { isAuthenticated: false },
+		});
+		const unauthenticated = await verify(anonymous.app, {
+			action: "lookup",
+			user_code: "BCDF-GHJK",
+		});
+		expect(unauthenticated.status).toBe(401);
+
+		const { app } = makeHarness({ rateLimiter: brokenLimiter(), failMode: "closed" });
+		const badAction = await verify(app, { action: "revoke", user_code: "BCDF-GHJK" });
+		expect(badAction.status).toBe(400);
 	});
 });
 
