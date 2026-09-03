@@ -17,11 +17,12 @@
 /** The in-memory `DeviceCodeStore` against the shared conformance suite. */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DeviceCodeStoreError } from "#/device-authorization/errors.mjs";
 import {
 	createMemoryDeviceCodeStore,
 	DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES,
 	DEFAULT_MEMORY_DEVICE_CODE_STORE_SWEEP_INTERVAL,
-} from "../memory.mjs";
+} from "#/device-authorization/memory.mjs";
 import { runDeviceCodeStoreContract } from "./adapters.contract.mjs";
 
 runDeviceCodeStoreContract("memory", {
@@ -68,7 +69,8 @@ describe("memory DeviceCodeStore — sweep", () => {
  * Same shape as the access-token denylist fix (#293 item 6): an amortized
  * sweep on the one operation that grows the map, expired entries reclaimed
  * on every read path, and a cap the rate limiter's `maxBuckets` already set
- * the pattern for.
+ * the pattern for -- except that at the cap this store refuses rather than
+ * evicts (#445), because what it holds is not a counter that can be reset.
  */
 describe("memory DeviceCodeStore — bounded growth", () => {
 	afterEach(() => {
@@ -153,23 +155,49 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 		}
 	});
 
-	it("caps the resident set at maxEntries, evicting the entry closest to expiry", async () => {
-		// Under a flood the one closest to expiring is the least harm to
-		// drop: it is the one about to be reclaimed anyway. Same choice the
-		// rate limiter's `maxBuckets` makes.
+	it("refuses a create at maxEntries rather than evicting a live record", async () => {
+		// #445: a pending or approved-not-yet-polled record is a human's
+		// answer in flight, and a flood that reaches the cap carries the
+		// newest expiries -- so "evict the one closest to expiry" evicted every
+		// legitimate authorization before any of the attacker's. Refusing the
+		// newcomer is the answer that costs the flooder rather than the user
+		// already mid-flow; the per-IP guard ahead of the endpoint bounds how
+		// often anyone is refused.
 		const base = Date.now();
 		const store = createMemoryDeviceCodeStore({ maxEntries: 2 });
 		await store.create(entry(1, base + 100_000, "a"));
 		await store.create(entry(2, base + 50_000, "b"));
-		await store.create(entry(3, base + 200_000, "c"));
+
+		await expect(store.create(entry(3, base + 200_000, "c"))).rejects.toThrow(DeviceCodeStoreError);
+		await expect(store.create(entry(3, base + 200_000, "c"))).rejects.toMatchObject({
+			reason: "full",
+		});
 
 		expect(store.size()).toBe(2);
-		expect(await store.findPendingByUserCode("b-uc-2", base)).toBeNull();
 		expect(await store.findPendingByUserCode("a-uc-1", base)).not.toBeNull();
-		expect(await store.findPendingByUserCode("c-uc-3", base)).not.toBeNull();
+		expect(await store.findPendingByUserCode("b-uc-2", base)).not.toBeNull();
+		expect(await store.findPendingByUserCode("c-uc-3", base)).toBeNull();
 	});
 
-	it("prunes expired entries before evicting a live one at the cap", async () => {
+	it("admits a create again once a slot is freed", async () => {
+		// The refusal is per request, not a latched state: a redeemed
+		// approval, a polled denial, an expiry or an explicit `remove` frees a
+		// slot and the next create takes it.
+		const base = Date.now();
+		const store = createMemoryDeviceCodeStore({ maxEntries: 1 });
+		await store.create(entry(1, base + 100_000, "a"));
+		await expect(store.create(entry(2, base + 100_000, "b"))).rejects.toMatchObject({
+			reason: "full",
+		});
+
+		await store.remove("a-dc-1");
+		await expect(store.create(entry(2, base + 100_000, "b"))).resolves.toBeUndefined();
+		expect(store.size()).toBe(1);
+	});
+
+	it("reclaims expired entries at the cap before refusing", async () => {
+		// The cap counts live records. An expired one still resident between
+		// amortized sweeps is not a reason to refuse anybody.
 		vi.useFakeTimers();
 		const store = createMemoryDeviceCodeStore({ maxEntries: 2 });
 		await store.create(entry(1, Date.now() + 1_000, "dead"));
@@ -180,6 +208,25 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 		expect(store.size()).toBe(2);
 		expect(await store.findPendingByUserCode("live-uc-2", Date.now())).not.toBeNull();
 		expect(await store.findPendingByUserCode("new-uc-3", Date.now())).not.toBeNull();
+	});
+
+	it("sweeps at most once per create, even where the cadence and the cap coincide", async () => {
+		// Copilot on #451: the amortized boundary and the cap both wanted the
+		// expired records gone and each asked for its own O(n) pass — two
+		// sweeps on the one create where they coincide, on the refusal path a
+		// flood exercises. A second pass straight after the first has nothing
+		// left to find. `sweep` is the only reader of the clock inside
+		// `create`, so one clock read per create is one sweep per create.
+		const store = createMemoryDeviceCodeStore({ sweepInterval: 3, maxEntries: 2 });
+		const base = Date.now();
+		await store.create(entry(1, base + 600_000, "live"));
+		await store.create(entry(2, base + 600_000, "live"));
+		const third = entry(3, base + 600_000, "live");
+
+		const clock = vi.spyOn(Date, "now");
+		await expect(store.create(third)).rejects.toMatchObject({ reason: "full" });
+		expect(clock).toHaveBeenCalledTimes(1);
+		clock.mockRestore();
 	});
 
 	it("falls back to the defaults for a non-positive cap or interval", async () => {
@@ -202,9 +249,11 @@ describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
 	});
 
 	it("drops a record with a non-finite expiry on sight when the cap is reached", async () => {
-		// `Infinity` compares false against everything, so a closest-to-expiry
-		// scan would never pick it and the cap loop would never make progress.
-		// It is the record least entitled to stay, so it is the one evicted.
+		// `NaN` and `Infinity` never satisfy `expiresAtMs <= now`, so a record
+		// carrying one would sit in the map until process exit and, under a
+		// cap that refuses rather than evicts (#445), hold a slot forever. It
+		// is the record least entitled to stay, so the sweep reclaims it
+		// alongside the expired ones and the newcomer is admitted.
 		const base = Date.now();
 		const store = createMemoryDeviceCodeStore({ maxEntries: 1 });
 		await store.create(record(1, Number.POSITIVE_INFINITY));

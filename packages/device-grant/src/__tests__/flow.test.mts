@@ -41,7 +41,7 @@ import {
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
@@ -129,10 +129,11 @@ const makeHarness = (
 		rateLimiter?: RateLimiter;
 		session?: Record<string, unknown>;
 		auditSink?: AuditSink;
+		store?: ReturnType<typeof createMemoryDeviceCodeStore>;
 	} = {},
 ) => {
 	const clock = makeClock();
-	const store = createMemoryDeviceCodeStore();
+	const store = overrides.store ?? createMemoryDeviceCodeStore();
 	const resolved = { ...settings, ...(overrides.settings ?? {}) };
 	const rateLimiter =
 		overrides.rateLimiter ??
@@ -729,5 +730,38 @@ describe("code generation", () => {
 
 	it("keeps generateUserCode honest about its own normalisation", () => {
 		expect(normaliseUserCode(generateUserCode())).not.toBeNull();
+	});
+});
+
+describe("store capacity (#445)", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it("answers 503 temporarily_unavailable for a new device at the cap, and keeps the first device's code live", async () => {
+		// A flood that reaches the cap must cost the flooder, not the user
+		// already mid-flow: the store refuses the newcomer instead of evicting
+		// a live record, and the endpoint reports that as what RFC 6749 §5.2
+		// calls "temporary overloading" rather than as a code collision.
+		const { app, poll, clock } = makeHarness({
+			store: createMemoryDeviceCodeStore({ maxEntries: 1 }),
+		});
+		const first = await startDevice(app);
+		expect(first.status).toBe(200);
+
+		const spy = vi.spyOn(await import("@o3co/auth-provider-core"), "generateUserCode");
+		const second = await startDevice(app);
+		expect(second.status).toBe(503);
+		expect(second.body.error).toBe("temporarily_unavailable");
+		expect(second.headers["cache-control"]).toContain("no-store");
+		// The store refused the slot, not the code, so re-drawing cannot
+		// help: one draw, not five sweeps of the map to find that out.
+		expect(spy).toHaveBeenCalledTimes(1);
+
+		clock.advance(10_000);
+		expect((await poll(first.body.device_code as string)).result).toMatchObject({
+			status: 400,
+			error: "authorization_pending",
+		});
 	});
 });

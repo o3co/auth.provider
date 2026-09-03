@@ -127,6 +127,11 @@ export interface DeviceCodeStore {
 	 * collision is a generator failure, not a routine condition, and silently
 	 * overwriting would detach a device from the code its user is about to
 	 * approve.
+	 * @throws `DeviceCodeStoreError` with `reason: "full"` when a bounded
+	 * adapter is at its cap with every resident record live (#445). An
+	 * adapter refuses rather than evicts here: what it holds is a human's
+	 * answer in flight, and the caller can ask again while the user cannot
+	 * re-approve what they never saw fail.
 	 */
 	create(input: CreateDeviceAuthorizationInput): Promise<void>;
 

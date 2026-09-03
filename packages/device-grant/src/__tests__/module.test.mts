@@ -239,6 +239,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 					"verification-uri-complete": false,
 					"code-lifetime-seconds": 600,
 					"polling-interval-seconds": 5,
+					rateLimit: { limit: 5, windowSeconds: 300 },
 				},
 			},
 			session: makeValidFullSections().session,
@@ -319,6 +320,53 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
 			/rateLimit\.failMode/,
 		);
+	});
+
+	/** `enabledDeps()` with `oauth.deviceAuthorization.rateLimit` replaced. */
+	const withVerificationBudget = (rateLimit: unknown) => {
+		const deps = enabledDeps();
+		return {
+			...deps,
+			config: {
+				...deps.config,
+				oauth: {
+					...deps.config.oauth,
+					deviceAuthorization: { ...deps.config.oauth.deviceAuthorization, rateLimit },
+				},
+			},
+		};
+	};
+
+	it("refuses to mount device/verification without the budget, oauth.deviceAuthorization.rateLimit", () => {
+		// #448: the "requires a rateLimiter" refusal reasons from a budget of
+		// five, and the limiter applies five only because its adapter module
+		// seeded `device_verification` from this key. The seed leaves the
+		// adapter's 60/60s default in place when the key is missing, so a
+		// hand-built config that never passed the schema booted with a
+		// refusal that argued from five while the limiter applied sixty.
+		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(withVerificationBudget(undefined))).toThrow(
+			/oauth\.deviceAuthorization\.rateLimit/,
+		);
+	});
+
+	it.each([
+		["a zero limit", { limit: 0, windowSeconds: 300 }],
+		["a fractional window", { limit: 5, windowSeconds: 0.5 }],
+		["a string limit", { limit: "5", windowSeconds: 300 }],
+	])("refuses to mount device/verification with %s as the budget", (_label, rateLimit) => {
+		// The same shapes the seed declines to apply: with one definition of
+		// "usable" shared with core, a budget the module accepts is one the
+		// limiter was seeded from.
+		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(withVerificationBudget(rateLimit))).toThrow(
+			/oauth\.deviceAuthorization\.rateLimit/,
+		);
+	});
+
+	it("mounts device/verification with a usable budget", () => {
+		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(withVerificationBudget({ limit: 5, windowSeconds: 300 }))).not.toThrow();
 	});
 
 	it("answers 404 with no-store when the grant is disabled", async () => {

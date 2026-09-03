@@ -78,13 +78,8 @@ describe("oauth.deviceAuthorization.rateLimit — schema boundary", () => {
 });
 
 describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", () => {
-	it("reaches the limiter as a budget of five from reference.conf alone", async () => {
-		// End to end through what a deployment actually runs: the shipped
-		// HOCON defaults, the schema, and the memory limiter module's seed.
-		// The sixth attempt under the verification prefix is the one refused.
-		const parsed = validate(parseFile(REFERENCE_CONF), deviceGrantConfigSchema);
-		expect(parsed.oauth.deviceAuthorization.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });
-
+	/** Six attempts under the verification prefix: the advertised limit and which were allowed. */
+	const spendSix = async (parsed: unknown) => {
 		const provide = memoryRateLimiterModule.provides?.rateLimiter as (deps: unknown) => {
 			check(
 				key: string,
@@ -93,7 +88,7 @@ describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", 
 		};
 		const limiter = provide({
 			config: {
-				...parsed,
+				...(parsed as Record<string, unknown>),
 				memoryRateLimiter: {
 					limits: {},
 					defaultLimit: { limit: 60, windowSeconds: 60 },
@@ -110,6 +105,30 @@ describe("oauth.deviceAuthorization.rateLimit — the documented key resolves", 
 			advertised ??= decision.limit;
 			outcomes.push(decision.allowed);
 		}
+		return { advertised, outcomes };
+	};
+
+	it("reaches the limiter as a budget of five from reference.conf alone", async () => {
+		// End to end through what a deployment actually runs: the shipped
+		// HOCON defaults, the schema, and the memory limiter module's seed.
+		// The sixth attempt under the verification prefix is the one refused.
+		const parsed = validate(parseFile(REFERENCE_CONF), deviceGrantConfigSchema);
+		expect(parsed.oauth.deviceAuthorization.rateLimit).toEqual({ limit: 5, windowSeconds: 300 });
+
+		const { advertised, outcomes } = await spendSix(parsed);
+		expect(advertised).toBe(5);
+		expect(outcomes).toEqual([true, true, true, true, true, false]);
+	});
+
+	it("reaches the limiter as a budget of five when the section is omitted entirely", async () => {
+		// #448: the other route into a running deployment — no reference.conf,
+		// no `rateLimit` block, just the schema default — was untested, and it
+		// is the one an embedder who hand-assembles config takes. The default
+		// has to travel the same path as the documented key, or the boot
+		// refusal reasons from five while the limiter applies sixty.
+		const parsed = deviceGrantConfigSchema.parse({ oauth: {} });
+
+		const { advertised, outcomes } = await spendSix(parsed);
 		expect(advertised).toBe(5);
 		expect(outcomes).toEqual([true, true, true, true, true, false]);
 	});

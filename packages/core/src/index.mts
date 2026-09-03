@@ -403,6 +403,7 @@ export type {
 } from "./policy/types.mjs";
 export {
 	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+	isDeviceVerificationRateLimitSpec,
 	resolveDeviceVerificationLimitSpec,
 } from "./ratelimit/deviceVerificationSpec.mjs";
 export {
@@ -641,6 +642,10 @@ export { constantTimeStringEqual } from "./security/timingSafe.mjs";
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628, #298)
 // ===========================================================================
 
+export {
+	DeviceCodeStoreError,
+	type DeviceCodeStoreErrorReason,
+} from "./device-authorization/errors.mjs";
 export {
 	createMemoryDeviceCodeStore,
 	DEFAULT_MEMORY_DEVICE_CODE_STORE_MAX_ENTRIES,

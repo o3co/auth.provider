@@ -32,6 +32,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	DEVICE_VERIFICATION_RATE_LIMIT_PREFIX,
+	isDeviceVerificationRateLimitSpec,
 	resolveDeviceVerificationLimitSpec,
 } from "#/ratelimit/deviceVerificationSpec.mjs";
 import { resolveSeededLimitSpecs } from "#/ratelimit/seededSpecs.mjs";
@@ -113,5 +114,34 @@ describe("resolveSeededLimitSpecs", () => {
 		);
 		expect(limits.login).toEqual({ limit: 20, windowSeconds: 900 });
 		expect(limits.device_verification).toEqual({ limit: 5, windowSeconds: 300 });
+	});
+});
+
+describe("isDeviceVerificationRateLimitSpec", () => {
+	// #448: the seed above leaves the adapter default in place for an
+	// unusable budget, and the device-grant module refuses to boot on one.
+	// Both decisions have to be the same decision, so the shape of a usable
+	// budget is defined once, here, and this is its specification.
+	it("accepts a positive-integer limit and window", () => {
+		expect(isDeviceVerificationRateLimitSpec({ limit: 5, windowSeconds: 300 })).toBe(true);
+	});
+
+	it.each([
+		["an absent section", undefined],
+		["null", null],
+		["a non-object", "5/300"],
+		["a zero limit", { limit: 0, windowSeconds: 300 }],
+		["a zero window", { limit: 5, windowSeconds: 0 }],
+		["a negative limit", { limit: -1, windowSeconds: 300 }],
+		["a fractional limit", { limit: 2.5, windowSeconds: 300 }],
+		["a fractional window", { limit: 5, windowSeconds: 2.5 }],
+		["a string limit", { limit: "5", windowSeconds: 300 }],
+		["a string window", { limit: 5, windowSeconds: "300" }],
+		["a missing window", { limit: 5 }],
+		["a missing limit", { windowSeconds: 300 }],
+	])("refuses %s", (_label, value) => {
+		// `0` is what an empty environment variable coerces to, and a budget
+		// invented from it is worse than the adapter's own default.
+		expect(isDeviceVerificationRateLimitSpec(value)).toBe(false);
 	});
 });

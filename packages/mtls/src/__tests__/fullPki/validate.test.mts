@@ -113,11 +113,24 @@ const deferredFetch = (table: Record<string, Uint8Array | number>) => {
 	return { impl, calls, release: () => gate.release() };
 };
 
-/** Let queued I/O callbacks run, up to `ticks` times or until `done()` holds. */
-const waitFor = async (done: () => boolean, ticks = 200): Promise<void> => {
-	for (let i = 0; i < ticks && !done(); i++) {
+/**
+ * Yield to queued I/O until `done()` holds or `timeoutMs` passes; true if it
+ * held.
+ *
+ * Bounded by the clock, not by a turn count. The first cut yielded at most
+ * 200 `setImmediate` turns, but while a WebCrypto call is on the threadpool
+ * the event loop spins through those turns in microseconds — so on a loaded
+ * runner under coverage the "first request issued" wait returned before path
+ * validation had asked for a CRL, and the concurrency assertion below
+ * compared against an empty set. Twice on CI, never locally.
+ */
+const settle = async (done: () => boolean, timeoutMs: number): Promise<boolean> => {
+	const deadline = Date.now() + timeoutMs;
+	while (!done()) {
+		if (Date.now() >= deadline) return false;
 		await new Promise<void>((resolve) => setImmediate(resolve));
 	}
+	return true;
 };
 
 const validator = (trustedCas: readonly Minted[], overrides: Partial<FullPkiOptions> = {}) =>
@@ -901,10 +914,14 @@ describe("full-pki revocation", () => {
 			fetchImpl: impl,
 		}).validate(leaf.x509, [int.x509], NOW);
 
-		await waitFor(() => calls.length >= 1);
+		// Loud, not silent: a wait that expires here must say so, rather than
+		// leave the concurrency assertion below reporting an empty set.
+		expect(await settle(() => calls.length >= 1, 3_000), "the first CRL fetch was issued").toBe(
+			true,
+		);
 		// Give a serial implementation every chance to issue its second request
 		// — it cannot, because the first has not answered.
-		await waitFor(() => calls.length >= 2, 20);
+		await settle(() => calls.length >= 2, 200);
 		expect(new Set(calls)).toEqual(new Set([INT_CRL_URL, ROOT_CRL_URL]));
 
 		release();
