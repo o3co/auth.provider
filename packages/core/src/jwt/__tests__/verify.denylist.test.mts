@@ -15,10 +15,12 @@
  */
 import { createSecretKey } from "node:crypto";
 import { SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMemoryAccessTokenDenylist } from "#/access-token-denylist/memory.mjs";
-import { verifyJwt } from "#/jwt/verify.mjs";
+import type { AccessTokenDenylist } from "#/access-token-denylist/types.mjs";
+import { isRevocationUnavailable, verifyJwt } from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore, type KeyStore } from "#/keys/KeyStore.mjs";
+import type { Logger } from "#/logging/Logger.mjs";
 
 const TEST_SECRET = "test-secret-32-bytes-long-string12";
 const TEST_KID = "v0";
@@ -122,11 +124,12 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 		expect(verified.payload.sub).toBe("u-1");
 	});
 
-	it("fail-closed: denylist.has() throwing causes JwtVerificationError reason=revoked (Copilot review #3)", async () => {
+	it("fail-closed: denylist.has() throwing causes JwtVerificationError reason=revocation_unavailable (Copilot review #3, #459)", async () => {
 		// SECURITY: if the denylist backend (e.g. Redis) is unavailable, we cannot
 		// determine revocation state. Failing open would accept revoked tokens during
-		// the outage; secure default is to reject with reason "revoked" + an audit
-		// event capturing the underlying cause for operator triage.
+		// the outage; secure default is to reject. The refusal is what this pins
+		// and it has not changed. The *reason* has: since #459 it is
+		// `revocation_unavailable`, not `revoked` — see the outage suite below.
 		const throwingDenylist = {
 			kind: "throwing-test-stub",
 			add: async () => {},
@@ -143,8 +146,123 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 				revocation: { denylist: throwingDenylist },
 			}),
 		).rejects.toMatchObject({
-			reason: "revoked",
+			reason: "revocation_unavailable",
 			message: expect.stringContaining("denylist consult failed"),
 		});
+	});
+});
+
+/*
+ * #459 — a denylist backend outage is not a revocation.
+ *
+ * Failing closed on an unreachable denylist is right, but reporting it as
+ * `reason: "revoked"` made it indistinguishable from a real one. The comment
+ * above the consult claimed operators could tell the two apart via the error
+ * message; `emitRejection` logs the reason and not the message, so a Redis
+ * blip and a genuinely revoked token produced the same
+ * `jwt_verify_rejected reason=revoked` line — for every token, on every
+ * replica, until the backend came back. #408 already split the outage from
+ * the finding for the subject watermark and named it `revocation_unavailable`;
+ * the denylist path predates that and was not brought in line.
+ *
+ * Nothing here lets a token through. It only stops an outage from being
+ * labelled as a revocation.
+ */
+describe("verifyJwt — denylist backend outage (#459)", () => {
+	/** A denylist whose consult always fails — a transient outage, not a revocation. */
+	const outageDenylist = (): AccessTokenDenylist => ({
+		kind: "outage",
+		async add() {},
+		async has() {
+			throw new Error("ECONNREFUSED");
+		},
+	});
+
+	const spyLogger = (): Logger => {
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: () => logger,
+		};
+		return logger as unknown as Logger;
+	};
+
+	const verifyWith = async (denylist: AccessTokenDenylist, logger?: Logger) => {
+		const { token } = await mintAccessToken();
+		return verifyJwt(token, testKeyStore(), {
+			type: "access_token",
+			expectedIssuer: TEST_ISSUER,
+			expectedAudience: TEST_AUDIENCE,
+			revocation: { denylist },
+			...(logger === undefined ? {} : { logger }),
+		});
+	};
+
+	/** Resolve to the rejection so the error object itself can be inspected. */
+	const rejectionOf = (p: Promise<unknown>): Promise<unknown> =>
+		p.then(
+			() => undefined,
+			(cause: unknown) => cause,
+		);
+
+	it("reports a consult failure as revocation_unavailable, not revoked", async () => {
+		await expect(verifyWith(outageDenylist())).rejects.toMatchObject({
+			reason: "revocation_unavailable",
+		});
+	});
+
+	it("is covered by isRevocationUnavailable — one predicate for both stores", async () => {
+		// A caller that answers 503 for a watermark outage (#408) must not
+		// have to know which store was down to give the denylist outage the
+		// same answer.
+		const err = await rejectionOf(verifyWith(outageDenylist()));
+		expect(isRevocationUnavailable(err)).toBe(true);
+	});
+
+	it("still fails closed — the token is refused either way", async () => {
+		await expect(verifyWith(outageDenylist())).rejects.toThrow();
+	});
+
+	it("names the store in the message so an operator can tell which one is down", async () => {
+		await expect(verifyWith(outageDenylist())).rejects.toMatchObject({
+			message: expect.stringContaining("denylist"),
+		});
+	});
+
+	it("logs jwt_verify_rejected with reason=revocation_unavailable — the field operators actually see", async () => {
+		// The audit record carries the reason, not the message. This pins the
+		// field a SIEM filter indexes on, which is the one the issue was about.
+		const logger = spyLogger();
+		await expect(verifyWith(outageDenylist(), logger)).rejects.toThrow();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ reason: "revocation_unavailable" }),
+			"jwt_verify_rejected",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.objectContaining({ reason: "revoked" }),
+			"jwt_verify_rejected",
+		);
+	});
+
+	it("keeps a genuine denylist hit reported as revoked, outside the predicate", async () => {
+		// The two must stay distinguishable in both directions, or a caller's
+		// 503 branch would start swallowing real revocations.
+		const denylist = createMemoryAccessTokenDenylist();
+		const { token, jti } = await mintAccessToken();
+		await denylist.add(jti, Date.now() + 10 * 60 * 1000);
+		const err = await rejectionOf(
+			verifyJwt(token, testKeyStore(), {
+				type: "access_token",
+				expectedIssuer: TEST_ISSUER,
+				expectedAudience: TEST_AUDIENCE,
+				revocation: { denylist },
+			}),
+		);
+		expect(err).toMatchObject({ reason: "revoked" });
+		expect(isRevocationUnavailable(err)).toBe(false);
 	});
 });

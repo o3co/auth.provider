@@ -53,14 +53,20 @@ export type JwtVerificationReason =
 	// unknown kid is an attacker-fabricated header signal. SIEM filters can
 	// page differently on each.
 	| "kid_expired"
-	// Wave 1 (§4.5): token present in the AccessTokenDenylist (i.e. explicitly
-	// revoked via RFC 7009). Distinct from `expired` so SIEM filters can tell
-	// natural expiry apart from an operator-initiated revocation event.
+	// Wave 1 (§4.5) / #296: a *finding* — the jti is on the AccessTokenDenylist
+	// (explicitly revoked via RFC 7009), or the token's `iat` is at or before
+	// the subject's revocation watermark. Distinct from `expired` so SIEM
+	// filters can tell natural expiry apart from an operator-initiated
+	// revocation event. Never emitted for a store that could not be consulted:
+	// that is `revocation_unavailable`, for both stores (#408, #459).
 	| "revoked"
-	// #408: a revocation store could not be consulted. Verification still fails
-	// closed — an unreachable backend must never read as "not revoked" — but the
+	// #408 / #459: a revocation store — the subject watermark (#408) or the jti
+	// denylist (#459) — could not be consulted. Verification still fails closed
+	// — an unreachable backend must never read as "not revoked" — but the
 	// failure is an outage, not a finding, and the two must not be reported as
-	// one thing.
+	// one thing: `emitRejection` logs this field, not the message, so under a
+	// shared reason a backend blip and a genuine revocation were the same
+	// `jwt_verify_rejected reason=revoked` line for every token on every replica.
 	//
 	// The refresh grant is where that mattered enough to split the reason: it
 	// mapped every verification error to `400 invalid_grant`, and per RFC 6749
@@ -89,7 +95,9 @@ export class JwtVerificationError extends Error {
 
 /**
  * Whether `err` is a {@link JwtVerificationError} reporting that a revocation
- * store could not be consulted (#408).
+ * store could not be consulted — the subject watermark (#408) or the jti
+ * denylist (#459). One predicate for both stores: a caller that answers an
+ * outage differently from a finding must not have to know which one was down.
  *
  * A predicate rather than an inline `instanceof` + `reason` pair at each call
  * site, because the answer changes what a caller says on the wire and getting
@@ -120,6 +128,9 @@ export function isRevocationUnavailable(err: unknown): boolean {
  *   by identity, the watermark revokes every token a subject held as of a
  *   moment — which is what a credential change needs, since the jtis
  *   outstanding for a subject are not enumerable.
+ *
+ * Either store failing to answer throws `reason: "revocation_unavailable"`
+ * (#408, #459): still a refusal, but an outage rather than a finding.
  *
  * Both fields stay individually optional inside the bundle: whether each
  * store exists is the composition's decision (#363). What the bundle removes
@@ -566,10 +577,18 @@ export async function verifyJwt(
 	//
 	// Fail-closed on denylist backend errors: if `denylist.has` throws (e.g.
 	// Redis network failure), we cannot determine revocation state. Treating
-	// "unknown" as "active" would let revoked tokens through during outages;
-	// secure default is to reject with `reason: "revoked"` and emit an audit
-	// event capturing the underlying cause so operators can distinguish a true
-	// revocation from a backend outage in logs/metrics.
+	// "unknown" as "active" would let revoked tokens through during outages,
+	// so the token is refused.
+	//
+	// #459: refused as `revocation_unavailable`, not `revoked`. This path used
+	// to throw `revoked` with the cause in the message, on the theory that
+	// operators could tell an outage from a revocation there — but
+	// `emitRejection` logs the reason, not the message, so a Redis blip and a
+	// genuinely revoked token were the same `jwt_verify_rejected reason=revoked`
+	// line, for every token on every replica until Redis returned. #408 split
+	// the outage from the finding for the watermark below; the denylist path
+	// predates that and now takes the same reason, so `isRevocationUnavailable`
+	// covers both stores and a caller answers both outages the same way.
 	if (denylist !== undefined) {
 		const jti = typeof payload.jti === "string" ? payload.jti : undefined;
 		if (jti !== undefined) {
@@ -579,7 +598,7 @@ export async function verifyJwt(
 			} catch (cause) {
 				const causeMessage = cause instanceof Error ? cause.message : String(cause);
 				const err = new JwtVerificationError(
-					"revoked",
+					"revocation_unavailable",
 					`denylist consult failed (fail-closed): ${causeMessage}`,
 				);
 				emitRejection(logger, err, payload, header);
@@ -600,9 +619,10 @@ export async function verifyJwt(
 	// enumerate the jtis a subject currently holds, so it records the moment
 	// before which none of them count and this consults it.
 	//
-	// Same fail-closed stance and same ordering rationale as the denylist above:
-	// an unreachable backend must not read as "not revoked", and the check runs
-	// only for otherwise-valid tokens so `reason: "revoked"` stays crisp.
+	// Same fail-closed stance, same outage reason (#408 here, #459 above) and
+	// same ordering rationale as the denylist above: an unreachable backend must
+	// not read as "not revoked", and the check runs only for otherwise-valid
+	// tokens so `reason: "revoked"` stays crisp.
 	if (subjectRevocation !== undefined) {
 		const sub = typeof payload.sub === "string" ? payload.sub : undefined;
 		const iat = typeof payload.iat === "number" ? payload.iat : undefined;
