@@ -23,6 +23,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
+import { evaluateGrantPolicy } from "./_grantPolicy.mjs";
 import {
 	deriveAudienceFromResources,
 	extractResourceParam,
@@ -106,72 +107,32 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 				? extractResourceParam(ctx.body as Record<string, unknown>)
 				: null;
 			if (deps.grantPolicy && resourceIndicatorEnabled) {
-				// CP-18 pattern: fail-closed on policy throw — same rationale
-				// as the refresh_token path. Policy is a security boundary;
-				// failing open would effectively grant the pre-policy scope
-				// ceiling.
+				// CP-18: the fail-closed evaluation (throw → 503, deny → 400)
+				// and the scope re-validation — the policy may only narrow the
+				// already-narrowed effective scope, never draw on the allowlist,
+				// and an empty array is strip-all — live in `evaluateGrantPolicy`,
+				// shared with the jwt-bearer grant. The audience half stays here
+				// because its ceiling is this client's `allowedAudiences`.
 				const resource = requestedResource;
-				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
-				try {
-					decision = await deps.grantPolicy.evaluate(
-						{
-							grantType: GRANT_TYPE,
-							clientId: client.clientId,
-							// RFC 6749 §4.4: client_credentials has no end-user;
-							// subject is the client itself.
-							subject: client.clientId,
-							requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
-							// RFC 8707: resource is null when body has no `resource` param;
-							// undefined passed to policy signals "no resource requested".
-							resource: resource ?? undefined,
-						},
-						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
-					);
-				} catch {
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "policy evaluation unavailable",
-						},
-					};
-				}
-				if (decision.outcome === "deny") {
-					return {
-						result: {
-							status: 400,
-							error: decision.error,
-							errorDescription: decision.errorDescription,
-						},
-					};
-				}
-				if (decision.grantedScope !== undefined) {
-					// CP-18: fail-closed. Re-validate the policy's returned scopes
-					// against effectiveScopes (the already-narrowed request set, after
-					// client allowlist has been applied) — not against client.allowedScopes.
-					// A buggy/compromised policy returning a scope that was not in the
-					// request (e.g. 'write' for a request narrowed to 'read') is scope
-					// expansion and must be rejected, even if that scope is in
-					// client.allowedScopes. Mirrors refreshToken.mts CP-15 exactly:
-					// ceiling is the post-narrowing effective scope, not the full ceiling.
-					const requestedSet = new Set(effectiveScopes);
-					const exceeded = decision.grantedScope.filter((s) => !requestedSet.has(s));
-					if (exceeded.length > 0) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_scope",
-								errorDescription: `policy returned scopes exceeding requested scope: ${exceeded.join(" ")}`,
-							},
-						};
-					}
-					// CP-15 mirror: assign unconditionally when policy returned the
-					// field — including empty array (policy intent: strip all scopes).
-					// Matches refreshToken.mts behavior: presence (even []) overrides
-					// effectiveScopes; the scope claim emission at line ~186 handles
-					// empty → null naturally (effectiveScopes.length > 0 check).
-					effectiveScopes = decision.grantedScope;
-				}
+				const policy = await evaluateGrantPolicy(
+					deps.grantPolicy,
+					{
+						grantType: GRANT_TYPE,
+						clientId: client.clientId,
+						// RFC 6749 §4.4: client_credentials has no end-user;
+						// subject is the client itself.
+						subject: client.clientId,
+						requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
+						// RFC 8707: resource is null when body has no `resource` param;
+						// undefined passed to policy signals "no resource requested".
+						resource: resource ?? undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					effectiveScopes,
+				);
+				if (!policy.ok) return { result: policy.result };
+				effectiveScopes = policy.scopes;
+				const { decision } = policy;
 				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
 					// Fail-closed audience validation: policy may only narrow to
 					// audiences already in client.allowedAudiences. An out-of-bounds
