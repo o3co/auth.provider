@@ -47,6 +47,7 @@ const confidentialClient = {
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
 	allowedScopes: ["openid"],
 	defaultScopes: ["openid"],
+	allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
 };
 
 const confidentialRepository: ClientRepository = {

@@ -44,6 +44,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "#/grant.mjs";
+import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { createDeviceVerificationHandler } from "#/verificationEndpoint.mjs";
 
 const CLIENT_ID = "tv-app";
@@ -56,6 +57,24 @@ const client = {
 	allowedScopes: ["openid", "profile"],
 	defaultScopes: ["openid"],
 	allowedAudiences: ["https://api.example.test"],
+	allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
+} as unknown as AuthenticatedClient;
+
+/** Registered, but never for this grant — one with an allowlist that omits it, one with none. */
+const OTHER_GRANTS_ID = "web-app";
+const otherGrantsClient = {
+	clientId: OTHER_GRANTS_ID,
+	tokenEndpointAuthMethod: "none" as const,
+	allowedScopes: ["openid"],
+	defaultScopes: ["openid"],
+	allowedGrantTypes: ["authorization_code"],
+} as unknown as AuthenticatedClient;
+const NO_ALLOWLIST_ID = "legacy-app";
+const noAllowlistClient = {
+	clientId: NO_ALLOWLIST_ID,
+	tokenEndpointAuthMethod: "none" as const,
+	allowedScopes: ["openid"],
+	defaultScopes: ["openid"],
 } as unknown as AuthenticatedClient;
 
 /**
@@ -71,12 +90,15 @@ const confidentialClient = {
 	tokenEndpointAuthMethod: "client_secret_basic" as const,
 	allowedScopes: ["openid"],
 	defaultScopes: ["openid"],
+	allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
 } as unknown as AuthenticatedClient;
 
 const clientRepository: ClientRepository = {
 	findById: async (id) => {
 		if (id === CLIENT_ID) return client as never;
 		if (id === CONFIDENTIAL_ID) return confidentialClient as never;
+		if (id === OTHER_GRANTS_ID) return otherGrantsClient as never;
+		if (id === NO_ALLOWLIST_ID) return noAllowlistClient as never;
 		return null;
 	},
 	authenticate: async (id, secret) =>
@@ -263,6 +285,29 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		const res = await startDevice(app, { client_id: "not-registered" });
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("invalid_client");
+	});
+
+	it("refuses a client whose allowedGrantTypes omit the device grant", async () => {
+		// The token endpoint would refuse the device_code exchange for this
+		// client, so letting it open a pending authorization only produces a
+		// real-looking prompt — the exact material a phishing page needs —
+		// for a grant that can never complete.
+		const { app } = makeHarness();
+		const res = await startDevice(app, { client_id: OTHER_GRANTS_ID });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
+		expect(res.body.error_description).toContain(DEVICE_CODE_GRANT_TYPE);
+	});
+
+	it("refuses a client with no allowedGrantTypes at all (#326: never acquired by omission)", async () => {
+		// The grant declares requiresExplicitGrantAllowlist, so the token
+		// endpoint denies by absence for it. The authorization endpoint
+		// applies the same rule, or the two disagree about who may start
+		// what only one of them will finish.
+		const { app } = makeHarness();
+		const res = await startDevice(app, { client_id: NO_ALLOWLIST_ID });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("unauthorized_client");
 	});
 
 	it("refuses a scope the client is not registered for", async () => {
