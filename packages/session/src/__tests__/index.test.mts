@@ -70,6 +70,18 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect((mod as { MAX_REDIRECT_URL_LENGTH?: unknown }).MAX_REDIRECT_URL_LENGTH).toBe(2048);
 	});
 
+	it("exports the #479 response-mode and client-secret surface a federation package needs", async () => {
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		// A federation package (federation-apple) declares `responseMode` and may
+		// hand the route layer a computed client secret; both need the shared
+		// vocabulary rather than a private copy per adapter.
+		expect(typeof mod.resolveFederationResponseMode).toBe("function");
+		expect(typeof mod.applyCrossSiteStateCookie).toBe("function");
+		expect(typeof mod.resolveClientSecret).toBe("function");
+		expect(mod.DEFAULT_FEDERATION_RESPONSE_MODE).toBe("query");
+		expect(mod.FEDERATION_RESPONSE_MODES).toEqual(["query", "form_post"]);
+	});
+
 	it("does NOT export the deleted v0.4.x federation factory surface", async () => {
 		const mod = await import("#/index.mjs");
 		// Per A2-γ §3.4 + Phase 9 issue #98 full removal:

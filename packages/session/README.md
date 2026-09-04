@@ -113,17 +113,21 @@ config slice.
 interface FederationProvider {
   readonly name: string;
   readonly scope: readonly string[];
+  readonly responseMode?: "query" | "form_post";   // default "query"
 
   buildAuthorizationUrl(params: {
     readonly redirectUri: string;
     readonly state: string;
     readonly codeVerifier: string;
+    readonly nonce?: string;
   }): URL;
 
   exchangeCode(params: {
     readonly code: string;
     readonly codeVerifier: string;
     readonly redirectUri: string;
+    readonly nonce?: string;
+    readonly callbackParams?: Readonly<Record<string, string>>;
   }): Promise<FederationProfile>;
 }
 ```
@@ -134,6 +138,8 @@ Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. O
 - `scope` — OAuth 2.0 scopes to request.
 - `buildAuthorizationUrl` — builds the RFC 6749 §4.1 + RFC 7636 authorization URL. Receives a pre-generated `codeVerifier` from the route layer; implementations should compute `code_challenge` via `codeChallenge(codeVerifier)`.
 - `exchangeCode` — exchanges an authorization code for a normalized `FederationProfile`. Must include `issuer` and `sub`; all other fields are optional.
+- `responseMode` — how the IdP delivers the authorization response. Optional, and absence means `"query"`, so every provider written before #479 is unaffected. See below.
+- `callbackParams` — the rest of the callback's parameters (query string or form body), string values only. Present so an IdP that returns identity data *beside* the token response can be adapted: Sign in with Apple sends the end user's name once, in a `user` JSON field on the first authorization, and never in the id_token. **The values are relayed through the user agent and are not signed** — the `state` check binds them to the session and binds nothing else, so treat anything read here as self-asserted and let `mapClaims` + claim precedence decide where it may land.
 
 > **Note (A5 split, v0.5.0):** redirect URL handling — `validateRedirect` /
 > `resolveCallbackRedirect` — was moved off `FederationProvider` and onto a
@@ -141,6 +147,55 @@ Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. O
 > contribute the policy via `federationRedirectPolicies.<name>`; built-ins
 > use `createFederationRedirectPolicy(...)`. Custom providers do not
 > implement these methods on `FederationProvider`.
+
+---
+
+### Response mode: `query` and `form_post` (#479)
+
+Most IdPs redirect the browser back to the callback with the authorization response in the query string. Sign in with Apple does not: whenever the requested `scope` includes `name` or `email`, Apple **POSTs** an `application/x-www-form-urlencoded` body to the callback, because the first-authorization `user` field does not fit a redirect URL.
+
+A provider opts in by declaring one field:
+
+```typescript
+const appleProvider: FederationProvider = {
+  name: "apple",
+  scope: ["name", "email"],
+  responseMode: "form_post",
+  // …
+};
+```
+
+That single declaration changes three things in the route layer, and nothing in the adapter:
+
+1. **The start route appends `response_mode=form_post`** to the URL `buildAuthorizationUrl` returned. The parameter is written once, in the router, rather than in every adapter — and nothing at all is appended for the default mode, so a `"query"` federation's authorization URL is byte-for-byte what its adapter produced.
+2. **`POST /oauth/federation/<name>/callback` starts accepting the form body.** It is the *same handler* as the GET callback over a different parameter source: same `session.federation` lookup, same `state` comparison, same delete-then-save reuse prevention before any async work, same PKCE verifier and nonce read from the session rather than from the request, same rollback ladder. A provider that did not declare `form_post` answers `405 method_not_allowed` (with `Allow: GET`) there, so no existing federation gains a POST surface.
+3. **The session cookie carrying that federation's state is marked `SameSite=None; Secure`** — for that session only.
+
+#### The `SameSite` consequence, and why it is per-federation
+
+A `form_post` callback arrives as a **cross-site POST** from the IdP's origin. A `SameSite=Lax` cookie — the deployment default, and the right default — is not sent on a cross-site POST, so the callback would land with no session: no `state` to compare against, no PKCE verifier. It fails closed, but it fails for everyone.
+
+The router therefore relaxes **the one session that just started a `form_post` federation**, via `applyCrossSiteStateCookie(req.session)`, and never `session.sameSite` in config. A deployment running Apple beside Google keeps `SameSite=Lax` on every Google login and on every session that never touched a cross-site federation; only the browser mid-Apple-flow holds the relaxed cookie. `Secure` is set alongside it because every current browser drops a `SameSite=None` cookie that is not `Secure` (the pairing `application.schema.mts` already enforces for the config-level value, #282) — and Apple refuses a non-`https` redirect URI anyway, so a `form_post` federation is HTTPS-only regardless.
+
+The re-issued `Set-Cookie` reaches the browser because the start handler also modifies the session (it writes the federation envelope) and `session.maxAge` is required by the config schema — together, express-session's condition for re-sending the cookie of an already-established session. A session middleware that exposes no `req.session.cookie` gets a warning naming the federation rather than a silent no-op.
+
+---
+
+### Client secrets that rotate (#479)
+
+`clientSecret` was a `string` because most IdPs issue a long-lived opaque one. Apple's is an ES256 JWT the relying party signs itself, capped at six months, so a value would mean a deployment that silently stops authenticating half a year after it was configured.
+
+The contract widens to a union — one field, one meaning, with the callable form saying only that the secret is computed rather than stored:
+
+```typescript
+type FederationClientSecret = string | (() => string | Promise<string>);
+
+const secret = await resolveClientSecret(config.clientSecret);
+```
+
+- **The static form is unchanged.** `federations.google.clientSecret = "…"` in HOCON, and Google's / GitHub's provider config, keep working exactly as before — a config file can still only carry the string form.
+- **`resolveClientSecret` is called once per token exchange** (and per refresh) and deliberately does **not** cache. Only the adapter knows when its secret expires, so caching belongs there: `federation-apple` regenerates its JWT when it comes within 24 h of `exp`.
+- **An empty or non-string result is rejected locally**, rather than posted upstream as an empty `client_secret` and returned as an opaque `invalid_client`.
 
 ---
 
