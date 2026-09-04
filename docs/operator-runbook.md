@@ -375,7 +375,8 @@ complete for `v0.11.0`:
 `federation.logout.success`, `federation.token.family_revoked`,
 `federation.token.forbidden`, `federation.token.reauthentication_required`,
 `federation.token.refresh_failed`, `federation.token.success`,
-`introspect.family_revoked`, `introspect.store_unavailable`,
+`introspect.family_revoked`, `introspect.session_invalid`,
+`introspect.store_unavailable`,
 `logout.cascade_failed`, `logout.family_revoked`, `logout.success`,
 `rate_limit.unavailable`, `token.issued`, `token.issued.failure`.
 

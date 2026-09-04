@@ -438,3 +438,73 @@ describe("createSessionGrant — email-verified gate (#297)", () => {
 		expect(result.status).toBe(200);
 	});
 });
+
+/**
+ * R3 — the `session` grant's access token must be covered by logout.
+ *
+ * The grant minted with `generateToken({}, …)`: no `sid`, so nothing linked
+ * the token to the browser session it was minted from. Every liveness check
+ * downstream (`/userinfo`, `/introspect`) keys on `sid`, so after logout the
+ * token stayed valid for the whole access-token lifetime — an hour by
+ * default — in exactly the BFF / proxy topology this grant exists to serve.
+ */
+describe("createSessionGrant — sid binds the token to the browser session (R3)", () => {
+	const runWith = async (session: Record<string, unknown>) => {
+		const handler = createSessionGrant(makeDeps());
+		const { result } = await handler.handle({
+			body: {},
+			session,
+			issuer: "https://auth.example",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: AUTH_CLIENT,
+		} as unknown as GrantContext);
+		return result;
+	};
+
+	it("stamps the session's sid onto the access token", async () => {
+		const result = await runWith({
+			isAuthenticated: true,
+			user: { id: "u1" },
+			sid: "sid-abc",
+		});
+
+		expect(result.status).toBe(200);
+		expect("tokens" in result).toBe(true);
+		if ("tokens" in result) {
+			const claims = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect(claims.sid).toBe("sid-abc");
+		}
+	});
+
+	it("issues no family_id — this grant mints no refresh token", async () => {
+		// A `family_id` would name a refresh-token family that does not exist,
+		// so the cascade would consult a family nothing ever revokes. `sid` is
+		// the whole binding here.
+		const result = await runWith({
+			isAuthenticated: true,
+			user: { id: "u1" },
+			sid: "sid-abc",
+		});
+
+		expect("tokens" in result).toBe(true);
+		if ("tokens" in result) {
+			const claims = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect(claims.family_id).toBeUndefined();
+			expect(result.tokens.refresh_token).toBeUndefined();
+		}
+	});
+
+	it("omits sid when the session recorded none", async () => {
+		// A deployment whose login wiring predates `sid` still mints; the claim
+		// is absent rather than present-and-empty, which is what keeps the
+		// liveness checks' "no sid to check" branch distinguishable.
+		const result = await runWith({ isAuthenticated: true, user: { id: "u1" } });
+
+		expect(result.status).toBe(200);
+		expect("tokens" in result).toBe(true);
+		if ("tokens" in result) {
+			const claims = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
+			expect("sid" in claims).toBe(false);
+		}
+	});
+});

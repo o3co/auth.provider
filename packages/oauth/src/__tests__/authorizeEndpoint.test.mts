@@ -32,13 +32,16 @@ import {
 	type CodeRepository,
 	createSymmetricKeyStore,
 	type GrantPolicyHook,
+	type Logger,
 	type PublicClient,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const CLIENT_ID = "client-a";
 const REDIRECT_URI = "https://app.example/cb";
@@ -83,6 +86,9 @@ const makeApp = async (opts: {
 	loginUrl?: string;
 	grantPolicy?: GrantPolicyHook;
 	auditSink?: AuditSink;
+	/** R1b: the session store `/authorize` re-checks a live `sid` against. */
+	userSessionStore?: UserSessionStore;
+	logger?: Logger;
 }) => {
 	const record = {
 		clientId: CLIENT_ID,
@@ -124,6 +130,8 @@ const makeApp = async (opts: {
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		...(opts.grantPolicy ? { grantPolicy: opts.grantPolicy } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
+		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
+		...(opts.logger ? { logger: opts.logger } : {}),
 	});
 
 	const app = express();
@@ -748,5 +756,176 @@ describe("/authorize — POST is supported (#284)", () => {
 		const { app } = await makeApp({ session: { isAuthenticated: false } });
 		const params = redirectParams(await authorizePost(app, { ...baseQuery, prompt: "none" }));
 		expect(params.get("error")).toBe("login_required");
+	});
+});
+
+/**
+ * R1b — a session whose `sid` is dead is not an authenticated session.
+ *
+ * `/authorize` used to gate on `req.session.isAuthenticated` alone, so a
+ * cookie whose `UserSession` had been deleted (by `/oauth/logout`'s cascade,
+ * by a store restart, by an out-of-band delete) still minted authorization
+ * codes carrying the dead `sid`. `/token` then refused every one of them with
+ * `invalid_grant`, and the browser looped without ever being shown a login
+ * page — for up to `session.maxAge`. This is the robust half of the fix: it
+ * is the same read `/token` already performs later, moved to the point where
+ * the answer can still be "log in again".
+ */
+describe("/authorize — dead sid is unauthenticated (R1b)", () => {
+	const liveSid = "sid-live";
+	const deadSid = "sid-dead";
+
+	const makeStore = (impl: (sid: string) => Promise<unknown>): UserSessionStore =>
+		({
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(impl),
+			delete: vi.fn(async () => {}),
+		}) as unknown as UserSessionStore;
+
+	const liveStore = () =>
+		makeStore(async (sid: string) =>
+			sid === liveSid
+				? {
+						sid: liveSid,
+						sub: "user-1",
+						authTime: new Date(),
+						createdAt: new Date(),
+						expiresAt: new Date(Date.now() + 3_600_000),
+						claims: {},
+					}
+				: null,
+		);
+
+	it("sends a session whose sid no longer resolves to the login page", async () => {
+		const createCode = vi.fn();
+		const { app } = await makeApp({
+			createCode,
+			userSessionStore: liveStore(),
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: deadSid },
+		});
+
+		const res = await authorize(app, baseQuery);
+
+		// Byte-identical to the existing unauthenticated branch: same login
+		// URL, same round-tripped `redirect_to`.
+		expect(res.status).toBe(302);
+		const location = res.headers.location as string;
+		expect(location.startsWith("/login?redirect_to=")).toBe(true);
+		const redirectTo = decodeURIComponent(location.split("redirect_to=")[1] as string);
+		expect(redirectTo.startsWith("https://issuer.example/oauth/authorize?")).toBe(true);
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("answers login_required for prompt=none when the sid no longer resolves", async () => {
+		const createCode = vi.fn();
+		const { app } = await makeApp({
+			createCode,
+			userSessionStore: liveStore(),
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: deadSid },
+		});
+
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "none" }));
+
+		expect(params.get("error")).toBe("login_required");
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("still mints for a session whose sid is live", async () => {
+		const store = liveStore();
+		const { app, createCode } = await makeApp({
+			userSessionStore: store,
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: liveSid },
+		});
+
+		const res = await authorize(app, baseQuery);
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location as string).searchParams.get("code")).toBe("code-x");
+		expect(createCode).toHaveBeenCalled();
+		expect(store.get).toHaveBeenCalledWith(liveSid);
+	});
+
+	it("does not read the store for a session that records no sid", async () => {
+		// Backward compatibility: a deployment whose login wiring never wrote
+		// `sid` onto the express-session has nothing to check, and refusing it
+		// would revoke authentication from every such deployment.
+		const store = liveStore();
+		const { app, createCode } = await makeApp({
+			userSessionStore: store,
+			session: { isAuthenticated: true, user: { id: "user-1" } },
+		});
+
+		const res = await authorize(app, baseQuery);
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location as string).searchParams.get("code")).toBe("code-x");
+		expect(createCode).toHaveBeenCalled();
+		expect(store.get).not.toHaveBeenCalled();
+	});
+
+	it("does not read the store for a genuinely unauthenticated request", async () => {
+		// The #284 property this fix must not cost: an unauthenticated request
+		// answers before touching any repository, so an unauthenticated
+		// endpoint cannot be turned into one lookup per hit.
+		const store = liveStore();
+		const { app } = await makeApp({
+			userSessionStore: store,
+			session: { isAuthenticated: false, sid: deadSid },
+		});
+
+		const res = await authorize(app, baseQuery);
+
+		expect(res.status).toBe(302);
+		expect(res.headers.location).toContain("/login");
+		expect(store.get).not.toHaveBeenCalled();
+	});
+
+	it("fails closed to the login page when the session store is unreachable", async () => {
+		const logger = createMockLogger();
+		const createCode = vi.fn();
+		const { app } = await makeApp({
+			createCode,
+			logger,
+			userSessionStore: makeStore(async () => {
+				throw new Error("redis down");
+			}),
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: liveSid },
+		});
+
+		const res = await authorize(app, baseQuery);
+
+		expect(res.status).toBe(302);
+		expect(res.headers.location).toContain("/login");
+		expect(createCode).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	it("fails closed to login_required for prompt=none when the store is unreachable", async () => {
+		const createCode = vi.fn();
+		const { app } = await makeApp({
+			createCode,
+			userSessionStore: makeStore(async () => {
+				throw new Error("redis down");
+			}),
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: liveSid },
+		});
+
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "none" }));
+
+		expect(params.get("error")).toBe("login_required");
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
+	it("mints unchanged when no session store is wired", async () => {
+		const { app, createCode } = await makeApp({
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: deadSid },
+		});
+
+		const res = await authorize(app, baseQuery);
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location as string).searchParams.get("code")).toBe("code-x");
+		expect(createCode).toHaveBeenCalled();
 	});
 });

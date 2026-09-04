@@ -26,6 +26,7 @@ import {
 	type Logger,
 	matchesRegisteredRedirectUri,
 	type PublicClient,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import {
@@ -61,7 +62,54 @@ export interface AuthorizeHandlerOptions {
 	readonly loginUrl: () => string;
 	/** The `oauth.*` knobs, resolved once at router composition (#328). */
 	readonly oauth: ResolvedOAuthOptions;
+	/**
+	 * R1b: the durable session store, so an express-session claiming
+	 * authentication can be checked against the `UserSession` record its `sid`
+	 * names. Optional for the same reason it is optional on the router: a
+	 * deployment without session-backed login has no record to check, and this
+	 * endpoint must keep working for it exactly as before.
+	 */
+	readonly userSessionStore?: UserSessionStore;
 }
+
+/**
+ * R1b — does the express-session's `sid` still name a live `UserSession`?
+ *
+ * `isAuthenticated` is a claim the browser's cookie makes; the `UserSession`
+ * record is the fact. `/oauth/logout`'s cascade deletes the record, and a
+ * store can also lose it to a restart or an out-of-band delete — after which
+ * this endpoint went on minting codes carrying a dead `sid` that `/token`
+ * refused with `invalid_grant`, leaving the browser in a login loop it was
+ * never shown a login page to escape. This is the same read `/token` already
+ * performs at redemption, moved to the point where "log in again" is still an
+ * available answer.
+ *
+ * Returns `true` — authentication stands — in the two cases where there is
+ * nothing to check: no store wired, or a session that recorded no `sid`
+ * (a deployment whose login wiring predates it). Neither is evidence of a
+ * dead session, and refusing them would revoke authentication from every such
+ * deployment.
+ *
+ * A store that cannot answer fails CLOSED. Minting a code is an authorization
+ * decision, and an outage is not a reason to make it: the caller lands on the
+ * login page (or gets `login_required`), which is recoverable, rather than
+ * holding a code bound to a session nobody can vouch for.
+ *
+ * Callers MUST short-circuit on `isAuthenticated` first, so a genuinely
+ * unauthenticated request still answers without touching any repository
+ * (#284) — this function is only reached once the session claims otherwise.
+ */
+const sessionSidIsLive = async (req: Request, opts: AuthorizeHandlerOptions): Promise<boolean> => {
+	const store = opts.userSessionStore;
+	const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
+	if (!store || sid === undefined) return true;
+	try {
+		return (await store.get(sid)) != null;
+	} catch (err) {
+		opts.logger.warn({ err, sid }, "authorize_session_liveness_unavailable");
+		return false;
+	}
+};
 
 /**
  * Per-request state threaded through the §4.1 steps below. Constructed only
@@ -903,7 +951,14 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 				.filter((v) => v.length > 0)
 				.includes("none");
 
-		if (!req.session.isAuthenticated && !wantsSilentAuth) {
+		// R1b: one liveness read per authenticated request, resolved here so
+		// both the login redirect below and the `prompt=none` refusal further
+		// down answer from the same fact. The `&&` short-circuits, which is
+		// what keeps the anonymous path free of the store read.
+		const authenticated =
+			Boolean(req.session.isAuthenticated) && (await sessionSidIsLive(req, opts));
+
+		if (!authenticated && !wantsSilentAuth) {
 			// `endpoints.login.url` may already carry a query string (e.g.
 			// `/login?tenant=x`), so `redirect_to` joins with `&` there and `?`
 			// otherwise — a second `?` would corrupt both parameters.
@@ -954,7 +1009,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (!checkRequestObjectUnsupported(ctx)) return;
 		const prompt = resolvePrompt(ctx);
 		if (prompt === null) return;
-		if (prompt.silent && !req.session.isAuthenticated) {
+		if (prompt.silent && !authenticated) {
 			// OIDC Core §3.1.2.6. Now that `redirect_uri` is validated this
 			// reaches the RP's own listener rather than a login page it cannot
 			// use.

@@ -135,6 +135,49 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **Not implemented:** `max_age` / `auth_time`, the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document already tells the truth about them by saying nothing.
 
+## Introspection: which tokens a caller may ask about
+
+`POST /oauth/introspect` authenticates its caller first (RFC 7662 §2.1 — public clients are refused), then answers only about tokens that caller is entitled to see. Two rules decide that, and both are stated here because both bit during live testing.
+
+### The audience pin is `allowedAudiences` ∪ `{client_id}`
+
+When client authentication identified the caller, the token's `aud` must be one of:
+
+- an entry in that client's registered `allowedAudiences`, or
+- that client's own `client_id`.
+
+That is the same ceiling every issuing grant already derives an audience within (`client_credentials`, `refresh_token`, `/authorize`), so introspection admits exactly the audiences the registration already trusted this client to be associated with, and nothing beyond them.
+
+The rule matters the moment RFC 8707 resource indicators are in use. Every access token then carries `aud: <resource URI>`, so a pin on `client_id` alone means a **resource server cannot introspect its own tokens** — it gets `active: false` unless it happens to be registered under a `client_id` that IS the resource URI. Register the resource URI as an allowed audience instead:
+
+```jsonc
+{
+  "clientId": "orders-api",
+  "tokenEndpointAuthMethod": "client_secret_basic",
+  "allowedAudiences": ["https://api.example.com/orders"]
+}
+```
+
+Everything the pin refused before, it still refuses: an audience outside that set, an unknown or expired token, one revoked through the jti denylist or the subject watermark, one from another issuer. The **bearer self-introspection** path — `Authorization: Bearer <token>` where the body `token` is that same value — establishes no calling-client identity, so there is no set to pin against; the verifier records the gap as `jwt_verify_aud_skipped` rather than inventing one.
+
+### A `client_id` with reserved characters must be percent-encoded in HTTP Basic
+
+RFC 6749 §2.3.1 requires the client id and secret to be `application/x-www-form-urlencoded`-encoded **before** the `id:secret` pair is base64-encoded into the `Authorization: Basic` header. A resource URI is the case that makes this mandatory rather than pedantic: it contains `:` and `/`, and `:` is the field separator the header is split on.
+
+```
+# WRONG — split at the first colon, so the client id parses as "https"
+Authorization: Basic base64("https://api.example.com/orders:s3cret")
+
+# RIGHT — reserved characters percent-encoded first
+Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
+```
+
+`client_secret_post` (credentials in the form body) avoids the question entirely — the body encoding already does it.
+
+### Session liveness
+
+A token carrying a `sid` claim is checked against the `UserSessionStore` before it is vouched for — the same read `/oauth/userinfo` performs. A session that has been logged out, has expired, or was deleted out of band answers `active: false` and emits `introspect.session_invalid`. A store outage also answers `active: false`, because RFC 7662 defines no `temporarily_unavailable` for this endpoint and inactive is the only fail-closed answer available; it emits `introspect.store_unavailable`. A token with no `sid` (client credentials, jwt-bearer) does not pay for the read, and neither does a composition that wires no `userSessionStore`.
+
 ## Token-binding cnf flow (Wave 2)
 
 When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `@o3co/auth-provider-mtls`), the grants here emit RFC 7800 `cnf` claims and the introspect handler echoes them back to resource servers.
@@ -240,6 +283,8 @@ Flow: verifies `id_token_hint` → loads session → broadcasts OIDC Back-Channe
 - `303` to first-federation IdP end-session URL (when that federation's provider implements `SupportsLogout`)
 - `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
 - `200 {"logged_out": true}` (fallback)
+
+On every one of those success shapes — and on the no-op answer for a session that is already gone — the endpoint also **ends the browser's own express-session**, but only when that session's `sid` is the one being logged out. RP-initiated logout is a request any party may make about any session, so a cookie naming a different `sid`, or naming none, is left alone rather than signing out an unrelated user. Without this the cascade emptied the stores while the cookie kept satisfying `req.session.isAuthenticated` at `/authorize`, which went on minting codes carrying a dead `sid` that `/token` then refused with `invalid_grant` — a login loop with no login page, for up to `session.maxAge`. A destroy the session store cannot complete is logged and does not turn a successful cascade into a `503`; `/authorize` refuses the dead `sid` on its own account either way, by re-checking that an authenticated session's `sid` still resolves in the `UserSessionStore` before it mints anything (a store that cannot answer fails closed to the login page, or to `login_required` under `prompt=none`).
 
 Cascade failure returns `503 {"error": "temporarily_unavailable"}`. The cascade order is fixed per the spec: step 1 (refresh-family revoke) and step 3 (session delete) fail hard; step 2 (federation-token delete) is best-effort and logs a warning on failure without aborting the cascade.
 

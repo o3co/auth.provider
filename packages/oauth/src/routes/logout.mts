@@ -17,6 +17,7 @@
 import type {
 	AuditSink,
 	ClientRepository,
+	EventLogger,
 	FederationProviderHandle,
 	FederationTokenStore,
 	KeyStore,
@@ -66,6 +67,89 @@ function supportsEndSession(
 ): provider is FederationProviderHandle & SupportsEndSession {
 	if (provider == null) return false;
 	return typeof (provider as { endSession?: unknown }).endSession === "function";
+}
+
+/**
+ * The slice of the express-session bag this route touches. Every field is
+ * optional at runtime even where `@types/express-session` says otherwise: a
+ * deployment may mount `/oauth/logout` with no session middleware at all (the
+ * pure back-channel shape), and a session written before the login wiring
+ * recorded `sid` carries none.
+ */
+interface BrowserSessionLike {
+	sid?: unknown;
+	destroy?: (callback: (err?: unknown) => void) => unknown;
+}
+
+/**
+ * R1a — ends the browser session that owns `sid`.
+ *
+ * The cascade deletes the `UserSession` record, but the express-session is a
+ * separate object: until this ran, the same cookie kept satisfying
+ * `req.session.isAuthenticated` at `/authorize`, which went on minting
+ * authorization codes carrying the now-dead `sid` that `/token` then refused
+ * with `invalid_grant`. The user saw a login loop with no login page for up
+ * to `session.maxAge`, and `prompt=login` is refused by this provider (#284),
+ * so no RP could force its way out.
+ *
+ * Scope — the substance of this helper. RP-initiated logout is a request any
+ * party may make about any session, so the cookie that happens to ride along
+ * on the request is NOT evidence that this browser owns the session being
+ * logged out. It is compared against `sid` first: a cookie naming a different
+ * `sid`, or naming none at all, is left alone, because destroying it would
+ * sign out an unrelated user on the strength of an id_token they never held.
+ * A browser session that recorded no `sid` at all is therefore left alone by
+ * both halves of R1 — this helper and `/authorize`'s liveness check, which
+ * also stands aside when there is no `sid` to resolve. That is deliberate, and
+ * it does not leave the loop open:
+ *
+ *   - Such a session cannot be the subject of an RP-initiated logout in the
+ *     first place. Step 5 above refuses an `id_token_hint` carrying no `sid`
+ *     with `400 invalid_request` long before this helper runs, so there is no
+ *     logout whose effect could be missed.
+ *   - Where a `userSessionStore` IS wired, a code minted from such a session
+ *     is refused at the token endpoint (`grants/authorization.mts`, the
+ *     `userSessionStore && !sid` guard), so it buys no token either.
+ *   - Where one is NOT wired there are no `UserSession` records to delete, no
+ *     `sid` on any token, and no RP-initiated logout at all — the
+ *     backward-compatible composition this endpoint has always declined to
+ *     serve.
+ *
+ * Refusing such a session at `/authorize` instead would revoke authentication
+ * from every deployment whose own login route sets `isAuthenticated` without
+ * recording a `sid`, which is a supported wiring; absence of a `sid` is not
+ * evidence of a dead session.
+ *
+ * Failure is logged, never propagated. By the time this runs the cascade has
+ * already succeeded; reporting the whole logout as failed would invite a
+ * retry of a cascade that already ran, and a cookie the session store could
+ * not delete is the weaker of the two failures — R1b refuses it at
+ * `/authorize` regardless.
+ *
+ * Takes `EventLogger`, not `Logger`: the route's own fallback is
+ * `opts.logger ?? console`, and `console` cannot satisfy `Logger` (no `fatal`,
+ * no `child`). This helper only ever emits one named structured event, which
+ * is exactly the narrow shape `EventLogger` exists for.
+ */
+async function endBrowserSession(req: Request, sid: string, logger: EventLogger): Promise<void> {
+	const session = (req as unknown as { session?: BrowserSessionLike }).session;
+	const destroy = session?.destroy;
+	if (!session || session.sid !== sid || typeof destroy !== "function") return;
+	await new Promise<void>((resolve) => {
+		try {
+			destroy.call(session, (err?: unknown) => {
+				if (err) {
+					logger.warn({ err, sid }, "logout_browser_session_destroy_failed");
+				}
+				resolve();
+			});
+		} catch (err) {
+			// A store adapter that throws synchronously never reaches its own
+			// callback, so resolve here or the request would hang.
+			logger.warn({ err, sid }, "logout_browser_session_destroy_failed");
+			resolve();
+		}
+	});
 }
 
 function readLogoutParam(source: Record<string, unknown>, key: string): string | undefined {
@@ -568,6 +652,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		}
 
 		if (!session) {
+			// R1a: the store entry is already gone — expired, or deleted out of
+			// band — which is exactly the state a browser gets stuck in. There
+			// is no cascade to run, but the cookie still has to end.
+			await endBrowserSession(req, sid, opts.logger ?? console);
 			return res.status(200).json({ logged_out: true });
 		}
 
@@ -664,6 +752,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				error_description: "logout cascade failed",
 			});
 		}
+
+		// R1a: the cascade emptied the stores; now end the browser's own
+		// session so the cookie stops satisfying `/authorize`. Placed here —
+		// after the cascade, ahead of response selection — so every success
+		// branch (front-channel HTML / IdP redirect / post-logout redirect /
+		// JSON) gets it exactly once, and the 503 above deliberately does not:
+		// a retry needs the cookie to still name the session.
+		await endBrowserSession(req, sid, opts.logger ?? console);
 
 		// Step 7: Select response.
 

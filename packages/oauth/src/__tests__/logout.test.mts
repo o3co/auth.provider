@@ -187,10 +187,65 @@ interface BuildAppOpts {
 	fetchImpl?: typeof fetch;
 	logger?: Logger;
 	auditSink?: AuditSink;
+	/**
+	 * The express-session bag the request carries. Absent by default, which is
+	 * the shape the rest of this suite runs in (no session middleware mounted)
+	 * and the one R1a must not throw on.
+	 */
+	browserSession?: FakeBrowserSession;
+}
+
+/**
+ * The slice of `express-session`'s request session R1a touches: the `sid` it
+ * recorded at login and the `destroy` callback. `destroyed` records whether
+ * the route actually ended it, so a test can assert on scoping rather than on
+ * a spy's call count alone.
+ */
+interface FakeBrowserSession extends Record<string, unknown> {
+	destroy: (cb: (err: Error | null) => void) => void;
+	destroyed?: boolean;
+}
+
+/**
+ * Builds the session bag a logged-in browser carries. `sid` names the
+ * UserSession this browser belongs to; `destroyFails` makes the store's
+ * destroy reject the way a Redis outage would, and `destroyThrows` makes it
+ * throw synchronously the way an adapter that validates its arguments before
+ * reaching its own callback does — the path that never calls back at all.
+ */
+function makeBrowserSession(
+	opts: { sid?: string; destroyFails?: boolean; destroyThrows?: boolean } = {},
+): FakeBrowserSession {
+	const session: FakeBrowserSession = {
+		isAuthenticated: true,
+		user: { id: "u-1" },
+		destroyed: false,
+		destroy(cb: (err: Error | null) => void) {
+			if (opts.destroyThrows) {
+				throw new Error("session store threw synchronously");
+			}
+			if (opts.destroyFails) {
+				cb(new Error("session store down"));
+				return;
+			}
+			session.destroyed = true;
+			session.isAuthenticated = false;
+			cb(null);
+		},
+	};
+	if (opts.sid !== undefined) session.sid = opts.sid;
+	return session;
 }
 
 function buildApp(opts: BuildAppOpts = {}) {
 	const app = express();
+	if (opts.browserSession) {
+		app.use((req, _res, next) => {
+			(req as unknown as { session: FakeBrowserSession }).session =
+				opts.browserSession as FakeBrowserSession;
+			next();
+		});
+	}
 	const router = createRouter(express, {
 		keyStore,
 		issuer: "https://auth.example.com",
@@ -1414,5 +1469,214 @@ describe("audit events", () => {
 				}),
 			);
 		});
+	});
+});
+
+/**
+ * R1a — `/oauth/logout` must end the browser session too.
+ *
+ * The cascade deletes the `UserSession` record, but until this fix nothing
+ * touched the express-session, so the same cookie kept satisfying
+ * `req.session.isAuthenticated` at `/authorize`: the browser went on minting
+ * authorization codes carrying the dead `sid`, `/token` refused them with
+ * `invalid_grant`, and the user sat in a login loop with no login page for up
+ * to `session.maxAge`.
+ *
+ * Scoping is the substance of these tests: the destroy is owed to the browser
+ * that OWNS the session being logged out, and to no other. An RP-initiated
+ * logout arriving on some third party's cookie must leave that cookie alone.
+ */
+describe("POST /oauth/logout — browser session (R1a)", () => {
+	it("destroys the express-session whose sid is the one being logged out", async () => {
+		const browserSession = makeBrowserSession({ sid: "sid-1" });
+		const sessionStore = makeSessionStore();
+		const app = buildApp({ browserSession, sessionStore });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ logged_out: true });
+		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+		expect(browserSession.destroyed).toBe(true);
+		expect(browserSession.isAuthenticated).toBe(false);
+	});
+
+	it("leaves a browser session belonging to a DIFFERENT sid untouched", async () => {
+		// RP-initiated logout for someone else's session, arriving on this
+		// browser's cookie. Destroying it would log out an unrelated user.
+		const browserSession = makeBrowserSession({ sid: "sid-other" });
+		const app = buildApp({ browserSession });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(200);
+		expect(browserSession.destroyed).toBe(false);
+		expect(browserSession.isAuthenticated).toBe(true);
+	});
+
+	it("leaves a browser session that recorded no sid untouched", async () => {
+		// Without a recorded `sid` there is no evidence this cookie belongs to
+		// the session being logged out, so the conservative read wins.
+		const browserSession = makeBrowserSession();
+		const app = buildApp({ browserSession });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(200);
+		expect(browserSession.destroyed).toBe(false);
+	});
+
+	it("completes normally when no session middleware is mounted at all", async () => {
+		// A back-channel-only deployment carries no cookie; the destroy must be
+		// a no-op rather than a TypeError on `req.session`.
+		const app = buildApp();
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ logged_out: true });
+	});
+
+	it("destroys on the front-channel HTML response branch", async () => {
+		const browserSession = makeBrowserSession({ sid: "sid-1" });
+		const sessionRPRegistry = makeSessionRPRegistry({
+			listRPs: vi.fn(async () => [
+				{
+					clientId: "client-1",
+					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
+					registeredAt: new Date(),
+				},
+			]),
+		});
+		const app = buildApp({ browserSession, sessionRPRegistry });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token }, { Accept: "text/html" });
+
+		expect(res.status).toBe(200);
+		expect(res.headers["content-type"]).toMatch(/text\/html/);
+		expect(browserSession.destroyed).toBe(true);
+	});
+
+	it("destroys on the IdP end-session 303 branch", async () => {
+		const browserSession = makeBrowserSession({ sid: "sid-1" });
+		const mockProvider = {
+			kind: "oidc",
+			endSession: vi
+				.fn()
+				.mockResolvedValue({ url: new URL("https://idp.example/end"), method: "GET" }),
+		} as unknown as FederationProviderHandle;
+		const sessionFederationIndex = makeSessionFederationIndex({
+			listFederations: vi.fn(async () => ["google"]),
+		});
+		const app = buildApp({
+			browserSession,
+			sessionFederationIndex,
+			getFederationProviders: () => new Map([["google", mockProvider]]),
+		});
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(303);
+		expect(browserSession.destroyed).toBe(true);
+	});
+
+	it("destroys on the post_logout_redirect_uri 303 branch", async () => {
+		const browserSession = makeBrowserSession({ sid: "sid-1" });
+		const clientRepo = makeClientRepo({
+			findById: vi.fn().mockResolvedValue({
+				clientId: "client-1",
+				allowedRedirectUris: [],
+				allowedScopes: [],
+				postLogoutRedirectUris: ["https://app.example.com/logged-out"],
+			}),
+		});
+		const app = buildApp({ browserSession, clientRepo });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, {
+			id_token_hint: token,
+			post_logout_redirect_uri: "https://app.example.com/logged-out",
+		});
+
+		expect(res.status).toBe(303);
+		expect(browserSession.destroyed).toBe(true);
+	});
+
+	it("destroys the browser session when the UserSession record is already gone", async () => {
+		// The no-op branch is exactly the broken-loop state: the store entry has
+		// expired or was deleted out of band while the cookie still claims to be
+		// authenticated. Ending the cookie here is what unsticks the browser.
+		const browserSession = makeBrowserSession({ sid: "sid-1" });
+		const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(null) });
+		const app = buildApp({ browserSession, sessionStore });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ logged_out: true });
+		expect(browserSession.destroyed).toBe(true);
+	});
+
+	it("a failing destroy is logged, and does not turn a successful cascade into a 5xx", async () => {
+		const logger = createMockLogger();
+		const browserSession = makeBrowserSession({ sid: "sid-1", destroyFails: true });
+		const sessionStore = makeSessionStore();
+		const app = buildApp({ browserSession, sessionStore, logger });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		// The cascade succeeded — the stores are clean and the RPs were told.
+		// A cookie the store could not delete is a weaker failure than
+		// reporting the whole logout as failed, which would invite a retry of
+		// a cascade that already ran.
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ logged_out: true });
+		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	it("a destroy that throws synchronously is logged, and the request still answers", async () => {
+		// An adapter that validates before reaching its own callback throws
+		// instead of calling back, so the promise the route awaits would never
+		// settle and the request would hang. The synchronous guard is what
+		// turns that into the same logged, non-fatal outcome as a callback
+		// error.
+		const logger = createMockLogger();
+		const browserSession = makeBrowserSession({ sid: "sid-1", destroyThrows: true });
+		const sessionStore = makeSessionStore();
+		const app = buildApp({ browserSession, sessionStore, logger });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ logged_out: true });
+		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+		expect(logger.warn).toHaveBeenCalled();
+		expect(browserSession.destroyed).toBe(false);
+	});
+
+	it("does NOT destroy the browser session when the cascade failed", async () => {
+		// A 503 invites a retry; leaving the cookie in place is what lets the
+		// retry identify the same session.
+		const browserSession = makeBrowserSession({ sid: "sid-1" });
+		const refreshFamilyRevocation = makeFamilyRevocation({
+			revokeFamily: vi.fn().mockRejectedValue(new Error("redis down")),
+		});
+		const app = buildApp({ browserSession, refreshFamilyRevocation });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(503);
+		expect(browserSession.destroyed).toBe(false);
 	});
 });
