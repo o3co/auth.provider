@@ -347,7 +347,7 @@ export const createRouter = (
 
 		// When a refusal spends the ephemeral state, and when it does not (#502).
 		//
-		// The rule: **a refusal burns the transaction when the request made a
+		// The rule: **a refusal spends the transaction when the request made a
 		// claim about it, and leaves it alone when it made none.** A `state` is
 		// that claim. Presenting one — right or wrong — is an attempt on this
 		// transaction, and an attempt that failed must not get a second try, so
@@ -365,7 +365,7 @@ export const createRouter = (
 		// | refusal                                    | spends it? |
 		// | ------------------------------------------ | ---------- |
 		// | unknown provider (404)                     | no — no transaction is ever read |
-		// | wrong method for the response mode (405)   | no — refused before the cookie is |
+		// | wrong method for the response mode (405)   | no — refused before the cookie is read |
 		// | no transaction cookie or no store (400)    | nothing to spend |
 		// | transaction lookup failed (500)            | best-effort — the record was presented and cannot be trusted intact |
 		// | no `state` in the callback (400)           | **no** — the claim was never made |
@@ -745,11 +745,14 @@ export const createRouter = (
 	/**
 	 * Bind {@link runCallback} to a parameter source.
 	 *
-	 * The POST binding is gated on the provider having declared
-	 * `responseMode: "form_post"`. An IdP that answers in the query string has
-	 * no reason to POST here, so every federation that predates #479 keeps
-	 * exactly the GET surface it had and a stray POST is refused rather than
-	 * parsed as a callback.
+	 * Each binding is gated on the provider's response mode, so a federation
+	 * has exactly one callback method and the other answers `405`. An IdP that
+	 * answers in the query string has no reason to POST here, so every
+	 * federation that predates #479 keeps exactly the GET surface it had; an
+	 * IdP that answers with a form post has no reason to GET here, and letting
+	 * it through was how a third party reached the transaction with an `<img>`
+	 * tag (#502). Either way the stray method is refused rather than parsed as
+	 * a callback.
 	 */
 	const callbackHandler =
 		(source: "query" | "body") =>
