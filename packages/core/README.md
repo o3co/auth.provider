@@ -24,7 +24,13 @@ import { AppConfigSchema, type AppConfig } from "@o3co/auth-provider-core";
 const config: AppConfig = AppConfigSchema.parse(rawConfig);
 ```
 
-Top-level fields:
+The schema **strips keys it does not declare** — that is Zod's default for an object, and it is what makes the parse a validation rather than a passthrough. It matters here because this parse runs *before* `createApp`, which is where each installed module's own `configSchema` is composed and applied: a section this schema does not know about is gone by the time the module that reads it runs, and most module schemas supply a default, so what follows is not an error but a quietly different deployment.
+
+So the schema declares every configuration section owned by a module in this repository — `oauth.mtls`, `oauth.dpop`, `oauth.deviceAuthorization`, `webauthn`, `memoryRateLimiter` / `redisRateLimiter` and the `redis*` store namespaces included — even though core itself reads none of them. Their bounds and defaults stay with the packages that own them (in each one's `reference.conf` and `configSchema`); the declaration here only keeps the values from being dropped in transit. `module-config-key-parity.test.mts` fails the build if a module declares a key this schema does not.
+
+A module from **outside** this repository is not covered by that check. If one reads its own config section, extend the schema before parsing — `AppConfigSchema.extend({ mySection: … })` — or hand `createApp` the unparsed configuration and let the composed module schemas validate it.
+
+Top-level fields (the sections every deployment carries; module-owned sections are documented by the package that owns them):
 
 | Field | Description |
 | --- | --- |
