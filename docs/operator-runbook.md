@@ -104,6 +104,20 @@ What it deliberately leaves to you (its own header says so): TLS termination
 in front plus `HTTP_TRUST_PROXY` naming that hop; the multi-replica steps above
 before any `--scale`; and every secret.
 
+It also leaves you the **cookie domain's trust boundary**. `__Host-auth.session`
+cannot be set by any other host, but a `form_post` federation (Sign in with
+Apple) additionally issues a path-scoped `__Secure-<session.name>.federation`
+cookie, and `__Secure-` does not stop a sibling subdomain setting it with
+`Domain=<parent>`. A related-domain attacker — a forgotten staging host, a
+dangling DNS record, XSS on a lower-trust app next door — can use that to log a
+victim's browser into the attacker's own federated account. It reaches no
+session and no credential, and there is nothing to configure: the mitigation is
+that no untrusted content runs under the domain your auth cookies are scoped to,
+and that `session.domain` stays `null`. Stated in full, with what the attacker
+needs and what it gets them, in
+[`packages/federation-apple/README.md`](../packages/federation-apple/README.md)
+(#502).
+
 ### Inputs with no default
 
 Boot fails on each of these rather than guessing. All are validated at

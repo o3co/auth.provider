@@ -173,6 +173,42 @@ the reason to upgrade.)
 cookie that is not `Secure` — and since Apple already requires an `https`
 return URL, an Apple deployment is HTTPS-only regardless.
 
+### Before you deploy: every host under your cookie domain is inside the trust boundary
+
+The transaction cookie is named `__Secure-…`, not `__Host-`, because `__Host-`
+requires `Path=/` and this cookie is deliberately scoped to the callback path
+alone. `__Host-` is what pins a cookie to exactly one host; `__Secure-` only
+pins it to HTTPS. Your session cookie defaults to `__Host-` and is enforced as
+such at boot, so the transaction cookie is the one place the Apple flow is
+weaker than the session cookie it replaced
+([#502](https://github.com/o3co/auth.provider/issues/502)).
+
+**What an attacker needs:** control of any sibling subdomain of the domain your
+cookies are scoped to — a forgotten staging host, a dangling DNS record, an XSS
+on a lower-trust app next door, a shared-hosting neighbour. They need nothing
+from this deployment: no session, no `state`, no account.
+
+**What it gets them:** from that subdomain they can set
+`__Secure-<session.name>.federation` with `Domain=<your parent domain>` in a
+victim's browser. They then start their own Sign in with Apple flow, plant
+their own transaction id, and auto-submit their own `state` and `code` to your
+callback. The victim's browser ends up logged into the **attacker's** Apple
+account, and whatever the victim does next is recorded against it. It does not
+read the victim's session, expose credentials, or reach the victim's own
+account — this buys identity confusion, not account takeover.
+
+Signing the cookie would not close it: the attacker's transaction is genuinely
+theirs, so anything the server would accept as its own issuance is something
+they legitimately hold. The property is inherent to a path-scoped cookie.
+
+**What to do about it:** treat every host under your cookie domain as part of
+this deployment. Keep `session.domain = null` (the `__Host-` default), and do
+not run untrusted or lower-trust content on a subdomain of the domain the auth
+cookies live under. That is the same rule the session package's signed CSRF
+token exists to survive on the login routes; here there is no session to bind
+to, because the callback is a cross-site POST that a session cookie does not
+accompany, so the rule is the whole mitigation.
+
 ## Claims
 
 Apple publishes no `userinfo_endpoint`, so the verified id_token (RS256, keys
