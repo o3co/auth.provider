@@ -582,6 +582,25 @@ describe("a cross-site request cannot spend an in-flight transaction (#502)", ()
 		expect(harness.store.get(flow.sid)?.data.federation).toBeDefined();
 	});
 
+	it("keeps a query federation's envelope even when its callback carries a wrong state", async () => {
+		// The one place the rule is deliberately asymmetric. `consumeTransaction`
+		// is a no-op for a query federation, whose envelope lives in the session
+		// and is retired only on the path that matched `state`. Spending it on a
+		// mismatch would be a regression, not a tightening: the session cookie is
+		// SameSite=Lax and IS sent on a top-level cross-site GET, so a third party
+		// could then cancel a Google login with one navigation — the very bug
+		// #502 reports against the form_post transaction. `state` is 128 bits, so
+		// unlimited guesses are worth no more than one anyway.
+		const harness = buildApp();
+		const flow = await startFlow(harness, "query-idp");
+
+		const res = await flow.get({ state: `${flow.state}-tampered`, code: "c" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_state");
+		expect(harness.store.get(flow.sid)?.data.federation).toBeDefined();
+	});
+
 	it("still answers 404 for an unknown provider before any transaction is read", async () => {
 		const { app } = buildApp();
 		const res = await request(app).get("/oauth/federation/unknown/callback");

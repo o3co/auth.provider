@@ -27,9 +27,13 @@
  *
  * `MemoryStore` answers synchronously, which serialises the callbacks and
  * hides the difference. A store with latency — any network store, Redis
- * included — does not, so these tests run against one that defers every answer
- * by a fixed delay. That is the entire reason the rest of the suite never saw
- * this.
+ * included — does not, so these tests run against one that answers out of
+ * band. That is the entire reason the rest of the suite never saw this.
+ *
+ * The concurrent case does not race for its overlap. The store can hold every
+ * read until all of them have arrived, which is what a network hop produces on
+ * its own and what no fixed delay can promise on a loaded runner, so the test
+ * asserts an exact count rather than a lower bound.
  *
  * What actually bounds a concurrent replay is the IdP: an authorization code
  * is single-use at the IdP, every racing callback necessarily carries the same
@@ -59,11 +63,19 @@ const CALLBACK_URL = "https://app.example.com/oauth/federation/apple/callback";
 /**
  * Round-trip latency to give every store answer.
  *
- * Long enough that all of the racing callbacks have issued their `get` before
- * the first one returns, which is the condition a network store meets by
- * default and the in-process `MemoryStore` never meets.
+ * Enough that a store answer is a real async boundary rather than a
+ * synchronous return, which is the one thing `MemoryStore` is not.
  */
 const STORE_LATENCY_MS = 25;
+
+/**
+ * How long a held read waits before giving up and answering anyway.
+ *
+ * Only reached if fewer reads arrive than the test asked to hold, which is a
+ * broken expectation rather than slowness — releasing turns it into a failed
+ * assertion instead of a suite-level timeout.
+ */
+const BARRIER_ESCAPE_MS = 2_000;
 
 /** How many callbacks race. Five is what the #502 reviewer ran. */
 const RACERS = 5;
@@ -112,13 +124,35 @@ function buildApp() {
 	const backing = makeRecordStore(records);
 
 	/**
+	 * Reads currently being held, and how many must arrive before they run.
+	 *
+	 * A fixed delay would leave the overlap to the scheduler: every callback
+	 * has to reach `get` before the first `get` returns, which a loaded CI
+	 * runner need not honour. Holding the reads until all of them have arrived
+	 * constructs the same overlap a network store produces, with no timing
+	 * assumption left in the test.
+	 */
+	let barrier: { needed: number; held: Array<() => void>; giveUp: NodeJS.Timeout } | null = null;
+
+	const releaseBarrier = (): void => {
+		if (!barrier) return;
+		const { held, giveUp } = barrier;
+		barrier = null;
+		clearTimeout(giveUp);
+		for (const resume of held) resume();
+	};
+
+	/**
 	 * The deployment's express-session store, with a network hop in front of
 	 * every method. Nothing else about it differs from the synchronous harness
 	 * store the other federation tests use.
 	 */
 	const sessionStore = {
 		get(sid: string, cb: (err: unknown, record?: unknown) => void) {
-			later(() => backing.get(sid, cb));
+			const run = () => backing.get(sid, cb);
+			if (!barrier) return later(run);
+			barrier.held.push(run);
+			if (barrier.held.length >= barrier.needed) releaseBarrier();
 		},
 		set(sid: string, record: unknown, cb?: (err?: unknown) => void) {
 			later(() => backing.set(sid, record, cb));
@@ -126,6 +160,11 @@ function buildApp() {
 		destroy(sid: string, cb?: (err?: unknown) => void) {
 			later(() => backing.destroy(sid, cb));
 		},
+	};
+
+	/** Hold every read until `count` of them are outstanding, then run them all. */
+	const holdReads = (count: number): void => {
+		barrier = { needed: count, held: [], giveUp: setTimeout(releaseBarrier, BARRIER_ESCAPE_MS) };
 	};
 
 	const app = express();
@@ -163,7 +202,7 @@ function buildApp() {
 		}),
 	);
 
-	return { app, records, apple, userSessionStore };
+	return { app, records, apple, userSessionStore, holdReads };
 }
 
 type Flow = {
@@ -226,17 +265,23 @@ describe("the federation transaction is NOT single-use under concurrency", () =>
 		// bounded by the IdP: they all carry the same authorization code, the IdP
 		// spends it once, and the rest get `502 exchange_failed`.
 		//
+		// The overlap is constructed rather than raced for: `holdReads` keeps
+		// every read outstanding until all of them have arrived, which is what a
+		// store with a network hop does on its own and what no delay can promise
+		// on a loaded runner.
+		//
 		// If this ever becomes atomic, this test fails — deliberately, so the
 		// README's account of the guarantee is revisited in the same change.
 		const harness = buildApp();
 		const flow = await startFlow(harness);
+		harness.holdReads(RACERS);
 
 		const responses = await Promise.all(
 			Array.from({ length: RACERS }, () => flow.post({ state: flow.state, code: "apple-code" })),
 		);
 
-		// The transaction did not serialise them…
-		expect(harness.apple.calls.length).toBeGreaterThan(1);
+		// The transaction did not serialise them: every one of them got through.
+		expect(harness.apple.calls).toHaveLength(RACERS);
 		// …and the IdP's single-use code did: exactly one session is created.
 		expect(responses.filter((res) => res.status === 302)).toHaveLength(1);
 		expect(harness.userSessionStore.create).toHaveBeenCalledTimes(1);
