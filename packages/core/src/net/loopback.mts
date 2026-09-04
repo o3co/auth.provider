@@ -28,9 +28,15 @@
  *     redirect targets must be `https://` — except a loopback host, which is
  *     where a native client's RFC 8252 §7.3 listener and local development
  *     live, and neither can obtain a certificate.
+ *   - **`createAppleProvider`** (`@o3co/auth-provider-federation-apple`, #479):
+ *     the same predicate read the other way round. Apple refuses a loopback
+ *     return URL even over `https`, so the federation carves loopback *out* at
+ *     boot rather than letting the authorization endpoint answer the first
+ *     login with an opaque `invalid_request`. Worth stating here, because it
+ *     shows the vocabulary answers "is this loopback", not "is this allowed".
  *
- * Both print the same operator-facing promise — "localhost, 127.0.0.0/8,
- * [::1]" — and before this module each backed it with its own copy of the
+ * The first two print the same operator-facing promise — "localhost,
+ * 127.0.0.0/8, [::1]" — and before this module each backed it with its own copy of the
  * predicate. The copies drifted within one commit of being written (one
  * accepted unbracketed `::1`, the other did not) under doc comments that were
  * still identical, which is the failure mode #292 moved the trusted-proxy

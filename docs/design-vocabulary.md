@@ -33,7 +33,7 @@ second definition it was never shown; a drift guard can.
 
 | Concept | Home (single definition site) | Consumers | Established by | Guarded |
 | --- | --- | --- | --- | --- |
-| Loopback hostname — "http:// is accepted for loopback hosts only" carve-outs | `packages/core/src/net/loopback.mts` | foundation `checkSecureEndpoint` (#285), session `checkRedirectShape` (#278) | #364 | yes |
+| Loopback hostname — "http:// is accepted for loopback hosts only" carve-outs | `packages/core/src/net/loopback.mts` | foundation `checkSecureEndpoint` (#285), session `checkRedirectShape` (#278), federation-apple `createAppleProvider` (#479 — carves loopback *out*, Apple refusing it even over https) | #364 | yes |
 | Trusted-proxy address vocabulary — "is this hop one of ours?" | `packages/core/src/net/trusted-proxy.mts` | `http.trustProxy` schema, mtls `trusted-proxies` (#280) | #292 | yes |
 | Canonical request URL — "the URL this request reached": configured origin + `req.originalUrl`, never `req.protocol` + `Host` | `packages/core/src/net/request-url.mts` | dpop htu comparison (#292), oauth `/authorize` login round-trip (#356) | #292, #356 | yes |
 | cnf / token-binding comparison matrix | `packages/core/src/grants/confirmationMatch.mts` | oauth refresh grant, token-exchange, protected-resource binding, introspection | #324 | yes |

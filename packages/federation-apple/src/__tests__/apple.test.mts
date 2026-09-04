@@ -116,8 +116,34 @@ describe("createAppleProvider — construction", () => {
 
 	it("refuses a non-https callbackURL, which Apple would reject anyway", () => {
 		expect(() =>
-			createAppleProvider({ ...baseConfig, callbackURL: "http://localhost:3000/cb" }),
+			createAppleProvider({ ...baseConfig, callbackURL: "http://app.example.com/cb" }),
 		).toThrow(/https/i);
+	});
+
+	it.each([
+		["localhost", "https://localhost/cb"],
+		["localhost with a port", "https://localhost:3000/cb"],
+		["the IPv4 loopback", "https://127.0.0.1/cb"],
+		["the rest of 127.0.0.0/8", "https://127.0.0.53/cb"],
+		["the IPv6 loopback", "https://[::1]/cb"],
+	])("refuses a return URL on %s even over https", (_label, callbackURL) => {
+		// Apple refuses a loopback return URL outright — the scheme check alone
+		// lets these through to an opaque `invalid_request` at the authorization
+		// endpoint, which is the failure this guard exists to pre-empt. The
+		// message must name the reason, not just repeat "https".
+		expect(() => createAppleProvider({ ...baseConfig, callbackURL })).toThrow(/loopback/i);
+	});
+
+	it("refuses a callbackURL that is not a URL at all", () => {
+		expect(() => createAppleProvider({ ...baseConfig, callbackURL: "not a url" })).toThrow(
+			/callbackURL/,
+		);
+	});
+
+	it("accepts an ordinary https return URL", () => {
+		expect(() =>
+			createAppleProvider({ ...baseConfig, callbackURL: "https://example.com/cb" }),
+		).not.toThrow();
 	});
 
 	it("accepts a static clientSecret", () => {

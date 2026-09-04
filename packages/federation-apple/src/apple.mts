@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { defineModule } from "@o3co/auth-provider-core";
+import { defineModule, isLoopbackHostname } from "@o3co/auth-provider-core";
 import {
 	codeChallenge,
 	createFederationRedirectPolicy,
@@ -123,9 +123,13 @@ export interface AppleProviderConfig {
 	 */
 	clientId: string;
 	/**
-	 * Return URL registered against the Services ID. Apple refuses a non-`https`
-	 * redirect URI and refuses `localhost` outright, so this is checked at
-	 * construction rather than discovered at the authorization endpoint.
+	 * Return URL registered against the Services ID.
+	 *
+	 * Two separate rules, both checked at construction rather than discovered
+	 * as an opaque `invalid_request` at the authorization endpoint: the scheme
+	 * must be `https`, **and** the host must not be loopback — Apple rejects
+	 * `localhost`, `127.0.0.0/8` and `[::1]` even over `https`, so local
+	 * development needs a tunnel or a dev hostname holding a certificate.
 	 */
 	callbackURL: string;
 	/**
@@ -210,9 +214,34 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	if (!config.callbackURL) {
 		throw new Error(`Apple federation "apple" requires callbackURL`);
 	}
-	if (!config.callbackURL.startsWith("https://")) {
+
+	// Apple's return URL is checked here, at boot, because every way it can be
+	// wrong produces the same opaque `invalid_request` from the authorization
+	// endpoint at the worst possible moment — the first login attempt.
+	let callbackUrl: URL;
+	try {
+		callbackUrl = new URL(config.callbackURL);
+	} catch {
 		throw new Error(
-			`Apple federation "apple" requires an https callbackURL — Apple refuses a plain-http or localhost return URL (got ${config.callbackURL})`,
+			`Apple federation "apple" received a callbackURL that is not a URL: ${config.callbackURL}`,
+		);
+	}
+	if (callbackUrl.protocol !== "https:") {
+		throw new Error(
+			`Apple federation "apple" requires an https callbackURL — Apple refuses a plain-http return URL (got ${config.callbackURL})`,
+		);
+	}
+	// `https` is necessary and not sufficient: Apple refuses a loopback return
+	// URL whatever its scheme, so `https://localhost/cb` clears the check above
+	// and still fails upstream. `isLoopbackHostname` is the repo's one
+	// definition of that vocabulary (#364, `core/src/net/loopback.mts`) — the
+	// same predicate `checkRedirectShape` uses to carve `http://` *in* for local
+	// development, used here to carve loopback *out*. `localhost` is a separate
+	// name from the IP literals and the predicate covers both, along with the
+	// whole 127.0.0.0/8 block and bracketed `[::1]` as `URL.hostname` reports it.
+	if (isLoopbackHostname(callbackUrl.hostname)) {
+		throw new Error(
+			`Apple federation "apple" refuses a loopback callbackURL (${config.callbackURL}) — Apple rejects localhost, 127.0.0.0/8 and [::1] return URLs even over https, so local development needs a tunnel or a dev hostname holding a certificate`,
 		);
 	}
 
