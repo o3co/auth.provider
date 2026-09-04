@@ -98,9 +98,27 @@ interface BrowserSessionLike {
  * logged out. It is compared against `sid` first: a cookie naming a different
  * `sid`, or naming none at all, is left alone, because destroying it would
  * sign out an unrelated user on the strength of an id_token they never held.
- * The narrow case that remains — an authenticated browser whose deployment
- * never recorded `sid` on the session — is covered by `/authorize`'s own
- * liveness check (R1b) rather than by a guess here.
+ * A browser session that recorded no `sid` at all is therefore left alone by
+ * both halves of R1 — this helper and `/authorize`'s liveness check, which
+ * also stands aside when there is no `sid` to resolve. That is deliberate, and
+ * it does not leave the loop open:
+ *
+ *   - Such a session cannot be the subject of an RP-initiated logout in the
+ *     first place. Step 5 above refuses an `id_token_hint` carrying no `sid`
+ *     with `400 invalid_request` long before this helper runs, so there is no
+ *     logout whose effect could be missed.
+ *   - Where a `userSessionStore` IS wired, a code minted from such a session
+ *     is refused at the token endpoint (`grants/authorization.mts`, the
+ *     `userSessionStore && !sid` guard), so it buys no token either.
+ *   - Where one is NOT wired there are no `UserSession` records to delete, no
+ *     `sid` on any token, and no RP-initiated logout at all — the
+ *     backward-compatible composition this endpoint has always declined to
+ *     serve.
+ *
+ * Refusing such a session at `/authorize` instead would revoke authentication
+ * from every deployment whose own login route sets `isAuthenticated` without
+ * recording a `sid`, which is a supported wiring; absence of a `sid` is not
+ * evidence of a dead session.
  *
  * Failure is logged, never propagated. By the time this runs the cascade has
  * already succeeded; reporting the whole logout as failed would invite a
