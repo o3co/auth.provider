@@ -30,10 +30,16 @@ the same HOCON keys through whatever binding you gave them.
 | `single` | Silent. You have declared one replica; in-process state is correct. |
 | unset | Boots, and logs one `replica_unsafe_adapters` warning listing what is held in this process's memory and what each one costs when scaled. |
 
-The guard is keyed on **module name**, not on config, because a composition
-root can wire a module without going through the adapter switches. The list it
-refuses, verbatim (`REPLICA_UNSAFE_MODULE_REASONS` in
-`packages/core/src/boot/replica-safety.mts`):
+The guard reads the declaration each installed module carries on its own
+manifest (`replicaSafety: { unsafe, reason }` on `defineModule`, read by
+`checkReplicaSafety` in `packages/core/src/boot/replica-safety.mts`), not the
+config, because a composition root can wire a module without going through the
+adapter switches. A module that declares nothing is treated as replica-safe, so
+a module of your own that holds per-process state must carry the declaration or
+the guard will not see it (`replicaUnsafeReason(module)` reads any manifest).
+Core's own in-memory modules declare it as follows
+(`REPLICA_UNSAFE_BUNDLED_MODULES`; the names alone are exported as
+`REPLICA_UNSAFE_MODULES`):
 
 | Module name | What forks per replica |
 | --- | --- |
@@ -53,16 +59,30 @@ Two things the guard cannot do:
   whose state is all in its own memory has no shared medium through which to
   see peers. Set `DEPLOYMENT_MODE=multi` as part of scaling, not after
   something breaks.
-- **It only knows the names above.** The standalone template's own in-memory
-  modules are named `standalone:in-memory-session-stores` and
-  `standalone:in-memory-code-repository` (`templates/standalone/src/modules.mts`),
-  and its federation-token store module builds the in-memory adapter when no
-  `federationTokenStore` section is configured — none of those three names is
-  on the list, so `multi` does not refuse them. In the standalone, set the
-  adapter switches yourself rather than relying on the refusal:
-  `USER_SESSION_STORES_ADAPTER=redis`, `OAUTH_CODE_ADAPTER=redis`,
-  `RATE_LIMITER_ADAPTER=redis`, `ACCESS_TOKEN_DENYLIST_ADAPTER=redis`
-  (`templates/standalone/src/buildModules.mts`).
+- **It only sees modules that declare themselves.** The standalone template's
+  own in-memory modules — `standalone:in-memory-session-stores`,
+  `standalone:in-memory-code-repository` and
+  `standalone:in-memory-federation-token-store`
+  (`templates/standalone/src/modules.mts`) — carry the declaration since #455,
+  so `multi` refuses them by name; before #455 they booted. Two per-process
+  fallbacks are still outside the guard and only warn: the login and
+  WebAuthn-options rate limiters when no shared `rateLimiter` is wired
+  (`login_rate_limiter_not_shared`,
+  `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#events-to-page-on)),
+  and express-session's own store when `SESSION_STORAGE_TYPE=memory`.
+
+In the standalone, `DEPLOYMENT_MODE=multi` therefore boots only once every
+store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
+`OAUTH_CODE_ADAPTER=redis`, `RATE_LIMITER_ADAPTER=redis`,
+`ACCESS_TOKEN_DENYLIST_ADAPTER=redis`, `SESSION_STORAGE_TYPE=redis`, and
+`FEDERATION_TOKEN_STORE_TYPE=redis` together with
+`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (32 bytes, base64;
+`templates/standalone/src/buildModules.mts`, `packages/core/config/reference.conf`).
+A deployment that ran `multi` with the default in-memory federation-token store
+before #455/#456 is refused at boot once they land — set the last pair before
+upgrading. `federationTokenStore.type` and `redisFederationTokenStore.*` are
+declared in the standalone's config schema since #456, so the switch and the key
+survive `AppConfigSchema` and reach `buildModules`.
 
 ### The standalone production compose
 
@@ -304,7 +324,7 @@ stream — its level is fixed at `info`.
 | `pkce_config_ignored_s256_is_mandatory` (warn) | `oauth/src/grants/pkce.mts` | a retired PKCE key (or `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) is still set; delete it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |
-| `federationTokenStore: in-memory adapter is for dev/test only …` (warn) | `core/src/federation-tokens/factory.mts` | the standalone builds this store in memory unless a `federationTokenStore` section is configured |
+| `federationTokenStore: in-memory adapter is for dev/test only …` (warn) | `core/src/federation-tokens/factory.mts` | the standalone builds this store in memory unless `federationTokenStore.type = "redis"` (`FEDERATION_TOKEN_STORE_TYPE=redis`) is set (#456) |
 | `[federation-tokens] CRITICAL: running with mode="allow-plaintext" …` (console) | `redis/src/federation-tokens.mts` | `FEDERATION_TOKENS_ALLOW_INSECURE=1` is set in production |
 | `` [buildModules] `repositories.code.type = "redis"` is deprecated `` (console) | `templates/standalone/src/buildModules.mts` | move to `oauth.code.adapter = "redis"` (`OAUTH_CODE_ADAPTER`) |
 
@@ -373,7 +393,8 @@ claim the code makes is for `sAddWithTtl`, a single-key `MULTI`.
 Prefixes are the shipped defaults; every one is overridable so two deployments
 can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX`, `CLIENT_CODE_KEY_PREFIX`,
-`REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX`; `packages/core/config/reference.conf`).
+`REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX`, `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX`;
+`packages/core/config/reference.conf`).
 
 | Key | Type / value | TTL comes from | Source |
 | --- | --- | --- | --- |
