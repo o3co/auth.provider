@@ -189,6 +189,15 @@ describe("sessionModule (static manifest)", () => {
 		// oauth-package concerns, MUST NOT appear in sessionModule.requires.
 		expect(sessionModule.requires).not.toContain("sessionRPRegistry");
 		expect(sessionModule.requires).not.toContain("sessionFamilyIndex");
+		// …and this is also the pin on how far `POST /session/logout` cascades.
+		// It invalidates the `UserSession` record, the subject index and the
+		// federation pair — every store in the list above. It does NOT revoke
+		// refresh-token families: that needs these three keys, and reaching
+		// them would mean depending on `@o3co/auth-provider-oauth` (a
+		// forbidden sibling edge) or writing a second `cascadeLogout`. A widened
+		// cascade must widen this list first, deliberately, not by accident.
+		expect(sessionModule.requires).not.toContain("refreshTokenFamilyRevocation");
+		expect(sessionModule.optional ?? []).not.toContain("refreshTokenFamilyRevocation");
 	});
 
 	it("contributes exactly two routes, both at /session, with distinct ids", () => {

@@ -399,7 +399,7 @@ per-provider (`FEDERATIONS_GOOGLE_CALLBACK_URL`).
 3. **`oauthSessionModule`** — session grant (exchanges an authenticated session for a token)
 4. **`oauthAuthorizationModule`** — authorization-code and refresh-token grants
 5. **`jwksModule`** (`@o3co/auth-provider-core`) — `GET /.well-known/jwks.json` (or `oauth.jwt.jwksPath`); a signing provider publishes its verification keys whether or not an issuer is set
-6. **`sessionModule`** — `POST /session/login`, `POST /session/logout`, `GET/POST /session/oauth/federation/*`
+6. **`sessionModule`** — `POST /session/login`, `POST /session/logout`, `GET/POST /session/oauth/federation/*`. `/session/logout` deletes the `UserSession` record (so `/oauth/introspect` and `/oauth/userinfo` stop honouring tokens minted from that session), the subject index and the federation entries — but it does **not** revoke refresh-token families; `POST /oauth/logout` is the endpoint that runs the full cascade. See [Which logout endpoint invalidates what](../../docs/operator-runbook.md#which-logout-endpoint-invalidates-what).
 7. **`googleFederationModule`** + **`googleFederationConfigModule`** — only when `federations.google.enabled = true`
 8. **`keyStoreModule`** — the signing key store from `oauth.jwt.signingKey`
 9. **`repositoriesModule`** — client and user repositories from `repositories.client` / `repositories.user`

@@ -16,6 +16,9 @@
 
 import type {
 	AppConfig,
+	FederationTokenStore,
+	Logger,
+	SessionFederationIndex,
 	SubjectSessionIndex,
 	UserRepository,
 	UserSessionStore,
@@ -93,6 +96,39 @@ function makeUserSessionStore(): UserSessionStore & { sessions: unknown[] } {
 }
 
 /**
+ * A `UserSessionStore` backed by a real Map, so a logout's delete is
+ * observable rather than merely "was the spy called".
+ */
+function makeLiveUserSessionStore(
+	seed: readonly string[] = [],
+): UserSessionStore & { readonly live: Map<string, unknown> } {
+	const live = new Map<string, unknown>(
+		seed.map((sid) => [
+			sid,
+			{
+				sid,
+				sub: "u-1",
+				authTime: new Date(),
+				createdAt: new Date(),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+			},
+		]),
+	);
+	return {
+		kind: "memory",
+		live,
+		async create() {},
+		async get(sid: string) {
+			return live.get(sid) ?? null;
+		},
+		async delete(sid: string) {
+			live.delete(sid);
+		},
+	} as unknown as UserSessionStore & { readonly live: Map<string, unknown> };
+}
+
+/**
  * Build a test express app with the Session router mounted at "/session".
  *
  * userRepository.authenticate controls the login outcome:
@@ -108,6 +144,14 @@ function buildApp(
 		userRepository?: UserRepository;
 		userSessionStore?: UserSessionStore;
 		subjectSessionIndex?: SubjectSessionIndex;
+		federationTokenStore?: FederationTokenStore;
+		sessionFederationIndex?: SessionFederationIndex;
+		logger?: Logger;
+		/**
+		 * Fields the express-session bag already carries when the request
+		 * arrives — how a logout sees the session a prior login established.
+		 */
+		initialSession?: Record<string, unknown>;
 		sessionTtlMs?: number;
 		regenerateError?: Error;
 		destroyError?: Error;
@@ -125,6 +169,10 @@ function buildApp(
 		} as unknown as UserRepository,
 		userSessionStore,
 		subjectSessionIndex,
+		federationTokenStore,
+		sessionFederationIndex,
+		logger,
+		initialSession,
 		sessionTtlMs,
 		regenerateError,
 		destroyError,
@@ -137,7 +185,7 @@ function buildApp(
 	// regenerateError/destroyError opt-ins simulate session-store failures so tests
 	// can drive the AS-1 500 server_error envelope paths.
 	app.use((req, _res, next) => {
-		const sessionData: Record<string, unknown> = {};
+		const sessionData: Record<string, unknown> = { ...(initialSession ?? {}) };
 		(req as unknown as { session: Record<string, unknown> }).session = {
 			...sessionData,
 			regenerate(cb: (err: Error | null) => void) {
@@ -162,6 +210,13 @@ function buildApp(
 					cb(destroyError);
 					return;
 				}
+				// Mirror express-session: the bag is gone once destroyed. This
+				// is what pins "read `sid` BEFORE destroying" — a handler that
+				// reads it afterwards finds `undefined` and invalidates nothing.
+				const bag = (req as unknown as { session: Record<string, unknown> }).session;
+				for (const key of ["sid", "user", "isAuthenticated", "redirectTo"]) {
+					delete bag[key];
+				}
 				cb(null);
 			},
 		};
@@ -173,6 +228,9 @@ function buildApp(
 		config,
 		...(userSessionStore !== undefined ? { userSessionStore } : {}),
 		...(subjectSessionIndex !== undefined ? { subjectSessionIndex } : {}),
+		...(federationTokenStore !== undefined ? { federationTokenStore } : {}),
+		...(sessionFederationIndex !== undefined ? { sessionFederationIndex } : {}),
+		...(logger !== undefined ? { logger } : {}),
 		...(sessionTtlMs !== undefined ? { sessionTtlMs } : {}),
 	});
 
@@ -897,5 +955,258 @@ describe("Session routes — subject session index (#296)", () => {
 			.set("Content-Type", "application/x-www-form-urlencoded");
 
 		expect(res.status).toBe(200);
+	});
+});
+
+/**
+ * `/session/logout` must invalidate the `UserSession` record, not only the
+ * cookie.
+ *
+ * #506 stamped `sid` on the `session` grant's access token and gave
+ * `/oauth/introspect` the liveness check `/oauth/userinfo` already ran. Both
+ * resolve the `UserSession` record — which this endpoint used to leave alive.
+ * So in the BFF / `auth.proxy` injection topology, whose logout is exactly
+ * this endpoint, a token minted from the session kept introspecting
+ * `active: true` and kept answering at `/userinfo` for its full lifetime
+ * after the user logged out. `/oauth/logout` was unaffected; it runs the full
+ * cascade. This suite pins the endpoint's own half.
+ */
+describe("Session routes — POST /session/logout invalidates the session record", () => {
+	/** A logged-in bag: what a prior `POST /session/login` leaves behind. */
+	const loggedIn = (sid = "sid-1") => ({
+		isAuthenticated: true,
+		sid,
+		user: { id: "u-1", username: "alice" },
+	});
+
+	const silentLogger = () =>
+		({
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		}) as unknown as Logger & { error: ReturnType<typeof vi.fn> };
+
+	it("deletes the UserSession record named by req.session.sid", async () => {
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const { app } = buildApp({ userSessionStore: store, initialSession: loggedIn() });
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({ message: "Logged out successfully" });
+		// The record the liveness checks in `/oauth/introspect` and
+		// `/oauth/userinfo` resolve is gone, so a token carrying this `sid`
+		// stops being honoured.
+		expect(store.live.has("sid-1")).toBe(false);
+	});
+
+	it("removes the subject-index entry, as the login rollback path already does", async () => {
+		const removeSid = vi.fn().mockResolvedValue(undefined);
+		const { app } = buildApp({
+			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
+			subjectSessionIndex: {
+				kind: "memory",
+				addSid: vi.fn(),
+				listSids: vi.fn(),
+				removeSid,
+				removeBySubject: vi.fn(),
+			} as unknown as SubjectSessionIndex,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		// #296: leaving the entry would have `revokeAllForSubject` enumerate a
+		// sid that no longer exists.
+		expect(removeSid).toHaveBeenCalledWith("u-1", "sid-1");
+	});
+
+	it("removes the federation token store and federation index entries for the sid", async () => {
+		const removeFederationTokens = vi.fn().mockResolvedValue(undefined);
+		const removeFederationIndex = vi.fn().mockResolvedValue(undefined);
+		const { app } = buildApp({
+			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
+			federationTokenStore: {
+				kind: "memory",
+				attach: vi.fn(),
+				get: vi.fn(),
+				update: vi.fn(),
+				removeBySid: removeFederationTokens,
+			} as unknown as FederationTokenStore,
+			sessionFederationIndex: {
+				kind: "memory",
+				addFederation: vi.fn(),
+				listFederations: vi.fn(),
+				removeFederation: vi.fn(),
+				removeBySid: removeFederationIndex,
+			} as unknown as SessionFederationIndex,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(removeFederationTokens).toHaveBeenCalledWith("sid-1");
+		expect(removeFederationIndex).toHaveBeenCalledWith("sid-1");
+	});
+
+	it("logs out cleanly in a composition wiring no userSessionStore", async () => {
+		// The backward-compatible shape: no stores at all, nothing to
+		// invalidate, and the endpoint still has to end the browser session.
+		const { app } = buildApp({ initialSession: loggedIn() });
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({ message: "Logged out successfully" });
+	});
+
+	it("takes no store action when the session carries no sid", async () => {
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const deleteSpy = vi.spyOn(store, "delete");
+		const { app } = buildApp({
+			userSessionStore: store,
+			// A deployment whose own login route sets `isAuthenticated` without
+			// recording a `sid` — a supported wiring. There is no record to name.
+			initialSession: { isAuthenticated: true, user: { id: "u-1" } },
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(deleteSpy).not.toHaveBeenCalled();
+		expect(store.live.has("sid-1")).toBe(true);
+	});
+
+	it("still logs the browser out, and logs the failure, when the store delete throws", async () => {
+		const logger = silentLogger();
+		const { app } = buildApp({
+			userSessionStore: {
+				kind: "memory",
+				create: vi.fn(),
+				get: vi.fn(),
+				delete: vi.fn().mockRejectedValue(new Error("store down")),
+			} as unknown as UserSessionStore,
+			logger,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		// A store outage must not turn a logout into a 5xx that leaves the user
+		// holding a live cookie: the cookie is the half this endpoint can always
+		// deliver, and `/authorize`'s R1b liveness check covers the residue.
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({ message: "Logged out successfully" });
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: "sid-1" }),
+			"logout_user_session_delete_failed",
+		);
+	});
+
+	it("does not let a federation-store outage stop the primary invalidation", async () => {
+		const logger = silentLogger();
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const { app } = buildApp({
+			userSessionStore: store,
+			federationTokenStore: {
+				kind: "memory",
+				attach: vi.fn(),
+				get: vi.fn(),
+				update: vi.fn(),
+				removeBySid: vi.fn().mockRejectedValue(new Error("federation store down")),
+			} as unknown as FederationTokenStore,
+			logger,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		// Primary invalidation runs FIRST and is not conditional on the
+		// best-effort hygiene that follows it.
+		expect(store.live.has("sid-1")).toBe(false);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: "sid-1" }),
+			"logout_federation_token_remove_failed",
+		);
+	});
+
+	// The two index removals are the remaining best-effort steps, and their
+	// failure paths were the only lines of `invalidateSessionRecords` no test
+	// reached. Both are hygiene rather than containment — the `UserSession` is
+	// already gone by the time they run — so the contract they have to keep is
+	// that the failure is visible and costs the caller nothing.
+	it("does not let a subject-index outage stop the primary invalidation", async () => {
+		const logger = silentLogger();
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const { app } = buildApp({
+			userSessionStore: store,
+			subjectSessionIndex: {
+				addSid: vi.fn(),
+				removeSid: vi.fn().mockRejectedValue(new Error("subject index down")),
+				pruneExpiredAndList: vi.fn(),
+			} as unknown as SubjectSessionIndex,
+			logger,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(store.live.has("sid-1")).toBe(false);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: "sid-1", sub: "u-1" }),
+			"logout_subject_session_index_remove_failed",
+		);
+	});
+
+	it("does not let a federation-index outage stop the primary invalidation", async () => {
+		const logger = silentLogger();
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const { app } = buildApp({
+			userSessionStore: store,
+			sessionFederationIndex: {
+				addFederation: vi.fn(),
+				removeFederation: vi.fn(),
+				listFederations: vi.fn(),
+				removeBySid: vi.fn().mockRejectedValue(new Error("federation index down")),
+			} as unknown as SessionFederationIndex,
+			logger,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(store.live.has("sid-1")).toBe(false);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: "sid-1" }),
+			"logout_session_federation_index_remove_failed",
+		);
+	});
+
+	it("keeps the 500 envelope when the cookie destroy itself fails", async () => {
+		// Pre-existing contract, deliberately unchanged: if the browser session
+		// survives, the logout did not happen from the browser's point of view.
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const { app } = buildApp({
+			userSessionStore: store,
+			destroyError: new Error("destroy failed"),
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(500);
+		expect(res.body).toMatchObject({ error: "server_error" });
+		// The record still went, so the token minted from this session is dead
+		// even though the cookie survived.
+		expect(store.live.has("sid-1")).toBe(false);
 	});
 });
