@@ -24,6 +24,7 @@ import { createHash } from "node:crypto";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
 import { describe, expect, it, vi } from "vitest";
+import { type AlgorithmPolicy, DEFAULT_SIGNATURE_ALGORITHMS } from "#/fullPki/algorithms.mjs";
 import { CRL_NEGATIVE_CACHE_TTL_MS } from "#/fullPki/crl.mjs";
 import type { GuardedFetch, GuardedRequest } from "#/fullPki/fetchGuard.mjs";
 import { createGuardedFetch } from "#/fullPki/fetchGuard.mjs";
@@ -60,6 +61,11 @@ const RESPONDER_URL = "http://ocsp.test/int";
 const MIRROR_URL = "http://ocsp.test/int-mirror";
 const OID_SHA1 = "1.3.14.3.2.26";
 const OID_NONCE = "1.3.6.1.5.5.7.48.1.2";
+/** The default algorithm policy — what `validate.mts` hands the resolver unless configured otherwise. */
+const POLICY: AlgorithmPolicy = {
+	signatureAlgorithms: DEFAULT_SIGNATURE_ALGORITHMS,
+	minRsaKeyBits: 2048,
+};
 
 /** root → intermediate → leaf, the leaf naming `responders` in its AIA. */
 const chain = async (responders: string | readonly string[] = RESPONDER_URL) => {
@@ -113,11 +119,12 @@ const answeringWithoutNonce =
 
 const resolver = (
 	fetch: GuardedFetch,
-	extra: { requireNonce?: boolean; cacheTtlSeconds?: number } = {},
+	extra: { requireNonce?: boolean; cacheTtlSeconds?: number; algorithms?: AlgorithmPolicy } = {},
 ) =>
 	createOcspResolver({
 		fetch,
 		cacheTtlSeconds: extra.cacheTtlSeconds ?? 3_600,
+		algorithms: extra.algorithms ?? POLICY,
 		...(extra.requireNonce === undefined ? {} : { requireNonce: extra.requireNonce }),
 	});
 
@@ -428,6 +435,89 @@ describe("OCSP resolver — who may sign a response (RFC 6960 §4.2.2.2)", () =>
 		expect(r.size()).toBe(0);
 		await r.resolve(leaf.cert, int.cert, NOW);
 		expect(urls()).toHaveLength(2);
+	});
+});
+
+describe("OCSP resolver — the signature-algorithm policy applies to the answer too (#470)", () => {
+	it("refuses a response signed with SHA-1 as algorithm_not_permitted, and remembers it for the negative window", async () => {
+		// pkijs verifies ecdsa-with-SHA1 and sha1WithRSAEncryption without
+		// complaint, so a SHA-1-signed answer *about* a certificate was
+		// believed while a SHA-1-signed certificate *on the path* was
+		// refused. The refusal is on the response's shape — the OID in its
+		// signatureAlgorithm — not on whether the signature verifies, so it
+		// is remembered the way an unsupported critical extension is:
+		// nothing injected can pin an acceptance this way, and a responder
+		// that signs with SHA-1 costs one probe per window, not one per
+		// request.
+		const { int, leaf } = await chain();
+		const { fetch, urls } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, hash: "SHA-1" }),
+		});
+		const r = resolver(fetch);
+
+		const result = await r.resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!result.ok) {
+			expect(result.detail).toContain("1.2.840.10045.4.1");
+			expect(result.detail).toContain("signature-algorithms");
+		}
+		expect(r.size()).toBe(1);
+		await r.resolve(leaf.cert, int.cert, NOW);
+		expect(urls()).toEqual([RESPONDER_URL]);
+	});
+
+	it("refuses a delegated responder whose certificate the CA signed with SHA-1", async () => {
+		// The responder certificate is not on the validated path, so the
+		// path pass never saw it. It is the one new key an answer can
+		// introduce, and it is held to the same policy as the path.
+		const { int, leaf } = await chain();
+		const responder = await mintOcspResponder("OCSP Responder", 50, int, { hash: "SHA-1" });
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+
+		const result = await resolver(fetch).resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!result.ok) {
+			expect(result.detail).toContain("responder certificate");
+			expect(result.detail).toContain("1.2.840.10045.4.1");
+		}
+	});
+
+	it("refuses a delegated responder whose RSA key is below the configured minimum", async () => {
+		const { int, leaf } = await chain();
+		const responder = await mintOcspResponder("OCSP Responder", 50, int, {
+			algorithm: "rsa-1024",
+		});
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+
+		const result = await resolver(fetch).resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!result.ok) expect(result.detail).toContain("1024-bit RSA key");
+	});
+
+	it("applies the configured allowlist, not a fixed one: ed25519 alone refuses a SHA-256 ECDSA answer", async () => {
+		const { int, leaf } = await chain();
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf }),
+		});
+
+		const result = await resolver(fetch, {
+			algorithms: { signatureAlgorithms: ["ed25519"], minRsaKeyBits: 2048 },
+		}).resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!result.ok) expect(result.detail).toContain("ecdsaWithSHA256");
+	});
+
+	it("still accepts a SHA-256 answer from a SHA-256-certified delegated responder", async () => {
+		const { int, leaf } = await chain();
+		const responder = await mintOcspResponder("OCSP Responder", 50, int);
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+		expect(await resolver(fetch).resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
 	});
 });
 
@@ -868,7 +958,12 @@ describe("OCSP resolver — one request per certificate, not one per caller", ()
 				return mintOcspResponse({ issuer: int, subject, nonce: nonceOf(body) as Uint8Array });
 			},
 		});
-		const r = createOcspResolver({ fetch, cacheTtlSeconds: 3_600, maxCacheEntries: 2 });
+		const r = createOcspResolver({
+			fetch,
+			cacheTtlSeconds: 3_600,
+			maxCacheEntries: 2,
+			algorithms: POLICY,
+		});
 		for (const leaf of leaves)
 			expect(await r.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
 		expect(r.size()).toBe(2);

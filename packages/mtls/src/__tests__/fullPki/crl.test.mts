@@ -22,6 +22,7 @@
 
 import type * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
+import { type AlgorithmPolicy, DEFAULT_SIGNATURE_ALGORITHMS } from "#/fullPki/algorithms.mjs";
 import { CRL_NEGATIVE_CACHE_TTL_MS, createCrlResolver } from "#/fullPki/crl.mjs";
 import type { GuardedFetch } from "#/fullPki/fetchGuard.mjs";
 import type { IssuingDistributionPointOptions, Minted } from "./pkiFactory.mjs";
@@ -50,6 +51,11 @@ const NOW = new Date("2027-01-01T00:00:00Z");
 const INT_CRL_URL = "http://crl.test/int.crl";
 const INT_CRL_MIRROR_URL = "http://crl.test/int-mirror.crl";
 const ROOT_CRL_URL = "http://crl.test/root.crl";
+/** The default algorithm policy — what `validate.mts` hands the resolver unless configured otherwise. */
+const POLICY: AlgorithmPolicy = {
+	signatureAlgorithms: DEFAULT_SIGNATURE_ALGORITHMS,
+	minRsaKeyBits: 2048,
+};
 
 /** root → intermediate → leaf, each non-anchor naming its issuer's distribution point. */
 const chain = async () => {
@@ -135,7 +141,7 @@ describe("CRL resolver — signature verification before caching", () => {
 		const impostor = await mintCa("Impostor", 900);
 		const forged = await mintCrl({ issuer: int, revoked: [], signingKeys: impostor.keys });
 		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: forged });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const first = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(first).toMatchObject({ ok: false, reason: "bad_signature" });
@@ -152,7 +158,7 @@ describe("CRL resolver — signature verification before caching", () => {
 		const { root, int, leaf } = await chain();
 		const genuine = await mintCrl({ issuer: int, revoked: [] });
 		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: genuine });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const wrongIssuer = await resolver.resolve(leaf.cert, root.cert, NOW);
 		expect(wrongIssuer).toMatchObject({ ok: false, reason: "bad_signature" });
@@ -173,7 +179,7 @@ describe("CRL resolver — one fetch per distribution point, not one per caller"
 		const { int, leaf } = await chain();
 		const genuine = await mintCrl({ issuer: int, revoked: [] });
 		const { fetch, calls, release } = deferredGuardedFetch({ [INT_CRL_URL]: genuine });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const lookups = Array.from({ length: 5 }, () => resolver.resolve(leaf.cert, int.cert, NOW));
 		await settle();
@@ -193,7 +199,7 @@ describe("CRL resolver — one fetch per distribution point, not one per caller"
 		// bounds that to one probe per window.
 		const { int, leaf } = await chain();
 		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: "down" });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
 			ok: false,
@@ -240,7 +246,7 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 			extensions: [unknownCriticalExtension()],
 		});
 		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: crl });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const first = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(first).toMatchObject({ ok: false, reason: "unsupported_critical_extension" });
@@ -270,7 +276,7 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 			extensions: [unknownNonCriticalExtension()],
 		});
 		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
 			ok: true,
@@ -290,7 +296,7 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 			entryExtensions: [certificateIssuerEntryExtension("Someone Else")],
 		});
 		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: crl });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
 			ok: false,
@@ -309,7 +315,7 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 		const { int, leaf } = await chain();
 		const crl = await mintCrl({ issuer: int, revoked: [], extensions: [deltaCrlIndicator(7)] });
 		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: crl });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(result).toMatchObject({ ok: false, reason: "unsupported_crl_scope" });
@@ -339,7 +345,7 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 				extensions: [issuingDistributionPoint(scope)],
 			});
 			const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
-			const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+			const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 			const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 			expect(result).toMatchObject({ ok: false, reason: "unsupported_crl_scope" });
@@ -359,7 +365,7 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 			extensions: [issuingDistributionPoint({})],
 		});
 		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
 	});
@@ -386,7 +392,7 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(result.ok).toBe(true);
@@ -419,7 +425,7 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(result.ok).toBe(true);
@@ -452,7 +458,7 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(result).toMatchObject({ ok: false, reason: "unsupported_distribution_point" });
@@ -478,7 +484,7 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 			[INT_CRL_MIRROR_URL]: "down",
 		});
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(result.ok).toBe(true);
@@ -504,7 +510,7 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 			[INT_CRL_MIRROR_URL]: "down",
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(result).toMatchObject({ ok: true, unavailable: [] });
@@ -525,7 +531,7 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
 		expect(calls).toEqual([INT_CRL_URL]);
@@ -547,12 +553,76 @@ describe("CRL resolver — several distribution points on one certificate (#446,
 		const { fetch, calls } = stubGuardedFetch({
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
-		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
 
 		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
 			ok: true,
 			unavailable: [],
 		});
 		expect(calls).toEqual([INT_CRL_URL]);
+	});
+});
+
+describe("CRL resolver — the signature-algorithm policy applies to the CRL too (#470)", () => {
+	it("refuses a CRL signed with SHA-1 as algorithm_not_permitted, and remembers it for the negative window", async () => {
+		// pkijs verifies ecdsa-with-SHA1 and sha1WithRSAEncryption without
+		// complaint, so a SHA-1-signed CRL was believed while a SHA-1-signed
+		// certificate on the path was refused. The decision is on the CRL's
+		// shape — the OID in its signatureAlgorithm — and is made before the
+		// signature is checked, so it is remembered the way an unsupported
+		// critical extension is (#447): nothing injected can pin an
+		// acceptance, a pinned refusal is bounded by the window, and a CA
+		// that signs with SHA-1 costs one probe per window rather than one
+		// fetch per request.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({ issuer: int, revoked: [], hash: "SHA-1" });
+		const { fetch, calls } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
+
+		const first = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(first).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!first.ok) {
+			expect(first.detail).toContain("1.2.840.10045.4.1");
+			expect(first.detail).toContain("signature-algorithms");
+		}
+		expect(resolver.size()).toBe(1);
+
+		const withinWindow = new Date(NOW.getTime() + CRL_NEGATIVE_CACHE_TTL_MS - 1);
+		expect(await resolver.resolve(leaf.cert, int.cert, withinWindow)).toMatchObject({
+			ok: false,
+			reason: "algorithm_not_permitted",
+		});
+		expect(calls).toEqual([INT_CRL_URL]);
+	});
+
+	it("does not let a SHA-1-signed CRL determine anything, not even a revocation", async () => {
+		// The point of the policy is that nothing signed below it is
+		// evidence. A CRL the policy refuses is not consulted for the
+		// serial either way — the caller sees an unavailable status and
+		// applies on-unavailable, as for any other CRL it could not use.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({ issuer: int, revoked: [leaf], hash: "SHA-1" });
+		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600, algorithms: POLICY });
+
+		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
+			ok: false,
+			reason: "algorithm_not_permitted",
+		});
+	});
+
+	it("applies the configured allowlist, not a fixed one: ed25519 alone refuses a SHA-256 ECDSA CRL", async () => {
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({ issuer: int, revoked: [] });
+		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({
+			fetch,
+			cacheTtlSeconds: 3_600,
+			algorithms: { signatureAlgorithms: ["ed25519"], minRsaKeyBits: 2048 },
+		});
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!result.ok) expect(result.detail).toContain("ecdsaWithSHA256");
 	});
 });

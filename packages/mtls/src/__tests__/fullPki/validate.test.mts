@@ -1365,6 +1365,86 @@ const ocspAndCrlChain = () =>
 		int: [ocspAia(ROOT_OCSP_URL), crlDistributionPoints([ROOT_CRL_URL])],
 	});
 
+describe("full-pki revocation — the algorithm policy covers revocation material (#470)", () => {
+	it("refuses, under 'reject', a certificate whose CRL is signed with SHA-1, as algorithm_not_permitted", async () => {
+		// The path pass refuses a SHA-1-signed certificate; the revocation
+		// pass used to believe a SHA-1-signed CRL about it. Same policy, same
+		// configuration key, applied to both — and surfaced as an
+		// unavailable status, so on-unavailable decides, not the CRL.
+		const { root, int, leaf } = await chainPointing({
+			leaf: [crlDistributionPoints([INT_CRL_URL])],
+			int: [crlDistributionPoints([ROOT_CRL_URL])],
+		});
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [], hash: "SHA-1" }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("crl", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("algorithm_not_permitted");
+		}
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "algorithm_not_permitted" }),
+			"mtls_revocation_unavailable_rejected",
+		);
+	});
+
+	it("refuses, under 'reject', a certificate whose OCSP response is signed with SHA-1, as algorithm_not_permitted", async () => {
+		const { root, int, leaf } = await ocspChain();
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, hash: "SHA-1" }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("algorithm_not_permitted");
+		}
+	});
+
+	it("waves the same SHA-1 CRL through under 'allow', with the unavailable warn line", async () => {
+		// A weak signature is an unknown status, not a determined one: the
+		// operator's on-unavailable choice applies exactly as for a CRL
+		// that is unreachable, and the line names the reason.
+		const { root, int, leaf } = await chainPointing({
+			leaf: [crlDistributionPoints([INT_CRL_URL])],
+			int: [crlDistributionPoints([ROOT_CRL_URL])],
+		});
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf], hash: "SHA-1" }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("crl", "allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "algorithm_not_permitted" }),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+});
+
 describe("full-pki revocation — mode = ocsp (#431)", () => {
 	it("accepts a certificate the responder reports good, asking each issuer's responder by POST", async () => {
 		const { root, int, leaf } = await ocspChain();

@@ -569,6 +569,8 @@ export interface MintCrlOptions {
 	readonly extensions?: readonly pkijs.Extension[];
 	/** CRL *entry* extensions, attached to every revoked entry. */
 	readonly entryExtensions?: readonly pkijs.Extension[];
+	/** Digest for the signature. `"SHA-1"` exercises the algorithm policy on revocation material (#470). */
+	readonly hash?: "SHA-256" | "SHA-1";
 }
 
 /** Returns the DER bytes of a signed CRL. */
@@ -609,7 +611,11 @@ export const mintCrl = async (options: MintCrlOptions): Promise<Uint8Array> => {
 	if (options.extensions !== undefined && options.extensions.length > 0) {
 		crl.crlExtensions = new pkijs.Extensions({ extensions: [...options.extensions] });
 	}
-	await crl.sign((options.signingKeys ?? options.issuer.keys).privateKey, "SHA-256", crypto);
+	await crl.sign(
+		(options.signingKeys ?? options.issuer.keys).privateKey,
+		options.hash ?? "SHA-256",
+		crypto,
+	);
 	return new Uint8Array(crl.toSchema(true).toBER(false));
 };
 
@@ -704,6 +710,8 @@ export interface MintOcspResponseOptions {
 	readonly responseStatus?: number;
 	/** Sign with this key instead of the signer's own. */
 	readonly signingKeys?: CryptoKeyPair;
+	/** Digest for the response signature. `"SHA-1"` exercises the algorithm policy on revocation material (#470). */
+	readonly hash?: "SHA-256" | "SHA-1";
 }
 
 const certStatusOf = (options: MintOcspResponseOptions): asn1js.BaseBlock => {
@@ -783,7 +791,11 @@ export const mintOcspResponse = async (options: MintOcspResponseOptions): Promis
 		tbsResponseData,
 		...(attach ? { certs: [signer.cert] } : {}),
 	});
-	await basic.sign((options.signingKeys ?? signer.keys).privateKey, "SHA-256", crypto);
+	await basic.sign(
+		(options.signingKeys ?? signer.keys).privateKey,
+		options.hash ?? "SHA-256",
+		crypto,
+	);
 
 	const response = new pkijs.OCSPResponse({
 		responseStatus: new asn1js.Enumerated({ value: responseStatus }),

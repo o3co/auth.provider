@@ -19,9 +19,11 @@ export {
 	type AlgorithmCheck,
 	type AlgorithmPolicy,
 	checkAlgorithmPolicy,
+	checkSignatureAlgorithm,
 	DEFAULT_SIGNATURE_ALGORITHMS,
 	SIGNATURE_ALGORITHM_NAMES,
 	SIGNATURE_ALGORITHM_OIDS,
+	type SignatureAlgorithmCheck,
 	type SignatureAlgorithmName,
 } from "./algorithms.mjs";
 export {
