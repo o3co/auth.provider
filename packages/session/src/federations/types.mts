@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import type { FederationResponseMode } from "./response-mode.mjs";
+
 export type FederationResult<T> =
 	| { readonly ok: true; readonly value: T }
 	| {
@@ -76,6 +78,31 @@ export interface FederationProvider {
 	readonly scope: readonly string[];
 
 	/**
+	 * How this IdP delivers the authorization response — `"query"` (the
+	 * default, and what every federation written before Sign in with Apple
+	 * assumed) or `"form_post"`.
+	 *
+	 * Declaring `"form_post"` changes three things in the route layer, and
+	 * nothing in the adapter:
+	 *
+	 * 1. the start route appends `response_mode=form_post` to the URL this
+	 *    provider's `buildAuthorizationUrl` returned, so the parameter is
+	 *    written once for every federation instead of in each adapter;
+	 * 2. `POST /oauth/federation/<name>/callback` starts accepting an
+	 *    `application/x-www-form-urlencoded` body, with the same state / PKCE
+	 *    / nonce binding as the GET callback (a provider that does not declare
+	 *    the mode answers 405 there, so no existing federation gains a POST
+	 *    surface);
+	 * 3. the session cookie carrying this federation's ephemeral state is
+	 *    marked `SameSite=None; Secure` for that one session, because the
+	 *    callback arrives as a cross-site POST — see `applyCrossSiteStateCookie`.
+	 *
+	 * Optional, and an unrecognised value is read as the default: absence must
+	 * mean "query" for every provider that predates this field.
+	 */
+	readonly responseMode?: FederationResponseMode;
+
+	/**
 	 * Build the authorization URL for RFC 6749 §4.1 + RFC 7636 code flow.
 	 *
 	 * `codeVerifier` MUST be a cryptographically strong URL-safe random string; the route
@@ -111,6 +138,24 @@ export interface FederationProvider {
 		readonly codeVerifier: string;
 		readonly redirectUri: string;
 		readonly nonce?: string;
+		/**
+		 * The rest of the callback's parameters — query string for a `"query"`
+		 * federation, form body for a `"form_post"` one — with only the string
+		 * values kept.
+		 *
+		 * Present so an IdP that returns identity data *beside* the token
+		 * response can be adapted without a second callback contract: Apple
+		 * sends the end user's name exactly once, in a `user` JSON field on the
+		 * first authorization, and never in the id_token.
+		 *
+		 * **These values are relayed through the user agent and are not signed.**
+		 * The `state` check binds them to this session, which is all it binds:
+		 * an adapter must treat anything read here as self-asserted, and the
+		 * route layer keeps whatever `mapClaims` makes of it under
+		 * `claims.federated[<provider>]` subject to the ordinary promotion
+		 * rules (see `claim-precedence.mts`) — never as an authorization input.
+		 */
+		readonly callbackParams?: Readonly<Record<string, string>>;
 	}): Promise<FederationProfile>;
 }
 

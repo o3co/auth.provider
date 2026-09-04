@@ -45,6 +45,10 @@ export {
 	mergeFederatedClaims,
 	PROMOTABLE_FEDERATED_CLAIMS,
 } from "./federations/claim-precedence.mjs";
+// #479 — a federation may compute its `client_secret` per token exchange
+// (Apple's ES256 JWT) instead of holding a fixed string.
+export type { FederationClientSecret } from "./federations/client-secret.mjs";
+export { resolveClientSecret } from "./federations/client-secret.mjs";
 export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect } from "./federations/helpers.mjs";
@@ -71,6 +75,14 @@ export {
 	isLoopbackHostname,
 	MAX_REDIRECT_URL_LENGTH,
 } from "./federations/redirect-policy.mjs";
+// #479 — `response_mode=form_post` federations (Sign in with Apple).
+export type { FederationResponseMode } from "./federations/response-mode.mjs";
+export {
+	applyCrossSiteStateCookie,
+	DEFAULT_FEDERATION_RESPONSE_MODE,
+	FEDERATION_RESPONSE_MODES,
+	resolveFederationResponseMode,
+} from "./federations/response-mode.mjs";
 export type {
 	EndSessionRequest,
 	EndSessionResult,
