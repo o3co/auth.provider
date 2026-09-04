@@ -491,27 +491,36 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				);
 
 				if (deps.refreshTokenFamilyRotation) {
-					const payload = decodeJwtPayload(refreshToken.token);
-					const jti = payload.jti as string | undefined;
-					const exp = payload.exp as number | undefined;
-					if (typeof jti === "string" && typeof exp === "number") {
-						// Fail-closed, mirroring authorization.mts CP-16: a refresh
-						// token whose family was never registered has no replay
-						// detection behind it, and serving it would quietly break the
-						// RFC 6819 §5.2.2.3 contract the family exists to keep. A
-						// controlled 503 tells the client to retry; `invalid_grant`
-						// would tell it to throw the passkey session away.
-						try {
-							await deps.refreshTokenFamilyRotation.register(jti, familyId, exp * 1000);
-						} catch {
-							return {
-								result: {
-									status: 503,
-									error: "temporarily_unavailable",
-									errorDescription: "refresh token store unavailable",
-								},
-							};
-						}
+					// Fail-closed, mirroring authorization.mts CP-16: a refresh token
+					// whose family was never registered has no replay detection behind
+					// it, and serving it would quietly break the RFC 6819 §5.2.2.3
+					// contract the family exists to keep. A controlled 503 tells the
+					// client to retry; `invalid_grant` would tell it to throw the
+					// passkey session away.
+					//
+					// EVERY way registration can fail lands here, not just a store
+					// outage. Reading the `jti` / `exp` back off the token we just
+					// minted can fail too — an unparseable token, a decode that
+					// throws, a payload missing either claim (an unset
+					// `oauth.refreshToken.expiresIn` produces exactly that, and a
+					// remote signer is free to return claims we did not ask for) — and
+					// the first shape of this code treated an unreadable payload as
+					// "nothing to register" and served the refresh token anyway. That
+					// is the same live-token-with-no-family outcome as the outage,
+					// reached down a quieter branch, so it gets the same answer.
+					const registered = await registerRefreshTokenFamily(
+						deps.refreshTokenFamilyRotation,
+						refreshToken.token,
+						familyId,
+					);
+					if (!registered) {
+						return {
+							result: {
+								status: 503,
+								error: "temporarily_unavailable",
+								errorDescription: "refresh token store unavailable",
+							},
+						};
 					}
 				}
 			}
@@ -532,6 +541,41 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 // ---------------------------------------------------------------------------
 // File-private helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Opens the refresh-token family for a token this grant just minted.
+ *
+ * Returns `true` only when the family is durably registered. Everything else —
+ * a payload that cannot be decoded, one carrying no usable `jti` or `exp`, a
+ * store that throws — returns `false`, and the caller refuses the whole
+ * request. The three are one event to the caller because they have one
+ * consequence: without a registration the token has no rotation record, so
+ * every replay of it would read as a first use (RFC 6819 §5.2.2.3). A boolean
+ * rather than a thrown error keeps that single fail-closed answer in one place
+ * at the call site.
+ *
+ * `exp` is validated as a finite number before the millisecond conversion:
+ * `NaN * 1000` is `NaN`, which a store would happily accept as an expiry and
+ * then never expire (or expire immediately), which is the failure this guard
+ * exists to prevent rather than a variant of it.
+ */
+async function registerRefreshTokenFamily(
+	rotation: NonNullable<GrantDependencies["refreshTokenFamilyRotation"]>,
+	refreshTokenValue: string,
+	familyId: string,
+): Promise<boolean> {
+	try {
+		const payload = decodeJwtPayload(refreshTokenValue);
+		const jti = payload.jti;
+		const exp = payload.exp;
+		if (typeof jti !== "string" || jti.length === 0) return false;
+		if (typeof exp !== "number" || !Number.isFinite(exp)) return false;
+		await rotation.register(jti, familyId, exp * 1000);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 type AssertionParseOk = {
 	ok: true;
