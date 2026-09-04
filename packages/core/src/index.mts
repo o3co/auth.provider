@@ -296,6 +296,13 @@ export type {
 	SupportsRevocation,
 } from "./mfa/types.mjs";
 export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
+// Middleware — CORS for the browser-facing OAuth surface (#500)
+export {
+	browserFacingCorsRoutes,
+	type CorsMiddlewareOptions,
+	type CorsRoute,
+	corsMw,
+} from "./middleware/cors.mjs";
 // Middleware — protected-resource sender-constraint enforcement (RFC 9449 §7.1 / RFC 8705 §3)
 export {
 	type ProtectedResourceBindingOptions,
@@ -369,6 +376,15 @@ export {
 // Exported so consumers import or re-export it rather than defining a copy;
 // the designVocabulary drift guard fails any second definition.
 export { isLoopbackHostname } from "./net/loopback.mjs";
+// The serialized-origin vocabulary (#500) — what `cors.allowedOrigins` may
+// carry. Enforced by the config schema at boot and re-applied by `corsMw`;
+// exported so a consumer assembling its own CORS policy holds origins to the
+// same rules and refuses in the same words.
+export {
+	checkSerializedOrigin,
+	describeSerializedOriginRejection,
+	type SerializedOriginRejection,
+} from "./net/origin.mjs";
 // The registered-redirect-URI shape vocabulary (#395) — enforced by
 // ClientEntrySchema at boot; exported so a custom ClientRepository, which
 // bypasses that schema by design, can hold its registrations to the same

@@ -31,6 +31,7 @@ import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { planDiscoveryRoute } from "../discovery/planRoute.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { browserFacingCorsRoutes, corsMw } from "../middleware/cors.mjs";
 import { protectedResourceBindingMw } from "../middleware/protectedResourceBinding.mjs";
 import {
 	type DispatchPolicy,
@@ -574,6 +575,40 @@ export function assembleApp(
 
 	// Step 2: Construct router (§5.6 step 2).
 	const router: Router = RouterCtor();
+
+	// CORS, FIRST — before every other middleware and every route (#500).
+	//
+	// Order is the whole design here. A preflight carries no `Authorization`
+	// and no body, so it must be answered before anything that would inspect
+	// either; and a browser can only read an error response — the `400
+	// invalid_grant` an SPA most needs to see — if `Access-Control-Allow-Origin`
+	// is already on the response when a downstream handler ends it. Headers set
+	// on the way IN survive whatever the route does; headers set on the way out
+	// would not exist for a response that never came back through here.
+	//
+	// Mounted on an ALLOWLIST of paths, which is the opposite polarity to the
+	// sender-constraint mount below, and deliberately so. That one guards a
+	// credential and must therefore cover routes core has never heard of (#327);
+	// this one GRANTS a cross-origin read, so a route core has never heard of is
+	// exactly the route that must not silently acquire it. `corsMw` returns null
+	// for an empty `cors.allowedOrigins`, so a deployment that has not opted in
+	// gains nothing at all — not even a `Vary` header.
+	{
+		const components = frozen.components as Record<string, unknown>;
+		const config = components.config as
+			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { jwksPath?: unknown } } }
+			| undefined;
+		const configured = config?.cors?.allowedOrigins;
+		if (Array.isArray(configured) && configured.length > 0) {
+			const logger = components.logger as Logger | undefined;
+			const mw = corsMw({
+				allowedOrigins: configured as readonly string[],
+				routes: browserFacingCorsRoutes(config ?? {}),
+				...(logger ? { logger } : {}),
+			});
+			if (mw !== null) router.use(mw);
+		}
+	}
 
 	// The paths the protected-resource sender-constraint middleware (#264)
 	// must NOT run on. Everything else is guarded — the mount below is GLOBAL,

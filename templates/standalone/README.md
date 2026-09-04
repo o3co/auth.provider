@@ -200,7 +200,64 @@ Two configuration notes:
   request.
 - If your login UI is served from a **different origin** than the provider,
   list that origin under `session.csrf.trustedOrigins` in your HOCON config.
-  `cors.allowedOrigins` no longer confers CSRF trust.
+  `cors.allowedOrigins` does not confer CSRF trust — see
+  [CORS](#cors) for what it does confer.
+
+### CORS
+
+| Variable | Default | Description |
+|---|---|---|
+| `CORS_ALLOWED_ORIGINS` | *(empty — CORS off)* | Comma-separated list of browser origins allowed to read the token, userinfo, revocation and discovery/JWKS responses |
+
+A browser app served from a different origin than this provider — an SPA on
+`https://app.example.com` against a provider on `https://auth.example.com` —
+cannot call the token endpoint at all unless that origin is on
+`cors.allowedOrigins`. Set it and the provider answers preflights and stamps
+`Access-Control-Allow-Origin` on the five endpoints a browser has a legitimate
+reason to call cross-origin:
+
+| Endpoint | Methods | Why |
+|---|---|---|
+| `/oauth/token` | `POST` | The PKCE code exchange and refresh — the call an SPA cannot avoid |
+| `/oauth/userinfo` | `GET`, `POST` | OIDC Core §5.3 defines both |
+| `/oauth/revoke` | `POST` | RFC 7009 §2.1 — a public client revoking its own tokens on sign-out |
+| `/.well-known/openid-configuration` | `GET` | Discovery, fetched by browser client libraries |
+| `/.well-known/jwks.json` | `GET` | Same; follows `oauth.jwt.jwksPath` when you override it |
+
+`/oauth/introspect` and `/oauth/authorize` are deliberately **not** included.
+Introspection is server-to-server and already refuses public clients, so no
+browser could use it; `/authorize` is a top-level navigation rather than a
+`fetch`, and CORS has no say over where a browser may navigate.
+
+```hocon
+cors {
+  allowedOrigins = ["https://app.example.com", "http://localhost:5173"]
+}
+```
+
+or `CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`.
+
+**Matching is exact string equality against the `Origin` header**, and every
+shape that could not match fails at boot naming its index rather than sitting
+in the config admitting nobody. So: no trailing slash
+(`https://app.example.com/`), no explicit default port (`:443`), no path, no
+uppercase host, and **no wildcard** — there is no subdomain matching and there
+is not going to be. `https` is required except for a loopback host
+(`localhost`, `127.0.0.0/8`, `[::1]`), which is the carve-out that lets a
+front-end dev server work without a certificate.
+
+**Credentials are never allowed.** The provider sends no
+`Access-Control-Allow-Credentials`, so an allowlisted origin can read these
+responses and cannot use the browser's session cookie. That is deliberate: a
+cross-origin SPA here is a public client using PKCE and needs no cookie, while
+the cookie it would otherwise gain reaches the `session` grant — which
+exchanges an authenticated browser session for tokens. If your app needs that
+grant, serve it same-origin or put a BFF in front.
+
+Every response from these five routes carries `Vary: Origin`, including the
+ones with no CORS headers, so a shared cache cannot hand one origin's response
+to another. An empty list (the default) means the middleware is not mounted at
+all — no headers, no `Vary`, nothing changed.
 
 ### Google Federation
 

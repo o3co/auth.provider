@@ -40,7 +40,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `federations` | フェデレーションプロバイダー — `z.record(string, { enabled, type?, ...passthrough })`。組み込みタイプ: `"google"`, `"github"`。 |
 | `repositories` | client、user、code の Repository 設定 |
 | `endpoints` | `login`、`client`、`authCallback` ルートのパスオーバーライド |
-| `cors.allowedOrigins` | CORS 許可オリジン。#272 以降、CSRF の信頼は**与えない**（`session.csrf.trustedOrigins` を使う）。 |
+| `cors.allowedOrigins` | token / userinfo / revocation / discovery・JWKS のレスポンスを読める browser origin（#500 で `corsMw` が消費するようになった）。空（既定）なら CORS は無効。#272 以降、CSRF の信頼は**与えない**（`session.csrf.trustedOrigins` を使う）。 |
 
 ### グラントシステム
 
