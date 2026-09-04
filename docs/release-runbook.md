@@ -29,15 +29,15 @@ git diff "$LAST_TAG"..HEAD --stat
 # Then run /multi-agent-review on the diff range
 ```
 
-Before the roll-up commit, the mechanical part of R6 step 5 — placeholders in
-operator-facing strings that the cut is supposed to stamp. This is how
-`removedIn: "this release (#330)"` shipped in v0.10.0 *and* v0.11.0 (#458): the
-grep below has to be read rather than merely run — it matches the doc comments
-that describe the convention as well as any real placeholder, and the block
-says how to tell them apart. Backing it up,
-`packages/core/src/config/__tests__/removedIn.drift.test.mts` fails the cut that
-moves a still-placeholdered PR out of `## [Unreleased]`, so a miss there is a
-red CI run rather than a released error message naming no release.
+Before the roll-up commit, run the mechanical part of R6 step 5 — the hunt for
+placeholders in operator-facing strings that the cut is supposed to stamp. This
+is how `removedIn: "this release (#330)"` shipped in v0.10.0 *and* v0.11.0
+(#458): the grep below has to be read rather than merely run — it matches the
+doc comments that describe the convention as well as any real placeholder, and
+the block says how to tell them apart. Backing it up,
+`packages/core/src/config/__tests__/removedIn.drift.test.mts` fails the cut
+that moves a still-placeholdered PR out of `## [Unreleased]`, so a miss there
+is a red CI run rather than a released error message naming no release.
 
 ```bash
 # Every operator-facing string still saying "this release" — stamp each with
