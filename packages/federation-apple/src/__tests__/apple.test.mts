@@ -400,6 +400,50 @@ describe("exchangeCode", () => {
 		await expect(p.exchangeCode({ ...exchangeArgs, nonce: undefined })).rejects.toThrow(/nonce/i);
 	});
 
+	it("fails closed when the token response exposes no claims at all", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({
+			access_token: "at",
+			expires_in: 3600,
+			claims: () => undefined,
+		});
+		const p = createAppleProvider(baseConfig);
+		await expect(p.exchangeCode(exchangeArgs)).rejects.toThrow(/sub/i);
+	});
+
+	it("falls back to a one-hour expiry when Apple sends no expires_in", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({
+			...appleTokenResponse(),
+			expires_in: undefined,
+		});
+		const p = createAppleProvider(baseConfig);
+		const profile = await p.exchangeCode(exchangeArgs);
+		const seconds = Math.round(((profile.expiresAt as Date).getTime() - Date.now()) / 1000);
+		expect(seconds).toBeGreaterThan(3500);
+		expect(seconds).toBeLessThanOrEqual(3600);
+	});
+
+	it("leaves isPrivateEmail absent when there is neither a marker nor an email to judge", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce(
+			appleTokenResponse({ email: undefined, is_private_email: undefined }),
+		);
+		const p = createAppleProvider(baseConfig);
+		const profile = await p.exchangeCode(exchangeArgs);
+		expect(profile.email).toBeUndefined();
+		expect(profile.isPrivateEmail).toBeUndefined();
+	});
+
+	it.each([
+		["a JSON scalar", "123"],
+		["a JSON null", "null"],
+		["an empty string", ""],
+		["a name object with no usable parts", JSON.stringify({ name: { firstName: "" } })],
+	])("ignores a user body that is %s", async (_label, user) => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce(appleTokenResponse());
+		const p = createAppleProvider(baseConfig);
+		const profile = await p.exchangeCode({ ...exchangeArgs, callbackParams: { user } });
+		expect(profile.name).toBeUndefined();
+	});
+
 	it("fails closed when the id_token carries no sub", async () => {
 		mockAuthorizationCodeGrant.mockResolvedValueOnce(appleTokenResponse({ sub: undefined }));
 		const p = createAppleProvider(baseConfig);
@@ -560,6 +604,13 @@ describe("endSession", () => {
 		// than a redirect to somewhere invented.
 		const p = createAppleProvider(baseConfig);
 		await expect(p.endSession({})).rejects.toThrow(/end_session_endpoint|postLogoutRedirectUri/);
+	});
+
+	it("rejects an invalid postLogoutRedirectUri rather than redirecting to it", async () => {
+		const p = createAppleProvider(baseConfig);
+		await expect(p.endSession({ postLogoutRedirectUri: "not a url" })).rejects.toThrow(
+			/postLogoutRedirectUri/,
+		);
 	});
 
 	it("rejects an invalid configured endpoint", async () => {
