@@ -36,6 +36,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { vi } from "vitest";
+import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
 import type { FederationProvider } from "#/federations/types.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
@@ -51,6 +52,49 @@ type StoredSession = {
 };
 
 export type HarnessSessionStore = Map<string, StoredSession>;
+
+/**
+ * The transaction cookie these harness apps issue. Named from a session cookie
+ * name the harness picks, and passed to the router explicitly, so a test never
+ * has to guess at the router's own fallback.
+ */
+export const HARNESS_SESSION_COOKIE_NAME = "harness.session";
+export const HARNESS_TRANSACTION_COOKIE_NAME = deriveFederationTransactionCookieName(
+	HARNESS_SESSION_COOKIE_NAME,
+);
+
+/**
+ * Records held by the shim's express-session `Store`, keyed exactly as the
+ * route keys them. The federation transaction records land here (#494).
+ */
+export type HarnessRecordStore = Map<string, unknown>;
+
+/**
+ * The `req.sessionStore` an express-session deployment exposes, reduced to the
+ * three methods the federation transaction store calls.
+ *
+ * Backed by its own map rather than by {@link HarnessSessionStore}, whose
+ * entries have a session-specific shape. The real thing is one store holding
+ * both, and that is what `Federation.applicationCookie.test.mts` exercises
+ * against the actual `MemoryStore`.
+ */
+export function makeRecordStore(records: HarnessRecordStore) {
+	return {
+		get(sid: string, cb: (err: unknown, record?: unknown) => void) {
+			cb(null, records.get(sid));
+		},
+		set(sid: string, record: unknown, cb?: (err?: unknown) => void) {
+			// Round-tripped through JSON the way every real store does, so a
+			// route cannot accidentally depend on holding the same object.
+			records.set(sid, JSON.parse(JSON.stringify(record)) as unknown);
+			cb?.();
+		},
+		destroy(sid: string, cb?: (err?: unknown) => void) {
+			records.delete(sid);
+			cb?.();
+		},
+	};
+}
 
 /** The deployment default this repo's config schema encourages: Lax, non-Secure locally. */
 const defaultCookie = (): SessionCookieAttributes => ({
@@ -69,8 +113,9 @@ function makeSessionObject(
 	const session: Record<string, unknown> = {
 		...entry.data,
 		// The attribute bag express-session exposes as `req.session.cookie`, and
-		// the object `applyCrossSiteStateCookie` relaxes. Shared by reference with
-		// the store entry so a route's mutation survives to the response.
+		// Shared by reference with the store entry, so anything a route wrote
+		// there would survive to the response — which is how this harness can
+		// still show that nothing writes there any more.
 		cookie: entry.cookie,
 		save(cb?: (err: unknown) => void) {
 			const current = (req as unknown as { session: Record<string, unknown> }).session;
@@ -80,9 +125,18 @@ function makeSessionObject(
 			return this as unknown as import("express-session").Session;
 		},
 		regenerate(cb?: (err: unknown) => void) {
-			// Session-ID rotation: the data goes, the cookie attributes stay (a
-			// regenerated session is still delivered to the same browser).
-			store.set(key, { data: {}, cookie: (store.get(key) ?? { cookie: defaultCookie() }).cookie });
+			// Session-ID rotation, as express-session actually performs it:
+			// `Store.prototype.regenerate` destroys the record and calls
+			// `store.generate`, which builds a brand-new session AND a brand-new
+			// `new Cookie(cookieOptions)` from the DEPLOYMENT's configuration.
+			//
+			// The data goes and so do the cookie attributes. This harness used to
+			// model the opposite — attributes carried across the regenerate — and
+			// that mismodelling is a direct reason #494 went unnoticed: it made a
+			// relaxed cookie look like something one success path tidied up, when
+			// in reality regenerate is the only thing that ever reset it and it
+			// runs on the success path alone.
+			store.set(key, { data: {}, cookie: defaultCookie() });
 			const fresh = makeSessionObject(store, key, req);
 			(req as unknown as { session: Record<string, unknown> }).session = fresh;
 			cb?.(null);
@@ -102,8 +156,12 @@ function makeSessionObject(
  * attributes into `Set-Cookie`, deferred to `res.end` so that a route which
  * relaxed them mid-request is the one the browser hears about.
  */
-export function makeSessionApp(store: HarnessSessionStore): express.Express {
+export function makeSessionApp(
+	store: HarnessSessionStore,
+	records: HarnessRecordStore = new Map(),
+): express.Express {
 	const app = express();
+	const sessionStore = makeRecordStore(records);
 	app.use((req, res, next) => {
 		const cookieHeader = req.headers.cookie ?? "";
 		const match = cookieHeader.match(/(?:^|;\s*)sid=([^;]+)/);
@@ -111,6 +169,8 @@ export function makeSessionApp(store: HarnessSessionStore): express.Express {
 
 		const session = makeSessionObject(store, id, req);
 		(req as unknown as { session: Record<string, unknown> }).session = session;
+		// What express-session puts on every request it handles.
+		(req as unknown as { sessionStore: unknown }).sessionStore = sessionStore;
 
 		const originalEnd = res.end.bind(res);
 		res.end = ((...args: Parameters<typeof originalEnd>) => {
@@ -192,6 +252,8 @@ export function makePermissivePolicy() {
 export type HarnessApp = {
 	app: express.Express;
 	store: HarnessSessionStore;
+	/** Federation transaction records, as the route wrote them (#494). */
+	records: HarnessRecordStore;
 	userSessionStore: ReturnType<typeof makeUserSessionStore>;
 	federationTokenStore: ReturnType<typeof makeFederationTokenStore>;
 	sessionFederationIndex: SessionFederationIndex;
@@ -215,7 +277,8 @@ export function buildFederationApp({
 	subjectSessionIndex?: SubjectSessionIndex;
 }): HarnessApp {
 	const store: HarnessSessionStore = new Map();
-	const app = makeSessionApp(store);
+	const records: HarnessRecordStore = new Map();
+	const app = makeSessionApp(store, records);
 	const userSessionStore = makeUserSessionStore();
 	const federationTokenStore = makeFederationTokenStore();
 	const sessionFederationIndex = makeSessionFederationIndex();
@@ -233,8 +296,9 @@ export function buildFederationApp({
 			sessionFederationIndex,
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			federationTokenStore,
+			federationTransactionCookieName: HARNESS_TRANSACTION_COOKIE_NAME,
 		}),
 	);
 
-	return { app, store, userSessionStore, federationTokenStore, sessionFederationIndex };
+	return { app, store, records, userSessionStore, federationTokenStore, sessionFederationIndex };
 }

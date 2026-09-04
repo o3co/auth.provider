@@ -24,6 +24,7 @@ import {
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
+import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
 import type { FederationProvider } from "./federations/types.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
@@ -192,6 +193,12 @@ export const sessionModule = defineModule<
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),
 						federationTokenStore: deps.federationTokenStore,
 						sessionTtlMs: config.session.maxAge,
+						// #494: named after the deployment's own session cookie, the
+						// way the CSRF cookie is, so an operator reading `Set-Cookie`
+						// can tell whose it is.
+						federationTransactionCookieName: deriveFederationTransactionCookieName(
+							config.session.name,
+						),
 						logger: deps.logger ?? consoleLogger,
 					}),
 				};
