@@ -34,6 +34,9 @@
  *   - that the family the grant registers rotates once and then reports a
  *     replay, driven through core's real store + rotation wrapper rather than a
  *     spy, so the RFC 6819 §5.2.2.3 semantics are the shared ones;
+ *   - that no refresh token is served unless its family was registered — a
+ *     store outage, a decode that throws, and a payload missing `jti` or `exp`
+ *     all answer 503 and return no tokens at all;
  *   - the DPoP `cnf.jkt` binding, on the same public-client /
  *     `bindConfidentialClientRefreshTokens` gate `authorization.mts` and
  *     `refreshToken.mts` apply.
@@ -65,11 +68,24 @@ vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),
 }));
 
+// Spied, not replaced: the default implementation is the real one, so every
+// test below exercises the genuine decode. Only the unregisterable-token cases
+// override it, one call at a time, to reach branches a correctly minted token
+// cannot produce.
+vi.mock("#/internal/_jwtPayload.mjs", async () => {
+	const actual = await vi.importActual<typeof import("#/internal/_jwtPayload.mjs")>(
+		"#/internal/_jwtPayload.mjs",
+	);
+	return { decodeJwtPayload: vi.fn(actual.decodeJwtPayload) };
+});
+
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
+import { decodeJwtPayload } from "#/internal/_jwtPayload.mjs";
 import { verifyWebAuthnAssertion } from "#/internal/verification.mjs";
 import { webauthnModule } from "#/module.mjs";
 
 const mockVerifyAssertion = vi.mocked(verifyWebAuthnAssertion);
+const mockDecodeJwtPayload = vi.mocked(decodeJwtPayload);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -407,6 +423,102 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 
 		expect(result.status).toBe(503);
 		expect("error" in result && result.error).toBe("temporarily_unavailable");
+		expect("tokens" in result).toBe(false);
+	});
+
+	// -------------------------------------------------------------------------
+	// A token that cannot be registered must not be served either
+	//
+	// Registration needs the `jti` and `exp` of the token just minted. Reading
+	// them back can fail — the decode can throw, or return a payload missing
+	// either claim — and the first shape of this code treated that as "nothing
+	// to register" and returned the refresh token anyway. That is the same
+	// outcome as the store outage above (a live refresh token with no rotation
+	// record and no replay detection) reached down a different branch, so it
+	// gets the same fail-closed answer.
+	// -------------------------------------------------------------------------
+
+	it("answers 503 and serves nothing when the minted token cannot be decoded", async () => {
+		const register = vi.fn(async () => {});
+		const deps = await makeDeps({
+			refreshTokenFamilyRotation: {
+				register,
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+			},
+		});
+		mockDecodeJwtPayload.mockImplementationOnce(() => {
+			throw new Error("decode blew up");
+		});
+
+		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
+
+		expect(result.status).toBe(503);
+		expect("error" in result && result.error).toBe("temporarily_unavailable");
+		expect("tokens" in result).toBe(false);
+		expect(register).not.toHaveBeenCalled();
+	});
+
+	it("answers 503 and serves nothing when the minted token carries no jti", async () => {
+		const register = vi.fn(async () => {});
+		const deps = await makeDeps({
+			refreshTokenFamilyRotation: {
+				register,
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+			},
+		});
+		mockDecodeJwtPayload.mockReturnValueOnce({ exp: Math.floor(Date.now() / 1000) + 60 });
+
+		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
+
+		expect(result.status).toBe(503);
+		expect("error" in result && result.error).toBe("temporarily_unavailable");
+		expect("tokens" in result).toBe(false);
+		expect(register).not.toHaveBeenCalled();
+	});
+
+	it("answers 503 and serves nothing when the minted token carries no exp", async () => {
+		const register = vi.fn(async () => {});
+		const deps = await makeDeps({
+			refreshTokenFamilyRotation: {
+				register,
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+			},
+		});
+		mockDecodeJwtPayload.mockReturnValueOnce({ jti: "a-jti-with-no-exp" });
+
+		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
+
+		expect(result.status).toBe(503);
+		expect("error" in result && result.error).toBe("temporarily_unavailable");
+		expect("tokens" in result).toBe(false);
+		expect(register).not.toHaveBeenCalled();
+	});
+
+	it("answers 503 when oauth.refreshToken.expiresIn is unset, so the token has no exp", async () => {
+		// The same guard reached without touching the decoder: no configured TTL
+		// means `generateToken` emits no `exp` claim, so the family would have no
+		// expiry to register under. A misconfiguration must not degrade into an
+		// unregistered refresh token.
+		const noTtlConfig = {
+			oauth: {
+				jwt: { issuer: ISSUER },
+				accessToken: { expiresIn: ACCESS_TOKEN_TTL },
+				refreshToken: {},
+			},
+		} as unknown as GrantDependencies["config"];
+
+		const { result } = await createWebAuthnGrant(
+			await makeDeps({
+				config: noTtlConfig,
+				refreshTokenFamilyRotation: {
+					register: vi.fn(async () => {}),
+					rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+				},
+			}),
+		).handle(makeCtx(makeClient()));
+
+		expect(result.status).toBe(503);
+		expect("tokens" in result).toBe(false);
 	});
 
 	it("still issues when no rotation component is wired", async () => {
