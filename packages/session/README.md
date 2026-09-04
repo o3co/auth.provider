@@ -194,11 +194,23 @@ The name is derived from `session.name` the way the CSRF cookie's is, so it inhe
 
 The transaction is what binds the callback to the browser that started it, which is the property the session cookie used to provide. The `state` comparison is unchanged and still runs; the transaction cookie is an addition to it, never a replacement. A caller who presents a stolen `state` without the matching transaction cookie is refused before `state` is read at all.
 
-Both the record and the cookie are dropped on every callback exit that **judged** the transaction — success, `invalid_state`, `exchange_failed`, `unknown_user` alike — so a transaction is single-use in the strict sense.
+Both the record and the cookie are dropped on every callback exit that **judged** the transaction — success, `invalid_state`, `exchange_failed`, `unknown_user` alike.
 
 They are deliberately *not* dropped by a refusal that judged nothing ([#502](https://github.com/o3co/auth.provider/issues/502)). The rule is: **a refusal spends the transaction when the request made a claim about it, and leaves it alone when it made none.** A `state` is that claim. A callback carrying no `state` claims nothing and costs nothing (`400 invalid_request`, record untouched); a GET is refused with `405` before the cookie is read at all. A *wrong* `state` is different in kind — that is an attempt on this transaction, and it still spends it, so a guess gets no second try. The distinction matters because the cookie is `SameSite=None` by necessity, so it accompanies any cross-site request to the callback path: while every refusal consumed the record, a third party could destroy a victim's in-flight login with one `<img>` tag.
 
 An abandoned flow leaves only the short-lived cookie, and the record expires with it: the expiry is written into the record as `cookie.expires`, which is exactly what `MemoryStore` reaps on read and what `connect-redis` turns into the key's `EX`.
+
+##### What "single use" guarantees, and what enforces it
+
+Retiring the record is a `get` followed by a `destroy`, and those are two round trips. The express-session `Store` API is `get` / `set` / `destroy`: there is no compare-and-delete on it, and no atomic read-and-consume can be composed from the three. So the guarantee is worth stating exactly ([#502](https://github.com/o3co/auth.provider/issues/502)):
+
+| | |
+|---|---|
+| **Guaranteed** | A callback arriving *after* an earlier one completed its delete finds no record and is refused. That covers the replay this is for: a `code` and `state` lifted from a proxy log, the back button, a retried request. |
+| **Not guaranteed** | Callbacks that *overlap*. Two that both read the record before either deletes it both pass the `state` comparison and both reach `exchangeCode`. `MemoryStore` answers synchronously and happens to serialise them; a store with network latency does not. |
+| **What bounds the overlap** | The IdP. An authorization code is single-use at the IdP, racing callbacks necessarily carry the same one, and at most one exchange succeeds however many get that far — the rest get `502 exchange_failed`. PKCE binds that exchange to the verifier held in the record. |
+
+This is weaker than `DeviceCodeStore` (#298), which *is* an atomic read-and-consume with a racing conformance test. The difference is the API each works over: `DeviceCodeStore` owns its adapter and can push the consume into one Redis round trip, while a federation transaction deliberately shares the session store rather than adding a component slot of its own — a slot that would have to be declared in `AppConfigSchema` and configured in every deployment. Strict atomicity here means paying that, for a property the IdP already provides. `Federation.transactionConcurrency.test.mts` pins both halves so neither the code nor this table can drift from the other.
 
 A `"query"` federation is untouched by all of this. Its callback is a same-site top-level GET, its envelope stays in `req.session.federation`, and its authorization URL, cookies and error surface are byte-for-byte what they were.
 
