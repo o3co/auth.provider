@@ -120,7 +120,7 @@ type RealApp = {
  * its signed cookie, and `/peek` reports what the session looks like once the
  * middleware has loaded it back out of the store on a later request.
  */
-function buildRealApp(): RealApp {
+function buildRealApp({ rolling = false }: { rolling?: boolean } = {}): RealApp {
 	const store = new session.MemoryStore();
 	const app = express();
 
@@ -130,6 +130,11 @@ function buildRealApp(): RealApp {
 			secret: "test-secret-of-at-least-32-bytes-length!",
 			resave: false,
 			saveUninitialized: false,
+			// `rolling` is what makes the re-issue test below able to assert
+			// anything at all: without it express-session emits no `Set-Cookie`
+			// on an unmodified session, so a test looking for one finds nothing
+			// under the fix *and* nothing under the bug (#502).
+			rolling,
 			store,
 			cookie: { ...SESSION_COOKIE },
 		}),
@@ -173,12 +178,22 @@ function buildRealApp(): RealApp {
 	return { app, store };
 }
 
-/** The `Set-Cookie` value for the application session, replayed verbatim. */
-function readSessionCookie(res: request.Response): string {
+/**
+ * The whole `Set-Cookie` header for the application session, attributes and
+ * all. Throws when the response emitted none — which is an assertion in its own
+ * right, since express-session suppresses the header entirely for a `Secure`
+ * session cookie over a plain-HTTP hop.
+ */
+function sessionSetCookie(res: request.Response): string {
 	const setCookie = (res.headers["set-cookie"] as unknown as string[]) ?? [];
 	const header = setCookie.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
 	if (!header) throw new Error("no application session cookie was issued");
-	return header.split(";")[0] as string;
+	return header;
+}
+
+/** The `Set-Cookie` value for the application session, replayed verbatim. */
+function readSessionCookie(res: request.Response): string {
+	return sessionSetCookie(res).split(";")[0] as string;
 }
 
 /** Every key the store is holding, sessions and transaction records alike. */
@@ -262,15 +277,28 @@ describe("the application session cookie survives a form_post federation start (
 		// A forced `secure: true` does not merely mislabel the cookie: express-session
 		// stops emitting `Set-Cookie` at all when the session's cookie is Secure and
 		// the hop is not TLS, so the session silently stops being delivered.
-		const { app } = buildRealApp();
+		//
+		// #502: this test used to guard its assertion with `if (sessionHeader)`,
+		// and on an unmodified session express-session emits no `Set-Cookie` at
+		// all — so the guard was false in the fixed tree and in the buggy one
+		// alike, and the assertion never ran. `rolling: true` forces the re-issue,
+		// and the header is now required rather than inspected if present:
+		// `sessionSetCookie` throws when it is missing, which is exactly the
+		// symptom the bug produces.
+		const { app } = buildRealApp({ rolling: true });
 
 		const primed = await request(app).get("/prime");
 		const cookie = readSessionCookie(primed);
 
 		const start = await request(app).get("/oauth/federation/apple").set("Cookie", cookie);
-		const reissued = (start.headers["set-cookie"] as unknown as string[]) ?? [];
-		const sessionHeader = reissued.find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
-		if (sessionHeader) expect(sessionHeader).not.toMatch(/Secure/i);
+		expect(start.status).toBe(302);
+		expect(sessionSetCookie(start)).not.toMatch(/Secure/i);
+		// And the session is still delivered on the request after that one, which
+		// is the property an operator would actually notice losing.
+		const peek = await request(app).get("/peek").set("Cookie", cookie);
+		expect(peek.status).toBe(200);
+		expect(sessionSetCookie(peek)).not.toMatch(/Secure/i);
+		expect(peek.body.secure).toBe(false);
 	});
 
 	it("is unaffected by a third party who only causes the start navigation", async () => {
