@@ -740,6 +740,73 @@ export const CoreConfigSchema = z.object({
 				bindConfidentialClientRefreshTokens: coerceBooleanFromEnv.optional(),
 			})
 			.optional(),
+		// #496: the two binding-mechanism sections `tokenBinding` above
+		// dispatches over. Declared here for the reason `deviceAuthorization`
+		// is: this object strips keys it does not know, and the composition
+		// root `packages/core/README.md` documents parses through it BEFORE
+		// `createApp` composes the modules' own `configSchema`s. So an
+		// operator's whole mTLS or DPoP posture vanished at that first parse,
+		// `enabled` fell to the module's `false` default, and the mechanism
+		// reported itself as switched off rather than as misconfigured — the
+		// quietest of the failure modes, because nothing errors.
+		//
+		// For mTLS that also made every boot refusal added this cycle (#431,
+		// #469, #470) unreachable on the documented path: each one inspects a
+		// configuration that never arrived.
+		//
+		// Both are presence-only, like the `redis*` sections in
+		// `fullSectionsSchema`: the bounds and the defaults stay in
+		// `mtlsConfigSchema` / `dpopConfigSchema` and in the `reference.conf`
+		// each package ships. The enum-shaped keys keep their vocabulary so a
+		// typo fails here by name, and the booleans ride `coerceBooleanFromEnv`
+		// (#288) so a `${?VAR}` string still reads.
+		mtls: z
+			.object({
+				enabled: coerceBooleanFromEnv.optional(),
+				source: z.enum(["header", "tls-layer"]).optional(),
+				"cert-header": z.string().optional(),
+				"cert-header-dialect": z.enum(["envoy", "plain-pem"]).optional(),
+				"trusted-proxies": z.array(z.string()).optional(),
+				mode: z.enum(["self-signed", "pki", "full-pki"]).optional(),
+				"trusted-cas": z.array(z.string()).optional(),
+				"full-pki": z
+					.object({
+						"max-chain-depth": z.coerce.number().int().positive().optional(),
+						// Left as strings rather than restated as an enum: the
+						// signature-algorithm vocabulary is owned by the mtls package
+						// and checked there. Copying nine literals into core would be
+						// two lists that must agree, which is the drift this whole
+						// section exists to avoid.
+						"signature-algorithms": z.array(z.string()).optional(),
+						"min-rsa-key-bits": z.coerce.number().int().positive().optional(),
+						// #341: the one block with no defaults anywhere — the module
+						// refuses boot unless the operator writes `mode` and
+						// `on-unavailable` down. A refusal can only fire on what
+						// survives this parse.
+						revocation: z
+							.object({
+								mode: z.enum(["crl", "ocsp", "both", "disabled"]).optional(),
+								"on-unavailable": z.enum(["reject", "allow"]).optional(),
+								"allowed-hosts": z.array(z.string()).optional(),
+								"fetch-timeout-ms": z.coerce.number().int().positive().optional(),
+								"cache-ttl-seconds": z.coerce.number().int().nonnegative().optional(),
+								"max-response-bytes": z.coerce.number().int().positive().optional(),
+								"ocsp-require-nonce": coerceBooleanFromEnv.optional(),
+							})
+							.optional(),
+					})
+					.optional(),
+			})
+			.optional(),
+		dpop: z
+			.object({
+				enabled: coerceBooleanFromEnv.optional(),
+				"iat-window-seconds": z.coerce.number().int().positive().optional(),
+				"alg-whitelist": z.array(z.string()).optional(),
+				"replay-store": z.enum(["memory", "redis"]).optional(),
+				"replay-store-ttl-seconds": z.coerce.number().int().positive().optional(),
+			})
+			.optional(),
 	}),
 });
 
@@ -1012,6 +1079,40 @@ export const fullSectionsSchema = z.object({
 	cors: z.object({
 		allowedOrigins: z.array(z.string()),
 	}),
+	// #496: the WebAuthn deployer section. `@o3co/auth-provider-webauthn`
+	// ships it in its own `reference.conf` and parses it with
+	// `webauthnConfigSchema` inside the bootstrap module a composition root
+	// writes — which reads `config.webauthn`, so the section has to reach the
+	// composition root first. It did not: this schema declared no `webauthn`,
+	// and a strip-mode object drops what it does not declare, so the operator's
+	// relying-party identity and the #281 throttle went missing between
+	// `parseFile` and the bootstrap module's `webauthnConfigSchema.parse(...)`
+	// — which then failed on a *missing* `rpId` rather than on the one the
+	// operator had written.
+	//
+	// Presence-only, like the sections above: `webauthnConfigSchema` owns the
+	// real constraints (the origin allowlist's no-wildcard / secure-scheme
+	// rules above all) and the package's `reference.conf` owns the defaults.
+	webauthn: z
+		.object({
+			rpId: z.string().optional(),
+			rpName: z.string().optional(),
+			// A list in a config file, a single string from `${?WEBAUTHN_ORIGIN}`.
+			// Both spellings reach `webauthnConfigSchema`, which is where the
+			// shape is decided; narrowing to an array here would fail the env
+			// spelling at the wrong layer, with the wrong message.
+			origin: z.union([z.string(), z.array(z.string())]).optional(),
+			challengeTtlMs: z.coerce.number().int().positive().optional(),
+			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
+			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),
+			allowCredentialsForKnownUser: coerceBooleanFromEnv.optional(),
+			rateLimit: z
+				.object({
+					authenticationOptions: rateLimitSpecSchema.optional(),
+				})
+				.optional(),
+		})
+		.optional(),
 	// #287 / #304: where security-relevant audit events go. `type` selects a
 	// builder in the composition root's `AuditSinkFactory`, so it stays an open
 	// string rather than an enum — `registerBuiltinAuditSinks` ships `console`,
@@ -1093,6 +1194,24 @@ export const fullSectionsSchema = z.object({
 			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
 			defaultLimit: rateLimitSpecSchema.optional(),
 			maxBuckets: z.coerce.number().int().positive().optional(),
+		})
+		.optional(),
+	// #495: the same section for the OTHER adapter, and the one every
+	// multi-replica deployment actually runs — `rateLimiter.adapter = "redis"`
+	// is what the standalone's production compose file pins. Undeclared until
+	// now, and `redisRateLimiterModule.configSchema` defaults the whole object
+	// to 60 requests / 60 s, so an operator's per-endpoint budgets were
+	// dropped here and replaced by a number nobody chose. `login` and
+	// `device_verification` kept theirs by accident: `resolveSeededLimitSpecs`
+	// seeds those two prefixes from `rateLimit.login` and
+	// `oauth.deviceAuthorization.rateLimit`, which ARE declared — `token`,
+	// `authorize`, `introspect` and the WebAuthn options route were the ones
+	// lost. Presence-only; the defaults live in `reference.conf` and in the
+	// module.
+	redisRateLimiter: z
+		.object({
+			limits: z.record(z.string(), rateLimitSpecSchema).optional(),
+			defaultLimit: rateLimitSpecSchema.optional(),
 		})
 		.optional(),
 	// Wave 5d (OR-4): adapter switch for the four user-session stores
@@ -1216,6 +1335,19 @@ export const fullSectionsSchema = z.object({
 			// `RedisCodeRepository` constructor for defense in depth.
 			// Per Copilot review on PR #122.
 			defaultExpiresIn: z.coerce.number().int().positive().optional(),
+		})
+		.optional(),
+	// #495: the last two `redis*` namespaces without an entry here, found by
+	// `module-config-key-parity.test.mts` rather than by an operator — which
+	// is the point of that test. Presence-only, defaults in the modules.
+	redisChallengeStore: z
+		.object({
+			keyPrefix: z.string().optional(),
+		})
+		.optional(),
+	redisReplaySeenSet: z
+		.object({
+			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 });

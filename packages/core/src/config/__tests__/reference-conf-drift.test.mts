@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+import { readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
@@ -25,20 +28,47 @@ import { AppConfigSchema } from "#/config/application.schema.mjs";
  *
  * The schema is a strip-mode `z.object`: a key it does not declare is dropped
  * at parse time, silently, before any module's own `configSchema` runs. That
- * has now bitten five times over — `redisSessionStores` (MIN-3),
+ * has now bitten seven times over — `redisSessionStores` (MIN-3),
  * `redisRefreshTokenFamilyStore` (D-2 v2), `redisCodeRepository` (OR-9),
  * `redisFederationTokenStore` (#456), `redisDeviceCodeStore` and
- * `oauth.deviceAuthorization` (#472) — each found by an operator whose
- * documented override did nothing. Every fix declared the one missing
+ * `oauth.deviceAuthorization` (#472), `redisRateLimiter` (#495) and
+ * `oauth.mtls` / `oauth.dpop` / `webauthn` (#496) — each found by an operator
+ * whose documented override did nothing. Every fix declared the one missing
  * section and left the mechanism in place.
  *
  * This resolves `reference.conf` the way the standalone does, runs it through
  * the schema, and diffs the key trees: any path the resolved HOCON has that
  * the parsed config lacks is a section the next module forgot to declare, and
  * it fails here by name rather than in production by omission.
+ *
+ * #496: every package that ships defaults gets the same treatment, in the
+ * chained shape a composition root actually assembles (`withFallback` down to
+ * core's). Core's own file could only ever cover core's own sections, and
+ * `oauth.mtls`, `oauth.dpop` and `webauthn` ship their defaults from the
+ * packages that own them — so the sections most likely to be forgotten here
+ * were exactly the ones the original diff could not see.
  */
 
-const REFERENCE_CONF_PATH = new URL("../../../config/reference.conf", import.meta.url).pathname;
+const REFERENCE_CONF_PATH = fileURLToPath(
+	new URL("../../../config/reference.conf", import.meta.url),
+);
+
+const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
+
+/**
+ * Every `reference.conf` shipped by a workspace under `packages/`, found by
+ * looking rather than by a list: a new package's defaults join this diff
+ * without anyone remembering to add them.
+ */
+function shippedReferenceConfs(dir: string, found: string[] = []): string[] {
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		if (entry.name === "node_modules" || entry.name === "dist") continue;
+		const full = join(dir, entry.name);
+		if (entry.isDirectory()) shippedReferenceConfs(full, found);
+		else if (entry.name === "reference.conf") found.push(full);
+	}
+	return found.sort();
+}
 
 /** The three substitutions `reference.conf` cannot validate without. */
 const REQUIRED_ENV = {
@@ -71,7 +101,7 @@ function hasPath(tree: unknown, path: string): boolean {
 	return true;
 }
 
-describe("reference.conf survives AppConfigSchema without losing a path (#472)", () => {
+describe("core's reference.conf survives AppConfigSchema without losing a path (#472)", () => {
 	const raw = parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV });
 	const resolved = raw.toObject();
 	const parsed = validate(raw, AppConfigSchema);
@@ -89,6 +119,56 @@ describe("reference.conf survives AppConfigSchema without losing a path (#472)",
 		// `AppConfigSchema` does not declare. Declare it — presence-only, like
 		// the `redis*` sections in `fullSectionsSchema` — rather than adding it
 		// to an allowlist here.
+		expect(stripped).toEqual([]);
+	});
+});
+
+describe("every shipped reference.conf survives AppConfigSchema (#496)", () => {
+	const confPaths = shippedReferenceConfs(join(REPO_ROOT, "packages"));
+
+	// The chain a composition root assembles: each package's defaults layered
+	// over core's, which is the bottom tier the standalone template resolves.
+	const chained = confPaths
+		.filter((path) => path !== REFERENCE_CONF_PATH)
+		.reduce(
+			(config, path) => config.withFallback(parseFile(path, { env: REQUIRED_ENV })),
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
+		);
+	const resolved = chained.toObject();
+	const parsed = validate(chained, AppConfigSchema);
+
+	it("finds the packages that ship defaults", () => {
+		// Named rather than counted: the diff below is the assertion, and a new
+		// package's `reference.conf` joins it without touching this test. These
+		// five are here so a lookup that silently found nothing — a moved file,
+		// a renamed directory — fails as itself rather than as a passing diff
+		// over an empty tree.
+		expect(confPaths.map((path) => relative(REPO_ROOT, path))).toEqual(
+			expect.arrayContaining([
+				"packages/core/config/reference.conf",
+				"packages/device-grant/src/reference.conf",
+				"packages/dpop/src/reference.conf",
+				"packages/mtls/src/reference.conf",
+				"packages/webauthn/config/reference.conf",
+			]),
+		);
+	});
+
+	it("resolves the sections those packages own", () => {
+		const paths = collectPaths(resolved);
+		expect(paths).toContain("oauth.mtls.full-pki.max-chain-depth");
+		expect(paths).toContain("oauth.dpop.replay-store");
+		expect(paths).toContain("oauth.deviceAuthorization.enabled");
+		expect(paths).toContain("webauthn.rateLimit.authenticationOptions.limit");
+		expect(paths).toContain("redisRateLimiter.defaultLimit.limit");
+	});
+
+	it("strips no path any shipped default carries", () => {
+		const stripped = collectPaths(resolved).filter((path) => !hasPath(parsed, path));
+		// A path listed here is a section some package ships that
+		// `AppConfigSchema` does not declare, so an operator who overrides it
+		// hands `createApp` a configuration without it. Declare it —
+		// presence-only, like the `redis*` sections in `fullSectionsSchema`.
 		expect(stripped).toEqual([]);
 	});
 });
