@@ -106,8 +106,11 @@ before any `--scale`; and every secret.
 
 It also leaves you the **cookie domain's trust boundary**. `__Host-auth.session`
 cannot be set by any other host, but a `form_post` federation (Sign in with
-Apple) additionally issues a path-scoped `__Secure-<session.name>.federation`
-cookie, and `__Secure-` does not stop a sibling subdomain setting it with
+Apple) additionally issues a path-scoped transaction cookie — `session.name`
+with any `__Host-` / `__Secure-` prefix stripped, then `__Secure-` and
+`.federation` applied, so the default `__Host-auth.session` yields
+`__Secure-auth.session.federation` — and `__Secure-` does not stop a sibling
+subdomain setting it with
 `Domain=<parent>`. A related-domain attacker — a forgotten staging host, a
 dangling DNS record, XSS on a lower-trust app next door — can use that to log a
 victim's browser into the attacker's own federated account. It reaches no

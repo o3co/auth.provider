@@ -145,10 +145,12 @@ path-scoped to `/session/oauth/federation/apple/callback`, expiring in ten
 minutes, and carrying nothing but an opaque id. The `state`, PKCE verifier,
 nonce and post-login redirect are held in the session store under that id.
 
-Both are deleted as soon as a callback **judges** the transaction — on success,
-and on every refusal that compared a `state`. A callback carrying no `state`
-judges nothing and leaves the flow intact, which is what stops a cross-site
-request from cancelling a login in progress. The single use that buys you is
+Both are deleted as soon as a callback **judges** the transaction: on success,
+on a `state` that was compared and did not match, and on a transaction id that
+resolved to no record or to another provider's. What does *not* spend them is a
+callback that judged nothing — one carrying no `state` at all leaves the flow
+intact, which is what stops a cross-site request from cancelling a login in
+progress, and a GET is refused with `405` before the cookie is read. The single use that buys you is
 sequential: a callback arriving after an earlier one completed is refused. Two
 callbacks that *overlap* can both get past the record, because retiring it is a
 read and then a delete over an API with no compare-and-delete; what stops them
@@ -188,9 +190,11 @@ cookies are scoped to — a forgotten staging host, a dangling DNS record, an XS
 on a lower-trust app next door, a shared-hosting neighbour. They need nothing
 from this deployment: no session, no `state`, no account.
 
-**What it gets them:** from that subdomain they can set
-`__Secure-<session.name>.federation` with `Domain=<your parent domain>` in a
-victim's browser. They then start their own Sign in with Apple flow, plant
+**What it gets them:** from that subdomain they can set the transaction cookie
+— `session.name` with any `__Host-` / `__Secure-` prefix stripped, then
+`__Secure-` and `.federation` applied, so a deployment running the default
+`__Host-auth.session` is looking for `__Secure-auth.session.federation` — with
+`Domain=<your parent domain>` in a victim's browser. They then start their own Sign in with Apple flow, plant
 their own transaction id, and auto-submit their own `state` and `code` to your
 callback. The victim's browser ends up logged into the **attacker's** Apple
 account, and whatever the victim does next is recorded against it. It does not
