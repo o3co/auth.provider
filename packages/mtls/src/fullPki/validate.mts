@@ -42,7 +42,8 @@
  *     engine. Checked here against the validated path.
  *  2. **Algorithm policy (§6.1.4).** Left to local policy by the RFC, which
  *     in practice means the OpenSSL build's policy. Applied here to every
- *     certificate on the path.
+ *     certificate on the path, and by the resolvers to the CRL and OCSP
+ *     signatures and to a delegated responder's certificate (#470).
  *  3. **Revocation.** The engine skips its revocation block entirely when
  *     handed no CRLs, and returns *valid*. So a CRL endpoint that is down
  *     produces the same verdict as a certificate that is not revoked. That is
@@ -288,15 +289,24 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					maxBytes: revocation.maxResponseBytes,
 					...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
 				});
+	// The same algorithm policy the path is held to governs the revocation
+	// material about it — a CRL's signature, a response's signature, a
+	// delegated responder's certificate (#470). One policy, or a deployment
+	// that refuses SHA-1 certificates would still believe SHA-1 CRLs.
 	const crlResolver: CrlResolver | null =
 		fetch !== null && revocation.mode !== "disabled" && revocation.mode !== "ocsp"
-			? createCrlResolver({ fetch, cacheTtlSeconds: revocation.cacheTtlSeconds })
+			? createCrlResolver({
+					fetch,
+					cacheTtlSeconds: revocation.cacheTtlSeconds,
+					algorithms: options.algorithms,
+				})
 			: null;
 	const ocspResolver: OcspResolver | null =
 		fetch !== null && revocation.mode !== "disabled" && revocation.mode !== "crl"
 			? createOcspResolver({
 					fetch,
 					cacheTtlSeconds: revocation.cacheTtlSeconds,
+					algorithms: options.algorithms,
 					...(revocation.ocspRequireNonce === undefined
 						? {}
 						: { requireNonce: revocation.ocspRequireNonce }),

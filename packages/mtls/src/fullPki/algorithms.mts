@@ -22,7 +22,12 @@
  * is not a decision a deployment made; it is a decision its base image made.
  * A certificate signed with SHA-1 still verifies, and a chain is only as
  * strong as its weakest hop — so the policy is applied to **every**
- * certificate on the validated path, anchors included, not just the leaf.
+ * certificate on the validated path, anchors included, not just the leaf;
+ * and to the revocation material about them — a CRL's signature, an OCSP
+ * response's signature, and a delegated responder's certificate — because
+ * pkijs verifies `sha1WithRSAEncryption` and `ecdsa-with-SHA1` as readily
+ * as it does a certificate's, and a SHA-1-signed "not revoked" is no better
+ * evidence than a SHA-1-signed certificate (#470).
  *
  * Names rather than OIDs in config: an operator reviewing
  * `signature-algorithms` should be able to see what it says. Unknown names
@@ -88,22 +93,46 @@ const rsaModulusBits = (certificate: X509Certificate): number | null => {
 	return typeof bits === "number" ? bits : null;
 };
 
+export type SignatureAlgorithmCheck =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly detail: string };
+
+/**
+ * Whether a signature algorithm is one the policy names — the half of the
+ * policy that applies to any signed object, not only to a certificate. A CRL
+ * and an OCSP response carry a `signatureAlgorithm` exactly as a certificate
+ * does, and are held to the same allowlist (#470). The detail names the
+ * algorithm as the config vocabulary does when it can, and by OID when it
+ * cannot — SHA-1 has no name here, deliberately.
+ */
+export const checkSignatureAlgorithm = (
+	signatureAlgorithmOid: string,
+	policy: AlgorithmPolicy,
+): SignatureAlgorithmCheck => {
+	const allowedOids = new Set<string>(
+		policy.signatureAlgorithms.map((name) => SIGNATURE_ALGORITHM_OIDS[name]),
+	);
+	if (allowedOids.has(signatureAlgorithmOid)) return { ok: true };
+	const known = Object.entries(SIGNATURE_ALGORITHM_OIDS).find(
+		([, oid]) => oid === signatureAlgorithmOid,
+	);
+	return {
+		ok: false,
+		detail: `${known?.[0] ?? signatureAlgorithmOid} is not in oauth.mtls.full-pki.signature-algorithms`,
+	};
+};
+
 export const checkAlgorithmPolicy = (
 	certificate: X509Certificate,
 	signatureAlgorithmOid: string,
 	policy: AlgorithmPolicy,
 ): AlgorithmCheck => {
-	const allowedOids = new Set<string>(
-		policy.signatureAlgorithms.map((name) => SIGNATURE_ALGORITHM_OIDS[name]),
-	);
-	if (!allowedOids.has(signatureAlgorithmOid)) {
-		const known = Object.entries(SIGNATURE_ALGORITHM_OIDS).find(
-			([, oid]) => oid === signatureAlgorithmOid,
-		);
+	const algorithm = checkSignatureAlgorithm(signatureAlgorithmOid, policy);
+	if (!algorithm.ok) {
 		return {
 			ok: false,
 			step: "signature algorithm not permitted",
-			detail: `${certificate.subject}: ${known?.[0] ?? signatureAlgorithmOid} is not in oauth.mtls.full-pki.signature-algorithms`,
+			detail: `${certificate.subject}: ${algorithm.detail}`,
 		};
 	}
 

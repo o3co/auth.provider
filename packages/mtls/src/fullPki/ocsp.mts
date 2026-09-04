@@ -61,6 +61,30 @@
  * source, a CRL, exists only under `mode = "both"`. Local policy per
  * §4.2.2.2.1's third option, and recorded in the README.
  *
+ * ### The algorithm policy applies to the answer too (#470)
+ *
+ * pkijs verifies `sha1WithRSAEncryption` and `ecdsa-with-SHA1` as readily
+ * as it verifies SHA-256, so a SHA-1-signed "good" was believed about a
+ * certificate that a SHA-1 signature would have refused on the path. The
+ * policy `validate.mts` holds the path to is applied here to the two things
+ * an answer introduces that the path pass never saw: the response's own
+ * `signatureAlgorithm`, checked on the bytes' shape before the signer is
+ * even identified, and — for a delegated responder — the responder
+ * certificate, held to the full policy (signature algorithm and RSA modulus)
+ * once the checks above have established it is this CA's delegate, so that
+ * a stranger's certificate is still refused as *not issued*, whatever it was
+ * signed with. Either is `algorithm_not_permitted`, and is remembered per
+ * certificate for the negative window like `unsupported_critical_extension`,
+ * not exempted like `bad_signature`: the decision is on an OID or a key
+ * size, not on whether a signature verifies, so an injected response can
+ * pin at most a bounded refusal (an injected `unparseable` already can), and
+ * the algorithm is a property of the responder's own material, identical on
+ * every request until the CA changes it. Per certificate rather than per
+ * responder because a responder may sign with more than one key during a
+ * rollover, and the answer is remembered at the granularity it was given —
+ * as a stale or `unknown` answer is. The CA's own key, when the CA signs the
+ * response itself, is on the validated path and was judged there.
+ *
  * ### The CertID hash
  *
  * The `CertID` names the certificate by a hash of its issuer's name and key
@@ -106,13 +130,19 @@
  * sooner; a responder that could not be used is remembered as down for
  * `OCSP_NEGATIVE_CACHE_TTL_MS` (per responder for a transport or
  * responder-level failure, per certificate for an answer that could not be
- * used); `bad_signature` and `nonce_mismatch` are never remembered in either
- * direction, for the reason `crl.mts` gives.
+ * used, `algorithm_not_permitted` included); `bad_signature` and
+ * `nonce_mismatch` are never remembered in either direction, for the reason
+ * `crl.mts` gives.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import * as asn1js from "asn1js";
 import * as pkijs from "pkijs";
+import {
+	type AlgorithmPolicy,
+	checkAlgorithmPolicy,
+	checkSignatureAlgorithm,
+} from "./algorithms.mjs";
 import {
 	type CriticalExtensionCheck,
 	checkCriticalExtensions,
@@ -174,7 +204,9 @@ export const OCSP_UNDATED_RESPONSE_MAX_AGE_MS = 10 * 60_000;
 
 /**
  * Why a certificate's status could not be determined by OCSP. Values are
- * stable — audit logs read them.
+ * stable — audit logs read them. `algorithm_not_permitted` is a response, or
+ * a delegated responder's certificate, outside the algorithm policy the path
+ * is held to (#470).
  */
 export type OcspUnavailableReason =
 	| "no_responder"
@@ -183,6 +215,7 @@ export type OcspUnavailableReason =
 	| "responder_error"
 	| "no_matching_response"
 	| "unsupported_critical_extension"
+	| "algorithm_not_permitted"
 	| "bad_signature"
 	| "nonce_mismatch"
 	| "nonce_missing"
@@ -318,6 +351,7 @@ type RespondersFailure = "fetch_failed" | "unparseable" | "responder_error";
 type CertificateFailure =
 	| "no_matching_response"
 	| "unsupported_critical_extension"
+	| "algorithm_not_permitted"
 	| "nonce_missing"
 	| "not_yet_valid"
 	| "stale"
@@ -331,6 +365,7 @@ const RESPONDER_FAILURES: ReadonlySet<string> = new Set<RespondersFailure>([
 const CERTIFICATE_FAILURES: ReadonlySet<string> = new Set<CertificateFailure>([
 	"no_matching_response",
 	"unsupported_critical_extension",
+	"algorithm_not_permitted",
 	"nonce_missing",
 	"not_yet_valid",
 	"stale",
@@ -365,6 +400,12 @@ export interface OcspResolverOptions {
 	 */
 	readonly cacheTtlSeconds: number;
 	/**
+	 * The signature-algorithm and key-size policy the validated path is held
+	 * to, applied to the response's signature and to a delegated responder's
+	 * certificate as well (#470). See the module header.
+	 */
+	readonly algorithms: AlgorithmPolicy;
+	/**
 	 * Refuse a response that does not carry the request's nonce. Defaults to
 	 * `true`; see the module header for what `false` gives up.
 	 */
@@ -398,6 +439,17 @@ const issuerKeyId = (issuer: pkijs.Certificate): string =>
 
 const serialHex = (certificate: pkijs.Certificate): string =>
 	Buffer.from(certificate.serialNumber.valueBlock.valueHexView).toString("hex");
+
+/** Node's view of a certificate — what `checkAlgorithmPolicy` reads the key size from. */
+const toNode = (certificate: pkijs.Certificate): X509Certificate =>
+	new X509Certificate(Buffer.from(certificate.toSchema(true).toBER(false)));
+
+/** Why a signer was refused: a signature that is not the CA's, or material outside the policy. */
+type SignerRefusal = {
+	readonly ok: false;
+	readonly reason: "bad_signature" | "algorithm_not_permitted";
+	readonly detail: string;
+};
 
 interface BuiltRequest {
 	readonly der: Uint8Array;
@@ -566,23 +618,30 @@ const checkDelegatedResponder = async (
 	issuer: pkijs.Certificate,
 	now: Date,
 	crypto: pkijs.ICryptoEngine,
-): Promise<{ ok: true } | { ok: false; detail: string }> => {
+	algorithms: AlgorithmPolicy,
+): Promise<{ ok: true } | SignerRefusal> => {
 	const notIssued =
 		"the responder certificate was not issued by the certificate's issuing CA (RFC 6960 §4.2.2.2)";
-	if (!candidate.issuer.isEqual(issuer.subject)) return { ok: false, detail: notIssued };
+	if (!candidate.issuer.isEqual(issuer.subject)) {
+		return { ok: false, reason: "bad_signature", detail: notIssued };
+	}
 	let issued = false;
 	try {
 		issued = await candidate.verify(issuer, crypto);
 	} catch {
 		issued = false;
 	}
-	if (!issued) return { ok: false, detail: notIssued };
+	if (!issued) return { ok: false, reason: "bad_signature", detail: notIssued };
 
 	if (
 		candidate.notBefore.value.getTime() > now.getTime() ||
 		candidate.notAfter.value.getTime() < now.getTime()
 	) {
-		return { ok: false, detail: "the responder certificate is outside its validity period" };
+		return {
+			ok: false,
+			reason: "bad_signature",
+			detail: "the responder certificate is outside its validity period",
+		};
 	}
 
 	const eku = candidate.extensions?.find((ext) => ext.extnID === OID_EXT_KEY_USAGE);
@@ -595,6 +654,7 @@ const checkDelegatedResponder = async (
 	) {
 		return {
 			ok: false,
+			reason: "bad_signature",
 			detail:
 				"the responder certificate does not carry id-kp-OCSPSigning in extendedKeyUsage " +
 				"(RFC 6960 §4.2.2.2)",
@@ -604,7 +664,32 @@ const checkDelegatedResponder = async (
 	// RFC 5280 §6.1.2 applies to the responder certificate as to any other;
 	// a critical extension nothing here processes is a refusal, not a pass.
 	const critical = checkCriticalExtensions([candidate]);
-	if (!critical.ok) return { ok: false, detail: `responder certificate: ${critical.detail}` };
+	if (!critical.ok) {
+		return {
+			ok: false,
+			reason: "bad_signature",
+			detail: `responder certificate: ${critical.detail}`,
+		};
+	}
+
+	// The responder certificate is the one key an answer introduces that the
+	// path pass never saw, so it is held to the policy the path was —
+	// signature algorithm and RSA modulus alike. Last, once the checks above
+	// have established it really is this CA's delegate: a stranger's
+	// certificate is refused as not issued, whatever it was signed with, and
+	// only the CA's own material is remembered under this reason (#470).
+	const algorithm = checkAlgorithmPolicy(
+		toNode(candidate),
+		candidate.signatureAlgorithm.algorithmId,
+		algorithms,
+	);
+	if (!algorithm.ok) {
+		return {
+			ok: false,
+			reason: "algorithm_not_permitted",
+			detail: `responder certificate: ${algorithm.detail}`,
+		};
+	}
 
 	// `id-pkix-ocsp-nocheck` (§4.2.2.2.1) is honoured by construction: the
 	// responder certificate's own revocation status is not looked up either
@@ -618,16 +703,18 @@ const identifySigner = async (
 	issuer: pkijs.Certificate,
 	now: Date,
 	crypto: pkijs.ICryptoEngine,
-): Promise<{ ok: true; signer: pkijs.Certificate } | { ok: false; detail: string }> => {
+	algorithms: AlgorithmPolicy,
+): Promise<{ ok: true; signer: pkijs.Certificate } | SignerRefusal> => {
 	const responderId: unknown = basic.tbsResponseData.responderID;
 	if (await isNamedResponder(issuer, responderId, crypto)) return { ok: true, signer: issuer };
 	for (const candidate of basic.certs ?? []) {
 		if (!(await isNamedResponder(candidate, responderId, crypto))) continue;
-		const delegated = await checkDelegatedResponder(candidate, issuer, now, crypto);
+		const delegated = await checkDelegatedResponder(candidate, issuer, now, crypto, algorithms);
 		return delegated.ok ? { ok: true, signer: candidate } : delegated;
 	}
 	return {
 		ok: false,
+		reason: "bad_signature",
 		detail:
 			"the response names a responder that is neither the issuing CA nor a certificate " +
 			"attached to the response",
@@ -802,8 +889,25 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			return { ok: false, reason: "unsupported_critical_extension", detail: critical.detail };
 		}
 
-		const signer = await identifySigner(basic, issuer, now, crypto);
-		if (!signer.ok) return { ok: false, reason: "bad_signature", detail: signer.detail };
+		// The response's own signature algorithm, still on shape alone: the
+		// OID it names is judged before its signer is even identified, and
+		// remembered per certificate like the check above (see the module
+		// header, #470). The responder certificate, when there is one, is
+		// held to the full policy inside `identifySigner`.
+		const algorithm = checkSignatureAlgorithm(
+			basic.signatureAlgorithm.algorithmId,
+			options.algorithms,
+		);
+		if (!algorithm.ok) {
+			return {
+				ok: false,
+				reason: "algorithm_not_permitted",
+				detail: `the response's signature algorithm ${algorithm.detail}`,
+			};
+		}
+
+		const signer = await identifySigner(basic, issuer, now, crypto, options.algorithms);
+		if (!signer.ok) return { ok: false, reason: signer.reason, detail: signer.detail };
 		const signature = await verifySignature(basic, signer.signer, crypto);
 		if (!signature.ok) return { ok: false, reason: "bad_signature", detail: signature.detail };
 

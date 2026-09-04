@@ -48,10 +48,11 @@
  *  - concurrent lookups of the same URL share one in-flight fetch;
  *  - a URL that could not be used — unreachable, unparseable, serving a CRL
  *    that is stale or undated, or serving one this resolver does not process
- *    (an unsupported critical extension, a delta, a scoped CRL) — is
- *    remembered as unavailable for `CRL_NEGATIVE_CACHE_TTL_MS`, so a stuck
- *    endpoint costs one probe per window rather than one per request.
- *    `bad_signature` is exempt, per the section above.
+ *    (an unsupported critical extension, a delta, a scoped CRL, a signature
+ *    algorithm outside the policy) — is remembered as unavailable for
+ *    `CRL_NEGATIVE_CACHE_TTL_MS`, so a stuck endpoint costs one probe per
+ *    window rather than one per request. `bad_signature` is exempt, per the
+ *    section above.
  *
  * The last group is why a CRL's extensions are inspected *before* its
  * signature (#447). pkijs's `verify` answers `false` for a critical extension
@@ -64,6 +65,25 @@
  * is only ever a decision *not* to use the CRL. Nothing an attacker injects
  * can pin an acceptance this way, and a pinned refusal is bounded by the
  * window exactly as an injected 503 already is.
+ *
+ * ### The algorithm policy applies to the CRL too (#470)
+ *
+ * `validate.mts` refuses a certificate signed with an algorithm outside
+ * `signature-algorithms`; pkijs, asked to verify a CRL, accepts
+ * `sha1WithRSAEncryption` and `ecdsa-with-SHA1` as readily as it accepts a
+ * certificate's, so a SHA-1-signed CRL was believed about a certificate that
+ * a SHA-1 signature would have refused. The CRL's `signatureAlgorithm` — the
+ * field pkijs verifies with — is checked against the same policy, before the
+ * signature itself, and the outcome is `algorithm_not_permitted`. It is
+ * remembered for the negative window like `unsupported_critical_extension`,
+ * not exempted like `bad_signature`: the decision is on the OID the bytes
+ * name, not on whether they verify, so an injected response can pin at most
+ * a bounded refusal, which an injected 503 already can; and the algorithm is
+ * a property of the CA's own material, identical on every fetch until the
+ * CA changes it, so not remembering it would cost one guarded fetch per
+ * request under both policies — the pattern #447 closed. The issuer's key
+ * size is not re-checked here: the issuer is on the validated path, and the
+ * path pass has already held it to `min-rsa-key-bits`.
  *
  * ### What a CRL may say about its own scope
  *
@@ -107,6 +127,7 @@
 
 import { createHash } from "node:crypto";
 import * as pkijs from "pkijs";
+import { type AlgorithmPolicy, checkSignatureAlgorithm } from "./algorithms.mjs";
 import { checkCrlCriticalExtensions, extensionValueParsed } from "./criticalExtensions.mjs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
 
@@ -136,7 +157,9 @@ const GENERAL_NAME_URI = 6;
  * recognises but does not implement: a distribution point that partitions by
  * reason or names another issuer, a delta or scoped CRL, a critical extension
  * nothing here processes. Each is reported rather than read as authoritative
- * (#446, #447).
+ * (#446, #447). `algorithm_not_permitted` is a CRL signed with an algorithm
+ * outside `oauth.mtls.full-pki.signature-algorithms` — the same policy the
+ * path is held to (#470).
  */
 export type CrlUnavailableReason =
 	| "no_distribution_point"
@@ -145,6 +168,7 @@ export type CrlUnavailableReason =
 	| "unparseable"
 	| "unsupported_critical_extension"
 	| "unsupported_crl_scope"
+	| "algorithm_not_permitted"
 	| "no_next_update"
 	| "stale"
 	| "bad_signature";
@@ -357,6 +381,11 @@ export interface CrlResolverOptions {
 	 * for a year.
 	 */
 	readonly cacheTtlSeconds: number;
+	/**
+	 * The signature-algorithm policy the validated path is held to, applied
+	 * to each CRL's signature as well (#470). See the module header.
+	 */
+	readonly algorithms: AlgorithmPolicy;
 	/** Bound on cache size, so a large trust set cannot grow it without limit. */
 	readonly maxCacheEntries?: number;
 }
@@ -622,6 +651,24 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		if (!scope.ok) {
 			remember(url, "unsupported_crl_scope", scope.detail, now);
 			return { ok: false, reason: "unsupported_crl_scope", detail: scope.detail };
+		}
+
+		// The signature *algorithm* before the signature, for the same reason
+		// the extensions are: this is a decision on the OID the CRL names,
+		// not on whether it verifies, and the answer is only ever "do not
+		// use it" — so it is safe to remember on unverified bytes, and it
+		// is remembered, or a CA that signs with SHA-1 would cost one
+		// guarded fetch per request (see the module header, #470).
+		// `signatureAlgorithm` is the field pkijs verifies with; RFC 5280
+		// §5.1.1.2 requires the tbsCertList copy to match it.
+		const algorithm = checkSignatureAlgorithm(
+			loaded.crl.signatureAlgorithm.algorithmId,
+			options.algorithms,
+		);
+		if (!algorithm.ok) {
+			const detail = `the CRL's signature algorithm ${algorithm.detail}`;
+			remember(url, "algorithm_not_permitted", detail, now);
+			return { ok: false, reason: "algorithm_not_permitted", detail };
 		}
 
 		// Nothing an unverified CRL says is acted on — not even its dates — so
