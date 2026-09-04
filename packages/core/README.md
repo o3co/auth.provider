@@ -46,7 +46,7 @@ Top-level fields (the sections every deployment carries; module-owned sections a
 | `federations` | Federation providers — `z.record(string, { enabled, type?, ...passthrough })`. Built-in types: `"google"`, `"github"`. |
 | `repositories` | Repository config for clients, users, and codes |
 | `endpoints` | Path overrides for `login`, `client`, and `authCallback` routes |
-| `cors.allowedOrigins` | CORS allowed origins. Since #272 this does **not** grant CSRF trust — use `session.csrf.trustedOrigins`. |
+| `cors.allowedOrigins` | Browser origins allowed to read the token, userinfo, revocation and discovery/JWKS responses — see [CORS](#cors). Empty (the default) means CORS is off. Since #272 this does **not** grant CSRF trust — use `session.csrf.trustedOrigins`. |
 
 ### Grant System
 
@@ -327,7 +327,9 @@ interface Client {
   clientSecret: string;
   allowedRedirectUris: string[];
   allowedScopes: string[];
-  // Logout metadata (TODO-F-5):
+  // Logout metadata (TODO-F-5). `postLogoutRedirectUris` takes the same
+  // registered-redirect-URI grammar as `allowedRedirectUris` (#498) —
+  // custom schemes included; the other two are http/https only.
   postLogoutRedirectUris?: string[];
   backchannelLogoutUri?: string;
   backchannelLogoutSessionRequired?: boolean; // default: true
@@ -508,6 +510,38 @@ Built-in routes registered unconditionally:
 - `GET /.well-known/jwks.json` — returns the public key set from `keyStore`
 
 `ExpressLike` is a structural type — any object with `Router()`, `json()`, and `urlencoded()` methods satisfies it. Pass the `express` default export directly.
+
+## CORS
+
+`cors.allowedOrigins` is consumed by `corsMw` (`src/middleware/cors.mts`), which `assembleApp` mounts **first** — ahead of every other middleware and every route contribution. An empty list (the default) mounts nothing at all, so a deployment that has not opted in behaves exactly as it did before the middleware existed: no headers, no `Vary`.
+
+Until [#500](https://github.com/o3co/auth.provider/issues/500) the key was declared here, shipped in every `reference.conf`, and read by nothing — a cross-origin preflight to `/oauth/token` got no `Access-Control-Allow-Origin`, so a browser SPA on any origin but the provider's could not use the provider at all, and an operator who set the key had no way to find out.
+
+### Surface
+
+`browserFacingCorsRoutes(config)` is the table, and it is an **allowlist** — the opposite polarity to the sender-constraint mount beside it. That one guards a credential and must therefore cover routes core has never heard of ([#327](https://github.com/o3co/auth.provider/issues/327)); this one *grants* a cross-origin read, so a route core has never heard of is exactly the one that must not silently acquire it.
+
+| Path | Methods |
+|---|---|
+| `/oauth/token` | `POST` |
+| `/oauth/userinfo` | `GET`, `POST` |
+| `/oauth/revoke` | `POST` |
+| `/.well-known/openid-configuration` | `GET` |
+| `oauth.jwt.jwksPath` (default `/.well-known/jwks.json`) | `GET` |
+
+`/oauth/introspect` is off the list because it is server-to-server and already refuses public clients; `/oauth/authorize` because it is a top-level navigation, not a `fetch`. The `/oauth/*` paths are coupled to the bundled `oauthModule`'s mountPath, like the `/oauth/token` mounts in `boot/assemble-app.mts` — a downstream that re-mounts the OAuth router elsewhere builds its own table and passes it to `corsMw`.
+
+### Headers
+
+- `Access-Control-Allow-Origin` carries the **matched entry, echoed exactly**. An arbitrary origin is never reflected and `*` is never emitted — not even for the unauthenticated documents, because one code path that can emit `*` is one code path away from emitting it on a response carrying a token.
+- **No `Access-Control-Allow-Credentials`, ever.** A cross-origin SPA here is a public client using PKCE and holds no cookie of ours. Allowing credentials would reach the cookie-backed `session` grant, which exchanges an authenticated browser session for tokens — a much larger grant than "may read the response to a request it authenticated itself", and CORS delivers the two together.
+- A preflight (`OPTIONS` carrying `Access-Control-Request-Method`) is answered `204` with the route's methods, `Access-Control-Allow-Headers: content-type, authorization, dpop`, and `Access-Control-Max-Age: 600`.
+- `Access-Control-Expose-Headers: WWW-Authenticate, Retry-After` — both are diagnostics the caller cannot act on otherwise (an opaque `429` with nothing to back off by; a `401` that will not say which scheme it wanted).
+- `Vary: Origin` on **every** response from these routes, including the ones with no CORS headers, so a shared cache cannot serve one origin's response to another.
+
+### Origins
+
+Entries are validated at boot by `checkSerializedOrigin` (`src/net/origin.mts`) and refused by index, because matching is exact string equality: a trailing slash, an explicit `:443`, an uppercase host, a path, or a wildcard is an allowlist that admits nobody with nothing anywhere to say so. `https` is required except for a loopback host, through the shared `isLoopbackHostname` home ([#364](https://github.com/o3co/auth.provider/issues/364)). `corsMw` re-applies the same check and warns on anything it drops, so a hand-built `AppConfig` that never passed the schema cannot install an entry the schema would have refused.
 
 ## Usage Example
 

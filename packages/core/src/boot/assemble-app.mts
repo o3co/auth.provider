@@ -31,6 +31,7 @@ import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { planDiscoveryRoute } from "../discovery/planRoute.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { browserFacingCorsRoutes, corsMw } from "../middleware/cors.mjs";
 import { protectedResourceBindingMw } from "../middleware/protectedResourceBinding.mjs";
 import {
 	type DispatchPolicy,
@@ -38,6 +39,7 @@ import {
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
+import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import type {
 	AppHandle,
@@ -574,6 +576,63 @@ export function assembleApp(
 
 	// Step 2: Construct router (§5.6 step 2).
 	const router: Router = RouterCtor();
+
+	// CORS, FIRST — before every other middleware and every route (#500).
+	//
+	// Order is the whole design here. A preflight carries no `Authorization`
+	// and no body, so it must be answered before anything that would inspect
+	// either; and a browser can only read an error response — the `400
+	// invalid_grant` an SPA most needs to see — if `Access-Control-Allow-Origin`
+	// is already on the response when a downstream handler ends it. Headers set
+	// on the way IN survive whatever the route does; headers set on the way out
+	// would not exist for a response that never came back through here.
+	//
+	// Mounted on an ALLOWLIST of paths, which is the opposite polarity to the
+	// sender-constraint mount below, and deliberately so. That one guards a
+	// credential and must therefore cover routes core has never heard of (#327);
+	// this one GRANTS a cross-origin read, so a route core has never heard of is
+	// exactly the route that must not silently acquire it. `corsMw` returns null
+	// for an empty `cors.allowedOrigins`, so a deployment that has not opted in
+	// gains nothing at all — not even a `Vary` header.
+	{
+		const components = frozen.components as Record<string, unknown>;
+		const config = components.config as
+			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { jwksPath?: unknown } } }
+			| undefined;
+		const configured = config?.cors?.allowedOrigins;
+		const logger = components.logger as Logger | undefined;
+		// Read through the shared shape normaliser rather than testing for an
+		// array. The config reaching this point has not necessarily been
+		// through `AppConfigSchema`: `validateAndComposeConfig` validates with
+		// the core schema, which does not declare `cors`, and shallow-merges
+		// the raw top-level extras back over the result. So an operator who
+		// configured this the documented way — `${?CORS_ALLOWED_ORIGINS}`, a
+		// comma-separated string, the only shape an environment variable can
+		// carry a list in — handed an `Array.isArray` test a string, and the
+		// middleware was silently not mounted. That is the exact failure this
+		// key was wired up to stop being.
+		const allowedOrigins = normalizeAllowedOrigins(configured);
+		if (allowedOrigins.length > 0) {
+			const mw = corsMw({
+				allowedOrigins,
+				routes: browserFacingCorsRoutes(config ?? {}),
+				...(logger ? { logger } : {}),
+			});
+			if (mw !== null) router.use(mw);
+		} else if (
+			configured !== undefined &&
+			configured !== null &&
+			!Array.isArray(configured) &&
+			typeof configured !== "string"
+		) {
+			// An array or a string that normalises to nothing is an operator
+			// saying "no origins", which is CORS off and needs no comment. A
+			// shape neither reader can interpret is a misconfiguration, and
+			// staying silent about it is what this whole block is here to
+			// stop.
+			logger?.warn({ received: typeof configured }, "cors_allowed_origins_unreadable");
+		}
+	}
 
 	// The paths the protected-resource sender-constraint middleware (#264)
 	// must NOT run on. Everything else is guarded — the mount below is GLOBAL,

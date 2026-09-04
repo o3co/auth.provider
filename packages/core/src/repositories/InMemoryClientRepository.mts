@@ -46,6 +46,29 @@ const httpUrlSchema = z
 	);
 
 /**
+ * One entry of a registered-redirect-URI list, held to the shared
+ * `net/redirect-uri` grammar and reporting refusals under `field`.
+ *
+ * Parameterised by the field name so `allowedRedirectUris` and
+ * `postLogoutRedirectUris` — the two lists on this record whose entries are
+ * URIs a *user agent* is sent to — are one vocabulary rather than two. The
+ * refusal wording comes from the checker, so a custom `ClientRepository`
+ * opting into `checkRedirectUri` refuses in the same words.
+ *
+ * @internal
+ */
+const redirectUriEntrySchema = (field: string) =>
+	z.string().superRefine((uri, ctx) => {
+		const rejection = checkRedirectUri(uri);
+		if (rejection !== null) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message: `${field} entry ${JSON.stringify(uri)}: ${describeRedirectUriRejection(rejection)}`,
+			});
+		}
+	});
+
+/**
  * @internal
  *
  * Zod schema for per-client configuration entries consumed by the in-memory and
@@ -70,19 +93,7 @@ export const ClientEntrySchema = z
 		// The logout URL fields below were already URL-validated; the more
 		// dangerous surface now is too. Refusal wording comes from the checker,
 		// so a custom ClientRepository opting in refuses in the same words.
-		allowedRedirectUris: z
-			.array(
-				z.string().superRefine((uri, ctx) => {
-					const rejection = checkRedirectUri(uri);
-					if (rejection !== null) {
-						ctx.addIssue({
-							code: z.ZodIssueCode.custom,
-							message: `allowedRedirectUris entry ${JSON.stringify(uri)}: ${describeRedirectUriRejection(rejection)}`,
-						});
-					}
-				}),
-			)
-			.default([]),
+		allowedRedirectUris: z.array(redirectUriEntrySchema("allowedRedirectUris")).default([]),
 		allowedScopes: z.array(z.string()).default([]),
 		// #396: what an omitted `scope` parameter grants. Optional — absent plus a
 		// non-empty allowlist makes a scope-omitting request `invalid_scope`
@@ -97,9 +108,30 @@ export const ClientEntrySchema = z
 		// deny-by-absence at /token dispatch (#326).
 		allowedGrantTypes: z.array(z.string()).optional(),
 		// NEW (TODO-F-5): Logout metadata.
-		// Use httpUrlSchema (not z.string().url()) for fields that end up in iframe src
-		// or redirect targets — rejects javascript:, data:, file: to prevent XSS.
-		postLogoutRedirectUris: z.array(httpUrlSchema).optional(),
+		//
+		// #498: `postLogoutRedirectUris` uses the SAME checker as
+		// `allowedRedirectUris` above, and for the same reason — it is a URI a
+		// user agent is redirected to, so it wants the redirect-target grammar,
+		// not "is this an http URL". On `httpUrlSchema` an app whose only
+		// redirect target is a reverse-DNS custom scheme (`com.example.app:/
+		// signout`) could register where it receives the authorization response
+		// and NOT where it is sent afterwards, so RP-initiated logout ended in a
+		// JSON body instead of back in the app.
+		//
+		// The move also TIGHTENS this field: `checkRedirectUri` refuses a
+		// fragment (RFC 6749 §3.1.2), userinfo, control characters and plain
+		// `http:` off a loopback host, all of which `httpUrlSchema` admitted.
+		// That is the same list `allowedRedirectUris` has been held to since
+		// #395; a post-logout target is not the weaker surface.
+		postLogoutRedirectUris: z.array(redirectUriEntrySchema("postLogoutRedirectUris")).optional(),
+		// The other two logout fields deliberately STAY on `httpUrlSchema`, and
+		// are not a drift from the line above. Neither is a redirect target:
+		// `backchannelLogoutUri` is fetched by this server as an RFC-defined
+		// POST, and `frontchannelLogoutUri` is rendered as an iframe `src`. A
+		// custom scheme is meaningless to the first (nothing here can dispatch
+		// `com.example.app:` — an OS handler can) and actively dangerous in the
+		// second, where the browser resolves the value in a document context.
+		// http/https is the whole vocabulary either one has.
 		backchannelLogoutUri: httpUrlSchema.optional(),
 		// NOTE: OIDC Back-Channel Logout 1.0 §2.2 defines backchannel_logout_session_required
 		// as defaulting to `false` when omitted. This implementation intentionally defaults to

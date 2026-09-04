@@ -51,6 +51,39 @@
 import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
 import { z } from "zod";
 
+/**
+ * Android's Credential Manager presents the calling app as
+ * `android:apk-key-hash:<base64url>` — the base64url SHA-256 of the signing
+ * certificate — where a browser presents an https origin. It is not a URL with
+ * a host, so the secure-context reasoning below (scheme + loopback carve-out)
+ * has nothing to say about it; the guarantee is the signing key itself, which
+ * only the app publisher holds.
+ *
+ * `@simplewebauthn/server` accepts this form and matches it against
+ * clientDataJSON by exact string, like every other expected origin. Until #497
+ * the schema refused it, so the "one RP shared by the web origin and the
+ * Android app" deployment this package's README describes could not be
+ * expressed in configuration at all.
+ *
+ * Validated on the RAW string, not on a parsed `URL`: the value is an opaque
+ * URI whose body is not a host, so there is nothing for the parse to check —
+ * and `new URL()` would happily accept `android:apk-key-hash:../evil` too.
+ * The shape is therefore the whole check:
+ *
+ * - the literal lowercase prefix, because that is the spelling the client
+ *   sends and the comparison is exact — `ANDROID:APK-KEY-HASH:` would parse
+ *   and then never match a ceremony, the same dead-entry failure the "no
+ *   trailing slash" rule above exists to prevent;
+ * - a non-empty base64url body (`A-Za-z0-9-_` with optional `=` padding) and
+ *   nothing after it, so a path, query or fragment smuggled onto the end is
+ *   refused rather than registered.
+ *
+ * Standard-base64 `+` and `/` are deliberately out: the alphabet Credential
+ * Manager emits is the URL-safe one, so those characters can only be a
+ * transcription error.
+ */
+const ANDROID_APK_KEY_HASH_ORIGIN = /^android:apk-key-hash:[A-Za-z0-9_-]+={0,2}$/;
+
 export const webauthnConfigSchema = z.object({
 	/** Relying Party ID — the effective domain, e.g. "example.com". */
 	rpId: z.string().min(1),
@@ -61,7 +94,7 @@ export const webauthnConfigSchema = z.object({
 	 * At least one entry required. Multiple entries support sub-domain or
 	 * multi-app deployments sharing a single RP ID.
 	 *
-	 * Each origin MUST be a literal origin (scheme + host + optional port) —
+	 * Each web origin MUST be a literal origin (scheme + host + optional port) —
 	 * `https://example.com`, `https://app.example.com`, `http://localhost:3000`.
 	 * MUST NOT include a trailing slash (`https://example.com/` will never match
 	 * the browser-sent clientDataJSON origin, which is the literal-origin form).
@@ -71,7 +104,13 @@ export const webauthnConfigSchema = z.object({
 	 * than `http://localhost` are rejected because passkeys are not transmittable
 	 * over insecure schemes (W3C WebAuthn §5.1.3 + browser policy).
 	 *
-	 * Cross-refs: Wave 1 post-merge audit M-1.
+	 * An **Android app** origin is the one non-URL entry this list accepts:
+	 * `android:apk-key-hash:<base64url>`, what Credential Manager sends in place
+	 * of an https origin (#497). List it alongside the web origin to share one
+	 * `rpId` between the site and the app — see ANDROID_APK_KEY_HASH_ORIGIN
+	 * above for the shape and why it is checked on the raw string.
+	 *
+	 * Cross-refs: Wave 1 post-merge audit M-1; #497.
 	 */
 	origin: z
 		.array(
@@ -83,6 +122,11 @@ export const webauthnConfigSchema = z.object({
 				})
 				.refine(
 					(u) => {
+						// The Android app form is not a URL with a host, so it is decided
+						// on its raw shape before the host-based reasoning below — see
+						// ANDROID_APK_KEY_HASH_ORIGIN. Every other refusal here is
+						// unchanged.
+						if (ANDROID_APK_KEY_HASH_ORIGIN.test(u)) return true;
 						// URL-parse-based check (not string-prefix) so attacker-prefix
 						// bypasses like `http://127.0.0.1.evil.com`, `http://127.0.0.1@evil.com`,
 						// `http://[::1]@evil.com` are rejected. The .url() validator above
@@ -110,7 +154,9 @@ export const webauthnConfigSchema = z.object({
 					},
 					{
 						message:
-							"origin must be https:// or http:// loopback (localhost / 127.0.0.1 / [::1]) with no userinfo (W3C WebAuthn secure-origin policy)",
+							"origin must be https://, http:// loopback (localhost / 127.0.0.1 / [::1]) with no userinfo " +
+							"(W3C WebAuthn secure-origin policy), or an Android app origin " +
+							"(android:apk-key-hash:<base64url>, lowercase prefix, no trailing path/query/fragment)",
 					},
 				),
 		)

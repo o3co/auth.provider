@@ -172,6 +172,12 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 
 	// --- endpoints ----------------------------------------------------
 	ENDPOINTS_LOGIN_URL: "/login",
+
+	// --- cors ---------------------------------------------------------
+	// #500: a list, in the only shape an environment variable can carry one.
+	// The schema splits and validates it; the `turns every non-boolean
+	// override into its declared type` case below pins the result.
+	CORS_ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
 };
 
 /**
@@ -294,6 +300,45 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.session.maxAge).toBe(3600000);
 		expect(config.session.csrf?.ttlSeconds).toBe(7200);
 		expect(config.oauth.nonce?.maxLength).toBe(256);
+		// #500: a comma-separated string becomes a list of origins, trimmed.
+		expect(config.cors?.allowedOrigins).toEqual([
+			"https://app.example.com",
+			"http://localhost:5173",
+		]);
+	});
+
+	describe("CORS_ALLOWED_ORIGINS (#500)", () => {
+		it("reads an exported-but-empty variable as no origins, not as an error", () => {
+			// The .env / compose / ConfigMap shape. "CORS off" is what both the
+			// unset key and the empty string mean, so they must agree.
+			const config = buildResolvedConfig({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: "" });
+			expect(config.cors?.allowedOrigins).toEqual([]);
+		});
+
+		it("fails boot on an origin that could never match, naming the key", () => {
+			// Every one of these parses as a URL and is a real typo: matching is
+			// exact string equality against the Origin header, so each would be
+			// an allowlist that admits nobody with nothing to say so.
+			for (const bad of [
+				"https://app.example.com/", // trailing slash
+				"https://app.example.com:443", // explicit default port
+				"https://*.example.com", // wildcard
+				"http://app.example.com", // plaintext off loopback
+				"https://app.example.com/callback", // a URL, not an origin
+			]) {
+				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, CORS_ALLOWED_ORIGINS: bad })).toThrow(
+					/cors\.allowedOrigins/,
+				);
+			}
+		});
+
+		it("accepts the loopback http carve-out a dev front-end needs", () => {
+			const config = buildResolvedConfig({
+				...DOCUMENTED_ENV,
+				CORS_ALLOWED_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173,https://app.example.com",
+			});
+			expect(config.cors?.allowedOrigins).toHaveLength(3);
+		});
 	});
 
 	it("parses the HS256 shape, whose strict union refuses asymmetric key fields", () => {

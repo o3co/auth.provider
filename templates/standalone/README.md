@@ -52,6 +52,49 @@ An allowlist is a network control, not a cryptographic one. The edge must also *
 
 **Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. Since #270 the login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; both adapters seed their own `limits.login` from it, so there is nothing to restate.
 
+**Behind a BFF, raise `limits.token` before you need to.** The OAuth-endpoint
+rate limits key on `req.ip` (`packages/core/src/ratelimit/guard.mts` builds the
+bucket key as `<endpoint>:ip:<req.ip>`), which is the right identity when the
+client is the browser or a native app talking to this provider directly. It is
+the wrong one in a backend-for-frontend topology, where a server-side app holds
+the session and exchanges codes and refreshes on its users' behalf: every
+`/oauth/token` and `/oauth/introspect` call then arrives from the BFF's single
+address and the whole deployment shares one bucket. At the default 60 requests
+per 60 s that caps you at roughly **60 session-grant exchanges a minute across
+all users** — and it does not surface as a rate limit. The BFF gets a `429` it
+was not written to expect, turns it into a `502` for its own caller, and the
+symptom your users report is "sign-in is broken sometimes", at the traffic
+level where it starts happening and not before.
+
+`HTTP_TRUST_PROXY` does not fix this and is not meant to. It teaches `req.ip`
+to see through a *proxy* — a hop that forwards someone else's request and says
+so in `X-Forwarded-For`. A BFF is not forwarding anyone; it is the client, and
+its address is the honest answer to "who called". There is no per-user identity
+in these requests to key on.
+
+The knob is the per-endpoint budget. Both limiter adapters take
+`limits { <prefix> { limit, windowSeconds } }`, keyed by the endpoint prefix:
+
+```hocon
+redisRateLimiter {
+  limits {
+    token     { limit = 600, windowSeconds = 60 }
+    introspect { limit = 600, windowSeconds = 60 }
+  }
+}
+```
+
+(`memoryRateLimiter.limits` for the memory adapter, same shape.) Size it from
+your BFF's peak sign-ins and refreshes per minute with headroom, and remember
+that under `rateLimiter.adapter = "redis"` the budget is shared across replicas
+— which is what you want here, and what makes the number mean something.
+
+The defaults are deliberately left alone: 60/60 s per source IP is a sensible
+brute-force bound for a deployment whose clients really are distinct IPs, and
+raising it globally to accommodate one topology would weaken it for the other.
+Put the throttling that protects the BFF's *own* users in front of the BFF,
+where per-user identity still exists.
+
 **Set `DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, DPoP proof-replay detection forking. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`USER_SESSION_STORES_ADAPTER=memory`), the authorization-code repository (`OAUTH_CODE_ADAPTER=memory`) and the federation token store (`FEDERATION_TOKEN_STORE_TYPE=memory`, the default) — are refused by name too; before #455 they booted under `multi`. Since #474 that includes express-session's own store under `SESSION_STORAGE_TYPE=memory` and the login / WebAuthn-options rate limiters when no shared `rateLimiter` is wired; with the mode unset those three warn instead (see the operator runbook). With the mode unset you get one `replica_unsafe_adapters` warning at boot instead; with `DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica.
 
 Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
@@ -200,7 +243,64 @@ Two configuration notes:
   request.
 - If your login UI is served from a **different origin** than the provider,
   list that origin under `session.csrf.trustedOrigins` in your HOCON config.
-  `cors.allowedOrigins` no longer confers CSRF trust.
+  `cors.allowedOrigins` does not confer CSRF trust — see
+  [CORS](#cors) for what it does confer.
+
+### CORS
+
+| Variable | Default | Description |
+|---|---|---|
+| `CORS_ALLOWED_ORIGINS` | *(empty — CORS off)* | Comma-separated list of browser origins allowed to read the token, userinfo, revocation and discovery/JWKS responses |
+
+A browser app served from a different origin than this provider — an SPA on
+`https://app.example.com` against a provider on `https://auth.example.com` —
+cannot call the token endpoint at all unless that origin is on
+`cors.allowedOrigins`. Set it and the provider answers preflights and stamps
+`Access-Control-Allow-Origin` on the five endpoints a browser has a legitimate
+reason to call cross-origin:
+
+| Endpoint | Methods | Why |
+|---|---|---|
+| `/oauth/token` | `POST` | The PKCE code exchange and refresh — the call an SPA cannot avoid |
+| `/oauth/userinfo` | `GET`, `POST` | OIDC Core §5.3 defines both |
+| `/oauth/revoke` | `POST` | RFC 7009 §2.1 — a public client revoking its own tokens on sign-out |
+| `/.well-known/openid-configuration` | `GET` | Discovery, fetched by browser client libraries |
+| `/.well-known/jwks.json` | `GET` | Same; follows `oauth.jwt.jwksPath` when you override it |
+
+`/oauth/introspect` and `/oauth/authorize` are deliberately **not** included.
+Introspection is server-to-server and already refuses public clients, so no
+browser could use it; `/authorize` is a top-level navigation rather than a
+`fetch`, and CORS has no say over where a browser may navigate.
+
+```hocon
+cors {
+  allowedOrigins = ["https://app.example.com", "http://localhost:5173"]
+}
+```
+
+or `CORS_ALLOWED_ORIGINS=https://app.example.com,http://localhost:5173`.
+
+**Matching is exact string equality against the `Origin` header**, and every
+shape that could not match fails at boot naming its index rather than sitting
+in the config admitting nobody. So: no trailing slash
+(`https://app.example.com/`), no explicit default port (`:443`), no path, no
+uppercase host, and **no wildcard** — there is no subdomain matching and there
+is not going to be. `https` is required except for a loopback host
+(`localhost`, `127.0.0.0/8`, `[::1]`), which is the carve-out that lets a
+front-end dev server work without a certificate.
+
+**Credentials are never allowed.** The provider sends no
+`Access-Control-Allow-Credentials`, so an allowlisted origin can read these
+responses and cannot use the browser's session cookie. That is deliberate: a
+cross-origin SPA here is a public client using PKCE and needs no cookie, while
+the cookie it would otherwise gain reaches the `session` grant — which
+exchanges an authenticated browser session for tokens. If your app needs that
+grant, serve it same-origin or put a BFF in front.
+
+Every response from these five routes carries `Vary: Origin`, including the
+ones with no CORS headers, so a shared cache cannot hand one origin's response
+to another. An empty list (the default) means the middleware is not mounted at
+all — no headers, no `Vary`, nothing changed.
 
 ### Google Federation
 
@@ -347,7 +447,11 @@ make test
 The `docker-compose.yml` starts the auth server together with a Redis container. Configure environment variables in `.env`.
 
 `docker-compose.yml` is a **development** file: it builds the `develop` target and bind-mounts `./src` and `./config`, so deploying it ships a hot-reload server running your working tree. The deployable shape is
-[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front plus `HTTP_TRUST_PROXY`, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
+[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
+
+`HTTP_TRUST_PROXY` is an explicit `${HTTP_TRUST_PROXY:?…}` entry there, so `docker compose up` **refuses to start** until you name the hop in `.env`. That is deliberate: there is no address the file could default to that would not silently trust a hop you never chose, and without the variable the Secure cookie the file pins is never set, the CSRF origin check 403s every browser POST, and every IP-keyed rate limit shares one bucket.
+
+Every store whose records must outlive one process is named in that file's `environment:` block rather than inherited — including `USER_SESSION_STORES_ADAPTER=redis`, which has to travel with `SESSION_STORAGE_TYPE=redis`. `DEPLOYMENT_MODE=single` will not tell you when it does not: the replica guard answers "can these stores be shared", not "do these two stores have the same lifetime". Split them and a restart leaves every browser holding a surviving express-session that still reads `isAuthenticated` with no `UserSession` behind it — `/authorize` bounces to login, the cookie bounces it back, and the loop clears only when the user deletes the cookie.
 
 ```bash
 # The signing keys are a required input: EdDSA is the default and there is no

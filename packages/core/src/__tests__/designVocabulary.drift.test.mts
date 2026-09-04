@@ -90,6 +90,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+withRemovedKeys\b/,
 	},
 	{
+		concept: "serialized origin (#500)",
+		home: "packages/core/src/net/origin.mts",
+		definition: /(?:function|const)\s+checkSerializedOrigin\b/,
+	},
+	{
 		concept: "device-verification budget shape (#448)",
 		home: "packages/core/src/ratelimit/deviceVerificationSpec.mts",
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,

@@ -14,6 +14,23 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      # The same coherence the production file states, for the same reason,
+      # and it matters MORE here. `config/application.conf` already puts
+      # express-session, the authorization codes and the access-token denylist
+      # on the Redis this compose runs; only the UserSession stores were left
+      # on their `memory` default. That combination survives a restart on one
+      # side and not the other, so every browser comes back holding an
+      # express-session that still says `isAuthenticated` with no `UserSession`
+      # behind it and /authorize loops.
+      #
+      # A dev container restarts on every save (`target: develop` is hot
+      # reload), so the developer meets that loop constantly — and meets it
+      # while changing something else, which is the worst possible time to
+      # debug it. Redis is already running and already required by three other
+      # stores, so this costs nothing: the shared ioredis socket is open
+      # either way.
+      USER_SESSION_STORES_ADAPTER: redis
 
   redis:
     # Tag-pinned, not digest-pinned. The Dockerfile argues for digests (#289)

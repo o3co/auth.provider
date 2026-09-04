@@ -38,6 +38,11 @@ import {
 	measureSecretEntropyBytes,
 } from "../keys/secretEntropy.mjs";
 import {
+	checkSerializedOrigin,
+	describeSerializedOriginRejection,
+	normalizeAllowedOrigins,
+} from "../net/origin.mjs";
+import {
 	checkTrustedProxyEntry,
 	describeTrustedProxyEntryRejection,
 } from "../net/trusted-proxy.mjs";
@@ -1077,7 +1082,52 @@ export const fullSectionsSchema = z.object({
 		// values into AppConfig that nothing consumed.
 	}),
 	cors: z.object({
-		allowedOrigins: z.array(z.string()),
+		/**
+		 * The browser origins allowed to read the token, userinfo, revocation
+		 * and discovery/JWKS responses (#500). Empty — the default — means CORS
+		 * is off and no middleware is mounted.
+		 *
+		 * Entries are validated at boot against the shared serialized-origin
+		 * vocabulary in `../net/origin`, so a typo fails here naming its index
+		 * rather than becoming a rule that silently never matches. That is not
+		 * a hypothetical for this key: matching is exact string equality
+		 * against the `Origin` header, so `https://app.example.com/` — a
+		 * trailing slash, the shape an address bar hands you — is an allowlist
+		 * that admits nobody, with nothing anywhere to say so.
+		 *
+		 * `${?CORS_ALLOWED_ORIGINS}` arrives as a comma-separated string, the
+		 * only shape an environment variable can carry a list in. Normalising
+		 * it here rather than relying on the hocon bridge is the #292 /
+		 * `normalizeTrustProxy` finding applied again: the bridge coerces only
+		 * leaves it can reach and towards a type it can name, and an array of
+		 * strings is neither.
+		 *
+		 * This list does NOT confer CSRF trust — that is
+		 * `session.csrf.trustedOrigins`, and #272 was filed because one list
+		 * was answering both questions.
+		 */
+		allowedOrigins: z
+			.preprocess(
+				// Shape normalisation is shared with `assembleApp`'s mount site
+				// (`net/origin.mts`), which reads the same key off a config that
+				// has not necessarily been through this schema. A second copy
+				// here is how the two would disagree about what a
+				// comma-separated `CORS_ALLOWED_ORIGINS` means.
+				(raw) => (raw === undefined ? raw : normalizeAllowedOrigins(raw)),
+				z.array(z.string()),
+			)
+			.superRefine((value, ctx) => {
+				value.forEach((entry, index) => {
+					const rejection = checkSerializedOrigin(entry);
+					if (rejection !== null) {
+						ctx.addIssue({
+							code: z.ZodIssueCode.custom,
+							message: `cors.allowedOrigins[${index}] ${describeSerializedOriginRejection(rejection)}`,
+							path: [index],
+						});
+					}
+				});
+			}),
 	}),
 	// #496: the WebAuthn deployer section. `@o3co/auth-provider-webauthn`
 	// ships it in its own `reference.conf` and parses it with

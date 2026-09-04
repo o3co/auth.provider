@@ -177,7 +177,7 @@ OAuth モジュールは `userSessionStore`、`federationTokenStore`、`refreshT
 OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。`application/x-www-form-urlencoded` を受け付ける:
 
 - `id_token_hint`（必須） — このプロバイダーが発行した署名済み id_token。`sid` クレームでセッションを特定する
-- `post_logout_redirect_uri`（任意） — `client.postLogoutRedirectUris` のいずれかと完全一致する必要がある
+- `post_logout_redirect_uri`（任意） — `client.postLogoutRedirectUris` のいずれかと**バイト単位で完全一致**する必要がある。カスタムスキームでも一致条件は緩和されない（#498）
 - `state`（任意） — `post_logout_redirect_uri` へのリダイレクト時にそのまま返す
 
 フロー: `id_token_hint` を検証 → セッションを取得 → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を POST → ストアカスケード（リフレッシュファミリー失効・フェデレーショントークン削除・セッション削除）を実行 → 以下のいずれかで応答:
@@ -215,10 +215,10 @@ IdP end-session 呼び出しが失敗した場合、ローカル状態はすで�
 
 各 `Client` はログアウト動作を制御する 5 つのオプションフィールドをサポートする:
 
-- `postLogoutRedirectUris?: string[]` — `POST /oauth/logout` の `post_logout_redirect_uri` 許可リスト
-- `backchannelLogoutUri?: string` — `logout_token` の POST を受け取る URI
+- `postLogoutRedirectUris?: string[]` — `POST /oauth/logout` の `post_logout_redirect_uri` 許可リスト。#498 以降は `allowedRedirectUris` と**同じ文法**で検証される: `https:`、ループバックホストの `http:`、または RFC 8252 §7.1 の逆ドメイン形式カスタムスキーム（`com.example.app:/signout`）。フラグメント・userinfo・実行可能スキームは拒否される。カスタムスキームを登録できることが、ネイティブアプリをログアウト後にアプリ自身へ戻せる条件になる。
+- `backchannelLogoutUri?: string` — `logout_token` の POST を受け取る URI。**`http`/`https` のみ** — このサーバー自身が POST するため、カスタムスキームには到達できない。
 - `backchannelLogoutSessionRequired?: boolean` — デフォルト `true`。`false` にすると `logout_token` から `sid` を除外する
-- `frontchannelLogoutUri?: string` — フロントチャネルの iframe src
+- `frontchannelLogoutUri?: string` — フロントチャネルの iframe src。**`http`/`https` のみ** — ブラウザーがドキュメントコンテキストで解決する値であり、カスタムスキームは無意味かつ危険
 - `frontchannelLogoutSessionRequired?: boolean` — デフォルト `true`。`false` にすると iframe URL から `sid` を除外する
 
 ## TODO-F-6 の変更点 — フェデレーショントークンエンドポイント

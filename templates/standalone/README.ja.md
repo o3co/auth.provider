@@ -115,7 +115,15 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 設定上の注意が 2 点:
 
 - TLS 終端プロキシの背後では `HTTP_TRUST_PROXY` にそのプロキシのアドレス／CIDR を設定する (例: `HTTP_TRUST_PROXY=10.0.0.0/8`)。設定しないと `req.protocol` は `http` のままでブラウザは `Origin: https://…` を送るため、origin 側の判定が全リクエストを拒否する。`true` は「プロキシ以外が絶対にプロセスへ到達できない」と言い切れる場合にのみ正しい (#292) — 英語版 README も同じ指針。
-- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON の `session.csrf.trustedOrigins` に列挙する。`cors.allowedOrigins` は CSRF 信頼を与えなくなった。
+- ログイン UI をプロバイダーと**別 origin** で配信している場合は、その origin を HOCON の `session.csrf.trustedOrigins` に列挙する。`cors.allowedOrigins` は CSRF 信頼を与えない。
+
+### CORS（#500）
+
+ブラウザーアプリをプロバイダーと別 origin で配信している場合、その origin を `cors.allowedOrigins`（環境変数は `CORS_ALLOWED_ORIGINS`、カンマ区切り）に列挙しないと、SPA は token エンドポイントを呼べない。有効になるのは `/oauth/token`、`/oauth/userinfo`、`/oauth/revoke`、discovery、JWKS の 5 つだけで、`/oauth/introspect`（サーバー間通信）と `/oauth/authorize`（トップレベル遷移）は意図的に対象外。
+
+`Origin` ヘッダーとの**完全一致**なので、末尾スラッシュ・明示的な `:443`・パス・大文字ホスト・ワイルドカードはいずれも起動時に失敗する（一致しない許可リストが黙って居座るのを防ぐため）。ループバックホストを除き https が必須。
+
+`Access-Control-Allow-Credentials` は**決して送らない** — ここでのクロスオリジン SPA は PKCE を使う public client であり cookie は不要で、cookie を渡せば `session` grant に届いてしまう。空リスト（既定）なら CORS は無効で、middleware 自体がマウントされない。詳細は英語版 README の [CORS](README.md#cors) を参照。
 
 ### Google フェデレーション
 

@@ -293,6 +293,82 @@ describe("InMemoryClientRepository", () => {
 		});
 	});
 
+	// #498 — `postLogoutRedirectUris` was on the http/https-only
+	// `httpUrlSchema` while `allowedRedirectUris` on the same record already
+	// used the richer `checkRedirectUri` grammar. A native app whose only
+	// redirect target is a reverse-DNS custom scheme could register where it
+	// receives the authorization response and NOT where it is sent after
+	// logout, so RP-initiated logout ended in a JSON body instead of back in
+	// the app.
+	describe("postLogoutRedirectUris uses the registered-redirect-URI grammar (#498)", () => {
+		const baseEntry = {
+			tokenEndpointAuthMethod: "client_secret_basic" as const,
+			clientSecret: "secret",
+			allowedRedirectUris: [],
+			allowedScopes: [],
+		};
+
+		const parse = (postLogoutRedirectUris: string[]) =>
+			ClientEntrySchema.safeParse({ ...baseEntry, postLogoutRedirectUris });
+
+		it("accepts an RFC 8252 §7.1 reverse-domain custom scheme", () => {
+			expect(parse(["com.example.app:/signout"]).success).toBe(true);
+		});
+
+		it("accepts the same grammar allowedRedirectUris accepts", () => {
+			// The point of the change: one record, one vocabulary. Every shape
+			// that is a legal redirect target is a legal post-logout target.
+			const uris = [
+				"https://rp.example/logged-out",
+				"http://127.0.0.1:8080/logged-out",
+				"com.example.app:/signout",
+				"com.example.app:signout",
+			];
+			expect(parse(uris).success).toBe(true);
+			expect(ClientEntrySchema.safeParse({ ...baseEntry, allowedRedirectUris: uris }).success).toBe(
+				true,
+			);
+		});
+
+		it.each([
+			["dotless custom scheme", "myapp:/signout"],
+			["executable scheme", "javascript:alert(1)"],
+			["dotted executable scheme", "javascript.evil:/x"],
+			["data scheme", "data:text/html,<script>alert(1)</script>"],
+			["fragment", "https://rp.example/logged-out#frag"],
+			["userinfo", "https://user:pass@rp.example/logged-out"],
+			["http off loopback", "http://rp.example/logged-out"],
+			["not absolute", "/logged-out"],
+		])("refuses a %s", (_label, uri) => {
+			expect(parse([uri]).success).toBe(false);
+		});
+
+		it("names the field and the offending entry when it refuses", () => {
+			const result = parse(["javascript:alert(1)"]);
+			expect(result.success).toBe(false);
+			const message = result.success ? "" : (result.error.issues[0]?.message ?? "");
+			expect(message).toContain("postLogoutRedirectUris");
+			expect(message).toContain("javascript:alert(1)");
+		});
+
+		it("leaves backchannelLogoutUri and frontchannelLogoutUri on http/https", () => {
+			// Deliberately NOT widened: one is a server-side POST target and the
+			// other an iframe `src`, where a custom scheme is wrong or dangerous.
+			expect(
+				ClientEntrySchema.safeParse({
+					...baseEntry,
+					backchannelLogoutUri: "com.example.app:/backchannel",
+				}).success,
+			).toBe(false);
+			expect(
+				ClientEntrySchema.safeParse({
+					...baseEntry,
+					frontchannelLogoutUri: "com.example.app:/frontchannel",
+				}).success,
+			).toBe(false);
+		});
+	});
+
 	describe("allowedAudiences field round-trip (Token Exchange RFC 8693)", () => {
 		it("exposes allowedAudiences via findById (empty array when omitted)", async () => {
 			const repo = new InMemoryClientRepository(
