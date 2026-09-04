@@ -67,10 +67,14 @@ picking the wrong one produces `invalid_client` with no further explanation.
 | **`AuthKey_XYZW98765F.p8`** | `privateKey` | The EC P-256 private key, PKCS#8 PEM. **Downloadable exactly once** — if it is lost, revoke the key and create another. Pass the file's contents, not its path. |
 
 The **return URL** registered against the Services ID must equal `callbackURL`
-exactly, and Apple requires it to be `https` — plain HTTP and `localhost` are
-both refused, so local development needs a tunnel or a dev hostname with a
-certificate. The provider checks this at construction rather than letting the
-authorization endpoint reject it later.
+exactly, and Apple imposes two separate rules on it: the scheme must be
+`https`, **and** the host must not be loopback. `https://localhost/cb`
+satisfies the first and still fails, as do `https://127.0.0.1/cb`, the rest of
+`127.0.0.0/8`, and `https://[::1]/cb` — so local development needs a tunnel or
+a dev hostname holding a certificate. The provider checks both at
+construction, through the repo's one loopback predicate (`isLoopbackHostname`,
+#364), rather than letting the authorization endpoint answer the first login
+with an opaque `invalid_request`.
 
 ## The rotating client secret
 
