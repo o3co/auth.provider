@@ -593,6 +593,38 @@ export const CoreConfigSchema = z.object({
 				adapter: z.enum(["memory", "redis"]).optional(),
 			})
 			.optional(),
+		// #472: the RFC 8628 device-grant section `deviceGrantModule` reads.
+		// Declared here for the reason the `redis*` sections below are: this
+		// object strips keys it does not know, and the standalone validates
+		// against it before any module's own `configSchema` runs, so an
+		// operator's `enabled = true` — and the verification URI, code
+		// lifetime and rate-limit budget beside it — vanished at parse time.
+		//
+		// Presence-only. The defaults live in the device-grant package's
+		// `reference.conf` and in `deviceGrantConfigSchema`, which also
+		// enforces the real bounds; the two enum-shaped keys keep their
+		// vocabulary so a typo fails here by name rather than reading as a
+		// silently-absent declaration downstream. The booleans ride
+		// `coerceBooleanFromEnv` for the #288 reason: a `${?VAR}` arrives as a
+		// string.
+		deviceAuthorization: z
+			.object({
+				enabled: coerceBooleanFromEnv.optional(),
+				"verification-uri": z.string().optional(),
+				"verification-uri-complete": coerceBooleanFromEnv.optional(),
+				"code-lifetime-seconds": z.coerce.number().int().positive().optional(),
+				"polling-interval-seconds": z.coerce.number().int().positive().optional(),
+				rateLimit: z
+					.object({
+						limit: z.coerce.number().int().positive(),
+						windowSeconds: z.coerce.number().int().positive(),
+					})
+					.optional(),
+				// #363: the declared-absence spelling for the `deviceCodeStore`
+				// slot. `"unsupported"` is the only value the module accepts.
+				store: z.literal("unsupported").optional(),
+			})
+			.optional(),
 		// IH-16 (v0.5.1): bound the OIDC `nonce` query parameter at /authorize
 		// ingress so a malicious RP cannot exhaust per-request memory or amplify
 		// the id_token payload by sending a multi-megabyte nonce. Shape-only —
@@ -1103,6 +1135,18 @@ export const fullSectionsSchema = z.object({
 			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 			encryptionKey: z.string().optional(),
 			scanFallback: z.boolean().optional(),
+		})
+		.optional(),
+	// #472: module-internal config for `redisDeviceCodeStoreModule` (#433).
+	// Presence-only, for the same reason as every `redis*` section here:
+	// without a top-level entry `AppConfigSchema.parse(...)` strips the key
+	// before the module's own `configSchema` sees it, and the namespace the
+	// redis README documents is silently the default. The default lives in
+	// the module. `reference-conf-drift.test.mts` is what keeps the next
+	// section from being forgotten the same way.
+	redisDeviceCodeStore: z
+		.object({
+			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 	// #277: adapter switch for the RFC 7009 access-token denylist. Default
