@@ -151,4 +151,68 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 			});
 		}
 	});
+
+	// #497: Android Credential Manager presents `android:apk-key-hash:<base64url>`
+	// as the ceremony origin, and SimpleWebAuthn — which this package delegates
+	// verification to — matches it by exact string like any other origin. The
+	// secure-context gate above knew only about `https:` and loopback `http:`,
+	// so the "one RP shared by the web origin and the Android app" deployment
+	// the README describes could not be expressed in configuration at all.
+	describe("Android apk-key-hash origins (#497)", () => {
+		const { origin: _origin, ...okBase } = VALID;
+		// A real Credential Manager origin is the SHA-256 of the app's signing
+		// certificate, base64url-encoded — 43 characters, unpadded.
+		const androidOrigin = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
+
+		const accepts = [
+			androidOrigin,
+			// Padded base64url is still base64url; some tooling emits it.
+			"android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOU=",
+			// The `-` and `_` of the URL-safe alphabet.
+			"android:apk-key-hash:-_ab12",
+		];
+
+		const rejects = [
+			// Empty body — the prefix on its own names no app.
+			"android:apk-key-hash:",
+			// Standard base64's `+` and `/` are not the URL-safe alphabet, and an
+			// authenticator never sends them.
+			"android:apk-key-hash:abc+def",
+			"android:apk-key-hash:abc/def",
+			// Trailing junk after the body.
+			"android:apk-key-hash:abcdef/../evil",
+			"android:apk-key-hash:abcdef?x=1",
+			"android:apk-key-hash:abcdef#frag",
+			// A different `android:` sub-scheme is not the one Credential
+			// Manager sends, so it could only ever be a dead entry.
+			"android:apk-key-hash-sha256:abcdef",
+			"android:package:com.example.app",
+			// Case matters: the client sends the lowercase spelling, and
+			// SimpleWebAuthn compares exactly.
+			"ANDROID:APK-KEY-HASH:abcdef",
+			// Wildcards stay refused here too.
+			"android:apk-key-hash:*",
+		];
+
+		for (const origin of accepts) {
+			it(`accepts ${origin}`, () => {
+				expect(webauthnConfigSchema.safeParse({ ...okBase, origin: [origin] }).success).toBe(true);
+			});
+		}
+
+		for (const origin of rejects) {
+			it(`rejects ${origin}`, () => {
+				expect(webauthnConfigSchema.safeParse({ ...okBase, origin: [origin] }).success).toBe(false);
+			});
+		}
+
+		it("shares one RP between the web origin and the Android app", () => {
+			// The deployment the README documents: one `rpId`, two origins.
+			const parsed = webauthnConfigSchema.parse({
+				...okBase,
+				origin: ["https://example.com", androidOrigin],
+			});
+			expect(parsed.origin).toEqual(["https://example.com", androidOrigin]);
+		});
+	});
 });

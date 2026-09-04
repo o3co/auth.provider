@@ -56,6 +56,56 @@ const app = await createApp({
 });
 ```
 
+## Multi-origin: one RP for the site and the Android app
+
+`origin` is a list because one Relying Party is normally reached from more than
+one place. Every entry is compared against the authenticator's
+`clientDataJSON` by **exact string** — SimpleWebAuthn does no normalisation, no
+subdomain matching and no wildcards — so each entry has to be written exactly
+as the client sends it.
+
+| Client | Entry | Notes |
+|---|---|---|
+| Browser | `https://example.com` | Literal origin: scheme + host + optional port. **No trailing slash** — `https://example.com/` never matches. |
+| Browser, sub-domain | `https://app.example.com:8443` | Sharing one `rpId` across sub-domains means listing each origin. |
+| Browser, local dev | `http://localhost:3000` | `http:` is accepted for loopback only (`localhost`, `127.0.0.1`, `[::1]`). |
+| Android app | `android:apk-key-hash:<base64url>` | What Credential Manager sends in place of an origin ([#497](https://github.com/o3co/auth.provider/issues/497)). |
+
+```hocon
+webauthn {
+  rpId = "example.com"
+  rpName = "Example App"
+  origin = [
+    "https://example.com"
+    "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI"
+  ]
+}
+```
+
+**The Android entry.** Android's Credential Manager identifies the calling app
+by the base64url SHA-256 of its **signing certificate**, not by a host, and
+presents `android:apk-key-hash:<that hash>` as the ceremony origin. Derive it
+from the certificate that signs the build you are registering — a debug build
+and a Play-signed release have different signing keys and therefore different
+entries, so list both if both must work:
+
+```bash
+keytool -exportcert -alias <alias> -keystore <keystore> \
+  | openssl sha256 -binary \
+  | openssl base64 -A | tr '+/' '-_' | tr -d '='
+```
+
+The schema validates the shape only — the lowercase `android:apk-key-hash:`
+prefix plus a non-empty base64url body, with nothing after it. It cannot check
+that the hash is *your* app's, so an entry pasted from the wrong build is a
+ceremony that fails at runtime rather than a boot error. Standard-base64 `+`
+and `/` are refused: Credential Manager emits the URL-safe alphabet, so those
+characters are a transcription error every time.
+
+Serving `/.well-known/assetlinks.json` on the `rpId` domain is what lets the
+app use the RP ID; it is an Android platform requirement and outside this
+package.
+
 The library ships safe defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in `config/reference.conf` (resolved via composition-root `withFallback` chain per PR #171 discipline). Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR `packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md`).
 
 ## First-credential bootstrap (dogfood)
@@ -165,7 +215,7 @@ This package implements **Wave 1 first slice**:
 
 - Primary-login passkeys
 - Registration + authentication ceremonies
-- Multi-origin support (`config.origin: string[]`)
+- Multi-origin support (`config.origin: string[]`), web and Android — see [Multi-origin](#multi-origin-one-rp-for-the-site-and-the-android-app)
 - RFC 8707 resource indicator opt-in plumbing (Stage 1, mirroring `client_credentials` / `refresh_token`)
 - Refresh-token issuance for allowed clients ([issue #480](https://github.com/o3co/auth.provider/issues/480))
 
