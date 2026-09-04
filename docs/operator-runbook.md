@@ -65,12 +65,12 @@ Two things the guard cannot do:
   `standalone:in-memory-code-repository` and
   `standalone:in-memory-federation-token-store`
   (`templates/standalone/src/modules.mts`) — carry the declaration since #455,
-  so `multi` refuses them by name; before #455 they booted. Two per-process
-  fallbacks are still outside the guard and only warn: the login and
-  WebAuthn-options rate limiters when no shared `rateLimiter` is wired
-  (`login_rate_limiter_not_shared`,
-  `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#4-alerts)),
-  and express-session's own store when `SESSION_STORAGE_TYPE=memory`.
+  so `multi` refuses them by name; before #455 they booted. Three more joined
+  them in #474 and are refused the same way: express-session's own store under
+  `SESSION_STORAGE_TYPE=memory`, and the login and WebAuthn-options rate
+  limiters when no shared `rateLimiter` is wired. With the mode **unset** those
+  three warn instead (`login_rate_limiter_not_shared`,
+  `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#4-alerts)).
 
 In the standalone, `DEPLOYMENT_MODE=multi` therefore boots only once every
 store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
@@ -146,7 +146,7 @@ Module-level messages that arrive wrapped in a factory failure:
 - Standalone Redis: `` `refreshTokenFamilyStore.redis.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
 - Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs a `CRITICAL` line on every boot (`packages/redis/src/federation-tokens.mts`).
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
-- Device grant: the four refusals for `verification-uri`, the `session` slice, `rateLimit.failMode` and a `rateLimiter` component (`packages/device-grant/src/module.mts`).
+- Device grant: the five refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, and a usable `oauth.deviceAuthorization.rateLimit` budget (#448) (`packages/device-grant/src/module.mts`).
 - mTLS: `source = "header"` with empty `trusted-proxies`; `mode = "pki"`/`"full-pki"` with empty `trusted-cas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `revocation.mode` + `on-unavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowed-hosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
 
