@@ -150,6 +150,7 @@ import {
 	extensionValueParsed,
 } from "./criticalExtensions.mjs";
 import { CRL_NEGATIVE_CACHE_TTL_MS } from "./crl.mjs";
+import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
 
 /** OID of `authorityInfoAccess` (RFC 5280 §4.2.2.1). */
@@ -403,8 +404,17 @@ export interface OcspResolverOptions {
 	 * The signature-algorithm and key-size policy the validated path is held
 	 * to, applied to the response's signature and to a delegated responder's
 	 * certificate as well (#470). See the module header.
+	 *
+	 * Optional, defaulting to `DEFAULT_ALGORITHM_POLICY` — the same strict
+	 * policy the config resolves to when the operator sets nothing. This is
+	 * a security fix on a public interface, so a consumer who constructs a
+	 * resolver directly and upgrades without touching their code must *get*
+	 * the fix rather than opt into it. The default is fail-closed: omitting
+	 * the field can only make the check stricter, never weaker, so no
+	 * existing caller is silently left unprotected. `validate.mts` passes
+	 * the operator's configured policy explicitly.
 	 */
-	readonly algorithms: AlgorithmPolicy;
+	readonly algorithms?: AlgorithmPolicy;
 	/**
 	 * Refuse a response that does not carry the request's nonce. Defaults to
 	 * `true`; see the module header for what `false` gives up.
@@ -820,6 +830,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 	const cache = new Map<string, CacheEntry>();
 	const maxEntries = options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
 	const requireNonce = options.requireNonce ?? true;
+	const algorithms = options.algorithms ?? DEFAULT_ALGORITHM_POLICY;
 	/** Requests in progress, so concurrent misses on one certificate issue one request. */
 	const inFlight = new Map<string, Promise<Answer>>();
 
@@ -894,10 +905,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		// remembered per certificate like the check above (see the module
 		// header, #470). The responder certificate, when there is one, is
 		// held to the full policy inside `identifySigner`.
-		const algorithm = checkSignatureAlgorithm(
-			basic.signatureAlgorithm.algorithmId,
-			options.algorithms,
-		);
+		const algorithm = checkSignatureAlgorithm(basic.signatureAlgorithm.algorithmId, algorithms);
 		if (!algorithm.ok) {
 			return {
 				ok: false,
@@ -906,7 +914,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			};
 		}
 
-		const signer = await identifySigner(basic, issuer, now, crypto, options.algorithms);
+		const signer = await identifySigner(basic, issuer, now, crypto, algorithms);
 		if (!signer.ok) return { ok: false, reason: signer.reason, detail: signer.detail };
 		const signature = await verifySignature(basic, signer.signer, crypto);
 		if (!signature.ok) return { ok: false, reason: "bad_signature", detail: signature.detail };

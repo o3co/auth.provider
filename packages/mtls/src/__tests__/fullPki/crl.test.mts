@@ -24,6 +24,7 @@ import type * as pkijs from "pkijs";
 import { describe, expect, it } from "vitest";
 import { type AlgorithmPolicy, DEFAULT_SIGNATURE_ALGORITHMS } from "#/fullPki/algorithms.mjs";
 import { CRL_NEGATIVE_CACHE_TTL_MS, createCrlResolver } from "#/fullPki/crl.mjs";
+import { DEFAULT_ALGORITHM_POLICY, resolveFullPkiTuning } from "#/fullPki/defaults.mjs";
 import type { GuardedFetch } from "#/fullPki/fetchGuard.mjs";
 import type { IssuingDistributionPointOptions, Minted } from "./pkiFactory.mjs";
 import {
@@ -608,6 +609,42 @@ describe("CRL resolver — the signature-algorithm policy applies to the CRL too
 		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({
 			ok: false,
 			reason: "algorithm_not_permitted",
+		});
+	});
+
+	it("holds a resolver built without an algorithms policy to the strict default, refusing SHA-1", async () => {
+		// `algorithms` is optional so that this security fix reaches a
+		// consumer who upgrades without touching their code — the resolver
+		// options are public surface (#470 review). Omitting it must mean the
+		// strict default, never "no policy": absent a default, `undefined`
+		// here would have thrown, or worse, waved everything through.
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({ issuer: int, revoked: [], hash: "SHA-1" });
+		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!result.ok) expect(result.detail).toContain("1.2.840.10045.4.1");
+	});
+
+	it("still accepts a SHA-256 CRL with no algorithms policy given, so the default is not 'permit nothing'", async () => {
+		const { int, leaf } = await chain();
+		const crl = await mintCrl({ issuer: int, revoked: [] });
+		const { fetch } = stubGuardedFetch({ [INT_CRL_URL]: crl });
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		expect(await resolver.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
+	});
+
+	it("defaults to the very policy the config resolves to when the operator sets nothing", async () => {
+		// Two defaults that drift apart would mean a resolver built directly
+		// is held to a different bar than one the config builds — the failure
+		// mode `defaults.mts` exists to prevent.
+		const fromConfig = resolveFullPkiTuning(undefined);
+		expect(DEFAULT_ALGORITHM_POLICY).toEqual({
+			signatureAlgorithms: fromConfig.signatureAlgorithms,
+			minRsaKeyBits: fromConfig.minRsaKeyBits,
 		});
 	});
 
