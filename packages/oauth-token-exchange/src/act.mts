@@ -91,3 +91,41 @@ export function matchesMayAct(actor: ValidatedToken, mayAct: unknown): boolean {
 	if (!isRecord(mayAct)) return false;
 	return mayActEntryMatches(actor, mayAct);
 }
+
+function mayActClientEntryMatches(clientId: string, entry: Readonly<Record<string, unknown>>) {
+	// An entry that constrains `iss` names a party identified by the issuer of
+	// a token. This request presented no token for the actor, so there is no
+	// issuer to compare against and no honest answer but "no". Substituting
+	// this AS's own issuer would be a guess, and the permissive one.
+	if ("iss" in entry) return false;
+	if (typeof entry.sub !== "string") return false;
+	return entry.sub === clientId;
+}
+
+/**
+ * Check whether the authenticated calling **client** satisfies a subject
+ * token's RFC 8693 `may_act` claim on an *impersonation* exchange — the
+ * exchange that presents no `actor_token`, where the party acting on the
+ * subject's behalf is the client itself.
+ *
+ * Deliberately narrower than {@link matchesMayAct}, because the two compare
+ * against different things. `matchesMayAct` reads an actor *token*: `sub`
+ * against its subject, `iss` against its issuer. A client identity has the
+ * first and structurally cannot have the second, so an `iss`-constrained
+ * entry is refused rather than satisfied by an inferred value.
+ *
+ * `sub` is compared against `client.clientId`: for a client acting in its own
+ * name that IS its subject identifier — the same value `client_credentials`
+ * mints as `sub` (RFC 6749 §4.4.2) and every grant here stamps as `azp`.
+ *
+ * Malformed values fail closed, exactly as {@link matchesMayAct} does: a bad
+ * `may_act` claim must not silently disable a subject-declared constraint.
+ */
+export function matchesMayActClient(clientId: string, mayAct: unknown): boolean {
+	if (Array.isArray(mayAct)) {
+		if (mayAct.length === 0) return false;
+		return mayAct.some((entry) => isRecord(entry) && mayActClientEntryMatches(clientId, entry));
+	}
+	if (!isRecord(mayAct)) return false;
+	return mayActClientEntryMatches(clientId, mayAct);
+}

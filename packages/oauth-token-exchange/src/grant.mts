@@ -29,10 +29,11 @@ import {
 	formatObject,
 	generateToken,
 	generateTokenResponse,
+	isGrantTypeAllowed,
 	matchConfirmation,
 	ownedConfirmation,
 } from "@o3co/auth-provider-core";
-import { buildActClaim, countActorChainDepth, matchesMayAct } from "./act.mjs";
+import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
 import type { ExchangeTokenValidator, ValidatedToken } from "./validator/types.mjs";
 
@@ -59,6 +60,16 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
 
 	return {
+		// #326 deny-by-absence, the shape `client_credentials` and the WebAuthn
+		// grant already declare. Token exchange mints a fresh credential out of
+		// one a client already holds — a standing capability of a registration,
+		// never a per-user ceremony — so a registration that predates this
+		// grant, or simply omits `allowedGrantTypes`, must not acquire it by
+		// omission while `oauth.requireGrantTypeAllowlist` defaults off.
+		// Dispatch enforces this before `handle` runs; the in-handler copy
+		// below covers the standalone wiring this package documents, where no
+		// dispatch rule runs at all.
+		requiresExplicitGrantAllowlist: true,
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const body = ctx.body as Record<string, unknown>;
 			const subjectToken = typeof body.subject_token === "string" ? body.subject_token : null;
@@ -214,6 +225,33 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						status: 401,
 						error: "invalid_client",
 						errorDescription: "client authentication failed",
+					},
+				};
+			}
+
+			// #326, the in-handler half of `requiresExplicitGrantAllowlist`
+			// declared above. Not a redundant second copy of the rule: the
+			// dispatch check reads `ctx.authenticatedClient` and skips when it
+			// is null, and this grant documents a standalone wiring (no
+			// `clientAuthMw`) where it IS null and the client was authenticated
+			// from body credentials a few lines up. Without this the strict
+			// declaration would be decorative on exactly the path that has no
+			// route-level gate at all.
+			//
+			// The rule itself is core's — `isGrantTypeAllowed` with
+			// `requireAllowlist`, the same call dispatch makes — rather than a
+			// hand-rolled comparison, and the wire shape matches dispatch's
+			// byte for byte so a caller cannot tell which gate refused it.
+			if (!isGrantTypeAllowed(client.allowedGrantTypes, GRANT_TYPE, { requireAllowlist: true })) {
+				deps.logger?.warn(
+					{ clientId: client.clientId, grantType: GRANT_TYPE },
+					"token_exchange_grant_type_not_allowed",
+				);
+				return {
+					result: {
+						status: 400,
+						error: "unauthorized_client",
+						errorDescription: `client is not authorized for ${GRANT_TYPE}`,
 					},
 				};
 			}
@@ -590,10 +628,72 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
+			} else {
+				// Impersonation — no `actor_token`, so the party acting on the
+				// subject's behalf is the authenticated calling client itself,
+				// and `may_act` (RFC 8693 §4.4) is exactly a statement about who
+				// that party may be.
+				//
+				// Consulting the claim only when an `actor_token` happened to be
+				// supplied made a subject-declared constraint opt-out: a client
+				// that simply omitted the parameter was never held to it, so a
+				// token naming `{"sub":"svc-a"}` as its only permitted actor was
+				// exchangeable by any exchange-enabled client that got hold of
+				// it. The claim says who may act; it does not say "only when
+				// they bring a token to prove it".
+				//
+				// `matchesMayActClient` rather than `matchesMayAct`: the latter
+				// takes a `ValidatedToken` and compares `iss` against that
+				// token's issuer, and there is no actor token here to have one.
+				// Rather than fabricate a `ValidatedToken` that lies about its
+				// claims, the narrower matcher compares `sub` against the client
+				// id and refuses any entry that pins `iss` — see its doc comment
+				// for why an inferred issuer would be the permissive guess.
+				const subjectMayAct = subjectValidated.claims.may_act;
+				if (
+					subjectMayAct !== undefined &&
+					subjectMayAct !== null &&
+					!matchesMayActClient(client.clientId, subjectMayAct)
+				) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+						},
+						"token_exchange_may_act_violation",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "may_act_violation: client not authorized by subject token",
+						},
+					};
+				}
 			}
 
-			// Scope narrowing: requested scope ⊆ subject scope.
+			// Scope narrowing: requested scope ⊆ subject scope ∩ client.allowedScopes.
+			//
+			// Two ceilings, not one. The subject token's scope bounds what this
+			// exchange may carry forward; the calling client's registration
+			// bounds what that client may ever hold, on any grant. Only the
+			// first was enforced here, so a client registered for `read` that
+			// got hold of a subject token carrying `admin` exchanged it and
+			// received `admin` — its own registration was not a boundary at all,
+			// while `client_credentials`, jwt-bearer and `/authorize` all treat
+			// `allowedScopes` as exactly that.
+			//
+			// Absent and empty `allowedScopes` mean the same thing here, and
+			// they mean deny: a registration that names no scope may receive
+			// none. That is the #363/#396 shape — reading absence as
+			// "unrestricted" is precisely the over-grant #396 removed from the
+			// scope-omitting path in the sibling grants, and it would leave the
+			// hole above open for every registration that never filled the
+			// field in. A scope-less deployment is unaffected: there is nothing
+			// to over-grant, the exchange still mints a token, it simply carries
+			// no `scope` claim.
 			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
+			const clientScopeSet = new Set(client.allowedScopes ?? []);
 			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
 			const requestedScopeRaw = requestedScopeStr?.split(" ").filter(Boolean) ?? null;
 			// Normalize empty arrays to null — `scope=""` and `scope=" "` behave the
@@ -610,6 +710,21 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 								status: 400,
 								error: "invalid_scope",
 								errorDescription: `scope "${s}" is not in subject_token scope`,
+							},
+						};
+					}
+					// Named explicitly, so refuse rather than silently drop it:
+					// the caller asked for a scope its registration does not
+					// carry, and answering with a narrower token would answer a
+					// different request than the one submitted. Same
+					// `invalid_scope` + offending-value shape as the check above
+					// and as the audience allowlist below.
+					if (!clientScopeSet.has(s)) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_scope",
+								errorDescription: `scope "${s}" is not allowed for this client`,
 							},
 						};
 					}
@@ -637,7 +752,14 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// Policy hook — existing GrantPolicyHook contract.
 			// grantedScope/grantedAudience start as the narrowed values from the
 			// request validation phase above; the policy hook may further override them.
-			let grantedScope: readonly string[] | undefined = requestedScope ?? subjectScope;
+			// An omitted `scope` inherits the subject's, clamped to the client's
+			// registration. Narrowing rather than refusing, because the caller
+			// named nothing to be refused — this is the same clamp `/authorize`
+			// and jwt-bearer apply to their inherited default, and refusing
+			// instead would make a subject token that is merely wider than this
+			// client unexchangeable rather than exchangeable for less.
+			let grantedScope: readonly string[] | undefined =
+				requestedScope ?? subjectScope.filter((s) => clientScopeSet.has(s));
 			let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;
 			if (deps.grantPolicy) {
 				const policyRequest: GrantPolicyRequest = {
@@ -685,8 +807,18 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
 			}
 
+			// The policy hook may narrow, never widen — and "widen" is now past
+			// EITHER ceiling. A hook returning a scope the subject carries but
+			// the registration does not is still handing this client something
+			// its registration never permitted, which is the boundary the
+			// README's policy-widening note promises is re-checked before
+			// minting; checking only the subject would have left the hook as a
+			// way around the ceiling added above.
 			const subjectScopeSet = new Set(subjectScope);
-			const widenedScopes = grantedScope?.filter((scope) => !subjectScopeSet.has(scope)) ?? [];
+			const widenedScopes =
+				grantedScope?.filter(
+					(scope) => !subjectScopeSet.has(scope) || !clientScopeSet.has(scope),
+				) ?? [];
 			if (widenedScopes.length > 0) {
 				deps.logger?.warn(
 					{
@@ -800,7 +932,46 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			});
 			const scopeClaim = grantedScope && grantedScope.length > 0 ? grantedScope.join(" ") : null;
 
-			const expiresIn = getExpiresIn(deps);
+			// RFC 8693 §2.2.1: the issued token's lifetime SHOULD NOT exceed the
+			// subject token's. A fresh `exp` was stamped from config with no
+			// reference to the subject at all, so every exchange reset the
+			// clock: a chain of exchanges outlived the credential it descends
+			// from indefinitely, and the subject's expiry stopped being an
+			// expiry — the one bound that does not depend on any store staying
+			// wired was the one bound not enforced.
+			//
+			// Evaluated here rather than beside the other subject checks so the
+			// order in which a doubly-invalid request is refused does not move;
+			// the subject validator already rejects an expired self-issued token
+			// before this point, which makes this the fail-closed backstop for
+			// consumer-contributed validators rather than the common path.
+			const subjectExpiry = subjectValidated.claims.exp;
+			let expiresIn = getExpiresIn(deps);
+			if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
+				const remaining = Math.floor(subjectExpiry - Date.now() / 1000);
+				// `<= 0` is both the already-expired token and the one expiring
+				// inside this second. Capping either mints a token with a zero
+				// or negative lifetime — dead on arrival, and indistinguishable
+				// at the resource server from a bug here — so it is a refusal
+				// the caller can read instead.
+				if (remaining <= 0) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "subject_token has expired",
+						},
+					};
+				}
+				expiresIn = Math.min(expiresIn, remaining);
+			}
+			// A subject token carrying no `exp` leaves the configured lifetime
+			// standing. That is not absence read permissively: `exp` is a
+			// property of the presented credential, not a policy this
+			// deployment declined to write, and a validator that returns a
+			// token without one is asserting a credential with no expiry for
+			// the cap to descend from. The built-in validator never takes this
+			// path — jose rejects an expired token before the handler sees it.
 
 			const accessToken = await generateToken(
 				formatObject({
@@ -820,7 +991,17 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				},
 			);
 
-			const tokens = generateTokenResponse({ accessToken });
+			// RFC 9449 §5: a DPoP-bound access token is advertised as
+			// `token_type: "DPoP"`. The envelope defaulted to Bearer while the
+			// token itself carried `cnf.jkt`, so a DPoP-aware client believed
+			// the response and presented the token as a Bearer token — which
+			// this provider's own protected-resource middleware refuses (RFC
+			// 9449 §7.1). mTLS keeps "Bearer": RFC 8705 §3 does not redefine
+			// the wire-level type. Read off the confirmation actually stamped
+			// into the token, so the envelope cannot disagree with the claim.
+			const responseTokenType =
+				issuedConfirmation && "jkt" in issuedConfirmation ? "DPoP" : "Bearer";
+			const tokens = generateTokenResponse({ accessToken }, { tokenType: responseTokenType });
 			const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
 				...tokens,
 				issued_token_type: ACCESS_TOKEN_TYPE,
@@ -837,6 +1018,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 }
 
 function getExpiresIn(deps: TokenExchangeDependencies): number {
+	// The CONFIGURED lifetime only — the caller caps it at the subject token's
+	// remaining lifetime (RFC 8693 §2.2.1) before minting, so this value is a
+	// ceiling rather than the lifetime the issued token gets.
+	//
 	// Reads the global OAuth accessToken.expiresIn. The per-grant
 	// oauth.grants.token_exchange.accessToken.expiresIn path is unreachable
 	// because core's GrantRegistry.addModule keys module config by grant-type

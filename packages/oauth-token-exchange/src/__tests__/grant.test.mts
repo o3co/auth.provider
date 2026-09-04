@@ -25,7 +25,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
-import { createTokenExchangeGrant } from "#/grant.mjs";
+import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
@@ -44,8 +44,13 @@ const mockConfig = {
 const publicClient = (overrides: Partial<PublicClient> = {}): PublicClient => ({
 	clientId: "client-a",
 	allowedRedirectUris: [],
-	allowedScopes: [],
+	// The registration is a ceiling on both axes now: it must name the scopes
+	// this client may receive (an empty list grants none) and it must name the
+	// exchange grant type itself (#326 deny-by-absence). The fixture declares
+	// what these tests already assumed it had.
+	allowedScopes: ["read", "write"],
 	allowedAudiences: [],
+	allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
 	backchannelLogoutSessionRequired: true,
 	frontchannelLogoutSessionRequired: true,
 	allowedAzpForFederationToken: false,
