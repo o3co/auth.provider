@@ -323,6 +323,13 @@ describe("/authorize — redirect_uri matching (#483, RFC 8252 §7.3)", () => {
 		expectRefused((await attempt("http://127.0.0.1/cb", "http://127.0.0.2:49152/cb")).res);
 	});
 
+	it("refuses a path that only a URL normalization would equate with the registration", async () => {
+		// The carve-out is the port and nothing else: a comparison on
+		// normalized URLs would have let these into the allowlist.
+		expectRefused((await attempt("http://127.0.0.1/cb", "http://127.0.0.1:49152/a/../cb")).res);
+		expectRefused((await attempt("http://127.0.0.1/cb", "http://127.0.0.1:49152/cb/")).res);
+	});
+
 	it("refuses a port difference on localhost — no carve-out (RFC 8252 §8.3)", async () => {
 		expectRefused((await attempt("http://localhost/cb", "http://localhost:1234/cb")).res);
 	});
