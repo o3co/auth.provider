@@ -168,16 +168,33 @@ const appleProvider: FederationProvider = {
 That single declaration changes three things in the route layer, and nothing in the adapter:
 
 1. **The start route appends `response_mode=form_post`** to the URL `buildAuthorizationUrl` returned. The parameter is written once, in the router, rather than in every adapter — and nothing at all is appended for the default mode, so a `"query"` federation's authorization URL is byte-for-byte what its adapter produced.
-2. **`POST /oauth/federation/<name>/callback` starts accepting the form body.** It is the *same handler* as the GET callback over a different parameter source: same `session.federation` lookup, same `state` comparison, same delete-then-save reuse prevention before any async work, same PKCE verifier and nonce read from the session rather than from the request, same rollback ladder. A provider that did not declare `form_post` answers `405 method_not_allowed` (with `Allow: GET`) there, so no existing federation gains a POST surface.
-3. **The session cookie carrying that federation's state is marked `SameSite=None; Secure`** — for that session only.
+2. **`POST /oauth/federation/<name>/callback` starts accepting the form body.** It is the *same handler* as the GET callback over a different parameter source: same envelope lookup, same `state` comparison, same consume-before-any-async-work reuse prevention, same PKCE verifier and nonce read from the stored envelope rather than from the request, same rollback ladder. A provider that did not declare `form_post` answers `405 method_not_allowed` (with `Allow: GET`) there, so no existing federation gains a POST surface.
+3. **That federation's ephemeral state moves out of the session** and into a *federation transaction* with a cookie of its own. The application session cookie is not modified.
 
-#### The `SameSite` consequence, and why it is per-federation
+#### The `SameSite` consequence, and what actually carries the state
 
-A `form_post` callback arrives as a **cross-site POST** from the IdP's origin. A `SameSite=Lax` cookie — the deployment default, and the right default — is not sent on a cross-site POST, so the callback would land with no session: no `state` to compare against, no PKCE verifier. It fails closed, but it fails for everyone.
+A `form_post` callback arrives as a **cross-site POST** from the IdP's origin. A `SameSite=Lax` cookie — the deployment default, and the right default — is not sent on a cross-site POST, so a callback relying on the session cookie would land with no session: no `state` to compare against, no PKCE verifier. It fails closed, but it fails for everyone.
 
-The router therefore relaxes **the one session that just started a `form_post` federation**, via `applyCrossSiteStateCookie(req.session)`, and never `session.sameSite` in config. A deployment running Apple beside Google keeps `SameSite=Lax` on every Google login and on every session that never touched a cross-site federation; only the browser mid-Apple-flow holds the relaxed cookie. `Secure` is set alongside it because every current browser drops a `SameSite=None` cookie that is not `Secure` (the pairing `application.schema.mts` already enforces for the config-level value, #282) — and Apple refuses a non-`https` redirect URI anyway, so a `form_post` federation is HTTPS-only regardless.
+The flow therefore needs *a* cookie that survives a cross-site POST. It does **not** need the session cookie to be that cookie, and making it one was [#494](https://github.com/o3co/auth.provider/issues/494): `GET /oauth/federation/<name>` requires no authentication, and a `SameSite=Lax` cookie **is** sent on a top-level GET, so any third party who caused one navigation permanently downgraded the victim's authenticated session cookie. Permanently, because express-session serialises `req.session.cookie` into the store and `Store.prototype.createSession` rebuilds it from there — with every own key — on every later request.
 
-The re-issued `Set-Cookie` reaches the browser because the start handler also modifies the session (it writes the federation envelope) and `session.maxAge` is required by the config schema — together, express-session's condition for re-sending the cookie of an already-established session. A session middleware that exposes no `req.session.cookie` gets a warning naming the federation rather than a silent no-op.
+So the cross-site part gets its own cookie and its own record:
+
+| | value |
+|---|---|
+| cookie name | `<session.name>.federation`, with a `__Host-` prefix swapped for `__Secure-` |
+| attributes | `HttpOnly; Secure; SameSite=None`, `Path` scoped to that provider's callback URL, `Max-Age` = the transaction TTL (10 minutes by default) |
+| contents | an opaque 256-bit id, and nothing else |
+| record | `state`, `codeVerifier`, `nonce`, `redirectTo` and the provider name, in the session store under a `fedtx:` key prefix |
+
+The name is derived from `session.name` the way the CSRF cookie's is, so it inherits the operator's naming. The one deviation is the prefix: `__Host-` requires `Path=/`, and this cookie is deliberately path-scoped to the callback, so a `__Host-` name would be dropped by every browser. `__Secure-` says what this cookie does guarantee — it is only ever set with `Secure`, because every current browser drops a `SameSite=None` cookie that is not (the pairing `application.schema.mts` already enforces for the config-level value, #282), and Apple refuses a non-`https` redirect URI anyway.
+
+**The application session cookie keeps the attributes the deployment configured**, on every session, whether or not it ever started a `form_post` federation — a deployment running Apple beside Google sees no difference on any Google login, and no difference on the Apple browser's own session either.
+
+The transaction is what binds the callback to the browser that started it, which is the property the session cookie used to provide. The `state` comparison is unchanged and still runs; the transaction cookie is an addition to it, never a replacement. A caller who presents a stolen `state` without the matching transaction cookie is refused before `state` is read at all.
+
+Both the record and the cookie are dropped on **every** callback exit — success, `invalid_state`, `exchange_failed`, `unknown_user` alike — so a transaction is single-use in the strict sense. An abandoned flow leaves only the short-lived cookie, and the record expires with it: the expiry is written into the record as `cookie.expires`, which is exactly what `MemoryStore` reaps on read and what `connect-redis` turns into the key's `EX`.
+
+A `"query"` federation is untouched by all of this. Its callback is a same-site top-level GET, its envelope stays in `req.session.federation`, and its authorization URL, cookies and error surface are byte-for-byte what they were.
 
 ---
 

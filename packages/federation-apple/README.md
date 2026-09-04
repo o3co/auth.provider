@@ -126,18 +126,34 @@ URL.
 The provider declares `responseMode: "form_post"`, and the session router does
 the rest: it appends `response_mode=form_post` to the authorization request,
 mounts `POST /session/oauth/federation/apple/callback` with the same state /
-CSRF / PKCE / nonce binding as the GET callback, and marks that session's
-cookie `SameSite=None; Secure`.
+CSRF / PKCE / nonce binding as the GET callback, and carries the flow's
+ephemeral state in a **federation transaction** rather than in the session.
 
 That last one is the part worth knowing about before deploying. The callback is
 a **cross-site POST** from `appleid.apple.com`, and a `SameSite=Lax` cookie is
-not sent on one — the callback would arrive with no session, no `state` to
-compare against and no PKCE verifier. The router relaxes only the session that
-started an Apple login, never `session.sameSite` in config, so a deployment
-running Apple beside Google keeps `SameSite=Lax` on every Google login. `Secure`
-comes with it because browsers drop a `SameSite=None` cookie that is not
-`Secure` — and since Apple already requires an `https` return URL, an Apple
-deployment is HTTPS-only regardless.
+not sent on one — a callback relying on the session cookie would arrive with no
+session, no `state` to compare against and no PKCE verifier. So the start leg
+issues a second, dedicated cookie: `HttpOnly; Secure; SameSite=None`,
+path-scoped to `/session/oauth/federation/apple/callback`, expiring in ten
+minutes, and carrying nothing but an opaque id. The `state`, PKCE verifier,
+nonce and post-login redirect are held in the session store under that id, and
+both are deleted the moment the callback consumes them — on success and on
+every failure alike.
+
+**Your application session cookie is not modified.** Not its `SameSite`, not
+its `Secure` flag, not for the browser doing the Apple login and not for anyone
+else; `session.sameSite` in config is likewise never touched. A deployment
+running Apple beside Google keeps `SameSite=Lax` on every session in it. (Until
+[#494](https://github.com/o3co/auth.provider/issues/494) this was not true: the
+start leg relaxed the session cookie in place, and because express-session
+persists cookie attributes into the store, any third party who caused one
+navigation to the unauthenticated start route downgraded that browser's session
+cookie for good. If you are reading this against an older release, treat that as
+the reason to upgrade.)
+
+`Secure` is on the transaction cookie because browsers drop a `SameSite=None`
+cookie that is not `Secure` — and since Apple already requires an `https`
+return URL, an Apple deployment is HTTPS-only regardless.
 
 ## Claims
 
