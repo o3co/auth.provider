@@ -41,7 +41,11 @@
  * and neither raises anything at boot.
  */
 
-import { DEFAULT_SIGNATURE_ALGORITHMS, type SignatureAlgorithmName } from "./algorithms.mjs";
+import {
+	type AlgorithmPolicy,
+	DEFAULT_SIGNATURE_ALGORITHMS,
+	type SignatureAlgorithmName,
+} from "./algorithms.mjs";
 
 export interface FullPkiTuning {
 	readonly maxChainDepth: number;
@@ -56,6 +60,21 @@ export const FULL_PKI_DEFAULTS: FullPkiTuning = {
 	maxChainDepth: FULL_PKI_DEFAULT_MAX_CHAIN_DEPTH,
 	signatureAlgorithms: DEFAULT_SIGNATURE_ALGORITHMS,
 	minRsaKeyBits: FULL_PKI_DEFAULT_MIN_RSA_KEY_BITS,
+};
+
+/**
+ * The algorithm policy a `full-pki` deployment gets when the operator
+ * configures none — the two tuning values above, in the shape
+ * `checkAlgorithmPolicy` takes.
+ *
+ * Derived from `FULL_PKI_DEFAULTS` rather than restated, for this file's
+ * usual reason: a second copy only runs on the path nobody tests by default,
+ * and would eventually disagree. The resolvers in `crl.mts` and `ocsp.mts`
+ * fall back to it when their `algorithms` option is omitted.
+ */
+export const DEFAULT_ALGORITHM_POLICY: AlgorithmPolicy = {
+	signatureAlgorithms: FULL_PKI_DEFAULTS.signatureAlgorithms,
+	minRsaKeyBits: FULL_PKI_DEFAULTS.minRsaKeyBits,
 };
 
 /**

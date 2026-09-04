@@ -129,6 +129,7 @@ import { createHash } from "node:crypto";
 import * as pkijs from "pkijs";
 import { type AlgorithmPolicy, checkSignatureAlgorithm } from "./algorithms.mjs";
 import { checkCrlCriticalExtensions, extensionValueParsed } from "./criticalExtensions.mjs";
+import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
 import type { GuardedFetch } from "./fetchGuard.mjs";
 
 /** OID of the `cRLDistributionPoints` extension (RFC 5280 §4.2.1.13). */
@@ -384,8 +385,17 @@ export interface CrlResolverOptions {
 	/**
 	 * The signature-algorithm policy the validated path is held to, applied
 	 * to each CRL's signature as well (#470). See the module header.
+	 *
+	 * Optional, defaulting to `DEFAULT_ALGORITHM_POLICY` — the same strict
+	 * policy the config resolves to when the operator sets nothing. This is
+	 * a security fix on a public interface, so a consumer who constructs a
+	 * resolver directly and upgrades without touching their code must *get*
+	 * the fix rather than opt into it. The default is fail-closed: omitting
+	 * the field can only make the check stricter, never weaker, so no
+	 * existing caller is silently left unprotected. `validate.mts` passes
+	 * the operator's configured policy explicitly.
 	 */
-	readonly algorithms: AlgorithmPolicy;
+	readonly algorithms?: AlgorithmPolicy;
 	/** Bound on cache size, so a large trust set cannot grow it without limit. */
 	readonly maxCacheEntries?: number;
 }
@@ -531,6 +541,7 @@ const unavailableKey = (url: string): string => `down:${url}`;
 export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 	const cache = new Map<string, CacheEntry>();
 	const maxEntries = options.maxCacheEntries ?? DEFAULT_MAX_CACHE_ENTRIES;
+	const algorithms = options.algorithms ?? DEFAULT_ALGORITHM_POLICY;
 	/** Fetches in progress, so concurrent misses on one URL issue one request. */
 	const inFlight = new Map<string, Promise<Loaded>>();
 
@@ -663,7 +674,7 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		// §5.1.1.2 requires the tbsCertList copy to match it.
 		const algorithm = checkSignatureAlgorithm(
 			loaded.crl.signatureAlgorithm.algorithmId,
-			options.algorithms,
+			algorithms,
 		);
 		if (!algorithm.ok) {
 			const detail = `the CRL's signature algorithm ${algorithm.detail}`;

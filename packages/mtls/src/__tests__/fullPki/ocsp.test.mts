@@ -511,6 +511,48 @@ describe("OCSP resolver — the signature-algorithm policy applies to the answer
 		if (!result.ok) expect(result.detail).toContain("ecdsaWithSHA256");
 	});
 
+	it("holds a resolver built without an algorithms policy to the strict default, refusing SHA-1", async () => {
+		// The resolver options are public surface, so `algorithms` is
+		// optional — a consumer who upgrades without touching their code gets
+		// this security fix rather than opting into it (#470 review). The
+		// default is the strict policy, so omitting it can only be stricter.
+		const { int, leaf } = await chain();
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, hash: "SHA-1" }),
+		});
+
+		const result = await createOcspResolver({ fetch, cacheTtlSeconds: 3_600 }).resolve(
+			leaf.cert,
+			int.cert,
+			NOW,
+		);
+		expect(result).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+		if (!result.ok) expect(result.detail).toContain("1.2.840.10045.4.1");
+	});
+
+	it("refuses a SHA-1-certified delegated responder with no algorithms policy given", async () => {
+		const { int, leaf } = await chain();
+		const responder = await mintOcspResponder("OCSP Responder", 50, int, { hash: "SHA-1" });
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+
+		expect(
+			await createOcspResolver({ fetch, cacheTtlSeconds: 3_600 }).resolve(leaf.cert, int.cert, NOW),
+		).toMatchObject({ ok: false, reason: "algorithm_not_permitted" });
+	});
+
+	it("still accepts a SHA-256 answer with no algorithms policy given, so the default is not 'permit nothing'", async () => {
+		const { int, leaf } = await chain();
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf }),
+		});
+
+		expect(
+			await createOcspResolver({ fetch, cacheTtlSeconds: 3_600 }).resolve(leaf.cert, int.cert, NOW),
+		).toMatchObject({ ok: true });
+	});
+
 	it("still accepts a SHA-256 answer from a SHA-256-certified delegated responder", async () => {
 		const { int, leaf } = await chain();
 		const responder = await mintOcspResponder("OCSP Responder", 50, int);
