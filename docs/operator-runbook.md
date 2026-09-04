@@ -110,13 +110,12 @@ Apple) additionally issues a path-scoped transaction cookie — `session.name`
 with any `__Host-` / `__Secure-` prefix stripped, then `__Secure-` and
 `.federation` applied, so the default `__Host-auth.session` yields
 `__Secure-auth.session.federation` — and `__Secure-` does not stop a sibling
-subdomain setting it with
-`Domain=<parent>`. A related-domain attacker — a forgotten staging host, a
-dangling DNS record, XSS on a lower-trust app next door — can use that to log a
-victim's browser into the attacker's own federated account. It reaches no
-session and no credential, and there is nothing to configure: the mitigation is
-that no untrusted content runs under the domain your auth cookies are scoped to,
-and that `session.domain` stays `null`. Stated in full, with what the attacker
+subdomain setting it with `Domain=<parent>`. A related-domain attacker — a
+forgotten staging host, a dangling DNS record, XSS on a lower-trust app next
+door — can use that to log a victim's browser into the attacker's own federated
+account. It reaches no session and no credential, and there is nothing to
+configure: the mitigation is that no untrusted content runs under the domain
+your auth cookies are scoped to, and that `session.domain` stays `null`. Stated in full, with what the attacker
 needs and what it gets them, in
 [`packages/federation-apple/README.md`](../packages/federation-apple/README.md)
 (#502).
