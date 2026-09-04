@@ -370,9 +370,14 @@ export { isLoopbackHostname } from "./net/loopback.mjs";
 // ClientEntrySchema at boot; exported so a custom ClientRepository, which
 // bypasses that schema by design, can hold its registrations to the same
 // rules and refuse in the same words.
+// `matchesRegisteredRedirectUri` (#483) is the runtime half of the same
+// vocabulary — the /authorize allowlist comparison, exact except for the RFC
+// 8252 §7.3 loopback port. Exported alongside the shape checker so a custom
+// authorization endpoint matches the way this one does.
 export {
 	checkRedirectUri,
 	describeRedirectUriRejection,
+	matchesRegisteredRedirectUri,
 	type RedirectUriRejection,
 } from "./net/redirect-uri.mjs";
 // The single canonical-request-URL vocabulary (#292, #356) — "the URL this

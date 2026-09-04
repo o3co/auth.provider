@@ -874,6 +874,44 @@ describe("createAuthorizationGrant", () => {
 				expect(result.status).toBe(200);
 			});
 
+			it("#483: the loopback port carve-out does NOT reach here — this equality stays exact", async () => {
+				// /authorize may admit a presented `redirect_uri` whose loopback
+				// port differs from the registration (RFC 8252 §7.3), and it
+				// binds the URI it actually used to the code record. RFC 6749
+				// §4.1.3 is a different question — "is this the URI this code
+				// was issued for" — so it is answered by exact equality, port
+				// included, and a second listener on another port cannot redeem
+				// the first one's code.
+				const deps = makeDeps(
+					vi.fn().mockResolvedValue({
+						code: "abc",
+						sid: "test-sid-1",
+						client_id: "client1",
+						redirect_uri: "http://127.0.0.1:49152/cb",
+						code_challenge: S256_CHALLENGE,
+						code_challenge_method: "S256",
+					}),
+				);
+				const handler = createAuthorizationGrant(deps);
+				const ctx: GrantContext = {
+					body: {
+						code: "abc",
+						client_id: "client1",
+						redirect_uri: "http://127.0.0.1:51000/cb",
+						code_verifier: CODE_VERIFIER,
+					},
+					session: { code: "abc", code_client_id: "client1" },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				};
+
+				const { result } = await handler.handle(ctx);
+
+				expect(result.status).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_grant");
+			});
+
 			it("D-1 / IH-4: rejects when codeData has no redirect_uri (was: vacuous-pass returns 200)", async () => {
 				// Pre-v0.5.1 this returned 200 because the redirect_uri binding
 				// check was guarded by `if (storedRedirectUri)`. Post-D-1
