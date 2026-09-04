@@ -51,6 +51,7 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"federation.token.refresh_failed",
 	"federation.token.success",
 	"introspect.family_revoked",
+	"introspect.session_invalid",
 	"introspect.store_unavailable",
 	"logout.cascade_failed",
 	"logout.family_revoked",

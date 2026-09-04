@@ -110,6 +110,19 @@ export interface SessionData {
 	client?: Record<string, unknown>;
 	code?: string;
 	isAuthenticated?: boolean;
+	/**
+	 * The `UserSession` id this browser session belongs to — written by local
+	 * login (`POST /session/login`) or the federation callback, and preserved
+	 * across session regeneration. Exposed to grants so a token minted straight
+	 * from the browser session can carry it: `sid` is what every liveness check
+	 * downstream (`/userinfo`, `/introspect`, the refresh grant) keys on, so a
+	 * token minted without it is one logout cannot reach.
+	 *
+	 * Absent for a deployment whose login wiring predates `sid` and for a
+	 * back-channel `/token` call carrying no cookie; grants treat absence as
+	 * "no session to bind to", never as an error.
+	 */
+	sid?: string;
 }
 
 export interface GrantContext {

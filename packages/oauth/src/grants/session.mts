@@ -125,6 +125,20 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
+			// R3: bind the token to the browser session that produced it. Without
+			// `sid` nothing linked the two, so `/oauth/logout` — which deletes the
+			// `UserSession` record and revokes refresh families — left this token
+			// valid for its full lifetime (an hour by default) in precisely the
+			// BFF / proxy topology this grant exists for. Stamping `sid` puts it
+			// under the session-liveness machinery `/userinfo` and `/introspect`
+			// already run.
+			//
+			// No `family_id` is stamped alongside it: this grant issues no refresh
+			// token, so a family id would name a family nothing ever opens or
+			// revokes. `sid` is the whole binding.
+			const sid =
+				typeof session.sid === "string" && session.sid.length > 0 ? session.sid : undefined;
+
 			// `allowedAudiences[0]` is the client's configured resource audience, and
 			// per the AuthenticatedClient contract a grant issuing tokens straight
 			// from the client record takes it as the default `aud`. Forcing the
@@ -144,7 +158,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 					status: 200,
 					tokens: generateTokenResponse({
 						accessToken: await generateToken(
-							{},
+							{ ...(sid ? { sid } : {}) },
 							{
 								keyStore,
 								expiresIn: config.oauth.accessToken.expiresIn,

@@ -569,10 +569,33 @@ export const createOAuthRouter = async (
 					// the identity is unknown and the verifier records the gap via
 					// `jwt_verify_aud_skipped`.
 					// Wave 1 (C4): denylist consulted so revoked ATs report active:false.
+					//
+					// R4: the pin is the calling client's `allowedAudiences` ∪
+					// `{clientId}`, not `clientId` alone. With RFC 8707 resource
+					// indicators in use every access token carries `aud: <resource
+					// URI>`, so pinning the client id made a resource server unable
+					// to introspect the tokens issued FOR it — `active: false`
+					// unless it happened to be registered under a `client_id` equal
+					// to the resource URI, which is a workaround, not a design.
+					// (`auth.proxy`'s `CLIENT_ID`/`CLIENT_SECRET` validation mode
+					// walked into the same wall.)
+					//
+					// The widened set is not a new trust decision: it is exactly the
+					// ceiling every issuing grant already derives an audience within
+					// (`clientCredentials.mts`, `refreshToken.mts`,
+					// `routes/authorize.mts` all bound derivation by
+					// `allowedAudiences ∪ {clientId}`). A caller can therefore only
+					// see tokens for audiences it was already registered to be
+					// associated with; an audience outside that set still answers
+					// `active: false`, and so do unknown, expired, revoked and
+					// other-issuer tokens, which this pin never governed.
+					const expectedAudiences = req.oauthClient
+						? [...(req.oauthClient.allowedAudiences ?? []), req.oauthClient.clientId]
+						: null;
 					const verified = await verifyJwt(token, keyStore, {
 						type: "access_token",
 						expectedIssuer: canonicalIssuer,
-						...(req.oauthClient ? { expectedAudience: req.oauthClient.clientId } : {}),
+						...(expectedAudiences ? { expectedAudience: expectedAudiences } : {}),
 						legacyTypAccept: legacyTypAcceptOpt ?? false,
 						// #296/#367: token-accepting surface — forward what the
 						// composition wired, jti denylist and subject watermark both.
@@ -618,6 +641,55 @@ export const createOAuthRouter = async (
 								ip: req.ip,
 								userAgent: req.get("user-agent"),
 								details: { family_id: familyId },
+							});
+							return res.status(200).json({ active: false });
+						}
+					}
+
+					// R3: session liveness — the same read `/oauth/userinfo` and the
+					// refresh grant already perform, and the missing third leg of
+					// the set this handler consults. Without it a token whose
+					// browser session has been logged out still introspected as
+					// `active: true`, so a resource server that trusts
+					// introspection (the BFF / proxy topology, where the `session`
+					// grant's token now carries `sid`) kept honouring it for the
+					// rest of the access-token lifetime.
+					//
+					// Cost: one extra store read per introspection of a
+					// `sid`-carrying token. Tokens without `sid` — client
+					// credentials, jwt-bearer, anything minted outside a browser
+					// session — do not pay it, and neither does a deployment that
+					// wires no `userSessionStore`.
+					//
+					// Fail-closed on a store throw, for the reason the family
+					// check states: RFC 7662 has no `temporarily_unavailable`
+					// slot, so `active: false` is the only safe answer available.
+					const rawSid = (payload as Record<string, unknown>).sid;
+					const sid = typeof rawSid === "string" && rawSid.length > 0 ? rawSid : null;
+					if (sid !== null && userSessionStore) {
+						let userSession: Awaited<ReturnType<UserSessionStore["get"]>>;
+						try {
+							userSession = await userSessionStore.get(sid);
+						} catch (cause) {
+							emitAuditEvent(auditSink, {
+								timestamp: new Date(),
+								type: "introspect.store_unavailable",
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								details: {
+									sid,
+									error: cause instanceof Error ? cause.message : String(cause),
+								},
+							});
+							return res.status(200).json({ active: false });
+						}
+						if (!userSession) {
+							emitAuditEvent(auditSink, {
+								timestamp: new Date(),
+								type: "introspect.session_invalid",
+								ip: req.ip,
+								userAgent: req.get("user-agent"),
+								details: { sid },
 							});
 							return res.status(200).json({ active: false });
 						}
