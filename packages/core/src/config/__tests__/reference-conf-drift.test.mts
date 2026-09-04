@@ -92,6 +92,20 @@ function collectPaths(tree: unknown, prefix = ""): string[] {
 	});
 }
 
+/**
+ * Only the dotted paths that carry a value. Branches are excluded because two
+ * files sharing a branch (`oauth`, say) is how HOCON layering is meant to
+ * work; two files setting the same leaf is the case where a merge order
+ * decides which value an operator gets.
+ */
+function collectLeafPaths(tree: unknown, prefix = ""): string[] {
+	if (!isPlainObject(tree)) return [];
+	return Object.entries(tree).flatMap(([key, value]) => {
+		const path = prefix === "" ? key : `${prefix}.${key}`;
+		return isPlainObject(value) ? collectLeafPaths(value, path) : [path];
+	});
+}
+
 function hasPath(tree: unknown, path: string): boolean {
 	let cursor: unknown = tree;
 	for (const segment of path.split(".")) {
@@ -126,12 +140,21 @@ describe("core's reference.conf survives AppConfigSchema without losing a path (
 describe("every shipped reference.conf survives AppConfigSchema (#496)", () => {
 	const confPaths = shippedReferenceConfs(join(REPO_ROOT, "packages"));
 
-	// The chain a composition root assembles: each package's defaults layered
-	// over core's, which is the bottom tier the standalone template resolves.
+	// The chain a composition root assembles: core's defaults at the bottom,
+	// each package's own `reference.conf` layered over them. `a.withFallback(b)`
+	// keeps `a` where both define a path (the direction `app.mts` relies on), so
+	// the accumulated config is the FALLBACK argument here — the file that owns
+	// a section wins for the keys in it, which is the reading each package's
+	// README documents for its own defaults.
+	//
+	// No two shipped files define the same leaf — asserted below rather than
+	// assumed — so the merge is the union of every shipped default and the
+	// order cannot quietly pick a winner. The order is still written down, so
+	// that stays a property of the files rather than of this reduce.
 	const chained = confPaths
 		.filter((path) => path !== REFERENCE_CONF_PATH)
 		.reduce(
-			(config, path) => config.withFallback(parseFile(path, { env: REQUIRED_ENV })),
+			(config, path) => parseFile(path, { env: REQUIRED_ENV }).withFallback(config),
 			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
 		);
 	const resolved = chained.toObject();
@@ -152,6 +175,24 @@ describe("every shipped reference.conf survives AppConfigSchema (#496)", () => {
 				"packages/webauthn/config/reference.conf",
 			]),
 		);
+	});
+
+	it("has no leaf two of them both define, so the merge order cannot hide one", () => {
+		const owners = new Map<string, string[]>();
+		for (const path of confPaths) {
+			const tree = parseFile(path, { env: REQUIRED_ENV }).toObject();
+			for (const leaf of collectLeafPaths(tree)) {
+				owners.set(leaf, [...(owners.get(leaf) ?? []), relative(REPO_ROOT, path)]);
+			}
+		}
+		const contested = [...owners]
+			.filter(([, files]) => files.length > 1)
+			.map(([leaf, files]) => `${leaf} — ${files.join(", ")}`);
+		// Two packages shipping a default for the same key is a question about
+		// which one an operator gets, and this diff would answer it silently by
+		// merge order. Decide it where the key lives instead: one package owns
+		// the section, the other reads it.
+		expect(contested).toEqual([]);
 	});
 
 	it("resolves the sections those packages own", () => {
