@@ -5,9 +5,14 @@ on:
     branches: [develop, main]
   pull_request:
     branches: [develop, main]
+  # Daily audit of develop (see the `audit` job). Nothing else runs on this
+  # trigger: build-and-test is gated on the event below.
+  schedule:
+    - cron: '17 3 * * *'
 
 jobs:
   build-and-test:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,7 +39,6 @@ jobs:
           restore-keys: pnpm-store-
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run audit
       - run: pnpm run lint
       - run: pnpm run build
       - name: Vendor leak guard
@@ -226,6 +230,39 @@ jobs:
           flags: session
           disable_search: true
           fail_ci_if_error: false
+
+  # `pnpm audit --prod --audit-level=low` in its own job (#477). It used to be a
+  # step of build-and-test — the one required status check — so an outage of
+  # registry.npmjs.org's audit endpoint blocked every merge (three consecutive
+  # release-PR failures on ERR_SOCKET_TIMEOUT, 2026-09-04). The audit still runs
+  # on every push and pull request and shows on the PR, and additionally runs
+  # daily on develop so an advisory published between pushes is caught. It is
+  # deliberately not a required check: a finding on a PR is a red check the
+  # reviewer sees, not a merge held hostage to a third-party endpoint. The
+  # `--audit-level=low` floor and `--prod` scope are unchanged (`make audit`).
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Get pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run audit
 
   publish-readiness:
     runs-on: ubuntu-latest
