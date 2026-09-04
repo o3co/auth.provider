@@ -60,6 +60,7 @@
 
 import {
 	AUDIT_SINK_ABSENCE_POLICY,
+	BootError,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
@@ -233,14 +234,34 @@ export const webauthnModule = defineModule<
 					windowSeconds: deps.webauthnConfig.rateLimit.authenticationOptions.windowSeconds,
 				};
 				if (deps.rateLimiter === undefined) {
-					logger.warn(
-						{
-							limit: spec.limit,
-							windowSeconds: spec.windowSeconds,
-							tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
-						},
-						"webauthn_authentication_options_rate_limiter_not_shared",
-					);
+					// #474: the per-process fallback below is replica-unsafe state
+					// of the same kind the boot guard refuses (#271), and it sat
+					// outside the guard because it is built here rather than
+					// declared on the manifest. Read the same three-state switch:
+					// "multi" refuses — the flood and enumeration budget on this
+					// route would be multiplied by the replica count — "single" is
+					// silent, unset warns. Thrown from a route factory, the planner
+					// wraps this as `contribute-factory-failed` with this error as
+					// its `cause`.
+					const deploymentMode = deps.config.deployment?.mode;
+					if (deploymentMode === "multi") {
+						throw new BootError({
+							stage: "applyContributions",
+							reason: "replica-unsafe-adapter",
+							message: `deployment.mode is "multi" but no shared rateLimiter is wired for POST /oauth/webauthn/authentication/options: the route would fall back to a per-process limiter, so the configured ${spec.limit} / ${spec.windowSeconds}s is really ${spec.limit} × replicas and resets on every deploy. Wire a rateLimiter (rateLimiter.adapter = "redis"), or set deployment.mode = "single".`,
+							details: { reason: "replica-unsafe-adapter", modules: ["webauthn"] },
+						});
+					}
+					if (deploymentMode !== "single") {
+						logger.warn(
+							{
+								limit: spec.limit,
+								windowSeconds: spec.windowSeconds,
+								tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
+							},
+							"webauthn_authentication_options_rate_limiter_not_shared",
+						);
+					}
 				}
 				// Falling back rather than leaving the route unguarded, the same
 				// choice `/session/login` makes: this endpoint is the credential-

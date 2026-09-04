@@ -349,6 +349,9 @@ export type {
 	PathResolver,
 	Provider,
 	ProviderDeps,
+	// #455 / #474: the manifest's replica-safety declaration, so a package
+	// building its manifest from config can type the value it attaches.
+	ReplicaSafetyDeclaration,
 	RouteContribution,
 	RouteContributionEntry,
 	RouteContributionFactory,

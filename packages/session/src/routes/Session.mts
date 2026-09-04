@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import {
 	type AppConfig,
 	type AuditSink,
+	BootError,
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
@@ -150,13 +151,31 @@ export const createRouter = (
 		windowSeconds: Math.max(1, Math.ceil(config.rateLimit.login.windowMs / 1000)),
 	};
 	if (rateLimiter === undefined) {
-		logger.warn(
-			{
-				limit: loginLimitSpec.limit,
-				windowSeconds: loginLimitSpec.windowSeconds,
-			},
-			"login_rate_limiter_not_shared",
-		);
+		// #474: the per-process fallback below is replica-unsafe state of the
+		// same kind the boot guard refuses (#271), and it sat outside the guard
+		// because it is built here rather than declared on a manifest. Read the
+		// same three-state switch: "multi" refuses — the configured limit would
+		// really be limit × replicas, reset on every deploy — "single" is silent,
+		// unset warns. Thrown from a route factory, the planner wraps this as
+		// `contribute-factory-failed` with this error as its `cause`.
+		const deploymentMode = config.deployment?.mode;
+		if (deploymentMode === "multi") {
+			throw new BootError({
+				stage: "applyContributions",
+				reason: "replica-unsafe-adapter",
+				message: `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login: the route would fall back to a per-process limiter, so the configured ${loginLimitSpec.limit} / ${loginLimitSpec.windowSeconds}s is really ${loginLimitSpec.limit} × replicas and resets on every deploy. Wire a rateLimiter (rateLimiter.adapter = "redis"), or set deployment.mode = "single".`,
+				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
+			});
+		}
+		if (deploymentMode !== "single") {
+			logger.warn(
+				{
+					limit: loginLimitSpec.limit,
+					windowSeconds: loginLimitSpec.windowSeconds,
+				},
+				"login_rate_limiter_not_shared",
+			);
+		}
 	}
 	// Falling back rather than leaving the route unguarded: this is the endpoint
 	// that exists to resist password guessing, and a per-process bucket is weak
