@@ -52,6 +52,49 @@ An allowlist is a network control, not a cryptographic one. The edge must also *
 
 **Point `rateLimiter.adapter` at Redis.** It defaults to `"memory"`, which is per-process: with N replicas every configured limit is effectively N times larger and resets on every deploy. The memory adapter is also **evadable under bucket exhaustion**: it caps itself at 10,000 buckets and, at the cap, admitting a new key evicts the bucket closest to reset — so an attacker who can present many source IPs (and `req.ip` is client-influenced whenever `HTTP_TRUST_PROXY` is broader than your actual hops) can churn the table until a target's counter is evicted and starts over. That is acceptable for one dev process; it is not a production rate limit. Since #270 the login guard runs on this same shared component, so one setting covers both the OAuth endpoints and `/session/login`. The login window and limit stay configured at `rateLimit.login`; both adapters seed their own `limits.login` from it, so there is nothing to restate.
 
+**Behind a BFF, raise `limits.token` before you need to.** The OAuth-endpoint
+rate limits key on `req.ip` (`packages/core/src/ratelimit/guard.mts` builds the
+bucket key as `<endpoint>:ip:<req.ip>`), which is the right identity when the
+client is the browser or a native app talking to this provider directly. It is
+the wrong one in a backend-for-frontend topology, where a server-side app holds
+the session and exchanges codes and refreshes on its users' behalf: every
+`/oauth/token` and `/oauth/introspect` call then arrives from the BFF's single
+address and the whole deployment shares one bucket. At the default 60 requests
+per 60 s that caps you at roughly **60 session-grant exchanges a minute across
+all users** — and it does not surface as a rate limit. The BFF gets a `429` it
+was not written to expect, turns it into a `502` for its own caller, and the
+symptom your users report is "sign-in is broken sometimes", at the traffic
+level where it starts happening and not before.
+
+`HTTP_TRUST_PROXY` does not fix this and is not meant to. It teaches `req.ip`
+to see through a *proxy* — a hop that forwards someone else's request and says
+so in `X-Forwarded-For`. A BFF is not forwarding anyone; it is the client, and
+its address is the honest answer to "who called". There is no per-user identity
+in these requests to key on.
+
+The knob is the per-endpoint budget. Both limiter adapters take
+`limits { <prefix> { limit, windowSeconds } }`, keyed by the endpoint prefix:
+
+```hocon
+redisRateLimiter {
+  limits {
+    token     { limit = 600, windowSeconds = 60 }
+    introspect { limit = 600, windowSeconds = 60 }
+  }
+}
+```
+
+(`memoryRateLimiter.limits` for the memory adapter, same shape.) Size it from
+your BFF's peak sign-ins and refreshes per minute with headroom, and remember
+that under `rateLimiter.adapter = "redis"` the budget is shared across replicas
+— which is what you want here, and what makes the number mean something.
+
+The defaults are deliberately left alone: 60/60 s per source IP is a sensible
+brute-force bound for a deployment whose clients really are distinct IPs, and
+raising it globally to accommodate one topology would weaken it for the other.
+Put the throttling that protects the BFF's *own* users in front of the BFF,
+where per-user identity still exists.
+
 **Set `DEPLOYMENT_MODE=multi` once you run more than one replica.** Boot then *fails* if any in-memory store that has to be shared is still wired, naming every offender and what it costs — user sessions forking (back-channel logout reaches one replica, a logged-out session stays valid on the others), rate-limit counters multiplying, access-token revocation not propagating, DPoP proof-replay detection forking. The check reads the declaration each installed module carries on its own manifest rather than a list of library module names, so this template's own in-memory modules — the user-session stores (`USER_SESSION_STORES_ADAPTER=memory`), the authorization-code repository (`OAUTH_CODE_ADAPTER=memory`) and the federation token store (`FEDERATION_TOKEN_STORE_TYPE=memory`, the default) — are refused by name too; before #455 they booted under `multi`. Since #474 that includes express-session's own store under `SESSION_STORAGE_TYPE=memory` and the login / WebAuthn-options rate limiters when no shared `rateLimiter` is wired; with the mode unset those three warn instead (see the operator runbook). With the mode unset you get one `replica_unsafe_adapters` warning at boot instead; with `DEPLOYMENT_MODE=single` the check is silent, because you have said there is one replica.
 
 Be aware of what this check *cannot* do: if you scale to N replicas without ever setting `DEPLOYMENT_MODE`, nothing fails. A process holding all its state in its own memory has no shared medium through which to notice peers — the condition is undetectable from inside exactly when it is true. Set the variable as part of scaling, not after something breaks.
