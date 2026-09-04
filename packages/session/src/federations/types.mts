@@ -143,6 +143,14 @@ export interface FederationProvider {
 		 * federation, form body for a `"form_post"` one — with only the string
 		 * values kept.
 		 *
+		 * **`code` and `state` are excluded.** Both are the framework's to bind,
+		 * and both are already accounted for: `code` arrives in its own field
+		 * above, and `state` is the value the route compared against the session
+		 * before calling. Leaving them in would put each in two places, one of
+		 * which the route validated and one of which it did not — so an adapter
+		 * cannot read a credential from the wrong one, because the wrong one is
+		 * not there.
+		 *
 		 * Present so an IdP that returns identity data *beside* the token
 		 * response can be adapted without a second callback contract: Apple
 		 * sends the end user's name exactly once, in a `user` JSON field on the
