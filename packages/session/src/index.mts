@@ -84,8 +84,8 @@ export {
 } from "./federations/response-mode.mjs";
 // #494 — a form_post federation's ephemeral state lives in a transaction of
 // its own, addressed by a dedicated cookie, so the application session cookie
-// is never relaxed. Replaces `applyCrossSiteStateCookie`, removed in this
-// release.
+// is never relaxed. Replaces `applyCrossSiteStateCookie`, which is removed —
+// see CHANGELOG for the release that performed the removal.
 export type {
 	FederationTransactionEnvelope,
 	FederationTransactionSessionStore,
