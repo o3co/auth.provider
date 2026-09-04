@@ -143,9 +143,20 @@ session, no `state` to compare against and no PKCE verifier. So the start leg
 issues a second, dedicated cookie: `HttpOnly; Secure; SameSite=None`,
 path-scoped to `/session/oauth/federation/apple/callback`, expiring in ten
 minutes, and carrying nothing but an opaque id. The `state`, PKCE verifier,
-nonce and post-login redirect are held in the session store under that id, and
-both are deleted the moment the callback consumes them — on success and on
-every failure alike.
+nonce and post-login redirect are held in the session store under that id.
+
+Both are deleted as soon as a callback **judges** the transaction — on success,
+and on every refusal that compared a `state`. A callback carrying no `state`
+judges nothing and leaves the flow intact, which is what stops a cross-site
+request from cancelling a login in progress. The single use that buys you is
+sequential: a callback arriving after an earlier one completed is refused. Two
+callbacks that *overlap* can both get past the record, because retiring it is a
+read and then a delete over an API with no compare-and-delete; what stops them
+becoming two logins is Apple's authorization code, which is itself single-use,
+so at most one exchange succeeds and the rest end in `502 exchange_failed`.
+There is nothing for you to configure either way — it is stated here because
+the alternative is a guarantee you might plan around
+([#502](https://github.com/o3co/auth.provider/issues/502)).
 
 **Your application session cookie is not modified.** Not its `SameSite`, not
 its `Secure` flag, not for the browser doing the Apple login and not for anyone

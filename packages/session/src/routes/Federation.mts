@@ -389,13 +389,45 @@ export const createRouter = (
 			});
 		}
 
-		// Copy ephemeral state to locals, then delete and persist BEFORE any async work
-		// to guarantee reuse prevention even if exchangeCode throws.
+		// Copy ephemeral state to locals, then retire it BEFORE any async work, so
+		// a replay arriving after this callback finds nothing — including when
+		// `exchangeCode` throws.
 		const { codeVerifier, redirectTo, nonce } = fed;
-		// Fail-closed either way: if the ephemeral state cannot be retired, it
-		// could still be replayed on a subsequent read. Return 500 rather than
-		// continuing — an attacker who can force the failure and then replay the
-		// code would bypass CSRF protection entirely.
+
+		// What this retirement does and does not guarantee (#502).
+		//
+		// It is a read followed by a delete, and those are two round trips. The
+		// express-session `Store` API is `get` / `set` / `destroy` — there is no
+		// compare-and-delete on it, and no atomic read-and-consume can be
+		// composed from the three. So:
+		//
+		// - **Guaranteed:** a callback that arrives after an earlier one has
+		//   completed its delete finds no record and is refused. That is the
+		//   replay this bounds — a `code` and `state` lifted from a proxy log,
+		//   the browser's own back button, a retried request.
+		// - **Not guaranteed:** callbacks that overlap. Two that both read the
+		//   record before either deletes it both pass the `state` comparison and
+		//   both reach `exchangeCode`. `MemoryStore` answers synchronously and so
+		//   happens to serialise them; a store with network latency does not.
+		//   `Federation.transactionConcurrency.test.mts` pins this rather than
+		//   leaving it to be discovered.
+		// - **What actually bounds the overlap:** the IdP. An authorization code
+		//   is single-use at the IdP, racing callbacks necessarily carry the same
+		//   one, and so at most one exchange succeeds however many get this far.
+		//   PKCE binds that exchange to the verifier held in the record.
+		//
+		// `DeviceCodeStore` (#298) *is* an atomic read-and-consume, and the
+		// difference is which API each has to work over: it owns its adapter and
+		// can push the consume into one Redis round trip, while this record
+		// deliberately shares the session store rather than adding a component
+		// slot of its own — one that would need declaring in `AppConfigSchema`
+		// and configuring in every deployment. Buying strict atomicity here means
+		// paying that, for a property the IdP already provides.
+		//
+		// Fail-closed either way: if the ephemeral state cannot be retired at
+		// all, it stays readable indefinitely, so the flow stops with a 500
+		// rather than continuing — an attacker who could force the delete to fail
+		// and then replay would otherwise face no reuse prevention whatsoever.
 		if (responseMode === "form_post") {
 			const consumeErr = await consumeTransaction();
 			if (consumeErr) {
