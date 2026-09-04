@@ -101,6 +101,12 @@ interface BuildOptions {
 	readonly mountMw?: boolean;
 	readonly mechanisms?: readonly TokenBindingMechanism[];
 	readonly config?: AppConfig;
+	/**
+	 * The grant type the handler is registered under. Defaults to
+	 * `client_credentials`; the WebAuthn URN case below uses it to show that a
+	 * grant contributed by another package inherits this gate unchanged (#489).
+	 */
+	readonly grantType?: string;
 }
 
 async function buildApp(handler: GrantHandler, options: BuildOptions): Promise<express.Express> {
@@ -110,7 +116,7 @@ async function buildApp(handler: GrantHandler, options: BuildOptions): Promise<e
 	app.use(express.urlencoded({ extended: false }));
 	const keyStore = createSymmetricKeyStore(SECRET);
 	const registry = new GrantRegistry();
-	registry.register("client_credentials", handler);
+	registry.register(options.grantType ?? "client_credentials", handler);
 	if (options.mountMw) {
 		app.use(
 			tokenBindingMw({
@@ -130,7 +136,10 @@ async function buildApp(handler: GrantHandler, options: BuildOptions): Promise<e
 	return app;
 }
 
-function makeInMemoryRepo(sc?: SenderConstraint): ClientRepository {
+function makeInMemoryRepo(
+	sc?: SenderConstraint,
+	allowedGrantTypes: readonly string[] = ["client_credentials"],
+): ClientRepository {
 	return new InMemoryClientRepository(
 		new Map([
 			[
@@ -141,7 +150,7 @@ function makeInMemoryRepo(sc?: SenderConstraint): ClientRepository {
 					allowedRedirectUris: [],
 					allowedScopes: ["read"],
 					allowedAudiences: ["https://api.example"],
-					allowedGrantTypes: ["client_credentials"],
+					allowedGrantTypes: [...allowedGrantTypes],
 					...(sc !== undefined && { senderConstrained: sc }),
 				},
 			],
@@ -414,5 +423,69 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 
 		expect(res.status).toBe(200);
 		expect(handler.captured.invoked).toBe(true);
+	});
+});
+
+// --------------------------------------------------------------------------
+// The gate is the only sender-constraint rule any grant needs (#489)
+// --------------------------------------------------------------------------
+
+describe("senderConstrained enforcement reaches grants contributed by other packages", () => {
+	// The WebAuthn grant lives in @o3co/auth-provider-webauthn and is registered
+	// through the `contributes.grants` slot, so it never sees this check in its
+	// own source. #489 asked what stops a client registered
+	// `senderConstrained: "dpop"` from obtaining an unbound access token from it
+	// when the request carries no proof; the answer is this gate, which runs
+	// before every handler and does not know one grant type from another. The
+	// handler adds no second copy of the rule, so the property is pinned here,
+	// on the code that actually holds it, with the URN as the vehicle.
+	const WEBAUTHN_GRANT_TYPE = "urn:o3co:oauth:grant-type:webauthn";
+
+	it("refuses a proofless request for the WebAuthn grant type, before the handler runs", async () => {
+		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
+		const repo = makeInMemoryRepo(sc, [WEBAUTHN_GRANT_TYPE]);
+		const handler = capturingHandler();
+		// No tokenBindingMw mounted → ctx.tokenBinding is undefined.
+		const app = await buildApp(handler, {
+			clientRepo: repo,
+			mountMw: false,
+			grantType: WEBAUTHN_GRANT_TYPE,
+		});
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: WEBAUTHN_GRANT_TYPE });
+
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
+		expect(res.body.error_description).toBe("sender-constrained binding required, none provided");
+		// No assertion is verified, no token is minted: the grant never ran.
+		expect(handler.captured.invoked).toBe(false);
+	});
+
+	it("admits the WebAuthn grant type once the required binding is presented", async () => {
+		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
+		const repo = makeInMemoryRepo(sc, [WEBAUTHN_GRANT_TYPE]);
+		const handler = capturingHandler();
+		const app = await buildApp(handler, {
+			clientRepo: repo,
+			mountMw: true,
+			mechanisms: [dpopMechanism],
+			grantType: WEBAUTHN_GRANT_TYPE,
+		});
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: WEBAUTHN_GRANT_TYPE });
+
+		expect(res.status).toBe(200);
+		expect(handler.captured.invoked).toBe(true);
+		// And the confirmation the gate insisted on is the one the handler sees,
+		// which is what the grant now puts on its access token.
+		expect(handler.captured.ctx?.tokenBinding).toEqual(fakeDPoP);
 	});
 });
