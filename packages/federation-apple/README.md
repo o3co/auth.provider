@@ -150,10 +150,12 @@ on a `state` that was compared and did not match, and on a transaction id that
 resolved to no record or to another provider's. What does *not* spend them is a
 callback that judged nothing — one carrying no `state` at all leaves the flow
 intact, which is what stops a cross-site request from cancelling a login in
-progress, and a GET is refused with `405` before the cookie is read. The single use that buys you is
-sequential: a callback arriving after an earlier one completed is refused. Two
-callbacks that *overlap* can both get past the record, because retiring it is a
-read and then a delete over an API with no compare-and-delete; what stops them
+progress, and a GET is refused with `405` before the cookie is read.
+
+The single use that buys you is sequential: a callback arriving after an
+earlier one completed is refused. Two callbacks that *overlap* can both get
+past the record, because retiring it is a read and then a delete over an API
+with no compare-and-delete; what stops them
 becoming two logins is Apple's authorization code, which is itself single-use,
 so at most one exchange succeeds and the rest end in `502 exchange_failed`.
 There is nothing for you to configure either way — it is stated here because
@@ -194,9 +196,9 @@ from this deployment: no session, no `state`, no account.
 — `session.name` with any `__Host-` / `__Secure-` prefix stripped, then
 `__Secure-` and `.federation` applied, so a deployment running the default
 `__Host-auth.session` is looking for `__Secure-auth.session.federation` — with
-`Domain=<your parent domain>` in a victim's browser. They then start their own Sign in with Apple flow, plant
-their own transaction id, and auto-submit their own `state` and `code` to your
-callback. The victim's browser ends up logged into the **attacker's** Apple
+`Domain=<your parent domain>` in a victim's browser. They then start their own
+Sign in with Apple flow, plant their own transaction id, and auto-submit their
+own `state` and `code` to your callback. The victim's browser ends up logged into the **attacker's** Apple
 account, and whatever the victim does next is recorded against it. It does not
 read the victim's session, expose credentials, or reach the victim's own
 account — this buys identity confusion, not account takeover.
