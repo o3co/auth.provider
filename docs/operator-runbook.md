@@ -52,6 +52,7 @@ Core's own in-memory modules declare it as follows
 | `core-webauthn-credential-store-memory` | registered passkeys — a passkey registered on one replica does not exist on the others |
 | `core-device-code-store-memory` | pending device authorizations — the human approves on one replica while the device polls another that has never heard of the code |
 | `core-federation-token-store-memory` | upstream federation tokens — stored on one replica, missing on the others |
+| `sessionStoreModule` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
 
 Two things the guard cannot do:
 
@@ -143,7 +144,8 @@ Module-level messages that arrive wrapped in a factory failure:
 
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `refreshTokenFamilyStore.redis.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
-- Federation tokens: `mode "allow-plaintext" is not allowed in NODE_ENV="production"` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs a `CRITICAL` line on every boot (`packages/redis/src/federation-tokens.mts`).
+- Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs a `CRITICAL` line on every boot (`packages/redis/src/federation-tokens.mts`).
+- Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
 - Device grant: the four refusals for `verification-uri`, the `session` slice, `rateLimit.failMode` and a `rateLimiter` component (`packages/device-grant/src/module.mts`).
 - mTLS: `source = "header"` with empty `trusted-proxies`; `mode = "pki"`/`"full-pki"` with empty `trusted-cas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `revocation.mode` + `on-unavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowed-hosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
@@ -269,9 +271,11 @@ Two cross-cutting facts about these rows:
 - **`/session/login` and the WebAuthn options route never run unguarded.**
   With no `rateLimiter` wired they fall back to a per-process memory limiter
   and say so once at boot (`login_rate_limiter_not_shared`,
-  `webauthn_authentication_options_rate_limiter_not_shared`). The OAuth
-  endpoints, by contrast, run with no limiter at all in that case
-  (`packages/oauth/src/routes.mts`).
+  `webauthn_authentication_options_rate_limiter_not_shared`) — when
+  `deployment.mode` is unset. Under `"multi"` the fallback is refused at boot
+  like every other per-process store (#474, see [Boot refusals you will meet](#boot-refusals-you-will-meet)); under
+  `"single"` it is silent. The OAuth endpoints, by contrast, run with no
+  limiter at all in that case (`packages/oauth/src/routes.mts`).
 
 ---
 
@@ -322,12 +326,12 @@ stream — its level is fixed at `info`.
 | Event | Where | What to do |
 | --- | --- | --- |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `deployment.mode` is unset; set it |
-| `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter`; the guard is per-process |
+| `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
 | `pkce_config_ignored_s256_is_mandatory` (warn) | `oauth/src/grants/pkce.mts` | a retired PKCE key (or `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) is still set; delete it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |
 | `federationTokenStore: in-memory adapter is for dev/test only …` (warn) | `core/src/federation-tokens/factory.mts` | the standalone builds this store in memory unless `federationTokenStore.type = "redis"` (`FEDERATION_TOKEN_STORE_TYPE=redis`) is set (#456) |
-| `[federation-tokens] CRITICAL: running with mode="allow-plaintext" …` (console) | `redis/src/federation-tokens.mts` | `FEDERATION_TOKENS_ALLOW_INSECURE=1` is set in production |
+| `[federation-tokens] CRITICAL: running with mode="allow-plaintext" …` (console) | `redis/src/federation-tokens.mts` | `FEDERATION_TOKENS_ALLOW_INSECURE=1` is set where plaintext is refused — a production/staging environment or `deployment.mode = "multi"` (#473) |
 | `` [buildModules] `repositories.code.type = "redis"` is deprecated `` (console) | `templates/standalone/src/buildModules.mts` | move to `oauth.code.adapter = "redis"` (`OAUTH_CODE_ADAPTER`) |
 
 ### Data corruption — a stored record could not be read

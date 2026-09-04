@@ -174,7 +174,7 @@ tokens that have already expired.
 | `SESSION_SAME_SITE` | `lax` | `SameSite` attribute (`lax`, `strict`, `none`). `none` **requires** `SESSION_SECURE=true` — browsers drop a `SameSite=None` cookie that is not `Secure`, so boot refuses the combination rather than letting every login fail silently in the client. |
 | `SESSION_DOMAIN` | — | Cookie domain (unset by default) |
 | `SESSION_CSRF_TTL_SECONDS` | `7200` | Lifetime of an issued CSRF token, in seconds. Integer, 1–86400; boot fails otherwise (an *empty* value coerces to `0` and would silently disable the token arm). |
-| `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory` |
+| `SESSION_STORAGE_TYPE` | `redis` | Session store backend: `redis` or `memory`. `memory` is per process and is refused under `DEPLOYMENT_MODE=multi` like the other in-memory stores (#474) |
 | `SESSION_STORAGE_REDIS_URL` | `redis://localhost:6379` | Redis connection URL for session storage |
 | `SESSION_STORAGE_REDIS_PASSWORD` | — | Redis password for session storage |
 
@@ -258,7 +258,7 @@ needs a key.
 |---|---|---|
 | `FEDERATION_TOKEN_STORE_TYPE` | `memory` | Federation token store backend: `memory` or `redis` |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` | — | AES-256-GCM key for records at rest: 32 bytes, base64-encoded (`openssl rand -base64 32`). **Required** with `redis` unless the mode below is `allow-plaintext` |
-| `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused under `NODE_ENV=production` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
+| `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused when the config was selected by a production/staging environment (`CONFIG_ENV` or `NODE_ENV`) and under `DEPLOYMENT_MODE=multi` in any environment, unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
 
 `ttl` (seconds; keep it above the upstream refresh-token lifetime) and the #291
 `scanFallback` migration flag live under `redisFederationTokenStore` in a
