@@ -47,7 +47,7 @@ pnpm build
 - **core** — Interfaces, config schemas, token service, app factory. Always required.
 - **oauth** — OAuth routes (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`). Required for any token issuance.
 - **session** — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.
-- **federation-google / federation-github** — Concrete OAuth federation providers. Optional — install only the providers you register.
+- **federation-google / federation-github / federation-apple** — Concrete OAuth federation providers. Optional — install only the providers you register. An iOS app offering Google or GitHub login must offer Sign in with Apple too (App Store Review Guideline 4.8).
 - **foundation** — Production HTTP user-authentication adapter (client of "the Store"). Optional.
 - **webauthn / dpop / mtls / oauth-token-exchange / device-grant / redis** — Optional capability and adapter modules; see [Packages](#packages).
 
@@ -65,6 +65,7 @@ pnpm build
 | [`packages/mtls`](packages/mtls/) | `@o3co/auth-provider-mtls` | mTLS (RFC 8705) sender-constrained access tokens |
 | [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google federation provider |
 | [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub federation provider |
+| [`packages/federation-apple`](packages/federation-apple/) | `@o3co/auth-provider-federation-apple` | Sign in with Apple federation provider — `form_post` callback, rotating ES256 client secret |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis-backed adapters and `defineModule` manifests |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Production HTTP user-authentication adapter ("the Store" client) |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
