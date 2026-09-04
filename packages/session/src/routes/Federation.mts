@@ -345,6 +345,40 @@ export const createRouter = (
 			});
 		}
 
+		// When a refusal spends the ephemeral state, and when it does not (#502).
+		//
+		// The rule: **a refusal burns the transaction when the request made a
+		// claim about it, and leaves it alone when it made none.** A `state` is
+		// that claim. Presenting one — right or wrong — is an attempt on this
+		// transaction, and an attempt that failed must not get a second try, so
+		// the record is spent. Presenting no `state` at all claims nothing, and
+		// must therefore cost nothing.
+		//
+		// This is not pedantry. The transaction cookie is `SameSite=None` by
+		// necessity, so it accompanies *any* cross-site request to the callback
+		// path — an `<img>` tag's GET included. While every refusal consumed the
+		// transaction, one parameterless cross-site request deleted a victim's
+		// in-flight flow and their genuine callback then failed (#502).
+		//
+		// Applied across the callback's refusals:
+		//
+		// | refusal                                    | spends it? |
+		// | ------------------------------------------ | ---------- |
+		// | unknown provider (404)                     | no — no transaction is ever read |
+		// | wrong method for the response mode (405)   | no — refused before the cookie is |
+		// | no transaction cookie or no store (400)    | nothing to spend |
+		// | transaction lookup failed (500)            | best-effort — the record was presented and cannot be trusted intact |
+		// | no `state` in the callback (400)           | **no** — the claim was never made |
+		// | `state` present and wrong (400)            | yes — a guess, and one guess is all there is |
+		// | envelope absent or names another provider  | yes — same, judged against the record |
+		// | anything after the `state` match           | already spent, before any async work |
+		if (typeof params.state !== "string" || params.state.length === 0) {
+			return res.status(400).json({
+				error: "invalid_request",
+				error_description: "Missing state parameter",
+			});
+		}
+
 		// CSRF state check — unchanged, and deliberately so: the transaction
 		// cookie is an addition to this comparison, never a replacement for it.
 		if (params.state !== fed.state) {
@@ -700,13 +734,31 @@ export const createRouter = (
 					);
 			}
 
-			if (source === "body" && resolveFederationResponseMode(provider) !== "form_post") {
+			const providerResponseMode = resolveFederationResponseMode(provider);
+
+			if (source === "body" && providerResponseMode !== "form_post") {
 				return res
 					.status(405)
 					.set("Allow", "GET")
 					.json({
 						error: "method_not_allowed",
 						error_description: `Federation "${provider.name}" returns its authorization response in the query string; the POST callback is accepted only for a form_post federation`,
+					});
+			}
+
+			// #502: and the mirror of it. A form_post IdP only ever POSTs here, so
+			// a GET is a misconfiguration or a probe — but the probe arrives
+			// carrying the victim's `SameSite=None` transaction cookie, because
+			// that is what `SameSite=None` means. Refusing the method before the
+			// cookie is read is what keeps a third party's `<img>` tag from
+			// reaching the transaction at all.
+			if (source === "query" && providerResponseMode === "form_post") {
+				return res
+					.status(405)
+					.set("Allow", "POST")
+					.json({
+						error: "method_not_allowed",
+						error_description: `Federation "${provider.name}" returns its authorization response as a form post; the GET callback is accepted only for a query federation`,
 					});
 			}
 
