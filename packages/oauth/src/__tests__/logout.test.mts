@@ -209,16 +209,21 @@ interface FakeBrowserSession extends Record<string, unknown> {
 /**
  * Builds the session bag a logged-in browser carries. `sid` names the
  * UserSession this browser belongs to; `destroyFails` makes the store's
- * destroy reject the way a Redis outage would.
+ * destroy reject the way a Redis outage would, and `destroyThrows` makes it
+ * throw synchronously the way an adapter that validates its arguments before
+ * reaching its own callback does — the path that never calls back at all.
  */
 function makeBrowserSession(
-	opts: { sid?: string; destroyFails?: boolean } = {},
+	opts: { sid?: string; destroyFails?: boolean; destroyThrows?: boolean } = {},
 ): FakeBrowserSession {
 	const session: FakeBrowserSession = {
 		isAuthenticated: true,
 		user: { id: "u-1" },
 		destroyed: false,
 		destroy(cb: (err: Error | null) => void) {
+			if (opts.destroyThrows) {
+				throw new Error("session store threw synchronously");
+			}
 			if (opts.destroyFails) {
 				cb(new Error("session store down"));
 				return;
@@ -1636,6 +1641,27 @@ describe("POST /oauth/logout — browser session (R1a)", () => {
 		expect(res.body).toEqual({ logged_out: true });
 		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
 		expect(logger.warn).toHaveBeenCalled();
+	});
+
+	it("a destroy that throws synchronously is logged, and the request still answers", async () => {
+		// An adapter that validates before reaching its own callback throws
+		// instead of calling back, so the promise the route awaits would never
+		// settle and the request would hang. The synchronous guard is what
+		// turns that into the same logged, non-fatal outcome as a callback
+		// error.
+		const logger = createMockLogger();
+		const browserSession = makeBrowserSession({ sid: "sid-1", destroyThrows: true });
+		const sessionStore = makeSessionStore();
+		const app = buildApp({ browserSession, sessionStore, logger });
+		const token = await mintIdToken();
+
+		const res = await postLogout(app, { id_token_hint: token });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ logged_out: true });
+		expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+		expect(logger.warn).toHaveBeenCalled();
+		expect(browserSession.destroyed).toBe(false);
 	});
 
 	it("does NOT destroy the browser session when the cascade failed", async () => {
