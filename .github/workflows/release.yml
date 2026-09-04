@@ -20,6 +20,25 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      # A prerelease tag — anything with a `-` identifier after the core
+      # version, e.g. v1.0.0-rc1 or v2.0.0-beta.2 — must neither move npm's
+      # `latest` dist-tag nor be listed as a full GitHub Release (#476). The tag
+      # is classified once here; every later step reads these outputs instead of
+      # re-deriving them from GITHUB_REF.
+      - name: Classify the tag
+        id: release
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=next" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "npm_tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Get pnpm store path
         id: pnpm-store
         shell: bash
@@ -33,7 +52,9 @@ jobs:
           restore-keys: pnpm-store-
 
       - name: Set version from tag
-        run: pnpm -r exec pnpm version "${GITHUB_REF#refs/tags/v}" --no-git-tag-version --no-commit-hooks
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: pnpm -r exec pnpm version "$VERSION" --no-git-tag-version --no-commit-hooks
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
@@ -44,6 +65,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           draft: true
+          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true
 
       # pnpm publish skips per-package when the version is already on the registry,
@@ -52,11 +74,17 @@ jobs:
       # publishes (e.g. trusted-publisher misconfig on one package) to be
       # impossible to recover from via tag retag — once core was on the registry,
       # rerun would skip the entire publish step and never retry the missing packages.
+      # `--tag` is the npm dist-tag: `latest` for a final release, `next` for a
+      # prerelease, so `npm install @o3co/<pkg>` never resolves to an RC. A final
+      # release after an RC moves `latest` forward as before.
       - name: Publish packages
-        run: pnpm -r publish --access public --no-git-checks --provenance
+        env:
+          NPM_TAG: ${{ steps.release.outputs.npm_tag }}
+        run: pnpm -r publish --access public --no-git-checks --provenance --tag "$NPM_TAG"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
+          prerelease: ${{ steps.release.outputs.prerelease == 'true' }}
           generate_release_notes: true

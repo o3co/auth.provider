@@ -88,7 +88,7 @@ git push origin "vX.Y.Z"
 1. Checks out the tagged commit
 2. Sets the version across all workspace packages via `pnpm -r exec pnpm version "${GITHUB_REF#refs/tags/v}" --no-git-tag-version`
 3. Builds + typechecks
-4. Publishes each non-private package with provenance attestation
+4. Publishes each non-private package with provenance attestation — under npm dist-tag `latest` for a final release, `next` when the tag carries a prerelease identifier (`v1.0.0-rc1`), so an RC never becomes what `npm install` resolves to; the GitHub Release is marked *prerelease* in the same case
 5. Creates the GitHub Release with auto-generated notes
 
 Watch the workflow:
