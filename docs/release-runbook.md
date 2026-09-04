@@ -40,7 +40,12 @@ CI run rather than a released error message naming no release.
 ```bash
 # Every operator-facing string still saying "this release" — stamp each with
 # the tag being cut (docs/release-policy.md R5, R6 step 5). Expect no output.
-git grep -n '"this release' -- 'packages/*/src' 'templates/*/src'
+#
+# The pathspec must be `:(glob)` with `/**`: git's default pathspec treats
+# `packages/*/src` as a literal path, which matches no file, so the plain form
+# reported "no output" whatever the tree contained. That is how the placeholder
+# this check exists to catch shipped twice (#458).
+git grep -n '"this release' -- ':(glob)packages/*/src/**' ':(glob)templates/*/src/**'
 ```
 
 The audit must cover:
