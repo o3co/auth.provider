@@ -76,7 +76,11 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		// hand the route layer a computed client secret; both need the shared
 		// vocabulary rather than a private copy per adapter.
 		expect(typeof mod.resolveFederationResponseMode).toBe("function");
-		expect(typeof mod.applyCrossSiteStateCookie).toBe("function");
+		expect(typeof mod.createFederationTransactionStore).toBe("function");
+		expect(typeof mod.deriveFederationTransactionCookieName).toBe("function");
+		expect(typeof mod.mintFederationTransactionId).toBe("function");
+		// #494: removed from the public surface with the defect it implemented.
+		expect("applyCrossSiteStateCookie" in mod).toBe(false);
 		expect(typeof mod.resolveClientSecret).toBe("function");
 		expect(mod.DEFAULT_FEDERATION_RESPONSE_MODE).toBe("query");
 		expect(mod.FEDERATION_RESPONSE_MODES).toEqual(["query", "form_post"]);

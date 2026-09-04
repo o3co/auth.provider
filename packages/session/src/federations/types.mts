@@ -93,9 +93,13 @@ export interface FederationProvider {
 	 *    / nonce binding as the GET callback (a provider that does not declare
 	 *    the mode answers 405 there, so no existing federation gains a POST
 	 *    surface);
-	 * 3. the session cookie carrying this federation's ephemeral state is
-	 *    marked `SameSite=None; Secure` for that one session, because the
-	 *    callback arrives as a cross-site POST — see `applyCrossSiteStateCookie`.
+	 * 3. this federation's ephemeral state moves out of the session and into a
+	 *    federation transaction — an opaque id in a dedicated `HttpOnly;
+	 *    Secure; SameSite=None` cookie, path-scoped to the callback, and the
+	 *    envelope in a store record keyed by it — because the callback arrives
+	 *    as a cross-site POST that the session cookie does not accompany. The
+	 *    application session cookie is left exactly as configured; see
+	 *    `federations/transaction.mts` (#494).
 	 *
 	 * Optional, and an unrecognised value is read as the default: absence must
 	 * mean "query" for every provider that predates this field.

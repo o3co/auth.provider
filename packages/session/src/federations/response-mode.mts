@@ -27,6 +27,23 @@ import type { FederationProvider } from "./types.mjs";
  *   `application/x-www-form-urlencoded` body to the callback. Apple requires
  *   this whenever the requested `scope` includes `name` or `email`, because
  *   the first-authorization `user` field does not fit a redirect URL.
+ *
+ * A `form_post` callback is a **cross-site POST** from the IdP's origin, and a
+ * `SameSite=Lax` cookie — the deployment default, and the right default — is
+ * not sent on one. That is a fact about the mode, and the router answers it by
+ * giving the flow a cookie of its own rather than by changing the session's:
+ * the ephemeral state moves into a federation transaction (an opaque id in a
+ * short-lived, path-scoped, `SameSite=None; Secure; HttpOnly` cookie, with the
+ * envelope in a store record keyed by it — `federations/transaction.mts`).
+ *
+ * The application session cookie keeps the attributes the deployment
+ * configured, on every session, whether or not it ever started a `form_post`
+ * federation. It has to: `GET /oauth/federation/:name` requires no
+ * authentication, a `SameSite=Lax` cookie IS sent on a top-level GET, and
+ * express-session serialises `req.session.cookie` into the store and rebuilds
+ * it from there on every later request — so a start leg that wrote to that
+ * cookie handed any third party a permanent, unauthenticated downgrade of a
+ * victim's session (#494).
  */
 export type FederationResponseMode = "query" | "form_post";
 
@@ -61,45 +78,4 @@ export const resolveFederationResponseMode = (
 	return FEDERATION_RESPONSE_MODES.includes(declared as FederationResponseMode)
 		? (declared as FederationResponseMode)
 		: DEFAULT_FEDERATION_RESPONSE_MODE;
-};
-
-/**
- * Relax the session cookie carrying this federation's ephemeral state to
- * `SameSite=None; Secure`, for the one session that just started a `form_post`
- * federation.
- *
- * A `form_post` callback arrives as a **cross-site POST** from the IdP's
- * origin. A `SameSite=Lax` cookie — the deployment default, and the right
- * default — is not sent on a cross-site POST, so the callback would land with
- * no session, no `state` to compare against and no PKCE verifier: the flow
- * fails closed, but it fails for everyone.
- *
- * The fix is applied **per session, on the start leg of a `form_post`
- * federation only**, never to `session.sameSite` in config. A deployment that
- * runs Apple alongside Google keeps `SameSite=Lax` on every Google login and
- * on every session that never touched a cross-site federation; only the
- * browser that is mid-Apple-flow holds the relaxed cookie. `Secure` is set
- * with it because every current browser drops a `SameSite=None` cookie that is
- * not `Secure` (the same pairing `application.schema.mts` enforces for the
- * config-level value, #282) — and Apple refuses a non-`https` redirect URI
- * anyway, so a `form_post` federation is already HTTPS-only.
- *
- * Takes `unknown` because the session object is supplied by whatever
- * middleware the composition root mounted; returns whether the relaxation
- * actually applied so the caller can say so rather than assume it.
- *
- * Note for express-session: the re-issued `Set-Cookie` reaches the browser
- * because this handler also modifies the session (it writes the federation
- * envelope) and the deployment's `session.maxAge` is required by config
- * schema, which is exactly express-session's condition for re-sending the
- * cookie of an already-established session.
- */
-export const applyCrossSiteStateCookie = (session: unknown): boolean => {
-	if (session == null || typeof session !== "object") return false;
-	const cookie = (session as { cookie?: unknown }).cookie;
-	if (cookie == null || typeof cookie !== "object") return false;
-	const attributes = cookie as { sameSite?: unknown; secure?: unknown };
-	attributes.sameSite = "none";
-	attributes.secure = true;
-	return true;
 };

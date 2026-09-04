@@ -29,17 +29,29 @@ import type { Request, RequestHandler, Response, Router } from "express";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
+import { resolveFederationResponseMode } from "../federations/response-mode.mjs";
 import {
-	applyCrossSiteStateCookie,
-	resolveFederationResponseMode,
-} from "../federations/response-mode.mjs";
+	createFederationTransactionStore,
+	DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
+	deriveFederationTransactionCookieName,
+	type FederationTransactionEnvelope,
+	type FederationTransactionSessionStore,
+	type FederationTransactionStore,
+	mintFederationTransactionId,
+} from "../federations/transaction.mjs";
 import { type FederationProvider, supportsClaimMapping } from "../federations/types.mjs";
+import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 
 declare module "express-session" {
 	interface SessionData {
-		/** Ephemeral federation state stored during the OAuth 2 redirect leg.
-		 *  Deleted by the callback handler immediately after the CSRF check (reuse prevention). */
+		/** Ephemeral federation state stored during the OAuth 2 redirect leg of a
+		 *  `"query"` federation. Deleted by the callback handler immediately after
+		 *  the CSRF check (reuse prevention).
+		 *
+		 *  A `"form_post"` federation does NOT use this field: its callback is a
+		 *  cross-site POST that the session cookie does not accompany, so its
+		 *  envelope lives in a federation transaction record instead (#494). */
 		federation?: {
 			name: string;
 			state: string;
@@ -58,6 +70,26 @@ declare module "express-session" {
 }
 
 const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
+
+/**
+ * The session cookie name assumed when the caller passes neither
+ * `federationTransactionCookieName` nor a config carrying `session.name`.
+ *
+ * It matches `reference.conf`'s default, minus the `__Host-` prefix that
+ * {@link deriveFederationTransactionCookieName} would strip anyway. A
+ * deployment reaches this only through a hand-built `AppConfig`; the module
+ * wiring always passes the real name.
+ */
+const FALLBACK_SESSION_COOKIE_NAME = "auth.session";
+
+/** Read `config.session.name` without assuming the caller supplied a full AppConfig. */
+const readSessionCookieName = (config: unknown): string => {
+	if (config == null || typeof config !== "object") return FALLBACK_SESSION_COOKIE_NAME;
+	const session = (config as { session?: unknown }).session;
+	if (session == null || typeof session !== "object") return FALLBACK_SESSION_COOKIE_NAME;
+	const name = (session as { name?: unknown }).name;
+	return typeof name === "string" && name.length > 0 ? name : FALLBACK_SESSION_COOKIE_NAME;
+};
 
 /**
  * Narrow a callback's parameter bag (`req.query` or `req.body`) to its string
@@ -86,7 +118,7 @@ export const createRouter = (
 		urlencoded: (opts: { extended: boolean }) => RequestHandler;
 	},
 	{
-		config: _config,
+		config,
 		federationProviders,
 		federationRedirectPolicyResolver,
 		providerCallbackUrls,
@@ -96,6 +128,8 @@ export const createRouter = (
 		sessionFederationIndex,
 		federationTokenStore,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
+		federationTransactionTtlMs = DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
+		federationTransactionCookieName,
 		logger = consoleLogger,
 	}: {
 		config: AppConfig;
@@ -113,6 +147,20 @@ export const createRouter = (
 		sessionFederationIndex: SessionFederationIndex;
 		federationTokenStore: FederationTokenStore;
 		sessionTtlMs?: number;
+		/**
+		 * How long a `form_post` federation's transaction may sit unconsumed
+		 * (#494). Bounds the transaction cookie's `Max-Age` and the stored
+		 * record's expiry together.
+		 */
+		federationTransactionTtlMs?: number;
+		/**
+		 * Name of the `form_post` transaction cookie. Defaults to the
+		 * deployment's session cookie name run through
+		 * {@link deriveFederationTransactionCookieName}, so it inherits the
+		 * operator's naming without inheriting a `__Host-` prefix this
+		 * path-scoped cookie could not satisfy.
+		 */
+		federationTransactionCookieName?: string;
 		logger?: Logger;
 	},
 ): Router => {
@@ -123,6 +171,79 @@ export const createRouter = (
 	if (!providerCallbackUrls) throw new Error("federation routes require providerCallbackUrls");
 
 	const router = express.Router();
+
+	const transactionCookieName =
+		federationTransactionCookieName ??
+		deriveFederationTransactionCookieName(readSessionCookieName(config));
+
+	/**
+	 * The federation transaction store, over the express-session store the
+	 * deployment already runs (#494).
+	 *
+	 * Taken off the request rather than injected because that is where the
+	 * store the session middleware mounted actually is, and a second wiring of
+	 * the same store is a second thing that can point somewhere else. A request
+	 * that reaches here without one has no session middleware in front of it,
+	 * which is a composition error rather than a per-request condition — the
+	 * `form_post` start leg refuses rather than silently proceeding.
+	 */
+	const transactionStore = (req: Request): FederationTransactionStore | undefined => {
+		const store = (req as unknown as { sessionStore?: unknown }).sessionStore;
+		if (store == null || typeof store !== "object") return undefined;
+		const candidate = store as Partial<FederationTransactionSessionStore>;
+		if (
+			typeof candidate.get !== "function" ||
+			typeof candidate.set !== "function" ||
+			typeof candidate.destroy !== "function"
+		) {
+			return undefined;
+		}
+		return createFederationTransactionStore(candidate as FederationTransactionSessionStore);
+	};
+
+	/**
+	 * The path the transaction cookie is scoped to: the provider's callback
+	 * route and nothing else.
+	 *
+	 * Derived from `providerCallbackUrls`, the authoritative map, so the cookie
+	 * is offered to exactly the URL the IdP was told to POST to. A cookie that
+	 * is `SameSite=None` is offered on every cross-site request to a matching
+	 * path, so the narrower that path, the less of the deployment is reachable
+	 * carrying it.
+	 */
+	const transactionCookiePath = (provider: FederationProvider): string | undefined => {
+		const callbackUrl = providerCallbackUrls.get(provider.name);
+		if (!callbackUrl) return undefined;
+		try {
+			return new URL(callbackUrl).pathname;
+		} catch {
+			return undefined;
+		}
+	};
+
+	/** Attributes shared by the `Set-Cookie` that issues the cookie and the one that clears it. */
+	const transactionCookieAttributes = (path: string) =>
+		({
+			httpOnly: true,
+			// `SameSite=None` is what makes the cookie reach a cross-site POST,
+			// and every current browser drops such a cookie unless it is also
+			// `Secure`. Apple refuses a non-`https` redirect URI anyway, so a
+			// form_post federation is HTTPS-only regardless.
+			secure: true,
+			sameSite: "none",
+			path,
+		}) as const;
+
+	/**
+	 * Drop the transaction cookie. Called on every callback exit — success,
+	 * refusal and error alike — so a consumed or unusable transaction never
+	 * leaves a cookie behind for the next attempt to trip over.
+	 */
+	const clearTransactionCookie = (provider: FederationProvider, res: Response): void => {
+		const path = transactionCookiePath(provider);
+		if (path === undefined) return;
+		res.clearCookie(transactionCookieName, transactionCookieAttributes(path));
+	};
 
 	/**
 	 * The callback leg, shared verbatim by the GET and the POST route (#479).
@@ -149,18 +270,85 @@ export const createRouter = (
 		// so subsequent calls do not need to repeat either field.
 		let log = logger.child({ provider: provider.name });
 
-		const fed = req.session.federation;
+		const responseMode = resolveFederationResponseMode(provider);
 
-		// Check session.federation present and name matches
+		// Where this federation's ephemeral state lives.
+		//
+		// A `"query"` federation keeps it in the session, exactly as it always
+		// has: that callback is a same-site top-level GET, the session cookie is
+		// sent with it, and nothing about Google or GitHub changes here.
+		//
+		// A `"form_post"` federation keeps it in a transaction record addressed
+		// by its own cookie (#494), because that callback is a cross-site POST
+		// which a `SameSite=Lax` session cookie does not accompany. The
+		// transaction cookie is what binds the callback to the browser that
+		// started the flow — the property the session cookie used to provide —
+		// so a caller who cannot present it is refused before `state` is read at
+		// all. A stolen `state` alone is therefore still worth nothing.
+		let fed: FederationTransactionEnvelope | undefined;
+		let transactions: FederationTransactionStore | undefined;
+		let transactionId: string | undefined;
+
+		/**
+		 * Consume the transaction: drop the cookie and the stored record.
+		 *
+		 * Returns the store's error rather than throwing, so a caller on a
+		 * refusal path can clean up best-effort while a caller about to do
+		 * irreversible work can fail closed on it. A no-op for a `"query"`
+		 * federation, which has no transaction to consume.
+		 */
+		const consumeTransaction = async (): Promise<unknown> => {
+			if (!transactions || transactionId === undefined) return null;
+			clearTransactionCookie(provider, res);
+			const id = transactionId;
+			transactionId = undefined;
+			try {
+				await transactions.delete(id);
+				return null;
+			} catch (err) {
+				return err;
+			}
+		};
+
+		if (responseMode === "form_post") {
+			transactions = transactionStore(req);
+			transactionId = readCookie(req, transactionCookieName);
+			if (!transactions || transactionId === undefined || transactionId.length === 0) {
+				// No transaction cookie, no transaction. This is the refusal an
+				// attacker replaying a `state` from another browser meets.
+				clearTransactionCookie(provider, res);
+				return res.status(400).json({
+					error: "invalid_session",
+					error_description: "No active federation session for this provider",
+				});
+			}
+			try {
+				fed = (await transactions.get(transactionId)) ?? undefined;
+			} catch (err) {
+				log.warn({ err }, "federation transaction lookup failed");
+				await consumeTransaction();
+				return res.status(500).json({
+					error: "server_error",
+					error_description: "Session store unavailable",
+				});
+			}
+		} else {
+			fed = req.session.federation;
+		}
+
+		// Check the envelope is present and names this provider
 		if (!fed || fed.name !== String(req.params.name)) {
+			await consumeTransaction();
 			return res.status(400).json({
 				error: "invalid_session",
 				error_description: "No active federation session for this provider",
 			});
 		}
 
-		// CSRF state check
+		// CSRF state check — unchanged, and deliberately so: the transaction
+		// cookie is an addition to this comparison, never a replacement for it.
 		if (params.state !== fed.state) {
+			await consumeTransaction();
 			return res.status(400).json({
 				error: "invalid_state",
 				error_description: "CSRF state mismatch",
@@ -170,20 +358,31 @@ export const createRouter = (
 		// Copy ephemeral state to locals, then delete and persist BEFORE any async work
 		// to guarantee reuse prevention even if exchangeCode throws.
 		const { codeVerifier, redirectTo, nonce } = fed;
-		delete req.session.federation;
-		// Fail-closed: if the reuse-prevention save fails, the old federation state
-		// could still be replayed from the store on a subsequent read.  Return 500
-		// rather than continuing — an attacker who can force a save failure and then
-		// replay the code would bypass CSRF protection entirely.
-		const reusePrevSaveErr = await new Promise<unknown>((resolve) => {
-			req.session.save((err) => resolve(err ?? null));
-		});
-		if (reusePrevSaveErr) {
-			log.warn({ err: reusePrevSaveErr }, "reuse-prevention session save failed");
-			return res.status(500).json({
-				error: "server_error",
-				error_description: "Session store unavailable",
+		// Fail-closed either way: if the ephemeral state cannot be retired, it
+		// could still be replayed on a subsequent read. Return 500 rather than
+		// continuing — an attacker who can force the failure and then replay the
+		// code would bypass CSRF protection entirely.
+		if (responseMode === "form_post") {
+			const consumeErr = await consumeTransaction();
+			if (consumeErr) {
+				log.warn({ err: consumeErr }, "federation transaction delete failed");
+				return res.status(500).json({
+					error: "server_error",
+					error_description: "Session store unavailable",
+				});
+			}
+		} else {
+			delete req.session.federation;
+			const reusePrevSaveErr = await new Promise<unknown>((resolve) => {
+				req.session.save((err) => resolve(err ?? null));
 			});
+			if (reusePrevSaveErr) {
+				log.warn({ err: reusePrevSaveErr }, "reuse-prevention session save failed");
+				return res.status(500).json({
+					error: "server_error",
+					error_description: "Session store unavailable",
+				});
+			}
 		}
 
 		// Fix 4: validate code query parameter early — missing/empty code must be a 400
@@ -580,21 +779,22 @@ export const createRouter = (
 			const codeVerifier = generateCodeVerifier();
 			const nonce = randomBytes(16).toString("base64url");
 
-			// #479: a form_post callback arrives as a cross-site POST from the
-			// IdP's origin, and a SameSite=Lax cookie is not sent on one — the
-			// callback would land with no session to check `state` against. Relax
-			// this session's cookie, and only this one: a deployment running Apple
-			// beside Google keeps SameSite=Lax on every session that never started
-			// a cross-site federation.
-			if (responseMode === "form_post" && !applyCrossSiteStateCookie(req.session)) {
-				logger.warn(
-					{ provider: provider.name },
-					"federation declares response_mode=form_post but the session exposes no cookie to mark SameSite=None; the cross-site callback will arrive without a session unless the session middleware sets it another way",
-				);
+			// providerCallbackUrls is the authoritative map of per-provider callback URLs,
+			// populated by module wiring from config.federations.<name>.callbackURL.
+			//
+			// Read before the ephemeral state is persisted: a form_post start
+			// scopes its transaction cookie to this URL's path, and there is
+			// nothing to be gained by persisting state for a provider whose
+			// callback URL is missing.
+			const callbackUrl = providerCallbackUrls.get(provider.name);
+			if (!callbackUrl) {
+				return res.status(500).json({
+					error: "misconfiguration",
+					error_description: `No callback URL registered for provider "${provider.name}"`,
+				});
 			}
 
-			// Persist ephemeral federation state in the session
-			req.session.federation = {
+			const envelope = {
 				name: provider.name,
 				state,
 				codeVerifier,
@@ -602,14 +802,76 @@ export const createRouter = (
 				redirectTo,
 			};
 
-			// providerCallbackUrls is the authoritative map of per-provider callback URLs,
-			// populated by module wiring from config.federations.<name>.callbackURL.
-			const callbackUrl = providerCallbackUrls.get(provider.name);
-			if (!callbackUrl) {
-				return res.status(500).json({
-					error: "misconfiguration",
-					error_description: `No callback URL registered for provider "${provider.name}"`,
+			// #494: a form_post callback arrives as a cross-site POST from the
+			// IdP's origin, and a SameSite=Lax cookie is not sent on one. The
+			// ephemeral state therefore travels as a transaction of its own — an
+			// opaque id in a short-lived, path-scoped, SameSite=None cookie, and
+			// the envelope in a store record keyed by it.
+			//
+			// The application session cookie is not touched, by this branch or
+			// any other. This route is unauthenticated and a SameSite=Lax cookie
+			// IS sent on a top-level GET, so anything the start leg changed about
+			// that cookie would be changeable by any third party who could make a
+			// browser follow a link here — permanently, since express-session
+			// serialises `req.session.cookie` into the store and rebuilds it from
+			// there on every later request.
+			if (responseMode === "form_post") {
+				const transactions = transactionStore(req);
+				const cookiePath = transactionCookiePath(provider);
+				if (!transactions || cookiePath === undefined) {
+					logger.error(
+						{ provider: provider.name, callbackUrl },
+						"federation declares response_mode=form_post but no express-session store is reachable on the request, or its callback URL has no parsable path; the cross-site callback would arrive with nothing to check state against",
+					);
+					return res.status(500).json({
+						error: "misconfiguration",
+						error_description: `Federation "${provider.name}" cannot start: no session store is mounted to hold its transaction`,
+					});
+				}
+
+				const transactionId = mintFederationTransactionId();
+				// Persist the transaction BEFORE redirecting to the IdP, for the
+				// same reason the query branch saves the session here: an async
+				// store that loses the record before the user reaches the callback
+				// breaks CSRF + PKCE + nonce binding, and failing closed on a store
+				// outage is cheaper than a stranded callback.
+				try {
+					await transactions.set(transactionId, envelope, federationTransactionTtlMs);
+				} catch (err) {
+					logger.warn({ err, provider: provider.name }, "federation transaction save failed");
+					return res.status(500).json({
+						error: "server_error",
+						error_description: "Session store unavailable",
+					});
+				}
+
+				res.cookie(transactionCookieName, transactionId, {
+					...transactionCookieAttributes(cookiePath),
+					// Expires with the record it addresses, so an abandoned flow
+					// leaves neither behind.
+					maxAge: federationTransactionTtlMs,
 				});
+			} else {
+				// Persist ephemeral federation state in the session
+				req.session.federation = envelope;
+
+				// Persist the federation envelope BEFORE redirecting to the IdP. Without an explicit
+				// save, async session stores (Redis, etc.) can lose the state/codeVerifier/nonce
+				// before the user reaches the callback, breaking CSRF + PKCE + nonce binding —
+				// fail-closed on store outages here is cheaper than a stranded callback.
+				const startSaveErr = await new Promise<unknown>((resolve) => {
+					req.session.save((err) => resolve(err ?? null));
+				});
+				if (startSaveErr) {
+					logger.warn(
+						{ err: startSaveErr, provider: provider.name },
+						"federation start session save failed",
+					);
+					return res.status(500).json({
+						error: "server_error",
+						error_description: "Session store unavailable",
+					});
+				}
 			}
 
 			const authUrl = provider.buildAuthorizationUrl({
@@ -626,24 +888,6 @@ export const createRouter = (
 			// authorization URL is byte-for-byte what its adapter returned.
 			if (responseMode !== "query") {
 				authUrl.searchParams.set("response_mode", responseMode);
-			}
-
-			// Persist the federation envelope BEFORE redirecting to the IdP. Without an explicit
-			// save, async session stores (Redis, etc.) can lose the state/codeVerifier/nonce
-			// before the user reaches the callback, breaking CSRF + PKCE + nonce binding —
-			// fail-closed on store outages here is cheaper than a stranded callback.
-			const startSaveErr = await new Promise<unknown>((resolve) => {
-				req.session.save((err) => resolve(err ?? null));
-			});
-			if (startSaveErr) {
-				logger.warn(
-					{ err: startSaveErr, provider: provider.name },
-					"federation start session save failed",
-				);
-				return res.status(500).json({
-					error: "server_error",
-					error_description: "Session store unavailable",
-				});
 			}
 
 			return res.redirect(authUrl.toString());

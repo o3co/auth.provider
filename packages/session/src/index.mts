@@ -78,11 +78,27 @@ export {
 // #479 — `response_mode=form_post` federations (Sign in with Apple).
 export type { FederationResponseMode } from "./federations/response-mode.mjs";
 export {
-	applyCrossSiteStateCookie,
 	DEFAULT_FEDERATION_RESPONSE_MODE,
 	FEDERATION_RESPONSE_MODES,
 	resolveFederationResponseMode,
 } from "./federations/response-mode.mjs";
+// #494 — a form_post federation's ephemeral state lives in a transaction of
+// its own, addressed by a dedicated cookie, so the application session cookie
+// is never relaxed. Replaces `applyCrossSiteStateCookie`, removed in this
+// release.
+export type {
+	FederationTransactionEnvelope,
+	FederationTransactionSessionStore,
+	FederationTransactionStore,
+} from "./federations/transaction.mjs";
+export {
+	createFederationTransactionStore,
+	DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
+	deriveFederationTransactionCookieName,
+	FEDERATION_TRANSACTION_COOKIE_SUFFIX,
+	FEDERATION_TRANSACTION_KEY_PREFIX,
+	mintFederationTransactionId,
+} from "./federations/transaction.mjs";
 export type {
 	EndSessionRequest,
 	EndSessionResult,

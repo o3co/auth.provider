@@ -22,7 +22,9 @@
  *
  * 1. a provider that declares `responseMode: "form_post"` gets the parameter
  *    on its authorization URL, a POST callback, and a `SameSite=None; Secure`
- *    state cookie — and a provider that declares nothing gets none of it;
+ *    federation *transaction* cookie of its own — and a provider that declares
+ *    nothing gets none of it, nor does the application session cookie change
+ *    for either (#494);
  * 2. the POST callback's state / CSRF / PKCE / nonce binding is the GET
  *    callback's, not a second implementation that drifts from it;
  * 3. a fake Apple — form_post, `user` body on first authorization, string
@@ -35,8 +37,13 @@ import type { UserRepository } from "@o3co/auth-provider-core";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { codeChallenge } from "#/federations/pkce.mjs";
+import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import type { FederationProfile, FederationProvider } from "#/federations/types.mjs";
-import { buildFederationApp, makeUserRepository } from "./federation-harness.mjs";
+import {
+	buildFederationApp,
+	HARNESS_TRANSACTION_COOKIE_NAME,
+	makeUserRepository,
+} from "./federation-harness.mjs";
 
 const APPLE_CALLBACK_URL = "https://app.example.com/session/oauth/federation/apple/callback";
 const QUERY_CALLBACK_URL = "https://app.example.com/session/oauth/federation/query-idp/callback";
@@ -160,44 +167,75 @@ function buildApp(opts: { userRepository?: UserRepository } = {}) {
 
 type StartedFlow = {
 	sid: string;
+	/** The opaque transaction id, for a form_post federation. */
+	transactionId?: string;
 	state: string;
 	nonce: string;
 	codeVerifier: string;
 	startResponse: request.Response;
-	/** POST the callback carrying this flow's session cookie. */
+	/** POST the callback carrying this flow's cookies. */
 	post: (body: Record<string, string>) => request.Test;
-	/** GET the callback carrying this flow's session cookie. */
+	/** GET the callback carrying this flow's cookies. */
 	get: (query: Record<string, string>) => request.Test;
 };
+
+/** Every `Set-Cookie` the start leg emitted, as one blob. */
+function setCookieHeader(res: request.Response): string {
+	return ((res.headers["set-cookie"] as unknown as string[]) ?? []).join("\n");
+}
+
+/** The transaction id the start leg put in its cookie, if it issued one. */
+function readTransactionCookie(res: request.Response): string | undefined {
+	const match = setCookieHeader(res).match(
+		new RegExp(`${HARNESS_TRANSACTION_COOKIE_NAME}=([^;\n]*)`),
+	);
+	if (!match?.[1]) return undefined;
+	return decodeURIComponent(match[1]);
+}
 
 /**
  * Drive the start leg and read back the ephemeral state the route persisted.
  *
- * The session cookie is replayed by hand rather than through a supertest
- * agent: a form_post federation's state cookie is `Secure`, and superagent's
- * cookie jar correctly refuses to send a `Secure` cookie back over the plain
- * HTTP the test server speaks. That refusal is the harness being right about
- * the attribute, so the test carries the cookie itself instead of weakening it.
+ * Where that state lives is the whole of #494: a `"query"` federation still
+ * keeps it in the session, while a `"form_post"` federation keeps it in a
+ * transaction record addressed by a cookie of its own. This helper reads
+ * whichever applies and replays whichever cookies the flow actually needs.
+ *
+ * The cookies are replayed by hand rather than through a supertest agent: the
+ * transaction cookie is `Secure`, and superagent's cookie jar correctly refuses
+ * to send a `Secure` cookie back over the plain HTTP the test server speaks.
+ * That refusal is the harness being right about the attribute, so the test
+ * carries the cookie itself instead of weakening it.
  */
 async function startFlow(
 	harness: ReturnType<typeof buildApp>,
 	name = "apple",
 ): Promise<StartedFlow> {
 	const startResponse = await request(harness.app).get(`/oauth/federation/${name}`);
-	const setCookie = (startResponse.headers["set-cookie"] as unknown as string[]) ?? [];
-	const sidMatch = setCookie.join("\n").match(/sid=([^;\n]+)/);
+	const sidMatch = setCookieHeader(startResponse).match(/sid=([^;\n]+)/);
 	if (!sidMatch) throw new Error("start leg issued no session cookie");
 	const sid = decodeURIComponent(sidMatch[1]);
+	const cookies = [`sid=${encodeURIComponent(sid)}`];
 
-	const entry = harness.store.get(sid);
-	const federation = entry?.data.federation as
-		| { state: string; nonce: string; codeVerifier: string }
-		| undefined;
-	if (!federation) throw new Error("start leg persisted no federation state");
+	const transactionId = readTransactionCookie(startResponse);
+	let federation: { state: string; nonce: string; codeVerifier: string } | undefined;
 
-	const cookie = `sid=${encodeURIComponent(sid)}`;
+	if (transactionId !== undefined) {
+		const record = harness.records.get(`${FEDERATION_TRANSACTION_KEY_PREFIX}${transactionId}`) as
+			| { federation?: { state: string; nonce: string; codeVerifier: string } }
+			| undefined;
+		federation = record?.federation;
+		if (!federation) throw new Error("start leg issued a transaction cookie but stored no record");
+		cookies.push(`${HARNESS_TRANSACTION_COOKIE_NAME}=${encodeURIComponent(transactionId)}`);
+	} else {
+		federation = harness.store.get(sid)?.data.federation as typeof federation;
+		if (!federation) throw new Error("start leg persisted no federation state");
+	}
+
+	const cookie = cookies.join("; ");
 	return {
 		sid,
+		...(transactionId === undefined ? {} : { transactionId }),
 		state: federation.state,
 		nonce: federation.nonce,
 		codeVerifier: federation.codeVerifier,
@@ -236,22 +274,161 @@ describe("GET /oauth/federation/:name (start) — response mode", () => {
 		expect(location.searchParams.has("response_mode")).toBe(false);
 	});
 
-	it("marks the state cookie SameSite=None; Secure for a form_post federation", async () => {
+	it("issues a HttpOnly; Secure; SameSite=None transaction cookie for a form_post federation", async () => {
 		const { app } = buildApp();
 		const res = await request(app).get("/oauth/federation/apple");
-		const setCookie = (res.headers["set-cookie"] as unknown as string[]).join("\n");
-		expect(setCookie).toMatch(/SameSite=None/i);
-		expect(setCookie).toMatch(/Secure/);
+		const transactionCookie = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
+			c.startsWith(`${HARNESS_TRANSACTION_COOKIE_NAME}=`),
+		);
+		expect(transactionCookie).toBeDefined();
+		expect(transactionCookie).toMatch(/SameSite=None/i);
+		expect(transactionCookie).toMatch(/Secure/);
+		expect(transactionCookie).toMatch(/HttpOnly/i);
+		// Scoped to the callback route the IdP was told to POST to, and to
+		// nothing else — a SameSite=None cookie is offered on every cross-site
+		// request to a matching path.
+		expect(transactionCookie).toMatch(/Path=\/session\/oauth\/federation\/apple\/callback/);
+		// And bounded, so an abandoned flow expires on its own.
+		expect(transactionCookie).toMatch(/Max-Age=\d+/);
 	});
 
-	it("leaves the state cookie SameSite=Lax for a query federation in the same deployment", async () => {
-		// The relaxation is per-federation. A deployment that adds Apple must not
-		// find its Google logins running on a SameSite=None cookie.
+	it("leaves the application session cookie exactly as configured for a form_post federation", async () => {
+		// #494: the start route is unauthenticated, so anything it changed about
+		// the session cookie would be changeable by any third party who could get
+		// a browser to follow a link here.
+		const { app } = buildApp();
+		const res = await request(app).get("/oauth/federation/apple");
+		const sessionCookie = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
+			c.startsWith("sid="),
+		);
+		expect(sessionCookie).toBeDefined();
+		expect(sessionCookie).toMatch(/SameSite=Lax/i);
+		expect(sessionCookie).not.toMatch(/Secure/);
+	});
+
+	it("keeps the session cookie SameSite=Lax for a query federation, and issues no transaction cookie", async () => {
+		// A deployment that adds Apple must not find its Google logins changed in
+		// any way at all.
 		const { app } = buildApp();
 		const res = await request(app).get("/oauth/federation/query-idp");
-		const setCookie = (res.headers["set-cookie"] as unknown as string[]).join("\n");
+		const setCookie = ((res.headers["set-cookie"] as unknown as string[]) ?? []).join("\n");
 		expect(setCookie).toMatch(/SameSite=Lax/i);
 		expect(setCookie).not.toMatch(/Secure/);
+		expect(setCookie).not.toContain(HARNESS_TRANSACTION_COOKIE_NAME);
+	});
+
+	it("keeps a query federation's envelope in the session and writes no transaction record", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness, "query-idp");
+		expect(flow.transactionId).toBeUndefined();
+		expect(harness.records.size).toBe(0);
+		expect(harness.store.get(flow.sid)?.data.federation).toBeDefined();
+	});
+
+	it("keeps a form_post federation's envelope out of the session entirely", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		expect(flow.transactionId).toBeDefined();
+		expect(harness.store.get(flow.sid)?.data.federation).toBeUndefined();
+		expect(harness.records.size).toBe(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The transaction cookie is what binds the callback to the browser (#494)
+// ---------------------------------------------------------------------------
+
+describe("the federation transaction cookie binds the callback to its browser", () => {
+	it("completes the callback when the transaction cookie is presented", async () => {
+		const flow = await startFlow(buildApp());
+		const res = await flow.post({ state: flow.state, code: "apple-code" });
+		expect(res.status).toBe(302);
+	});
+
+	it("refuses the callback when the transaction cookie is absent", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		// Same session, same valid `state` — only the transaction cookie withheld.
+		const res = await request(harness.app)
+			.post("/oauth/federation/apple/callback")
+			.set("Cookie", `sid=${encodeURIComponent(flow.sid)}`)
+			.type("form")
+			.send({ state: flow.state, code: "apple-code" });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_session");
+		expect(harness.apple.calls).toHaveLength(0);
+	});
+
+	it("refuses a stolen state replayed from a different browser", async () => {
+		// The login-CSRF property, stated directly: knowing `state` is not enough,
+		// because `state` was never the thing bound to the browser.
+		const harness = buildApp();
+		const victim = await startFlow(harness);
+
+		const attacker = await request(harness.app)
+			.post("/oauth/federation/apple/callback")
+			.set("Cookie", "sid=attacker-session")
+			.type("form")
+			.send({ state: victim.state, code: "apple-code" });
+
+		expect(attacker.status).toBe(400);
+		expect(attacker.body.error).toBe("invalid_session");
+		expect(harness.apple.calls).toHaveLength(0);
+		// And the victim's own transaction is untouched, so their flow still works.
+		expect(await victim.post({ state: victim.state, code: "apple-code" })).toHaveProperty(
+			"status",
+			302,
+		);
+	});
+
+	it("refuses a transaction cookie that names no record", async () => {
+		const harness = buildApp();
+		const res = await request(harness.app)
+			.post("/oauth/federation/apple/callback")
+			.set("Cookie", `${HARNESS_TRANSACTION_COOKIE_NAME}=not-a-real-transaction`)
+			.type("form")
+			.send({ state: "whatever", code: "apple-code" });
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_session");
+	});
+
+	it("deletes the transaction record and clears its cookie after a successful callback", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		const res = await flow.post({ state: flow.state, code: "apple-code" });
+
+		expect(res.status).toBe(302);
+		expect(harness.records.size).toBe(0);
+		expect(setCookieHeader(res)).toMatch(new RegExp(`${HARNESS_TRANSACTION_COOKIE_NAME}=;`));
+	});
+
+	it("deletes the transaction record and clears its cookie after a failed callback", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		// A state mismatch: the transaction is spent either way, so a wrong guess
+		// cannot be retried against the same record.
+		const res = await flow.post({ state: `${flow.state}-tampered`, code: "apple-code" });
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_state");
+		expect(harness.records.size).toBe(0);
+		expect(setCookieHeader(res)).toMatch(new RegExp(`${HARNESS_TRANSACTION_COOKIE_NAME}=;`));
+
+		// And the spent transaction cannot then be completed with the right state.
+		const retry = await flow.post({ state: flow.state, code: "apple-code" });
+		expect(retry.status).toBe(400);
+		expect(retry.body.error).toBe("invalid_session");
+	});
+
+	it("deletes the transaction record even when the exchange fails downstream", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		harness.apple.exchangeCode = async () => {
+			throw new Error("upstream down");
+		};
+		const res = await flow.post({ state: flow.state, code: "apple-code" });
+		expect(res.status).toBe(502);
+		expect(harness.records.size).toBe(0);
 	});
 });
 

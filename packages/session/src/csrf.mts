@@ -49,6 +49,7 @@
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
 import { consoleLogger, errorEnvelope, type Logger } from "@o3co/auth-provider-core";
 import type { CookieOptions, NextFunction, Request, RequestHandler, Response } from "express";
+import { readCookie } from "./internal/cookies.mjs";
 
 /** Default cookie carrying the double-submit value. */
 export const DEFAULT_CSRF_COOKIE_NAME = "auth.csrf";
@@ -150,33 +151,6 @@ const constantTimeEquals = (a: string, b: string): boolean =>
 
 /** `<expiry-seconds>.<nonce>.<signature>` */
 const TOKEN_SHAPE = /^(\d{1,15})\.([A-Za-z0-9_-]{16,})\.([A-Za-z0-9_-]{16,})$/;
-
-const readCookie = (req: Request, name: string): string | undefined => {
-	// cookie-parser is not a dependency of this package, but a composition root
-	// is free to mount it; prefer its output when present.
-	const parsed = (req as { cookies?: unknown }).cookies;
-	if (parsed !== null && typeof parsed === "object") {
-		const value = (parsed as Record<string, unknown>)[name];
-		if (typeof value === "string" && value.length > 0) return value;
-	}
-	const header = req.headers?.cookie;
-	if (typeof header !== "string") return undefined;
-	for (const pair of header.split(";")) {
-		const eq = pair.indexOf("=");
-		if (eq === -1) continue;
-		if (pair.slice(0, eq).trim() !== name) continue;
-		const raw = pair.slice(eq + 1).trim();
-		try {
-			return decodeURIComponent(raw);
-		} catch {
-			// A cookie value that is not valid percent-encoding is not one we
-			// issued. Hand back the raw text and let signature verification
-			// reject it, rather than throwing out of a request guard.
-			return raw;
-		}
-	}
-	return undefined;
-};
 
 /**
  * Reject a `ttlSeconds` that would silently disable the token arm.

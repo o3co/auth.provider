@@ -16,7 +16,6 @@
 
 import { describe, expect, it } from "vitest";
 import {
-	applyCrossSiteStateCookie,
 	DEFAULT_FEDERATION_RESPONSE_MODE,
 	FEDERATION_RESPONSE_MODES,
 	resolveFederationResponseMode,
@@ -59,33 +58,5 @@ describe("federation response mode", () => {
 		expect(resolveFederationResponseMode(makeProvider({ responseMode: "fragment" } as never))).toBe(
 			"query",
 		);
-	});
-});
-
-describe("applyCrossSiteStateCookie", () => {
-	it("marks the session cookie SameSite=None; Secure so a cross-site POST carries it", () => {
-		const session = { cookie: { sameSite: "lax", secure: false, httpOnly: true } };
-		expect(applyCrossSiteStateCookie(session)).toBe(true);
-		expect(session.cookie.sameSite).toBe("none");
-		expect(session.cookie.secure).toBe(true);
-		// Untouched attributes stay untouched — this relaxes exactly two fields.
-		expect(session.cookie.httpOnly).toBe(true);
-	});
-
-	it("reports false (and throws nothing) when the session carries no cookie object", () => {
-		expect(applyCrossSiteStateCookie({})).toBe(false);
-		expect(applyCrossSiteStateCookie(undefined)).toBe(false);
-		expect(applyCrossSiteStateCookie(null)).toBe(false);
-		expect(applyCrossSiteStateCookie({ cookie: "not-an-object" })).toBe(false);
-	});
-
-	it("mutates only the session it is given — sibling sessions keep SameSite=Lax", () => {
-		// Per-federation, not a global weakening: a deployment that also runs a
-		// query-mode federation must keep its Lax state cookie.
-		const crossSite = { cookie: { sameSite: "lax", secure: false } };
-		const sameSite = { cookie: { sameSite: "lax", secure: false } };
-		applyCrossSiteStateCookie(crossSite);
-		expect(sameSite.cookie.sameSite).toBe("lax");
-		expect(sameSite.cookie.secure).toBe(false);
 	});
 });
