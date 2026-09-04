@@ -31,7 +31,9 @@ import {
 	clientAuthEku,
 	crlDistributionPoints,
 	deltaCrlIndicator,
-	indirectCrlDistributionPoint,
+	distributionPoint,
+	distributionPointsExtension,
+	indirectDistributionPoint,
 	issuingDistributionPoint,
 	KEY_USAGE,
 	keyUsage,
@@ -39,7 +41,7 @@ import {
 	mintCrl,
 	mintIntermediate,
 	mintLeaf,
-	reasonPartitionedCrlDistributionPoint,
+	reasonPartitionedDistributionPoint,
 	unknownCriticalExtension,
 	unknownNonCriticalExtension,
 } from "./pkiFactory.mjs";
@@ -363,43 +365,103 @@ describe("CRL resolver — extensions it does not process (#447, #446)", () => {
 	});
 });
 
-describe("CRL resolver — several distribution points on one certificate (#446)", () => {
-	it("refuses a distribution point carrying reasons, without fetching it", async () => {
+describe("CRL resolver — several distribution points on one certificate (#446, #469)", () => {
+	it("skips a distribution point carrying reasons without fetching it, and still consults the plain point beside it", async () => {
 		// With reasons, no single CRL is the complete answer, and the
-		// reasons-mask bookkeeping of RFC 5280 §6.3.3 is not implemented. The
-		// point is reported before anything is fetched, so nothing partial is
-		// ever mistaken for complete.
+		// reasons-mask bookkeeping of RFC 5280 §6.3.3 is not implemented. But
+		// a point *without* reasons covers every reason code (§4.2.1.13), so
+		// the plain point's CRL is a complete answer on its own. Giving up on
+		// the whole extension at the partitioned point threw that answer
+		// away (#469); now the point is reported, unfetched, beside the CRL
+		// the other point yielded, and the caller's policy decides.
 		const { int } = await chain();
-		const leaf = await leafWithPoints(int, reasonPartitionedCrlDistributionPoint(INT_CRL_URL));
+		const leaf = await leafWithPoints(
+			int,
+			distributionPointsExtension([
+				reasonPartitionedDistributionPoint(INT_CRL_MIRROR_URL),
+				distributionPoint(INT_CRL_URL),
+			]),
+		);
 		const { fetch, calls } = stubGuardedFetch({
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
 		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
-		expect(result).toMatchObject({ ok: false, reason: "unsupported_distribution_point" });
-		if (!result.ok) expect(result.detail).toContain("reasons");
-		expect(calls).toEqual([]);
-		expect(resolver.size()).toBe(0);
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.crls).toHaveLength(1);
+			expect(result.unavailable).toEqual([
+				expect.objectContaining({
+					url: INT_CRL_MIRROR_URL,
+					reason: "unsupported_distribution_point",
+				}),
+			]);
+			expect(result.unavailable[0]?.detail).toContain("reasons");
+		}
+		expect(calls).toEqual([INT_CRL_URL]);
+		expect(resolver.size()).toBe(1);
 	});
 
-	it("refuses a distribution point naming a cRLIssuer, without fetching it", async () => {
+	it("skips a distribution point naming a cRLIssuer without fetching it, and still consults the plain point beside it", async () => {
 		// The CRL there is signed by someone other than the certificate's
 		// issuer, and this resolver verifies against the issuer only.
 		const { int } = await chain();
 		const leaf = await leafWithPoints(
 			int,
-			indirectCrlDistributionPoint(INT_CRL_URL, "Someone Else"),
+			distributionPointsExtension([
+				distributionPoint(INT_CRL_URL),
+				indirectDistributionPoint(INT_CRL_MIRROR_URL, "Someone Else"),
+			]),
 		);
 		const { fetch, calls } = stubGuardedFetch({
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
+
+		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.crls).toHaveLength(1);
+			expect(result.unavailable).toEqual([
+				expect.objectContaining({
+					url: INT_CRL_MIRROR_URL,
+					reason: "unsupported_distribution_point",
+				}),
+			]);
+			expect(result.unavailable[0]?.detail).toContain("cRLIssuer");
+		}
+		expect(calls).toEqual([INT_CRL_URL]);
+	});
+
+	it("is unavailable as unsupported_distribution_point when every point is unsupported, without fetching", async () => {
+		// No usable point remains, so there is nothing to consult: the
+		// certificate's status is unknown, under the reason that says why,
+		// and every point's detail is in the audit line.
+		const { int } = await chain();
+		const leaf = await leafWithPoints(
+			int,
+			distributionPointsExtension([
+				reasonPartitionedDistributionPoint(INT_CRL_URL),
+				indirectDistributionPoint(INT_CRL_MIRROR_URL, "Someone Else"),
+			]),
+		);
+		const { fetch, calls } = stubGuardedFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
 		const resolver = createCrlResolver({ fetch, cacheTtlSeconds: 3_600 });
 
 		const result = await resolver.resolve(leaf.cert, int.cert, NOW);
 		expect(result).toMatchObject({ ok: false, reason: "unsupported_distribution_point" });
-		if (!result.ok) expect(result.detail).toContain("cRLIssuer");
+		if (!result.ok) {
+			expect(result.detail).toContain("reasons");
+			expect(result.detail).toContain("cRLIssuer");
+		}
 		expect(calls).toEqual([]);
+		expect(resolver.size()).toBe(0);
 	});
 
 	it("reports a distribution point that yielded no CRL alongside the CRLs the others did", async () => {

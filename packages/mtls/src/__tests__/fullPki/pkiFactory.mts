@@ -159,7 +159,15 @@ export const criticalClientAuthEku = (): pkijs.Extension =>
 		extnValue: new pkijs.ExtKeyUsage({ keyPurposes: [OID.clientAuth] }).toSchema().toBER(false),
 	});
 
-const distributionPointsExtension = (points: readonly pkijs.DistributionPoint[]): pkijs.Extension =>
+/**
+ * A `cRLDistributionPoints` extension carrying exactly `points`, in order —
+ * for a certificate that mixes point shapes (a plain point beside a
+ * partitioned or indirect one, #469). The builders below produce the
+ * individual points.
+ */
+export const distributionPointsExtension = (
+	points: readonly pkijs.DistributionPoint[],
+): pkijs.Extension =>
 	new pkijs.Extension({
 		extnID: OID.crlDistributionPoints,
 		critical: false,
@@ -169,50 +177,58 @@ const distributionPointsExtension = (points: readonly pkijs.DistributionPoint[])
 	});
 
 /**
- * A `cRLDistributionPoints` extension. Each entry is one distribution point:
- * a string names it by a single URI, an array by several — which RFC 5280
- * §4.2.1.13 defines as alternative ways to obtain the *same* CRL.
+ * One plain distribution point: a string names it by a single URI, an array
+ * by several — which RFC 5280 §4.2.1.13 defines as alternative ways to obtain
+ * the *same* CRL. No `reasons`, so it covers every reason code.
  */
-export const crlDistributionPoints = (
-	points: readonly (string | readonly string[])[],
-): pkijs.Extension =>
-	distributionPointsExtension(
-		points.map(
-			(point) =>
-				new pkijs.DistributionPoint({
-					distributionPoint: (typeof point === "string" ? [point] : point).map(uriName),
-				}),
-		),
-	);
+export const distributionPoint = (urls: string | readonly string[]): pkijs.DistributionPoint =>
+	new pkijs.DistributionPoint({
+		distributionPoint: (typeof urls === "string" ? [urls] : urls).map(uriName),
+	});
 
 /**
  * A distribution point carrying `reasons` — the CA partitions its revocation
  * information by reason code across several CRLs (RFC 5280 §4.2.1.13), so no
  * single one of them is the whole answer.
  */
-export const reasonPartitionedCrlDistributionPoint = (url: string): pkijs.Extension =>
-	distributionPointsExtension([
-		new pkijs.DistributionPoint({
-			distributionPoint: [uriName(url)],
-			// ReasonFlags with keyCompromise (bit 1) set.
-			reasons: new asn1js.BitString({ valueHex: new Uint8Array([0x40]).buffer, unusedBits: 0 }),
-		}),
-	]);
+export const reasonPartitionedDistributionPoint = (url: string): pkijs.DistributionPoint =>
+	new pkijs.DistributionPoint({
+		distributionPoint: [uriName(url)],
+		// ReasonFlags with keyCompromise (bit 1) set.
+		reasons: new asn1js.BitString({ valueHex: new Uint8Array([0x40]).buffer, unusedBits: 0 }),
+	});
 
 /**
  * A distribution point naming a `cRLIssuer` — the CRL there is signed by
  * someone other than the certificate's issuer (an indirect CRL).
  */
-export const indirectCrlDistributionPoint = (url: string, crlIssuerCn: string): pkijs.Extension => {
+export const indirectDistributionPoint = (
+	url: string,
+	crlIssuerCn: string,
+): pkijs.DistributionPoint => {
 	const issuer = new pkijs.RelativeDistinguishedNames();
 	setCommonName(issuer, crlIssuerCn);
-	return distributionPointsExtension([
-		new pkijs.DistributionPoint({
-			distributionPoint: [uriName(url)],
-			cRLIssuer: [new pkijs.GeneralName({ type: 4, value: issuer })],
-		}),
-	]);
+	return new pkijs.DistributionPoint({
+		distributionPoint: [uriName(url)],
+		cRLIssuer: [new pkijs.GeneralName({ type: 4, value: issuer })],
+	});
 };
+
+/**
+ * A `cRLDistributionPoints` extension of plain points. Each entry is one
+ * distribution point, named as `distributionPoint` takes it.
+ */
+export const crlDistributionPoints = (
+	points: readonly (string | readonly string[])[],
+): pkijs.Extension => distributionPointsExtension(points.map(distributionPoint));
+
+/** A `cRLDistributionPoints` extension whose only point is reason-partitioned. */
+export const reasonPartitionedCrlDistributionPoint = (url: string): pkijs.Extension =>
+	distributionPointsExtension([reasonPartitionedDistributionPoint(url)]);
+
+/** A `cRLDistributionPoints` extension whose only point names a `cRLIssuer`. */
+export const indirectCrlDistributionPoint = (url: string, crlIssuerCn: string): pkijs.Extension =>
+	distributionPointsExtension([indirectDistributionPoint(url, crlIssuerCn)]);
 
 const aiaExtension = (descriptions: readonly pkijs.AccessDescription[]): pkijs.Extension =>
 	new pkijs.Extension({

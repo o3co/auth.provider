@@ -41,6 +41,8 @@ import {
 	clientAuthEku,
 	criticalClientAuthEku,
 	crlDistributionPoints,
+	distributionPoint,
+	distributionPointsExtension,
 	dnsSan,
 	emptyCriticalKeyUsage,
 	issuingDistributionPoint,
@@ -57,6 +59,7 @@ import {
 	nonceOf,
 	ocspAia,
 	reasonPartitionedCrlDistributionPoint,
+	reasonPartitionedDistributionPoint,
 	serverAuthEku,
 	tlsFeature,
 	unknownCriticalExtension,
@@ -1132,7 +1135,108 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
-	it("treats a certificate whose distribution point carries reasons as unavailable, without fetching it", async () => {
+	it.each(["reject", "allow"] as const)(
+		"refuses a certificate the plain point's CRL lists as revoked, beside a partitioned point, under '%s' (#469)",
+		async (onUnavailable) => {
+			// RFC 5280 §4.2.1.13: a point without reasons covers every reason
+			// code, so the plain point's CRL is a complete answer on its own.
+			// Giving up on the extension at the first partitioned point threw
+			// that answer away: a revoked certificate read as "unavailable",
+			// and under "allow" went on working.
+			const { root, int, leaf } = await chainWith(
+				distributionPointsExtension([
+					distributionPoint(INT_CRL_URL),
+					reasonPartitionedDistributionPoint(INT_CRL_MIRROR_URL),
+				]),
+			);
+			const { impl, calls } = stubFetch({
+				[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
+				[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
+				[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+			});
+
+			const result = await validator([root], {
+				revocation: crlPolicy(onUnavailable),
+				fetchImpl: impl,
+			}).validate(leaf.x509, [int.x509], NOW);
+
+			expect(result.ok).toBe(false);
+			if (!result.ok) expect(result.step).toBe("certificate revoked");
+			expect(calls).not.toContain(INT_CRL_MIRROR_URL);
+		},
+	);
+
+	it("under 'allow', accepts a certificate absent from the plain point's CRL beside a partitioned point, and logs the point it could not use (#469)", async () => {
+		const { root, int, leaf } = await chainWith(
+			distributionPointsExtension([
+				distributionPoint(INT_CRL_URL),
+				reasonPartitionedDistributionPoint(INT_CRL_MIRROR_URL),
+			]),
+		);
+		const { impl, calls } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(calls).not.toContain(INT_CRL_MIRROR_URL);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "unsupported_distribution_point" }),
+			"mtls_revocation_partially_unavailable_allowed",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"mtls_revocation_unavailable_allowed",
+		);
+	});
+
+	it("under 'reject', refuses the same certificate: a point it could not use is a gap, whatever the cause (#469)", async () => {
+		// The same rule as a point that is down: "reject" is the instruction
+		// not to guess that the CA's other points were redundant — and the
+		// plain point's CRL is still consulted first, so a revocation it
+		// lists is reported as such rather than as an outage.
+		const { root, int, leaf } = await chainWith(
+			distributionPointsExtension([
+				distributionPoint(INT_CRL_URL),
+				reasonPartitionedDistributionPoint(INT_CRL_MIRROR_URL),
+			]),
+		);
+		const { impl, calls } = stubFetch({
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[INT_CRL_MIRROR_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.step).toBe("revocation status unavailable");
+			expect(result.detail).toContain("unsupported_distribution_point");
+			expect(result.detail).toContain(INT_CRL_MIRROR_URL);
+		}
+		expect(calls).toContain(INT_CRL_URL);
+		expect(calls).not.toContain(INT_CRL_MIRROR_URL);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ subject: "CN=client", reason: "unsupported_distribution_point" }),
+			"mtls_revocation_unavailable_rejected",
+		);
+	});
+
+	it("treats a certificate whose only distribution point carries reasons as unavailable, without fetching it", async () => {
 		const { root, int, leaf } = await chainWith(reasonPartitionedCrlDistributionPoint(INT_CRL_URL));
 		const { impl, calls } = stubFetch({
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
