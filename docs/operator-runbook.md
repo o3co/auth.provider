@@ -68,7 +68,7 @@ Two things the guard cannot do:
   fallbacks are still outside the guard and only warn: the login and
   WebAuthn-options rate limiters when no shared `rateLimiter` is wired
   (`login_rate_limiter_not_shared`,
-  `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#events-to-page-on)),
+  `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#4-alerts)),
   and express-session's own store when `SESSION_STORAGE_TYPE=memory`.
 
 In the standalone, `DEPLOYMENT_MODE=multi` therefore boots only once every
@@ -76,8 +76,10 @@ store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
 `OAUTH_CODE_ADAPTER=redis`, `RATE_LIMITER_ADAPTER=redis`,
 `ACCESS_TOKEN_DENYLIST_ADAPTER=redis`, `SESSION_STORAGE_TYPE=redis`, and
 `FEDERATION_TOKEN_STORE_TYPE=redis` together with
-`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (32 bytes, base64;
-`templates/standalone/src/buildModules.mts`, `packages/core/config/reference.conf`).
+`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (a base64 string that decodes to
+exactly 32 bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder
+refuses any other length; `templates/standalone/src/buildModules.mts`,
+`packages/core/config/reference.conf`).
 A deployment that ran `multi` with the default in-memory federation-token store
 before #455/#456 is refused at boot once they land — set the last pair before
 upgrading. `federationTokenStore.type` and `redisFederationTokenStore.*` are
