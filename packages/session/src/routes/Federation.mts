@@ -360,9 +360,11 @@ export const createRouter = (
 		// transaction, one parameterless cross-site request deleted a victim's
 		// in-flight flow and their genuine callback then failed (#502).
 		//
-		// Applied across the callback's refusals:
+		// Applied across the callback's refusals. The column is the `form_post`
+		// *transaction*, because `consumeTransaction` is a no-op for a `query`
+		// federation — see below.
 		//
-		// | refusal                                    | spends it? |
+		// | refusal                                    | spends the transaction? |
 		// | ------------------------------------------ | ---------- |
 		// | unknown provider (404)                     | no — no transaction is ever read |
 		// | wrong method for the response mode (405)   | no — refused before the cookie is read |
@@ -372,6 +374,26 @@ export const createRouter = (
 		// | `state` present and wrong (400)            | yes — a guess, and one guess is all there is |
 		// | envelope absent or names another provider  | yes — same, judged against the record |
 		// | anything after the `state` match           | already spent, before any async work |
+		//
+		// A `query` federation keeps its envelope in the session instead, and
+		// retires it only on the path that matched `state` — so there a wrong
+		// `state` leaves the envelope in place. That asymmetry is deliberate,
+		// not an oversight: the session cookie is `SameSite=Lax` and *is* sent on
+		// a top-level cross-site GET, so retiring the envelope on a mismatch
+		// would hand any third party, with one navigation, exactly the
+		// availability bug #502 reports against the transaction — in the one
+		// branch that never had it. What burning it there would defend against
+		// is not a real attack anyway: `state` is 128 bits from the CSPRNG, so
+		// an unlimited number of guesses is worth no more than one.
+		//
+		// The `form_post` branch pays that cost knowingly. Its record is
+		// short-lived and dedicated, losing one costs a retry rather than a
+		// session, and an attacker who *does* hold the transaction cookie — which
+		// `SameSite=None` hands to any cross-site request — gets a single
+		// judged attempt against a live record rather than a standing one.
+		//
+		// The "no `state`" row is the one both branches share, because there the
+		// request claimed nothing either way.
 		if (typeof params.state !== "string" || params.state.length === 0) {
 			return res.status(400).json({
 				error: "invalid_request",
