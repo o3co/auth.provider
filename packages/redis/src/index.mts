@@ -107,9 +107,12 @@ export {
 export {
 	createRedisFederationTokenStore,
 	type EncryptionConfig,
+	type EncryptionGuardContext,
+	type RedisFederationTokenStoreModuleOptions,
 	type RedisFederationTokenStoreOptions,
 	redisFederationTokenStoreBuilder,
 	redisFederationTokenStoreModule,
+	redisFederationTokenStoreModuleFor,
 } from "./federation-tokens.mjs";
 export { redisSessionStoresModule } from "./modules/redisSessionStores.mjs";
 // ---------------------------------------------------------------------------
