@@ -434,7 +434,13 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// for the DPoP kind (RFC 9449 §5). An mTLS-bound token keeps "Bearer"
 			// per RFC 8705 §3 — it travels as a bearer token and is checked against
 			// the TLS client certificate.
-			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
+			//
+			// Named for the envelope it fills, not `tokenType` as in the sibling
+			// grants: this handler mints two tokens and passes `tokenType` twice
+			// more below as the JWT header `typ` ("at+jwt" / "rt+jwt"), which is a
+			// different value in a different registry from the response's
+			// `token_type`.
+			const responseTokenType = bindingIsDpop ? "DPoP" : "Bearer";
 
 			// #480: a passkey is the primary login on a native app, and the access
 			// token is short-lived — without a refresh token the user is sent back
@@ -572,7 +578,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 							accessToken,
 							...(refreshToken ? { refreshToken } : {}),
 						},
-						{ tokenType },
+						{ tokenType: responseTokenType },
 					),
 				},
 			};
