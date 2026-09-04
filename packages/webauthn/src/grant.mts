@@ -43,12 +43,32 @@
  *      ones. A registration that does not name `refresh_token` — including one that
  *      declares no `allowedGrantTypes` at all — receives the access token alone.
  *
- * Refresh-token binding:
- *   A DPoP- or mTLS-bound request carries its RFC 7800 confirmation into the refresh
- *   token on the same gate `authorization.mts` and `refreshToken.mts` apply: public
- *   clients always, confidential clients only under
- *   `oauth.tokenBinding.bindConfidentialClientRefreshTokens` (#275). The access token
- *   this grant issues is unbound, so the response `token_type` stays "Bearer".
+ * Sender binding:
+ *   A DPoP- or mTLS-bound request carries its RFC 7800 confirmation into BOTH
+ *   tokens, on the two different gates the other grants apply (#489).
+ *
+ *   The access token binds whenever the request carried a confirmation, with no
+ *   further condition — the same mechanism-agnostic copy `authorization.mts` and
+ *   `clientCredentials.mts` perform. A resource server checks an access token's
+ *   `cnf` against the proof on every call, so a token minted from a proven key
+ *   and handed back unbound is a token that replays from anywhere.
+ *
+ *   The refresh token binds on the narrower gate `authorization.mts` and
+ *   `refreshToken.mts` apply: public clients always, confidential clients only
+ *   under `oauth.tokenBinding.bindConfidentialClientRefreshTokens` (#275),
+ *   because for them the client secret is already the refresh-time
+ *   authenticator (RFC 9449 §5).
+ *
+ *   The response `token_type` says which of the two the access token is: "DPoP"
+ *   for a DPoP-bound token (RFC 9449 §5), "Bearer" otherwise — including for an
+ *   mTLS-bound one, which is presented as a bearer token and checked against the
+ *   TLS client certificate (RFC 8705 §3).
+ *
+ *   A client registered `senderConstrained` needs nothing from this handler: the
+ *   shared grant-dispatch gate in the /token route refuses a proofless request
+ *   with 401 `invalid_client` before any handler runs, for every grant type. The
+ *   hole #489 named was the other half — a request that DID prove its key still
+ *   received an unbound access token.
  *
  * Audience derivation:
  *   - When ctx.authenticatedClient is present: allowedAudiences[0] ?? issuer ?? null
@@ -396,6 +416,26 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
+			// #489: the confirmation the request already carries belongs on the
+			// access token too. Mechanism-agnostic — DPoP supplies `{ jkt }`, mTLS
+			// supplies `{ "x5t#S256" }`, and RFC 7800's claim shape is neutral
+			// between them — and ungated, exactly as `authorization.mts` and
+			// `clientCredentials.mts` apply it. Until this landed, a client
+			// registered `senderConstrained: "dpop"` had its proof verified at the
+			// token endpoint and was then handed a bearer access token; the proof
+			// bought it nothing, and a captured token replayed.
+			//
+			// The refresh token keeps its own, narrower gate below. #480 wired only
+			// that one, which is what made the asymmetry visible.
+			const confirmation = ctx.tokenBinding?.confirmation;
+			const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
+			const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
+			// The wire-level answer describes what was actually minted: "DPoP" only
+			// for the DPoP kind (RFC 9449 §5). An mTLS-bound token keeps "Bearer"
+			// per RFC 8705 §3 — it travels as a bearer token and is checked against
+			// the TLS client certificate.
+			const tokenType = bindingIsDpop ? "DPoP" : "Bearer";
+
 			// #480: a passkey is the primary login on a native app, and the access
 			// token is short-lived — without a refresh token the user is sent back
 			// to the platform authenticator at every expiry. The grant now issues
@@ -449,6 +489,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					...(client ? { authorizedParty: client.clientId } : {}),
 					scope: scopeClaim,
 					tokenType: "at+jwt",
+					...(confirmation ? { confirmation } : {}),
 				},
 			);
 
@@ -462,13 +503,11 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				// `bindConfidentialClientRefreshTokens` lifts for a deployment that
 				// protects its client secret and its key differently.
 				//
-				// The wire-level `token_type` deliberately stays "Bearer": the
-				// access token this grant issues carries no `cnf` of its own, and
-				// answering "DPoP" would describe an access token that is not
-				// DPoP-bound.
-				const confirmation = ctx.tokenBinding?.confirmation;
-				const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
-				const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
+				// Narrower than the access token's gate above on purpose: a
+				// confidential client authenticates itself again at every refresh,
+				// so RFC 9449 §5 leaves its RT unbound rather than pin it to one key
+				// for the RT's whole lifetime. Nothing of the sort applies to the
+				// access token, which has no such second credential behind it.
 				const isPublicClient = client.tokenEndpointAuthMethod === "none";
 				const bindConfidentialClients =
 					config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
@@ -528,10 +567,13 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({
-						accessToken,
-						...(refreshToken ? { refreshToken } : {}),
-					}),
+					tokens: generateTokenResponse(
+						{
+							accessToken,
+							...(refreshToken ? { refreshToken } : {}),
+						},
+						{ tokenType },
+					),
 				},
 			};
 		},
