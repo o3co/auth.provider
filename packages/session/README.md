@@ -348,6 +348,14 @@ So an IdP cannot contribute `groups` (nor a `roles` / `scope` / `permissions` an
 }
 ```
 
+#### `emailVerified` is a boolean here, whatever the IdP sent
+
+`MappedClaims.emailVerified` is `boolean | undefined`, and normalising to it is the **adapter's** job — the merge does not coerce, and nothing downstream does either.
+
+This is not a formality. Sign in with Apple sends `email_verified` as the *string* `"true"` on some responses and as a boolean on others, and `is_private_email` behaves the same way. `Boolean("false")` is `true`, so an adapter that passes the raw claim through — or coerces it — reports an unverified address as verified, on a claim that gates token issuance through `oauth.requireEmailVerified`. `federation-apple` reads `"true"` / `"false"` to their booleans and treats every other shape as **absent**, because absence is not `false` (#297); a new adapter for an IdP with the same habit should do likewise.
+
+A non-boolean that does reach `mapClaims`'s output is not promoted — `emailVerified` is not in `PROMOTABLE_FEDERATED_CLAIMS` at all — but it *is* recorded verbatim under `claims.federated[<providerName>]`, where a deployment reading it as a gate would then be reading a string.
+
 The merge is exported as `mergeFederatedClaims` for consumers that build a claims envelope of their own.
 
 ---
@@ -382,6 +390,14 @@ Providers implementing `SupportsRefresh` can keep federation tokens alive withou
 - Requests `openid profile email` scope by default.
 - Uses stable Google OAuth/OIDC endpoints.
 - `FederationProfile.sub` is the Google numeric account ID.
+
+**`@o3co/auth-provider-federation-apple`**
+
+- Default scope is `["name", "email"]` — Apple's two documented values, and requesting either is what makes Apple POST the callback, so the module declares `responseMode: "form_post"`.
+- `FederationProfile.sub` is Apple's stable team-scoped opaque identifier.
+- The verified id_token is the only identity source (Apple publishes no `userinfo_endpoint`), `nonce` is required, and `email_verified` may arrive as the string `"true"` — see the note above.
+- `is_private_email` is surfaced as `isPrivateEmail` for Hide My Email relay addresses; it is namespaced, never promoted.
+- The user's display name arrives once, in the first authorization's POST `user` body, and never in the id_token.
 
 **`@o3co/auth-provider-federation-github`**
 

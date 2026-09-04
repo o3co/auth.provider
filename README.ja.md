@@ -40,7 +40,7 @@ pnpm build
 
 - **core** — インターフェース、設定スキーマ、トークンサービス、アプリファクトリ。常に必要。
 - **oauth** — OAuth ルート (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`)。トークン発行に必須。
-- **session** — セッションログイン + OAuth フェデレーション（Google、GitHub、拡張可能）。オプション — API のみのデプロイではスキップ可能。
+- **session** — セッションログイン + OAuth フェデレーション（Google、GitHub、Apple、拡張可能）。オプション — API のみのデプロイではスキップ可能。
 - **foundation** — 本番向け HTTP ユーザー認証アダプター（「the Store」のクライアント）。オプション。
 - **webauthn / dpop / mtls / oauth-token-exchange / redis** — オプションの capability / アダプターモジュール。[パッケージ構成](#パッケージ構成)を参照。
 
@@ -57,6 +57,7 @@ pnpm build
 | [`packages/mtls`](packages/mtls/) | `@o3co/auth-provider-mtls` | mTLS (RFC 8705) sender-constrained アクセストークン |
 | [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google フェデレーションプロバイダー |
 | [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub フェデレーションプロバイダー |
+| [`packages/federation-apple`](packages/federation-apple/) | `@o3co/auth-provider-federation-apple` | Sign in with Apple フェデレーションプロバイダー — `form_post` コールバック、ローテーションする ES256 クライアントシークレット |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis バックエンドのアダプターと `defineModule` マニフェスト |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | 本番向け HTTP ユーザー認証アダプター（「the Store」のクライアント） |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |

@@ -3,6 +3,7 @@
 		"packages/core",
 		"packages/federation-google",
 		"packages/federation-github",
+		"packages/federation-apple",
 		"packages/oauth",
 		"packages/session",
 		"packages/foundation"
