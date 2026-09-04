@@ -34,9 +34,16 @@
  * `redisFederationTokenStoreModule` off the shared ioredis socket; the boot
  * below is the test the README sentence never had.
  *
+ * #474: express-session's own store was the one memory store the guard could
+ * not see — `SESSION_STORAGE_TYPE=memory` is config, and `sessionStoreModule`'s
+ * static manifest carried no declaration. `buildModules` now builds it from
+ * the config (`sessionStoreModuleFor`), so it is refused by name like the rest.
+ *
  * ioredis is mocked, as in `device-code-store-client-module.test.mts`: the
  * point is composition and the boot planner's stage-1 verdict, not Redis.
- * Nothing here issues a command.
+ * Nothing here issues a command. node-redis and connect-redis — the session
+ * store's own connection — are mocked for the same reason, since #474 puts
+ * `SESSION_STORAGE_TYPE=redis` in the baseline.
  */
 
 import { fileURLToPath } from "node:url";
@@ -56,6 +63,35 @@ import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+
+// The redis session-store builder dynamically imports these (#474 puts the
+// Redis session store in the baseline); mock them so no socket opens.
+vi.mock("redis", () => ({
+	createClient: vi.fn(() => ({
+		connect: vi.fn().mockResolvedValue(undefined),
+		quit: vi.fn().mockResolvedValue(undefined),
+		ping: vi.fn().mockResolvedValue("PONG"),
+		on: vi.fn(),
+	})),
+}));
+
+vi.mock("connect-redis", async () => {
+	const { EventEmitter } = await import("node:events");
+	// express-session subscribes to store events, so the fake must be an
+	// EventEmitter rather than a plain object.
+	return {
+		RedisStore: class MockRedisStore extends EventEmitter {
+			constructor(_opts: { client: unknown }) {
+				super();
+			}
+			get(): unknown {
+				return undefined;
+			}
+			set(): void {}
+			destroy(): void {}
+		},
+	};
+});
 
 vi.mock("ioredis", () => {
 	// Every command resolves to nothing. A boot that reached Redis would be a
@@ -99,10 +135,8 @@ const ENCRYPTION_KEY = Buffer.alloc(32, 7).toString("base64");
 
 /**
  * The umbrella E2E's shape (`o3co/auth` `tests/docker-compose.yml`), with
- * every shared store on Redis. Each case below flips one variable off this.
- *
- * `SESSION_STORAGE_TYPE=memory` keeps express-session's own store off
- * node-redis; it is not one of the shared stores the guard covers.
+ * every shared store on Redis — express-session's own included, since #474
+ * put it under the guard. Each case below flips one variable off this.
  */
 const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
@@ -111,7 +145,8 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	SESSION_SECRET: "replica-safety-session-secret.at-least-32-bytes.ok",
 	SESSION_SECURE: "false",
 	SESSION_NAME: "auth.session",
-	SESSION_STORAGE_TYPE: "memory",
+	SESSION_STORAGE_TYPE: "redis",
+	SESSION_STORAGE_REDIS_URL: "redis://redis.test:6379",
 	CLIENT_USER_TYPE: "yaml",
 	DEPLOYMENT_MODE: "multi",
 	REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: "redis://redis.test:6379",
@@ -190,6 +225,9 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 		["USER_SESSION_STORES_ADAPTER", "standalone:in-memory-session-stores"],
 		["OAUTH_CODE_ADAPTER", "standalone:in-memory-code-repository"],
 		["FEDERATION_TOKEN_STORE_TYPE", "standalone:in-memory-federation-token-store"],
+		// #474: express-session's own store. Not a module of this template but
+		// built here from its config, which is what lets the manifest declare.
+		["SESSION_STORAGE_TYPE", "sessionStoreModule"],
 		// Core's, selected by the same kind of switch. The guard knew these by
 		// name; pinned so the name table's departure (#455) did not lose them.
 		["RATE_LIMITER_ADAPTER", "core-rate-limiter-memory"],
@@ -213,6 +251,7 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 			USER_SESSION_STORES_ADAPTER: "memory",
 			OAUTH_CODE_ADAPTER: "memory",
 			FEDERATION_TOKEN_STORE_TYPE: "memory",
+			SESSION_STORAGE_TYPE: "memory",
 			RATE_LIMITER_ADAPTER: "memory",
 			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
 		});

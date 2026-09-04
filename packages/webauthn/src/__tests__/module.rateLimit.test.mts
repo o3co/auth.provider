@@ -122,12 +122,36 @@ const spyAuditSink = (): { sink: AuditSink; events: AuditEvent[] } => {
 /** Yield microtasks so the guard's fire-and-forget audit emit settles. */
 const settleAudit = () => new Promise((r) => setImmediate(r));
 
+/**
+ * The same providers under a test name with no `replicaSafety`, so the
+ * replica-safety guard has nothing to refuse and the test reaches the route
+ * factory under `deployment.mode = "multi"`.
+ */
+const asSharedStub = (m: Module): Module => {
+	const { replicaSafety: _declared, ...manifest } = m;
+	return { ...manifest, name: `test:shared:${m.name}` } as Module;
+};
+
 async function bootApp(
 	webauthnConfig: WebAuthnConfig,
 	extraModules: readonly Module[],
 	failMode?: "open" | "closed",
+	deploymentMode?: "single" | "multi",
 ) {
-	const config = makeCoreConfig(failMode);
+	const config = {
+		...makeCoreConfig(failMode),
+		...(deploymentMode === undefined ? {} : { deployment: { mode: deploymentMode } }),
+	};
+	// With a deployment mode declared, the memory stores this fixture wires
+	// stand in for shared ones: the case under test is the route's own
+	// fallback (#474), not the stores the replica-safety guard already refuses
+	// by manifest (#455). The stubs keep the providers and drop the declaration
+	// — and the core name the guard would still recognise.
+	const storeModules: readonly Module[] = [
+		memoryChallengeStoreModule,
+		memoryReplaySeenSetModule,
+		memoryWebAuthnCredentialStoreModule,
+	].map((m) => (deploymentMode === undefined ? m : asSharedStub(m)));
 	const handle = await createApp({
 		modules: [
 			webauthnModule,
@@ -136,10 +160,8 @@ async function bootApp(
 				provides: { webauthnConfig: () => webauthnConfig },
 			}),
 			keyStoreModule,
-			memoryChallengeStoreModule,
-			memoryReplaySeenSetModule,
+			...storeModules,
 			defaultChallengeCeremonyModule,
-			memoryWebAuthnCredentialStoreModule,
 			noopGrantPolicyModule,
 			...extraModules,
 		],
@@ -330,6 +352,86 @@ describe("webauthn authentication/options rate limit (#281) — limiter outage",
 
 		expect((await hit(app)).status).toBe(200);
 
+		await handle.dispose();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #474 — the per-process fallback sat outside the replica guard. Under
+// `deployment.mode = "multi"` a composition wiring no shared `rateLimiter` got
+// the warning and a limiter whose buckets were per replica — the flood and
+// enumeration budget on this route multiplied by the replica count. Under
+// `"multi"` boot refuses instead; `"single"` is silent; unset keeps the warning.
+// ---------------------------------------------------------------------------
+
+describe("webauthn authentication/options rate limit (#474) — fallback under deployment.mode", () => {
+	it('refuses to boot under "multi" with no shared limiter, naming the route as replica-unsafe', async () => {
+		// The route factory throws; the planner wraps a factory throw as
+		// `contribute-factory-failed` and carries the module's own BootError as
+		// `cause`, which is where the reason and the route name live.
+		await expect(bootApp(makeWebAuthnConfig(7), [], "open", "multi")).rejects.toMatchObject({
+			name: "BootError",
+			reason: "contribute-factory-failed",
+			cause: {
+				name: "BootError",
+				reason: "replica-unsafe-adapter",
+				message: expect.stringContaining(OPTIONS_PATH),
+				details: { reason: "replica-unsafe-adapter", modules: ["webauthn"] },
+			},
+		});
+	});
+
+	it('boots under "multi" when a shared limiter is wired, without warning', async () => {
+		const logger = spyLogger();
+		const limiter = createMemoryRateLimiter({
+			limits: {},
+			defaultLimit: { limit: 100, windowSeconds: 60 },
+		});
+		const { handle } = await bootApp(
+			makeWebAuthnConfig(7),
+			[
+				defineModule({ name: "test:webauthn-rl-logger-3", provides: { logger: () => logger } }),
+				defineModule({
+					name: "test:webauthn-rl-limiter-3",
+					provides: { rateLimiter: () => limiter },
+				}),
+			],
+			"open",
+			"multi",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"webauthn_authentication_options_rate_limiter_not_shared",
+		);
+		await handle.dispose();
+	});
+
+	it('is silent under "single": the operator has declared one replica', async () => {
+		const logger = spyLogger();
+		const { handle, app } = await bootApp(
+			makeWebAuthnConfig(7),
+			[defineModule({ name: "test:webauthn-rl-logger-4", provides: { logger: () => logger } })],
+			"open",
+			"single",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"webauthn_authentication_options_rate_limiter_not_shared",
+		);
+		// Still guarded: the fallback limiter is in force, it is just not news.
+		expect((await hit(app)).status).toBe(200);
+		await handle.dispose();
+	});
+
+	it("keeps the warning when the mode is unset", async () => {
+		const logger = spyLogger();
+		const { handle } = await bootApp(makeWebAuthnConfig(7), [
+			defineModule({ name: "test:webauthn-rl-logger-5", provides: { logger: () => logger } }),
+		]);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ limit: 7, windowSeconds: 60 }),
+			"webauthn_authentication_options_rate_limiter_not_shared",
+		);
 		await handle.dispose();
 	});
 });

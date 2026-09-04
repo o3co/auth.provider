@@ -36,7 +36,7 @@ import {
 	redisRefreshTokenFamilyStoreModule,
 	redisSessionStoresModule,
 } from "@o3co/auth-provider-redis";
-import { sessionModule, sessionStoreModule } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import {
 	auditSinkModule,
 	googleFederationConfigModule,
@@ -214,7 +214,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// list position (declarationIndex tie-breaking)** — the module
 		// intentionally has no `before`/`after` clause, so it MUST be listed
 		// ahead of every session-consuming module here. Do not reorder.
-		sessionStoreModule,
+		//
+		// #474: built from `config` rather than the static manifest, so that
+		// `session.storage.type = "memory"` declares itself replica-unsafe and
+		// `deployment.mode = "multi"` refuses it by name like the other stores.
+		sessionStoreModuleFor(config),
 		oauthModule({ config }),
 		oauthSessionModule({ config }),
 		oauthAuthorizationModule({ config }),

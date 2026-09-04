@@ -252,3 +252,65 @@ describe("/session/login rate limiting — fallback (#270)", () => {
 		void app;
 	});
 });
+
+// ---------------------------------------------------------------------------
+// #474 — the per-process fallback sat outside the replica guard. A deployment
+// that declared `deployment.mode = "multi"` and wired no shared limiter got the
+// warning above and a limiter whose buckets were per replica: the configured
+// 20 / 15 min was 20 × replicas, exactly what #270 fixed for the wired case.
+// Under `"multi"` the route refuses to mount instead; `"single"` is silent,
+// like the guard; unset keeps the warning.
+// ---------------------------------------------------------------------------
+
+describe("/session/login rate limiting — fallback under deployment.mode (#474)", () => {
+	const withMode = (mode: "single" | "multi" | undefined): AppConfig =>
+		({
+			...stubConfig,
+			...(mode === undefined ? {} : { deployment: { mode } }),
+		}) as unknown as AppConfig;
+
+	const build = (config: AppConfig, rateLimiter?: RateLimiter) => {
+		const warn = vi.fn();
+		const router = () =>
+			createRouter(express, {
+				userRepository,
+				config,
+				...(rateLimiter ? { rateLimiter } : {}),
+				logger: { warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
+			});
+		return { router, warn };
+	};
+
+	it('refuses to mount under "multi" with no shared limiter, as a replica-unsafe-adapter BootError naming the route', () => {
+		const { router } = build(withMode("multi"));
+		expect(router).toThrow(
+			expect.objectContaining({
+				name: "BootError",
+				reason: "replica-unsafe-adapter",
+				message: expect.stringContaining("/session/login"),
+				details: { reason: "replica-unsafe-adapter", modules: ["session"] },
+			}),
+		);
+	});
+
+	it('mounts under "multi" when a shared limiter is wired, without warning', () => {
+		const { router, warn } = build(
+			withMode("multi"),
+			scriptedLimiter(() => ({ allowed: true })),
+		);
+		expect(router).not.toThrow();
+		expect(warn).not.toHaveBeenCalled();
+	});
+
+	it('is silent under "single": the operator has declared one replica', () => {
+		const { router, warn } = build(withMode("single"));
+		expect(router).not.toThrow();
+		expect(warn).not.toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
+	});
+
+	it("keeps the warning when the mode is unset", () => {
+		const { router, warn } = build(withMode(undefined));
+		expect(router).not.toThrow();
+		expect(warn).toHaveBeenCalledWith(expect.anything(), "login_rate_limiter_not_shared");
+	});
+});
