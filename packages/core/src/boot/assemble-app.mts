@@ -39,6 +39,7 @@ import {
 	tokenBindingMw,
 } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
+import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
 import type {
 	AppHandle,
@@ -599,14 +600,37 @@ export function assembleApp(
 			| { cors?: { allowedOrigins?: unknown }; oauth?: { jwt?: { jwksPath?: unknown } } }
 			| undefined;
 		const configured = config?.cors?.allowedOrigins;
-		if (Array.isArray(configured) && configured.length > 0) {
-			const logger = components.logger as Logger | undefined;
+		const logger = components.logger as Logger | undefined;
+		// Read through the shared shape normaliser rather than testing for an
+		// array. The config reaching this point has not necessarily been
+		// through `AppConfigSchema`: `validateAndComposeConfig` validates with
+		// the core schema, which does not declare `cors`, and shallow-merges
+		// the raw top-level extras back over the result. So an operator who
+		// configured this the documented way — `${?CORS_ALLOWED_ORIGINS}`, a
+		// comma-separated string, the only shape an environment variable can
+		// carry a list in — handed an `Array.isArray` test a string, and the
+		// middleware was silently not mounted. That is the exact failure this
+		// key was wired up to stop being.
+		const allowedOrigins = normalizeAllowedOrigins(configured);
+		if (allowedOrigins.length > 0) {
 			const mw = corsMw({
-				allowedOrigins: configured as readonly string[],
+				allowedOrigins,
 				routes: browserFacingCorsRoutes(config ?? {}),
 				...(logger ? { logger } : {}),
 			});
 			if (mw !== null) router.use(mw);
+		} else if (
+			configured !== undefined &&
+			configured !== null &&
+			!Array.isArray(configured) &&
+			typeof configured !== "string"
+		) {
+			// An array or a string that normalises to nothing is an operator
+			// saying "no origins", which is CORS off and needs no comment. A
+			// shape neither reader can interpret is a misconfiguration, and
+			// staying silent about it is what this whole block is here to
+			// stop.
+			logger?.warn({ received: typeof configured }, "cors_allowed_origins_unreadable");
 		}
 	}
 

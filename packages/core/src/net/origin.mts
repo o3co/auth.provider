@@ -65,6 +65,48 @@ import { isLoopbackHostname } from "./loopback.mjs";
  *     shares it.
  */
 
+/**
+ * Read `cors.allowedOrigins` from whatever shape it arrived in.
+ *
+ * Two shapes are legitimate and both have to work at every reader:
+ *
+ *   - an array, which is what `application.conf` and a hand-built `AppConfig`
+ *     carry, and
+ *   - a comma-separated string, which is the only shape an environment
+ *     variable can carry a list in (`${?CORS_ALLOWED_ORIGINS}`).
+ *
+ * It lives here, beside {@link checkSerializedOrigin}, because the config
+ * schema is not the only reader. `assembleApp` decides whether to mount the
+ * CORS middleware from `components.config`, and that config has not
+ * necessarily been through `AppConfigSchema`: the boot pipeline validates with
+ * the core schema and shallow-merges the raw top-level extras back over the
+ * result, so an operator who set the environment variable — the documented way
+ * to configure this — would hand the mount site a string. Testing that for
+ * `Array.isArray` answered "no origins configured" and mounted nothing, with
+ * no error and no log: precisely the silent no-op this key was wired up to
+ * stop being.
+ *
+ * Only the shape is normalised here. Each entry is still checked with
+ * {@link checkSerializedOrigin} by both the schema (which fails boot naming
+ * the index) and the middleware (which drops it with a warning), so this
+ * cannot widen an allowlist — it can only stop one being dropped whole.
+ *
+ * Anything that is neither an array nor a string yields no origins; the caller
+ * decides whether that shape deserves a warning.
+ */
+export function normalizeAllowedOrigins(raw: unknown): readonly string[] {
+	if (Array.isArray(raw)) {
+		return raw.flatMap((entry) => (typeof entry === "string" ? [entry.trim()] : []));
+	}
+	if (typeof raw !== "string") return [];
+	// An exported-but-empty variable — the .env / compose / ConfigMap shape —
+	// reads as "no origins", i.e. CORS off, which is what the unset key means.
+	return raw
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry !== "");
+}
+
 /** Why a configured origin was refused. */
 export type SerializedOriginRejection =
 	| { reason: "unparsable" }

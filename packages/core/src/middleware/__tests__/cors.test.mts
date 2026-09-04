@@ -31,6 +31,7 @@ import { defineModule } from "#/modules/manifest/index.mjs";
 import { makeValidAppConfig } from "#/testing/fixtures/valid-config.mjs";
 
 const ALLOWED = "https://app.example.com";
+const OTHER_ALLOWED = "https://admin.example.com";
 const UNLISTED = "https://evil.example.com";
 
 /** Every path the middleware guards answers 200 with a marker body. */
@@ -345,7 +346,7 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 		},
 	});
 
-	const bootWith = async (allowedOrigins: readonly string[]) => {
+	const bootWith = async (allowedOrigins: unknown) => {
 		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
 		config.cors = { allowedOrigins };
 		const handle = await createApp({
@@ -387,6 +388,52 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 		const res = await request(app).post("/oauth/token").set("Origin", ALLOWED);
 		expect(res.headers["access-control-allow-origin"]).toBeUndefined();
 		expect(res.headers.vary).toBeUndefined();
+		await handle.dispose();
+	});
+
+	// The environment variable is the documented way to configure this, and it
+	// can only carry a list as a comma-separated string. `assembleApp` reads
+	// `components.config`, which has NOT necessarily been through
+	// `AppConfigSchema` — `validateAndComposeConfig` validates with the core
+	// schema, which does not declare `cors`, and merges the raw extras back
+	// over the result. Testing that string for `Array.isArray` mounted nothing
+	// at all, silently, which is the failure this key exists to end.
+	it("mounts from a comma-separated string, the shape an env var carries", async () => {
+		const { app, handle } = await bootWith(`${ALLOWED}, ${OTHER_ALLOWED}`);
+		for (const origin of [ALLOWED, OTHER_ALLOWED]) {
+			const res = await request(app).post("/oauth/token").set("Origin", origin);
+			expect(res.status, origin).toBe(200);
+			expect(res.headers["access-control-allow-origin"], origin).toBe(origin);
+		}
+		const refused = await request(app).post("/oauth/token").set("Origin", UNLISTED);
+		expect(refused.headers["access-control-allow-origin"]).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("treats an exported-but-empty variable as CORS off", async () => {
+		const { app, handle } = await bootWith("");
+		const res = await request(app).post("/oauth/token").set("Origin", ALLOWED);
+		expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+		expect(res.headers.vary).toBeUndefined();
+		await handle.dispose();
+	});
+
+	it("warns rather than staying silent when the value is a shape nothing can read", async () => {
+		const warn = vi.fn();
+		const config = makeValidAppConfig() as unknown as Record<string, unknown>;
+		config.cors = { allowedOrigins: 42 };
+		const handle = await createApp({
+			modules: [surfaceModule],
+			bootstrapComponents: {
+				config: config as never,
+				logger: { ...console, warn, child: () => console } as never,
+				pathResolver: (s: string) => s,
+			} as never,
+		});
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ received: "number" }),
+			"cors_allowed_origins_unreadable",
+		);
 		await handle.dispose();
 	});
 

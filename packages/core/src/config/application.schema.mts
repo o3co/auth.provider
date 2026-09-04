@@ -37,7 +37,11 @@ import {
 	MIN_SECRET_ENTROPY_BYTES,
 	measureSecretEntropyBytes,
 } from "../keys/secretEntropy.mjs";
-import { checkSerializedOrigin, describeSerializedOriginRejection } from "../net/origin.mjs";
+import {
+	checkSerializedOrigin,
+	describeSerializedOriginRejection,
+	normalizeAllowedOrigins,
+} from "../net/origin.mjs";
 import {
 	checkTrustedProxyEntry,
 	describeTrustedProxyEntryRejection,
@@ -1103,19 +1107,15 @@ export const fullSectionsSchema = z.object({
 		 * was answering both questions.
 		 */
 		allowedOrigins: z
-			.preprocess((raw) => {
-				if (Array.isArray(raw)) {
-					return raw.map((entry) => (typeof entry === "string" ? entry.trim() : entry));
-				}
-				if (typeof raw !== "string") return raw;
-				// An exported-but-empty variable — the .env / compose /
-				// ConfigMap shape — reads as "no origins", i.e. CORS off,
-				// which is the same thing the unset key means.
-				return raw
-					.split(",")
-					.map((entry) => entry.trim())
-					.filter((entry) => entry !== "");
-			}, z.array(z.string()))
+			.preprocess(
+				// Shape normalisation is shared with `assembleApp`'s mount site
+				// (`net/origin.mts`), which reads the same key off a config that
+				// has not necessarily been through this schema. A second copy
+				// here is how the two would disagree about what a
+				// comma-separated `CORS_ALLOWED_ORIGINS` means.
+				(raw) => (raw === undefined ? raw : normalizeAllowedOrigins(raw)),
+				z.array(z.string()),
+			)
 			.superRefine((value, ctx) => {
 				value.forEach((entry, index) => {
 					const rejection = checkSerializedOrigin(entry);
