@@ -389,7 +389,9 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 
 		const { tokens } = result;
 		expect(tokens.access_token).toBeTruthy();
-		// Wave 1 §2.4: no refresh token
+		// No authenticated client, so no `allowedGrantTypes` to name `refresh_token`
+		// and no `azp` a refresh token could ever be redeemed against (#480). The
+		// refresh-token paths themselves live in grant.refreshToken.test.mts.
 		expect(tokens.refresh_token).toBeUndefined();
 
 		const payload = decodeJwtPayload(tokens.access_token) as Record<string, unknown>;

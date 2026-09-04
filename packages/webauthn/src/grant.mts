@@ -36,7 +36,19 @@
  *      the auth event, not scope authorization). Policy is the ONLY scope-bounding gate.
  *      Deployments wanting scope authorization MUST wire grantPolicy.
  *
- *   8. Issue access token. No refresh token (Wave 1 first slice, spec §2.4).
+ *   8. Issue an access token, and a refresh token when the authenticated client's
+ *      `allowedGrantTypes` names `refresh_token` (#480). The refresh token opens a
+ *      family through `refreshTokenFamilyRotation`, exactly as the authorization-code
+ *      grant does, so rotation and RFC 6819 §5.2.2.3 replay detection are the shared
+ *      ones. A registration that does not name `refresh_token` — including one that
+ *      declares no `allowedGrantTypes` at all — receives the access token alone.
+ *
+ * Refresh-token binding:
+ *   A DPoP- or mTLS-bound request carries its RFC 7800 confirmation into the refresh
+ *   token on the same gate `authorization.mts` and `refreshToken.mts` apply: public
+ *   clients always, confidential clients only under
+ *   `oauth.tokenBinding.bindConfidentialClientRefreshTokens` (#275). The access token
+ *   this grant issues is unbound, so the response `token_type` stays "Bearer".
  *
  * Audience derivation:
  *   - When ctx.authenticatedClient is present: allowedAudiences[0] ?? issuer ?? null
@@ -56,6 +68,8 @@
  * Cross-refs: Plan T30 / spec §2.4 / PR #172 W1P3 patterns / Codex Round 3 P1
  */
 
+import { randomUUID } from "node:crypto";
+
 import {
 	type ChallengeCeremony,
 	type GrantContext,
@@ -64,9 +78,12 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	isGrantTypeAllowed,
+	type Token,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
+import { decodeJwtPayload } from "./internal/_jwtPayload.mjs";
 import { extractResourceParam } from "./internal/_resourceIndicator.mjs";
 import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 
@@ -75,6 +92,12 @@ import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 // ---------------------------------------------------------------------------
 
 export const WEBAUTHN_GRANT_TYPE = "urn:o3co:oauth:grant-type:webauthn";
+
+/**
+ * The grant type a client must be allowed before this grant hands it a refresh
+ * token (#480). RFC 6749 §6 — a plain name, not a URN.
+ */
+const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 
 // ---------------------------------------------------------------------------
 // Deps type
@@ -361,7 +384,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			}
 
 			// ------------------------------------------------------------------
-			// Step 8: Derive audience + issue access token
+			// Step 8: Derive audience + issue tokens
 			// ------------------------------------------------------------------
 			const client = ctx.authenticatedClient;
 			// Audience derivation:
@@ -373,6 +396,38 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 
+			// #480: a passkey is the primary login on a native app, and the access
+			// token is short-lived — without a refresh token the user is sent back
+			// to the platform authenticator at every expiry. The grant now issues
+			// one, on the same machinery `authorization_code` uses.
+			//
+			// Two conditions, both structural rather than policy:
+			//
+			//   1. There must be an authenticated client. `refresh_token`'s own
+			//      handler refuses an unauthenticated caller with `invalid_client`
+			//      and binds the RT to `azp`, so an RT minted in the client-less
+			//      passkey-is-the-auth-event mode could never be redeemed. Issuing
+			//      one would be a token that only looks like a capability.
+			//
+			//   2. The client's `allowedGrantTypes` must NAME `refresh_token` —
+			//      absence denies (#268 / #311 / #326). A refresh token is a
+			//      standing credential with a lifetime measured in days, so it is
+			//      exactly the thing that must not be acquired by omission: a
+			//      registration written before this shipped keeps getting today's
+			//      access-token-only response. `isGrantTypeAllowed` with
+			//      `requireAllowlist` is the central rule, not a second copy of it.
+			const issueRefreshToken =
+				client !== null &&
+				isGrantTypeAllowed(client.allowedGrantTypes, REFRESH_TOKEN_GRANT_TYPE, {
+					requireAllowlist: true,
+				});
+
+			// One family per issuance, opened here and revoked as a unit on replay
+			// (RFC 6819 §5.2.2.3). Both tokens carry the id: introspect resolves
+			// family revocation off the `family_id` claim, so an access token
+			// without it survives a revocation that was meant to kill it.
+			const familyId = issueRefreshToken ? randomUUID() : null;
+
 			// Mint client_id + authorizedParty when client authenticated so the AT is
 			// revocable via /oauth/revoke (Wave 1 post-merge security audit H-1: the
 			// revoke endpoint resolves the token's client via `client_id ?? azp ?? aud`
@@ -380,21 +435,94 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// silently caused revoke 200 + no denylist insertion).
 			// Unauthenticated client mode (passkey IS the auth event) remains unrevocable
 			// by /oauth/revoke per RFC 7009 — documented as a known limitation.
-			const accessToken = await generateToken(client ? { client_id: client.clientId } : {}, {
-				expiresIn: config.oauth.accessToken.expiresIn,
-				keyStore,
-				issuer,
-				audience,
-				subject: credential.userId,
-				...(client ? { authorizedParty: client.clientId } : {}),
-				scope: scopeClaim,
-				tokenType: "at+jwt",
-			});
+			const accessToken = await generateToken(
+				{
+					...(client ? { client_id: client.clientId } : {}),
+					...(familyId ? { family_id: familyId } : {}),
+				},
+				{
+					expiresIn: config.oauth.accessToken.expiresIn,
+					keyStore,
+					issuer,
+					audience,
+					subject: credential.userId,
+					...(client ? { authorizedParty: client.clientId } : {}),
+					scope: scopeClaim,
+					tokenType: "at+jwt",
+				},
+			);
+
+			let refreshToken: Token | undefined;
+			if (client && familyId) {
+				// Sender-binding for the RT is the gate `authorization.mts` and
+				// `refreshToken.mts` already apply, reused verbatim rather than
+				// restated: a mechanism allowlist (only the kinds whose
+				// refresh-time enforcement matrix `refreshToken.mts` knows) AND a
+				// public-client restriction, which `#275`'s
+				// `bindConfidentialClientRefreshTokens` lifts for a deployment that
+				// protects its client secret and its key differently.
+				//
+				// The wire-level `token_type` deliberately stays "Bearer": the
+				// access token this grant issues carries no `cnf` of its own, and
+				// answering "DPoP" would describe an access token that is not
+				// DPoP-bound.
+				const confirmation = ctx.tokenBinding?.confirmation;
+				const bindingIsDpop = ctx.tokenBinding?.kind === "dpop";
+				const bindingIsMtls = ctx.tokenBinding?.kind === "mtls";
+				const isPublicClient = client.tokenEndpointAuthMethod === "none";
+				const bindConfidentialClients =
+					config.oauth.tokenBinding?.bindConfidentialClientRefreshTokens === true;
+				const bindRefreshToken =
+					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
+
+				refreshToken = await generateToken(
+					{ family_id: familyId },
+					{
+						expiresIn: config.oauth.refreshToken.expiresIn,
+						keyStore,
+						issuer,
+						audience,
+						subject: credential.userId,
+						authorizedParty: client.clientId,
+						scope: scopeClaim,
+						tokenType: "rt+jwt",
+						...(bindRefreshToken && confirmation ? { confirmation } : {}),
+					},
+				);
+
+				if (deps.refreshTokenFamilyRotation) {
+					const payload = decodeJwtPayload(refreshToken.token);
+					const jti = payload.jti as string | undefined;
+					const exp = payload.exp as number | undefined;
+					if (typeof jti === "string" && typeof exp === "number") {
+						// Fail-closed, mirroring authorization.mts CP-16: a refresh
+						// token whose family was never registered has no replay
+						// detection behind it, and serving it would quietly break the
+						// RFC 6819 §5.2.2.3 contract the family exists to keep. A
+						// controlled 503 tells the client to retry; `invalid_grant`
+						// would tell it to throw the passkey session away.
+						try {
+							await deps.refreshTokenFamilyRotation.register(jti, familyId, exp * 1000);
+						} catch {
+							return {
+								result: {
+									status: 503,
+									error: "temporarily_unavailable",
+									errorDescription: "refresh token store unavailable",
+								},
+							};
+						}
+					}
+				}
+			}
 
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({ accessToken }),
+					tokens: generateTokenResponse({
+						accessToken,
+						...(refreshToken ? { refreshToken } : {}),
+					}),
 				},
 			};
 		},

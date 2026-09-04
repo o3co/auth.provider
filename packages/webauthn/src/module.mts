@@ -107,7 +107,7 @@ export const webauthnModule = defineModule<
 	| "challengeCeremony"
 	| "config"
 	| "keyStore",
-	"grantPolicy" | "rateLimiter" | "auditSink" | "logger"
+	"grantPolicy" | "rateLimiter" | "auditSink" | "logger" | "refreshTokenFamilyRotation"
 >({
 	name: "webauthn",
 	requires: [
@@ -133,6 +133,12 @@ export const webauthnModule = defineModule<
 		"auditSink",
 		// #281 — operator-visible outage channel + the fallback-limiter warning.
 		"logger",
+		// #480 — the refresh-token family the grant opens when the client is
+		// allowed `refresh_token`. A3 §5.2, the same component the
+		// authorization_code grant registers its initial rt+jwt with. Optional so
+		// a composition that issues no refresh tokens still boots; when it IS
+		// wired, the grant is fail-closed on a store outage.
+		"refreshTokenFamilyRotation",
 	],
 	// #363: `auditSink` is optional to wire, not optional to decide — an
 	// unfilled slot must be declared with audit.sink.type = "none" or boot
@@ -164,6 +170,11 @@ export const webauthnModule = defineModule<
 					webauthnCredentialStore: deps.webauthnCredentialStore,
 					challengeCeremony: deps.challengeCeremony,
 					grantPolicy: deps.grantPolicy,
+					// #480: without this the grant would mint refresh tokens whose
+					// family was never registered — no replay detection, and no
+					// symptom. The deps bag is built field by field here, so an
+					// unnamed slot is a dropped slot (the C1 `grantPolicy` bypass).
+					refreshTokenFamilyRotation: deps.refreshTokenFamilyRotation,
 					webauthnConfig: {
 						rpId: deps.webauthnConfig.rpId,
 						origin: deps.webauthnConfig.origin,
