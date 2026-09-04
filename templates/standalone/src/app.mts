@@ -99,8 +99,12 @@ await (async (): Promise<void> => {
 	// `buildModules` is the single source of truth for the module list — it
 	// gates federation modules on `config.federations.<name>.enabled`, which
 	// the standalone scaffold defaults to false.
+	//
+	// `environment` is the name the config above was selected by (#473): the
+	// Redis federation-token store's plaintext guard reads it in addition to
+	// NODE_ENV, so `CONFIG_ENV=production` is production to the guard too.
 	const handle = await createApp({
-		modules: buildModules(config),
+		modules: buildModules(config, { environment: env }),
 		bootstrapComponents: {
 			config,
 			pathResolver: import.meta.resolve,

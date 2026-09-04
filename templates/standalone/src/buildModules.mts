@@ -31,7 +31,7 @@ import {
 import {
 	redisAccessTokenDenylistModule,
 	redisCodeRepositoryModule,
-	redisFederationTokenStoreModule,
+	redisFederationTokenStoreModuleFor,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
 	redisSessionStoresModule,
@@ -49,11 +49,21 @@ import {
 } from "./modules.mjs";
 
 /**
- * Test-only overrides allowing the smoke test to substitute in-memory
- * implementations of the file-system-backed modules. Production callers
- * should not pass overrides; the defaults match the standalone scaffold.
+ * Overrides for the composition. All but `environment` are test-only: they let
+ * the smoke test substitute in-memory implementations of the file-system-backed
+ * modules, and production callers should not pass them — the defaults match the
+ * standalone scaffold.
  */
 export interface BuildModulesOverrides {
+	/**
+	 * #473: the name this deployment selected its configuration by —
+	 * `CONFIG_ENV || NODE_ENV`, computed once in `app.mts` and passed here so
+	 * the Redis federation-token store's `allow-plaintext` guard reads the
+	 * environment the config actually came from, not `NODE_ENV` alone. Omitted,
+	 * the guard falls back to `NODE_ENV` (and `deployment.mode`, which it reads
+	 * off the config either way).
+	 */
+	readonly environment?: string;
 	readonly keyStoreModule?: Module;
 	readonly repositoriesModule?: Module;
 	readonly storesModule?: Module;
@@ -203,9 +213,13 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// `require` its client slot. The previous single module chose the adapter
 	// at runtime under one name — the replica guard could not tell the two
 	// apart, and the Redis branch had no client to hand the builder.
+	//
+	// #473: the Redis module is built for this composition root so its
+	// plaintext guard knows which environment selected the config; it reads
+	// `deployment.mode` off the config itself.
 	const federationTokenStoreModules: Module[] =
 		federationTokenStoreAdapter === "redis"
-			? [redisFederationTokenStoreModule]
+			? [redisFederationTokenStoreModuleFor({ environment: overrides.environment })]
 			: [inMemoryFederationTokenStoreModule];
 
 	return [

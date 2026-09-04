@@ -137,7 +137,12 @@ Each redis adapter ships in two flavours:
 
 - A **`defineModule` manifest** (`redisChallengeStoreModule`,
   `redisFederationTokenStoreModule`, etc.) for declarative wiring via
-  `createApp({ modules: [...] })`.
+  `createApp({ modules: [...] })`. The federation-token store also has
+  `redisFederationTokenStoreModuleFor({ environment })` for a composition root
+  that selects its config by a name other than `NODE_ENV` (the standalone's
+  `CONFIG_ENV`): its `allow-plaintext` guard reads that name in addition to
+  `NODE_ENV`, and `deployment.mode` off the config — `"multi"` refuses
+  plaintext in every environment (#473).
 - An **`AdapterBuilder`** (`redisChallengeStoreBuilder`,
   `redisCodeRepositoryBuilder`, etc.) for runtime-config-driven wiring
   via `factory.register("redis", redisXxxBuilder)` + `factory.create({

@@ -39,6 +39,11 @@
  * static manifest carried no declaration. `buildModules` now builds it from
  * the config (`sessionStoreModuleFor`), so it is refused by name like the rest.
  *
+ * #473: the Redis federation store's `allow-plaintext` guard keyed off
+ * `NODE_ENV` alone. It now reads the environment the config was selected by
+ * (`CONFIG_ENV || NODE_ENV`, passed through `buildModules`) and refuses under
+ * `deployment.mode = "multi"` in every environment.
+ *
  * ioredis is mocked, as in `device-code-store-client-module.test.mts`: the
  * point is composition and the boot planner's stage-1 verdict, not Redis.
  * Nothing here issues a command. node-redis and connect-redis — the session
@@ -60,7 +65,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 
@@ -200,17 +205,24 @@ const testKeyStoreModule = defineModule({
 	},
 });
 
-const modulesFor = (config: AppConfig) =>
+const modulesFor = (config: AppConfig, environment?: string) =>
 	buildModules(config, {
 		keyStoreModule: testKeyStoreModule,
 		repositoriesModule: testRepositoriesModule,
+		...(environment === undefined ? {} : { environment }),
 	});
 
-const boot = (config: AppConfig) =>
+const boot = (config: AppConfig, environment?: string) =>
 	createApp({
-		modules: modulesFor(config),
+		modules: modulesFor(config, environment),
 		bootstrapComponents: { config, pathResolver: (s) => s },
 	});
+
+/** The message of a boot failure and of the module error it wraps, together. */
+const messageChain = (err: unknown): string => {
+	const e = err as { message?: string; cause?: { message?: string } };
+	return `${e.message ?? ""} ${e.cause?.message ?? ""}`;
+};
 
 describe('#455: the standalone\'s memory modules are refused under deployment.mode = "multi"', () => {
 	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
@@ -375,5 +387,70 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 		expect(names).not.toContain("redis-federation-token-store");
 		handleRef = await boot(config);
 		expect(handleRef.components.federationTokenStore?.kind).toBe("memory");
+	});
+});
+
+describe("#473: the Redis federation store's plaintext guard, booted from the shipped config", () => {
+	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+	let origInsecure: string | undefined;
+
+	beforeEach(() => {
+		// vitest runs with NODE_ENV=test: not a production name, so every
+		// refusal below comes from what the standalone passes, not from NODE_ENV.
+		expect(process.env.NODE_ENV).not.toMatch(/^(production|staging)$/);
+		origInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	afterEach(async () => {
+		await handleRef?.dispose();
+		handleRef = undefined;
+		if (origInsecure === undefined) delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		else process.env.FEDERATION_TOKENS_ALLOW_INSECURE = origInsecure;
+		warnSpy.mockRestore();
+		errorSpy.mockRestore();
+	});
+
+	/** All-Redis, with the federation store told to skip encryption. */
+	const PLAINTEXT_ENV: Readonly<Record<string, string>> = {
+		...without(ALL_REDIS_ENV, "REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY"),
+		REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "allow-plaintext",
+	};
+
+	it('is refused under deployment.mode = "multi" in a development environment', async () => {
+		// The umbrella shape with plaintext: refused before #473 only if
+		// NODE_ENV happened to say production. A multi-replica deployment is
+		// never a development box.
+		await expect(boot(resolveConfig(PLAINTEXT_ENV), "development")).rejects.toSatisfy(
+			(err: unknown) => /deployment\.mode is "multi"/.test(messageChain(err)),
+		);
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	it("is refused when the config was selected by CONFIG_ENV=production, whatever NODE_ENV says", async () => {
+		// `app.mts` selects `production.conf` by `CONFIG_ENV || NODE_ENV` and
+		// passes that name through `buildModules`; the guard used to read
+		// NODE_ENV alone and would have let this boot.
+		const config = resolveConfig({ ...PLAINTEXT_ENV, DEPLOYMENT_MODE: "single" });
+		await expect(boot(config, "production")).rejects.toSatisfy((err: unknown) =>
+			/the environment is "production"/.test(messageChain(err)),
+		);
+	});
+
+	it("boots with the plaintext warning in a development environment on a single replica", async () => {
+		const config = resolveConfig({ ...PLAINTEXT_ENV, DEPLOYMENT_MODE: "single" });
+		handleRef = await boot(config, "development");
+		expect(handleRef.components.federationTokenStore?.kind).toBe("redis");
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("allow-plaintext"));
+	});
+
+	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch under multi, at CRITICAL", async () => {
+		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
+		handleRef = await boot(resolveConfig(PLAINTEXT_ENV), "development");
+		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("CRITICAL"));
 	});
 });

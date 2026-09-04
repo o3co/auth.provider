@@ -223,6 +223,23 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(redis.data.has("ft:sid-1:google")).toBe(false);
 	});
 
+	it("get() self-heals an empty-string value like corrupt JSON — key deleted, index member dropped (#473)", async () => {
+		// `""` is a value Redis can hold and `JSON.parse` cannot read. It used
+		// to be answered as `null` before `open()` ran, so the key stayed and
+		// so did its index member: a record that is never served and never
+		// reclaimed until the TTL, and a `removeBySid` that keeps naming it.
+		const store = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "allow-plaintext" },
+		});
+		await store.attach("sid-1", "google", tokens);
+		redis.data.set("ft:sid-1:google", "");
+		expect(await store.get("sid-1", "google")).toBeNull();
+		expect(redis.del).toHaveBeenCalledWith("ft:sid-1:google");
+		expect(redis.data.has("ft:sid-1:google")).toBe(false);
+		expect([...(redis.sets.get("ft:idx:sid-1") ?? [])]).toEqual([]);
+	});
+
 	it("get() self-heals when decryption fails (wrong / rotated encryption key)", async () => {
 		const keyA = Buffer.alloc(32, 1);
 		const keyB = Buffer.alloc(32, 2);
@@ -392,7 +409,7 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
-		).toThrow(/mode "allow-plaintext" is not allowed in NODE_ENV="production"/);
+		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
 	});
 
 	it("throws when NODE_ENV=staging and mode=allow-plaintext (no override)", () => {
@@ -403,7 +420,7 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 				{ client: mockClient, encryption: { mode: "allow-plaintext" } },
 				{},
 			),
-		).toThrow(/mode "allow-plaintext" is not allowed in NODE_ENV="staging"/);
+		).toThrow(/mode "allow-plaintext" is refused because the environment is "staging"/);
 	});
 
 	it("succeeds in production with FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch (emits CRITICAL)", () => {
@@ -463,7 +480,153 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 				client: fake,
 				encryption: { mode: "allow-plaintext" },
 			}),
-		).toThrow(/mode "allow-plaintext" is not allowed in NODE_ENV="production"/);
+		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #473 — the guard keyed off NODE_ENV alone. The standalone selects its config
+// by `CONFIG_ENV || NODE_ENV`, so `CONFIG_ENV=production NODE_ENV=test` ran
+// production.conf with the development guard; and `deployment.mode = "multi"`
+// — a deployment that has said it runs more than one replica — could store
+// upstream refresh tokens in clear because NODE_ENV happened to be unset.
+// ---------------------------------------------------------------------------
+
+describe("#473 — the plaintext guard reads the selected environment and deployment.mode", () => {
+	let origEnv: string | undefined;
+	let origInsecure: string | undefined;
+	let warnSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		origEnv = process.env.NODE_ENV;
+		origInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		process.env.NODE_ENV = "development";
+		delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		if (origEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = origEnv;
+		if (origInsecure === undefined) delete process.env.FEDERATION_TOKENS_ALLOW_INSECURE;
+		else process.env.FEDERATION_TOKENS_ALLOW_INSECURE = origInsecure;
+		warnSpy.mockRestore();
+		errorSpy.mockRestore();
+	});
+
+	const plaintext = { mode: "allow-plaintext" } as const;
+
+	it("refuses plaintext when the explicit environment is production, whatever NODE_ENV says", () => {
+		// NODE_ENV=development (see beforeEach): the config was selected by
+		// CONFIG_ENV=production, and that is the environment that counts.
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: createFakeRedis(),
+				encryption: plaintext,
+				environment: "production",
+			}),
+		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
+	});
+
+	it("still refuses on NODE_ENV=production when the explicit environment is not — the guard unions the two", () => {
+		// Passing an environment adds a signal; it does not take NODE_ENV's
+		// away. A process that says production anywhere is production.
+		process.env.NODE_ENV = "production";
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: createFakeRedis(),
+				encryption: plaintext,
+				environment: "development",
+			}),
+		).toThrow(/mode "allow-plaintext" is refused because the environment is "production"/);
+	});
+
+	it("falls back to NODE_ENV when no environment is passed", () => {
+		process.env.NODE_ENV = "staging";
+		expect(() =>
+			createRedisFederationTokenStore({ client: createFakeRedis(), encryption: plaintext }),
+		).toThrow(/the environment is "staging"/);
+	});
+
+	it('refuses plaintext under deployment.mode = "multi" regardless of environment', () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: createFakeRedis(),
+				encryption: plaintext,
+				environment: "development",
+				deploymentMode: "multi",
+			}),
+		).toThrow(/mode "allow-plaintext" is refused because deployment\.mode is "multi"/);
+	});
+
+	it("names both reasons when both apply", () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: createFakeRedis(),
+				encryption: plaintext,
+				environment: "production",
+				deploymentMode: "multi",
+			}),
+		).toThrow(/the environment is "production" and deployment\.mode is "multi"/);
+	});
+
+	it('warns and continues under deployment.mode = "single" in development', () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: createFakeRedis(),
+				encryption: plaintext,
+				environment: "development",
+				deploymentMode: "single",
+			}),
+		).not.toThrow();
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("allow-plaintext"));
+		expect(errorSpy).not.toHaveBeenCalled();
+	});
+
+	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch for the multi refusal too, at CRITICAL", () => {
+		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: createFakeRedis(),
+				encryption: plaintext,
+				deploymentMode: "multi",
+			}),
+		).not.toThrow();
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.stringMatching(/CRITICAL.*FEDERATION_TOKENS_ALLOW_INSECURE=1/),
+		);
+		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('deployment.mode is "multi"'));
+	});
+
+	it("the builder forwards environment and deploymentMode to the same guard", () => {
+		const client = createFakeRedis() as unknown as FederationTokenStoreClient;
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{ client, encryption: plaintext, environment: "production" },
+				{},
+			),
+		).toThrow(/the environment is "production"/);
+		expect(() =>
+			redisFederationTokenStoreBuilder(
+				{ client, encryption: plaintext, deploymentMode: "multi" },
+				{},
+			),
+		).toThrow(/deployment\.mode is "multi"/);
+	});
+
+	it('mode = "required" is silent under multi in production — the guard is about plaintext only', () => {
+		expect(() =>
+			createRedisFederationTokenStore({
+				client: createFakeRedis(),
+				encryption: { mode: "required", key: encryptionKey },
+				environment: "production",
+				deploymentMode: "multi",
+			}),
+		).not.toThrow();
+		expect(warnSpy).not.toHaveBeenCalled();
+		expect(errorSpy).not.toHaveBeenCalled();
 	});
 });
 
