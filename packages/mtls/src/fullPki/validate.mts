@@ -556,13 +556,14 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 
 				// Only a certificate absent from every CRL that was obtained is
 				// subject to the gap. A certificate may name several distribution
-				// points, and the resolver reports the ones it could not use
-				// alongside the CRLs it did obtain. Whether that partial answer is
-				// an answer is this policy's call, not the resolver's (#446).
-				// Under "reject" it is not: this process cannot tell from one
-				// fetched CRL that the CA's other points were redundant — a CA
-				// that partitions its list without saying so publishes exactly
-				// this shape — and "reject" is the operator's instruction not to
+				// points, and the resolver reports the ones it could not use —
+				// down, or of a shape it does not implement (#469) — alongside
+				// the CRLs it did obtain. Whether that partial answer is an
+				// answer is this policy's call, not the resolver's (#446). Under
+				// "reject" it is not: this process cannot tell from one fetched
+				// CRL that the CA's other points were redundant — a CA that
+				// partitions its list without saying so publishes exactly this
+				// shape — and "reject" is the operator's instruction not to
 				// guess in the permissive direction. Under "allow" that guess is
 				// what was chosen, so the certificate passes and the gap is logged
 				// — under its own message, because "checked against part of its

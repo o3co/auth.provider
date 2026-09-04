@@ -82,6 +82,14 @@
  * carries it is complete as of its own `thisUpdate`, so it is used as such
  * and the delta it points to is simply not fetched.
  *
+ * An unsupported *distribution point* is skipped, not fatal. A point without
+ * `reasons` covers every reason code (§4.2.1.13), so a plain HTTP point
+ * beside a partitioned or indirect one is a complete answer by itself; the
+ * unsupported point is reported alongside the CRLs the usable points
+ * yielded, exactly as a point that was down is, and the caller's policy
+ * decides whether the gap matters. Only a certificate with no usable point
+ * left is unavailable for it (#469).
+ *
  * ### The failure that matters
  *
  * `pkijs` skips its revocation block entirely when it is handed no CRLs. So
@@ -141,7 +149,11 @@ export type CrlUnavailableReason =
 	| "stale"
 	| "bad_signature";
 
-/** One distribution-point URI that yielded no usable CRL, and why. */
+/**
+ * One distribution point that yielded no usable CRL, and why: a URI that was
+ * tried and failed, or a point of a shape this resolver does not implement,
+ * named by its first URI and never tried (#469).
+ */
 export interface CrlPointUnavailable {
 	readonly url: string;
 	readonly reason: CrlUnavailableReason;
@@ -153,10 +165,11 @@ export type CrlLookup =
 			readonly ok: true;
 			readonly crls: readonly pkijs.CertificateRevocationList[];
 			/**
-			 * Distribution points that yielded no CRL, one entry per URI tried —
-			 * empty when every point the certificate names was used. A lookup
-			 * can be `ok` and incomplete at once; whether that is an answer is
-			 * the caller's `on-unavailable` decision, not this module's (#446).
+			 * Distribution points that yielded no CRL — one entry per URI tried,
+			 * and one per unsupported point that was not — empty when every
+			 * point the certificate names was used. A lookup can be `ok` and
+			 * incomplete at once; whether that is an answer is the caller's
+			 * `on-unavailable` decision, not this module's (#446, #469).
 			 */
 			readonly unavailable: readonly CrlPointUnavailable[];
 	  }
@@ -181,8 +194,15 @@ export const CRL_NEGATIVE_CACHE_TTL_MS = 30_000;
 export type CrlDistributionPoints =
 	| {
 			readonly ok: true;
-			/** One entry per distribution point: that point's HTTP(S) URIs, in order. */
+			/** One entry per usable distribution point: that point's HTTP(S) URIs, in order. */
 			readonly points: readonly (readonly string[])[];
+			/**
+			 * Distribution points of a shape this resolver does not implement —
+			 * carrying `reasons` or `cRLIssuer` — one entry per point, never
+			 * fetched. Reported beside the usable points so the caller can
+			 * count them as gaps under `"reject"` (#469).
+			 */
+			readonly unsupported: readonly CrlPointUnavailable[];
 	  }
 	| {
 			readonly ok: false;
@@ -192,9 +212,43 @@ export type CrlDistributionPoints =
 
 const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
 
+/** The absolute HTTP(S) URIs a distribution point is named by, in order. */
+const httpUrls = (point: pkijs.DistributionPoint): readonly string[] => {
+	const name = point.distributionPoint;
+	if (!Array.isArray(name)) return [];
+	return name
+		.filter((generalName) => generalName.type === GENERAL_NAME_URI)
+		.map((generalName) => generalName.value)
+		.filter((value): value is string => typeof value === "string" && isHttpUrl(value));
+};
+
+/**
+ * Why a distribution point is one this resolver does not implement. With
+ * `reasons`, no single CRL is the complete answer and the reasons-mask
+ * bookkeeping of RFC 5280 §6.3.3 is not implemented; with `cRLIssuer`, the
+ * CRL is signed by someone other than the certificate's issuer, and the
+ * signature here is verified against the issuer only. Either read as complete
+ * would be a partial or foreign list standing in for the whole (#446).
+ */
+const unsupportedPointDetail = (point: pkijs.DistributionPoint): string | null => {
+	if (point.reasons !== undefined) {
+		return (
+			"a distribution point carries reasons: the CA partitions revocation by reason " +
+			"code across several CRLs, which this validator does not support"
+		);
+	}
+	if (point.cRLIssuer !== undefined) {
+		return (
+			"a distribution point names a cRLIssuer: its CRL is published by someone other " +
+			"than the certificate's issuer (an indirect CRL), which this validator does not support"
+		);
+	}
+	return null;
+};
+
 /**
  * Read the distribution points a certificate advertises, one URI list per
- * point.
+ * usable point, plus the points this resolver does not implement.
  *
  * The shape is kept rather than flattened because it carries meaning:
  * several names within one point are alternative ways to obtain the *same*
@@ -210,13 +264,17 @@ const isHttpUrl = (value: string): boolean => /^https?:\/\//i.test(value);
  * point is `no_distribution_point`, an honest "cannot check" rather than a
  * silent pass.
  *
- * A point carrying `reasons` or `cRLIssuer` makes the whole extension
- * unsupported, before anything is fetched. With `reasons`, no single CRL is
- * the complete answer and the reasons-mask bookkeeping of §6.3.3 is not
- * implemented; with `cRLIssuer`, the CRL is signed by someone other than the
- * certificate's issuer, and the signature here is verified against the
- * issuer only. Either read as complete would be a partial or foreign list
- * standing in for the whole (#446).
+ * A point carrying `reasons` or `cRLIssuer` is skipped, never fetched, and
+ * reported as `unsupported_distribution_point` — beside the usable points,
+ * not instead of them. A point *without* `reasons` covers every reason code
+ * (§4.2.1.13), so a plain point beside a partitioned or indirect one is a
+ * complete answer on its own; giving up on the whole extension at the first
+ * unsupported point discarded that answer, and read a revoked certificate
+ * as merely "unavailable" (#469). Whether the skipped point is a gap is the
+ * caller's `on-unavailable` decision. Only a certificate left with no usable
+ * point is `unsupported_distribution_point` as a whole. The point is named
+ * by its first HTTP(S) URI in the audit line; one with no such URI is still
+ * reported, since the shape, not the transport, is what is unsupported.
  */
 export const crlDistributionPoints = (certificate: pkijs.Certificate): CrlDistributionPoints => {
 	const extension = certificate.extensions?.find(
@@ -224,41 +282,35 @@ export const crlDistributionPoints = (certificate: pkijs.Certificate): CrlDistri
 	);
 	const parsed = extension?.parsedValue as pkijs.CRLDistributionPoints | undefined;
 	const points: (readonly string[])[] = [];
+	const unsupported: CrlPointUnavailable[] = [];
 	for (const point of parsed?.distributionPoints ?? []) {
-		if (point.reasons !== undefined) {
-			return {
-				ok: false,
+		const urls = httpUrls(point);
+		const detail = unsupportedPointDetail(point);
+		if (detail !== null) {
+			unsupported.push({
+				url: urls[0] ?? "(distribution point with no HTTP(S) URI)",
 				reason: "unsupported_distribution_point",
-				detail:
-					"a distribution point carries reasons: the CA partitions revocation by reason " +
-					"code across several CRLs, which this validator does not support",
-			};
+				detail,
+			});
+			continue;
 		}
-		if (point.cRLIssuer !== undefined) {
-			return {
-				ok: false,
-				reason: "unsupported_distribution_point",
-				detail:
-					"a distribution point names a cRLIssuer: its CRL is published by someone other " +
-					"than the certificate's issuer (an indirect CRL), which this validator does not support",
-			};
-		}
-		const name = point.distributionPoint;
-		if (!Array.isArray(name)) continue;
-		const urls = name
-			.filter((generalName) => generalName.type === GENERAL_NAME_URI)
-			.map((generalName) => generalName.value)
-			.filter((value): value is string => typeof value === "string" && isHttpUrl(value));
 		if (urls.length > 0) points.push(urls);
 	}
 	if (points.length === 0) {
+		if (unsupported.length > 0) {
+			return {
+				ok: false,
+				reason: "unsupported_distribution_point",
+				detail: describeUnavailable(unsupported),
+			};
+		}
 		return {
 			ok: false,
 			reason: "no_distribution_point",
 			detail: "certificate advertises no cRLDistributionPoints HTTP(S) URI",
 		};
 	}
-	return { ok: true, points };
+	return { ok: true, points, unsupported };
 };
 
 /** Reasons that are remembered for the negative window. */
@@ -608,7 +660,10 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 
 			const issuerId = issuerKeyId(issuer);
 			const crls: pkijs.CertificateRevocationList[] = [];
-			const unavailable: CrlPointUnavailable[] = [];
+			// A point of a shape this resolver does not implement is a point
+			// that yielded no CRL, reported with the rest — nothing about it
+			// is fetched, and the usable points are still consulted (#469).
+			const unavailable: CrlPointUnavailable[] = [...points.unsupported];
 
 			for (const urls of points.points) {
 				// Within one point the names are alternatives (RFC 5280
