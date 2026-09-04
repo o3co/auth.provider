@@ -213,6 +213,11 @@ export const createOAuthRouter = async (
 		issuer: canonicalIssuer,
 		loginUrl: () => config.endpoints.login.url,
 		oauth: options,
+		// R1b: `/authorize` re-checks that the express-session's `sid` still
+		// names a live `UserSession` before minting. Optional here for the same
+		// reason the slot itself is: a composition without session-backed login
+		// wires no store, and the endpoint behaves exactly as it did.
+		userSessionStore,
 	});
 
 	router

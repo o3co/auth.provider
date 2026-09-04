@@ -241,6 +241,8 @@ Flow: verifies `id_token_hint` → loads session → broadcasts OIDC Back-Channe
 - `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
 - `200 {"logged_out": true}` (fallback)
 
+On every one of those success shapes — and on the no-op answer for a session that is already gone — the endpoint also **ends the browser's own express-session**, but only when that session's `sid` is the one being logged out. RP-initiated logout is a request any party may make about any session, so a cookie naming a different `sid`, or naming none, is left alone rather than signing out an unrelated user. Without this the cascade emptied the stores while the cookie kept satisfying `req.session.isAuthenticated` at `/authorize`, which went on minting codes carrying a dead `sid` that `/token` then refused with `invalid_grant` — a login loop with no login page, for up to `session.maxAge`. A destroy the session store cannot complete is logged and does not turn a successful cascade into a `503`; `/authorize` refuses the dead `sid` on its own account either way, by re-checking that an authenticated session's `sid` still resolves in the `UserSessionStore` before it mints anything (a store that cannot answer fails closed to the login page, or to `login_required` under `prompt=none`).
+
 Cascade failure returns `503 {"error": "temporarily_unavailable"}`. The cascade order is fixed per the spec: step 1 (refresh-family revoke) and step 3 (session delete) fail hard; step 2 (federation-token delete) is best-effort and logs a warning on failure without aborting the cascade.
 
 ### POST /oauth/federation/:name/logout
