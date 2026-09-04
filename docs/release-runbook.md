@@ -46,7 +46,7 @@ git grep -n '"this release' -- 'packages/*/src' 'templates/*/src'
 The audit must cover:
 
 - **Security**: per-mechanism + cross-cutting (header injection, key handling, cnf claim shape)
-- **Extensibility & immutability**: per [`extensibility-immutability-check`](../.claude/skills/extensibility-immutability-check/SKILL.md) — exported surface unchanged or additive only
+- **Extensibility & immutability**: the exported surface of every published package is unchanged or additive only. Diff each package's entry point against the last tag (`git show <lastTag>:packages/<p>/src/index.mts`, following re-exports), and classify every change as additive / breaking / behavioural-only. Two shapes that read as additive but are not: **a new required field on an exported options or config type** breaks a caller that constructs it, and **a new required member on an exported interface** breaks a third-party implementer. Every break must appear in the release's CHANGELOG section saying what a consumer has to do
 - **Interface design**: ADR-level decisions still hold across the cut
 - **FCoT** on load-bearing decisions: pre-declare dismissal conditions for each counter-argument
 
