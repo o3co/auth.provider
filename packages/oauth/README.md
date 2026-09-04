@@ -274,7 +274,7 @@ The OAuth module exposes two logout-related routes when wired with `userSessionS
 OIDC RP-Initiated Logout 1.0 `end_session_endpoint`. Accepts `application/x-www-form-urlencoded`:
 
 - `id_token_hint` (required) — signed id_token from this provider; `sid` claim identifies the session
-- `post_logout_redirect_uri` (optional) — must match one of `client.postLogoutRedirectUris` exactly
+- `post_logout_redirect_uri` (optional) — must match one of `client.postLogoutRedirectUris` **exactly**, byte for byte. A reverse-domain custom scheme is a legal entry (#498), and gets no relaxation for being one.
 - `state` (optional) — round-tripped when redirecting to `post_logout_redirect_uri`
 
 Flow: verifies `id_token_hint` → loads session → broadcasts OIDC Back-Channel Logout 1.0 `logout_token` to every RP with `backchannelLogoutUri` → executes store cascade (refresh-family revoke, federation-token delete, session delete) → responds with one of:
@@ -314,10 +314,10 @@ The `session_supported` defaults of `true` intentionally deviate from OIDC Back-
 
 Each `Client` supports five optional fields for logout behavior:
 
-- `postLogoutRedirectUris?: string[]` — allowlist for `POST /oauth/logout`'s `post_logout_redirect_uri`
-- `backchannelLogoutUri?: string` — receives `logout_token` POST
+- `postLogoutRedirectUris?: string[]` — allowlist for `POST /oauth/logout`'s `post_logout_redirect_uri`. Held to the **same grammar as `allowedRedirectUris`** since [#498](https://github.com/o3co/auth.provider/issues/498): `https:`, `http:` for a loopback host, or an RFC 8252 §7.1 reverse-domain custom scheme (`com.example.app:/signout`), and never a fragment, userinfo or executable scheme. Registering the custom scheme is what lets a native app be returned to itself after logout instead of landing on a JSON body.
+- `backchannelLogoutUri?: string` — receives `logout_token` POST. **`http`/`https` only** — this server dispatches the POST itself, and it has no way to reach a custom scheme.
 - `backchannelLogoutSessionRequired?: boolean` — default `true`; set `false` to exclude `sid` from `logout_token`
-- `frontchannelLogoutUri?: string` — iframe src target
+- `frontchannelLogoutUri?: string` — iframe src target. **`http`/`https` only** — the browser resolves this value in a document context, where a custom scheme is at best inert and at worst a handler invocation the RP never asked for.
 - `frontchannelLogoutSessionRequired?: boolean` — default `true`; set `false` to exclude `sid` from iframe URL
 
 ## TODO-F-6 changes — Federation token endpoint

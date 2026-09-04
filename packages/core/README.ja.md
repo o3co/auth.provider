@@ -235,7 +235,9 @@ interface Client {
   clientSecret: string;
   allowedRedirectUris: string[];
   allowedScopes: string[];
-  // ログアウトメタデータ (TODO-F-5):
+  // ログアウトメタデータ (TODO-F-5)。`postLogoutRedirectUris` は
+  // `allowedRedirectUris` と同じ登録リダイレクト URI 文法（カスタムスキーム可、
+  // #498）。他の 2 つは http/https のみ。
   postLogoutRedirectUris?: string[];
   backchannelLogoutUri?: string;
   backchannelLogoutSessionRequired?: boolean; // デフォルト: true

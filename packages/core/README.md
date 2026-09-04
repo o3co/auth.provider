@@ -327,7 +327,9 @@ interface Client {
   clientSecret: string;
   allowedRedirectUris: string[];
   allowedScopes: string[];
-  // Logout metadata (TODO-F-5):
+  // Logout metadata (TODO-F-5). `postLogoutRedirectUris` takes the same
+  // registered-redirect-URI grammar as `allowedRedirectUris` (#498) —
+  // custom schemes included; the other two are http/https only.
   postLogoutRedirectUris?: string[];
   backchannelLogoutUri?: string;
   backchannelLogoutSessionRequired?: boolean; // default: true

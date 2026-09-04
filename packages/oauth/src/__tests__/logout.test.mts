@@ -1024,6 +1024,102 @@ describe("GET /oauth/logout", () => {
 		// avoids matching the escaped form's substring.
 		expect(res.text).not.toMatch(/value="a&b=1"/);
 	});
+
+	// #498 — `postLogoutRedirectUris` now accepts RFC 8252 §7.1 reverse-domain
+	// custom schemes, so a native app can be sent back to itself after logout.
+	// These pin the two things that had to keep holding once it could: the
+	// allowlist stays an EXACT match, and the value is never rendered into
+	// HTML unescaped.
+	describe("custom-scheme post_logout_redirect_uri (#498)", () => {
+		const NATIVE_URI = "com.example.app:/signout";
+
+		const nativeClientRepo = () =>
+			makeClientRepo({
+				findById: vi.fn().mockResolvedValue({
+					clientId: "client-1",
+					tokenEndpointAuthMethod: "none",
+					allowedRedirectUris: [NATIVE_URI],
+					allowedScopes: ["openid"],
+					postLogoutRedirectUris: [NATIVE_URI],
+				}),
+			});
+
+		it("redirects to a registered custom-scheme target, with state", async () => {
+			const sessionStore = makeSessionStore();
+			const app = buildApp({ sessionStore, clientRepo: nativeClientRepo() });
+
+			const res = await getLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: NATIVE_URI,
+				state: "bye",
+			});
+
+			expect(res.status).toBe(303);
+			expect(res.headers.location).toBe("com.example.app:/signout?state=bye");
+			expect(sessionStore.delete).toHaveBeenCalledWith("sid-1");
+		});
+
+		it("redirects to a registered custom-scheme target with no state", async () => {
+			// No `state` means the value is emitted without a query, so this
+			// catches a serializer that would mangle the opaque form.
+			const app = buildApp({ clientRepo: nativeClientRepo() });
+
+			const res = await getLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: NATIVE_URI,
+			});
+
+			expect(res.status).toBe(303);
+			expect(res.headers.location).toBe("com.example.app:/signout");
+		});
+
+		it("matches the allowlist exactly — a different path on the same scheme is refused", async () => {
+			// The comparison is string equality, and stays so for custom
+			// schemes: nothing about `com.example.app:` makes a sibling path
+			// the same target.
+			const app = buildApp({ clientRepo: nativeClientRepo() });
+
+			const res = await getLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: "com.example.app:/signout/../elsewhere",
+			});
+
+			expect(res.status).toBe(200);
+			expect(res.headers.location).toBeUndefined();
+			// The JSON fallback — the very outcome #498 exists to spare a
+			// native app when the target IS registered.
+			expect(res.body).toEqual({ logged_out: true });
+		});
+
+		it("refuses an unregistered app's scheme", async () => {
+			const app = buildApp({ clientRepo: nativeClientRepo() });
+
+			const res = await getLogout(app, {
+				id_token_hint: await mintIdToken(),
+				post_logout_redirect_uri: "com.attacker.app:/steal",
+			});
+
+			expect(res.status).toBe(200);
+			expect(res.headers.location).toBeUndefined();
+		});
+
+		it("escapes the custom-scheme URI in the stale-iat confirmation page", async () => {
+			// The confirm page echoes the allowlisted value into an HTML
+			// attribute; a custom scheme must go through the same escape as
+			// every other value there.
+			const app = buildApp({ clientRepo: nativeClientRepo() });
+
+			const res = await getLogout(app, {
+				id_token_hint: await mintOldIdToken(),
+				post_logout_redirect_uri: NATIVE_URI,
+			});
+
+			expectLogoutConfirmation(res);
+			expect(res.text).toContain('name="post_logout_redirect_uri"');
+			expect(res.text).toContain(`value="${NATIVE_URI}"`);
+			expect(res.text).not.toMatch(/<script>/);
+		});
+	});
 });
 
 // ---------------------------------------------------------------------------
