@@ -23,8 +23,10 @@ import {
 	createMemoryRateLimiter,
 	createRateLimitGuard,
 	errorEnvelope,
+	type FederationTokenStore,
 	type Logger,
 	type RateLimiter,
+	type SessionFederationIndex,
 	type SubjectSessionIndex,
 	type User,
 	type UserRepository,
@@ -64,6 +66,8 @@ export const createRouter = (
 		config,
 		userSessionStore,
 		subjectSessionIndex,
+		federationTokenStore,
+		sessionFederationIndex,
 		rateLimiter,
 		auditSink,
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
@@ -82,6 +86,22 @@ export const createRouter = (
 		 * than assumed.
 		 */
 		subjectSessionIndex?: SubjectSessionIndex;
+		/**
+		 * Upstream-IdP tokens held for the session, dropped on logout.
+		 *
+		 * The federation *routes* have always taken this store; the logout
+		 * handler takes it too so ending a session also drops what the session
+		 * accumulated at the IdP. Optional here for the same reason
+		 * `userSessionStore` is: a composition that federates nothing wires
+		 * none, and the handler simply has nothing to remove.
+		 */
+		federationTokenStore?: FederationTokenStore;
+		/**
+		 * Reverse index naming which federations a session touched. Removed
+		 * alongside `federationTokenStore` so the index does not outlive the
+		 * entries it points at.
+		 */
+		sessionFederationIndex?: SessionFederationIndex;
 		/**
 		 * Shared rate limiter for the login brute-force guard.
 		 *
@@ -228,6 +248,102 @@ export const createRouter = (
 		factoryName: "createRouter",
 	});
 
+	/**
+	 * Invalidates the server-side records a logging-out session owns.
+	 *
+	 * Why this exists: `/session/logout` used to call `req.session.destroy` and
+	 * nothing else, so the `UserSession` record its `sid` named stayed alive.
+	 * #506 stamped `sid` on the `session` grant's access token and gave
+	 * `/oauth/introspect` the liveness check `/oauth/userinfo` already ran —
+	 * both resolve that record. With it alive, a token minted from a
+	 * logged-out session kept introspecting `active: true` and kept answering
+	 * at `/userinfo` for its full lifetime, in exactly the BFF / proxy
+	 * topology whose logout IS this endpoint. `/oauth/logout` was unaffected;
+	 * it runs the full cascade.
+	 *
+	 * SCOPE — deliberately narrower than `/oauth/logout`'s cascade, and the
+	 * line is a layering fact, not an oversight. `cascadeLogout` lives in
+	 * `@o3co/auth-provider-oauth`; this package depends only on core, and the
+	 * two are siblings (`packages/oauth/src/routes/logout.mts` records the
+	 * same edge as forbidden in the other direction). Reaching the cascade
+	 * would mean either taking a dependency on oauth or writing a second
+	 * implementation of a documented algorithm — the drift
+	 * `docs/design-vocabulary.md` exists to prevent. So this endpoint
+	 * invalidates what the session module's own dependency set already owns:
+	 *
+	 *   - `userSessionStore.delete` — PRIMARY. The record every liveness check
+	 *     resolves; deleting it is what closes the reported gap.
+	 *   - `subjectSessionIndex.removeSid` — symmetry with the login-rollback
+	 *     path above, which already pairs these two. A surviving entry has
+	 *     `revokeAllForSubject` (#296) enumerate a sid that no longer exists.
+	 *   - `federationTokenStore` / `sessionFederationIndex` `removeBySid` —
+	 *     hygiene rather than containment: once the `UserSession` record is
+	 *     gone the federation-token endpoint cannot resolve the session, so
+	 *     the entries are already unreachable. Removed because leaving them to
+	 *     TTL keeps upstream-IdP refresh tokens at rest for no reason.
+	 *
+	 * NOT done here: refresh-token family revocation, and the RP-registry /
+	 * family-index cleanup that goes with it. Those need
+	 * `refreshTokenFamilyRevocation`, `sessionFamilyIndex` and
+	 * `sessionRPRegistry`, which this module declares none of — `module.mts`
+	 * records the latter two as oauth-package concerns. It is a real
+	 * difference and an operator has to know it: a browser that logged in
+	 * here and then ran an `/authorize` → `authorization_code` flow holds a
+	 * refresh token whose family only `/oauth/logout` revokes. The `session`
+	 * grant itself issues no refresh token, so the topology this fix is for
+	 * has no family to revoke. Both READMEs and the operator runbook state
+	 * which endpoint reaches what.
+	 *
+	 * ORDERING — primary invalidation FIRST, then best-effort hygiene, then
+	 * the cookie. This inverts `cascadeLogout`'s §6.2 order (fanout first,
+	 * `delete` last) on purpose: §6.2 defers the delete so a FAILED cascade
+	 * stays retryable through the sid it did not erase, and this endpoint
+	 * offers no retry — it never reports failure to the caller, and the caller
+	 * loses the cookie naming the sid either way. With retry off the table the
+	 * remaining criterion is which failure hurts most, and that is the one
+	 * that leaves a token still honoured. So the delete runs first and is not
+	 * conditional on the hygiene that follows.
+	 *
+	 * FAILURE — every step is best-effort and logged, never propagated. A
+	 * store outage must not turn a logout into a 5xx that leaves the user
+	 * holding a live cookie: the cookie is the half this endpoint can always
+	 * deliver, and a 5xx would invite a retry of work that partly succeeded.
+	 * The residue of a failed delete is covered from the other side —
+	 * `/authorize` refuses a session whose `sid` does not resolve, and a store
+	 * that cannot answer `delete` will not answer `get` either, which the
+	 * introspection and userinfo liveness checks both fail closed on.
+	 */
+	const invalidateSessionRecords = async (sid: string, sub: string | undefined): Promise<void> => {
+		if (userSessionStore) {
+			try {
+				await userSessionStore.delete(sid);
+			} catch (err) {
+				logger.error({ err, sid }, "logout_user_session_delete_failed");
+			}
+		}
+		if (subjectSessionIndex && sub) {
+			try {
+				await subjectSessionIndex.removeSid(sub, sid);
+			} catch (err) {
+				logger.error({ err, sub, sid }, "logout_subject_session_index_remove_failed");
+			}
+		}
+		if (federationTokenStore) {
+			try {
+				await federationTokenStore.removeBySid(sid);
+			} catch (err) {
+				logger.error({ err, sid }, "logout_federation_token_remove_failed");
+			}
+		}
+		if (sessionFederationIndex) {
+			try {
+				await sessionFederationIndex.removeBySid(sid);
+			} catch (err) {
+				logger.error({ err, sid }, "logout_session_federation_index_remove_failed");
+			}
+		}
+	};
+
 	router
 		.use(express.json())
 		.use(express.urlencoded({ extended: false }))
@@ -365,9 +481,27 @@ export const createRouter = (
 				});
 			},
 		)
-		.post("/logout", verifyCsrf, (req: Request, res: Response) => {
+		.post("/logout", verifyCsrf, async (req: Request, res: Response) => {
+			// Read the session's identifiers BEFORE destroying it: `destroy`
+			// empties the bag, so a handler that reads `sid` afterwards has
+			// nothing left to invalidate. This is the whole reason the endpoint
+			// used to invalidate nothing but the cookie.
+			const rawSid = req.session.sid;
+			const sid = typeof rawSid === "string" && rawSid.length > 0 ? rawSid : undefined;
+			const rawSub = req.session.user?.id;
+			const sub = typeof rawSub === "string" && rawSub.length > 0 ? rawSub : undefined;
+
+			if (sid) {
+				await invalidateSessionRecords(sid, sub);
+			}
+
 			req.session.destroy((err: Error | null) => {
 				if (err) {
+					// Unchanged contract. The records are already gone by now, so
+					// the surviving cookie buys nothing: `/authorize`'s R1b check
+					// treats an `isAuthenticated` session whose `sid` no longer
+					// resolves as unauthenticated, and `/oauth/introspect` and
+					// `/oauth/userinfo` refuse the tokens it minted.
 					return res.status(500).json(errorEnvelope("server_error", "Session destroy failed"));
 				}
 				return res.status(200).json({ message: "Logged out successfully" });

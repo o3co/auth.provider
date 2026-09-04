@@ -126,12 +126,30 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
 			// R3: bind the token to the browser session that produced it. Without
-			// `sid` nothing linked the two, so `/oauth/logout` — which deletes the
-			// `UserSession` record and revokes refresh families — left this token
-			// valid for its full lifetime (an hour by default) in precisely the
-			// BFF / proxy topology this grant exists for. Stamping `sid` puts it
-			// under the session-liveness machinery `/userinfo` and `/introspect`
-			// already run.
+			// `sid` nothing linked the two, so no logout could reach this token at
+			// all — it stayed valid for its full lifetime (an hour by default) in
+			// precisely the BFF / proxy topology this grant exists for. Stamping
+			// `sid` puts it under the session-liveness machinery `/userinfo` and
+			// `/introspect` run: both resolve the `UserSession` record, and both
+			// logout endpoints delete it.
+			//
+			// They delete different amounts around it. `/oauth/logout` runs the
+			// full cascade — refresh-token families, RP registry, federation
+			// stores. `/session/logout` invalidates the session record, the
+			// subject index and the federation pair, but revokes no families;
+			// `packages/session` may not reach `cascadeLogout` across the package
+			// boundary, and the scope it draws is documented on the handler.
+			// Neither difference reaches THIS token: it is bound by `sid` alone
+			// and issues no refresh token, so deleting the record is the whole of
+			// its revocation, from either endpoint.
+			//
+			// What `sid` does not buy is offline validation. Liveness is a
+			// property of asking: a resource server that only verifies the
+			// signature and `exp` never reads the record, so it cannot see a
+			// logout at any point and keeps accepting the token until it expires.
+			// That is inherent to a self-contained token, not a gap these checks
+			// left open — the lever for such a deployment is a short
+			// `accessToken.expiresIn`, not a longer one.
 			//
 			// No `family_id` is stamped alongside it: this grant issues no refresh
 			// token, so a family id would name a family nothing ever opens or

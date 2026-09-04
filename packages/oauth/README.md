@@ -269,6 +269,16 @@ Scope-to-claim mapping (OIDC Core §5.4 standard scopes):
 
 The OAuth module exposes two logout-related routes when wired with `userSessionStore`, `federationTokenStore`, `refreshTokenStore`, and `oauth.jwt.issuer`:
 
+> **There is a third logout endpoint, and it is not in this package.**
+> `POST /session/logout` (`@o3co/auth-provider-session`) is the browser's own
+> logout and the one a BFF / `auth.proxy` topology calls. It deletes the
+> `UserSession` record, the subject-index entry and the federation pair — so
+> the liveness checks below do bite — but it revokes **no refresh-token
+> families**, because `cascadeLogout` is not reachable across the package
+> boundary. `POST /oauth/logout` is the only endpoint that runs the full
+> cascade. If a session holds a refresh token, that is the one to call. See
+> [the session package README](../session/README.md#what-postsessionlogout-invalidates).
+
 ### POST /oauth/logout
 
 OIDC RP-Initiated Logout 1.0 `end_session_endpoint`. Accepts `application/x-www-form-urlencoded`:

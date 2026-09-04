@@ -655,6 +655,22 @@ export const createOAuthRouter = async (
 					// grant's token now carries `sid`) kept honouring it for the
 					// rest of the access-token lifetime.
 					//
+					// Both logout endpoints are covered, by the one read: the
+					// record resolved here is deleted by `/oauth/logout`'s cascade
+					// and by `/session/logout` alike. What they revoke AROUND it
+					// still differs — only `/oauth/logout` revokes refresh-token
+					// families — so a session that also holds a refresh token is
+					// not fully ended by the session endpoint. That difference is
+					// invisible from here; this check answers for the access token
+					// in hand, not for the family behind it.
+					//
+					// Coverage, stated so the check is not read as more than it
+					// is: it binds only callers that ASK. A resource server
+					// validating the JWT offline — signature and `exp`, no
+					// introspection — sees no logout at any point and accepts the
+					// token until it expires. Self-contained tokens are like that;
+					// the lever there is a short lifetime, not this read.
+					//
 					// Cost: one extra store read per introspection of a
 					// `sid`-carrying token. Tokens without `sid` — client
 					// credentials, jwt-bearer, anything minted outside a browser
