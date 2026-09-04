@@ -26,10 +26,83 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { type AppConfig, AppConfigSchema } from "@o3co/auth-provider-core";
+import { parseFile } from "@o3co/ts.hocon";
+import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
+import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
+const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 const read = (rel: string): string => readFileSync(`${standaloneDir}${rel}`, "utf8");
+
+/**
+ * The `environment:` entries of a compose file's `app` service, as the
+ * environment the container would actually see.
+ *
+ * A hand-rolled reader rather than a YAML dependency: these two files are
+ * fixed-shape artifacts in this repository, the block is flat `KEY: value`
+ * scalars, and adding a parser to the template's dependency tree to read its
+ * own scaffold would be a strange thing to ship to operators.
+ *
+ * Compose's `${VAR:?err}` required-variable form resolves from the operator's
+ * shell or `.env`, so there is no literal value to record — the key is mapped
+ * to `null`, which is the point of that form and what the assertions below
+ * check for.
+ */
+function composeAppEnvironment(rel: string): Map<string, string | null> {
+	const lines = read(rel).split("\n");
+	const start = lines.findIndex((line) => /^\s{4}environment:\s*$/.test(line));
+	const env = new Map<string, string | null>();
+	if (start === -1) return env;
+	for (const line of lines.slice(start + 1)) {
+		if (line.trim() === "" || /^\s*#/.test(line)) continue;
+		// The block ends at the first line indented no further than its own key.
+		if (!/^\s{6}\S/.test(line)) break;
+		const match = /^\s{6}([A-Z][A-Z0-9_]*):\s*(.*)$/.exec(line);
+		if (!match) continue;
+		const raw = (match[2] as string).trim().replace(/^["']|["']$/g, "");
+		env.set(match[1] as string, /^\$\{[A-Z][A-Z0-9_]*:\?/.test(raw) ? null : raw);
+	}
+	return env;
+}
+
+/** Resolve the shipped config layers under a given environment, as `src/app.mts` does. */
+function resolveWith(env: Record<string, string>, configEnv = "production"): AppConfig {
+	const { applicationConfPath, envConfPath } = resolveConfigPaths(configDir, configEnv);
+	return validate(
+		parseFile(envConfPath, { env })
+			.withFallback(parseFile(applicationConfPath, { env }))
+			.withFallback(parseFile(resolveLibraryReferenceConfPath(), { env })),
+		AppConfigSchema,
+	);
+}
+
+/**
+ * A compose file's `environment:` block, plus the secrets no compose file
+ * carries (they come from `.env` or a compose secret) — the environment the
+ * process would boot under.
+ *
+ * The key material follows what the file itself says: the production compose
+ * points the EdDSA key paths at its mounted secrets, so leave the default
+ * algorithm alone; the dev compose supplies no key at all, so give it the
+ * HS256 shape, whose `.strict()` union member is exactly why the two cannot
+ * share one map.
+ */
+function bootableEnv(rel: string): Record<string, string> {
+	const env: Record<string, string> = {
+		OAUTH_JWT_ISSUER: "https://auth.test",
+		SESSION_SECRET: "scaffold-assets-compose-session.at-least-32-bytes.ok",
+	};
+	for (const [key, value] of composeAppEnvironment(rel)) {
+		if (value !== null) env[key] = value;
+	}
+	if (env.OAUTH_JWT_PRIVATE_KEY_PATH === undefined) {
+		env.OAUTH_JWT_ALGORITHM = "HS256";
+		env.OAUTH_JWT_SECRET = "scaffold-assets-compose.at-least-32-bytes.ok";
+	}
+	return env;
+}
 
 describe("#407 — the Dockerfile installs with everything pnpm needs", () => {
 	it("copies pnpm-workspace.yaml into the deps stage", () => {
@@ -103,6 +176,62 @@ describe("#407 — the production compose matches the topology it documents", ()
 		const compose = read("/docker-compose.production.yml");
 		expect(compose).not.toMatch(/^\s*-\s*"3000:3000"\s*$/m);
 		expect(compose).toMatch(/127\.0\.0\.1:3000:3000/);
+	});
+});
+
+describe("the compose files put a store and its lifetime-sibling on the same backend", () => {
+	// The production compose set `SESSION_STORAGE_TYPE: redis` and left
+	// `USER_SESSION_STORES_ADAPTER` at its `memory` default. express-session
+	// then survives a restart and the `UserSession` it points at does not, so
+	// every browser comes back `isAuthenticated` with nothing behind it and
+	// /authorize loops until the cookie is deleted by hand.
+	//
+	// `DEPLOYMENT_MODE: single` is silent about this on purpose — the replica
+	// guard answers "can these stores be shared", not "do these two stores have
+	// the same lifetime" — so nothing but this assertion stands behind it.
+	for (const file of ["/docker-compose.production.yml", "/docker-compose.yml"]) {
+		it(`${file} keeps the user-session stores with the express-session store`, () => {
+			const config = resolveWith(bootableEnv(file));
+			// Resolved through the real config layers, not read off the file:
+			// what matters is the value the process ends up with, whether the
+			// compose stated it or `config/application.conf` did.
+			expect(config.session.storage?.type).toBe("redis");
+			expect(config.userSessionStores?.adapter).toBe("redis");
+		});
+	}
+
+	it("the production compose leaves no store on memory while a sibling is on Redis", () => {
+		const config = resolveWith(bootableEnv("/docker-compose.production.yml"));
+		// Every store whose records must outlive one process. The federation
+		// token store is deliberately absent: this template ships every
+		// federation disabled, so nothing writes to it, and turning it on needs
+		// an AES key the compose file must not invent.
+		expect(config.session.storage?.type).toBe("redis");
+		expect(config.userSessionStores?.adapter).toBe("redis");
+		expect(config.oauth.code?.adapter).toBe("redis");
+		expect(config.accessTokenDenylist?.adapter).toBe("redis");
+		expect(config.rateLimiter?.adapter).toBe("redis");
+	});
+});
+
+describe("the production compose refuses to guess HTTP_TRUST_PROXY", () => {
+	it("names the variable and supplies no default", () => {
+		// Without it the Secure cookie is never set, the CSRF origin check 403s
+		// every browser POST, and every IP-keyed rate limit shares one bucket.
+		// With a baked-in default it would silently trust a hop the operator
+		// never chose. The `${VAR:?err}` form is the only reading that is
+		// neither: compose refuses to start until the operator names their edge.
+		const compose = composeAppEnvironment("/docker-compose.production.yml");
+		expect(compose.has("HTTP_TRUST_PROXY")).toBe(true);
+		expect(compose.get("HTTP_TRUST_PROXY")).toBeNull();
+		expect(read("/docker-compose.production.yml")).not.toMatch(
+			/HTTP_TRUST_PROXY:\s*(true|false)\b/,
+		);
+	});
+
+	it("is offered in .env.example with no value", () => {
+		// The compose reads it from `.env`, which the operator copies from here.
+		expect(read("/.env.example")).toMatch(/^HTTP_TRUST_PROXY=$/m);
 	});
 });
 

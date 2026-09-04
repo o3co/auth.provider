@@ -347,7 +347,11 @@ make test
 The `docker-compose.yml` starts the auth server together with a Redis container. Configure environment variables in `.env`.
 
 `docker-compose.yml` is a **development** file: it builds the `develop` target and bind-mounts `./src` and `./config`, so deploying it ships a hot-reload server running your working tree. The deployable shape is
-[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front plus `HTTP_TRUST_PROXY`, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
+[`docker-compose.production.yml`](docker-compose.production.yml) — `runtime` target, no source mounts, restart policies, a network-internal persistent Redis, and a **required** `.env` (a boot without a real `SESSION_SECRET` must fail loudly). Its header comments state what it deliberately leaves to you: TLS termination in front, and the [multi-replica](#multi-replica-deployments) steps before any `--scale`.
+
+`HTTP_TRUST_PROXY` is an explicit `${HTTP_TRUST_PROXY:?…}` entry there, so `docker compose up` **refuses to start** until you name the hop in `.env`. That is deliberate: there is no address the file could default to that would not silently trust a hop you never chose, and without the variable the Secure cookie the file pins is never set, the CSRF origin check 403s every browser POST, and every IP-keyed rate limit shares one bucket.
+
+Every store whose records must outlive one process is named in that file's `environment:` block rather than inherited — including `USER_SESSION_STORES_ADAPTER=redis`, which has to travel with `SESSION_STORAGE_TYPE=redis`. `DEPLOYMENT_MODE=single` will not tell you when it does not: the replica guard answers "can these stores be shared", not "do these two stores have the same lifetime". Split them and a restart leaves every browser holding a surviving express-session that still reads `isAuthenticated` with no `UserSession` behind it — `/authorize` bounces to login, the cookie bounces it back, and the loop clears only when the user deletes the cookie.
 
 ```bash
 # The signing keys are a required input: EdDSA is the default and there is no

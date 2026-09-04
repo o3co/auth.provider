@@ -19,10 +19,11 @@
 #
 # What this file deliberately does NOT do:
 #
-# - **TLS.** Terminate it in front (reverse proxy / load balancer), and set
-#   HTTP_TRUST_PROXY to that hop's address so `req.ip` — and every IP-keyed
-#   rate limit — means the client, not the proxy. See README
-#   "Multi-replica deployments".
+# - **TLS.** Terminate it in front (reverse proxy / load balancer). The
+#   HTTP_TRUST_PROXY entry below then needs that hop's address so `req.ip` —
+#   and every IP-keyed rate limit — means the client, not the proxy; compose
+#   refuses to start until you supply it. See README "Multi-replica
+#   deployments".
 # - **Scale out.** This is one replica (DEPLOYMENT_MODE=single). Before
 #   `--scale app=N`, set DEPLOYMENT_MODE=multi and read that same README
 #   section — boot will then refuse any in-memory store that must be shared.
@@ -74,7 +75,31 @@ services:
       - jwt_public_key
     environment:
       NODE_ENV: production
+      # One replica. Under `single` the replica-safety guard is SILENT by
+      # design — you have told it there are no peers — so it will not tell you
+      # that a store below is on memory while its sibling is on Redis. That is
+      # why the adapter block further down states every one of them explicitly
+      # instead of leaving them to inherit. Before `--scale app=N`, set `multi`
+      # and read the README's "Multi-replica deployments".
       DEPLOYMENT_MODE: single
+      # Behind the TLS terminator this file assumes, `req.ip` is the proxy's
+      # address and `req.protocol` reads `http` until this names the hop. The
+      # README calls it required for exactly that reason, and the cost of
+      # leaving it unset is three failures at once: the Secure cookie pinned
+      # below is never set, the CSRF origin check 403s every browser POST
+      # (the browser sends `Origin: https://…`, the process believes it is
+      # serving http), and every IP-keyed rate limit — the OAuth endpoint
+      # limiters and the /session/login brute-force guard — shares ONE bucket
+      # across all users.
+      #
+      # It cannot be guessed and it is not defaulted: only you know what sits
+      # in front, and a default here would silently trust a hop you never
+      # chose. Put your edge's address or CIDR range in `.env` — `10.0.0.0/8`,
+      # or `loopback` for a sidecar on this host. Prefer that over `true`,
+      # which believes a forwarded client address from anyone able to reach
+      # this process. The `:?` form makes compose refuse to start until it is
+      # set, rather than starting wrong.
+      HTTP_TRUST_PROXY: ${HTTP_TRUST_PROXY:?set to your TLS terminator's address or CIDR range (e.g. 10.0.0.0/8, or `loopback` for a same-host sidecar) — never `true` behind an open network}
       # Point the process at the mounted secrets rather than the working-copy
       # paths `.env` carries for local runs.
       OAUTH_JWT_PRIVATE_KEY_PATH: /run/secrets/jwt_private_key
@@ -89,12 +114,46 @@ services:
       SESSION_SECURE: "true"
       SESSION_NAME: __Host-auth.session
       # Every Redis-backed store shares the compose-network Redis below.
+      #
+      # These are stated in full rather than inherited from
+      # `config/application.conf`, so that the deployable file names its own
+      # topology: an operator reading only this one can see which stores
+      # survive a restart. `OAUTH_CODE_ADAPTER` and
+      # `ACCESS_TOKEN_DENYLIST_ADAPTER` already ship as `redis` in that config
+      # layer and are left there on purpose — restating a value that agrees is
+      # a second place to forget to change.
       REFRESH_TOKEN_FAMILY_STORE_REDIS_URL: redis://redis:6379
       SESSION_STORAGE_TYPE: redis
       SESSION_STORAGE_REDIS_URL: redis://redis:6379
+      # The UserSession stores: the provider's own record of who is signed in,
+      # which RPs a session has touched, and the family / federation indexes
+      # hanging off it. They MUST be on Redis whenever the express-session
+      # store above is, and this line is the fix for what happens when they
+      # are not.
+      #
+      # express-session on Redis survives a restart; a memory UserSession store
+      # does not. So every browser comes back holding a session cookie whose
+      # express-session record still says `isAuthenticated: true`, while the
+      # `UserSession` that record points at is gone — /authorize sees an
+      # authenticated session, finds no user session behind it, and sends the
+      # browser to log in again, where the still-valid cookie puts it straight
+      # back. A login loop that clears only when the user deletes the cookie.
+      # `DEPLOYMENT_MODE: single` says nothing about it: the replica guard
+      # answers "can these stores be shared", not "do these two stores have the
+      # same lifetime".
+      USER_SESSION_STORES_ADAPTER: redis
       # The memory rate limiter is per-process and evadable under bucket
       # exhaustion (see README) — production points it at Redis.
       RATE_LIMITER_ADAPTER: redis
+      # The federation token store is deliberately left at its `memory`
+      # default, and that is coherent here rather than an oversight: this
+      # template ships every federation disabled, so nothing writes to the
+      # store, and switching it on would need a 32-byte AES key
+      # (REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY) that this file must not
+      # invent — the records are long-lived upstream refresh tokens. Enabling
+      # a federation means setting BOTH, together:
+      #   FEDERATION_TOKEN_STORE_TYPE: redis
+      #   REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: <openssl rand -base64 32, from .env>
 
   redis:
     # Tag-pinned, not digest-pinned. The Dockerfile argues for digests (#289)

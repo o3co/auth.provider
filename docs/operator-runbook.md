@@ -96,13 +96,28 @@ Redis reachable only on the compose network and persisting to a volume
 compose secrets at `/run/secrets/jwt_private_key` / `jwt_public_key`. Its
 `environment:` block pins `NODE_ENV=production`, `DEPLOYMENT_MODE=single`,
 `SESSION_SECURE=true`, `SESSION_NAME=__Host-auth.session`,
-`SESSION_STORAGE_TYPE=redis`, `RATE_LIMITER_ADAPTER=redis`, and both Redis
-URLs to `redis://redis:6379`. The app port is published on loopback only
-(`127.0.0.1:3000:3000`).
+`SESSION_STORAGE_TYPE=redis`, `USER_SESSION_STORES_ADAPTER=redis`,
+`RATE_LIMITER_ADAPTER=redis`, and both Redis URLs to `redis://redis:6379`. The
+app port is published on loopback only (`127.0.0.1:3000:3000`).
 
-What it deliberately leaves to you (its own header says so): TLS termination
-in front plus `HTTP_TRUST_PROXY` naming that hop; the multi-replica steps above
-before any `--scale`; and every secret.
+The user-session line is there for a reason the replica guard cannot supply.
+Under `DEPLOYMENT_MODE=single` the guard is silent by design — it answers "can
+these stores be shared", not "do these two stores have the same lifetime" — so
+it said nothing when express-session was on Redis and the `UserSession` stores
+were on their `memory` default. A provider restart then left every browser
+holding a Redis-backed express-session that still read `isAuthenticated` with
+no `UserSession` behind it: `/authorize` sends the browser to log in, the
+surviving cookie puts it straight back, and the loop clears only when the user
+deletes the cookie by hand. The compose now states every store's backend
+explicitly rather than letting one inherit.
+
+What it deliberately leaves to you (its own header says so): TLS termination in
+front, the multi-replica steps above before any `--scale`, and every secret.
+`HTTP_TRUST_PROXY` is now an explicit `${HTTP_TRUST_PROXY:?…}` entry rather
+than an omission — compose refuses to start until you name the hop, because
+there is no value that file could default to that would not silently trust one
+you never chose. Put it in `.env` (there is an empty `HTTP_TRUST_PROXY=` in
+`.env.example`) as your edge's address or CIDR range, not `true`.
 
 It also leaves you the **cookie domain's trust boundary**. `__Host-auth.session`
 cannot be set by any other host, but a `form_post` federation (Sign in with
