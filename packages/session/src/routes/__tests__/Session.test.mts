@@ -1137,6 +1137,60 @@ describe("Session routes — POST /session/logout invalidates the session record
 		);
 	});
 
+	// The two index removals are the remaining best-effort steps, and their
+	// failure paths were the only lines of `invalidateSessionRecords` no test
+	// reached. Both are hygiene rather than containment — the `UserSession` is
+	// already gone by the time they run — so the contract they have to keep is
+	// that the failure is visible and costs the caller nothing.
+	it("does not let a subject-index outage stop the primary invalidation", async () => {
+		const logger = silentLogger();
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const { app } = buildApp({
+			userSessionStore: store,
+			subjectSessionIndex: {
+				addSid: vi.fn(),
+				removeSid: vi.fn().mockRejectedValue(new Error("subject index down")),
+				pruneExpiredAndList: vi.fn(),
+			} as unknown as SubjectSessionIndex,
+			logger,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(store.live.has("sid-1")).toBe(false);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: "sid-1", sub: "u-1" }),
+			"logout_subject_session_index_remove_failed",
+		);
+	});
+
+	it("does not let a federation-index outage stop the primary invalidation", async () => {
+		const logger = silentLogger();
+		const store = makeLiveUserSessionStore(["sid-1"]);
+		const { app } = buildApp({
+			userSessionStore: store,
+			sessionFederationIndex: {
+				addFederation: vi.fn(),
+				removeFederation: vi.fn(),
+				listFederations: vi.fn(),
+				removeBySid: vi.fn().mockRejectedValue(new Error("federation index down")),
+			} as unknown as SessionFederationIndex,
+			logger,
+			initialSession: loggedIn(),
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(200);
+		expect(store.live.has("sid-1")).toBe(false);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ sid: "sid-1" }),
+			"logout_session_federation_index_remove_failed",
+		);
+	});
+
 	it("keeps the 500 envelope when the cookie destroy itself fails", async () => {
 		// Pre-existing contract, deliberately unchanged: if the browser session
 		// survives, the logout did not happen from the browser's point of view.
