@@ -73,6 +73,16 @@ describe("deriveFederationTransactionCookieName", () => {
 		);
 	});
 
+	it("applies __Secure- unconditionally, even to a session name that carries no prefix", () => {
+		// Not merely a swap: unlike the session cookie, whose `Secure` flag is the
+		// operator's to set, this cookie is SameSite=None and so is always issued
+		// with `Secure`. The prefix states that invariant where the browser
+		// enforces it.
+		for (const name of ["auth.session", "sid", "my_app-cookie"]) {
+			expect(deriveFederationTransactionCookieName(name)).toBe(`__Secure-${name}.federation`);
+		}
+	});
+
 	it("swaps a __Host- prefix for __Secure-, because this cookie is path-scoped", () => {
 		// `__Host-` requires `Path=/`. This cookie is deliberately scoped to the
 		// callback route, so a `__Host-` name would be dropped by every browser

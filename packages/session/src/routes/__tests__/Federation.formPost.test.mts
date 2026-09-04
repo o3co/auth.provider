@@ -179,18 +179,38 @@ type StartedFlow = {
 	get: (query: Record<string, string>) => request.Test;
 };
 
-/** Every `Set-Cookie` the start leg emitted, as one blob. */
+/** Every `Set-Cookie` the response emitted. */
+function setCookies(res: request.Response): string[] {
+	return (res.headers["set-cookie"] as unknown as string[]) ?? [];
+}
+
+/** Every `Set-Cookie` the response emitted, as one blob. */
 function setCookieHeader(res: request.Response): string {
-	return ((res.headers["set-cookie"] as unknown as string[]) ?? []).join("\n");
+	return setCookies(res).join("\n");
+}
+
+/**
+ * The one `Set-Cookie` for a given cookie name.
+ *
+ * Matched by prefix over the header list rather than by a RegExp built from
+ * the name: the transaction cookie's name contains `.`, which a RegExp would
+ * read as a wildcard and so match a neighbouring cookie.
+ */
+function setCookieNamed(res: request.Response, name: string): string | undefined {
+	return setCookies(res).find((c) => c.startsWith(`${name}=`));
 }
 
 /** The transaction id the start leg put in its cookie, if it issued one. */
 function readTransactionCookie(res: request.Response): string | undefined {
-	const match = setCookieHeader(res).match(
-		new RegExp(`${HARNESS_TRANSACTION_COOKIE_NAME}=([^;\n]*)`),
-	);
-	if (!match?.[1]) return undefined;
-	return decodeURIComponent(match[1]);
+	const header = setCookieNamed(res, HARNESS_TRANSACTION_COOKIE_NAME);
+	const value = header?.split(";")[0]?.slice(HARNESS_TRANSACTION_COOKIE_NAME.length + 1);
+	if (!value) return undefined;
+	return decodeURIComponent(value);
+}
+
+/** Whether the response cleared the named cookie (an empty value). */
+function clearedCookie(res: request.Response, name: string): boolean {
+	return setCookies(res).some((c) => c.startsWith(`${name}=;`));
 }
 
 /**
@@ -277,9 +297,7 @@ describe("GET /oauth/federation/:name (start) — response mode", () => {
 	it("issues a HttpOnly; Secure; SameSite=None transaction cookie for a form_post federation", async () => {
 		const { app } = buildApp();
 		const res = await request(app).get("/oauth/federation/apple");
-		const transactionCookie = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
-			c.startsWith(`${HARNESS_TRANSACTION_COOKIE_NAME}=`),
-		);
+		const transactionCookie = setCookieNamed(res, HARNESS_TRANSACTION_COOKIE_NAME);
 		expect(transactionCookie).toBeDefined();
 		expect(transactionCookie).toMatch(/SameSite=None/i);
 		expect(transactionCookie).toMatch(/Secure/);
@@ -298,9 +316,7 @@ describe("GET /oauth/federation/:name (start) — response mode", () => {
 		// a browser to follow a link here.
 		const { app } = buildApp();
 		const res = await request(app).get("/oauth/federation/apple");
-		const sessionCookie = ((res.headers["set-cookie"] as unknown as string[]) ?? []).find((c) =>
-			c.startsWith("sid="),
-		);
+		const sessionCookie = setCookieNamed(res, "sid");
 		expect(sessionCookie).toBeDefined();
 		expect(sessionCookie).toMatch(/SameSite=Lax/i);
 		expect(sessionCookie).not.toMatch(/Secure/);
@@ -399,7 +415,7 @@ describe("the federation transaction cookie binds the callback to its browser", 
 
 		expect(res.status).toBe(302);
 		expect(harness.records.size).toBe(0);
-		expect(setCookieHeader(res)).toMatch(new RegExp(`${HARNESS_TRANSACTION_COOKIE_NAME}=;`));
+		expect(clearedCookie(res, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(true);
 	});
 
 	it("deletes the transaction record and clears its cookie after a failed callback", async () => {
@@ -412,7 +428,7 @@ describe("the federation transaction cookie binds the callback to its browser", 
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_state");
 		expect(harness.records.size).toBe(0);
-		expect(setCookieHeader(res)).toMatch(new RegExp(`${HARNESS_TRANSACTION_COOKIE_NAME}=;`));
+		expect(clearedCookie(res, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(true);
 
 		// And the spent transaction cannot then be completed with the right state.
 		const retry = await flow.post({ state: flow.state, code: "apple-code" });
