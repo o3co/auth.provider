@@ -69,7 +69,7 @@ For consumer-driven account flows (signup forms, magic-link, etc.) the consumer 
 - `POST /oauth/webauthn/registration/options` — generates `PublicKeyCredentialCreationOptions`. Requires an authenticated subject (upstream session / bearer middleware sets `req.webauthnSubject`).
 - `POST /oauth/webauthn/registration/verify` — verifies the attestation response and persists a `WebAuthnCredential`. Single-use challenge via `ChallengeCeremony`.
 - `POST /oauth/webauthn/authentication/options` — generates `PublicKeyCredentialRequestOptions`. Unauthenticated, rate-limited, and discoverable-credential only: the response never carries an `allowCredentials` list derived from the request. The allow-list flow is available behind `allowCredentialsForKnownUser` — see [SECURITY — `authentication/options` enumeration](#security--authenticationoptions-enumeration).
-- Grant: `urn:o3co:oauth:grant-type:webauthn` — exchanges a verified assertion for an access token. No refresh token in Wave 1 (deferred to a future minor).
+- Grant: `urn:o3co:oauth:grant-type:webauthn` — exchanges a verified assertion for an access token, plus a refresh token when the authenticated client is allowed one. See [SECURITY — refresh-token issuance](#security--refresh-token-issuance).
 
 ## SECURITY — `userId` opacity
 
@@ -91,6 +91,18 @@ The webauthn grant has **no library-side `allowedScopes` ceiling**. Client crede
 `grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy, per Stage 1 RFC 8707 plumbing). This mirrors the `refresh_token` grant pattern.
 
 **`grantPolicy` is REQUIRED at boot.** As of the Wave 1 post-merge security fix, wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "allow" }` — making the choice visible in the composition root.
+
+## SECURITY — refresh-token issuance
+
+A passkey is the primary login on a native app and the access token is short-lived, so without a refresh token a passkey-only user is sent back to the platform authenticator at every expiry. The grant issues one — but only for a client that is **named** for it.
+
+**The gate is deny-by-absence.** The refresh token is issued only when the request carried an authenticated client AND that client's `allowedGrantTypes` includes `refresh_token`. A registration that omits it, or declares no `allowedGrantTypes` at all, gets the access token alone — the response it got before this shipped. A refresh token is a standing credential with a lifetime measured in days; it is exactly the thing that must not be acquired by a registration written before the feature existed ([#268](https://github.com/o3co/auth.provider/issues/268) / [#311](https://github.com/o3co/auth.provider/issues/311) / [#326](https://github.com/o3co/auth.provider/issues/326)).
+
+**Client authentication is required in practice.** In the client-less passkey-is-the-auth-event mode there is no `allowedGrantTypes` to consult, and the `refresh_token` grant refuses an unauthenticated caller and binds every refresh token to its issuing client via `azp` — so a token minted there could never be redeemed. Wire `clientAuthMw` in front of the grant if you want refresh tokens.
+
+**Rotation and replay detection are the shared ones.** The grant opens a refresh-token family through the `refreshTokenFamilyRotation` component, the same one the authorization-code grant registers its initial `rt+jwt` with: one active token per family, and a replayed token revokes the whole family (RFC 6819 §5.2.2.3). The lifetime comes from `oauth.refreshToken.expiresIn`. Registration is fail-closed — if the family store cannot be reached the request answers `503 temporarily_unavailable` rather than serving a token with no replay detection behind it. Both the access and the refresh token carry the `family_id` claim, so revoking the family reaches the access token too.
+
+**Sender-bound requests produce sender-bound refresh tokens.** A DPoP or mTLS request has its RFC 7800 confirmation (`cnf.jkt` / `cnf.x5t#S256`) carried into the refresh token on the same gate the other grants apply: public clients always; confidential clients only when the deployment sets `oauth.tokenBinding.bindConfidentialClientRefreshTokens` ([#275](https://github.com/o3co/auth.provider/issues/275)), since their client secret is already the refresh-time authenticator. The access token this grant issues carries no `cnf` of its own, so the response `token_type` stays `Bearer`.
 
 ## SECURITY — token revocation limitations
 
@@ -145,11 +157,11 @@ This package implements **Wave 1 first slice**:
 - Registration + authentication ceremonies
 - Multi-origin support (`config.origin: string[]`)
 - RFC 8707 resource indicator opt-in plumbing (Stage 1, mirroring `client_credentials` / `refresh_token`)
+- Refresh-token issuance for allowed clients ([issue #480](https://github.com/o3co/auth.provider/issues/480))
 
 Deferred to subsequent waves:
 
 - WebAuthn as MFA factor (Wave 3)
-- Refresh-token issuance for the webauthn grant
 - RFC 8707 Stage 2 audience-restrict enforcement ([issue #173](https://github.com/o3co/auth.provider/issues/173))
 - Attestation root chain verification (Stage 2+)
 
