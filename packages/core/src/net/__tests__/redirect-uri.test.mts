@@ -141,6 +141,31 @@ describe("matchesRegisteredRedirectUri (#483)", () => {
 		).toBe(false);
 	});
 
+	it("relaxes the port and NOTHING else — no URL normalization rides along", () => {
+		// The carve-out is a port comparison, not a URL-equivalence one. The
+		// first shape here parsed to the same `href` while this compared
+		// normalized URLs, which widened the allowlist by exactly the URIs a
+		// native app controls: dot segments, `\` as a separator, scheme case,
+		// and an elided empty path all collapsed into a registered entry.
+		// The equality therefore runs on the ORIGINAL strings with only the
+		// port removed.
+		const registered = "http://127.0.0.1/cb";
+		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:8080/a/../cb")).toBe(false);
+		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:8080/./cb")).toBe(false);
+		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:8080/%63b")).toBe(false);
+		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:8080/cb/")).toBe(false);
+		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:8080\\cb")).toBe(false);
+		expect(matchesRegisteredRedirectUri(registered, "HTTP://127.0.0.1:8080/cb")).toBe(false);
+		expect(matchesRegisteredRedirectUri("http://127.0.0.1/", "http://127.0.0.1:8080")).toBe(false);
+		// Userinfo is not a port, so it never rides in either — and a
+		// registration cannot carry it (see checkRedirectUri) anyway.
+		expect(matchesRegisteredRedirectUri(registered, "http://u@127.0.0.1:8080/cb")).toBe(false);
+		// ...while the case the carve-out exists for is untouched.
+		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:49152/cb")).toBe(true);
+		// The default port is still a port: writing it out is a port difference.
+		expect(matchesRegisteredRedirectUri(registered, "http://127.0.0.1:80/cb")).toBe(true);
+	});
+
 	it("gives `localhost` no carve-out (RFC 8252 §8.3 discourages it)", () => {
 		// `localhost` resolves through the host's name resolution, which is not
 		// the guarantee the IP literals carry — §7.3's relaxation is for the

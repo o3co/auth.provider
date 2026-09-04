@@ -165,7 +165,66 @@ export function describeRedirectUriRejection(rejection: RedirectUriRejection): s
  * (#364) rather than opening a second dialect of "loopback".
  */
 const isLoopbackHttpListener = (url: URL): boolean =>
-	url.protocol === "http:" && url.hostname !== "localhost" && isLoopbackHostname(url.hostname);
+	url.protocol === "http:" &&
+	// Userinfo has no place in a redirect target (`checkRedirectUri` refuses it
+	// on the registration side), and excluding it here keeps the authority
+	// below a plain `host[:port]` — one less shape for the surgery to get
+	// wrong.
+	url.username === "" &&
+	url.password === "" &&
+	url.hostname !== "localhost" &&
+	isLoopbackHostname(url.hostname);
+
+/**
+ * `raw` with the authority's `:port` removed, byte for byte — or `null` when
+ * the authority cannot be located with certainty.
+ *
+ * This works on the ORIGINAL string, never on a parsed `URL`'s serialization,
+ * and that is the whole point. Comparing normalized `href`s would have
+ * ignored not just the port but dot-segment resolution (`/a/../cb` ≡ `/cb`),
+ * `\` as a path separator, scheme case and an elided empty path — widening
+ * the allowlist by exactly the URIs a native app controls. Only the port may
+ * differ, so only the port is removed.
+ *
+ * Callers must have established via {@link isLoopbackHttpListener} that the
+ * value parses to an `http:` loopback IP literal with no userinfo; the
+ * authority is then `host[:port]`, with the port after `]` for the bracketed
+ * IPv6 form and after the sole `:` otherwise. Anything that does not present
+ * that shape in its raw spelling — `http:/127.0.0.1/cb`, which the parser
+ * accepts but which has no literal `://` — returns `null` and gets no
+ * carve-out, which is the safe direction.
+ */
+function withoutAuthorityPort(raw: string): string | null {
+	const schemeEnd = raw.indexOf("://");
+	if (schemeEnd === -1) return null;
+	const authorityStart = schemeEnd + 3;
+
+	// The authority runs to the first path/query/fragment delimiter. `\`
+	// counts: WHATWG treats it as `/` for special schemes, so it ends the
+	// authority even though it is not what a path normally starts with.
+	let authorityEnd = raw.length;
+	for (let i = authorityStart; i < raw.length; i++) {
+		const c = raw[i];
+		if (c === "/" || c === "\\" || c === "?" || c === "#") {
+			authorityEnd = i;
+			break;
+		}
+	}
+	const authority = raw.slice(authorityStart, authorityEnd);
+
+	// Where the host ends: after `]` for `[::1]`, otherwise the whole thing up
+	// to the port colon (a loopback IPv4 literal contains none).
+	let hostEnd = 0;
+	if (authority.startsWith("[")) {
+		const bracket = authority.indexOf("]");
+		if (bracket === -1) return null;
+		hostEnd = bracket + 1;
+	}
+	const colon = authority.indexOf(":", hostEnd);
+	const host = colon === -1 ? authority : authority.slice(0, colon);
+
+	return raw.slice(0, authorityStart) + host + raw.slice(authorityEnd);
+}
 
 /**
  * Whether a presented `redirect_uri` matches one registered entry — the
@@ -193,9 +252,13 @@ const isLoopbackHttpListener = (url: URL): boolean =>
  * different question ("is this the URI this code was issued for") that stays
  * exact, port included.
  *
- * Comparison runs on WHATWG-parsed URLs, so both sides are normalized
- * identically; an unparsable value on either side falls back to the string
- * comparison rather than throwing.
+ * The parse decides only WHETHER the carve-out applies. The equality itself
+ * runs on the two original strings with the port removed, so nothing else is
+ * normalized away — comparing WHATWG-serialized `href`s would silently have
+ * accepted `/a/../cb` for `/cb`, `\` for `/`, `HTTP:` for `http:` and an
+ * empty path for `/`, which is the allowlist widening this exists to avoid.
+ * An unparsable value on either side falls back to the string comparison
+ * rather than throwing.
  */
 export function matchesRegisteredRedirectUri(registered: string, presented: string): boolean {
 	// The pre-#483 behaviour, unchanged, and the answer for every pair the
@@ -212,9 +275,9 @@ export function matchesRegisteredRedirectUri(registered: string, presented: stri
 	}
 	if (!isLoopbackHttpListener(registeredUrl) || !isLoopbackHttpListener(presentedUrl)) return false;
 
-	// Port dropped from both; `href` carries host, path, query and fragment,
-	// so everything else is still compared exactly.
-	registeredUrl.port = "";
-	presentedUrl.port = "";
-	return registeredUrl.href === presentedUrl.href;
+	// Port dropped from both ORIGINAL strings, then byte equality — so scheme,
+	// host, path, query and fragment are all still compared exactly.
+	const registeredKey = withoutAuthorityPort(registered);
+	const presentedKey = withoutAuthorityPort(presented);
+	return registeredKey !== null && registeredKey === presentedKey;
 }
