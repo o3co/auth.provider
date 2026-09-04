@@ -129,6 +129,13 @@ mounts `POST /session/oauth/federation/apple/callback` with the same state /
 CSRF / PKCE / nonce binding as the GET callback, and carries the flow's
 ephemeral state in a **federation transaction** rather than in the session.
 
+The GET on that path answers `405 method_not_allowed` with `Allow: POST`, the
+mirror of the `405` a query federation answers to a POST. Apple only ever posts
+here, and the transaction cookie below is offered to *every* cross-site request
+that reaches the path, so refusing the method before the cookie is read is what
+keeps a third party's `<img src="…/callback">` from touching the flow
+([#502](https://github.com/o3co/auth.provider/issues/502)).
+
 That last one is the part worth knowing about before deploying. The callback is
 a **cross-site POST** from `appleid.apple.com`, and a `SameSite=Lax` cookie is
 not sent on one — a callback relying on the session cookie would arrive with no

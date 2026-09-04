@@ -129,22 +129,34 @@ function makeFakeApple(): FederationProvider & {
 	};
 }
 
-/** A plain query-mode provider — the shape every pre-#479 federation has. */
-function makeQueryProvider(): FederationProvider {
+/**
+ * A plain query-mode provider — the shape every pre-#479 federation has.
+ *
+ * It records its exchange calls the way the fake Apple does, because since
+ * #502 the GET callback is *this* provider's surface: a form_post federation
+ * answers 405 there, so every assertion about what the GET leg hands an
+ * adapter has to be made here.
+ */
+function makeQueryProvider(): FederationProvider & { calls: ExchangeCall[] } {
+	const calls: ExchangeCall[] = [];
 	return {
 		name: "query-idp",
 		scope: ["openid"],
+		calls,
 		buildAuthorizationUrl: ({ state, codeVerifier }) => {
 			const url = new URL("https://idp.example.com/authorize");
 			url.searchParams.set("state", state);
 			url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
 			return url;
 		},
-		exchangeCode: vi.fn(async () => ({
-			issuer: "https://idp.example.com",
-			sub: "query-sub",
-			expiresAt: null,
-		})),
+		exchangeCode: vi.fn(async (params) => {
+			calls.push(params);
+			return {
+				issuer: "https://idp.example.com",
+				sub: "query-sub",
+				expiresAt: null,
+			};
+		}),
 	};
 }
 
@@ -482,6 +494,103 @@ describe("POST /oauth/federation/:name/callback — surface", () => {
 });
 
 // ---------------------------------------------------------------------------
+// A cross-site request must not be able to destroy an in-flight transaction
+// (#502)
+// ---------------------------------------------------------------------------
+
+/**
+ * The transaction cookie is `SameSite=None` by necessity, so it accompanies
+ * *any* cross-site request to the callback path — including one a third party
+ * causes with an `<img>` tag. Before #502 every refusal consumed the
+ * transaction, so one parameterless cross-site request deleted the victim's
+ * in-flight flow and their genuine Apple callback then failed.
+ *
+ * Two things close that: a `form_post` federation refuses GET the way a
+ * `query` federation already refuses POST, and a callback carrying no `state`
+ * is not treated as an attempt on the transaction at all.
+ */
+describe("a cross-site request cannot spend an in-flight transaction (#502)", () => {
+	it("refuses GET on a form_post federation's callback with 405 and Allow: POST", async () => {
+		// The mirror of the 405 a query federation answers to a POST. Apple only
+		// ever POSTs here, so a GET is either a misconfiguration or someone
+		// probing — and the probe arrives carrying the victim's cookie.
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+
+		const res = await flow.get({});
+
+		expect(res.status).toBe(405);
+		expect(res.body.error).toBe("method_not_allowed");
+		expect(res.headers.allow).toBe("POST");
+	});
+
+	it("leaves the transaction intact after a parameterless cross-site GET", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+
+		const attack = await flow.get({});
+
+		expect(harness.records.size).toBe(1);
+		expect(clearedCookie(attack, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(false);
+		// The whole point: the victim's own callback still completes.
+		const genuine = await flow.post({ state: flow.state, code: "apple-code" });
+		expect(genuine.status).toBe(302);
+	});
+
+	it("leaves the transaction intact after a cross-site POST carrying no state", async () => {
+		// An auto-submitting cross-site form with no fields. Nothing was claimed
+		// about the transaction, so nothing about it is spent.
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+
+		const attack = await flow.post({});
+
+		expect(attack.status).toBe(400);
+		expect(attack.body.error).toBe("invalid_request");
+		expect(harness.records.size).toBe(1);
+		expect(clearedCookie(attack, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(false);
+
+		const genuine = await flow.post({ state: flow.state, code: "apple-code" });
+		expect(genuine.status).toBe(302);
+	});
+
+	it("still spends the transaction on a wrong state, which is a real attempt on it", async () => {
+		// The line between the two: an absent `state` claims nothing, a wrong
+		// `state` is a guess — and a guess must not get a second try.
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+
+		const attempt = await flow.post({ state: `${flow.state}-tampered`, code: "c" });
+
+		expect(attempt.status).toBe(400);
+		expect(attempt.body.error).toBe("invalid_state");
+		expect(harness.records.size).toBe(0);
+		expect(clearedCookie(attempt, HARNESS_TRANSACTION_COOKIE_NAME)).toBe(true);
+	});
+
+	it("keeps a query federation's envelope when its callback carries no state", async () => {
+		// The same rule, in the branch that keeps its envelope in the session:
+		// a bare GET to a query callback is a top-level navigation any third
+		// party can cause, and a SameSite=Lax session cookie is sent on one.
+		const harness = buildApp();
+		const flow = await startFlow(harness, "query-idp");
+
+		const attack = await flow.get({});
+
+		expect(attack.status).toBe(400);
+		expect(attack.body.error).toBe("invalid_request");
+		expect(harness.store.get(flow.sid)?.data.federation).toBeDefined();
+	});
+
+	it("still answers 404 for an unknown provider before any transaction is read", async () => {
+		const { app } = buildApp();
+		const res = await request(app).get("/oauth/federation/unknown/callback");
+		expect(res.status).toBe(404);
+		expect(res.body.error).toBe("not_found");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // POST callback — binding parity with GET
 // ---------------------------------------------------------------------------
 
@@ -517,11 +626,16 @@ describe("POST callback binds state / CSRF / PKCE / nonce exactly as GET does", 
 		expect(harness.apple.calls).toHaveLength(0);
 	});
 
-	it("400 invalid_state when the body carries no state at all", async () => {
-		const flow = await startFlow(buildApp());
+	it("400 invalid_request when the body carries no state at all", async () => {
+		// #502: not `invalid_state`. A callback that carries no `state` has made
+		// no claim about the transaction to be judged as a mismatch, and the
+		// difference is load-bearing — see the cross-site section below.
+		const harness = buildApp();
+		const flow = await startFlow(harness);
 		const res = await flow.post({ code: "c" });
 		expect(res.status).toBe(400);
-		expect(res.body.error).toBe("invalid_state");
+		expect(res.body.error).toBe("invalid_request");
+		expect(harness.records.size).toBe(1);
 	});
 
 	it("400 invalid_request when the body carries no code", async () => {
@@ -577,16 +691,20 @@ describe("POST callback binds state / CSRF / PKCE / nonce exactly as GET does", 
 	it("produces the same rejection on GET as on POST for every binding failure", async () => {
 		// The two callbacks are one handler over two parameter sources; this is
 		// the assertion that keeps them from becoming two handlers.
+		//
+		// The POST side is the form_post federation and the GET side the query
+		// one, because since #502 each response mode has exactly one method: the
+		// handler is shared, the surfaces are not.
 		const cases: ReadonlyArray<{ params: Record<string, string>; error: string }> = [
-			{ params: { code: "c" }, error: "invalid_state" },
+			{ params: { code: "c" }, error: "invalid_request" },
 			{ params: { state: "wrong", code: "c" }, error: "invalid_state" },
-			{ params: {}, error: "invalid_state" },
+			{ params: {}, error: "invalid_request" },
 		];
 		for (const { params, error } of cases) {
 			const viaPost = await startFlow(buildApp());
 			const postRes = await viaPost.post(params);
 
-			const viaGet = await startFlow(buildApp());
+			const viaGet = await startFlow(buildApp(), "query-idp");
 			const getRes = await viaGet.get(params);
 
 			expect(postRes.status).toBe(getRes.status);
@@ -599,7 +717,7 @@ describe("POST callback binds state / CSRF / PKCE / nonce exactly as GET does", 
 		const viaPost = await startFlow(buildApp());
 		const postRes = await viaPost.post({ state: viaPost.state });
 
-		const viaGet = await startFlow(buildApp());
+		const viaGet = await startFlow(buildApp(), "query-idp");
 		const getRes = await viaGet.get({ state: viaGet.state });
 
 		expect(postRes.status).toBe(400);
@@ -633,15 +751,16 @@ describe("callbackParams excludes the parameters the framework binds", () => {
 	});
 
 	it("keeps code and state out of it on the GET callback too", async () => {
+		// On the query federation, which is where the GET callback lives (#502).
 		const harness = buildApp();
-		const flow = await startFlow(harness);
-		await flow.get({ state: flow.state, code: "apple-code", extra: "kept" });
+		const flow = await startFlow(harness, "query-idp");
+		await flow.get({ state: flow.state, code: "idp-code", extra: "kept" });
 
-		const call = harness.apple.calls[0];
+		const call = harness.queryProvider.calls[0];
 		expect(call.callbackParams).not.toHaveProperty("code");
 		expect(call.callbackParams).not.toHaveProperty("state");
 		expect(call.callbackParams?.extra).toBe("kept");
-		expect(call.code).toBe("apple-code");
+		expect(call.code).toBe("idp-code");
 	});
 
 	it("hands the adapter an empty bag rather than nothing when there is nothing else", async () => {
