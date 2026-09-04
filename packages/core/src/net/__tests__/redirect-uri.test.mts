@@ -21,9 +21,17 @@
  * The two clauses the #395 falsification pass promoted to requirements are
  * pinned here by name: parse-then-check (the tab-smuggled `javascript:` case)
  * and the deliberate absence of a legacy dotless-scheme escape hatch.
+ *
+ * `matchesRegisteredRedirectUri` (#483) is the runtime half — the /authorize
+ * allowlist comparison, exact everywhere except the RFC 8252 §7.3 loopback
+ * port.
  */
 import { describe, expect, it } from "vitest";
-import { checkRedirectUri, describeRedirectUriRejection } from "#/net/redirect-uri.mjs";
+import {
+	checkRedirectUri,
+	describeRedirectUriRejection,
+	matchesRegisteredRedirectUri,
+} from "#/net/redirect-uri.mjs";
 
 const reason = (raw: string) => checkRedirectUri(raw)?.reason;
 
@@ -94,5 +102,84 @@ describe("checkRedirectUri (#395)", () => {
 		expect(reason("not a url")).toBe("unparsable");
 		expect(reason("%6aavascript:x")).toBe("unparsable");
 		expect(reason("/relative/path")).toBe("unparsable");
+	});
+});
+
+describe("matchesRegisteredRedirectUri (#483)", () => {
+	it("ignores the port when both sides are http on a loopback IP literal (RFC 8252 §7.3)", () => {
+		// The native-app case: the client bound an ephemeral port at run time,
+		// so the registration cannot name it.
+		expect(matchesRegisteredRedirectUri("http://127.0.0.1/cb", "http://127.0.0.1:49152/cb")).toBe(
+			true,
+		);
+		expect(matchesRegisteredRedirectUri("http://[::1]/cb", "http://[::1]:49152/cb")).toBe(true);
+		// Whole 127.0.0.0/8, and port variance in either direction.
+		expect(matchesRegisteredRedirectUri("http://127.0.0.53/cb", "http://127.0.0.53:8080/cb")).toBe(
+			true,
+		);
+		expect(
+			matchesRegisteredRedirectUri("http://127.0.0.1:1234/cb", "http://127.0.0.1:5678/cb"),
+		).toBe(true);
+	});
+
+	it("still compares scheme, host, path and query exactly", () => {
+		expect(
+			matchesRegisteredRedirectUri("http://127.0.0.1/cb", "http://127.0.0.1:49152/other"),
+		).toBe(false);
+		// Both hosts are loopback; the carve-out is the port and only the port.
+		expect(matchesRegisteredRedirectUri("http://127.0.0.1/cb", "http://127.0.0.2:49152/cb")).toBe(
+			false,
+		);
+		expect(matchesRegisteredRedirectUri("http://127.0.0.1/cb", "http://[::1]:49152/cb")).toBe(
+			false,
+		);
+		expect(
+			matchesRegisteredRedirectUri("http://127.0.0.1/cb?x=1", "http://127.0.0.1:49152/cb?x=1"),
+		).toBe(true);
+		expect(
+			matchesRegisteredRedirectUri("http://127.0.0.1/cb?x=1", "http://127.0.0.1:49152/cb?x=2"),
+		).toBe(false);
+	});
+
+	it("gives `localhost` no carve-out (RFC 8252 §8.3 discourages it)", () => {
+		// `localhost` resolves through the host's name resolution, which is not
+		// the guarantee the IP literals carry — §7.3's relaxation is for the
+		// literals, so this stays an exact match.
+		expect(matchesRegisteredRedirectUri("http://localhost/cb", "http://localhost:1234/cb")).toBe(
+			false,
+		);
+		expect(matchesRegisteredRedirectUri("http://localhost/cb", "http://localhost/cb")).toBe(true);
+	});
+
+	it("gives https no carve-out, loopback host or not", () => {
+		expect(
+			matchesRegisteredRedirectUri("https://app.example/cb", "https://app.example:8443/cb"),
+		).toBe(false);
+		expect(matchesRegisteredRedirectUri("https://127.0.0.1/cb", "https://127.0.0.1:49152/cb")).toBe(
+			false,
+		);
+		// A scheme mismatch is a mismatch even when the rest lines up.
+		expect(matchesRegisteredRedirectUri("http://127.0.0.1/cb", "https://127.0.0.1:49152/cb")).toBe(
+			false,
+		);
+	});
+
+	it("matches every other pair by exact string equality", () => {
+		expect(
+			matchesRegisteredRedirectUri(
+				"com.example.app:/oauth2redirect",
+				"com.example.app:/oauth2redirect",
+			),
+		).toBe(true);
+		expect(matchesRegisteredRedirectUri("https://app.example/cb", "https://app.example/cb")).toBe(
+			true,
+		);
+		expect(matchesRegisteredRedirectUri("https://app.example/cb", "https://evil.example/cb")).toBe(
+			false,
+		);
+		// Unparsable on either side falls back to the string comparison rather
+		// than throwing.
+		expect(matchesRegisteredRedirectUri("not a url", "not a url")).toBe(true);
+		expect(matchesRegisteredRedirectUri("not a url", "http://127.0.0.1:1/cb")).toBe(false);
 	});
 });

@@ -117,6 +117,13 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **`/oauth/authorize` accepts GET and POST** (OIDC Core §3.1.2.1). Both run the identical sequence of checks: the handler reads its parameters through one accessor, so a check cannot be mounted on one method and forgotten on the other.
 
+**`redirect_uri` is matched against `client.allowedRedirectUris` by exact string equality, with one carve-out (#483).** When **both** the registered entry and the presented value are `http:` on a loopback **IP literal** (`127.0.0.0/8`, `[::1]`), the port is dropped from both before comparing — scheme, host, path and query are still compared exactly. A native app receiving the response on a loopback interface binds an ephemeral port the OS assigns at run time, so a registration cannot name it (RFC 8252 §7.3): `http://127.0.0.1/cb` admits `http://127.0.0.1:49152/cb`.
+
+- `http://localhost/cb` gets **no** carve-out — a loopback *name* moves the guarantee into the host's name resolution, and RFC 8252 §8.3 discourages it. Register the IP literal.
+- `https://` gets no carve-out either, loopback host or not.
+- The **presented** URI is where the response goes, and it is what gets bound to the authorization code. The token endpoint's `redirect_uri` check (RFC 6749 §4.1.3) compares against that record with plain equality — port included — so a listener on a different port cannot redeem another one's code.
+- The comparison lives in `matchesRegisteredRedirectUri` (`@o3co/auth-provider-core`), exported so a custom authorization endpoint matches the way this one does.
+
 **`prompt=none` is supported.** No session answers `login_required` at the client's `redirect_uri` — which is the point, since a hidden renewal iframe cannot act on a login page. A session proceeds silently.
 
 **`prompt=login`, `consent` and `select_account` are refused** with `invalid_request` naming the value, not ignored:

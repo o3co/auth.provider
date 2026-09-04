@@ -24,6 +24,7 @@ import {
 	isEmailVerified,
 	isGrantTypeAllowed,
 	type Logger,
+	matchesRegisteredRedirectUri,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
@@ -157,7 +158,15 @@ const resolveClientAndRedirectUri = async (
 		return null;
 	}
 
-	if (!client.allowedRedirectUris.includes(redirect_uri)) {
+	// #483: exact string equality, except that a `http:` loopback IP literal on
+	// both sides is compared with the port dropped — a native app's listener
+	// binds an ephemeral port the registration cannot name (RFC 8252 §7.3).
+	// `localhost` and `https:` get no carve-out. The PRESENTED URI is what is
+	// carried forward and bound to the code record, so the token endpoint's
+	// §4.1.3 equality check still compares the URI actually used.
+	if (
+		!client.allowedRedirectUris.some((entry) => matchesRegisteredRedirectUri(entry, redirect_uri))
+	) {
 		// Cannot redirect — redirect_uri not trusted
 		res
 			.status(400)

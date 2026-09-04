@@ -274,6 +274,64 @@ describe("/authorize — A-1 pre-redirect validation (400/500 JSON)", () => {
 	});
 });
 
+describe("/authorize — redirect_uri matching (#483, RFC 8252 §7.3)", () => {
+	// A native app receives the authorization response on a loopback listener
+	// whose port the OS assigns at run time, so the registration cannot name
+	// it. The port — and only the port — is therefore ignored when BOTH sides
+	// are `http:` on a loopback IP literal. Everything else stays the exact
+	// string comparison it has always been.
+	const attempt = async (registered: string, presented: string) => {
+		const { app, createCode } = await makeApp({ client: { allowedRedirectUris: [registered] } });
+		const res = await authorize(app, { ...baseQuery, redirect_uri: presented });
+		return { res, createCode };
+	};
+
+	const expectAccepted = (res: request.Response, presented: string) => {
+		expect(res.status).toBe(302);
+		const location = new URL(res.headers.location as string);
+		// The PRESENTED URI is where the response goes — the registration is an
+		// allowlist entry, not a rewrite target.
+		expect(location.origin + location.pathname).toBe(presented);
+		expect(location.searchParams.get("code")).toBe("code-x");
+	};
+
+	const expectRefused = (res: request.Response) => {
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({
+			error: "invalid_request",
+			error_description: "redirect_uri not allowed",
+		});
+	};
+
+	it("accepts an ephemeral port against a portless 127.0.0.1 registration", async () => {
+		const presented = "http://127.0.0.1:49152/cb";
+		const { res, createCode } = await attempt("http://127.0.0.1/cb", presented);
+		expectAccepted(res, presented);
+		// The code record binds the URI actually used, so the token endpoint's
+		// RFC 6749 §4.1.3 equality check still has something exact to compare.
+		expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ redirect_uri: presented }));
+	});
+
+	it("accepts an ephemeral port against a portless [::1] registration", async () => {
+		const presented = "http://[::1]:49152/cb";
+		const { res } = await attempt("http://[::1]/cb", presented);
+		expectAccepted(res, presented);
+	});
+
+	it("refuses a different path or host even when both are loopback", async () => {
+		expectRefused((await attempt("http://127.0.0.1/cb", "http://127.0.0.1:49152/other")).res);
+		expectRefused((await attempt("http://127.0.0.1/cb", "http://127.0.0.2:49152/cb")).res);
+	});
+
+	it("refuses a port difference on localhost — no carve-out (RFC 8252 §8.3)", async () => {
+		expectRefused((await attempt("http://localhost/cb", "http://localhost:1234/cb")).res);
+	});
+
+	it("refuses a port difference on https", async () => {
+		expectRefused((await attempt("https://app.example/cb", "https://app.example:8443/cb")).res);
+	});
+});
+
 describe("/authorize — scope semantics (#396)", () => {
 	it("narrows an over-asking request and persists only the allowlisted scopes", async () => {
 		// The narrowing half of the §3.3 contract; the echo half (the token
