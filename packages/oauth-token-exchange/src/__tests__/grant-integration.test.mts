@@ -34,6 +34,8 @@ const client: PublicClient = {
 	allowedRedirectUris: [],
 	allowedScopes: ["read", "write"],
 	allowedAudiences: ["billing"],
+	// #326: the exchange grant denies by absence of `allowedGrantTypes`.
+	allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
 	backchannelLogoutSessionRequired: true,
 	frontchannelLogoutSessionRequired: true,
 	allowedAzpForFederationToken: false,

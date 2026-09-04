@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildActClaim } from "#/act.mjs";
+import { buildActClaim, matchesMayActClient } from "#/act.mjs";
 import type { ValidatedToken } from "#/validator/types.mjs";
 
 const tok = (overrides: Partial<ValidatedToken> = {}): ValidatedToken => ({
@@ -65,5 +65,44 @@ describe("buildActClaim", () => {
 			sub: "service-b",
 			act: { sub: "service-a", act: { sub: "service-upstream" } },
 		});
+	});
+});
+
+/**
+ * The impersonation-path matcher: no actor token exists, so the acting party
+ * is the authenticated client and `may_act` is matched against its id.
+ */
+describe("matchesMayActClient", () => {
+	it("matches a single { sub } entry naming the client", () => {
+		expect(matchesMayActClient("client-a", { sub: "client-a" })).toBe(true);
+	});
+
+	it("matches an array entry naming the client", () => {
+		expect(matchesMayActClient("client-a", [{ sub: "svc-b" }, { sub: "client-a" }])).toBe(true);
+	});
+
+	it("rejects an entry naming a different party", () => {
+		expect(matchesMayActClient("client-a", [{ sub: "svc-b" }])).toBe(false);
+	});
+
+	it("rejects an entry that pins iss — a client presents no token to have one", () => {
+		expect(matchesMayActClient("client-a", { sub: "client-a", iss: "https://auth.example" })).toBe(
+			false,
+		);
+	});
+
+	it("rejects an empty may_act array (names nobody)", () => {
+		expect(matchesMayActClient("client-a", [])).toBe(false);
+	});
+
+	it.each([
+		["string", "client-a"],
+		["number", 1],
+		["null", null],
+		["undefined", undefined],
+		["entry with non-string sub", [{ sub: 1 }]],
+		["entry with no sub", [{ other: "client-a" }]],
+	])("fails closed on malformed may_act (%s)", (_label, mayAct) => {
+		expect(matchesMayActClient("client-a", mayAct)).toBe(false);
 	});
 });

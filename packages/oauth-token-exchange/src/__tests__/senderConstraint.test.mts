@@ -33,7 +33,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
-import { createTokenExchangeGrant } from "#/grant.mjs";
+import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
@@ -57,8 +57,14 @@ const mockConfig = {
 const publicClient = (): PublicClient => ({
 	clientId: "client-a",
 	allowedRedirectUris: [],
-	allowedScopes: [],
+	// `signSelfIssuedAccessToken` defaults the subject to `scope: "read"`, so
+	// the registration names it — the client's `allowedScopes` is a ceiling on
+	// the granted scope now, and the exchange grant denies by absence of
+	// `allowedGrantTypes` (#326). Neither gate is what this file tests; both
+	// have to be satisfied to reach the binding matrix.
+	allowedScopes: ["read"],
 	allowedAudiences: [],
+	allowedGrantTypes: [TOKEN_EXCHANGE_GRANT_TYPE],
 	backchannelLogoutSessionRequired: true,
 	frontchannelLogoutSessionRequired: true,
 	allowedAzpForFederationToken: false,
