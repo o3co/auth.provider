@@ -121,14 +121,23 @@ export const mintFederationTransactionId = (): string => randomBytes(32).toStrin
 
 /**
  * Name the transaction cookie after the deployment's session cookie, the way
- * the CSRF cookie is named.
+ * the CSRF cookie is named: `<session.name>.federation`, so it inherits the
+ * operator's naming rather than introducing an unrelated one.
  *
- * One deviation, and it matters: a `__Host-` name is swapped for `__Secure-`.
- * `__Host-` requires `Path=/`, and this cookie is deliberately path-scoped to
- * the callback route, so a `__Host-` name would be silently dropped by every
- * browser and the callback would fail with nothing visibly wrong. `__Secure-`
- * asserts what this cookie actually guarantees — it is only ever set with
- * `Secure` — and carries no path constraint.
+ * The prefix is the deviation, and it is deliberate. Any prefix the session
+ * name carries is stripped and `__Secure-` is applied **unconditionally**, so
+ * the result is always `__Secure-<base>.federation` — including for a session
+ * cookie named with no prefix at all.
+ *
+ * `__Secure-` rather than `__Host-`, because `__Host-` requires `Path=/` and
+ * this cookie is deliberately path-scoped to the callback route; a `__Host-`
+ * name would be silently dropped by every browser and the callback would fail
+ * with nothing visibly wrong. Unconditionally, because unlike the session
+ * cookie — whose `Secure` flag is the operator's `session.secure` to set — this
+ * cookie is `SameSite=None` and therefore *always* issued with `Secure`. The
+ * prefix states that invariant where a browser will enforce it, so the cookie
+ * cannot be set over a plain-HTTP hop by anything, including an attacker in a
+ * position to inject one.
  */
 export const deriveFederationTransactionCookieName = (sessionCookieName: string): string => {
 	const base = sessionCookieName.replace(/^__(?:Host|Secure)-/, "");

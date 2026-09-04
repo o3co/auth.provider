@@ -181,12 +181,14 @@ So the cross-site part gets its own cookie and its own record:
 
 | | value |
 |---|---|
-| cookie name | `<session.name>.federation`, with a `__Host-` prefix swapped for `__Secure-` |
+| cookie name | `__Secure-<session.name, minus any prefix>.federation` — e.g. `__Host-auth.session` and `auth.session` both give `__Secure-auth.session.federation` |
 | attributes | `HttpOnly; Secure; SameSite=None`, `Path` scoped to that provider's callback URL, `Max-Age` = the transaction TTL (10 minutes by default) |
 | contents | an opaque 256-bit id, and nothing else |
 | record | `state`, `codeVerifier`, `nonce`, `redirectTo` and the provider name, in the session store under a `fedtx:` key prefix |
 
-The name is derived from `session.name` the way the CSRF cookie's is, so it inherits the operator's naming. The one deviation is the prefix: `__Host-` requires `Path=/`, and this cookie is deliberately path-scoped to the callback, so a `__Host-` name would be dropped by every browser. `__Secure-` says what this cookie does guarantee — it is only ever set with `Secure`, because every current browser drops a `SameSite=None` cookie that is not (the pairing `application.schema.mts` already enforces for the config-level value, #282), and Apple refuses a non-`https` redirect URI anyway.
+The name is derived from `session.name` the way the CSRF cookie's is, so it inherits the operator's naming. The prefix is the one deviation, and it is applied **unconditionally** — a session cookie with no prefix still yields a `__Secure-` transaction cookie.
+
+`__Secure-` rather than `__Host-` because `__Host-` requires `Path=/`, and this cookie is deliberately path-scoped to the callback, so a `__Host-` name would be dropped by every browser. Unconditionally because, unlike the session cookie — whose `Secure` flag is the operator's `session.secure` to set — this cookie is `SameSite=None` and therefore always issued with `Secure` (every current browser drops a `SameSite=None` cookie that is not `Secure`; the pairing `application.schema.mts` already enforces for the config-level value, #282 — and Apple refuses a non-`https` redirect URI anyway). The prefix states that invariant where the browser will enforce it.
 
 **The application session cookie keeps the attributes the deployment configured**, on every session, whether or not it ever started a `form_post` federation — a deployment running Apple beside Google sees no difference on any Google login, and no difference on the Apple browser's own session either.
 
