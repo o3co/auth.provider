@@ -206,6 +206,14 @@ export const createRouter = (
 			});
 		}
 
+		// #479: what the adapter sees of the callback, minus `code` and `state`.
+		// Both are removed rather than passed through twice: `code` reaches the
+		// adapter in its own field, `state` is the value this route has already
+		// compared against the session and the adapter has no business
+		// re-deriving, and a generic bag that still carried them would offer a
+		// second, unchecked place to read a credential from.
+		const { code: _code, state: _state, ...adapterCallbackParams } = params;
+
 		let profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>;
 		try {
 			profile = await provider.exchangeCode({
@@ -216,12 +224,12 @@ export const createRouter = (
 				// id_token via openid-client `expectedNonce`. Adapters that ignore nonce
 				// (OAuth-only) accept undefined gracefully.
 				nonce,
-				// #479: the rest of the callback's parameters, so an adapter can
-				// read identity an IdP delivers beside the token response — Apple's
+				// #479: the remaining callback parameters, so an adapter can read
+				// identity an IdP delivers beside the token response — Apple's
 				// first-authorization `user` body. Unsigned and relayed through the
 				// user agent: `mapClaims` decides what to make of it and claim
 				// precedence decides where the result may land.
-				callbackParams: params,
+				callbackParams: adapterCallbackParams,
 			});
 		} catch (err) {
 			log.warn({ err }, "federation token exchange failed");

@@ -417,6 +417,49 @@ describe("POST callback binds state / CSRF / PKCE / nonce exactly as GET does", 
 });
 
 // ---------------------------------------------------------------------------
+// callbackParams — what the adapter is and is not handed
+// ---------------------------------------------------------------------------
+
+describe("callbackParams excludes the parameters the framework binds", () => {
+	it("keeps code and state out of it on the POST callback", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		const userField = JSON.stringify({ name: { firstName: "Ada" } });
+		await flow.post({ state: flow.state, code: "apple-code", user: userField });
+
+		const call = harness.apple.calls[0];
+		// The two values the route already checked and already passes in named
+		// fields do not appear a second time under a generic bag: an adapter that
+		// could read `callbackParams.code` could read the one the route never
+		// validated against the session.
+		expect(call.callbackParams).not.toHaveProperty("code");
+		expect(call.callbackParams).not.toHaveProperty("state");
+		// Everything else survives, and the dedicated fields still carry the two.
+		expect(call.callbackParams?.user).toBe(userField);
+		expect(call.code).toBe("apple-code");
+	});
+
+	it("keeps code and state out of it on the GET callback too", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		await flow.get({ state: flow.state, code: "apple-code", extra: "kept" });
+
+		const call = harness.apple.calls[0];
+		expect(call.callbackParams).not.toHaveProperty("code");
+		expect(call.callbackParams).not.toHaveProperty("state");
+		expect(call.callbackParams?.extra).toBe("kept");
+		expect(call.code).toBe("apple-code");
+	});
+
+	it("hands the adapter an empty bag rather than nothing when there is nothing else", async () => {
+		const harness = buildApp();
+		const flow = await startFlow(harness);
+		await flow.post({ state: flow.state, code: "apple-code" });
+		expect(harness.apple.calls[0].callbackParams).toEqual({});
+	});
+});
+
+// ---------------------------------------------------------------------------
 // End-to-end: fake Apple
 // ---------------------------------------------------------------------------
 
