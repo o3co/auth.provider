@@ -16,7 +16,7 @@
 
 import { createSymmetricKeyStore, defineModule, type GrantHandler } from "@o3co/auth-provider-core";
 import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { oauthSessionModule } from "#/oauthSession.mjs";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +36,46 @@ const keyStoreModule = defineModule({
 // ---------------------------------------------------------------------------
 
 describe("oauthSessionModule", () => {
+	it("wires session liveness into the registered grant", async () => {
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: true } } },
+		};
+		const get = vi.fn(async () => null);
+		const handle = await createTestApp({
+			modules: [
+				oauthSessionModule({ config }),
+				keyStoreModule,
+				defineModule({
+					name: "test:session-store",
+					provides: {
+						userSessionStore: () => ({
+							kind: "memory" as const,
+							get,
+							create: async () => {},
+							delete: async () => {},
+						}),
+					},
+				}),
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		try {
+			const grant = handle.inspect.grants.get("session") as GrantHandler;
+			const { result } = await grant.handle({
+				body: {},
+				session: { isAuthenticated: true, sid: "revoked", user: { id: "user" } },
+				issuer: "https://issuer.test",
+				metadata: {},
+				authenticatedClient: { clientId: "app", tokenEndpointAuthMethod: "none" },
+			});
+			expect(result.status).toBe(400);
+			expect(get).toHaveBeenCalledWith("revoked");
+		} finally {
+			await handle.dispose();
+		}
+	});
 	it("has name 'oauth-session'", () => {
 		const config = makeValidAppConfig();
 		const module = oauthSessionModule({ config });
