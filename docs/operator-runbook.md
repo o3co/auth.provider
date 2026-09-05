@@ -308,6 +308,38 @@ Two cross-cutting facts about these rows:
   `"single"` it is silent. The OAuth endpoints, by contrast, run with no
   limiter at all in that case (`packages/oauth/src/routes.mts`).
 
+### Which logout endpoint invalidates what
+
+There are two, they differ, and the difference is one you have to choose
+against — a session logged out at the wrong endpoint keeps a live credential.
+
+| | `POST /session/logout` | `POST /oauth/logout` |
+|---|---|---|
+| Who calls it | the browser; the BFF / `auth.proxy` injection topology | an RP, with an `id_token_hint` |
+| express-session cookie | destroyed | destroyed, but only when the request's own cookie names the `sid` being logged out |
+| `UserSession` record | deleted | deleted |
+| subject index | entry removed | removed via the cascade |
+| federation tokens + index | removed | removed |
+| **refresh-token families** | **not revoked** | revoked |
+| RP registry / back-channel `logout_token` fanout | not run | run |
+| On store failure | logged, still `200` — the cookie is destroyed either way | `503 temporarily_unavailable`, cascade retryable |
+
+Deleting the `UserSession` record is what makes `/oauth/introspect` answer
+`active: false` and `/oauth/userinfo` refuse, so both endpoints stop an access
+token that carries a `sid`. Only `/oauth/logout` stops a **refresh** token: if
+the session completed an `/authorize` → `authorization_code` flow, call that
+one. The `session` grant issues no refresh token, so a deployment whose tokens
+all come from it is fully served by `/session/logout`.
+
+Neither endpoint reaches a resource server that validates the JWT offline —
+signature and `exp`, no introspection call. Such a consumer cannot observe a
+logout at all, and the only lever is a short `oauth.accessToken.expiresIn`.
+
+The asymmetry is structural: `cascadeLogout` lives in
+`@o3co/auth-provider-oauth` and `@o3co/auth-provider-session` cannot import it.
+It is recorded here because it changes an operator's choice, not because it is
+expected to change.
+
 ---
 
 ## 4. Alerts
@@ -331,6 +363,8 @@ stream — its level is fixed at `info`.
 | `refresh_token_revocation_store_unavailable` (error) | `oauth/src/grants/refreshToken.mts` | refreshes are answering `503` because the watermark store is unreachable |
 | `revoke_all_for_subject_incomplete`, `revoke_all_watermark_failed`, `revoke_all_list_sids_failed`, `revoke_all_cascade_failed`, `revoke_all_remove_sid_failed` (error) | `core/src/user-sessions/revokeAllForSubject.mts` | a credential change did **not** fully invalidate what was issued. `incomplete` means a store was not wired (composition gap); the others mean a wired store threw (outage — retry) |
 | `subject_session_index_write_failed` (error) | `session/src/routes/Session.mts`, `Federation.mts` | a login succeeded that a later credential-change cascade will not find |
+| `logout_user_session_delete_failed` (error) | `session/src/routes/Session.mts` | **alert on this.** `POST /session/logout` destroyed the cookie but could not delete the `UserSession` record, so an access token minted by the `session` grant keeps introspecting `active: true` until it expires. The user is out of the browser; the token is not. Same store outage the introspection liveness check fails closed on, so the exposure is bounded by whether the store recovers |
+| `logout_subject_session_index_remove_failed`, `logout_federation_token_remove_failed`, `logout_session_federation_index_remove_failed` (error) | `session/src/routes/Session.mts` | a logout left bookkeeping behind. Lower severity than the row above: the `UserSession` record is already gone, so the orphans are unreachable and bounded by TTL — but upstream-IdP tokens stay at rest for that window |
 | audit `introspect.store_unavailable`, `logout.cascade_failed` | `oauth/src/routes.mts`, `oauth/src/routes/logout.mts` | introspection is answering `active: false` for outages; a logout left state behind |
 | `mtls_revocation_unavailable_rejected` (warn), sustained | `mtls/src/fullPki/validate.mts` | your CRL distribution point or OCSP responder is down and mTLS clients cannot get tokens |
 | `mtls_revocation_unavailable_allowed` (warn), **any**, if you chose `allow` | same | each line is a certificate that was not revocation-checked; a steady rate means the PKI is effectively unrevocable |

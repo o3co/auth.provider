@@ -160,6 +160,12 @@ export const sessionModule = defineModule<
 						userRepository: deps.userRepository,
 						config,
 						userSessionStore: deps.userSessionStore,
+						// `POST /session/logout` invalidates the records the session
+						// owns, not just the cookie. Both stores are already in this
+						// module's `requires` for the federation routes, so handing
+						// them to the session routes adds no manifest surface.
+						federationTokenStore: deps.federationTokenStore,
+						sessionFederationIndex: deps.sessionFederationIndex,
 						...(deps.rateLimiter ? { rateLimiter: deps.rateLimiter } : {}),
 						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						...(deps.subjectSessionIndex ? { subjectSessionIndex: deps.subjectSessionIndex } : {}),

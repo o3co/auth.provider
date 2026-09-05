@@ -692,6 +692,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// field in. A scope-less deployment is unaffected: there is nothing
 			// to over-grant, the exchange still mints a token, it simply carries
 			// no `scope` claim.
+			//
+			// Note the axis: this is the `allowedScopes` CEILING, where the
+			// sibling grants do agree with this one. The omitted-`scope`
+			// DEFAULT is where they part company — they read `defaultScopes`,
+			// this grant inherits the subject token's scope. See the note at
+			// the `grantedScope` assignment below.
 			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
 			const clientScopeSet = new Set(client.allowedScopes ?? []);
 			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
@@ -752,12 +758,31 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// Policy hook — existing GrantPolicyHook contract.
 			// grantedScope/grantedAudience start as the narrowed values from the
 			// request validation phase above; the policy hook may further override them.
-			// An omitted `scope` inherits the subject's, clamped to the client's
-			// registration. Narrowing rather than refusing, because the caller
-			// named nothing to be refused — this is the same clamp `/authorize`
-			// and jwt-bearer apply to their inherited default, and refusing
-			// instead would make a subject token that is merely wider than this
-			// client unexchangeable rather than exchangeable for less.
+			// An omitted `scope` inherits the SUBJECT TOKEN's scope, clamped to
+			// the client's registration.
+			//
+			// This is deliberately not what the sibling grants do, and an earlier
+			// version of this comment claimed a symmetry with them that does not
+			// exist. `/authorize` (`routes/authorize.mts`), `client_credentials`
+			// (`grants/clientCredentials.mts` `resolveScope`), jwt-bearer and the
+			// device grant all resolve an omitted `scope` from the client's
+			// declared `defaultScopes`, and all refuse with `invalid_scope` when
+			// the client declares none against a non-empty allowlist — #396's
+			// deny-by-absence, which exists because "forgot to send `scope`" used
+			// to mean "grant the entire allowlist". This grant reads
+			// `defaultScopes` nowhere and refuses nothing on that axis.
+			//
+			// Inheritance is the right default HERE because the request already
+			// carries a ceiling. RFC 8693 §2.1 gives an omitted `scope` the same
+			// scope as the subject token, and unlike the sibling grants this one
+			// is handed a token whose scope is an explicit, already-authorized
+			// upper bound — there is no unbounded "maximum grant" to fall into,
+			// so the failure #396 closed cannot arise. Narrowing rather than
+			// refusing for the same reason: the caller named nothing to be
+			// refused, and refusing would make a subject token merely wider than
+			// this client unexchangeable rather than exchangeable for less. The
+			// clamp to `allowedScopes` is what keeps the client's own
+			// registration a boundary.
 			let grantedScope: readonly string[] | undefined =
 				requestedScope ?? subjectScope.filter((s) => clientScopeSet.has(s));
 			let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;

@@ -45,11 +45,59 @@ Const Module. Contributes two route bundles, both mounted at `/session`:
 |--------|---------------------------------------------------|---------------------------------|
 | GET    | /session/csrf                                     | Issue a double-submit CSRF token |
 | POST   | /session/login                                    | Username / password login       |
-| POST   | /session/logout                                   | Session logout                  |
+| POST   | /session/logout                                   | Session logout — see [what it invalidates](#what-postsessionlogout-invalidates) |
 | GET    | /session/oauth/federation/:name                   | Initiate OAuth federation flow  |
 | GET    | /session/oauth/federation/:name/callback          | Federation callback             |
 
 The `:name` path parameter corresponds to the federation key in `config.federations` (e.g. `google`, `github`, `google-work`). Unknown names return `404`.
+
+#### What `POST /session/logout` invalidates
+
+This provider has **two** logout endpoints and they do not invalidate the same
+things. Pick by what the session holds.
+
+`POST /session/logout` — the browser's own logout, and the one a BFF /
+`auth.proxy` injection topology calls. It answers `200 {"message": "Logged out
+successfully"}` and invalidates:
+
+| What | Effect |
+|------|--------|
+| the express-session cookie | destroyed |
+| the `UserSession` record for the session's `sid` | deleted — this is what makes `/oauth/introspect` report `active: false` and `/oauth/userinfo` refuse a token minted by the `session` grant |
+| the `subjectSessionIndex` entry | removed, so `revokeAllForSubject` stops enumerating a dead `sid` |
+| `federationTokenStore` + `sessionFederationIndex` entries for the `sid` | removed, so upstream-IdP tokens are not left at rest |
+| **refresh-token families bound to the `sid`** | **not revoked** |
+
+That last row is the one to read twice. A browser that logged in here and then
+completed an `/authorize` → `authorization_code` flow holds a refresh token
+whose family this endpoint does **not** revoke; the refresh token keeps working
+until it expires. Use `POST /oauth/logout` with an `id_token_hint` for that
+session — it runs the full cascade (refresh-family revoke, RP registry,
+federation, session delete) and ends the browser session too.
+
+The boundary is structural, not an oversight: the cascade
+(`packages/oauth/src/logout/cascadeLogout.mts`) needs
+`refreshTokenFamilyRevocation`, `sessionFamilyIndex` and `sessionRPRegistry`,
+which this module declares none of, and `@o3co/auth-provider-session` may not
+import `@o3co/auth-provider-oauth` — they are siblings over core.
+
+The `session` grant issues no refresh token, so a deployment whose tokens all
+come from that grant has no family to revoke and `/session/logout` is
+sufficient on its own.
+
+**Failure modes.** Every store step is best-effort and logged, never
+propagated: a store outage must not turn a logout into a `5xx` that leaves the
+user holding a live cookie. The `UserSession` delete runs **first**, before the
+cookie is destroyed and before the best-effort hygiene, so a federation-store
+outage cannot prevent the invalidation that matters. Failures are logged as
+`logout_user_session_delete_failed`,
+`logout_subject_session_index_remove_failed`,
+`logout_federation_token_remove_failed` and
+`logout_session_federation_index_remove_failed` — alert on the first. If the
+cookie destroy itself fails the response is still `500 server_error` (unchanged),
+and by then the records are already gone, so `/authorize` refuses the surviving
+cookie on its own account. A composition wiring no `userSessionStore`, or a
+session carrying no `sid`, logs out exactly as before.
 
 #### CSRF on the state-changing routes (#272)
 
