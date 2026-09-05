@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - The session grant checks a configured UserSessionStore before issuing fresh tokens, refusing missing/revoked sessions and store outages.
 - Session-grant access tokens retain validated DPoP/mTLS confirmations and the appropriate response token type.
+- Update @simplewebauthn/server to 13.3.3 for GHSA-6hxq-p678-4hr2, preserving adapter public-key types and copying credential bytes at the verification boundary. Deployments using attestation should validate real authenticators against the stricter certificate-chain checks; the default attestation preference remains none.
 
 ## [0.11.0] - 2026-09-03
 
