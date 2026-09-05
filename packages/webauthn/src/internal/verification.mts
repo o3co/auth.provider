@@ -29,11 +29,20 @@
  *
  * NOT exported from the package barrel — internal use only.
  *
- * Error-reason regex mapping (validated against SimpleWebAuthn v13.1.1 source):
+ * Error-reason regex mapping (re-validated against SimpleWebAuthn v13.3.3 source;
+ * all four target strings are unchanged since v13.1.1):
  *   /origin/i   → "origin_mismatch"
  *   /challenge/i → "challenge_mismatch"
  *   /rp.?id/i   → "rp_id_mismatch"  (matches "RP ID" from UnexpectedRPIDHash)
  *   /counter/i  → "sign_count_regression"
+ *
+ * Deliberately unmapped: attestation certificate-chain failures. Since v13.3.2
+ * (GHSA-6hxq-p678-4hr2) these throw "x5c could not be chained to any specified
+ * trust anchor", wrapped per format as "... (Apple)" / "(Android Key)" / etc.
+ * No regex above matches it, so it lands on "unknown" — the same bucket it fell
+ * into before the bump, when the message read "Subject issuer did not match
+ * issuer subject". Giving it its own discriminant is a behaviour change that
+ * belongs in its own PR, not in an advisory bump.
  *
  * Cross-refs: Plan T25 / spec §2.5 / §2.4 sign-count
  */
@@ -76,7 +85,15 @@ export type AttestationVerificationResult =
 			readonly ok: true;
 			readonly material: {
 				readonly credentialId: string;
-				readonly publicKey: Uint8Array;
+				/**
+				 * COSE public key. `Uint8Array<ArrayBuffer>` rather than a bare
+				 * `Uint8Array`: the value is always freshly allocated by
+				 * `new Uint8Array(...)` below, so its backing store is a plain
+				 * ArrayBuffer and never a SharedArrayBuffer. Stating that in the
+				 * type keeps it assignable to `@simplewebauthn/server` >= 13.3.2's
+				 * byte inputs without a second copy downstream.
+				 */
+				readonly publicKey: Uint8Array<ArrayBuffer>;
 				readonly signCount: number;
 				readonly transports?: ReadonlyArray<AuthenticatorTransport>;
 				readonly backedUp: boolean;
@@ -186,7 +203,25 @@ export async function verifyWebAuthnAssertion(
 			expectedRPID: input.expectedRpId,
 			credential: {
 				id: input.credential.credentialId,
-				publicKey: input.credential.publicKey,
+				// Defensive copy, for two independent reasons.
+				//
+				// 1. Type. `WebAuthnCredential.publicKey` is a bare `Uint8Array`
+				//    (= `Uint8Array<ArrayBufferLike>`) on purpose: a store adapter's
+				//    natural source is its driver's `Buffer`, which types as
+				//    `Buffer<ArrayBufferLike>` and would not satisfy the narrower
+				//    form. `@simplewebauthn/server` >= 13.3.2 requires
+				//    `Uint8Array<ArrayBuffer>`. `new Uint8Array(view)` always
+				//    allocates a fresh plain ArrayBuffer, so this CONVERTS rather
+				//    than asserts — it stays correct even for the (legal, if
+				//    exotic) adapter that hands back a SharedArrayBuffer-backed
+				//    view, which no cast could make safe.
+				// 2. Aliasing. The store contract documents these bytes as logically
+				//    immutable, and the in-process adapter returns its own stored
+				//    array by reference. Copying keeps a third-party library from
+				//    holding a live alias of the store's internal state.
+				//
+				// Cost is one ~77-byte COSE-key copy per assertion.
+				publicKey: new Uint8Array(input.credential.publicKey),
 				counter: input.credential.signCount,
 				// Cast: SimpleWebAuthn expects AuthenticatorTransportFuture[]
 				// (superset of our AuthenticatorTransport — adds "cable" and
