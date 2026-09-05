@@ -37,6 +37,18 @@ export interface WebAuthnCredential {
 	 * store's view of the credential. (Convention: `Uint8Array` record
 	 * fields are treated as readonly even though TypeScript has no
 	 * `ReadonlyUint8Array` type.)
+	 *
+	 * Deliberately a bare `Uint8Array` (= `Uint8Array<ArrayBufferLike>`) and
+	 * NOT `Uint8Array<ArrayBuffer>`. An adapter's natural source for these
+	 * bytes is its driver's `Buffer`, which TypeScript gives the wide
+	 * `Buffer<ArrayBufferLike>` type; narrowing this field would reject that
+	 * at compile time even when an adapter returns an ArrayBuffer-backed
+	 * Buffer. Node also permits SharedArrayBuffer-backed Buffers; both are
+	 * accepted here and copied into a plain ArrayBuffer at verification.
+	 * `@simplewebauthn/server` >= 13.3.2 does require the narrow form, so the
+	 * WebAuthn package copies these bytes at that one call boundary
+	 * (`packages/webauthn/src/internal/verification.mts`) instead. Do not
+	 * "fix" the width here — this port is implemented outside this repo.
 	 */
 	readonly publicKey: Uint8Array;
 	readonly signCount: number;

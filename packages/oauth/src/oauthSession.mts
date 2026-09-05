@@ -74,6 +74,7 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 		// `config` is required because createSessionGrant uses config.oauth.accessToken.expiresIn
 		// when building the token response for authenticated sessions.
 		requires: ["config", "keyStore"],
+		optional: ["userSessionStore"],
 		contributes: {
 			grants: {
 				session: (deps) => createSessionGrant(deps),
