@@ -60,6 +60,8 @@ Registers the `"session"` grant type in the grant registry. Activation is gated 
 When a `userSessionStore` is wired, every session grant requires a non-empty
 `sid` and a live UserSession before signing a token. Missing or revoked sessions
 return `400 invalid_grant`; store failures return `503 temporarily_unavailable`.
+The tracked session must have a non-empty subject matching the browser user;
+malformed or inconsistent identities are refused before any token is signed.
 Deployments without a session store retain the existing browser-session behavior.
 Validated DPoP/mTLS bindings are retained in the access token's `cnf`;
 DPoP responses use `token_type=DPoP`, while mTLS responses retain `Bearer`.

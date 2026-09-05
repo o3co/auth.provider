@@ -55,6 +55,7 @@ async function buildApp(
 	store?: UserSessionStore,
 	binding?: TokenBinding,
 	sid: string | undefined = SID,
+	browserUser: { id?: unknown } = { id: SUB },
 ) {
 	const client = {
 		clientId: "app",
@@ -88,7 +89,7 @@ async function buildApp(
 	const app = express();
 	app.use((req, _res, next) => {
 		// A persisted express-session survives an independent UserSession revocation.
-		req.session = { isAuthenticated: true, user: { id: SUB }, sid } as typeof req.session;
+		req.session = { isAuthenticated: true, user: browserUser, sid } as typeof req.session;
 		// The binding middleware has already validated this evidence. These tests
 		// exercise dispatch and issuance, not proof parsing or TLS termination.
 		if (binding) req.tokenBinding = binding;
@@ -105,6 +106,33 @@ const mint = (app: express.Express) =>
 		.send({ grant_type: "session", client_id: "app", scope: "read" });
 
 describe("session grant authentication and token binding", () => {
+	it.each([{ id: "another-user" }, {}, { id: null }])(
+		"refuses a browser identity that does not match the tracked subject: %j",
+		async (browserUser) => {
+			const result = await mint(await buildApp(await liveStore(), undefined, SID, browserUser));
+			expect(result.status).toBe(400);
+			expect(result.body.error).toBe("invalid_grant");
+			expect(result.body.access_token).toBeUndefined();
+		},
+	);
+
+	it.each([undefined, null, "", 42])("refuses an invalid tracked subject: %j", async (sub) => {
+		const store = await liveStore();
+		const record = await store.get(SID);
+		if (!record) throw new Error("test session was not created");
+		vi.spyOn(store, "get").mockResolvedValue({ ...record, sub: sub as string });
+		const result = await mint(await buildApp(store));
+		expect(result.status).toBe(400);
+		expect(result.body.error).toBe("invalid_grant");
+		expect(result.body.access_token).toBeUndefined();
+	});
+
+	it("issues the tracked subject when browser and store identities agree", async () => {
+		const result = await mint(await buildApp(await liveStore()));
+		expect(result.status).toBe(200);
+		expect(decodeJwt(result.body.access_token).sub).toBe(SUB);
+	});
+
 	it("refuses fresh issuance after UserSession revocation with the browser session retained", async () => {
 		const store = await liveStore();
 		const app = await buildApp(store);

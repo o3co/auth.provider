@@ -88,6 +88,8 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 			// is optional, but a configured store requires a live sid.
 			const sid =
 				typeof session.sid === "string" && session.sid.length > 0 ? session.sid : undefined;
+			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
+			let userId = typeof rawUserId === "string" ? rawUserId : undefined;
 			if (deps.userSessionStore) {
 				if (!sid) {
 					return {
@@ -99,7 +101,15 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 					};
 				}
 				try {
-					if (!(await deps.userSessionStore.get(sid))) {
+					const tracked = await deps.userSessionStore.get(sid);
+					// The tracked identity is authoritative. A retained browser
+					// identity must agree before its claims can satisfy issuance policy.
+					if (
+						!tracked ||
+						typeof tracked.sub !== "string" ||
+						tracked.sub.length === 0 ||
+						tracked.sub !== userId
+					) {
 						return {
 							result: {
 								status: 400,
@@ -108,6 +118,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 							},
 						};
 					}
+					userId = tracked.sub;
 				} catch {
 					return {
 						result: {
@@ -158,9 +169,6 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 					};
 				}
 			}
-
-			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
-			const userId = typeof rawUserId === "string" ? rawUserId : undefined;
 
 			// R3: bind the token to the browser session that produced it. Without
 			// `sid` nothing linked the two, so `/oauth/logout` — which deletes the
