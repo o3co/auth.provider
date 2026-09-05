@@ -199,7 +199,9 @@ Wire the `rateLimiter` ComponentMap slot (the Redis adapter in a scaled deployme
 - Your threat model requires authenticator provenance verification (e.g. enterprise device fleet, FIDO2 metadata service consumer)
 - You have a curated trust anchor set (FIDO MDS root list) wired into your verifier
 
-The library does NOT ship attestation root verification — `"direct"` extracts the chain but consumer-side validation is your responsibility.
+Attestation root verification is partial, and which half you get depends on the format. `@simplewebauthn/server` ships default trust anchors for `apple`, `android-key` and `android-safetynet`, and validates the `x5c` chain against them. For `packed`, `tpm` and `fido-u2f` it holds no anchors and skips path validation entirely, so provenance for those formats remains your responsibility.
+
+Since 13.3.2 (GHSA-6hxq-p678-4hr2) the check for the anchored formats is fail-closed: a chain that does not actually terminate at a shipped anchor is now rejected where earlier versions accepted it. The library throws on a chain failure, and none of the reason regexes below match its message, so it surfaces from the verify endpoint as `400 {"error": "unknown"}` — there is no dedicated discriminant for it.
 
 ## SECURITY — sign-count handling
 
@@ -207,7 +209,11 @@ The grant rejects sign-count regressions per WebAuthn §2.4 (clone detection). T
 
 ## Dependency: SimpleWebAuthn
 
-`@simplewebauthn/server` is pinned to `13.1.1` (S12). The verification helpers and options generators wrap this library; Dependabot tracks major bumps.
+`@simplewebauthn/server` is pinned to `13.3.3` (S12). The verification helpers and options generators wrap this library; Dependabot tracks major bumps.
+
+Pinned past `13.3.1` for GHSA-6hxq-p678-4hr2 — registration attestation certificate chains were not reliably checked against a trust anchor. Deployments on the `attestationPreference = "none"` default are unaffected: that path never inspects a certificate. See [`attestationPreference` default](#security--attestationpreference-default) for who is.
+
+Known caveat carried by 13.3.2 and 13.3.3: the rewritten path validation requires every certificate in `x5c` to appear in the chain it builds, so an `x5c` carrying a cross-signed certificate is rejected. Upstream fixed this in 14.0.0. A deployment relying on Apple or Android attestation should canary real authenticators before rolling this out.
 
 ## Wave 1 scope boundaries
 

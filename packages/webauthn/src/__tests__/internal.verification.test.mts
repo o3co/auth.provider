@@ -595,3 +595,80 @@ describe("Codex Round 2 P1-1: userVerification enforcement", () => {
 		expect((callArgs as Record<string, unknown>).requireUserVerification).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Stored public key is copied at the SimpleWebAuthn boundary
+// ---------------------------------------------------------------------------
+
+describe("stored publicKey is copied before it reaches SimpleWebAuthn", () => {
+	/**
+	 * Builds a credential whose publicKey is a fresh array owned by this test,
+	 * so a missing copy shows up here rather than as cross-test pollution of
+	 * the shared STUB_PUBLIC_KEY.
+	 */
+	function makeOwnedCredential(): WebAuthnCredential {
+		return { ...makeStoredCredential(5), publicKey: new Uint8Array([1, 2, 3, 4]) };
+	}
+
+	function mockVerifiedOnce(): void {
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: {
+				newCounter: 10,
+				credentialID: "dGVzdC1jcmVkZW50aWFsLWlk",
+				userVerified: false,
+				credentialDeviceType: "singleDevice",
+				credentialBackedUp: false,
+				authenticatorExtensionResults: undefined,
+				origin: "https://example.com",
+				rpID: "example.com",
+			},
+		});
+	}
+
+	it("forwards equal bytes on a plain-ArrayBuffer-backed copy, not the stored array", async () => {
+		mockVerifiedOnce();
+		const stored = makeOwnedCredential();
+
+		await verifyWebAuthnAssertion({
+			credential: stored,
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		expect(mockVerifyAuthentication).toHaveBeenCalledOnce();
+		const [callArgs] = mockVerifyAuthentication.mock.calls[0];
+		const forwarded = callArgs.credential.publicKey;
+
+		// Same bytes...
+		expect(Array.from(forwarded)).toEqual([1, 2, 3, 4]);
+		// ...on a different array, over a different, non-shared buffer.
+		// `@simplewebauthn/server` >= 13.3.2 requires a plain ArrayBuffer backing.
+		expect(forwarded).not.toBe(stored.publicKey);
+		expect(forwarded.buffer).not.toBe(stored.publicKey.buffer);
+		expect(forwarded.buffer).toBeInstanceOf(ArrayBuffer);
+	});
+
+	it("mutation of the forwarded array cannot corrupt the stored credential", async () => {
+		mockVerifiedOnce();
+		const stored = makeOwnedCredential();
+
+		await verifyWebAuthnAssertion({
+			credential: stored,
+			response: STUB_AUTHENTICATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		const [callArgs] = mockVerifyAuthentication.mock.calls[0];
+		// Stand-in for a third party writing through the reference it was handed.
+		// The store contract documents these bytes as logically immutable, and the
+		// in-process adapter returns its own stored array by reference.
+		callArgs.credential.publicKey[0] = 99;
+
+		expect(Array.from(stored.publicKey)).toEqual([1, 2, 3, 4]);
+	});
+});
