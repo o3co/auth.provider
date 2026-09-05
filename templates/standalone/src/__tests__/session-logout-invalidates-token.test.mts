@@ -217,9 +217,11 @@ describe("POST /session/logout invalidates the session grant's access token", ()
 		// session so the follow-up logout needs no second round trip. The
 		// mechanism is a signed double-submit, so the cookie's value IS the
 		// token the header has to echo; the pre-login token no longer matches.
+		const csrfCookiePrefix = `${config.session.name}.csrf=`;
 		const reissued = loginCookies
-			.map((c) => /^auth\.sid\.csrf=([^;]+)/.exec(c)?.[1])
-			.find((v): v is string => v !== undefined);
+			.find((c) => c.startsWith(csrfCookiePrefix))
+			?.slice(csrfCookiePrefix.length)
+			.split(";")[0];
 		expect(reissued).toBeDefined();
 		return {
 			cookies: loginCookies,
