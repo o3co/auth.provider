@@ -29,6 +29,10 @@
  *      (`attestationType` accepts only `'direct' | 'enterprise' | 'none'`).
  *   5. Set `authenticatorSelection.residentKey = "preferred"` to enable
  *      discoverable credentials by default (WebAuthn §2.4).
+ *   6. Require an ArrayBuffer-backed `challenge` (see the field docs below).
+ *      SimpleWebAuthn >= 13.3.2 types its byte inputs as `Uint8Array<ArrayBuffer>`
+ *      rather than the `Uint8Array<ArrayBufferLike>` default, i.e. it will not
+ *      accept a view onto a SharedArrayBuffer.
  *
  * NOT exported from the package barrel — internal use only.
  *
@@ -57,7 +61,18 @@ export async function generateRegistrationOptionsForUser(args: {
 	readonly userName: string;
 	readonly userDisplayName: string;
 	readonly excludeCredentials: readonly WebAuthnCredential[];
-	readonly challenge: Uint8Array;
+	/**
+	 * Ceremony challenge, ArrayBuffer-backed.
+	 *
+	 * `Uint8Array<ArrayBuffer>` rather than a bare `Uint8Array` (which since
+	 * TypeScript 5.7 means `Uint8Array<ArrayBufferLike>` and so admits a
+	 * SharedArrayBuffer backing) because `@simplewebauthn/server` >= 13.3.2
+	 * requires the non-shared form. Both callers build this with
+	 * `crypto.getRandomValues(new Uint8Array(32))`, which already produces
+	 * exactly this type — the bare annotation was widening a value that was
+	 * never actually wide.
+	 */
+	readonly challenge: Uint8Array<ArrayBuffer>;
 }): Promise<PublicKeyCredentialCreationOptionsJSON> {
 	// SimpleWebAuthn v13.1.1 removed "indirect" from attestationType.
 	// Map "indirect" → "none" (least-privilege fallback).
@@ -108,7 +123,18 @@ export async function generateAuthenticationOptionsForUser(args: {
 	 * so the client browser prompts the user to pick an available passkey).
 	 */
 	readonly allowCredentials: readonly WebAuthnCredential[];
-	readonly challenge: Uint8Array;
+	/**
+	 * Ceremony challenge, ArrayBuffer-backed.
+	 *
+	 * `Uint8Array<ArrayBuffer>` rather than a bare `Uint8Array` (which since
+	 * TypeScript 5.7 means `Uint8Array<ArrayBufferLike>` and so admits a
+	 * SharedArrayBuffer backing) because `@simplewebauthn/server` >= 13.3.2
+	 * requires the non-shared form. Both callers build this with
+	 * `crypto.getRandomValues(new Uint8Array(32))`, which already produces
+	 * exactly this type — the bare annotation was widening a value that was
+	 * never actually wide.
+	 */
+	readonly challenge: Uint8Array<ArrayBuffer>;
 }): Promise<PublicKeyCredentialRequestOptionsJSON> {
 	return swGenAuth({
 		rpID: args.config.rpId,
