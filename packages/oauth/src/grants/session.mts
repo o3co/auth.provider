@@ -82,6 +82,43 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 				};
 			}
 
+			// express-session and UserSession are separate stores. A retained
+			// browser cookie must not mint fresh tokens after the tracked session
+			// is revoked or expires. Match authorization-code issuance: tracking
+			// is optional, but a configured store requires a live sid.
+			const sid =
+				typeof session.sid === "string" && session.sid.length > 0 ? session.sid : undefined;
+			if (deps.userSessionStore) {
+				if (!sid) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "session identifier (sid) is required",
+						},
+					};
+				}
+				try {
+					if (!(await deps.userSessionStore.get(sid))) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "session_invalid",
+							},
+						};
+					}
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "session store unavailable",
+						},
+					};
+				}
+			}
+
 			// #297: this grant mints a token straight from the browser session, so
 			// it is the second point (with `/authorize`) that holds the user at
 			// issuance and therefore the second the gate has to cover. Without it
@@ -136,9 +173,6 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 			// No `family_id` is stamped alongside it: this grant issues no refresh
 			// token, so a family id would name a family nothing ever opens or
 			// revokes. `sid` is the whole binding.
-			const sid =
-				typeof session.sid === "string" && session.sid.length > 0 ? session.sid : undefined;
-
 			// `allowedAudiences[0]` is the client's configured resource audience, and
 			// per the AuthenticatedClient contract a grant issuing tokens straight
 			// from the client record takes it as the default `aud`. Forcing the
@@ -152,25 +186,30 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 			// matters either way is that `aud` is never null — an audience-less
 			// token was half of what made the old path a self-elevation.
 			const audience = client.allowedAudiences?.[0] ?? client.clientId;
+			const confirmation = ctx.tokenBinding?.confirmation;
 
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse({
-						accessToken: await generateToken(
-							{ ...(sid ? { sid } : {}) },
-							{
-								keyStore,
-								expiresIn: config.oauth.accessToken.expiresIn,
-								issuer,
-								audience,
-								subject: userId ?? null,
-								authorizedParty: client.clientId,
-								scope: scopes?.join(" ") ?? null,
-								tokenType: "at+jwt",
-							},
-						),
-					}),
+					tokens: generateTokenResponse(
+						{
+							accessToken: await generateToken(
+								{ ...(sid ? { sid } : {}) },
+								{
+									keyStore,
+									expiresIn: config.oauth.accessToken.expiresIn,
+									issuer,
+									audience,
+									subject: userId ?? null,
+									authorizedParty: client.clientId,
+									scope: scopes?.join(" ") ?? null,
+									tokenType: "at+jwt",
+									...(confirmation ? { confirmation } : {}),
+								},
+							),
+						},
+						{ tokenType: ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer" },
+					),
 				},
 			};
 		},

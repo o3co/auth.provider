@@ -57,6 +57,14 @@ function oauthSessionModule(params: {
 
 Registers the `"session"` grant type in the grant registry. Activation is gated on `config.oauth.grants.session.enabled`. Use this sub-module directly when you need to compose the grant registry manually.
 
+When a `userSessionStore` is wired, every session grant requires a non-empty
+`sid` and a live UserSession before signing a token. Missing or revoked sessions
+return `400 invalid_grant`; store failures return `503 temporarily_unavailable`.
+Deployments without a session store retain the existing browser-session behavior.
+Validated DPoP/mTLS bindings are retained in the access token's `cnf`;
+DPoP responses use `token_type=DPoP`, while mTLS responses retain `Bearer`.
+The resource server must support and verify the corresponding possession evidence.
+
 ---
 
 ### `oauthAuthorizationModule`
