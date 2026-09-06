@@ -13,6 +13,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Session-grant access tokens retain validated DPoP/mTLS confirmations and the appropriate response token type.
 - Update @simplewebauthn/server to 13.3.3 for GHSA-6hxq-p678-4hr2, preserving adapter public-key types and copying credential bytes at the verification boundary. Deployments using attestation should validate real authenticators against the stricter certificate-chain checks; the default attestation preference remains none.
 
+### Fixed
+
+- **The standalone template's shutdown could still wedge, and could lose the
+  lines saying why** (#290 follow-up). `finish` awaited `cleanup` with no
+  deadline, and the drain deadline is already cleared by the time it runs — so a
+  dispose that never settled meant `exit` was never reached, which is the
+  failure #290 added the drain deadline to remove, moved one step later.
+  `cleanup` is now raced against `cleanupTimeoutMs` (defaulting to
+  `drainTimeoutMs`) and a timeout is reported as a shutdown failure.
+
+  Separately, the default `exit` called `process.exit` in the same tick as the
+  last `logger.error`. pino's default destination is not synchronous, so the
+  `cleanup failed` line an operator would go looking for could be dropped. The
+  default now yields the loop once first; `deferExit` is exported so a
+  deployment needing certainty can pass an `exit` that flushes its own
+  transport.
+
+  Both were found reviewing the copies of this file in
+  [auth.proxy#81](https://github.com/o3co/auth.proxy/pull/81) and
+  [auth.policy-verifier#210](https://github.com/o3co/auth.policy-verifier/pull/210),
+  which took this implementation as their starting point.
+
 ## [0.11.0] - 2026-09-03
 
 ### Added
