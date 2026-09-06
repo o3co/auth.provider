@@ -30,6 +30,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   deployment needing certainty can pass an `exit` that flushes its own
   transport.
 
+  The final `graceful shutdown: complete` line also said `reason: "drained"`
+  next to a non-zero exit code when it was cleanup that failed. `reason` now
+  names whatever decided the exit code (`cleanup-timeout` / `cleanup-failed`),
+  and the drain outcome keeps its own `drain` key, so the line an operator
+  alerts on is internally consistent without losing either fact.
+
   Both were found reviewing the copies of this file in
   [auth.proxy#81](https://github.com/o3co/auth.proxy/pull/81) and
   [auth.policy-verifier#210](https://github.com/o3co/auth.policy-verifier/pull/210),
