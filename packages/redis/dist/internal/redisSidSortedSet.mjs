@@ -1,0 +1,87 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * Module-level monotonic counter used as the ZADD score.
+ *
+ * Using `Date.now()` alone is insufficient for insertion-order guarantees:
+ * multiple sequential `await add(...)` calls within the same millisecond
+ * receive the same score, and Redis returns members with equal scores in an
+ * undefined (lexicographic or internal hash) order — violating the
+ * load-bearing ordering contract of `SessionFederationIndex` (A4 §5.4).
+ *
+ * A module-level auto-increment counter guarantees strict monotonicity across
+ * all add() calls in the current process:
+ *   - ZADD NX assigns the score on first add; subsequent adds for the same
+ *     member are no-ops (score preserved), satisfying the NX contract.
+ *   - ZRANGE ascending score == call-site insertion order unconditionally.
+ *
+ * Process-restart behaviour: the counter resets to 0. If the same Redis key
+ * survives a restart (i.e. it has not yet TTL-expired), new members added
+ * after restart may receive a lower score than pre-restart members and
+ * therefore sort ahead of them. In practice this case cannot occur because
+ * PEXPIREAT synchronises key lifetime to session.expiresAt; a restarted
+ * process issues a new session (new key prefix) before any add.
+ *
+ * JavaScript `number` range: 2^53 - 1 ≈ 9 × 10^15. At 1 million adds/second
+ * the counter overflows after ~285 years — treated as unbounded in practice.
+ */
+let _insertionCounter = 0;
+/**
+ * Private redis helper used by `SessionFamilyIndex` + `SessionFederationIndex`.
+ * Single-key ZADD NX + PEXPIREAT pipeline keyed by `${keyPrefix}${sid}`.
+ *
+ * Per A4 §7.2.2.
+ *
+ * **NX semantics**: ZADD ... NX does NOT update the existing member's score.
+ * Original insertion-time score is preserved, so re-add of an existing
+ * member does NOT promote its position. Load-bearing for
+ * `SessionFederationIndex` ordering contract (A4 §5.4).
+ *
+ * **TTL contract** (identical to `createRedisSidHash`): callers MUST pass
+ * `session.expiresAt`; same-sid writes use the SAME `expiresAt`; writes
+ * after expiry no-op.
+ *
+ * **Score**: monotonic module-level counter (see `_insertionCounter` above).
+ * The counter replaces `Date.now()` as the score source to guarantee strict
+ * insertion-order even when multiple adds execute within the same millisecond.
+ */
+export function createRedisSidSortedSet(opts) {
+    const k = (sid) => `${opts.keyPrefix}${sid}`;
+    return {
+        async add(sid, member, expiresAt) {
+            const expiresAtMs = expiresAt.getTime();
+            // Guard: no-op writes after expiry.
+            if (expiresAtMs <= Date.now())
+                return;
+            // Monotonically increasing score — guarantees insertion order even
+            // when multiple adds execute within the same millisecond.
+            const score = ++_insertionCounter;
+            const pipeline = opts.client.multi();
+            pipeline.zAdd(k(sid), { score, value: member }, { NX: true });
+            pipeline.pExpireAt(k(sid), expiresAtMs);
+            await pipeline.exec();
+        },
+        async list(sid) {
+            return opts.client.zRange(k(sid), 0, -1);
+        },
+        async remove(sid, member) {
+            await opts.client.zRem(k(sid), member);
+        },
+        async removeBySid(sid) {
+            await opts.client.del(k(sid));
+        },
+    };
+}

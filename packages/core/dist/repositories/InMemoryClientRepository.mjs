@@ -1,0 +1,139 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import crypto from "node:crypto";
+import bcrypt from "bcrypt";
+import { z } from "zod";
+/**
+ * Validates that a URL string uses only `http:` or `https:` schemes.
+ * Rejects `javascript:`, `data:`, `file:`, and other dangerous schemes that
+ * could enable XSS when embedded in `<iframe src="...">` (front-channel logout)
+ * or used in redirect flows.
+ *
+ * @internal — shared only with unit tests in this package.
+ */
+const httpUrlSchema = z
+    .string()
+    .url()
+    .refine((u) => {
+    try {
+        const scheme = new URL(u).protocol;
+        return scheme === "https:" || scheme === "http:";
+    }
+    catch {
+        // new URL() threw — the string is not a valid absolute URL;
+        // z.string().url() already rejects it, so return false here too.
+        return false;
+    }
+}, { message: "URL must use http: or https: scheme" });
+/**
+ * @internal
+ *
+ * Zod schema for per-client configuration entries consumed by the in-memory and
+ * YAML client repositories. NOT part of the public API — consumers implementing
+ * a custom `ClientRepository` should define their own input schema suited to
+ * their backing store (database row, JWT claims, LDAP attributes, etc.).
+ * This schema is exported only to share fixtures with unit tests within the
+ * package.
+ */
+export const ClientEntrySchema = z
+    .object({
+    clientSecret: z.string().min(1),
+    allowedRedirectUris: z.array(z.string()).default([]),
+    allowedScopes: z.array(z.string()).default([]),
+    // NEW (TODO-F-5): Logout metadata.
+    // Use httpUrlSchema (not z.string().url()) for fields that end up in iframe src
+    // or redirect targets — rejects javascript:, data:, file: to prevent XSS.
+    postLogoutRedirectUris: z.array(httpUrlSchema).optional(),
+    backchannelLogoutUri: httpUrlSchema.optional(),
+    // NOTE: OIDC Back-Channel Logout 1.0 §2.2 defines backchannel_logout_session_required
+    // as defaulting to `false` when omitted. This implementation intentionally defaults to
+    // `true` to include `sid` in logout_token by default, which mitigates CSRF / session-
+    // confusion risk for self-hosted deployments where RPs often cannot correlate logouts
+    // without sid. Clients that want the spec-default behavior must set the field explicitly
+    // to `false`. The OIDC Discovery metadata (`backchannel_logout_session_supported`,
+    // `frontchannel_logout_session_supported`) must advertise `true` — see Task 7.
+    backchannelLogoutSessionRequired: z.boolean().optional().default(true),
+    frontchannelLogoutUri: httpUrlSchema.optional(),
+    frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
+    // NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
+    allowedAzpForFederationToken: z.boolean().optional().default(false),
+})
+    .strict();
+export class InMemoryClientRepository {
+    clients;
+    constructor(clients) {
+        // Parse each entry through the schema to enforce defaults (e.g. backchannelLogoutSessionRequired
+        // and frontchannelLogoutSessionRequired default to `true`).
+        this.clients = new Map(Array.from(clients.entries()).map(([id, entry]) => [id, ClientEntrySchema.parse(entry)]));
+    }
+    async findById(clientId) {
+        const entry = this.clients.get(clientId);
+        if (!entry)
+            return null;
+        return {
+            clientId,
+            allowedRedirectUris: entry.allowedRedirectUris,
+            allowedScopes: entry.allowedScopes,
+            ...(entry.postLogoutRedirectUris !== undefined && {
+                postLogoutRedirectUris: entry.postLogoutRedirectUris,
+            }),
+            ...(entry.backchannelLogoutUri !== undefined && {
+                backchannelLogoutUri: entry.backchannelLogoutUri,
+            }),
+            backchannelLogoutSessionRequired: entry.backchannelLogoutSessionRequired,
+            ...(entry.frontchannelLogoutUri !== undefined && {
+                frontchannelLogoutUri: entry.frontchannelLogoutUri,
+            }),
+            frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
+            allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+        };
+    }
+    async authenticate(clientId, secret) {
+        const entry = this.clients.get(clientId);
+        if (!entry)
+            return null;
+        const stored = entry.clientSecret;
+        const isBcrypt = /^\$2[aby]\$/.test(stored);
+        let match;
+        if (isBcrypt) {
+            match = await bcrypt.compare(secret, stored);
+        }
+        else {
+            const a = Buffer.from(secret);
+            const b = Buffer.from(stored);
+            match = a.length === b.length && crypto.timingSafeEqual(a, b);
+        }
+        if (!match)
+            return null;
+        return {
+            clientId,
+            allowedRedirectUris: entry.allowedRedirectUris,
+            allowedScopes: entry.allowedScopes,
+            ...(entry.postLogoutRedirectUris !== undefined && {
+                postLogoutRedirectUris: entry.postLogoutRedirectUris,
+            }),
+            ...(entry.backchannelLogoutUri !== undefined && {
+                backchannelLogoutUri: entry.backchannelLogoutUri,
+            }),
+            backchannelLogoutSessionRequired: entry.backchannelLogoutSessionRequired,
+            ...(entry.frontchannelLogoutUri !== undefined && {
+                frontchannelLogoutUri: entry.frontchannelLogoutUri,
+            }),
+            frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
+            allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+        };
+    }
+}

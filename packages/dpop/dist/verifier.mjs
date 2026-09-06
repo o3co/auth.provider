@@ -1,0 +1,188 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+import { importJWK, jwtVerify } from "jose";
+import { DPoPError } from "./errors.mjs";
+import { normalizeHtu } from "./htu-normalize.mjs";
+import { parseProof } from "./proof.mjs";
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const DEFAULT_ALG_WHITELIST = ["ES256", "ES384", "EdDSA", "RS256"];
+const DEFAULT_IAT_WINDOW_SECONDS = 60;
+const DEFAULT_REPLAY_TTL_SECONDS = 300;
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+/**
+ * Reconstruct the effective request URL for htu comparison. Includes the
+ * query string so `normalizeHtu` can strip it uniformly from both sides.
+ */
+const buildRequestUrl = (req) => {
+    const proto = req.protocol;
+    const host = req.get("host") ?? "";
+    // req.originalUrl includes query string; normalizeHtu strips it.
+    return `${proto}://${host}${req.originalUrl}`;
+};
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+/**
+ * Create a DPoP `TokenBindingMechanism` for use with `tokenBindingMw`.
+ *
+ * The returned mechanism:
+ *   - Returns `null` when the `DPoP` header is absent (non-DPoP request).
+ *   - Throws `DPoPError` for any proof invalidity.
+ *   - Returns `{ kind: "dpop", confirmation: { jkt } }` on success.
+ *
+ * The `jkt` in the confirmation is the RFC 7638 SHA-256 thumbprint of the
+ * proof's JWK, computed by `parseProof` (Sub-PR 2a) — not re-derived here.
+ *
+ * Per Wave 2 Phase 2 spec §8 (factory contract) + §6 (validation sequence).
+ */
+export const createDPoPMechanism = (options) => {
+    const algWhitelist = options.algWhitelist ?? DEFAULT_ALG_WHITELIST;
+    const iatWindowSeconds = options.iatWindowSeconds ?? DEFAULT_IAT_WINDOW_SECONDS;
+    const replayTtlSeconds = options.replayTtlSeconds ?? DEFAULT_REPLAY_TTL_SECONDS;
+    const { replayStore, logger } = options;
+    return {
+        kind: "dpop",
+        /**
+         * `true` — DPoP is an explicit application-layer construction: the
+         * client intentionally presents the `DPoP` header. Per cluster spec
+         * §3.5, explicit-intent mechanisms win over ambient-intent mechanisms
+         * (mTLS) in `intent-explicit` dispatch mode.
+         */
+        intentExplicit: true,
+        extract: async (req) => {
+            // Step 1 (spec §6): DPoP header presence.
+            const header = req.get("dpop");
+            if (header === undefined) {
+                return null; // non-DPoP request — no binding
+            }
+            // Step 2 (spec §6): Only a single DPoP header value is permitted.
+            if (header.includes(",")) {
+                throw new DPoPError("multiple_headers", "Multiple DPoP header values presented");
+            }
+            // Steps 3–9 (spec §6): Structural validation + JWK screening + jkt.
+            // `parseProof` is async (computes jkt via SubtleCrypto in proof.mts).
+            // The flat DPoPProof shape from Sub-PR 2a: proof.jwk, proof.alg, proof.jkt.
+            const proof = await parseProof(header);
+            // Step 5 (spec §6): Algorithm allowlist check.
+            // parseProof ensures alg is a non-empty string; whitelist check is here.
+            if (!algWhitelist.includes(proof.alg)) {
+                logger?.warn({ alg: proof.alg, whitelist: algWhitelist }, "dpop_alg_not_allowed");
+                throw new DPoPError("alg_not_allowed", `alg ${proof.alg} is not in the allowlist`);
+            }
+            // Step 8 (spec §6): Signature verification.
+            // Import the public key from proof.jwk (flat field from Sub-PR 2a).
+            try {
+                const publicKey = await importJWK(proof.jwk, proof.alg);
+                await jwtVerify(header, publicKey, { typ: "dpop+jwt" });
+            }
+            catch (err) {
+                // Re-throw DPoPError as-is (shouldn't happen here, but safe).
+                if (err instanceof DPoPError)
+                    throw err;
+                logger?.warn({ err }, "dpop_signature_invalid");
+                throw new DPoPError("signature_invalid", "DPoP proof signature verification failed");
+            }
+            // Step 10 (spec §6): HTTP method match.
+            if (proof.claims.htm.toUpperCase() !== req.method.toUpperCase()) {
+                throw new DPoPError("htm_mismatch", "DPoP proof htm does not match request method", {
+                    expected: req.method.toUpperCase(),
+                    presented: proof.claims.htm,
+                });
+            }
+            // Step 11 (spec §6): HTTP URI match — both sides normalized per §7.
+            // `normalizeHtu` throws when either URL contains userinfo (the
+            // reconstruction drops `username`/`password`, which would otherwise
+            // let `https://attacker:pwn@as.example/...` equality-match the
+            // server-built URL after canonicalization). Wrap so the contract
+            // stays inside `DPoPError`.
+            let expectedHtu;
+            let presentedHtu;
+            try {
+                expectedHtu = normalizeHtu(buildRequestUrl(req));
+                presentedHtu = normalizeHtu(proof.claims.htu);
+            }
+            catch (err) {
+                throw new DPoPError("malformed_proof", `DPoP htu canonicalization failed: ${err.message}`);
+            }
+            if (expectedHtu !== presentedHtu) {
+                throw new DPoPError("htu_mismatch", "DPoP proof htu does not match request URI", {
+                    expected: expectedHtu,
+                    presented: presentedHtu,
+                });
+            }
+            // Step 12 (spec §6): iat acceptance window.
+            const nowSec = Math.floor(Date.now() / 1000);
+            const drift = Math.abs(nowSec - proof.claims.iat);
+            if (drift > iatWindowSeconds) {
+                throw new DPoPError("iat_out_of_window", "DPoP proof iat is outside the acceptance window", {
+                    windowSeconds: iatWindowSeconds,
+                    drift,
+                });
+            }
+            // Step 13 (spec §6): JKT — already computed by parseProof (Sub-PR 2a).
+            // Do NOT re-compute: proof.jkt is the canonical value.
+            const { jkt } = proof;
+            // Step 14 (spec §6): Replay check — atomic (jti, jkt) pair seen/mark.
+            // Wrap so that transport faults (Redis ECONNREFUSED, etc.) surface
+            // as the distinct `replay_store_unavailable` audit signal rather
+            // than leaking a raw infrastructure error through `tokenBindingMw`
+            // — operators triaging audit events need to distinguish "client
+            // sent garbage" from "replay store is down" even when both map to
+            // the same RFC 9449 §7 wire code `invalid_dpop_proof`.
+            let alreadySeen;
+            try {
+                alreadySeen = await replayStore.seen(proof.claims.jti, jkt, replayTtlSeconds);
+            }
+            catch (err) {
+                // Narrow the catch so only TRANSPORT / availability faults
+                // surface as `replay_store_unavailable`. Programming-contract
+                // violations propagate as-is:
+                //   - DPoPError: a future refactor might shape replay-store
+                //     errors directly as DPoPError; preserve that classification.
+                //   - RangeError: `DPoPReplayStore.seen`'s interface JSDoc says
+                //     implementations SHOULD throw `RangeError` on non-positive
+                //     `ttlSeconds`. That is a programmer / config bug, NOT an
+                //     availability fault — misclassifying it as
+                //     `replay_store_unavailable` would mislead operator triage
+                //     into checking Redis health when the actual fix is the
+                //     ttl config.
+                if (err instanceof DPoPError)
+                    throw err;
+                if (err instanceof RangeError)
+                    throw err;
+                logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_unavailable");
+                throw new DPoPError("replay_store_unavailable", "DPoP replay store is unavailable; cannot determine replay status");
+            }
+            if (alreadySeen) {
+                throw new DPoPError("replay_detected", "DPoP proof (jti, jkt) already seen in replay window", {
+                    jti: proof.claims.jti,
+                });
+            }
+            // Step 15 (spec §6): Return the sender-constrained token binding.
+            // Confirmation shape is the RFC 7800 `cnf.jkt` variant only (Stage 1).
+            // The `proof` object is NOT forwarded — sub-PR 2c reads only
+            // `tokenBinding.confirmation.jkt` for cnf claim issuance.
+            return {
+                kind: "dpop",
+                confirmation: { jkt },
+            };
+        },
+    };
+};

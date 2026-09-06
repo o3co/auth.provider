@@ -1,0 +1,1 @@
+{"version":3,"file":"express.d.mts","sourceRoot":"","sources":["../../src/middleware/express.mts"],"names":[],"mappings":"AASA,OAAO,KAAK,EAAE,YAAY,EAAE,MAAM,4BAA4B,CAAC;AAE/D,OAAO,CAAC,MAAM,CAAC;IACd,UAAU,OAAO,CAAC;QACjB,UAAU,OAAO;YAChB,YAAY,CAAC,EAAE,YAAY,CAAC;SAC5B;KACD;CACD"}

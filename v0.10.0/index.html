@@ -1,0 +1,265 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="./"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="assets/style.css"/><link rel="stylesheet" href="assets/highlight.css"/><script defer src="assets/main.js"></script><script async src="assets/icons.js" id="tsd-icons-script"></script><script async src="assets/search.js" id="tsd-search-script"></script><script async src="assets/navigation.js" id="tsd-nav-script"></script><script async src="assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<h1>auth.provider API</h1></div>
+<div class="tsd-panel tsd-typography"><h1 id="authprovider" class="tsd-anchor-link">auth.provider<a href="#authprovider" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h1>
+<p><a href="https://github.com/o3co/auth.provider/actions/workflows/ci.yml"><img src="https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+<a href="https://www.npmjs.com/package/@o3co/auth-provider-core"><img src="https://img.shields.io/npm/v/@o3co/auth-provider-core" alt="npm"></a>
+<a href="https://codecov.io/gh/o3co/auth.provider"><img src="https://codecov.io/gh/o3co/auth.provider/graph/badge.svg" alt="codecov"></a>
+<a href="https://o3co.github.io/auth.provider/"><img src="https://img.shields.io/badge/docs-API-blue" alt="API Docs"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a></p>
+<blockquote>
+<p>This repository handles <strong>authentication and token issuance</strong> in the three-layer separation of concerns (authentication &amp; token issuance / <a href="https://github.com/o3co/auth.policy-verifier">authorization decision</a> / <a href="https://github.com/o3co/protobuf.interceptors">authorization enforcement</a>) of the <a href="https://github.com/o3co/auth">auth</a> stack.</p>
+</blockquote>
+<p>OAuth 2.0 / OIDC provider. Issue JWTs via session-based login or the authorization code flow — same token format, same introspection endpoint, same downstream verification.</p>
+<h2 id="features" class="tsd-anchor-link">Features<a href="#features" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><strong>Modular composition</strong> — Pick only the modules you need. Skip session, federation, or authorization code for API-only deployments.</li>
+<li><strong>JWT algorithm selection</strong> — EdDSA (default), ES256, RS256, HS256. The default is asymmetric, so the JWKS endpoint (<code>/.well-known/jwks.json</code>) publishes a real verification key and relying parties never hold one that can also mint tokens. HS256 stays selectable and publishes no JWKS.</li>
+<li><strong>OAuth 2.0 compliance</strong> — Authorization code flow with PKCE (RFC 7636), token introspection (RFC 7662), refresh tokens</li>
+<li><strong>Session authentication</strong> — Local username/password login + OAuth federation (Google, GitHub, and custom providers via per-federation <code>defineModule(...)</code> modules)</li>
+<li><strong>Rate limiting</strong> — Per-endpoint configurable limits</li>
+<li><strong>HOCON configuration</strong> — Type-safe config with Zod validation and environment variable overrides</li>
+</ul>
+<h2 id="quick-start" class="tsd-anchor-link">Quick Start<a href="#quick-start" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="bash"><span class="hl-0">npx</span><span class="hl-1"> </span><span class="hl-2">@o3co/create-auth-provider</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">cd</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-2">install</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-2">build</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="architecture" class="tsd-anchor-link">Architecture<a href="#architecture" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="text">┌──────────────────────────────────────────┐
+│             Composition Root              │
+│  (standalone template or your own app)   │
+├─────────┬───────────┬────────────────────┤
+│  oauth  │  session  │    foundation      │
+│ /oauth  │ /session  │  Redis, HTTP       │
+│ routes  │  routes   │  adapters          │
+├─────────┴───────────┴────────────────────┤
+│                   core                    │
+│  GrantRegistry · KeyStore · Repositories │
+└──────────────────────────────────────────┘
+</code><button type="button">Copy</button></pre>
+
+<ul>
+<li><strong>core</strong> — Interfaces, config schemas, token service, app factory. Always required.</li>
+<li><strong>oauth</strong> — OAuth routes (<code>/oauth/token</code>, <code>/oauth/authorize</code>, <code>/oauth/introspect</code>). Required for any token issuance.</li>
+<li><strong>session</strong> — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.</li>
+<li><strong>federation-google / federation-github</strong> — Concrete OAuth federation providers. Optional — install only the providers you register.</li>
+<li><strong>foundation</strong> — Production repository adapters (Redis code store, HTTP user lookup). Optional.</li>
+</ul>
+<h2 id="packages" class="tsd-anchor-link">Packages<a href="#packages" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>npm</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="media/core"><code>packages/core</code></a></td>
+<td><code>@o3co/auth-provider-core</code></td>
+<td>Grant registry, token service, repository interfaces, config schemas</td>
+</tr>
+<tr>
+<td><a href="media/oauth"><code>packages/oauth</code></a></td>
+<td><code>@o3co/auth-provider-oauth</code></td>
+<td>OAuth routes: <code>/oauth/token</code>, <code>/oauth/authorize</code>, <code>/oauth/introspect</code></td>
+</tr>
+<tr>
+<td><a href="media/session"><code>packages/session</code></a></td>
+<td><code>@o3co/auth-provider-session</code></td>
+<td>Session routes and provider-registered OAuth federation</td>
+</tr>
+<tr>
+<td><a href="media/federation-google"><code>packages/federation-google</code></a></td>
+<td><code>@o3co/auth-provider-federation-google</code></td>
+<td>Google OAuth/OIDC federation provider</td>
+</tr>
+<tr>
+<td><a href="media/federation-github"><code>packages/federation-github</code></a></td>
+<td><code>@o3co/auth-provider-federation-github</code></td>
+<td>GitHub OAuth federation provider</td>
+</tr>
+<tr>
+<td><a href="media/foundation"><code>packages/foundation</code></a></td>
+<td><code>@o3co/auth-provider-foundation</code></td>
+<td>Redis code store, HTTP user/client repositories</td>
+</tr>
+<tr>
+<td><a href="media/standalone"><code>templates/standalone</code></a></td>
+<td>—</td>
+<td>Deployable server template (composition root)</td>
+</tr>
+<tr>
+<td><a href="media/create-app"><code>create-app</code></a></td>
+<td><code>@o3co/create-auth-provider</code></td>
+<td>CLI scaffolder</td>
+</tr>
+</tbody>
+</table>
+<h2 id="endpoints" class="tsd-anchor-link">Endpoints<a href="#endpoints" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Module</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /oauth/token</code></td>
+<td>oauth</td>
+<td>Token issuance (session, authorization code, refresh)</td>
+</tr>
+<tr>
+<td><code>GET /oauth/authorize</code></td>
+<td>oauth</td>
+<td>Authorization code flow (PKCE)</td>
+</tr>
+<tr>
+<td><code>POST /oauth/introspect</code></td>
+<td>oauth</td>
+<td>Token introspection (RFC 7662)</td>
+</tr>
+<tr>
+<td><code>GET /.well-known/jwks.json</code></td>
+<td>core</td>
+<td>JWKS endpoint (asymmetric algorithms only)</td>
+</tr>
+<tr>
+<td><code>GET /session/csrf</code></td>
+<td>session</td>
+<td>Issue a double-submit CSRF token</td>
+</tr>
+<tr>
+<td><code>POST /session/login</code></td>
+<td>session</td>
+<td>Local authentication</td>
+</tr>
+<tr>
+<td><code>POST /session/logout</code></td>
+<td>session</td>
+<td>Session destruction</td>
+</tr>
+<tr>
+<td><code>GET /_healthcheck</code></td>
+<td>core</td>
+<td>Health check</td>
+</tr>
+</tbody>
+</table>
+<h2 id="configuration" class="tsd-anchor-link">Configuration<a href="#configuration" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>HOCON config file with environment variable overrides. The config schema depends on which modules are registered:</p>
+<p><strong>Core (always required):</strong></p>
+<pre><code class="hocon">http { port = 3000 }
+oauth {
+  jwt {
+    # Required. Canonical issuer stamped as `iss` on every minted token:
+    # absolute https URL (http only for a loopback host), no query or fragment.
+    # Boot fails when unset — it is never derived from the Host header.
+    issuer = ${?OAUTH_JWT_ISSUER}
+    signingKey {
+      provider = "local"           # "local" is the only built-in; extend via KeyStoreFactory
+      local {
+        # Default. Asymmetric, so /.well-known/jwks.json publishes a real
+        # verification key and no relying party ever holds a key that can
+        # also MINT tokens. Required — there is no key-material default:
+        #   openssl genpkey -algorithm ed25519 -out jwt-private.pem
+        #   openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
+        algorithm = "EdDSA"        # EdDSA | ES256 | RS256 | HS256
+        privateKeyPath = ${?OAUTH_JWT_PRIVATE_KEY_PATH}
+        publicKeyPath  = ${?OAUTH_JWT_PUBLIC_KEY_PATH}
+        # HS256 instead: set algorithm = "HS256" and supply a secret of at
+        # least 32 bytes (`openssl rand -hex 32`). No JWKS is published.
+        # secret = ${?OAUTH_JWT_SECRET}
+      }
+    }
+  }
+  accessToken  { expiresIn = 3600 }   # seconds, positive, <= 1 year
+  refreshToken { expiresIn = 86400 }  # seconds, positive, <= 1 year
+}
+</code><button type="button">Copy</button></pre>
+
+<p><strong>Authorization code grant (when <code>oauthAuthorizationModule</code> is registered):</strong></p>
+<pre><code class="hocon">oauth.grants.authorization_code {
+  pkce {
+    requireS256 = false   # Set to true to reject plain code_challenge_method (S256 only)
+    requireS256 = ${?OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256}
+  }
+}
+</code><button type="button">Copy</button></pre>
+
+<p><strong>Session (when <code>sessionModule</code> is registered):</strong></p>
+<pre><code class="hocon"># `secret` signs the cookie that IS the authenticated session: at least
+# 32 bytes (256 bits), e.g. `openssl rand -hex 32`.
+session { secret = ${SESSION_SECRET} }
+
+# Shorthand: key name = provider type (google, github, or any registered custom type)
+federations {
+  google {
+    enabled = false
+    # clientId, clientSecret, callbackURL — required when enabled = true
+  }
+  # github { enabled = false }
+}
+</code><button type="button">Copy</button></pre>
+
+<p>See <a href="media/application.conf"><code>templates/standalone/config/application.conf</code></a> for a complete example.</p>
+<h2 id="development" class="tsd-anchor-link">Development<a href="#development" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="bash"><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-2">install</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-3">-r</span><span class="hl-1"> </span><span class="hl-2">build</span><span class="hl-1">     </span><span class="hl-4"># build all packages</span><br/><span class="hl-0">pnpm</span><span class="hl-1"> </span><span class="hl-3">-r</span><span class="hl-1"> </span><span class="hl-2">test</span><span class="hl-1">      </span><span class="hl-4"># test all packages</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="docker" class="tsd-anchor-link">Docker<a href="#docker" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<pre><code class="bash"><span class="hl-0">npx</span><span class="hl-1"> </span><span class="hl-2">@o3co/create-auth-provider</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">cd</span><span class="hl-1"> </span><span class="hl-2">my-auth-app</span><br/><span class="hl-0">docker</span><span class="hl-1"> </span><span class="hl-2">build</span><span class="hl-1"> </span><span class="hl-3">-t</span><span class="hl-1"> </span><span class="hl-2">my-auth</span><span class="hl-1"> </span><span class="hl-2">.</span>
+</code><button type="button">Copy</button></pre>
+
+<h2 id="related-projects" class="tsd-anchor-link">Related Projects<a href="#related-projects" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<ul>
+<li><a href="https://github.com/o3co/auth.policy-verifier">auth.policy-verifier</a> — ABAC policy engine for authorization decisions</li>
+<li><a href="https://github.com/o3co/auth.proxy">auth.proxy</a> — Token validation reverse proxy</li>
+<li><a href="https://github.com/o3co/protobuf.interceptors">protobuf.interceptors</a> — protobuf-option-driven authorization interceptors for gRPC / ConnectRPC (calls auth.provider for introspection, auth.policy-verifier for authorization)</li>
+<li><a href="https://github.com/o3co/auth">auth</a> — Architecture docs and E2E tests</li>
+</ul>
+<h2 id="license" class="tsd-anchor-link">License<a href="#license" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h2>
+<p>Apache License 2.0 — Copyright 2026 1o1 Co. Ltd.</p>
+</div></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details"><a href="#authprovider"><span>auth.provider</span></a>
+<ul>
+<li><a href="#features"><span>Features</span></a></li>
+<li><a href="#quick-start"><span>Quick <wbr/>Start</span></a></li>
+<li><a href="#architecture"><span>Architecture</span></a></li>
+<li><a href="#packages"><span>Packages</span></a></li>
+<li><a href="#endpoints"><span>Endpoints</span></a></li>
+<li><a href="#configuration"><span>Configuration</span></a></li>
+<li><a href="#development"><span>Development</span></a></li>
+<li><a href="#docker"><span>Docker</span></a></li>
+<li><a href="#related-projects"><span>Related <wbr/>Projects</span></a></li>
+<li><a href="#license"><span>License</span></a></li></ul></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

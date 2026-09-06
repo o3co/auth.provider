@@ -1,0 +1,84 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>isGrantTypeAllowed | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">isGrantTypeAllowed</a></li></ul>
+<h1>Function isGrantTypeAllowed</h1></div>
+<section class="tsd-panel">
+<ul class="tsd-signatures">
+<li class="">
+<div class="tsd-signature tsd-anchor-link" id="isgranttypeallowed"><span class="tsd-kind-call-signature">isGrantTypeAllowed</span><span class="tsd-signature-symbol">(</span><br/>    <span class="tsd-kind-parameter">allowedGrantTypes</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">grantType</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">,</span><br/>    <span class="tsd-kind-parameter">options</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">requireAllowlist</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span> <span class="tsd-signature-symbol">}</span><span class="tsd-signature-symbol">,</span><br/><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><a href="#isgranttypeallowed" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
+<div class="tsd-description">
+<div class="tsd-comment tsd-typography"><p>Whether a client's <code>allowedGrantTypes</code> permits <code>grantType</code>.</p>
+<p>This is the <strong>central</strong> rule, applied once at grant dispatch and at
+<code>/authorize</code> so every current and future grant inherits it (#268).</p>
+<ul>
+<li><code>undefined</code> (no allowlist declared) → allowed. Absence means
+&quot;unrestricted&quot;, not &quot;denied&quot;: the field post-dates the grants that
+ignore it, so treating absence as denial would revoke every grant from
+every registration written before it existed — a total outage on
+upgrade rather than a security fix.</li>
+<li>declared → allowed iff <code>grantType</code> appears in it. An empty array
+therefore denies everything, which is what &quot;this client may use no
+grant type&quot; has always meant for this field.</li>
+</ul>
+<p>A grant MAY declare a stricter rule via
+<code>GrantHandler.requiresExplicitGrantAllowlist</code> (#326): dispatch then denies
+by absence for that grant — deliberately, so that machine-to-machine
+access is never acquired by omission. <code>client_credentials</code> and the
+WebAuthn grant declare it. The two rules compose to the stricter of the
+pair, because either can reject and only the absent case distinguishes
+them; both are enforced at dispatch, next to each other.</p>
+<p><code>options.requireAllowlist</code> (#311) flips the absent case to denial for the
+whole deployment — the counterpart of <code>requiresExplicitGrantAllowlist</code>,
+which only a handler can declare and only for itself. Without it the secure
+posture is opt-in <em>per registration</em>: an operator who wants deny-by-default
+has to guarantee that every registration, now and in future, carries the
+field, and nothing enforces that. It defaults off, because flipping the
+default is the outage #268 was shaped to avoid; a deployment turns it on
+once it has audited what it has registered.</p>
+<p>Absence denies outright rather than falling back to an implied set. RFC 7591
+§2 does the latter — an omitted <code>grant_types</code> there means
+<code>[&quot;authorization_code&quot;]</code> alone — and that is good evidence absence should
+not mean &quot;everything&quot;, but an implied set is still a decision nobody wrote
+down, which is the shape #363 exists to refuse. A deployment that turns this
+on has said it audits its registrations, so it can name the grants.</p>
+<p>Exact string comparison: <code>grant_type</code> is case-sensitive, and extension
+grants are URIs (RFC 6749 §4.5), where a prefix or case-folded match would
+be a namespace confusion rather than a convenience.</p>
+</div>
+<div class="tsd-parameters">
+<h4 class="tsd-parameters-title">Parameters</h4>
+<ul class="tsd-parameter-list">
+<li><span><span class="tsd-kind-parameter">allowedGrantTypes</span>: <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">undefined</span></span></li>
+<li><span><span class="tsd-kind-parameter">grantType</span>: <span class="tsd-signature-type">string</span></span></li>
+<li><span><code class="tsd-tag">Optional</code><span class="tsd-kind-parameter">options</span>: <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">requireAllowlist</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span> <span class="tsd-signature-symbol">}</span></span></li></ul></div>
+<h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">boolean</span></h4><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/d4671c1817ef172b598b09823fb96bf1fcbf1fb9/packages/core/src/repositories/allowedGrantTypes.mts#L60">packages/core/src/repositories/allowedGrantTypes.mts:60</a></li></ul></aside></div></li></ul></section></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>
