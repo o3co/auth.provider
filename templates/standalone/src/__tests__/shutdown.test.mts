@@ -33,7 +33,7 @@
 import type { Server } from "node:http";
 import type { Logger } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import { installGracefulShutdown } from "../shutdown.mjs";
+import { deferExit, installGracefulShutdown } from "../shutdown.mjs";
 
 /** A `Server` double whose `close` callback fires only when we say so. */
 function makeServer() {
@@ -232,6 +232,58 @@ describe("installGracefulShutdown (#290)", () => {
 		failClose(new Error("teardown failed"));
 		await vi.waitFor(() => expect(exit).toHaveBeenCalled());
 		expect(cleanup).toHaveBeenCalledTimes(1);
+	});
+
+	it("bounds cleanup so a hanging dispose cannot wedge the process", async () => {
+		// The guarantees above say cleanup "never wedges the process", but `finish`
+		// awaited it with no deadline — and the drain deadline is already cleared
+		// by then, so a dispose that never settles meant `exit` was never reached.
+		// The same defect was found in auth.proxy#81 and auth.policy-verifier#210,
+		// both of which took this file as their starting point.
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit, logger } = install({
+				cleanup: () => new Promise<void>(() => {}),
+				drainTimeoutMs: 5_000,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(5_000);
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({ cleanupTimeoutMs: 5_000 }),
+				expect.stringContaining("cleanup timed out"),
+			);
+			expect(exit).toHaveBeenCalledWith(1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("does not penalise a cleanup that finishes inside its budget", async () => {
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit } = install({
+				cleanup: () => Promise.resolve(),
+				drainTimeoutMs: 5_000,
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(exit).toHaveBeenCalledExactlyOnceWith(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("defers the real exit a turn so a buffered log destination can flush", async () => {
+		// The scaffolded app logs NDJSON through pino, whose default destination is
+		// not synchronous: exiting in the same tick as the last `logger.error` can
+		// drop exactly the `cleanup failed` line an operator would look for.
+		const exitProcess = vi.fn();
+		deferExit(3, exitProcess);
+		expect(exitProcess).not.toHaveBeenCalled();
+		await new Promise((resolve) => setImmediate(resolve));
+		expect(exitProcess).toHaveBeenCalledWith(3);
 	});
 
 	it("removes its own signal listeners once shutting down", async () => {
