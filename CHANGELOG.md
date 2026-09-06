@@ -4,7 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.12.0] - 2026-09-06
+
+### Added
+
+- **`@o3co/auth-provider-federation-apple` — Sign in with Apple**
+  ([#479](https://github.com/o3co/auth.provider/issues/479)). An iOS app that
+  offers Google or GitHub login must offer Sign in with Apple as well (App Store
+  Review Guideline 4.8), so this is the provider an iOS client of this stack
+  needs to ship social login at all. It mirrors `federation-google` in shape and
+  owns the Apple specifics: the ES256 `client_secret` JWT signed with the
+  downloaded `.p8` (cached, re-signed within 24 h of `exp`, 180-day default so
+  clock skew cannot turn Apple's six-month ceiling into an outage);
+  `responseMode: "form_post"` for the POST callback with a `SameSite=None;
+  Secure` state cookie; and claim normalisation — `email_verified` arriving as
+  the *string* `"true"`/`"false"` is read to a boolean rather than coerced
+  (`Boolean("false")` is `true`), and `is_private_email` is surfaced as
+  `isPrivateEmail` for Hide My Email relays. First versioned release of this
+  package: it was added the day after 0.11.0 was cut.
 
 ### Security
 
