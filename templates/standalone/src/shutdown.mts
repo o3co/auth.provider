@@ -78,7 +78,7 @@ export interface GracefulShutdownOptions {
 	 * sequence — size both against the orchestrator's grace period, not one.
 	 */
 	readonly cleanupTimeoutMs?: number;
-	/** Injected in tests; defaults to `process.exit`. */
+	/** Injected in tests; defaults to {@link deferExit}. */
 	readonly exit?: (code: number) => void;
 	/** Injected in tests; defaults to `process.on`. */
 	readonly onSignal?: (signal: NodeJS.Signals, handler: () => void) => void;
@@ -153,10 +153,16 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 		if (finished) return;
 		finished = true;
 		let exitCode = code;
+		// `reason` names whatever decided the exit code, so the line an operator
+		// alerts on cannot say "drained" next to a non-zero code. The drain
+		// outcome keeps its own key rather than being overwritten — both facts
+		// are wanted, and a stable shape is what makes the line queryable.
+		let outcome = reason;
 		try {
 			if ((await runCleanup()) === CLEANUP_TIMED_OUT) {
 				logger.error({ cleanupTimeoutMs }, "graceful shutdown: cleanup timed out");
 				exitCode = 1;
+				outcome = "cleanup-timeout";
 			}
 		} catch (err) {
 			// Through the app logger, not `console.error`: a shutdown that
@@ -165,8 +171,9 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 			// pipeline drops.
 			logger.error({ err }, "graceful shutdown: cleanup failed");
 			exitCode = 1;
+			outcome = "cleanup-failed";
 		}
-		logger.info({ reason, exitCode }, "graceful shutdown: complete");
+		logger.info({ reason: outcome, drain: reason, exitCode }, "graceful shutdown: complete");
 		exit(exitCode);
 	};
 
