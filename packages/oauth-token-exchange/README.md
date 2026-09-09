@@ -172,7 +172,7 @@ const handle = await createApp({
 
 Sender-constrained token minting **is** supported and was listed here in error: the handler enforces the full DPoP and mTLS `cnf` matrices on the `subject_token` and the `actor_token` (#265, #309), stamps the proven binding into the issued token, and advertises `token_type: "DPoP"` for a `cnf.jkt` token (Security note 17). See `src/__tests__/senderConstraint.test.mts` for the matrix rows.
 
-## Breaking changes (unreleased)
+## Breaking changes (v0.12.0)
 
 Each of these fails closed. A client registration that relied on omission stops working until the field is declared; that is the intended direction.
 

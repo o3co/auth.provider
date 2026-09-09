@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [0.12.1] - 2026-09-09
 
 ### Fixed
 
@@ -22,6 +22,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `refresh_token` do — fail-closed against `allowedAudiences` — and refuses a
   policy audience for an unauthenticated caller (no client, no ceiling) with
   `invalid_request` rather than silently dropping it as before.
+
+  **Upgrade note.** A resource server that verified `aud` against the *client
+  id* for jwt-bearer tokens must now accept the client's `allowedAudiences[0]`
+  instead, as it already had to for `session` and device tokens from the same
+  client; tokens minted before the upgrade keep the old `aud` until they
+  expire, so both values coexist for one access-token lifetime. Clients with
+  no `allowedAudiences` see no change. A policy that returns `grantedAudience`
+  for an unauthenticated jwt-bearer caller must stop doing so, or the caller
+  must authenticate. The grant still ignores an RFC 8707 `resource`
+  parameter, unlike `client_credentials`, `refresh_token` and `/authorize`;
+  that gap is tracked in
+  [#522](https://github.com/o3co/auth.provider/issues/522), the client-less
+  audience rule shared with the WebAuthn grant in
+  [#520](https://github.com/o3co/auth.provider/issues/520), and the remaining
+  audit follow-ups in [#521](https://github.com/o3co/auth.provider/issues/521).
 
 ## [0.12.0] - 2026-09-06
 

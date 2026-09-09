@@ -56,6 +56,14 @@ is a red CI run rather than a released error message naming no release.
 # reported "no output" whatever the tree contained. That is how the placeholder
 # this check exists to catch shipped twice (#458).
 git grep -n '"this release' -- ':(glob)packages/*/src/**' ':(glob)templates/*/src/**'
+
+# Placeholders spelled `unreleased` live in docs and package READMEs rather
+# than in operator-facing strings: the design-vocabulary "since" column and
+# a README heading both shipped that way in v0.12.0 and were caught only at
+# the v0.12.1 cut. Stamp each hit with the PR number (vocabulary table) or
+# the released tag (README). The policy / runbook prose that describes the
+# `## [Unreleased]` convention is filtered out and is correct as it stands.
+git grep -n -i 'unreleased' -- docs ':(glob)packages/*/README.md' | grep -v -E 'release-(policy|runbook)\.md|\[Unreleased\]'
 ```
 
 The audit must cover:
