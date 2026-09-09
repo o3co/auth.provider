@@ -83,6 +83,12 @@ const ctx = (body: Record<string, unknown> = {}, extra: Partial<GrantContext> = 
 		...extra,
 	}) as GrantContext;
 
+const policyOf = (
+	evaluate: (...args: Parameters<GrantPolicyHook["evaluate"]>) => Promise<GrantPolicyDecision>,
+): GrantPolicyHook => ({ kind: "stub", evaluate });
+const allow = (extra: Record<string, unknown> = {}) =>
+	policyOf(async () => ({ outcome: "allow", ...extra }) as GrantPolicyDecision);
+
 describe("jwt-bearer grant — the happy path (#301)", () => {
 	it("uses the registered RFC 7523 grant type", () => {
 		expect(JWT_BEARER_GRANT_TYPE).toBe("urn:ietf:params:oauth:grant-type:jwt-bearer");
@@ -465,11 +471,6 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed (CP-18)", (
 	// Every other minting path evaluates `grantPolicy`; this one did not, so
 	// a deployment's policy hook saw client_credentials, refresh_token, the
 	// code flow and token exchange — and never a device login.
-	const policyOf = (
-		evaluate: (...args: Parameters<GrantPolicyHook["evaluate"]>) => Promise<GrantPolicyDecision>,
-	): GrantPolicyHook => ({ kind: "stub", evaluate });
-	const allow = (extra: Record<string, unknown> = {}) =>
-		policyOf(async () => ({ outcome: "allow", ...extra }) as GrantPolicyDecision);
 	const authed = {
 		authenticatedClient: {
 			clientId: "c1",
@@ -576,6 +577,104 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed (CP-18)", (
 		const evaluate = vi.fn(async (): Promise<GrantPolicyDecision> => ({ outcome: "allow" }));
 		await build({ grantPolicy: policyOf(evaluate), verifier: verifierFor(null) }).handle(ctx());
 		expect(evaluate).not.toHaveBeenCalled();
+	});
+});
+
+describe("jwt-bearer grant — aud names the client's configured resource audience (#518)", () => {
+	// The session and device grants mint `aud` as
+	// `client.allowedAudiences?.[0] ?? client.clientId`; this grant minted the
+	// client id unconditionally, so one public client got tokens for
+	// `https://api.example` from `session` and for `mobile-app` from
+	// jwt-bearer, and a resource server pinning its own identifier accepted
+	// the first and rejected the second for the same user, client and scopes.
+	const client = (over: Record<string, unknown>) =>
+		({
+			authenticatedClient: { clientId: "mobile-app", allowedScopes: [], ...over },
+		}) as never;
+	const claimsOf = (result: { status: number } & Record<string, unknown>) =>
+		"tokens" in result
+			? decodeJwt((result.tokens as { access_token: string }).access_token)
+			: expect.fail("expected tokens");
+
+	it("mints aud as the client's first allowedAudiences entry, the way the session grant does", async () => {
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedAudiences: ["https://api.example", "https://other.example"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(claimsOf(result).aud).toBe("https://api.example");
+	});
+
+	it("keeps azp and client_id on the client when aud names the resource", async () => {
+		// The audience moved; the party the token was issued to did not.
+		const { result } = await build({}).handle(
+			ctx({}, client({ allowedAudiences: ["https://api.example"] })),
+		);
+		const claims = claimsOf(result);
+		expect(claims.azp).toBe("mobile-app");
+		expect(claims.client_id).toBe("mobile-app");
+	});
+
+	it("falls back to the client id when the client configures no allowedAudiences", async () => {
+		// Unchanged, and never null: the fallback `session` and the device
+		// grant use, since the token is bound to an end user and meant for a
+		// resource, not for the authorization server.
+		expect(claimsOf((await build({}).handle(ctx({}, client({})))).result).aud).toBe("mobile-app");
+		expect(
+			claimsOf((await build({}).handle(ctx({}, client({ allowedAudiences: [] })))).result).aud,
+		).toBe("mobile-app");
+	});
+
+	it("still mints no aud without an authenticated client", async () => {
+		// RFC 7523 §3 makes client authentication optional; with no
+		// registration there is no configured audience to name. Pinned so the
+		// fix above is a decision about the authenticated case only.
+		const { result } = await build({}).handle(ctx({}, { authenticatedClient: null }));
+		expect(result.status).toBe(200);
+		expect(claimsOf(result).aud).toBeUndefined();
+	});
+
+	it("honours a policy audience within the client's allowedAudiences", async () => {
+		// The ceiling the grant said it did not have. `allowedAudiences` is
+		// it, as it is for client_credentials and refresh_token.
+		const { result } = await build({
+			grantPolicy: allow({ grantedAudience: ["https://other.example"] }),
+		}).handle(
+			ctx({}, client({ allowedAudiences: ["https://api.example", "https://other.example"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(claimsOf(result).aud).toBe("https://other.example");
+	});
+
+	it("refuses a policy audience outside the client's allowedAudiences", async () => {
+		// A buggy or compromised policy must not mint a token that a resource
+		// server the client was never registered for would accept.
+		const { result } = await build({
+			grantPolicy: allow({ grantedAudience: ["https://evil.example"] }),
+		}).handle(ctx({}, client({ allowedAudiences: ["https://api.example"] })));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect("errorDescription" in result && result.errorDescription).toMatch(/allowedAudiences/);
+	});
+
+	it("refuses a policy audience when no authenticated client supplies a ceiling", async () => {
+		// The rule `resolveScope` already applies to scope: a value with
+		// nothing to bound it is refused, not granted. Silently dropping it —
+		// the previous behaviour — let a policy believe it had narrowed the
+		// audience of a token that carries none.
+		const { result } = await build({
+			grantPolicy: allow({ grantedAudience: ["https://api.example"] }),
+		}).handle(ctx({}, { authenticatedClient: null }));
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect("errorDescription" in result && result.errorDescription).toMatch(/allowedAudiences/);
+	});
+
+	it("treats an empty grantedAudience as no audience decision", async () => {
+		const { result } = await build({ grantPolicy: allow({ grantedAudience: [] }) }).handle(
+			ctx({}, client({ allowedAudiences: ["https://api.example"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(claimsOf(result).aud).toBe("https://api.example");
 	});
 });
 

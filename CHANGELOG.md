@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **The jwt-bearer grant minted `aud` as the client id, so a resource server
+  pinning its own identifier rejected its tokens**
+  ([#518](https://github.com/o3co/auth.provider/issues/518)). The session and
+  device grants mint `aud` as the client's configured resource audience
+  (`allowedAudiences[0]`, falling back to the client id); the jwt-bearer grant
+  minted the client id unconditionally. One public client therefore received
+  `aud: "https://api.example"` from `session` and `aud: "mobile-app"` from
+  jwt-bearer, and a resource server verifying `aud` against itself accepted the
+  first token and rejected the second for the same user, client and scopes.
+  The grant now derives `aud` the same way. With that ceiling in place it also
+  honours a `grantPolicy`'s `grantedAudience` as `client_credentials` and
+  `refresh_token` do — fail-closed against `allowedAudiences` — and refuses a
+  policy audience for an unauthenticated caller (no client, no ceiling) with
+  `invalid_request` rather than silently dropping it as before.
+
 ## [0.12.0] - 2026-09-06
 
 ### Added
