@@ -75,6 +75,14 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * Store data-modelling choice. `UserRepository` stays `authenticate` /
  * `authenticateByToken` (#305's verify-only boundary).
  *
+ * ## What `aud` names
+ *
+ * The client's configured resource audience — `allowedAudiences[0]`, falling
+ * back to the client id — the rule the session and device grants apply
+ * (#518). A `grantPolicy` may narrow it, within `allowedAudiences`. Without
+ * an authenticated client there is no registration to name a resource, and
+ * `aud` is absent.
+ *
  * ## Failure vocabulary
  *
  * - Missing/blank `assertion` → `invalid_request` (RFC 6749 §5.2: a missing
@@ -89,7 +97,9 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   re-enrol a device that was fine — the distinction #408 drew for revocation.
  * - `grantPolicy`, when wired, runs after all of the above and fails closed
  *   (throw → `503`, deny → its own error, a widened scope → `invalid_scope`)
- *   — see `evaluateGrantPolicy`.
+ *   — see `evaluateGrantPolicy`. A `grantedAudience` outside the client's
+ *   `allowedAudiences`, or one returned when no authenticated client
+ *   supplies that ceiling, is `invalid_request` (#518).
  */
 export const createJwtBearerGrant = (
 	deps: GrantDependencies & {
@@ -213,15 +223,14 @@ export const createJwtBearerGrant = (
 			const scopes = resolveScope(ctx, verified.scope);
 			if ("error" in scopes) return { result: scopes };
 			let effectiveScopes = scopes.scopes;
-			const clientId = ctx.authenticatedClient?.clientId;
+			const client = ctx.authenticatedClient;
+			const clientId = client?.clientId;
 
 			// CP-18: the policy gate every other minting path applies, after
 			// the identity gates and the scope ceilings so it sees a resolved
 			// subject and an already-narrowed request. Consulted whenever it is
-			// wired, as the refresh grant and `/authorize` do. `grantedAudience`
-			// is not applied: this grant mints `aud` as the authenticated
-			// client (or none) and has no `allowedAudiences` ceiling of its own
-			// to validate a policy audience against.
+			// wired, as the refresh grant and `/authorize` do.
+			let policyGrantedAudience: string | null = null;
 			if (deps.grantPolicy) {
 				const policy = await evaluateGrantPolicy(
 					deps.grantPolicy,
@@ -236,7 +245,55 @@ export const createJwtBearerGrant = (
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;
+				const { decision } = policy;
+				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
+					// #518: the audience ceiling is the client's `allowedAudiences`,
+					// the same one `client_credentials` and `refresh_token` hold a
+					// policy to. Fail closed: an out-of-bounds audience from a buggy
+					// or compromised policy would mint a token accepted by a resource
+					// server the client was never registered for.
+					//
+					// Without an authenticated client there is no ceiling at all, and
+					// the answer is the one `resolveScope` gives a scope with nothing
+					// to bound it: refused, not granted. Dropping the audience
+					// silently — what this grant did before — let a policy believe it
+					// had narrowed a token that carries no `aud`.
+					if (!client) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_request",
+								errorDescription:
+									"policy returned an audience but no authenticated client supplies an allowedAudiences ceiling",
+							},
+						};
+					}
+					const allowedAudSet = new Set(client.allowedAudiences ?? []);
+					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_request",
+								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
+							},
+						};
+					}
+					// Flatten to the first entry, as every other grant does.
+					policyGrantedAudience = decision.grantedAudience[0];
+				}
 			}
+
+			// #518: the audience rule the session and device grants apply — the
+			// client's configured resource audience, falling back to the client
+			// id. Minting the client id unconditionally, as this grant did, gave
+			// one public client `aud: "https://api.example"` from `session` and
+			// `aud: "mobile-app"` from here, so a resource server pinning its own
+			// identifier accepted the first token and rejected the second for the
+			// same user, client and scopes. A policy-narrowed audience, validated
+			// above, wins over the default. Without an authenticated client there
+			// is no registration to name a resource, and `aud` stays absent.
+			const audience = policyGrantedAudience ?? client?.allowedAudiences?.[0] ?? clientId ?? null;
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 			const confirmation = ctx.tokenBinding?.confirmation;
@@ -248,7 +305,7 @@ export const createJwtBearerGrant = (
 					expiresIn: config.oauth.accessToken.expiresIn,
 					keyStore,
 					issuer: ctx.issuer,
-					audience: clientId ?? null,
+					audience,
 					subject,
 					...(clientId ? { authorizedParty: clientId } : {}),
 					scope: scopeClaim,
