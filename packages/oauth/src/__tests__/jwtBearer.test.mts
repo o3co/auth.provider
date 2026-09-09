@@ -87,7 +87,7 @@ const policyOf = (
 	evaluate: (...args: Parameters<GrantPolicyHook["evaluate"]>) => Promise<GrantPolicyDecision>,
 ): GrantPolicyHook => ({ kind: "stub", evaluate });
 const allow = (extra: Record<string, unknown> = {}) =>
-	policyOf(async () => ({ outcome: "allow", ...extra }) as GrantPolicyDecision);
+	policyOf(async () => ({ ...extra, outcome: "allow" }) as GrantPolicyDecision);
 
 describe("jwt-bearer grant — the happy path (#301)", () => {
 	it("uses the registered RFC 7523 grant type", () => {
