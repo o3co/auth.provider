@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { jwtVerify } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
@@ -561,6 +562,34 @@ describe("exchangeCode", () => {
 		expect(clientSecret).toHaveBeenCalledTimes(2);
 		expect(mockClientSecretPost).toHaveBeenNthCalledWith(1, "secret-1");
 		expect(mockClientSecretPost).toHaveBeenNthCalledWith(2, "secret-2");
+	});
+
+	it("follows a rotated privateKey through the key-material path, as the README promises (#498 review)", async () => {
+		// `createAppleProvider` must not copy `privateKey` at construction: the
+		// option is read at every exchange so a getter or a re-read file is
+		// enough to rotate without a restart.
+		mockAuthorizationCodeGrant.mockResolvedValue(appleTokenResponse());
+		const first = await makeTestSigningKey();
+		const rotated = await makeTestSigningKey();
+		let privateKey = first.privateKeyPem;
+		const { clientSecret: _static, ...withoutSecret } = baseConfig;
+		const p = createAppleProvider({
+			...withoutSecret,
+			teamId: "ABCDE12345",
+			keyId: "XYZW98765F",
+			get privateKey() {
+				return privateKey;
+			},
+		});
+
+		await p.exchangeCode(exchangeArgs);
+		privateKey = rotated.privateKeyPem;
+		await p.exchangeCode(exchangeArgs);
+
+		const posted = mockClientSecretPost.mock.calls.map(([secret]) => secret as string);
+		expect(posted).toHaveLength(2);
+		await jwtVerify(posted[0] as string, first.publicKey);
+		await jwtVerify(posted[1] as string, rotated.publicKey);
 	});
 
 	it("propagates a client-secret resolver failure instead of calling the token endpoint", async () => {

@@ -121,35 +121,48 @@ export function createAppleClientSecret(options: AppleClientSecretOptions): () =
 
 	const now = options.now ?? Date.now;
 
-	let cached: { readonly jwt: string; readonly expiresAtSeconds: number } | undefined;
-	let inFlight: Promise<string> | undefined;
+	/**
+	 * Everything that belongs to one key material: the imported key, the
+	 * secret signed with it, and the signature in flight. #498: a key memoised
+	 * on success alone recovers from broken → repaired but never from valid →
+	 * rotated — a leaked `.p8` revoked and replaced under a running process
+	 * would keep signing with the old one until a restart. Tying the cache and
+	 * the in-flight signature to the generation, rather than to the resolver,
+	 * is what makes rotation safe while a signature is in progress: a caller
+	 * arriving after the rotation gets the new generation's signature, and the
+	 * old one, when it completes, commits to a generation nothing reads.
+	 */
+	interface Generation {
+		readonly pem: string;
+		key: Promise<CryptoKey> | undefined;
+		cached: { readonly jwt: string; readonly expiresAtSeconds: number } | undefined;
+		inFlight: Promise<string> | undefined;
+	}
+	let generation: Generation | undefined;
 
-	// The imported key, remembered with the PEM it came from. #498: a key
-	// memoised on success alone recovers from broken → repaired but never from
-	// valid → rotated — a leaked `.p8` revoked and replaced under a running
-	// process would keep signing with the old one until a restart. Comparing
-	// the material is a string comparison; importing happens only when it has
-	// changed.
-	let signingKey: { readonly pem: string; readonly key: Promise<CryptoKey> } | undefined;
-	const importSigningKey = (): Promise<CryptoKey> => {
+	/** The generation for the material `privateKey` reads as right now. A string comparison; a new one only when it has changed. */
+	const currentGeneration = (): Generation => {
 		const pem = options.privateKey;
-		if (signingKey?.pem !== pem) {
-			// New material (or the first call): forget any secret signed under the
-			// old key along with the key itself.
-			cached = undefined;
-			const key = (importPKCS8(pem, "ES256") as Promise<CryptoKey>).catch((err: unknown) => {
-				// Drop the rejected entry so a later call re-reads the key material
-				// rather than replaying this failure forever.
-				if (signingKey?.pem === pem) signingKey = undefined;
-				throw err;
-			});
-			signingKey = { pem, key };
+		if (generation === undefined || generation.pem !== pem) {
+			generation = { pem, key: undefined, cached: undefined, inFlight: undefined };
 		}
-		return signingKey.key;
+		return generation;
 	};
 
-	const sign = async (): Promise<string> => {
-		const key = await importSigningKey();
+	const importSigningKey = (gen: Generation): Promise<CryptoKey> => {
+		if (gen.key === undefined) {
+			gen.key = (importPKCS8(gen.pem, "ES256") as Promise<CryptoKey>).catch((err: unknown) => {
+				// Drop the rejected import so a later call retries rather than
+				// replaying this failure forever.
+				gen.key = undefined;
+				throw err;
+			});
+		}
+		return gen.key;
+	};
+
+	const sign = async (gen: Generation): Promise<string> => {
+		const key = await importSigningKey(gen);
 		const issuedAtSeconds = Math.floor(now() / 1000);
 		const expiresAtSeconds = issuedAtSeconds + lifetimeSeconds;
 		const jwt = await new SignJWT({})
@@ -160,29 +173,28 @@ export function createAppleClientSecret(options: AppleClientSecretOptions): () =
 			.setIssuedAt(issuedAtSeconds)
 			.setExpirationTime(expiresAtSeconds)
 			.sign(key);
-		cached = { jwt, expiresAtSeconds };
+		// Committed to the generation that signed it — never to a newer one.
+		gen.cached = { jwt, expiresAtSeconds };
 		return jwt;
 	};
 
 	return async (): Promise<string> => {
 		// Rotation is noticed here, not only when the cache expires: a valid
-		// secret signed under a revoked key is not one to keep presenting.
-		if (signingKey !== undefined && signingKey.pem !== options.privateKey) {
-			signingKey = undefined;
-			cached = undefined;
-		}
+		// secret signed under a revoked key is not one to keep presenting, and
+		// neither is one still being signed under it.
+		const gen = currentGeneration();
 		const nowSeconds = Math.floor(now() / 1000);
 		if (
-			cached &&
-			nowSeconds < cached.expiresAtSeconds - APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS
+			gen.cached &&
+			nowSeconds < gen.cached.expiresAtSeconds - APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS
 		) {
-			return cached.jwt;
+			return gen.cached.jwt;
 		}
-		if (!inFlight) {
-			inFlight = sign().finally(() => {
-				inFlight = undefined;
+		if (!gen.inFlight) {
+			gen.inFlight = sign(gen).finally(() => {
+				gen.inFlight = undefined;
 			});
 		}
-		return inFlight;
+		return gen.inFlight;
 	};
 }

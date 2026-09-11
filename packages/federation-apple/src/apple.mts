@@ -212,12 +212,17 @@ function resolveSecretSource(config: AppleProviderConfig): FederationClientSecre
 			`Apple federation "apple" requires a clientSecret, or teamId + keyId + privateKey to sign one`,
 		);
 	}
-	// `createAppleClientSecret` names whichever piece is missing.
+	// `createAppleClientSecret` names whichever piece is missing. `privateKey`
+	// is read through to the caller's config at every resolve rather than
+	// copied now, so a rotation the caller exposes as a getter or a re-read
+	// file reaches the signer through this path too (#498).
 	return createAppleClientSecret({
 		teamId: config.teamId as string,
 		clientId: config.clientId,
 		keyId: config.keyId as string,
-		privateKey: config.privateKey as string,
+		get privateKey() {
+			return config.privateKey as string;
+		},
 	});
 }
 
