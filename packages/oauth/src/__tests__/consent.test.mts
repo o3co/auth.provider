@@ -73,6 +73,8 @@ const makeApp = async (opts: {
 	auditSink?: AuditSink;
 	/** #527 review: the durable session behind the cookie, when a test needs one. */
 	userSessionStore?: UserSessionStore;
+	/** #527 review: a registry that fails, or forgets the client, mid-flow. */
+	clientRepository?: ClientRepository;
 }) => {
 	const record = {
 		clientId: CLIENT_ID,
@@ -85,7 +87,7 @@ const makeApp = async (opts: {
 		firstParty: false,
 		...(opts.client ?? {}),
 	} as unknown as PublicClient;
-	const clientRepository: ClientRepository = {
+	const clientRepository: ClientRepository = opts.clientRepository ?? {
 		findById: async (id) => (id === CLIENT_ID ? record : null),
 		authenticate: async () => null,
 	};
@@ -122,6 +124,18 @@ const makeApp = async (opts: {
 	app.use("/oauth", router);
 	return { app, session, createCode };
 };
+
+/** The registered third-party client, for a test that supplies its own registry. */
+const THIRD_PARTY_CLIENT = {
+	clientId: CLIENT_ID,
+	tokenEndpointAuthMethod: "none" as const,
+	allowedRedirectUris: [REDIRECT_URI],
+	allowedScopes: ["read", "write"],
+	defaultScopes: ["read"],
+	clientName: "Acme Chat",
+	clientUri: "https://chat.example",
+	firstParty: false,
+} as unknown as PublicClient;
 
 const baseQuery = {
 	response_type: "code",
@@ -536,5 +550,108 @@ describe("the consent endpoints answer only for a live session (#527 review)", (
 			.send({ challenge, decision: "accept" });
 		expect(res.status).toBe(303);
 		expect((await consentStore.find("user-1", CLIENT_ID))?.scopes).toEqual(["read"]);
+	});
+});
+
+describe("the consent page and its answer, on the edges (#527 review)", () => {
+	const parkedWith = async (extra: Parameters<typeof makeApp>[0] = {}) => {
+		const consentStore = createMemoryConsentStore();
+		const harness = await makeApp({ consentStore, ...extra });
+		const challenge = atConsentPage(await authorize(harness.app));
+		return { ...harness, challenge, consentStore };
+	};
+
+	it("answers 503 when the client registry cannot be reached", async () => {
+		const consentStore = createMemoryConsentStore();
+		let fail = false;
+		const harness = await makeApp({
+			consentStore,
+			clientRepository: {
+				findById: async (id: string) => {
+					if (fail) throw new Error("registry down");
+					return id === CLIENT_ID ? THIRD_PARTY_CLIENT : null;
+				},
+				authenticate: async () => null,
+			},
+		});
+		const challenge = atConsentPage(await authorize(harness.app));
+		fail = true;
+		const res = await request(harness.app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+	});
+
+	it("drops the parked request when the client is no longer registered", async () => {
+		const consentStore = createMemoryConsentStore();
+		let registered = true;
+		const harness = await makeApp({
+			consentStore,
+			clientRepository: {
+				findById: async (id: string) =>
+					registered && id === CLIENT_ID ? THIRD_PARTY_CLIENT : null,
+				authenticate: async () => null,
+			},
+		});
+		const challenge = atConsentPage(await authorize(harness.app));
+		registered = false;
+		const res = await request(harness.app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/no longer registered/);
+		expect(harness.session.pendingConsent).toBeUndefined();
+	});
+
+	it("refuses an answer from a session that names no subject", async () => {
+		const { app, challenge, session } = await parkedWith({});
+		session.user = {};
+		const res = await request(app)
+			.post("/oauth/consent")
+			.type("form")
+			.send({ challenge, decision: "accept" });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/names no subject/);
+	});
+
+	it("fails closed when the session store cannot answer", async () => {
+		// `/authorize` reads the same store, so it has to answer while the
+		// request is being parked and fail only afterwards.
+		let down = false;
+		const flaky = {
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async (sid: string) => {
+				if (down) throw new Error("session store down");
+				return {
+					sid,
+					sub: "user-1",
+					authTime: new Date(),
+					createdAt: new Date(),
+					expiresAt: new Date(Date.now() + 3_600_000),
+					claims: {},
+				};
+			}),
+			delete: vi.fn(async () => {}),
+		} as unknown as UserSessionStore;
+		const { app, challenge } = await parkedWith({
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } } as Session,
+			userSessionStore: flaky,
+		});
+		down = true;
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
+
+	it("carries a repeated resource parameter into the parked URL", async () => {
+		// RFC 8707 allows more than one `resource`; the single-valued guard does
+		// not cover it, so the parked URL has to keep both.
+		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		await request(app)
+			.get("/oauth/authorize")
+			.query({ ...baseQuery, resource: ["https://api.example/a", "https://api.example/b"] });
+		const parked = new URL(session.pendingConsent?.authorizeUrl as string);
+		expect(parked.searchParams.getAll("resource")).toEqual([
+			"https://api.example/a",
+			"https://api.example/b",
+		]);
 	});
 });
