@@ -49,7 +49,17 @@ export interface ConsentRecord {
 export interface ConsentStore {
 	readonly kind: string;
 	find(sub: string, clientId: string): Promise<ConsentRecord | null>;
-	/** Replaces any record for the same (`sub`, `clientId`). */
+	/**
+	 * Records consent for the (`sub`, `clientId`) pair, as the **union** of
+	 * `record.scopes` and any scopes already recorded for that pair — never
+	 * as a replacement. Two browsers consenting to different scopes at the
+	 * same time would otherwise lose one of the grants, and the one lost is
+	 * the one the user already answered for. `grantedAt` and `expiresAt` are
+	 * the new record's.
+	 *
+	 * An adapter over a store with a compare-and-set or a set type should use
+	 * it; the union is the contract, not the read-modify-write.
+	 */
 	grant(record: ConsentRecord): Promise<void>;
 	/** @returns whether a record was removed. */
 	revoke(sub: string, clientId: string): Promise<boolean>;

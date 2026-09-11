@@ -946,7 +946,16 @@ export const createOAuthRouter = async (
 	// Without one there is nothing to record, and `/authorize` refuses the
 	// clients that would need it.
 	if (consentStore) {
-		router.use(createConsentRouter(express, { consentStore, clientRepository, auditSink, logger }));
+		router.use(
+			createConsentRouter(express, {
+				consentStore,
+				clientRepository,
+				auditSink,
+				logger,
+				// #527 review: the same liveness read `/authorize` performs.
+				userSessionStore,
+			}),
+		);
 	}
 
 	return { router, registry };

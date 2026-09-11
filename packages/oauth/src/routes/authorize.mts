@@ -346,6 +346,43 @@ const subjectOf = (req: Request): string | null => {
 // Runs after every request-shape check and before the policy hook: a user
 // is not asked to consent to a request that would fail anyway, and the
 // policy sees the request only once the user has allowed it.
+/**
+ * The authorize request to come back to once the consent page has an
+ * answer.
+ *
+ * Not `req.originalUrl`, for two reasons the review found (#527). A POST
+ * carries its parameters in the body — `authorizeParams` reads them from
+ * there — so the URL alone names no client, no `redirect_uri`, no PKCE, and
+ * the resumed request would be a different, invalid one; the parameters are
+ * written back into the query of the URL the browser returns to. And
+ * `prompt=consent` is answered by this very round trip: carried back, it
+ * would park the request again, forever. Every other prompt value is left
+ * alone — `login` has its own one-shot marker (#481).
+ */
+const resumeUrl = (ctx: AuthorizeContext): string => {
+	const url = new URL(buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl));
+	url.search = "";
+	for (const [name, value] of Object.entries(authorizeParams(ctx.req))) {
+		if (typeof value === "string") {
+			url.searchParams.append(name, value);
+		} else if (Array.isArray(value)) {
+			for (const item of value) {
+				if (typeof item === "string") url.searchParams.append(name, item);
+			}
+		}
+	}
+	const prompt = url.searchParams.get("prompt");
+	if (prompt !== null) {
+		const remaining = prompt.split(" ").filter((v) => v.length > 0 && v !== "consent");
+		if (remaining.length === 0) {
+			url.searchParams.delete("prompt");
+		} else {
+			url.searchParams.set("prompt", remaining.join(" "));
+		}
+	}
+	return url.toString();
+};
+
 const checkConsent = async (
 	ctx: AuthorizeContext,
 	client: PublicClient,
@@ -401,7 +438,7 @@ const checkConsent = async (
 		clientId: ctx.clientId,
 		scopes: [...scopes],
 		grantedScopes: record === null ? [] : [...record.scopes],
-		authorizeUrl: buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl),
+		authorizeUrl: resumeUrl(ctx),
 		redirectUri: ctx.redirectUri,
 		...(ctx.state === undefined ? {} : { state: ctx.state }),
 		createdAt: Date.now(),
@@ -625,9 +662,7 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 	}
 	// #481: `login` is honoured — see `evaluateReauthentication`.
 	// #527: so is `consent` — see `checkConsent`.
-	const unsupported = values.filter(
-		(v) => v !== "none" && v !== "login" && v !== "consent",
-	);
+	const unsupported = values.filter((v) => v !== "none" && v !== "login" && v !== "consent");
 	if (unsupported.length > 0) {
 		redirectError(
 			ctx,

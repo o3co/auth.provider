@@ -82,3 +82,28 @@ describe("consentCovers (#527)", () => {
 		expect(consentCovers({ ...record, expiresAt: 100 }, ["read"], 99)).toBe(true);
 	});
 });
+
+describe("createMemoryConsentStore — grant unions (#527 review)", () => {
+	it("adds to what is recorded rather than replacing it", async () => {
+		// Two browsers answering at once: the second write must not lose the
+		// consent the first one recorded.
+		const store = createMemoryConsentStore();
+		await store.grant({ sub: "u1", clientId: "c1", scopes: ["read"], grantedAt: Date.now() });
+		await store.grant({ sub: "u1", clientId: "c1", scopes: ["write"], grantedAt: Date.now() });
+		const record = await store.find("u1", "c1");
+		expect([...(record?.scopes ?? [])].sort()).toEqual(["read", "write"]);
+	});
+
+	it("does not resurrect the scopes of an expired record", async () => {
+		const store = createMemoryConsentStore();
+		await store.grant({
+			sub: "u1",
+			clientId: "c1",
+			scopes: ["read"],
+			grantedAt: Date.now() - 10_000,
+			expiresAt: Date.now() - 1,
+		});
+		await store.grant({ sub: "u1", clientId: "c1", scopes: ["write"], grantedAt: Date.now() });
+		expect((await store.find("u1", "c1"))?.scopes).toEqual(["write"]);
+	});
+});

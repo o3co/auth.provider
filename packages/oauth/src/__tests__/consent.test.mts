@@ -34,6 +34,7 @@ import {
 	createMemoryConsentStore,
 	createSymmetricKeyStore,
 	type PublicClient,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -70,6 +71,8 @@ const makeApp = async (opts: {
 	session?: Session;
 	consentUrl?: string;
 	auditSink?: AuditSink;
+	/** #527 review: the durable session behind the cookie, when a test needs one. */
+	userSessionStore?: UserSessionStore;
 }) => {
 	const record = {
 		clientId: CLIENT_ID,
@@ -105,6 +108,7 @@ const makeApp = async (opts: {
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		...(opts.consentStore ? { consentStore: opts.consentStore } : {}),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
+		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		logger: createMockLogger(),
 	});
 	// One session object for the whole test, so what `/authorize` parks is
@@ -427,5 +431,110 @@ describe("POST /oauth/consent (#527)", () => {
 		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
 		expect(res.status).toBe(503);
 		expect(res.body.error).toBe("temporarily_unavailable");
+	});
+});
+
+describe("the parked request resumes as the request that was made (#527 review)", () => {
+	it("drops prompt=consent from the URL it returns to, so an accepted request does not park again", async () => {
+		// Carried back, `prompt=consent` parks the request a second time, and a
+		// third: every forced-consent request would loop forever.
+		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		await authorize(app, { prompt: "consent" });
+		const parked = new URL(session.pendingConsent?.authorizeUrl as string);
+		expect(parked.searchParams.get("prompt")).toBeNull();
+		expect(parked.searchParams.get("client_id")).toBe(CLIENT_ID);
+	});
+
+	it("does not reach the consent step while a re-authentication is outstanding", async () => {
+		// `prompt=login consent` is answered by #481's re-authentication first —
+		// here by `invalid_request`, because this composition wires no user
+		// session store — so nothing is parked and the one-shot `consent` is
+		// still to be spent on the way back.
+		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const res = await authorize(app, { prompt: "login consent" });
+		expect(atClient(res).get("error")).toBe("invalid_request");
+		expect(session.pendingConsent).toBeUndefined();
+	});
+
+	it("carries a POST's form parameters into the URL it returns to", async () => {
+		// `authorizeParams` reads a POST from the body, so `req.originalUrl` is
+		// bare `/oauth/authorize`: resumed from it, the request would name no
+		// client and no redirect_uri.
+		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const res = await request(app).post("/oauth/authorize").type("form").send(baseQuery);
+		expect(res.status).toBe(302);
+		const parked = new URL(session.pendingConsent?.authorizeUrl as string);
+		expect(parked.pathname).toBe("/oauth/authorize");
+		expect(parked.searchParams.get("client_id")).toBe(CLIENT_ID);
+		expect(parked.searchParams.get("redirect_uri")).toBe(REDIRECT_URI);
+		expect(parked.searchParams.get("code_challenge")).toBe(S256_CHALLENGE);
+		expect(parked.searchParams.get("code_challenge_method")).toBe("S256");
+		expect(parked.searchParams.get("state")).toBe("xyz");
+		expect(parked.searchParams.get("scope")).toBe("read");
+	});
+});
+
+describe("the consent endpoints answer only for a live session (#527 review)", () => {
+	/** A store that knows `sid` only while `alive` says so. */
+	const storeFor = (alive: () => boolean): UserSessionStore =>
+		({
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async (sid: string) =>
+				alive() && sid === "sid-1"
+					? {
+							sid: "sid-1",
+							sub: "user-1",
+							authTime: new Date(),
+							createdAt: new Date(),
+							expiresAt: new Date(Date.now() + 3_600_000),
+							claims: {},
+						}
+					: null,
+			),
+			delete: vi.fn(async () => {}),
+		}) as unknown as UserSessionStore;
+
+	const parked = async (alive: () => boolean) => {
+		const consentStore = createMemoryConsentStore();
+		const harness = await makeApp({
+			consentStore,
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } } as Session,
+			userSessionStore: storeFor(alive),
+		});
+		const challenge = atConsentPage(await authorize(harness.app));
+		return { ...harness, challenge, consentStore };
+	};
+
+	it("refuses the page when the durable session was revoked behind the cookie", async () => {
+		let alive = true;
+		const { app, challenge } = await parked(() => alive);
+		alive = false;
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+	});
+
+	it("refuses the answer too, and records nothing", async () => {
+		let alive = true;
+		const { app, challenge, consentStore } = await parked(() => alive);
+		alive = false;
+		const res = await request(app)
+			.post("/oauth/consent")
+			.type("form")
+			.send({ challenge, decision: "accept" });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+		expect(await consentStore.find("user-1", CLIENT_ID)).toBeNull();
+	});
+
+	it("accepts while the session is live", async () => {
+		const { app, challenge, consentStore } = await parked(() => true);
+		const res = await request(app)
+			.post("/oauth/consent")
+			.type("form")
+			.send({ challenge, decision: "accept" });
+		expect(res.status).toBe(303);
+		expect((await consentStore.find("user-1", CLIENT_ID))?.scopes).toEqual(["read"]);
 	});
 });

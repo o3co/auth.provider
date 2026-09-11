@@ -1364,6 +1364,8 @@ export const fullSectionsSchema = z.object({
 	replaySeenSet: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
 	// #527: where consent to a client that is not first-party is recorded.
 	// `"none"` (the HOCON default) wires nothing, and such clients are refused
 	// as before; `"memory"` forks per replica and is refused by name under

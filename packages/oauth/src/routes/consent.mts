@@ -51,6 +51,7 @@ import {
 	type ConsentStore,
 	emitAuditEvent,
 	type Logger,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 
@@ -91,6 +92,14 @@ type ExpressLike = {
 export interface ConsentRouterOptions {
 	readonly consentStore: ConsentStore;
 	readonly clientRepository: ClientRepository;
+	/**
+	 * #527 review: the durable session behind the cookie. `/authorize`
+	 * re-reads it before it mints anything, and these endpoints must too —
+	 * a session revoked out of band while the browser still holds its cookie
+	 * and its parked challenge would otherwise record a consent that a later
+	 * login then inherits without ever being asked.
+	 */
+	readonly userSessionStore?: UserSessionStore;
 	readonly auditSink?: AuditSink;
 	readonly logger: Logger;
 }
@@ -140,7 +149,25 @@ const subjectOf = (req: Request): string | null => {
 };
 
 export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOptions): Router {
-	const { consentStore, clientRepository, auditSink, logger } = opts;
+	const { consentStore, clientRepository, auditSink, logger, userSessionStore } = opts;
+
+	/**
+	 * Whether the cookie's session is still the live one. The same read
+	 * `/authorize` does before it mints a code: a `sid` the store no longer
+	 * knows is a session someone revoked, and an answer given through it is
+	 * not the user's. A store that cannot answer fails closed, because the
+	 * alternative is recording a consent on an unknown session.
+	 */
+	const sessionIsLive = async (req: Request): Promise<boolean> => {
+		const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
+		if (!userSessionStore || sid === undefined) return true;
+		try {
+			return (await userSessionStore.get(sid)) != null;
+		} catch (err) {
+			logger.warn({ err, sid }, "consent_session_liveness_unavailable");
+			return false;
+		}
+	};
 	const router = express.Router();
 	router.use(express.json());
 	router.use(express.urlencoded({ extended: false }));
@@ -148,6 +175,9 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	router.get("/consent", async (req, res) => {
 		const pending = pendingFor(req, res, req.query.challenge);
 		if (pending === null) return;
+		if (!(await sessionIsLive(req))) {
+			return jsonError(res, 401, "login_required", "the session is no longer active");
+		}
 		let client: Awaited<ReturnType<ClientRepository["findById"]>>;
 		try {
 			client = await clientRepository.findById(pending.clientId);
@@ -183,6 +213,9 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		const body = (req.body ?? {}) as Record<string, unknown>;
 		const pending = pendingFor(req, res, body.challenge);
 		if (pending === null) return;
+		if (!(await sessionIsLive(req))) {
+			return jsonError(res, 401, "login_required", "the session is no longer active");
+		}
 		const sub = subjectOf(req);
 		if (sub === null) {
 			return jsonError(

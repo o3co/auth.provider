@@ -59,9 +59,18 @@ export function createMemoryConsentStore(): MemoryConsentStore {
 		},
 
 		async grant(record) {
-			records.set(key(record.sub, record.clientId), {
+			// The union, per the port's contract: a concurrent accept for other
+			// scopes must not lose the consent this one records. Single-threaded
+			// here, so reading and writing around no await is atomic.
+			const id = key(record.sub, record.clientId);
+			const current = records.get(id);
+			const live =
+				current !== undefined && (current.expiresAt === undefined || current.expiresAt > Date.now())
+					? current.scopes
+					: [];
+			records.set(id, {
 				...record,
-				scopes: [...record.scopes],
+				scopes: [...new Set([...live, ...record.scopes])],
 			});
 		},
 

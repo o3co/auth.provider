@@ -392,3 +392,18 @@ describe("ClientEntrySchema — private_key_jwt (#484)", () => {
 		expect(issues({ tokenEndpointAuthMethod: "private_key_jwt", jwks: { keys: [] } })).not.toBe("");
 	});
 });
+
+describe("ClientEntrySchema — clientUri is rendered by a consent page (#527 review)", () => {
+	const parse = (clientUri: string) =>
+		ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "none",
+			clientUri,
+		});
+
+	it("refuses a scheme a page would execute, and keeps http(s)", () => {
+		expect(parse("javascript:alert(1)").success).toBe(false);
+		expect(parse("data:text/html;base64,PHNjcmlwdD4=").success).toBe(false);
+		expect(parse("https://chat.example").success).toBe(true);
+		expect(parse("http://localhost:3000").success).toBe(true);
+	});
+});
