@@ -336,3 +336,20 @@ describe("acr_values_supported (#481)", () => {
 		);
 	});
 });
+
+describe("oauthModule — client_id_metadata_document_supported (#529)", () => {
+	it("advertises Client ID Metadata Documents only when the feature is on", () => {
+		// MCP 2026-07-28: a hosted client selects CIMD when the AS advertises
+		// this AND lists `none` in token_endpoint_auth_methods_supported.
+		const off = discoveryContribution();
+		expect(off.metadata?.client_id_metadata_document_supported).toBeUndefined();
+
+		const base = configWithRevocation();
+		const on = discoveryContribution({}, {
+			...base,
+			oauth: { ...base.oauth, clientIdMetadataDocuments: { enabled: true } },
+		} as unknown as AppConfig);
+		expect(on.metadata?.client_id_metadata_document_supported).toBe(true);
+		expect(on.metadata?.token_endpoint_auth_methods_supported).toContain("none");
+	});
+});

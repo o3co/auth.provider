@@ -295,6 +295,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					// would put a non-standard claim in a standard document. The
 					// access-token answer lives at the endpoint.
 					const revocationSupported = revokesRefreshTokens || revokesAccessTokens;
+					// #529: advertised only when on. MCP clients select Client ID
+					// Metadata Documents on this flag plus `none` in
+					// token_endpoint_auth_methods_supported (below, unconditional).
+					const cimdSupported =
+						(deps.config as { oauth?: { clientIdMetadataDocuments?: { enabled?: unknown } } }).oauth
+							?.clientIdMetadataDocuments?.enabled === true;
 					// #283: RFC 8414 §2 says an OMITTED `grant_types_supported` means
 					// `["authorization_code", "implicit"]` — so saying nothing advertised
 					// an implicit flow this AS has never implemented, while hiding the
@@ -349,6 +355,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// restating a correct default is noise in a document RPs
 							// read.
 							request_uri_parameter_supported: false,
+							...(cimdSupported ? { client_id_metadata_document_supported: true } : {}),
 							subject_types_supported: ["public"],
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
 							scopes_supported: ["openid", "profile", "email", "groups"],

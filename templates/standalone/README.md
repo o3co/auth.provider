@@ -168,6 +168,14 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_JWT_SECRET` | — | Signing secret, **HMAC (`HS256`) only**. At least 32 bytes (256 bits) of random material — `openssl rand -hex 32`. Hex/base64 values are measured **decoded**, so a 32-character hex string counts as 16 bytes and is refused. |
 | `OAUTH_JWT_ISSUER` | **(required)** | Canonical issuer URL stamped as `iss` on every token. Must be absolute `https` (`http` only for a loopback host), with no query or fragment. Boot fails when unset — it is never derived from the `Host` header. |
 | `OAUTH_REQUIRE_EMAIL_VERIFIED` | `false` | Refuse to issue tokens for a user until the Store publishes `emailVerified: true`. Enforced at `/authorize` and on the `session` grant. Verification itself is the Store's job — this only reads the result. |
+| `OAUTH_CIMD_ENABLED` | `false` | Accept Client ID Metadata Documents (#529): a client whose `client_id` is the `https` URL of its own registration, the model MCP hosts use. Such a client is public, never first-party — it goes through the consent step, so wire `CONSENT_STORE_ADAPTER`. |
+| `OAUTH_CIMD_ALLOWED_SCOPES` | — | Comma-separated: what any such client may obtain (its document's `scope` is intersected with this). Empty admits none. |
+| `OAUTH_CIMD_ALLOWED_AUDIENCES` | — | Comma-separated: the resource servers it may mint for (RFC 8707 `resource`). Empty admits only its own `client_id`. |
+| `OAUTH_CIMD_ALLOWED_HOSTS` | — | Comma-separated hosts a document may live on: exact, or `.suffix` for a domain and its subdomains. Empty admits any public host. |
+| `OAUTH_CIMD_DENIED_HOSTS` | — | Comma-separated hosts refused even when allowed above. |
+| `OAUTH_CIMD_MAX_BYTES` | `5120` | Byte cap on a document (the draft recommends 5 KB). |
+| `OAUTH_CIMD_TIMEOUT_MS` | `5000` | Fetch timeout. |
+| `OAUTH_CIMD_CACHE_MAX_AGE_MS` | `600000` | Upper bound on how long a valid document is served from cache; `Cache-Control: max-age` may shorten it. |
 | `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM-encoded private key (asymmetric algorithms) |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | Path to PEM private key file |

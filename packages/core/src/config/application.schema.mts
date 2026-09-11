@@ -30,6 +30,21 @@
  * ADR 2026-04-30.
  */
 import { z } from "zod";
+
+/**
+ * A list that an environment variable may carry as one comma-separated
+ * string (#529). Entries are trimmed and empties dropped, so `"a, ,b"` is
+ * `["a", "b"]` and an exported-but-empty variable is `[]`.
+ */
+const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =>
+	Array.isArray(value)
+		? value
+		: value
+				.split(",")
+				.map((entry) => entry.trim())
+				.filter((entry) => entry.length > 0),
+);
+
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { isValidJwksPath } from "../jwks/path.mjs";
 import {
@@ -669,6 +684,25 @@ export const CoreConfigSchema = z.object({
 		resourceIndicator: z
 			.object({
 				enabled: coerceBooleanFromEnv,
+			})
+			.optional(),
+		// #529: Client ID Metadata Documents — a client whose `client_id` is the
+		// https URL of its own registration (draft-ietf-oauth-client-id-metadata-
+		// document; the MCP 2026-07-28 registration model). Off by default. The
+		// list-valued keys accept a comma-separated string, which is how an
+		// environment variable carries a list (the `cors.allowedOrigins` shape).
+		// Every ceiling here is the operator's: a document says who a client is,
+		// never what it may reach.
+		clientIdMetadataDocuments: z
+			.object({
+				enabled: coerceBooleanFromEnv,
+				allowedScopes: commaList.optional(),
+				allowedAudiences: commaList.optional(),
+				allowedHosts: commaList.optional(),
+				deniedHosts: commaList.optional(),
+				maxBytes: z.coerce.number().int().positive().optional(),
+				timeoutMs: z.coerce.number().int().positive().optional(),
+				cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
 			})
 			.optional(),
 		// #277: what `POST /oauth/revoke` promises for ACCESS tokens.

@@ -433,6 +433,9 @@ export {
 // both consume this; the designVocabulary drift guard fails any second
 // definition.
 export { buildCanonicalRequestUrl } from "./net/request-url.mjs";
+// #529: the RFC 6890 special-use ranges a caller-supplied URL must not
+// resolve to — the SSRF guard's one list.
+export { isSpecialUseAddress } from "./net/special-use.mjs";
 // The single trusted-proxy address vocabulary (#292) — Express's own
 // `trust proxy` forms. `http.trustProxy` validates its entries with
 // `checkTrustedProxyEntry`; `@o3co/auth-provider-mtls` matches
