@@ -60,6 +60,7 @@
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
+import { discoveryPathsFor } from "../discovery/wellKnownPaths.mjs";
 import { resolveJwksPath } from "../jwks/path.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { checkSerializedOrigin, describeSerializedOriginRejection } from "../net/origin.mjs";
@@ -117,12 +118,13 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  *   - `GET|POST /oauth/userinfo` — OIDC Core §5.3 defines both methods.
  *   - `POST /oauth/revoke` — RFC 7009 §2.1 lets a public client revoke its own
  *     tokens, which is exactly what an SPA does on sign-out.
- *   - `GET /.well-known/openid-configuration` and the JWKS document — public,
- *     unauthenticated, cacheable metadata that a browser-based client library
- *     fetches to discover the endpoints above. The JWKS path is resolved
- *     through {@link resolveJwksPath}, the same single source the route
- *     registration and the advertised `jwks_uri` use, so the three cannot
- *     drift.
+ *   - `GET /.well-known/openid-configuration`, its RFC 8414 twin
+ *     `/.well-known/oauth-authorization-server` (#528) and the JWKS document
+ *     — public, unauthenticated, cacheable metadata that a browser-based
+ *     client library fetches to discover the endpoints above. The discovery
+ *     paths come from {@link discoveryPathsFor} and the JWKS path from
+ *     {@link resolveJwksPath}: the same single sources the route registration
+ *     and the advertised `jwks_uri` use, so none of them can drift.
  *
  * **Deliberately off the list:**
  *
@@ -144,13 +146,15 @@ const PREFLIGHT_MAX_AGE_SECONDS = 600;
  * router elsewhere must build its own table.
  */
 export function browserFacingCorsRoutes(config: {
-	oauth?: { jwt?: { jwksPath?: unknown } };
+	oauth?: { jwt?: { jwksPath?: unknown; issuer?: unknown } };
 }): readonly CorsRoute[] {
+	const issuer = config.oauth?.jwt?.issuer;
+	const discovery = discoveryPathsFor(typeof issuer === "string" ? issuer : undefined);
 	return [
 		{ path: "/oauth/token", methods: ["POST"] },
 		{ path: "/oauth/userinfo", methods: ["GET", "POST"] },
 		{ path: "/oauth/revoke", methods: ["POST"] },
-		{ path: "/.well-known/openid-configuration", methods: ["GET"] },
+		...[...discovery.oidc, ...discovery.oauth].map((path) => ({ path, methods: ["GET"] })),
 		{ path: resolveJwksPath(config), methods: ["GET"] },
 	];
 }

@@ -26,14 +26,12 @@
  * collision-check + mount-order + mount pipeline — no special-casing.
  */
 
-import type { Router } from "express";
+import type { Request, Response, Router } from "express";
 import { BootError, type ListCollector } from "../boot/types.mjs";
 import type { RouteContribution, RouteHandler } from "../modules/manifest/route-contribution.mjs";
 import { buildDiscoveryDocument, DiscoveryDocumentError } from "./buildDocument.mjs";
 import type { OidcDiscoveryContribution } from "./types.mjs";
-
-/** The RFC 8414 / OIDC Discovery 1.0 fixed discovery path. */
-const OIDC_DISCOVERY_PATH = "/.well-known/openid-configuration";
+import { discoveryPathsFor } from "./wellKnownPaths.mjs";
 
 /** Stable id for the core-synthesized discovery route (used for collision identity). */
 const DISCOVERY_ROUTE_ID = "core:oidc-discovery";
@@ -43,8 +41,11 @@ const DISCOVERY_ROUTE_ID = "core:oidc-discovery";
  * `discoveryMetadata` contributions, or return `null` when discovery should not
  * be served.
  *
- * Returns a route contribution (mounted at "/", advertising
- * `GET /.well-known/openid-configuration`) when BOTH:
+ * Returns a route contribution (mounted at "/", advertising `GET` on every
+ * path the document is served at — OIDC Discovery's
+ * `/.well-known/openid-configuration` and RFC 8414's
+ * `/.well-known/oauth-authorization-server`, formed per the issuer's path
+ * component by {@link discoveryPathsFor}, #528) when BOTH:
  *   1. an issuer is configured (`config.oauth.jwt.issuer`), and
  *   2. some contribution declares `providerRoot: true` — the EXPLICIT
  *      "an OpenID Provider exists here" signal. An ancillary contributor like
@@ -96,15 +97,21 @@ export function planDiscoveryRoute(input: {
 		throw err;
 	}
 
+	// #528: one document, every path a client may look for it at — OIDC's
+	// appended form and RFC 8414's inserted form — through one handler, so
+	// the bodies and headers cannot differ between them.
+	const discovery = discoveryPathsFor(issuer);
+	const paths = [...discovery.oidc, ...discovery.oauth];
 	const router = routerFactory();
-	router.get(OIDC_DISCOVERY_PATH, (_req, res) => {
+	const serve = (_req: Request, res: Response): void => {
 		res.status(200).json(doc);
-	});
+	};
+	for (const path of paths) router.get(path, serve);
 
 	return {
 		id: DISCOVERY_ROUTE_ID,
 		mountPath: "/",
 		handler: router as RouteHandler,
-		routes: [{ method: "GET", path: OIDC_DISCOVERY_PATH }],
+		routes: paths.map((path) => ({ method: "GET" as const, path })),
 	};
 }
