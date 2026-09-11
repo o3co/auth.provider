@@ -2,8 +2,17 @@ version: 2
 updates:
   # The standalone template pins its base image by digest. A digest never moves,
   # which is the point — and also means it never picks up the CVE fixes that
-  # `node:24-alpine` rebuilds carry. This is the update path: Dependabot bumps
+  # `node:26-alpine` rebuilds carry. This is the update path: Dependabot bumps
   # tag and digest together, so the pin stays deliberate instead of stale.
+  #
+  # Major bumps track the LTS lines, which is why `node:25` was declined
+  # (#388: odd-numbered, never enters LTS, EOL June 2026). `node:26` was taken
+  # in September 2026, a few weeks ahead of its October LTS date, as a
+  # deliberate call rather than a default: bcrypt — the one native dependency
+  # — is a Node-API addon whose alpine prebuild loads on 26 without
+  # compiling, and the whole suite was run on 26 before the bump landed.
+  # Nothing in CI builds this image, so that verification is a human step,
+  # not a green check.
   - package-ecosystem: "docker"
     directory: "/templates/standalone"
     schedule:

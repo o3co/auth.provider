@@ -209,11 +209,13 @@ The grant rejects sign-count regressions per WebAuthn §2.4 (clone detection). T
 
 ## Dependency: SimpleWebAuthn
 
-`@simplewebauthn/server` is pinned to `13.3.3` (S12). The verification helpers and options generators wrap this library; Dependabot tracks major bumps.
+`@simplewebauthn/server` is pinned to `14.0.1` (S12). The verification helpers and options generators wrap this library; Dependabot tracks major bumps, so each one arrives as a deliberate security review.
 
 Pinned past `13.3.1` for GHSA-6hxq-p678-4hr2 — registration attestation certificate chains were not reliably checked against a trust anchor. Deployments on the `attestationPreference = "none"` default are unaffected: that path never inspects a certificate. See [`attestationPreference` default](#security--attestationpreference-default) for who is.
 
-Known caveat carried by 13.3.2 and 13.3.3: the rewritten path validation requires every certificate in `x5c` to appear in the chain it builds, so an `x5c` carrying a cross-signed certificate is rejected. Upstream fixed this in 14.0.0. A deployment relying on Apple or Android attestation should canary real authenticators before rolling this out.
+The caveat 13.3.2 and 13.3.3 carried — the rewritten path validation required every certificate in `x5c` to appear in the chain it built, so an `x5c` carrying a cross-signed certificate was rejected — is **resolved**: upstream fixed it in 14.0.0, which is what this package now runs. A deployment relying on Apple or Android attestation should still canary real authenticators when moving between these versions.
+
+**The advertised algorithm set is this package's, not the library's.** `WEBAUTHN_ALGORITHM_IDS` — EdDSA (`-8`), ES256 (`-7`), RS256 (`-257`), most preferred first — is passed to both `generateRegistrationOptions()` and `verifyRegistrationResponse()`, so what an authenticator is offered and what is accepted back cannot drift apart. 14.0.0 keeps its own default in a mutable module-level array and prepends ML-DSA-44 to it whenever the runtime reports support, which would have made the offer depend on the Node build the provider happens to run on and changed it under a dependency bump. A credential outlives the process that registered it, so the set is stated here. Offering ML-DSA-44 on purpose is [#554](https://github.com/o3co/auth.provider/issues/554).
 
 ## Wave 1 scope boundaries
 
