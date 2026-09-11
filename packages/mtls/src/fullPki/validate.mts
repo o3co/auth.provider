@@ -97,11 +97,13 @@
  *
  * Under `"both"` the responder is asked first — one small request about one
  * certificate, against a CRL that may be large — and the CRL is consulted
- * only when OCSP could not answer: unreachable, `unknown`, unverifiable, or
- * simply not named. A *revoked* from either source wins; a certificate is
- * unavailable only when both sources are. The fallback is logged when a
- * responder was actually asked and failed, so an OCSP outage is visible
- * even while the CRL keeps revocation checking alive.
+ * only when OCSP could not answer: unreachable, unverifiable, stale, or
+ * simply not named. An `unknown` is an answer, and final (#471): the CRL
+ * cannot list a never-issued serial, so it is not asked about one. A
+ * *revoked* from either source wins; a certificate is unavailable when both
+ * sources are, or when the responder said `unknown`. The fallback is logged
+ * when a responder was actually asked and failed, so an OCSP outage is
+ * visible even while the CRL keeps revocation checking alive.
  */
 
 import { X509Certificate } from "node:crypto";
@@ -139,7 +141,7 @@ export type OnRevocationUnavailable = "reject" | "allow";
 
 /**
  * Where revocation status comes from. `"both"` asks the responder first and
- * falls back to the CRL when OCSP could not answer (#431).
+ * falls back to the CRL when OCSP could not answer (#431) — could not, not would not: an OCSP `unknown` is final (#471).
  */
 export type RevocationSource = "crl" | "ocsp" | "both";
 
