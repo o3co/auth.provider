@@ -18,7 +18,11 @@ import crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import { z } from "zod";
 import type { User } from "./types.mjs";
-import type { UserRepository } from "./UserRepository.mjs";
+import type {
+	FederatedIdentityLink,
+	LinkFederatedIdentityResult,
+	UserRepository,
+} from "./UserRepository.mjs";
 
 const DUMMY_BCRYPT_PASSWORD_HASH = "$2b$10$39.FBAWt.ck.rbQbPhmLOOPkwFxWEPZEYA3HR07Lr2k5OYqk.vRSi";
 const BCRYPT_HASH_RE = /^\$2[aby]\$/;
@@ -34,6 +38,12 @@ export type UserEntry = z.infer<typeof UserEntrySchema>;
 
 export class InMemoryUserRepository implements UserRepository {
 	private users: Map<string, UserEntry>;
+	/**
+	 * #482: identities linked at runtime, token → username. In memory only —
+	 * a restart forgets them. This repository is the development and test
+	 * adapter; a deployment's Store persists its own links.
+	 */
+	private readonly linkedTokens = new Map<string, string>();
 
 	constructor(users: Map<string, UserEntry>) {
 		this.users = users;
@@ -73,11 +83,41 @@ export class InMemoryUserRepository implements UserRepository {
 	}
 
 	async authenticateByToken(token: string): Promise<User | null> {
+		const linked = this.linkedTokens.get(token);
+		if (linked !== undefined) {
+			const entry = this.users.get(linked);
+			if (entry) return this.toUser(linked, entry);
+		}
 		for (const [username, entry] of this.users) {
 			if ((entry as Record<string, unknown>).token === token) {
 				return this.toUser(username, entry);
 			}
 		}
 		return null;
+	}
+	/** #482 — see {@link UserRepository.linkFederatedIdentity}. In memory only. */
+	async linkFederatedIdentity(
+		userId: string,
+		identity: FederatedIdentityLink,
+	): Promise<LinkFederatedIdentityResult> {
+		const target = [...this.users.entries()].find(
+			([username, entry]) => (entry.id ?? username) === userId,
+		);
+		if (!target) return { ok: false, reason: "refused", description: "unknown user" };
+		const [username, entry] = target;
+		const holder =
+			this.linkedTokens.get(identity.token) ??
+			[...this.users.entries()].find(
+				([, candidate]) => (candidate as Record<string, unknown>).token === identity.token,
+			)?.[0];
+		if (holder !== undefined && holder !== username) {
+			return {
+				ok: false,
+				reason: "conflict",
+				description: "identity already linked to another user",
+			};
+		}
+		this.linkedTokens.set(identity.token, username);
+		return { ok: true, user: this.toUser(username, entry) };
 	}
 }

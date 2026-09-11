@@ -16,7 +16,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import {
 	type AppConfig,
+	type AuditSink,
 	consoleLogger,
+	emitAuditEvent,
 	errorEnvelope,
 	type FederationTokenStore,
 	type Logger,
@@ -61,6 +63,10 @@ declare module "express-session" {
 			 *  breaking the shared session shape. */
 			nonce?: string;
 			redirectTo?: string;
+			/** #482: the browser asked to link this federation's identity to the
+			 *  account of the session `sid` it held then (`?link=1`), rather than
+			 *  to log in. */
+			link?: { readonly sid: string };
 		};
 		/** UserSession ID — set after successful federation callback. */
 		sid?: string;
@@ -148,6 +154,7 @@ export const createRouter = (
 		sessionTtlMs = DEFAULT_SESSION_TTL_MS,
 		federationTransactionTtlMs = DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
 		federationTransactionCookieName,
+		auditSink,
 		logger = consoleLogger,
 	}: {
 		config: AppConfig;
@@ -179,6 +186,8 @@ export const createRouter = (
 		 * path-scoped cookie could not satisfy.
 		 */
 		federationTransactionCookieName?: string;
+		/** #482: `federation.identity.linked` / `federation.identity.link_refused`. Optional, like every sink. */
+		auditSink?: AuditSink;
 		logger?: Logger;
 	},
 ): Router => {
@@ -277,6 +286,186 @@ export const createRouter = (
 	 * Factored out rather than copied precisely because it is the security
 	 * boundary: two handlers would be two places for the CSRF check to drift.
 	 */
+	/**
+	 * #482: link a federated identity to the account the browser is already
+	 * signed in as, without minting a new session.
+	 *
+	 * Reached only through an explicit `?link=1` start, whose envelope the
+	 * callback verified exactly as a login's (`state`, PKCE, `nonce`). The
+	 * identity `<provider>:<sub>` was resolved just before; the rules are: nobody
+	 * → ask the Store; someone else → `409`, the Store is not asked (linking never
+	 * merges accounts); this account → nothing to link. In every accepted case
+	 * the federation is attached to the *live* session — its index entry and
+	 * upstream tokens under the current `sid` — and the browser is redirected as
+	 * after a login. No `UserSession` is created and the express session is not
+	 * regenerated, so the session's claims envelope stays what it was.
+	 */
+	const completeLink = async (
+		provider: FederationProvider,
+		profile: Awaited<ReturnType<FederationProvider["exchangeCode"]>>,
+		identityToken: string,
+		resolved: Awaited<ReturnType<typeof userRepository.authenticateByToken>>,
+		redirectTo: string | undefined,
+		linkSid: string,
+		req: Request,
+		res: Response,
+		log: Logger,
+	): Promise<unknown> => {
+		// The link belongs to the session that asked for it — the one the start
+		// leg recorded in the transaction — not to whichever session the browser
+		// holds now. A "query" federation's envelope lives in that session, so
+		// the two are one; a "form_post" callback is a cross-site POST that the
+		// application session cookie (SameSite=Lax) does not accompany, so
+		// `req.session` is a fresh one there and the recorded sid is the only
+		// binding. A request that does carry an authenticated session must be
+		// that same one: switching accounts in between links nothing.
+		const currentSid = linkSid;
+		if (req.session.isAuthenticated === true && req.session.sid !== currentSid) {
+			return res.status(401).json({
+				error: "login_required",
+				error_description: "The link was started from a different session",
+			});
+		}
+		let current: Awaited<ReturnType<typeof userSessionStore.get>>;
+		try {
+			current = await userSessionStore.get(currentSid);
+		} catch (err) {
+			log.warn({ err }, "federation link: user session lookup failed");
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "Session store unavailable",
+			});
+		}
+		if (!current) {
+			return res.status(401).json({
+				error: "login_required",
+				error_description: "Linking a federated identity requires a live session",
+			});
+		}
+		// The three emissions below spell their `type` literally, which is what
+		// the audit-inventory guard reads.
+		const auditBase = () => ({
+			timestamp: new Date(),
+			subject: current.sub,
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+		});
+
+		if (resolved && resolved.id !== current.sub) {
+			void emitAuditEvent(auditSink, {
+				...auditBase(),
+				type: "federation.identity.link_refused",
+				details: { provider: provider.name, reason: "conflict" },
+			});
+			return res.status(409).json({
+				error: "identity_conflict",
+				error_description: "This federated identity is already linked to another account",
+			});
+		}
+		if (!resolved) {
+			if (typeof userRepository.linkFederatedIdentity !== "function") {
+				return res.status(400).json({
+					error: "link_unsupported",
+					error_description: "The user repository does not support linking federated identities",
+				});
+			}
+			const mapped = supportsClaimMapping(provider) ? provider.mapClaims(profile) : {};
+			let outcome: Awaited<ReturnType<NonNullable<typeof userRepository.linkFederatedIdentity>>>;
+			try {
+				outcome = await userRepository.linkFederatedIdentity(current.sub, {
+					provider: provider.name,
+					sub: profile.sub,
+					token: identityToken,
+					claims: { ...(mapped as Record<string, unknown>) },
+				});
+			} catch (err) {
+				log.warn({ err }, "federation link: user repository failed");
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "User directory temporarily unavailable",
+				});
+			}
+			if (!outcome.ok) {
+				void emitAuditEvent(auditSink, {
+					...auditBase(),
+					type: "federation.identity.link_refused",
+					details: { provider: provider.name, reason: outcome.reason },
+				});
+				const conflict = outcome.reason === "conflict";
+				return res.status(conflict ? 409 : 403).json({
+					error: conflict ? "identity_conflict" : "link_refused",
+					error_description:
+						outcome.description ??
+						(conflict
+							? "This federated identity is already linked to another account"
+							: "The user directory refused to link this identity"),
+				});
+			}
+			void emitAuditEvent(auditSink, {
+				...auditBase(),
+				type: "federation.identity.linked",
+				details: { provider: provider.name },
+			});
+		}
+
+		// Whether the session already carried this federation: a failed re-link
+		// must not take an existing attachment down with it.
+		let hadFederation = false;
+		try {
+			hadFederation = (await sessionFederationIndex.listFederations(currentSid)).includes(
+				provider.name,
+			);
+			await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
+			if (profile.accessToken) {
+				await federationTokenStore.attach(currentSid, provider.name, {
+					accessToken: profile.accessToken,
+					refreshToken: profile.refreshToken,
+					idToken: profile.idToken,
+					expiresAt: profile.expiresAt,
+				});
+			}
+		} catch (err) {
+			log.warn({ err }, "federation link: attaching to the live session failed");
+			// Best-effort rollback, as the login path does. The transaction is
+			// consumed and the Store's link stands — the identity is the
+			// account's, and the next login through this federation lands on it —
+			// so what must not be left behind is a half-attached federation on the
+			// live session: the token record first, then the index entry. One the
+			// session already carried is left as it was.
+			if (!hadFederation) {
+				try {
+					await federationTokenStore.delete(currentSid, provider.name);
+				} catch {
+					// best-effort
+				}
+				try {
+					await sessionFederationIndex.removeFederation(currentSid, provider.name);
+				} catch {
+					// best-effort
+				}
+			}
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "Session store unavailable",
+			});
+		}
+		const policy = federationRedirectPolicyResolver.get(provider.name);
+		if (!policy) {
+			return res.status(500).json({
+				error: "internal_error",
+				error_description: "redirect policy not registered for provider",
+			});
+		}
+		const redirect = policy.resolveCallbackRedirect({ redirectTo });
+		if (!redirect.ok) {
+			return res.status(redirect.status).json({
+				error: redirect.error,
+				error_description: redirect.errorDescription,
+			});
+		}
+		return res.redirect(redirect.value);
+	};
+
 	const runCallback = async (
 		provider: FederationProvider,
 		params: Readonly<Record<string, string>>,
@@ -551,9 +740,10 @@ export const createRouter = (
 			});
 		}
 
+		const identityToken = `${provider.name}:${profile.sub}`;
 		let user: Awaited<ReturnType<typeof userRepository.authenticateByToken>>;
 		try {
-			user = await userRepository.authenticateByToken(`${provider.name}:${profile.sub}`);
+			user = await userRepository.authenticateByToken(identityToken);
 		} catch (err) {
 			log.warn({ err }, "user repository lookup failed");
 			return res.status(503).json({
@@ -561,6 +751,22 @@ export const createRouter = (
 				error_description: "User directory temporarily unavailable",
 			});
 		}
+		// #482: an explicit link request completes here, or is refused here. It
+		// never falls through to the login path below: a link is not a login.
+		if (fed.link !== undefined) {
+			return completeLink(
+				provider,
+				profile,
+				identityToken,
+				user,
+				redirectTo,
+				fed.link.sid,
+				req,
+				res,
+				log,
+			);
+		}
+
 		if (!user) {
 			return res.status(401).json({
 				error: "unknown_user",
@@ -898,6 +1104,33 @@ export const createRouter = (
 			// #479: how this IdP will deliver the authorization response. Absent
 			// (every federation written before Sign in with Apple) means "query",
 			// so nothing below changes for them.
+			// #482: `link=1` asks to link this federation's identity to the account
+			// the browser is already signed in as. Explicit on purpose — a session
+			// cookie plus a stray identity is the login-CSRF shape, so signing in
+			// with another provider never links by itself — and refused here, before
+			// the browser is sent anywhere, when it cannot succeed.
+			const wantsLink = req.query.link === "1" || req.query.link === "true";
+			let linkSid: string | undefined;
+			if (wantsLink) {
+				if (req.session.isAuthenticated !== true || typeof req.session.sid !== "string") {
+					return res.status(401).json({
+						error: "login_required",
+						error_description: "Linking a federated identity requires an authenticated session",
+					});
+				}
+				if (typeof userRepository.linkFederatedIdentity !== "function") {
+					return res.status(400).json({
+						error: "link_unsupported",
+						error_description: "The user repository does not support linking federated identities",
+					});
+				}
+				// The session the link is for. The callback binds to it — a form_post
+				// callback arrives without the application session cookie, and a
+				// browser that switched accounts in between must not link to the new
+				// one — so it is recorded in the transaction, not inferred later.
+				linkSid = req.session.sid;
+			}
+
 			const responseMode = resolveFederationResponseMode(provider);
 
 			// Generate CSRF state, PKCE code verifier, and OIDC nonce.
@@ -928,6 +1161,7 @@ export const createRouter = (
 				codeVerifier,
 				nonce,
 				redirectTo,
+				...(linkSid === undefined ? {} : { link: { sid: linkSid } }),
 			};
 
 			// #494: a form_post callback arrives as a cross-site POST from the

@@ -88,6 +88,24 @@ describe("registerBuiltinAdapters", () => {
 		expect(invalid).toBeNull();
 	});
 
+	it("http builder wires linkFederatedIdentityUrl only when the config carries it (#482)", async () => {
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		registerBuiltinAdapters({ userFactory });
+		const base = {
+			type: "http",
+			authenticateUrl: `${BASE_URL}/auth`,
+			authenticateByTokenUrl: `${BASE_URL}/auth/token`,
+			timeout: 5000,
+		};
+		const without = await userFactory.create(base);
+		expect(without.linkFederatedIdentity).toBeUndefined();
+		const withLink = await userFactory.create({
+			...base,
+			linkFederatedIdentityUrl: `${BASE_URL}/auth/link`,
+		});
+		expect(typeof withLink.linkFederatedIdentity).toBe("function");
+	});
+
 	it("http builder coerces string timeout to number (env-override path)", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		registerBuiltinAdapters({ userFactory });

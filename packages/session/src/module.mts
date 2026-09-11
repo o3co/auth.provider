@@ -205,6 +205,7 @@ export const sessionModule = defineModule<
 						federationTransactionCookieName: deriveFederationTransactionCookieName(
 							config.session.name,
 						),
+						...(deps.auditSink ? { auditSink: deps.auditSink } : {}),
 						logger: deps.logger ?? consoleLogger,
 					}),
 				};

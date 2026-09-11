@@ -502,7 +502,11 @@ export type {
 	TokenEndpointAuthMethod,
 	User,
 } from "./repositories/types.mjs";
-export type { UserRepository } from "./repositories/UserRepository.mjs";
+export type {
+	FederatedIdentityLink,
+	LinkFederatedIdentityResult,
+	UserRepository,
+} from "./repositories/UserRepository.mjs";
 export {
 	createRouter as createHealthcheckRouter,
 	type HealthcheckRouterOptions,

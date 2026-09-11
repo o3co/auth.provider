@@ -43,6 +43,8 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"device.approved",
 	"device.denied",
 	"device.rate_limited",
+	"federation.identity.link_refused",
+	"federation.identity.linked",
 	"federation.logout.idp_unreachable",
 	"federation.logout.success",
 	"federation.token.family_revoked",

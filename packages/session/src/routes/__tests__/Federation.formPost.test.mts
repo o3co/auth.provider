@@ -886,3 +886,66 @@ describe("fake Apple end-to-end through the federation routes", () => {
 		expect(federated.apple.name).toBe("Not Alice");
 	});
 });
+
+describe("POST callback — account linking through a form_post federation (#482)", () => {
+	it("links to the session that started the flow, which the cross-site POST does not carry", async () => {
+		const linkFederatedIdentity = vi.fn(async () => ({
+			ok: true,
+			user: { id: "user-1", username: "alice" },
+		}));
+		const harness = buildApp({
+			userRepository: {
+				authenticate: vi.fn(async () => null),
+				authenticateByToken: vi.fn(async () => null),
+				linkFederatedIdentity,
+			} as unknown as UserRepository,
+		});
+		// The browser holds an authenticated session for user-1, whose
+		// UserSession is live.
+		harness.store.set("browser", {
+			data: { sid: "s-1", isAuthenticated: true },
+			cookie: { sameSite: "lax", secure: true, httpOnly: true },
+		});
+		(harness.userSessionStore.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+			sid: "s-1",
+			sub: "user-1",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 3_600_000),
+			claims: {},
+		});
+
+		const start = await request(harness.app)
+			.get("/oauth/federation/apple?link=1")
+			.set("Cookie", "sid=browser");
+		expect(start.status).toBe(302);
+		const transactionId = readTransactionCookie(start);
+		expect(transactionId).toBeDefined();
+		const record = harness.records.get(`${FEDERATION_TRANSACTION_KEY_PREFIX}${transactionId}`) as {
+			federation: { state: string; link?: unknown };
+		};
+		expect(record.federation.link).toEqual({ sid: "s-1" });
+
+		// Apple posts back cross-site: the SameSite=None transaction cookie
+		// travels, the SameSite=Lax application session cookie does not.
+		const res = await request(harness.app)
+			.post("/oauth/federation/apple/callback")
+			.set(
+				"Cookie",
+				`${HARNESS_TRANSACTION_COOKIE_NAME}=${encodeURIComponent(transactionId as string)}`,
+			)
+			.type("form")
+			.send({ state: record.federation.state, code: "apple-code" });
+		expect(res.status).toBe(302);
+		expect(linkFederatedIdentity).toHaveBeenCalledWith(
+			"user-1",
+			expect.objectContaining({ provider: "apple", sub: "000123.abcdef.0456" }),
+		);
+		expect(harness.sessionFederationIndex.addFederation).toHaveBeenCalledWith(
+			"s-1",
+			"apple",
+			expect.any(Date),
+		);
+		expect(harness.userSessionStore.create).not.toHaveBeenCalled();
+	});
+});

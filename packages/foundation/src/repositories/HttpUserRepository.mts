@@ -14,8 +14,16 @@
  * limitations under the License.
  */
 
-import type { User, UserRepository } from "@o3co/auth-provider-core";
+import type {
+	FederatedIdentityLink,
+	LinkFederatedIdentityResult,
+	User,
+	UserRepository,
+} from "@o3co/auth-provider-core";
 import { assertSecureEndpoint } from "../endpointUrl.mjs";
+
+/** The Store answered 409 to a link request: the identity is already someone else's (#482). */
+const CONFLICT = Symbol("conflict");
 
 /**
  * Default ceiling on an upstream response body, in bytes.
@@ -169,15 +177,28 @@ export class HttpUserRepository implements UserRepository {
 	private authenticateByTokenUrl: string;
 	private timeout: number;
 	private maxResponseBytes: number;
+	private linkFederatedIdentityUrl?: string;
+	/**
+	 * #482 — see {@link UserRepository.linkFederatedIdentity}. Present only when
+	 * `linkFederatedIdentityUrl` is configured, which is how the federation routes
+	 * know to refuse `?link=1` up front instead of at the callback.
+	 */
+	readonly linkFederatedIdentity?: (
+		userId: string,
+		identity: FederatedIdentityLink,
+	) => Promise<LinkFederatedIdentityResult>;
 
 	constructor({
 		authenticateUrl,
 		authenticateByTokenUrl,
+		linkFederatedIdentityUrl,
 		timeout,
 		maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
 	}: {
 		authenticateUrl: string;
 		authenticateByTokenUrl: string;
+		/** #482: optional; the Store's link endpoint. Same https rule as the other two. */
+		linkFederatedIdentityUrl?: string;
 		timeout: number;
 		maxResponseBytes?: number;
 	}) {
@@ -186,6 +207,13 @@ export class HttpUserRepository implements UserRepository {
 			authenticateByTokenUrl,
 			"authenticateByTokenUrl",
 		);
+		if (linkFederatedIdentityUrl !== undefined) {
+			this.linkFederatedIdentityUrl = assertSecureEndpoint(
+				linkFederatedIdentityUrl,
+				"linkFederatedIdentityUrl",
+			);
+			this.linkFederatedIdentity = (userId, identity) => this.linkViaHttp(userId, identity);
+		}
 
 		if (!isPositiveIntegerWithin(timeout, MAX_TIMEOUT_MS)) {
 			throw new Error(
@@ -202,14 +230,36 @@ export class HttpUserRepository implements UserRepository {
 	}
 
 	async authenticate(username: string, password: string): Promise<User | null> {
-		return this.post(this.authenticateUrl, { email: username, password });
+		// Without `acceptConflict` the sentinel is never produced — a 409 throws.
+		return this.post(this.authenticateUrl, { email: username, password }) as Promise<User | null>;
 	}
 
 	async authenticateByToken(token: string): Promise<User | null> {
-		return this.post(this.authenticateByTokenUrl, { token });
+		return this.post(this.authenticateByTokenUrl, { token }) as Promise<User | null>;
 	}
 
-	private async post(url: string, body: unknown): Promise<User | null> {
+	/**
+	 * POST `{ userId, provider, sub, token, claims }` to the Store's link endpoint
+	 * (#482). A `2xx` `User` is the linked account; `401` / `403` is the Store's
+	 * refusal (policy — an unverified or relay address, one identity per
+	 * provider, …); `409` says the identity is already someone else's.
+	 */
+	private async linkViaHttp(
+		userId: string,
+		identity: FederatedIdentityLink,
+	): Promise<LinkFederatedIdentityResult> {
+		const url = this.linkFederatedIdentityUrl as string;
+		const answer = await this.post(url, { userId, ...identity }, { acceptConflict: true });
+		if (answer === CONFLICT) return { ok: false, reason: "conflict" };
+		if (answer === null) return { ok: false, reason: "refused" };
+		return { ok: true, user: answer };
+	}
+
+	private async post(
+		url: string,
+		body: unknown,
+		options: { acceptConflict?: boolean } = {},
+	): Promise<User | null | typeof CONFLICT> {
 		const controller = new AbortController();
 		let timedOut = false;
 
@@ -264,6 +314,9 @@ export class HttpUserRepository implements UserRepository {
 
 			discardBody(res);
 
+			if (options.acceptConflict && res.status === 409) {
+				return CONFLICT;
+			}
 			if (res.status === 401 || res.status === 403) {
 				return null;
 			}

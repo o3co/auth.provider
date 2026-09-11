@@ -342,6 +342,32 @@ expected to change.
 
 ---
 
+### Linking a second federation to an account (#482)
+
+A federated identity is `<provider>:<sub>`; the Store is the only place that
+says which account it belongs to, and the provider never infers a match from
+an e-mail. Linking is an explicit, authenticated action — the browser holds a
+session and starts the federation with `?link=1` — and it fails closed at every
+step: `401 login_required` without a session, `400 link_unsupported` when the
+Store client has no `linkFederatedIdentityUrl`
+(`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL`), `409 identity_conflict` when the
+identity is already another account's (the Store is not consulted),
+`403 link_refused` / `409 identity_conflict` when the Store says so,
+`503 temporarily_unavailable` when the session store or the Store is down.
+The link is bound to the session that started it — recorded in the
+transaction — so a `form_post` federation (Apple) links the same way as a
+`query` one, and a callback presented by a different authenticated session
+is `401 login_required`.
+Successes and refusals are audited (`federation.identity.linked`,
+`federation.identity.link_refused`, `subject` = the account,
+`details.reason` on a refusal).
+
+The rules a Store must apply before it links — never on an unverified or
+relay address, never by e-mail alone, `sub` verbatim — are in
+[`packages/session/README.md`](../packages/session/README.md#account-linking-across-federations-482).
+
+---
+
 ## 4. Alerts
 
 Alert on the **event name**, never on message text. Application logs and
@@ -417,10 +443,11 @@ after a deploy means a key or an encoding changed under live data — see
 
 `BUILT_IN_AUDIT_EVENT_TYPES` (`packages/core/src/audit/types.mts`) is pinned
 to the emission sites in both directions by a drift test, so this list is
-complete for `v0.11.0`:
+complete as of #482:
 
 `authorize.granted`, `authorize.rejected`, `device.approved`, `device.denied`,
-`device.rate_limited`, `federation.logout.idp_unreachable`,
+`device.rate_limited`, `federation.identity.link_refused`,
+`federation.identity.linked`, `federation.logout.idp_unreachable`,
 `federation.logout.success`, `federation.token.family_revoked`,
 `federation.token.forbidden`, `federation.token.reauthentication_required`,
 `federation.token.refresh_failed`, `federation.token.success`,

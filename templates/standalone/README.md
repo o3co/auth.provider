@@ -372,6 +372,7 @@ is documented in [its README](../../packages/federation-oidc/README.md).
 | `CLIENT_USER_TYPE` | `http` | User repository backend: `http` |
 | `CLIENT_USER_AUTHENTICATE_URL` | — | URL for password-based user authentication. **https required** (see below) |
 | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | URL for token-based user authentication. **https required** (see below) |
+| `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | — | Optional. URL the Store links a federated identity at (#482); enables `?link=1` on the federation start route. **https required** |
 | `CLIENT_USER_TIMEOUT` | `5000` | HTTP request timeout in milliseconds. Positive integer ≤ `2147483647` |
 | `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | Largest upstream response body accepted, in bytes |
 
