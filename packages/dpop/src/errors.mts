@@ -38,7 +38,9 @@ export type DPoPReasonCode =
 	| "replay_store_unavailable"
 	| "multiple_headers"
 	| "ath_missing"
-	| "ath_mismatch";
+	| "ath_mismatch"
+	| "nonce_required"
+	| "nonce_invalid";
 
 /**
  * Thrown by `parseProof` and `verifyProof` for any DPoP validation failure.
@@ -51,15 +53,35 @@ export type DPoPReasonCode =
  * Per Wave 2 Phase 2 spec §5.6 + design principle §3.4.
  */
 export class DPoPError extends Error {
-	readonly code = "invalid_dpop_proof" as const;
+	/**
+	 * The wire-level code: `invalid_dpop_proof` (RFC 9449 §7) for every
+	 * failure but one. A proof that lacks the server-provided nonce, or
+	 * carries a stale one, is `use_dpop_nonce` (§8 / §9, #530) — the one
+	 * refusal that is an instruction rather than a verdict, and the answer
+	 * that carries it also carries the nonce to retry with, in
+	 * `responseHeaders`.
+	 */
+	readonly code: "invalid_dpop_proof" | "use_dpop_nonce";
 	readonly reason: DPoPReasonCode;
 	readonly detail?: Record<string, unknown>;
+	/** Headers the HTTP answer must carry — `DPoP-Nonce` for the nonce refusals (#530). */
+	readonly responseHeaders?: Readonly<Record<string, string>>;
 
-	constructor(reason: DPoPReasonCode, message: string, detail?: Record<string, unknown>) {
+	constructor(
+		reason: DPoPReasonCode,
+		message: string,
+		detail?: Record<string, unknown>,
+		responseHeaders?: Readonly<Record<string, string>>,
+	) {
 		super(message);
 		this.name = "DPoPError";
 		this.reason = reason;
+		this.code =
+			reason === "nonce_required" || reason === "nonce_invalid"
+				? "use_dpop_nonce"
+				: "invalid_dpop_proof";
 		if (detail !== undefined) this.detail = detail;
+		if (responseHeaders !== undefined) this.responseHeaders = responseHeaders;
 	}
 }
 

@@ -50,7 +50,8 @@ import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
 
-import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
+import "./express.mjs";
+import { applyResponseHeaders, hasErrorCode } from "./_responseHeaders.mjs"; // ensure ambient Express.Request augmentation is loaded
 
 export interface ProtectedResourceBindingOptions {
 	/**
@@ -153,6 +154,21 @@ export const protectedResourceBindingMw = ({
 					{ mechanism: mechanism.kind, err },
 					"protected_resource_binding_proof_invalid",
 				);
+				if (hasErrorCode(err, "use_dpop_nonce")) {
+					// RFC 9449 §9 (#530): the resource server asks for a nonce with
+					// the error the challenge names, and hands the nonce over.
+					applyResponseHeaders(res, err);
+					res.setHeader("WWW-Authenticate", `${profile.challenge} error="use_dpop_nonce"`);
+					res
+						.status(401)
+						.json(
+							errorEnvelope(
+								"use_dpop_nonce",
+								"a server-provided nonce is required; retry with the value of the DPoP-Nonce header",
+							),
+						);
+					return;
+				}
 				reject("proof_invalid", profile.challenge, "presented proof-of-possession is invalid");
 				return;
 			}
@@ -178,6 +194,7 @@ export const protectedResourceBindingMw = ({
 			return;
 		}
 
+		applyResponseHeaders(res, binding);
 		req.tokenBinding = binding;
 		next();
 	};

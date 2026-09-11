@@ -22,6 +22,13 @@ export { DPoPError, type DPoPErrorCode, type DPoPReasonCode } from "./errors.mjs
 // (semver lock); the spec keeps it deliberately tight.
 export { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
 export { dpopConfigSchema, dpopModule } from "./module.mjs";
+// #530: server-provided nonce (RFC 9449 §8 / §9).
+export {
+	createDPoPNonceIssuer,
+	DEFAULT_DPOP_NONCE_TTL_SECONDS,
+	type DPoPNonceIssuer,
+	type DPoPNonceIssuerOptions,
+} from "./nonce.mjs";
 export type { DPoPProof, DPoPProofClaims } from "./proof.mjs";
 export { parseProof } from "./proof.mjs";
 export type { DPoPReplayStore } from "./replay-store.mjs";

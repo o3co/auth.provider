@@ -810,6 +810,14 @@ export const CoreConfigSchema = z.object({
 				"alg-whitelist": z.array(z.string()).optional(),
 				"replay-store": z.enum(["memory", "redis"]).optional(),
 				"replay-store-ttl-seconds": z.coerce.number().int().positive().optional(),
+				// #530: server-provided nonce; the module's own schema defaults it.
+				nonce: z
+					.object({
+						required: z.enum(["never", "as", "as+rs"]).optional(),
+						"ttl-seconds": z.coerce.number().int().positive().optional(),
+						secret: z.string().optional(),
+					})
+					.optional(),
 			})
 			.optional(),
 	}),

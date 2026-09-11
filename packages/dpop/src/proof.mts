@@ -33,6 +33,8 @@ export interface DPoPProofClaims {
 	 * request from being replayed with a different stolen token.
 	 */
 	readonly ath?: string;
+	/** The server-provided nonce echoed back (RFC 9449 §8 / §9, #530). */
+	readonly nonce?: string;
 }
 
 /**
@@ -153,6 +155,11 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 	if ("ath" in claims && typeof claims.ath !== "string") {
 		throw new DPoPError("malformed_proof", "invalid claim types");
 	}
+	// #530: same rule for `nonce` — present-and-wrong-typed is malformed, not
+	// absent, so it cannot read as "no nonce was sent".
+	if ("nonce" in claims && typeof claims.nonce !== "string") {
+		throw new DPoPError("malformed_proof", "invalid claim types");
+	}
 
 	// Step 8 (spec §6): RFC 7638 SHA-256 thumbprint over the validated JWK.
 	// `computeJkt` delegates to jose's `calculateJwkThumbprint`, which throws
@@ -177,6 +184,7 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 			iat: claims.iat,
 			jti: claims.jti,
 			...(typeof claims.ath === "string" ? { ath: claims.ath } : {}),
+			...(typeof claims.nonce === "string" ? { nonce: claims.nonce } : {}),
 		},
 		raw,
 	};

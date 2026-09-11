@@ -33,6 +33,7 @@ import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { computeAth } from "#/ath.mjs";
 import { createMemoryDPoPReplayStore } from "#/memory/replay-store.mjs";
+import { createDPoPNonceIssuer } from "#/nonce.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
 import { createDPoPMechanism } from "#/verifier.mjs";
 
@@ -159,5 +160,76 @@ describe("DPoP at a protected resource (#264)", () => {
 		const proof = await mintProof(attackerKey, { htu, ath: await computeAth(accessToken) });
 		const res = await call({ Authorization: `DPoP ${accessToken}`, DPoP: proof });
 		expect(res.status).toBe(401);
+	});
+});
+
+describe("DPoP at a protected resource — server-provided nonce (#530)", () => {
+	let server: Server;
+	let key: ClientKey;
+	let accessToken: string;
+	let htu: string;
+	const issuer = createDPoPNonceIssuer({
+		secret: "a-dpop-nonce-secret-of-at-least-32-bytes!!",
+		ttlSeconds: 300,
+	});
+
+	const mintProofWithNonce = async (nonce?: string): Promise<string> =>
+		new SignJWT({
+			htm: "GET",
+			htu,
+			iat: Math.floor(Date.now() / 1000),
+			jti: crypto.randomUUID(),
+			ath: await computeAth(accessToken),
+			...(nonce === undefined ? {} : { nonce }),
+		})
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: key.jwk })
+			.sign(key.privateKey);
+
+	beforeEach(async () => {
+		key = await makeClientKey();
+		accessToken = await mintBoundAccessToken(key.jkt);
+		const app = express();
+		server = await new Promise<Server>((resolve) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+		});
+		const address = server.address();
+		const port = typeof address === "object" && address !== null ? address.port : 0;
+		htu = `http://127.0.0.1:${port}${RESOURCE_PATH}`;
+		const mechanism = createDPoPMechanism({
+			issuer: `http://127.0.0.1:${port}`,
+			replayStore: createMemoryDPoPReplayStore(),
+			nonce: { required: "as+rs", issuer },
+		});
+		app.use(protectedResourceBindingMw({ mechanisms: [mechanism] }));
+		app.get(RESOURCE_PATH, (req, res) => {
+			res.status(200).json({ binding: req.tokenBinding ?? null });
+		});
+	});
+
+	afterEach(async () => {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	const call = (headers: Record<string, string>) => request(server).get(RESOURCE_PATH).set(headers);
+
+	it("asks for a nonce with 401 use_dpop_nonce, then admits the retry that carries it", async () => {
+		const first = await call({
+			Authorization: `DPoP ${accessToken}`,
+			DPoP: await mintProofWithNonce(),
+		});
+		expect(first.status).toBe(401);
+		expect(first.body.error).toBe("use_dpop_nonce");
+		expect(first.headers["www-authenticate"]).toBe('DPoP error="use_dpop_nonce"');
+		const nonce = first.headers["dpop-nonce"];
+		expect(issuer.verify(nonce)).toBe(true);
+
+		const second = await call({
+			Authorization: `DPoP ${accessToken}`,
+			DPoP: await mintProofWithNonce(nonce),
+		});
+		expect(second.status).toBe(200);
+		expect(second.body.binding).toMatchObject({ kind: "dpop", confirmation: { jkt: key.jkt } });
+		// The successful answer keeps the client current.
+		expect(issuer.verify(second.headers["dpop-nonce"])).toBe(true);
 	});
 });

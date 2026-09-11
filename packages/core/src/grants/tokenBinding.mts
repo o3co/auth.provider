@@ -29,4 +29,12 @@ import type { Confirmation } from "./confirmation.mjs";
 export interface TokenBinding {
 	readonly kind: string;
 	readonly confirmation: Confirmation;
+	/**
+	 * Headers the HTTP answer to this request should carry (#530) — a DPoP
+	 * mechanism configured for server-provided nonces hands the current nonce
+	 * back on every accepted proof (`DPoP-Nonce`, RFC 9449 §8), so a client
+	 * learns of a rotation before it needs to. The token-binding middlewares
+	 * set them; a mechanism with nothing to say leaves this out.
+	 */
+	readonly responseHeaders?: Readonly<Record<string, string>>;
 }

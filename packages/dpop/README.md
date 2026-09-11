@@ -53,6 +53,18 @@ When `oauth.dpop.enabled = true`, this module contributes `dpop_signing_alg_valu
 
 Nothing is contributed while DPoP is disabled — a client then has no way to tell this module apart from an uninstalled one, which is accurate.
 
+## Server-provided nonces (RFC 9449 §8 / §9, #530)
+
+Without a nonce the only freshness control on a proof is `iat` skew, which is weak for tokens that live longer than a few minutes: a proof minted ahead of time stays usable for the whole window. `oauth.dpop.nonce.required` turns nonces on:
+
+- `"as"` — the token endpoint asks. A proof without a valid `nonce` claim gets `400 use_dpop_nonce` with a `DPoP-Nonce` header, and the client retries with that value in the proof.
+- `"as+rs"` — protected resources (`protectedResourceBindingMw`) ask too: `401` with `WWW-Authenticate: DPoP error="use_dpop_nonce"` and the `DPoP-Nonce` header.
+- `"never"` (the default) — no nonce.
+
+The nonce is **stateless**: a time bucket and an HMAC under `oauth.dpop.nonce.secret` (`OAUTH_DPOP_NONCE_SECRET`, at least 32 bytes, shared by every replica). Nothing is stored and nothing is looked up on the proof path; a nonce minted by one replica verifies on every other, and the replay store is never consulted for a proof refused on its nonce — the client is about to present the same `jti` again with the nonce filled in. The bucket rotates every `ttl-seconds` (default 300) and the previous bucket stays accepted, so a client that received a nonce just before the boundary is not refused a moment later. Every accepted proof's answer carries the current nonce as well, so a client learns of a rotation before it needs to. A nonce is not single-use — replay of the *proof* is what `jti` and the replay store refuse; the nonce only bounds when the proof could have been made.
+
+Boot refuses `required` without a `secret`: a per-replica random key would mint nonces no other replica could verify. There is no discovery-metadata flag for nonces — RFC 9449 signals the requirement at runtime with `use_dpop_nonce`, and a client that supports DPoP handles it there.
+
 ## Operator requirements
 
 - **`oauth.jwt.issuer` MUST name the origin clients actually reach.** Since [#292](https://github.com/o3co/auth.provider/issues/292) the `htu` a proof is checked against is built from the configured issuer's origin plus the path of the request, *not* from `req.protocol` and the `Host` header. Those two read `X-Forwarded-Proto` / `X-Forwarded-Host` whenever Express `trust proxy` is on, which let a caller who could reach the AS past the edge choose the value its own proof had to match — satisfying both halves of the comparison at once. The issuer is a property of the deployment and no request can move it, which is the whole reason it is the right source.

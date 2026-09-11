@@ -18,6 +18,7 @@ const fakeRes = () => {
 	const r: Partial<Response> = {};
 	r.status = vi.fn(() => r as Response);
 	r.json = vi.fn(() => r as Response);
+	r.setHeader = vi.fn(() => r as Response);
 	return r as Response;
 };
 
@@ -294,5 +295,49 @@ describe("tokenBindingMw", () => {
 		expect(next).not.toHaveBeenCalled();
 		expect(res.status).toHaveBeenCalledWith(400);
 		expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ error: "invalid_request" }));
+	});
+});
+
+describe("tokenBindingMw — response headers a mechanism asks for (#530)", () => {
+	it("sets the headers a refusal carries and answers use_dpop_nonce with its own description", async () => {
+		const err = Object.assign(new Error("no nonce"), {
+			code: "use_dpop_nonce",
+			responseHeaders: { "DPoP-Nonce": "n1" },
+		});
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(err)],
+			dispatchPolicy: "intent-explicit",
+		});
+		const req = fakeReq();
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(req, res, next);
+		expect(next).not.toHaveBeenCalled();
+		expect(res.setHeader).toHaveBeenCalledWith("DPoP-Nonce", "n1");
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.json).toHaveBeenCalledWith(
+			expect.objectContaining({
+				error: "use_dpop_nonce",
+				error_description: expect.stringContaining("DPoP-Nonce"),
+			}),
+		);
+	});
+
+	it("sets the headers a succeeding binding carries, then continues", async () => {
+		const binding: TokenBinding = {
+			kind: "dpop",
+			confirmation: { jkt: "AAA" },
+			responseHeaders: { "DPoP-Nonce": "n2" },
+		};
+		for (const dispatchPolicy of ["intent-explicit", "strict-mutual-exclusion"] as const) {
+			const mw = tokenBindingMw({ mechanisms: [dpopMechanism(binding)], dispatchPolicy });
+			const req = fakeReq();
+			const res = fakeRes();
+			const next = vi.fn();
+			await mw(req, res, next);
+			expect(next).toHaveBeenCalledOnce();
+			expect(req.tokenBinding).toBe(binding);
+			expect(res.setHeader).toHaveBeenCalledWith("DPoP-Nonce", "n2");
+		}
 	});
 });
