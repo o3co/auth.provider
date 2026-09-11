@@ -251,7 +251,7 @@ describe("standalone smoke test", () => {
 	it("Dockerfile pins its mutable build inputs (#289)", () => {
 		// Base image by digest — the tag alone is a moving pointer, and
 		// Dependabot's docker ecosystem bumps tag and digest together.
-		expect(dockerfile).toMatch(/FROM node:24-alpine@sha256:[0-9a-f]{64} AS node-base/);
+		expect(dockerfile).toMatch(/FROM node:26-alpine@sha256:[0-9a-f]{64} AS node-base/);
 		// Global corepack by version — `npm install -g corepack` with no pin
 		// resolved whatever was latest at build time.
 		expect(dockerfile).toMatch(/npm install -g corepack@\d+\.\d+\.\d+ --force/);
