@@ -508,6 +508,50 @@ If you consume `@o3co/auth-provider-oauth` via its public API (`oauthModule`, `c
 
 If you extend or replace the middleware for custom client-auth schemes, import `createClientAuthMiddleware` from `@o3co/auth-provider-oauth` as a reference, or write a drop-in replacement that attaches a compatible `PublicClient` to `req.oauthClient`.
 
+## jwt-bearer: which issuers are trusted (#525)
+
+The RFC 7523 grant (`urn:ietf:params:oauth:grant-type:jwt-bearer`) accepts a signed assertion from an issuer this deployment trusts and hands the verified handle to the Store. Which issuers, on what keys, on what terms, is a **trust registry** of `AssertionIssuerEntry` records, and the bundled verifier is built over it:
+
+```ts
+import {
+  createMemoryAssertionIssuerRegistry,
+  createRegistryAssertionVerifier,
+} from "@o3co/auth-provider-core";
+
+const registry = createMemoryAssertionIssuerRegistry([
+  {
+    issuer: "https://devices.example",
+    keys: { type: "jwks_uri", uri: "https://devices.example/.well-known/jwks.json" },
+    algorithms: ["EdDSA"],
+    allowedClients: ["mobile-app"],           // who may present its assertions
+    allowedScopes: ["read", "write"],         // ceiling on the issued scope
+    allowedAudiences: ["https://api.example"], // ceiling on the issued aud
+  },
+  {
+    issuer: "https://legacy.example",
+    keys: { type: "key", key: legacyPublicKey },
+    algorithms: ["ES256"],
+    expiresAt: new Date("2026-12-31T00:00:00Z"),
+  },
+]);
+
+const assertionVerifier = createRegistryAssertionVerifier({
+  registry,
+  audience: ["https://auth.example", "https://auth.example/oauth/token"], // what the assertion's aud must name
+});
+```
+
+What an entry says, and what it means at `/oauth/token`:
+
+- **Keys** come from one public key (`type: "key"`), a static JWK set (`type: "jwks"`), or a JWKS endpoint (`type: "jwks_uri"`, `https` required outside loopback). A remote set is fetched on first use and cached; an unknown `kid` triggers a refetch, so a rotation at the issuer is picked up without a restart. An endpoint that is down is an outage: the grant answers `503`, not `invalid_grant`.
+- **An unregistered `iss` is refused before any signature work.** No key is fetched and no signature is checked for an issuer nobody registered; "signed by A, claiming to be B" fails on B's keys.
+- **`allowedClients`** restricts who may present the issuer's assertions; a list refuses an unauthenticated presenter. Absent, anyone may.
+- **`allowedScopes`** is intersected with the assertion's own `scope` claim (or stands alone when the assertion names none) and becomes the scope ceiling the request and the client registration are further bounded by.
+- **`allowedAudiences`** bounds the issued `aud` whatever chose it — a `grantPolicy`, an RFC 8707 `resource`, the client registration (its `allowedAudiences` narrowed to the issuer's, its client id only if the issuer admits it). With no authenticated client it is also the source: the token names the issuer's first audience instead of this server. A client and an issuer that admit no audience in common is `invalid_grant` and logs `jwt_bearer_issuer_audience_mismatch`.
+- **`expiresAt`** is the one field that changes in place (`registry.setExpiresAt`); everything else is immutable — remove and re-add — so the history of what was trusted is the history of adds and removes. `add`, `list`, `remove` are the rest of the admin surface.
+
+`createJwtAssertionVerifier({ key, issuer, audience, algorithms })` — the static one-key shape — is a one-entry registry and keeps working unchanged. A deployment that registers issuers at runtime and needs them to survive a restart implements `AssertionIssuerRegistry` (`findIssuer`) over its own store.
+
 ## See Also
 
 - [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes

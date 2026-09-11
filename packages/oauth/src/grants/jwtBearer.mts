@@ -97,7 +97,11 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * `oauth.resourceIndicator.enabled` a `resource` parameter derives the
  * audience within `allowedAudiences ∪ {clientId}` and a request the final
  * `aud` cannot represent is `invalid_target`, as in every sibling grant
- * (RFC 8707 §2, #522).
+ * (RFC 8707 §2, #522). An issuer registered with `allowedAudiences` (#525)
+ * bounds all of that — the registration's audiences narrowed to the
+ * issuer's, the client id only if the issuer admits it — and, with no
+ * client, supplies the audience itself. A client and an issuer that admit
+ * no audience in common is `invalid_grant`.
  *
  * ## Failure vocabulary
  *
@@ -120,6 +124,9 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   `jwt_bearer_policy_audience_refused` for the operator who wired it (#521).
  * - A `resource` the issued `aud` cannot represent → `400 invalid_target`
  *   (RFC 8707 §2), under `oauth.resourceIndicator.enabled` only (#522).
+ * - The presenting client and the assertion's issuer admit no audience in
+ *   common → `invalid_grant`, logged as `jwt_bearer_issuer_audience_mismatch`
+ *   (#525): two registrations the operator wrote disagree.
  */
 export const createJwtBearerGrant = (
 	deps: GrantDependencies & {
@@ -158,7 +165,11 @@ export const createJwtBearerGrant = (
 			// caller's string into a handle — the request never supplies one.
 			let verified: Awaited<ReturnType<AssertionVerifier["verify"]>>;
 			try {
-				verified = await assertionVerifier.verify(rawAssertion);
+				// #525: the verifier learns who is presenting, so an issuer's terms
+				// can admit some clients and not others.
+				verified = await assertionVerifier.verify(rawAssertion, {
+					clientId: ctx.authenticatedClient?.clientId,
+				});
 			} catch (err) {
 				deps.logger?.error({ err }, "jwt_bearer_assertion_verifier_unavailable");
 				return {
@@ -254,6 +265,20 @@ export const createJwtBearerGrant = (
 				? extractResourceParam(ctx.body as Record<string, unknown>)
 				: null;
 
+			// #525: the assertion issuer's terms. When its registry entry names
+			// audiences, they bound the issued `aud` whatever chose it, and with
+			// no client they are the source the registration would otherwise be.
+			const issuerAudiences = verified.audience;
+			const withinIssuer = (a: string): boolean =>
+				issuerAudiences === undefined || issuerAudiences.includes(a);
+			// What this request may mint for: the registration's audiences that
+			// the issuer also admits, or — with no client — the issuer's own list.
+			// `undefined` only when neither side says anything.
+			const clientAudiences = client
+				? (client.allowedAudiences ?? []).filter(withinIssuer)
+				: undefined;
+			const audienceCeiling = clientAudiences ?? issuerAudiences;
+
 			// CP-18: the policy gate every other minting path applies, after
 			// the identity gates and the scope ceilings so it sees a resolved
 			// subject and an already-narrowed request. Consulted whenever it is
@@ -277,16 +302,15 @@ export const createJwtBearerGrant = (
 				effectiveScopes = policy.scopes;
 				// #518: the audience ceiling is the client's `allowedAudiences`,
 				// the same one `client_credentials` and `refresh_token` hold a
-				// policy to. Without an authenticated client there is no ceiling
-				// at all, and the answer is the one `resolveScope` gives a scope
-				// with nothing to bound it: refused, not granted — dropping the
-				// audience silently, what this grant did before, let a policy
-				// believe it had narrowed a token that carries no `aud`. Both
-				// refusals are `boundPolicyAudience`'s (#520).
-				const policyAudience = boundPolicyAudience(
-					policy.decision,
-					client ? (client.allowedAudiences ?? []) : undefined,
-				);
+				// policy to — narrowed to what the assertion's issuer admits
+				// (#525). Without an authenticated client the issuer's own list
+				// is the ceiling, and with neither there is none at all: then the
+				// answer is the one `resolveScope` gives a scope with nothing to
+				// bound it, refused, not granted — dropping the audience silently,
+				// what this grant did before, let a policy believe it had narrowed
+				// a token that carries no `aud`. Both refusals are
+				// `boundPolicyAudience`'s (#520).
+				const policyAudience = boundPolicyAudience(policy.decision, audienceCeiling);
 				if (!policyAudience.ok) {
 					// #521: an operator-triggered refusal logs, as
 					// `jwt_bearer_email_not_verified` does, so the operator who
@@ -319,16 +343,47 @@ export const createJwtBearerGrant = (
 			// held to — instead of minting the default and then rejecting it.
 			// Without a client the bound is empty, nothing derives, and the check
 			// below refuses: naming a resource is not a registration.
+			//
+			// #525: every source is bounded by the assertion issuer's terms when
+			// it has any — the registration's audiences narrowed to those the
+			// issuer admits, the client id only if the issuer admits it — and
+			// with no client the issuer's first audience stands in for the
+			// registration.
 			const audience =
 				policyGrantedAudience ??
 				deriveAudienceFromResources(
 					requestedResource,
-					new Set([...(client?.allowedAudiences ?? []), ...(clientId ? [clientId] : [])]),
+					new Set([
+						...(audienceCeiling ?? []),
+						...(clientId !== undefined && withinIssuer(clientId) ? [clientId] : []),
+					]),
 				) ??
-				client?.allowedAudiences?.[0] ??
-				clientId ??
-				ctx.issuer ??
-				null;
+				(client
+					? (clientAudiences?.[0] ?? (withinIssuer(client.clientId) ? client.clientId : null))
+					: (issuerAudiences?.[0] ?? ctx.issuer ?? null));
+
+			if (
+				issuerAudiences !== undefined &&
+				(audience === null || !issuerAudiences.includes(audience))
+			) {
+				// The client and the issuer — two registrations the operator
+				// wrote — admit no audience in common, so no token can name one
+				// both would stand behind. Logged for the operator, refused as a
+				// grant the assertion cannot back, with a description that says
+				// which two registrations to compare.
+				deps.logger?.warn(
+					{ kind: assertionVerifier.kind, issuer: verified.issuer, clientId },
+					"jwt_bearer_issuer_audience_mismatch",
+				);
+				return {
+					result: {
+						status: 400,
+						error: "invalid_grant",
+						errorDescription:
+							"assertion issuer is not trusted for any audience this client mints for",
+					},
+				};
+			}
 
 			// RFC 8707 §2 (#522): the token's audience MUST be the resource the
 			// caller asked for. Runs after the audience is final so it covers

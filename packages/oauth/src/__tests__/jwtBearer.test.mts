@@ -847,6 +847,119 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 			expect("error" in result && result.error).toBe("invalid_target");
 		});
 	});
+
+	describe("the assertion issuer's terms (#525)", () => {
+		// A registry entry may say which audiences a token minted from its
+		// assertions may name. That list is a ceiling on the issued `aud`
+		// whatever chose it, and — with no authenticated client — the source
+		// the registration would otherwise be (the #520 remedy).
+		const trusted = (audience: readonly string[]) =>
+			verifierFor({ subjectHandle: "device:abc", issuer: "https://devices.example", audience });
+		const flagOn = {
+			...config,
+			oauth: { ...config.oauth, resourceIndicator: { enabled: true } },
+		} as unknown as AppConfig;
+
+		it("hands the verifier the presenting client, or nothing for an unauthenticated presenter", async () => {
+			const verify = vi.fn(async () => ({ subjectHandle: "device:abc" }));
+			const verifier: AssertionVerifier = { kind: "spy", verify };
+			await build({ verifier }).handle(ctx({}, client({})));
+			expect(verify).toHaveBeenLastCalledWith("an-assertion", { clientId: "mobile-app" });
+			await build({ verifier }).handle(ctx({}, { authenticatedClient: null }));
+			expect(verify).toHaveBeenLastCalledWith("an-assertion", { clientId: undefined });
+		});
+
+		it("mints the issuer's first allowed audience for an unauthenticated presenter", async () => {
+			const { result } = await build({
+				verifier: trusted(["https://api.example", "https://other.example"]),
+			}).handle(ctx({}, { authenticatedClient: null }));
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("https://api.example");
+		});
+
+		it("lets a policy narrow within the issuer's audiences when no client supplies a ceiling", async () => {
+			const within = await build({
+				verifier: trusted(["https://api.example", "https://other.example"]),
+				grantPolicy: allow({ grantedAudience: ["https://other.example"] }),
+			}).handle(ctx({}, { authenticatedClient: null }));
+			expect(within.result.status).toBe(200);
+			expect(claimsOf(within.result).aud).toBe("https://other.example");
+
+			const outside = await build({
+				verifier: trusted(["https://api.example"]),
+				grantPolicy: allow({ grantedAudience: ["https://evil.example"] }),
+			}).handle(ctx({}, { authenticatedClient: null }));
+			expect(outside.result.status).toBe(500);
+			expect("error" in outside.result && outside.result.error).toBe("server_error");
+		});
+
+		it("derives a requested resource within the issuer's audiences when no client supplies a ceiling", async () => {
+			const { result } = await build({
+				config: flagOn,
+				verifier: trusted(["https://api.example", "https://other.example"]),
+			}).handle(ctx({ resource: "https://other.example" }, { authenticatedClient: null }));
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("https://other.example");
+
+			const outside = await build({
+				config: flagOn,
+				verifier: trusted(["https://api.example"]),
+			}).handle(ctx({ resource: "https://evil.example" }, { authenticatedClient: null }));
+			expect(outside.result.status).toBe(400);
+			expect("error" in outside.result && outside.result.error).toBe("invalid_target");
+		});
+
+		it("bounds a client's audiences by the issuer's: the first the two share is minted", async () => {
+			const { result } = await build({ verifier: trusted(["https://other.example"]) }).handle(
+				ctx({}, client({ allowedAudiences: ["https://api.example", "https://other.example"] })),
+			);
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("https://other.example");
+		});
+
+		it("falls back to the client id only when the issuer admits it", async () => {
+			const { result } = await build({ verifier: trusted(["mobile-app"]) }).handle(
+				ctx({}, client({ allowedAudiences: ["https://api.example"] })),
+			);
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("mobile-app");
+		});
+
+		it("refuses, and logs, when the client and the issuer share no audience", async () => {
+			// A registration mismatch between two things the operator configured:
+			// the token would have to name an audience one side does not admit.
+			const warn = vi.fn();
+			const { result } = await build({
+				logger: { error: vi.fn(), warn, info: vi.fn(), debug: vi.fn() },
+				verifier: trusted(["https://other.example"]),
+			}).handle(ctx({}, client({ allowedAudiences: ["https://api.example"] })));
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_grant");
+			expect(warn).toHaveBeenCalledWith(
+				expect.objectContaining({ issuer: "https://devices.example", clientId: "mobile-app" }),
+				"jwt_bearer_issuer_audience_mismatch",
+			);
+		});
+
+		it("refuses a policy audience the client allows but the issuer does not", async () => {
+			const { result } = await build({
+				verifier: trusted(["https://other.example"]),
+				grantPolicy: allow({ grantedAudience: ["https://api.example"] }),
+			}).handle(
+				ctx({}, client({ allowedAudiences: ["https://api.example", "https://other.example"] })),
+			);
+			expect(result.status).toBe(500);
+			expect("error" in result && result.error).toBe("server_error");
+		});
+
+		it("leaves the registration in charge when the issuer says nothing about audiences", async () => {
+			const { result } = await build({
+				verifier: verifierFor({ subjectHandle: "device:abc", issuer: "https://devices.example" }),
+			}).handle(ctx({}, client({ allowedAudiences: ["https://api.example"] })));
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("https://api.example");
+		});
+	});
 });
 
 /*
