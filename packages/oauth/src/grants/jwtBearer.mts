@@ -80,8 +80,10 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * The client's configured resource audience — `allowedAudiences[0]`, falling
  * back to the client id — the rule the session and device grants apply
  * (#518). A `grantPolicy` may narrow it, within `allowedAudiences`. Without
- * an authenticated client there is no registration to name a resource, and
- * `aud` is absent.
+ * an authenticated client there is no registration to name a resource or a
+ * client, and `aud` is the issuer (#520): RFC 9068 §2.2 requires the claim,
+ * and the issuer is the one audience every deployment has — the WebAuthn
+ * grant mints the same in the same position.
  *
  * ## Failure vocabulary
  *
@@ -292,8 +294,12 @@ export const createJwtBearerGrant = (
 			// identifier accepted the first token and rejected the second for the
 			// same user, client and scopes. A policy-narrowed audience, validated
 			// above, wins over the default. Without an authenticated client there
-			// is no registration to name a resource, and `aud` stays absent.
-			const audience = policyGrantedAudience ?? client?.allowedAudiences?.[0] ?? clientId ?? null;
+			// is no registration to name a resource or a client, and `aud` is the
+			// issuer (#520): RFC 9068 §2.2 requires the claim, a verifier that pins
+			// its audience refuses a token without one, and the issuer is what the
+			// WebAuthn grant mints in the same position.
+			const audience =
+				policyGrantedAudience ?? client?.allowedAudiences?.[0] ?? clientId ?? ctx.issuer ?? null;
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 			const confirmation = ctx.tokenBinding?.confirmation;

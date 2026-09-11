@@ -228,7 +228,7 @@ This package implements **Wave 1 first slice**:
 Deferred to subsequent waves:
 
 - WebAuthn as MFA factor (Wave 3)
-- RFC 8707 Stage 2 audience-restrict enforcement ([issue #173](https://github.com/o3co/auth.provider/issues/173))
+- RFC 8707 audience derivation from `resource` for this grant — [#173](https://github.com/o3co/auth.provider/issues/173) delivered it for `client_credentials`, `refresh_token` and `/authorize` only. Here `resource` reaches the policy hook and nothing else; the audience a passkey token gets is the rule on `AuthenticatedClient.allowedAudiences` ([#520](https://github.com/o3co/auth.provider/issues/520))
 - Attestation root chain verification (Stage 2+)
 
 ## License

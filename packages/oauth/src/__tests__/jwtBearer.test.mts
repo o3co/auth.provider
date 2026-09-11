@@ -624,13 +624,17 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		).toBe("mobile-app");
 	});
 
-	it("still mints no aud without an authenticated client", async () => {
-		// RFC 7523 §3 makes client authentication optional; with no
-		// registration there is no configured audience to name. Pinned so the
-		// fix above is a decision about the authenticated case only.
+	it("mints the issuer as aud without an authenticated client (#520)", async () => {
+		// RFC 7523 §3 makes client authentication optional, and with no
+		// registration there is no resource or client to name. The token still
+		// has to name someone: RFC 9068 §2.2 makes `aud` REQUIRED on an
+		// `at+jwt`, and a token without one is refused by any verifier that
+		// pins its audience — including this stack's own. The issuer is the one
+		// audience every deployment has, and what the WebAuthn grant already
+		// mints in the same position.
 		const { result } = await build({}).handle(ctx({}, { authenticatedClient: null }));
 		expect(result.status).toBe(200);
-		expect(claimsOf(result).aud).toBeUndefined();
+		expect(claimsOf(result).aud).toBe("https://auth.example");
 	});
 
 	it("honours a policy audience within the client's allowedAudiences", async () => {

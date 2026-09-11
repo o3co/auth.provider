@@ -71,9 +71,27 @@ export interface AuthenticatedClient {
 	 */
 	readonly allowedGrantTypes?: readonly string[];
 	/**
-	 * Audience values this client may receive tokens for. Grants that issue
-	 * tokens directly from the client record select the first entry as the
-	 * default `aud`; absence falls back to the issuer.
+	 * Audience values this client may receive tokens for. Every grant that
+	 * derives an audience takes the first entry as the default `aud` and lets a
+	 * `grantPolicy` narrow within the list; what an absent list falls back to
+	 * depends on whom the token is for (#520):
+	 *
+	 * - **User-bound tokens** (`authorization_code`, `session`, the device,
+	 *   WebAuthn and jwt-bearer grants) fall back to the **client id**. The
+	 *   token is meant for a resource, so naming the authorization server would
+	 *   be wrong — and it is never null, because an audience-less token is
+	 *   accepted by anything that checks `aud` loosely.
+	 * - **Client-only tokens** (`client_credentials`) fall back to the
+	 *   **issuer**: there is no end user, and the registration is the party the
+	 *   token speaks for.
+	 * - **No authenticated client** (WebAuthn and jwt-bearer in client-less
+	 *   mode) mints the **issuer**. Nothing names a resource or a client, RFC
+	 *   9068 §2.2 still requires `aud`, and the issuer is the one audience every
+	 *   deployment has. A policy audience is refused here: with no list there
+	 *   is no ceiling to narrow within, and policy may narrow, never originate.
+	 *
+	 * `session.mts`, `jwtBearer.mts` and the WebAuthn grant cite this as their
+	 * authority; keep it true when adding a grant.
 	 */
 	readonly allowedAudiences?: readonly string[];
 	/**
