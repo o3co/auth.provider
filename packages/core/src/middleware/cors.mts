@@ -90,13 +90,16 @@ const ALLOWED_REQUEST_HEADERS = "content-type, authorization, dpop";
  * (`Cache-Control`, `Content-Language`, `Content-Length`, `Content-Type`,
  * `Expires`, `Last-Modified`, `Pragma`).
  *
- * Both are diagnostics the caller cannot act on otherwise: without
+ * All three are answers the caller cannot act on otherwise: without
  * `Retry-After` a throttled SPA sees an opaque `429` and has nothing to back
- * off by, and without `WWW-Authenticate` a `401` from userinfo does not say
- * which scheme or realm it wanted. Neither reveals anything to an origin that
- * is already permitted to read the whole body.
+ * off by, without `WWW-Authenticate` a `401` from userinfo does not say
+ * which scheme or realm it wanted, and without `DPoP-Nonce` a cross-origin
+ * DPoP client cannot read the nonce a `use_dpop_nonce` refusal hands it to
+ * retry with (RFC 9449 §8, #530) — the retry the refusal asks for would
+ * never happen. None reveals anything to an origin that is already
+ * permitted to read the whole body.
  */
-const EXPOSED_RESPONSE_HEADERS = "WWW-Authenticate, Retry-After";
+const EXPOSED_RESPONSE_HEADERS = "WWW-Authenticate, Retry-After, DPoP-Nonce";
 
 /**
  * How long a browser may cache a preflight, in seconds. Ten minutes: long
