@@ -1796,6 +1796,76 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 		}
 	});
 
+	it("spends no signature when the family store is unreachable", async () => {
+		const store = countingKeyStore();
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate() {
+					throw new Error("redis down");
+				},
+			},
+			store,
+		);
+		expect(result.status).toBe(503);
+		expect(store.signed).toHaveLength(0);
+	});
+
+	it("signs no longer than the family ceiling the rotation actually committed", async () => {
+		// IH-13: the family TTL is set once at creation and never extended,
+		// so a rotation late in a family's life commits a shorter expiry than
+		// it was asked for and reports it as `cappedExpiresAtMs`. A token
+		// signed past that outlives the record that would catch its replay.
+		const store = countingKeyStore();
+		const cappedAt = Date.now() + 42_000;
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate() {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: cappedAt };
+				},
+			},
+			store,
+		);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) return expect.fail("expected tokens");
+		const claims = JSON.parse(
+			Buffer.from(
+				(result.tokens.refresh_token as string).split(".")[1] ?? "",
+				"base64url",
+			).toString("utf-8"),
+		) as Record<string, unknown>;
+		// At or inside the committed ceiling — never past it. The adapter's
+		// reported value drifts forward by milliseconds, so the second it is
+		// floored to is the safe reading.
+		expect((claims.exp as number) * 1000).toBeLessThanOrEqual(cappedAt);
+		expect(claims.exp as number).toBe(Math.floor(cappedAt / 1000));
+	});
+
+	it("ignores a cap that is not shorter than what it asked for", async () => {
+		const store = countingKeyStore();
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate(_previousJti: string, _newJti: string, _family: string, expiresAt: number) {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: expiresAt + 60_000 };
+				},
+			},
+			store,
+		);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) return expect.fail("expected tokens");
+		const claims = JSON.parse(
+			Buffer.from(
+				(result.tokens.refresh_token as string).split(".")[1] ?? "",
+				"base64url",
+			).toString("utf-8"),
+		) as Record<string, unknown>;
+		expect((claims.exp as number) - (claims.iat as number)).toBe(
+			mockConfig.oauth.refreshToken.expiresIn,
+		);
+	});
+
 	it("signs the jti and expiry it reserved, once the reservation holds", async () => {
 		const reserved: { jti?: string; expiresAt?: number } = {};
 		const store = countingKeyStore();
