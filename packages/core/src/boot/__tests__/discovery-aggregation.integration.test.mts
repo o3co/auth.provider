@@ -245,6 +245,28 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
+	it("answers GET and HEAD, and leaves every other method to the rest of the app (#528 review)", async () => {
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+		app.use((_req, res) => res.status(404).json({ error: "not_found" }));
+
+		expect((await request(app).head("/.well-known/openid-configuration")).status).toBe(200);
+		// A POST to the metadata path is not this route's business; it passes
+		// through, as it did when the route was registered with `router.get`.
+		const posted = await request(app).post("/.well-known/oauth-authorization-server");
+		expect(posted.status).toBe(404);
+		expect(posted.body.error).toBe("not_found");
+
+		await handle.dispose();
+	});
+
 	it("issuer set but no discoveryMetadata contributions → no route, no boot error", async () => {
 		// A minimal composition that configures an issuer but wires no
 		// discovery-contributing module is not participating in the discovery
