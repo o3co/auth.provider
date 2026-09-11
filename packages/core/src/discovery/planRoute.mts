@@ -26,7 +26,7 @@
  * collision-check + mount-order + mount pipeline — no special-casing.
  */
 
-import type { Request, Response, Router } from "express";
+import type { NextFunction, Request, Response, Router } from "express";
 import { BootError, type ListCollector } from "../boot/types.mjs";
 import type { RouteContribution, RouteHandler } from "../modules/manifest/route-contribution.mjs";
 import { buildDiscoveryDocument, DiscoveryDocumentError } from "./buildDocument.mjs";
@@ -103,10 +103,33 @@ export function planDiscoveryRoute(input: {
 	const discovery = discoveryPathsFor(issuer);
 	const paths = [...discovery.oidc, ...discovery.oauth];
 	const router = routerFactory();
-	const serve = (_req: Request, res: Response): void => {
+	// These paths are literals, not route patterns. An issuer is a URL and
+	// its path may hold characters Express 5's parser reads as syntax —
+	// `+`, `*`, `(`, `)`, `:`, `{}` — so `router.get(path)` on
+	// `https://as.example/tenant+blue` either throws at boot or matches
+	// requests this server never advertised. Matching the pathname itself
+	// keeps the route exactly what the document says it is, which is also
+	// what RFC 8414 §3.3 requires of the two to agree.
+	//
+	// Exactly, but for a trailing slash: Express's default non-strict
+	// routing accepted one and clients send it, so that stays. Case is not
+	// folded — a well-known URI is case-sensitive (RFC 8615 §3), and an
+	// issuer identifier is compared as a string (RFC 8414 §3.3), so the two
+	// cannot be allowed to differ by case here.
+	const advertised = new Set(paths);
+	const trimTrailingSlash = (path: string): string =>
+		path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+	router.use((req: Request, res: Response, next: NextFunction): void => {
+		if (req.method !== "GET" && req.method !== "HEAD") {
+			next();
+			return;
+		}
+		if (!advertised.has(trimTrailingSlash(req.path))) {
+			next();
+			return;
+		}
 		res.status(200).json(doc);
-	};
-	for (const path of paths) router.get(path, serve);
+	});
 
 	return {
 		id: DISCOVERY_ROUTE_ID,

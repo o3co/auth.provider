@@ -195,6 +195,56 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
+	it("an issuer path is a literal, not a route pattern: metacharacters boot and serve (#528 review)", async () => {
+		// Express 5 parses a route string with path-to-regexp, where `+`, `*`,
+		// `(`, `)`, `:` and `{}` are syntax. An issuer is a URL, and those
+		// characters are legal in its path: passing it verbatim to
+		// `router.get` either fails the boot or matches the wrong requests.
+		for (const tenant of ["tenant+blue", "tenant(a)", "a*b", "x:y", "g{h}"]) {
+			const issuer = `https://auth.example.com/${tenant}`;
+			const handle = await createTestApp({
+				modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+				bootstrapComponents: { config: withIssuer(issuer), pathResolver: (s) => s },
+			});
+			const app = express();
+			app.use(handle.router);
+
+			const inserted = await request(app).get(`/.well-known/oauth-authorization-server/${tenant}`);
+			expect(inserted.status).toBe(200);
+			expect(inserted.body.issuer).toBe(issuer);
+			const appended = await request(app).get(`/${tenant}/.well-known/openid-configuration`);
+			expect(appended.status).toBe(200);
+			expect(appended.text).toBe(inserted.text);
+
+			await handle.dispose();
+		}
+	});
+
+	it("matches the advertised path and nothing else — no pattern, no neighbour (#528 review)", async () => {
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com/a*b"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+
+		// The `*` is a character of this tenant's name, so it matches that
+		// name and not the tenant next door.
+		expect(
+			(await request(app).get("/.well-known/oauth-authorization-server/anything")).status,
+		).toBe(404);
+		// A trailing slash still reaches it, as Express's own non-strict
+		// routing did before.
+		expect((await request(app).get("/.well-known/oauth-authorization-server/a*b/")).status).toBe(
+			200,
+		);
+
+		await handle.dispose();
+	});
+
 	it("issuer set but no discoveryMetadata contributions → no route, no boot error", async () => {
 		// A minimal composition that configures an issuer but wires no
 		// discovery-contributing module is not participating in the discovery
