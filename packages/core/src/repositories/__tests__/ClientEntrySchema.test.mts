@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 import { describe, expect, it } from "vitest";
-import { ClientEntrySchema } from "#/repositories/InMemoryClientRepository.mjs";
+import {
+	ClientEntrySchema,
+	InMemoryClientRepository,
+} from "#/repositories/InMemoryClientRepository.mjs";
 
 describe("ClientEntrySchema — allowedGrantTypes field (Wave 1 §3.4.1)", () => {
 	it("accepts absent allowedGrantTypes (existing clients)", () => {
@@ -267,5 +270,99 @@ describe("ClientEntrySchema — defaultScopes field (#396)", () => {
 			expect(message).toContain("admin");
 			expect(message).not.toContain('"read"');
 		}
+	});
+});
+
+describe("ClientEntrySchema — private_key_jwt (#484)", () => {
+	const jwk = {
+		kty: "EC",
+		crv: "P-256",
+		kid: "k1",
+		x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+		y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+	};
+	const issues = (input: unknown): string => {
+		const result = ClientEntrySchema.safeParse(input);
+		return result.success ? "" : result.error.issues.map((issue) => issue.message).join("\n");
+	};
+
+	it("accepts inline jwks and exposes it — public keys — through the repository", async () => {
+		expect(issues({ tokenEndpointAuthMethod: "private_key_jwt", jwks: { keys: [jwk] } })).toBe("");
+		const repo = new InMemoryClientRepository(
+			new Map([
+				["rp", { tokenEndpointAuthMethod: "private_key_jwt" as const, jwks: { keys: [jwk] } }],
+			]),
+		);
+		const found = await repo.findById("rp");
+		expect(found?.tokenEndpointAuthMethod).toBe("private_key_jwt");
+		expect(found?.jwks).toEqual({ keys: [jwk] });
+		// There is no secret to compare against: possession is proven at the
+		// token endpoint by the assertion, never by this method.
+		expect(await repo.authenticate("rp", "anything")).toBeNull();
+	});
+
+	it("accepts jwksUri over https, over http only on a loopback host, and exposes it", async () => {
+		expect(
+			issues({
+				tokenEndpointAuthMethod: "private_key_jwt",
+				jwksUri: "https://rp.example.com/jwks.json",
+			}),
+		).toBe("");
+		expect(
+			issues({ tokenEndpointAuthMethod: "private_key_jwt", jwksUri: "http://localhost:3000/jwks" }),
+		).toBe("");
+		expect(
+			issues({ tokenEndpointAuthMethod: "private_key_jwt", jwksUri: "http://rp.example.com/jwks" }),
+		).toMatch(/https/);
+		const repo = new InMemoryClientRepository(
+			new Map([
+				[
+					"rp",
+					{
+						tokenEndpointAuthMethod: "private_key_jwt" as const,
+						jwksUri: "https://rp.example.com/jwks.json",
+					},
+				],
+			]),
+		);
+		expect((await repo.findById("rp"))?.jwksUri).toBe("https://rp.example.com/jwks.json");
+	});
+
+	it("requires exactly one of jwks and jwksUri", () => {
+		expect(issues({ tokenEndpointAuthMethod: "private_key_jwt" })).toMatch(/exactly one of jwks/);
+		expect(
+			issues({
+				tokenEndpointAuthMethod: "private_key_jwt",
+				jwks: { keys: [jwk] },
+				jwksUri: "https://rp.example.com/jwks.json",
+			}),
+		).toMatch(/exactly one of jwks/);
+	});
+
+	it("refuses a clientSecret next to private_key_jwt — one credential, not two", () => {
+		expect(
+			issues({
+				tokenEndpointAuthMethod: "private_key_jwt",
+				jwks: { keys: [jwk] },
+				clientSecret: "s",
+			}),
+		).toMatch(/clientSecret must not be set/);
+	});
+
+	it("refuses jwks or jwksUri on a client that authenticates with a secret", () => {
+		expect(
+			issues({
+				tokenEndpointAuthMethod: "client_secret_basic",
+				clientSecret: "s",
+				jwks: { keys: [jwk] },
+			}),
+		).toMatch(/private_key_jwt/);
+		expect(
+			issues({ tokenEndpointAuthMethod: "none", jwksUri: "https://rp.example.com/jwks.json" }),
+		).toMatch(/private_key_jwt/);
+	});
+
+	it("refuses an empty key set", () => {
+		expect(issues({ tokenEndpointAuthMethod: "private_key_jwt", jwks: { keys: [] } })).not.toBe("");
 	});
 });

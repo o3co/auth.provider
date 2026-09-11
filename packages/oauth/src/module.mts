@@ -28,6 +28,7 @@ import {
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { z } from "zod";
+import { CLIENT_ASSERTION_ALGORITHMS } from "./middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "./routes.mjs";
 
 /**
@@ -124,6 +125,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "sessionFederationIndex"
 		| "federationTokenStore"
 		| "federationProviders"
+		| "replaySeenSet"
 		| "logger"
 	>({
 		name: "oauth",
@@ -148,6 +150,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"sessionFederationIndex", // Amendment 4 (§1.1.4)
 			"federationTokenStore", // Phase 9 Task 4 augmentation — federation-token routes
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
+			"replaySeenSet", // #484 — jti single-use for private_key_jwt client assertions; server_error on that path when absent
 			"logger", // D-4 — structured logger; falls back to consoleLogger when absent
 		],
 		// #363/#375: optional to wire, not optional to decide. `auditSink`
@@ -185,6 +188,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						sessionFamilyIndex: deps.sessionFamilyIndex,
 						sessionFederationIndex: deps.sessionFederationIndex,
 						federationTokenStore: deps.federationTokenStore,
+						replaySeenSet: deps.replaySeenSet,
 						logger: deps.logger ?? consoleLogger,
 						// Theme E structural fix: typed deps replace the v0.4.x lazy
 						// () => ctx.federationProviders closure. The closure here only
@@ -342,11 +346,16 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
 							scopes_supported: ["openid", "profile", "email", "groups"],
 							grant_types_supported: grantTypesSupported,
+							// #484: `private_key_jwt` on every client-authenticated endpoint,
+							// and the assertion algorithms it accepts (RFC 8414 §2). Only
+							// asymmetric ones — a shared secret is what the method avoids.
 							token_endpoint_auth_methods_supported: [
 								"client_secret_basic",
 								"client_secret_post",
+								"private_key_jwt",
 								"none",
 							],
+							token_endpoint_auth_signing_alg_values_supported: [...CLIENT_ASSERTION_ALGORITHMS],
 							// RFC 8414 §2: an omitted `*_endpoint_auth_methods_supported`
 							// means `["client_secret_basic"]`, which understates both
 							// endpoints. They differ from each other on purpose —
@@ -358,13 +367,21 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							introspection_endpoint_auth_methods_supported: [
 								"client_secret_basic",
 								"client_secret_post",
+								"private_key_jwt",
+							],
+							introspection_endpoint_auth_signing_alg_values_supported: [
+								...CLIENT_ASSERTION_ALGORITHMS,
 							],
 							...(revocationSupported
 								? {
 										revocation_endpoint_auth_methods_supported: [
 											"client_secret_basic",
 											"client_secret_post",
+											"private_key_jwt",
 											"none",
+										],
+										revocation_endpoint_auth_signing_alg_values_supported: [
+											...CLIENT_ASSERTION_ALGORITHMS,
 										],
 									}
 								: {}),

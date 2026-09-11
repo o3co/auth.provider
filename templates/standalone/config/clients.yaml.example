@@ -4,6 +4,9 @@
 # `tokenEndpointAuthMethod` is REQUIRED (RFC 6749 §2.3 / RFC 7591 §2):
 #   - "client_secret_basic": HTTP Basic Authorization header — recommended for confidential clients
 #   - "client_secret_post":  form-encoded body parameters
+#   - "private_key_jwt":     the client signs a JWT with its own private key
+#                            (RFC 7523 §2.2, #484) — register its public keys as
+#                            `jwks` (inline) or `jwksUri`, exactly one; no clientSecret
 #   - "none":                public client — no clientSecret; PKCE/S256 mandatory at /authorize
 #
 # Secret format (only for confidential clients — basic / post):
@@ -43,6 +46,25 @@
 #   verifier itself as the challenge and so proves nothing against anyone who
 #   can read the authorization request. Set it only for a legacy client that
 #   genuinely cannot compute SHA-256, and treat it as a migration deadline.
+
+# A machine client that authenticates with a key pair (#484). Nothing here is
+# secret: the private half stays with the client, which signs an assertion
+# (iss = sub = client id, aud = the issuer or the token endpoint, exp within
+# an hour, a fresh jti) per token request. Rotating the key is a JWKS
+# publish when `jwksUri` is used. Needs the replay seen-set wired
+# (REPLAY_SEEN_SET_ADAPTER, on by default).
+#
+# orders-service:
+#   tokenEndpointAuthMethod: "private_key_jwt"
+#   jwksUri: "https://orders.example.com/.well-known/jwks.json"
+#   # or inline:
+#   # jwks:
+#   #   keys:
+#   #     - { kty: "EC", crv: "P-256", kid: "2026-09", x: "...", y: "..." }
+#   allowedGrantTypes: ["client_credentials"]
+#   allowedScopes: ["orders:read"]
+#   defaultScopes: ["orders:read"]
+#   allowedAudiences: ["https://api.example.com/orders"]
 
 my-app:
   tokenEndpointAuthMethod: "client_secret_basic"

@@ -101,7 +101,21 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		expect(meta.metadata?.subject_types_supported).toEqual(["public"]);
 		expect(meta.metadata?.scopes_supported).toEqual(["openid", "profile", "email", "groups"]);
 		expect(meta.metadata?.token_endpoint_auth_methods_supported).toEqual(
-			expect.arrayContaining(["client_secret_basic", "client_secret_post", "none"]),
+			expect.arrayContaining([
+				"client_secret_basic",
+				"client_secret_post",
+				"private_key_jwt",
+				"none",
+			]),
+		);
+		// #484: the assertion algorithms travel with the method, and never a
+		// symmetric one — a shared secret is what private_key_jwt exists to avoid.
+		expect(meta.metadata?.token_endpoint_auth_signing_alg_values_supported).toEqual(
+			expect.arrayContaining(["ES256", "RS256", "EdDSA"]),
+		);
+		expect(meta.metadata?.token_endpoint_auth_signing_alg_values_supported).not.toContain("HS256");
+		expect(meta.metadata?.introspection_endpoint_auth_methods_supported).toContain(
+			"private_key_jwt",
 		);
 	});
 
@@ -200,6 +214,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		expect(meta.metadata?.revocation_endpoint_auth_methods_supported).toEqual([
 			"client_secret_basic",
 			"client_secret_post",
+			"private_key_jwt",
 			"none",
 		]);
 	});
@@ -274,6 +289,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		expect(meta.metadata?.introspection_endpoint_auth_methods_supported).toEqual([
 			"client_secret_basic",
 			"client_secret_post",
+			"private_key_jwt",
 		]);
 	});
 

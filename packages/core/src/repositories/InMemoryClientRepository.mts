@@ -17,6 +17,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import { z } from "zod";
+import { isLoopbackHostname } from "../net/loopback.mjs";
 import { checkRedirectUri, describeRedirectUriRejection } from "../net/redirect-uri.mjs";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
 
@@ -57,6 +58,30 @@ const httpUrlSchema = z
  *
  * @internal
  */
+/**
+ * #484: where a `private_key_jwt` client publishes its keys. `https`, or
+ * `http` on a loopback host for local development — the same carve-out
+ * every other operator-registered URL in this schema gets. The URI is
+ * configuration written by the operator, not a value a request supplies.
+ */
+const jwksUriSchema = z
+	.string()
+	.url()
+	.refine(
+		(value) => {
+			try {
+				const url = new URL(value);
+				return (
+					url.protocol === "https:" ||
+					(url.protocol === "http:" && isLoopbackHostname(url.hostname))
+				);
+			} catch {
+				return false;
+			}
+		},
+		{ message: "jwksUri must be an https URL (plain http only on a loopback host)" },
+	);
+
 const redirectUriEntrySchema = (field: string) =>
 	z.string().superRefine((uri, ctx) => {
 		const rejection = checkRedirectUri(uri);
@@ -85,8 +110,17 @@ export const ClientEntrySchema = z
 		// below so confidential clients still surface a startup error when the
 		// secret is missing, and public clients (`"none"`) cannot smuggle a
 		// secret in.
-		tokenEndpointAuthMethod: z.enum(["client_secret_basic", "client_secret_post", "none"]),
+		tokenEndpointAuthMethod: z.enum([
+			"client_secret_basic",
+			"client_secret_post",
+			"private_key_jwt",
+			"none",
+		]),
 		clientSecret: z.string().min(1).optional(),
+		// #484: the key sources for `private_key_jwt`. Exactly one of the two
+		// for that method, neither for any other — the superRefine below.
+		jwks: z.object({ keys: z.array(z.record(z.string(), z.unknown())).min(1) }).optional(),
+		jwksUri: jwksUriSchema.optional(),
 		// #395: held to the registered-redirect-URI shape (net/redirect-uri.mts)
 		// at boot — a `javascript:` target, a fragment, userinfo, or plain http
 		// off loopback used to register cleanly and become a valid redirect.
@@ -203,11 +237,40 @@ export const ClientEntrySchema = z
 				path: ["clientSecret"],
 			});
 		}
-		if (!needsSecret && data.clientSecret !== undefined) {
+		if (data.tokenEndpointAuthMethod === "none" && data.clientSecret !== undefined) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				message: 'clientSecret must not be set when tokenEndpointAuthMethod is "none"',
 				path: ["clientSecret"],
+			});
+		}
+		// #484: private_key_jwt proves possession of a key, so it carries keys
+		// and no secret; every other method carries no keys.
+		const hasKeys = data.jwks !== undefined;
+		const hasKeysUri = data.jwksUri !== undefined;
+		if (data.tokenEndpointAuthMethod === "private_key_jwt") {
+			if (hasKeys === hasKeysUri) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message:
+						'tokenEndpointAuthMethod "private_key_jwt" requires exactly one of jwks (inline public keys) or jwksUri',
+					path: ["jwks"],
+				});
+			}
+			if (data.clientSecret !== undefined) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message:
+						'clientSecret must not be set when tokenEndpointAuthMethod is "private_key_jwt" — the client proves possession of its private key instead of presenting a shared secret',
+					path: ["clientSecret"],
+				});
+			}
+		} else if (hasKeys || hasKeysUri) {
+			ctx.addIssue({
+				code: z.ZodIssueCode.custom,
+				message:
+					'jwks and jwksUri are only meaningful when tokenEndpointAuthMethod is "private_key_jwt"',
+				path: [hasKeys ? "jwks" : "jwksUri"],
 			});
 		}
 		// Wave 2 §4.8: `required: true` with an empty `methods` list
@@ -261,6 +324,8 @@ export class InMemoryClientRepository implements ClientRepository {
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+			...(entry.jwks !== undefined && { jwks: entry.jwks }),
+			...(entry.jwksUri !== undefined && { jwksUri: entry.jwksUri }),
 			...(entry.senderConstrained !== undefined && {
 				senderConstrained: entry.senderConstrained,
 			}),
@@ -323,6 +388,8 @@ export class InMemoryClientRepository implements ClientRepository {
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+			...(entry.jwks !== undefined && { jwks: entry.jwks }),
+			...(entry.jwksUri !== undefined && { jwksUri: entry.jwksUri }),
 			...(entry.senderConstrained !== undefined && {
 				senderConstrained: entry.senderConstrained,
 			}),

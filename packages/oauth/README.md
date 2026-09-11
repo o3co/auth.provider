@@ -145,6 +145,40 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **Not implemented:** `max_age` / `auth_time`, the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document already tells the truth about them by saying nothing.
 
+## Client authentication: `private_key_jwt` (RFC 7523 §2.2)
+
+Every client-authenticated endpoint here — `/oauth/token`, `/oauth/introspect`, `/oauth/revoke` — accepts, besides `client_secret_basic` / `client_secret_post`, a JWT the client signed with its own private key (#484). Nothing shared has to be distributed to every replica of a machine client and rotated everywhere at once: the private half stays with the client, rotation is a JWKS publish, and every assertion carries a `jti` the provider spends exactly once.
+
+**Registration.** `tokenEndpointAuthMethod: "private_key_jwt"` with exactly one of `jwks` (the public keys, inline, RFC 7591 `jwks`) or `jwksUri` (`https`, or `http` on a loopback host; fetched at verification time and cached, unknown `kid`s trigger a refetch with a cooldown). No `clientSecret` — the schema refuses one next to this method, and refuses `jwks` / `jwksUri` next to any other.
+
+**The request.** `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer` and `client_assertion=<JWT>` in the form body, and nothing else that authenticates: an assertion next to a Basic header or a body `client_secret` is refused before either is examined (RFC 6749 §2.3, one method per request). A body `client_id`, if present, must match the assertion.
+
+**The assertion.** `iss` and `sub` both equal to the `client_id`; `aud` naming the issuer or the token endpoint URL (RFC 7523 §3 — either form, so a client library that uses one or the other works); `exp` required and at most one hour ahead (`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`); `jti` required and single-use, recorded in the composition's `replaySeenSet` under `client-assertion:<client_id>` until the assertion expires; signed with an asymmetric algorithm (`RS*`, `PS*`, `ES*`, `EdDSA` — `token_endpoint_auth_signing_alg_values_supported` lists them; `HS*` and `none` are never accepted against a JWKS). `iat` and `nbf` are validated when present, with 30 s of clock tolerance.
+
+**Refusals** are `401 invalid_client` — a replayed `jti`, a wrong `aud`, an expired or over-long assertion, a signature under a key the JWKS does not hold, a `kid` it does not publish, a client registered for another method, an unknown client, or a `jwks_uri` that cannot be fetched (fail closed, logged as `client_assertion_refused` with the reason). A `private_key_jwt` request in a composition that wired no `replaySeenSet` is `500 server_error`: a `jti` that cannot be recorded is one that could be replayed, so the path refuses rather than authenticating unchecked. The scaffold wires one (`REPLAY_SEEN_SET_ADAPTER`, Redis by default; the memory adapter is refused under `DEPLOYMENT_MODE=multi` because a captured assertion would replay once per replica).
+
+**Not shipped: `client_secret_jwt`.** It would need the repository interface to hand the middleware the raw secret as an HMAC key — `authenticate(clientId, secret)` compares, it does not reveal — and a bcrypt-hashed `clientSecret`, which is what the scaffold recommends storing, cannot serve as one at all. The secret-based methods a deployment already has cover that case; the asymmetric one is the point of this feature.
+
+```yaml
+# config/clients.yaml
+orders-service:
+  tokenEndpointAuthMethod: "private_key_jwt"
+  jwksUri: "https://orders.example.com/.well-known/jwks.json"
+  allowedGrantTypes: ["client_credentials"]
+  allowedScopes: ["orders:read"]
+  defaultScopes: ["orders:read"]
+  allowedAudiences: ["https://api.example.com/orders"]
+```
+
+```http
+POST /oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials
+&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
+&client_assertion=eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYtMDkifQ...
+```
+
 ## Introspection: which tokens a caller may ask about
 
 `POST /oauth/introspect` authenticates its caller first (RFC 7662 §2.1 — public clients are refused), then answers only about tokens that caller is entitled to see. Two rules decide that, and both are stated here because both bit during live testing.

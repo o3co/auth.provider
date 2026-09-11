@@ -25,6 +25,12 @@ my-app:
   allowedRedirectUris: ["https://app.example/callback"]
 ```
 
+A machine client can authenticate with a key instead of a shared secret (#484):
+`tokenEndpointAuthMethod: "private_key_jwt"` plus `jwks` (inline public keys) or
+`jwksUri`, and it presents a signed assertion at `/oauth/token` — see the
+[oauth package README](../../packages/oauth/README.md#client-authentication-private_key_jwt-rfc-7523-22).
+Nothing secret lives in `clients.yaml` for such a client.
+
 **What this does not do.** It does not make `/authorize` safe against forced navigation for a client that *is* first-party — that remains the accepted model here. What it prevents is a client that should never have been trusted with a silent code being registered into that position by accident. The step that changes the former is a consent screen, tracked separately.
 
 **Migrating.** Registrations that predate the field are refused at `/authorize` until you mark them — a client with no `firstParty` field and one carrying an explicit `false` are treated alike. Mark every client you operate before pointing it at `/authorize`; there is no admit-with-warning window. The one-time `oauth.authorize.allowUnmarkedClients` migration flag was removed before it ever shipped in a release, and a config or environment still setting it (`OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) fails at boot with migration instructions rather than being silently ignored.
@@ -106,6 +112,7 @@ Other multi-replica considerations covered by the default modules:
 - The `express-session` store (`sessionStoreModule`) is its own connection: `SESSION_STORAGE_TYPE=redis` with `SESSION_STORAGE_REDIS_URL` (`session.storage.redis.url`) pointing at the shared instance.
 - The user-session stores switch on `userSessionStores.adapter = "redis"` (`USER_SESSION_STORES_ADAPTER`), which wires `redisSessionStoresModule` off the shared ioredis connection — the one `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` configures.
 - The authorization-code repository switches on `oauth.code.adapter` (`OAUTH_CODE_ADAPTER`); the template ships `"redis"`, on that same connection. The older `repositories.code.type = "redis"` (`CLIENT_CODE_TYPE`) switch is still honoured with a deprecation warning at boot. `CLIENT_CODE_ENDPOINT_URI` (`repositories.code.redis.endpointUri`) is still bound by `config/application.conf` but nothing reads it: the Redis code repository has run on the shared connection since the `{ endpointUri }` builder shape was retired, so there is one Redis URL for every adapter and that variable is legacy.
+- The replay seen-set — the `jti` single-use record behind `private_key_jwt` client authentication (#484) — switches on `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`); the template ships `"redis"` on the shared connection, and `memory` is refused under `DEPLOYMENT_MODE=multi` because a captured client assertion would replay once per replica.
 - The federation token store defaults to memory. Set `FEDERATION_TOKEN_STORE_TYPE=redis` (`federationTokenStore.type = "redis"`) and supply `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 bytes, base64-encoded (`openssl rand -base64 32`); the store encrypts the upstream refresh tokens it holds. It shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`. See [Federation Token Store](#federation-token-store).
 
 ## Usage

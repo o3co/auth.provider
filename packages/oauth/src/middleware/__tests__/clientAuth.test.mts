@@ -14,20 +14,25 @@
  * limitations under the License.
  */
 
-import type {
-	ClientRepository,
-	PublicClient,
-	TokenEndpointAuthMethod,
+import { randomUUID } from "node:crypto";
+import {
+	type ClientRepository,
+	createMemoryReplaySeenSet,
+	type PublicClient,
+	type TokenEndpointAuthMethod,
 } from "@o3co/auth-provider-core";
 import express from "express";
+import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "../clientAssertion.mjs";
 import { createClientAuthMiddleware } from "../clientAuth.mjs";
 
 interface FakeClient {
 	clientId: string;
 	tokenEndpointAuthMethod: TokenEndpointAuthMethod;
 	clientSecret?: string;
+	jwks?: { keys: JWK[] };
 }
 
 const buildPublicClient = (c: FakeClient): PublicClient => ({
@@ -35,6 +40,7 @@ const buildPublicClient = (c: FakeClient): PublicClient => ({
 	tokenEndpointAuthMethod: c.tokenEndpointAuthMethod,
 	allowedRedirectUris: [],
 	allowedScopes: [],
+	...(c.jwks ? { jwks: c.jwks } : {}),
 });
 
 /**
@@ -619,6 +625,114 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
 			expect(res.status).toBe(401);
 			expect(calls.length).toBeGreaterThan(0);
+		});
+	});
+
+	describe("private_key_jwt (#484)", () => {
+		const ISSUER = "https://auth.test";
+		let privateKey: CryptoKey;
+		let publicJwk: JWK;
+		beforeAll(async () => {
+			const pair = await generateKeyPair("ES256");
+			privateKey = pair.privateKey;
+			publicJwk = { ...(await exportJWK(pair.publicKey)), kid: "k1" };
+		});
+		const jwtClient = (): FakeClient => ({
+			clientId: "rp",
+			tokenEndpointAuthMethod: "private_key_jwt",
+			jwks: { keys: [publicJwk] },
+		});
+		const assertion = async (aud: string = `${ISSUER}/oauth/token`): Promise<string> => {
+			const now = Math.floor(Date.now() / 1000);
+			return new SignJWT({ iss: "rp", sub: "rp", aud, iat: now, exp: now + 60, jti: randomUUID() })
+				.setProtectedHeader({ alg: "ES256", kid: "k1" })
+				.sign(privateKey);
+		};
+		const buildApp = (options: Record<string, unknown> = {}) => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(fakeRepo([jwtClient(), basicConfidential("acme", "s3cret")]), {
+					issuer: ISSUER,
+					replaySeenSet: createMemoryReplaySeenSet(),
+					...options,
+				}),
+				(req, res) => res.json({ clientId: req.oauthClient?.clientId }),
+			);
+			return app;
+		};
+		const send = (app: express.Express, body: Record<string, string>) =>
+			request(app).post("/test").type("form").send(body);
+
+		it("authenticates a private_key_jwt client and exposes it downstream", async () => {
+			const res = await send(buildApp(), {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ clientId: "rp" });
+		});
+
+		it("is accepted where public clients are not — it is a confidential method", async () => {
+			const res = await send(buildApp({ allowPublicClients: false }), {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(ISSUER),
+			});
+			expect(res.status).toBe(200);
+		});
+
+		it("refuses a replayed assertion with invalid_client", async () => {
+			const app = buildApp();
+			const body = {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			};
+			expect((await send(app, body)).status).toBe(200);
+			const replay = await send(app, body);
+			expect(replay.status).toBe(401);
+			expect(replay.body.error).toBe("invalid_client");
+		});
+
+		it("refuses an assertion combined with another method — one per request (RFC 6749 §2.3)", async () => {
+			const app = buildApp();
+			const withBasic = await request(app)
+				.post("/test")
+				.set("Authorization", `Basic ${Buffer.from("acme:s3cret").toString("base64")}`)
+				.type("form")
+				.send({
+					client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+					client_assertion: await assertion(),
+				});
+			expect(withBasic.status).toBe(401);
+			expect(withBasic.body.error_description).toMatch(/one client authentication method/i);
+
+			const withSecret = await send(app, {
+				client_id: "acme",
+				client_secret: "s3cret",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(withSecret.status).toBe(401);
+			expect(withSecret.body.error_description).toMatch(/one client authentication method/i);
+		});
+
+		it("answers server_error when no replay store is wired — never an unchecked jti", async () => {
+			const res = await send(buildApp({ replaySeenSet: undefined }), {
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("server_error");
+		});
+
+		it("leaves the secret-based methods exactly as they were", async () => {
+			const res = await request(buildApp())
+				.post("/test")
+				.set("Authorization", `Basic ${Buffer.from("acme:s3cret").toString("base64")}`)
+				.type("form")
+				.send({});
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ clientId: "acme" });
 		});
 	});
 });

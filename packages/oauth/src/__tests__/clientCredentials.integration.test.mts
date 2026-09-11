@@ -25,18 +25,21 @@
  * HTTP path via supertest so per-client gating is verified end-to-end.
  */
 
+import { randomUUID } from "node:crypto";
 import {
 	type AppConfig,
 	type ClientRepository,
 	type CodeRepository,
+	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
-import { decodeJwt } from "jose";
+import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
+import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "#/middleware/clientAssertion.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -242,5 +245,132 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 		expect(res.status).toBe(200);
 		const payload = decodeJwt(res.body.access_token);
 		expect(payload.aud).toBe("urn:custom:audience");
+	});
+});
+
+describe("client_credentials — private_key_jwt client authentication at /oauth/token (#484)", () => {
+	const RP = "rp-jwt";
+	let privateKey: CryptoKey;
+	let publicJwk: JWK;
+	beforeAll(async () => {
+		const pair = await generateKeyPair("ES256");
+		privateKey = pair.privateKey;
+		publicJwk = { ...(await exportJWK(pair.publicKey)), kid: "rp-k1" };
+	});
+
+	const jwtClientRepo = (): ClientRepository => {
+		const rp = {
+			clientId: RP,
+			tokenEndpointAuthMethod: "private_key_jwt" as const,
+			jwks: { keys: [publicJwk] },
+			allowedRedirectUris: [],
+			allowedScopes: ["read"],
+			defaultScopes: ["read"],
+			allowedAudiences: ["https://api.example"],
+			allowedGrantTypes: ["client_credentials"],
+		};
+		return {
+			findById: async (id) => (id === RP ? rp : null),
+			authenticate: async () => null,
+		};
+	};
+
+	const assertion = async (claims: Record<string, unknown> = {}): Promise<string> => {
+		const now = Math.floor(Date.now() / 1000);
+		return new SignJWT({
+			iss: RP,
+			sub: RP,
+			aud: `${ISSUER}/oauth/token`,
+			iat: now,
+			exp: now + 60,
+			jti: randomUUID(),
+			...claims,
+		})
+			.setProtectedHeader({ alg: "ES256", kid: "rp-k1" })
+			.sign(privateKey);
+	};
+
+	async function buildJwtApp(
+		replaySeenSet = createMemoryReplaySeenSet(),
+	): Promise<express.Express> {
+		const app = express();
+		app.use(express.urlencoded({ extended: false }));
+		const keyStore = createSymmetricKeyStore(SECRET);
+		const registry = new GrantRegistry();
+		registry.register(
+			"client_credentials",
+			createClientCredentialsGrant({ config: fullConfig, keyStore }),
+		);
+		const { router } = await createOAuthRouter(express, {
+			registry,
+			config: fullConfig,
+			clientRepository: jwtClientRepo(),
+			codeRepository: codeRepoStub,
+			keyStore,
+			replaySeenSet,
+		});
+		app.use("/oauth", router);
+		return app;
+	}
+
+	it("a client registered with a JWKS authenticates with an assertion and receives a token", async () => {
+		const res = await request(await buildJwtApp())
+			.post("/oauth/token")
+			.type("form")
+			.send({
+				grant_type: "client_credentials",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+		expect(res.status).toBe(200);
+		expect(decodeJwt(res.body.access_token).sub).toBe(RP);
+	});
+
+	it.each([
+		["a replayed jti", async (a: () => Promise<string>) => a(), true],
+		["a wrong aud", async () => assertion({ aud: "https://other.example/oauth/token" }), false],
+		[
+			"an expired assertion",
+			async () => assertion({ exp: Math.floor(Date.now() / 1000) - 120 }),
+			false,
+		],
+	])("refuses %s with 401 invalid_client", async (_label, make, replay) => {
+		const app = await buildJwtApp();
+		const first = await (make as (a: () => Promise<string>) => Promise<string>)(assertion);
+		const send = (client_assertion: string) =>
+			request(app).post("/oauth/token").type("form").send({
+				grant_type: "client_credentials",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion,
+			});
+		if (replay) expect((await send(first)).status).toBe(200);
+		const res = await send(first);
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
+	});
+
+	it("refuses a signature from a key outside the registered JWKS", async () => {
+		const other = await generateKeyPair("ES256");
+		const now = Math.floor(Date.now() / 1000);
+		const forged = await new SignJWT({
+			iss: RP,
+			sub: RP,
+			aud: `${ISSUER}/oauth/token`,
+			iat: now,
+			exp: now + 60,
+			jti: randomUUID(),
+		})
+			.setProtectedHeader({ alg: "ES256", kid: "rp-k1" })
+			.sign(other.privateKey);
+		const res = await request(await buildJwtApp())
+			.post("/oauth/token")
+			.type("form")
+			.send({
+				grant_type: "client_credentials",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: forged,
+			});
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("invalid_client");
 	});
 });

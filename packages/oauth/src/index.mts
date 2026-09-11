@@ -29,6 +29,19 @@ export {
 	type RenderFrontchannelLogoutHtmlOptions,
 	renderFrontchannelLogoutHtml,
 } from "./logout/renderFrontchannel.mjs";
+// #484: private_key_jwt client authentication (RFC 7523 §2.2).
+export type {
+	ClientAssertionOutcome,
+	ClientAssertionVerifier,
+	ClientAssertionVerifierOptions,
+} from "./middleware/clientAssertion.mjs";
+export {
+	CLIENT_ASSERTION_ALGORITHMS,
+	createClientAssertionVerifier,
+	JWT_BEARER_CLIENT_ASSERTION_TYPE,
+	MAX_CLIENT_ASSERTION_LIFETIME_SECONDS,
+} from "./middleware/clientAssertion.mjs";
+export type { ClientAuthMiddlewareOptions } from "./middleware/clientAuth.mjs";
 export { createClientAuthMiddleware } from "./middleware/clientAuth.mjs";
 export { oauthModule } from "./module.mjs";
 export { oauthAuthorizationModule } from "./oauthAuthorization.mjs";

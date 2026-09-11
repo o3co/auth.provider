@@ -58,6 +58,21 @@ import type { Client, User } from "#/repositories/types.mjs";
 const FULLY_POPULATED_CLIENT = {
 	tokenEndpointAuthMethod: "client_secret_basic",
 	clientSecret: "a-client-secret-value",
+	// #484: the private_key_jwt key sources. Mutually exclusive with each
+	// other and with clientSecret by method, so the runtime parse below
+	// registers the fixture as variants; the type-level check stays whole.
+	jwks: {
+		keys: [
+			{
+				kty: "EC",
+				crv: "P-256",
+				kid: "k1",
+				x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+				y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+			},
+		],
+	},
+	jwksUri: "https://app.example.com/jwks.json",
 	allowedRedirectUris: ["https://app.example.com/cb"],
 	allowedScopes: ["read", "write"],
 	defaultScopes: ["read"],
@@ -77,21 +92,43 @@ const FULLY_POPULATED_CLIENT = {
 	// being covered here. This turns that into a compile error.
 } satisfies Required<Omit<Client, "clientId">>;
 
+/**
+ * #484: `clientSecret`, `jwks` and `jwksUri` cannot coexist on one
+ * registration — the method selects exactly one credential — so the runtime
+ * check registers three variants that together carry every field of the
+ * fixture. The union-of-keys assertion below is what keeps that honest.
+ */
+const { jwks, jwksUri, clientSecret, ...common } = FULLY_POPULATED_CLIENT;
+const REGISTRABLE_VARIANTS: ReadonlyArray<Record<string, unknown>> = [
+	{ ...common, tokenEndpointAuthMethod: "client_secret_basic", clientSecret },
+	{ ...common, tokenEndpointAuthMethod: "private_key_jwt", jwks },
+	{ ...common, tokenEndpointAuthMethod: "private_key_jwt", jwksUri },
+];
+
 describe("ClientEntrySchema conformance with Client (#343)", () => {
+	it("registers every field of the fixture across the variants", () => {
+		const covered = new Set(REGISTRABLE_VARIANTS.flatMap((v) => Object.keys(v)));
+		expect([...covered].sort()).toEqual(Object.keys(FULLY_POPULATED_CLIENT).sort());
+	});
+
 	it("represents every field the domain type carries", () => {
 		// The whole point. `.strict()` means an unrecognized key throws, so a
 		// field on `Client` that the schema never learned about fails here —
 		// which is exactly how #342 would have been caught before it shipped.
-		expect(() => ClientEntrySchema.parse(FULLY_POPULATED_CLIENT)).not.toThrow();
+		for (const variant of REGISTRABLE_VARIANTS) {
+			expect(() => ClientEntrySchema.parse(variant)).not.toThrow();
+		}
 	});
 
 	it("round-trips every field rather than quietly dropping any", () => {
 		// Representable is not enough: a field the schema strips would leave the
 		// repository returning a client the registration thought it configured.
-		const parsed = ClientEntrySchema.parse(FULLY_POPULATED_CLIENT) as Record<string, unknown>;
-		for (const [key, value] of Object.entries(FULLY_POPULATED_CLIENT)) {
-			expect(parsed).toHaveProperty(key);
-			expect(parsed[key]).toEqual(value);
+		for (const variant of REGISTRABLE_VARIANTS) {
+			const parsed = ClientEntrySchema.parse(variant) as Record<string, unknown>;
+			for (const [key, value] of Object.entries(variant)) {
+				expect(parsed).toHaveProperty(key);
+				expect(parsed[key]).toEqual(value);
+			}
 		}
 	});
 
@@ -100,7 +137,7 @@ describe("ClientEntrySchema conformance with Client (#343)", () => {
 		// typo'd key in a YAML registration must fail boot rather than be
 		// silently ignored, which would leave the operator believing they
 		// configured something.
-		expect(() => ClientEntrySchema.parse({ ...FULLY_POPULATED_CLIENT, frstParty: true })).toThrow(
+		expect(() => ClientEntrySchema.parse({ ...REGISTRABLE_VARIANTS[0], frstParty: true })).toThrow(
 			/frstParty/,
 		);
 	});
@@ -109,7 +146,7 @@ describe("ClientEntrySchema conformance with Client (#343)", () => {
 		// Named on its own because this one was a release blocker: without it
 		// `/authorize` answered `unauthorized_client` for every file-backed
 		// registration, and no stub-based test could see it.
-		const parsed = ClientEntrySchema.parse(FULLY_POPULATED_CLIENT) as { firstParty?: boolean };
+		const parsed = ClientEntrySchema.parse(REGISTRABLE_VARIANTS[0]) as { firstParty?: boolean };
 		expect(parsed.firstParty).toBe(true);
 	});
 });

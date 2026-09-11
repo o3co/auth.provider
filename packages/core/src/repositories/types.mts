@@ -20,9 +20,16 @@ import type { SenderConstraint } from "../grants/senderConstraint.mjs";
  *
  * - `"client_secret_basic"`: HTTP Basic `Authorization` header (§2.3.1)
  * - `"client_secret_post"`: form-encoded body parameters (§2.3.1)
+ * - `"private_key_jwt"`: a JWT the client signs with its own private key
+ *   (RFC 7523 §2.2 / OIDC Core §9), verified under the keys registered as
+ *   `jwks` or published at `jwksUri`. No shared secret anywhere (#484).
  * - `"none"`: public client (no secret; PKCE/S256 mandatory per RFC 9700 §2.1.1)
  */
-export type TokenEndpointAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
+export type TokenEndpointAuthMethod =
+	| "client_secret_basic"
+	| "client_secret_post"
+	| "private_key_jwt"
+	| "none";
 
 export interface Client {
 	readonly clientId: string;
@@ -42,6 +49,19 @@ export interface Client {
 	 * `"none"`. The `ClientEntrySchema` superRefine enforces both directions.
 	 */
 	readonly clientSecret?: string;
+	/**
+	 * The client's public signing keys for `private_key_jwt`, inline (RFC 7591
+	 * `jwks`, #484). Exactly one of `jwks` / `jwksUri` when the method is
+	 * `"private_key_jwt"`; neither for any other method. Public material —
+	 * it rides along on `PublicClient`.
+	 */
+	readonly jwks?: { readonly keys: ReadonlyArray<Readonly<Record<string, unknown>>> };
+	/**
+	 * Where the client publishes those keys (RFC 7591 `jwks_uri`, #484):
+	 * `https`, or `http` on a loopback host. Fetched and cached at
+	 * verification time, so rotating a key is a publish, not a re-registration.
+	 */
+	readonly jwksUri?: string;
 	readonly allowedRedirectUris: readonly string[];
 	readonly allowedScopes: readonly string[];
 	/**

@@ -38,6 +38,7 @@ import {
 	type Logger,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
+	type ReplaySeenSet,
 	readAccessTokenRevocationMode,
 	type SenderConstraint,
 	type SessionFamilyIndex,
@@ -104,6 +105,7 @@ export const createOAuthRouter = async (
 		sessionFamilyIndex,
 		sessionFederationIndex,
 		federationTokenStore,
+		replaySeenSet,
 		getFederationProviders = () => undefined,
 		logger = consoleLogger,
 	}: {
@@ -132,6 +134,12 @@ export const createOAuthRouter = async (
 		sessionFamilyIndex?: SessionFamilyIndex;
 		sessionFederationIndex?: SessionFederationIndex;
 		federationTokenStore?: FederationTokenStore;
+		/**
+		 * #484: the `jti` single-use record for `private_key_jwt` client
+		 * assertions, consulted by every client-authenticated endpoint here.
+		 * Optional to wire; an assertion request without it is `server_error`.
+		 */
+		replaySeenSet?: ReplaySeenSet;
 		/**
 		 * Lazy getter for the federation providers Map. Evaluated at request time so
 		 * module init order does not affect resolution — pass `() => context.federationProviders`
@@ -169,10 +177,15 @@ export const createOAuthRouter = async (
 	const legacyTypAcceptOpt = options.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
+	// #484: `private_key_jwt` on every client-authenticated endpoint: the
+	// assertion's `aud` may name the issuer or this token endpoint.
+	const tokenEndpoint = `${canonicalIssuer}/oauth/token`;
 	const tokenClientAuthMw = createClientAuthMiddleware(clientRepository, {
 		issuer: canonicalIssuer,
 		logger,
 		allowPublicClients: true,
+		replaySeenSet,
+		tokenEndpoint,
 	});
 	// `/oauth/introspect` MUST reject public clients per RFC 7662 §2.1 — a
 	// known client_id is a non-secret value and would otherwise let any party
@@ -180,6 +193,8 @@ export const createOAuthRouter = async (
 	const introspectClientAuthMw = createClientAuthMiddleware(clientRepository, {
 		issuer: canonicalIssuer,
 		logger,
+		replaySeenSet,
+		tokenEndpoint,
 	});
 
 	// #325: the check + outage policy (OR-5 failMode, CP-10 context, AS-2 429
