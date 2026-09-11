@@ -31,6 +31,7 @@ import type { WebAuthnConfig } from "../config.mjs";
 import {
 	generateAuthenticationOptionsForUser,
 	generateRegistrationOptionsForUser,
+	WEBAUTHN_ALGORITHM_IDS,
 } from "../internal/options.mjs";
 
 // ---------------------------------------------------------------------------
@@ -234,5 +235,28 @@ describe("generateAuthenticationOptionsForUser (spec §2.4)", () => {
 
 		const expectedChallenge = Buffer.from(challengeBytes).toString("base64url");
 		expect(result.challenge).toBe(expectedChallenge);
+	});
+});
+
+describe("the advertised algorithm set is this package's, not the library's default", () => {
+	it("offers exactly EdDSA, ES256, RS256, in that order", async () => {
+		// `@simplewebauthn/server` keeps this list in a mutable module-level
+		// default and prepends ML-DSA-44 to it when the runtime reports
+		// support (14.0.0). That makes what an authenticator is offered depend
+		// on the Node build the provider happens to run on, and changes it
+		// under a dependency bump. Registration is a long-lived decision — the
+		// credential outlives the process — so the set is stated here.
+		const result = await generateRegistrationOptionsForUser({
+			config: BASE_CONFIG,
+			userId: "user-1",
+			userName: "alice@example.com",
+			userDisplayName: "Alice",
+			excludeCredentials: [],
+			challenge: makeChallenge(),
+		});
+
+		expect(result.pubKeyCredParams.map((p) => p.alg)).toEqual([...WEBAUTHN_ALGORITHM_IDS]);
+		expect([...WEBAUTHN_ALGORITHM_IDS]).toEqual([-8, -7, -257]);
+		expect(result.pubKeyCredParams.every((p) => p.type === "public-key")).toBe(true);
 	});
 });

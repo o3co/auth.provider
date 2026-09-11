@@ -50,6 +50,24 @@ import {
 } from "@simplewebauthn/server";
 import type { WebAuthnConfig } from "../config.mjs";
 
+/**
+ * The public-key algorithms this provider offers at registration and accepts
+ * at verification: EdDSA (-8), ES256 (-7), RS256 (-257), most preferred
+ * first.
+ *
+ * Stated here rather than left to `@simplewebauthn/server`, whose default is
+ * a mutable module-level array that 14.0.0 prepends ML-DSA-44 to whenever
+ * the runtime reports support for it. Two things follow from that, and
+ * neither belongs in a dependency bump: what an authenticator is offered
+ * would depend on the Node build the provider happens to run on, and a
+ * credential registered under an algorithm one deployment can verify may
+ * reach another that cannot. A credential outlives the process that
+ * registered it, so the set is a decision, not a default.
+ *
+ * Adopting ML-DSA-44 deliberately is #554.
+ */
+export const WEBAUTHN_ALGORITHM_IDS: readonly number[] = [-8, -7, -257];
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -84,6 +102,8 @@ export async function generateRegistrationOptionsForUser(args: {
 	return swGenReg({
 		rpName: args.config.rpName,
 		rpID: args.config.rpId,
+		// This package's set, not the library's shifting default.
+		supportedAlgorithmIDs: [...WEBAUTHN_ALGORITHM_IDS],
 		// TextEncoder produces a Uint8Array from the opaque userId string.
 		// SimpleWebAuthn accepts Uint8Array for userID and encodes it as base64url
 		// in the returned PublicKeyCredentialCreationOptionsJSON.

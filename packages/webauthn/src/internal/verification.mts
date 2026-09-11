@@ -29,8 +29,10 @@
  *
  * NOT exported from the package barrel — internal use only.
  *
- * Error-reason regex mapping (re-validated against SimpleWebAuthn v13.3.3 source;
- * all four target strings are unchanged since v13.1.1):
+ * Error-reason regex mapping (re-validated against SimpleWebAuthn v14.0.1
+ * source; all four target strings are unchanged since v13.1.1. v14 adds
+ * "Unexpected top origin of …" for cross-origin authentication, which the
+ * `/origin/i` arm already covers and which is an origin mismatch):
  *   /origin/i   → "origin_mismatch"
  *   /challenge/i → "challenge_mismatch"
  *   /rp.?id/i   → "rp_id_mismatch"  (matches "RP ID" from UnexpectedRPIDHash)
@@ -50,6 +52,7 @@
 import type { AuthenticatorTransport, WebAuthnCredential } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from "@simplewebauthn/server";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
+import { WEBAUTHN_ALGORITHM_IDS } from "./options.mjs";
 
 // ---------------------------------------------------------------------------
 // Attestation (registration)
@@ -122,6 +125,10 @@ export async function verifyWebAuthnAttestation(
 			// "preferred" and "discouraged" are request hints only — not server-enforced.
 			// Cross-refs: Codex Round 2 P1-1 / spec §2.5
 			requireUserVerification: (input.userVerification ?? "preferred") === "required",
+			// The same set `generateRegistrationOptionsForUser` offered: what is
+			// accepted here and what is advertised there cannot drift apart, and
+			// the library's default moves with the runtime.
+			supportedAlgorithmIDs: [...WEBAUTHN_ALGORITHM_IDS],
 		});
 
 		if (!verification.verified || !verification.registrationInfo) {
