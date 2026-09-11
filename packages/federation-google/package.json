@@ -48,7 +48,7 @@
 		"@o3co/auth-provider-session": "workspace:*",
 		"jose": "^6.2.12",
 		"typescript": "^6.0.3",
-		"vitest": "^4.1.11",
+		"vitest": "^5.0.0",
 		"@vitest/coverage-v8": "^4.1.10"
 	}
 }
