@@ -312,8 +312,27 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					...(revocation.ocspRequireNonce === undefined
 						? {}
 						: { requireNonce: revocation.ocspRequireNonce }),
+					// #468: under "both" the CA's CRL is the independent source a
+					// delegated responder without `nocheck` is checked against — the
+					// CRL the responder's own certificate names. One naming none is
+					// the CA specifying no method (RFC 6960 §4.2.2.2.1, third option):
+					// local policy, which is to take the answer and log it, rather than
+					// to turn `both` into `crl` for every deployment whose responder
+					// certificate carries no distribution point.
+					...(crlResolver !== null
+						? {
+								responderRevocation: async (responder, issuer, now) => {
+									const own = await byCrl(responder, issuer, now);
+									return own.kind === "unavailable" && own.reason === "no_distribution_point"
+										? { kind: "unspecified" }
+										: own;
+								},
+							}
+						: {}),
 				})
 			: null;
+	// #468: responders taken without a check, so the deviation is logged once each.
+	const uncheckedResponders = new Set<string>();
 
 	const byCrl = async (
 		certificate: pkijs.Certificate,
@@ -343,6 +362,13 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 	): Promise<RevocationOutcome> => {
 		const lookup = await (ocspResolver as OcspResolver).resolve(certificate, issuer, now);
 		if (!lookup.ok) return { kind: "unavailable", reason: lookup.reason, detail: lookup.detail };
+		if (lookup.responderUnchecked && !uncheckedResponders.has(lookup.responder)) {
+			uncheckedResponders.add(lookup.responder);
+			options.logger?.warn(
+				{ responder: lookup.responder, subject: toNode(certificate).subject },
+				"mtls_ocsp_responder_unchecked",
+			);
+		}
 		if (lookup.status.status === "revoked") {
 			const reason = lookup.status.reason === undefined ? "" : ` (${lookup.status.reason})`;
 			return {

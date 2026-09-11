@@ -55,11 +55,18 @@
  * believed only when signed by the issuing CA itself, or by a responder
  * certificate that CA issued which carries `id-kp-OCSPSigning`, is within
  * its validity period, and carries no critical extension this validator
- * does not process. `id-pkix-ocsp-nocheck` (§4.2.2.2.1) is honoured; when a
- * responder certificate lacks it, its own revocation status is not checked —
- * the responder cannot be asked about itself, and the only independent
- * source, a CRL, exists only under `mode = "both"`. Local policy per
- * §4.2.2.2.1's third option, and recorded in the README.
+ * does not process. `id-pkix-ocsp-nocheck` (§4.2.2.2.1) is honoured: a
+ * responder certificate that carries it is not checked for revocation. One
+ * that lacks it is (#468) — through `responderRevocation`, which
+ * `validate.mts` wires to the CRL arm under `mode = "both"`, the one
+ * source the responder cannot answer for itself; a listed responder is
+ * `responder_revoked`, a CRL that could not be had is
+ * `responder_status_unavailable`. A responder certificate naming neither
+ * `nocheck` nor a CRL — the CA specified no method, §4.2.2.2.1's third
+ * option — and every case under `mode = "ocsp"`, where there is no
+ * independent source, take the answer and report it as
+ * `responderUnchecked` for the caller to log: the deviation the section
+ * leaves to local policy, and stated in the README.
  *
  * ### The algorithm policy applies to the answer too (#470)
  *
@@ -163,6 +170,8 @@ const OID_OCSP_BASIC = "1.3.6.1.5.5.7.48.1.1";
 const OID_OCSP_NONCE = "1.3.6.1.5.5.7.48.1.2";
 /** `id-kp-OCSPSigning` (RFC 6960 §4.2.2.2). */
 const OID_KP_OCSP_SIGNING = "1.3.6.1.5.5.7.3.9";
+/** `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1): the CA vouches for the responder for its certificate's lifetime. */
+const OID_OCSP_NOCHECK = "1.3.6.1.5.5.7.48.1.5";
 /** `extendedKeyUsage` (RFC 5280 §4.2.1.12). */
 const OID_EXT_KEY_USAGE = "2.5.29.37";
 /** The TLS feature extension (RFC 7633). */
@@ -222,7 +231,10 @@ export type OcspUnavailableReason =
 	| "nonce_missing"
 	| "not_yet_valid"
 	| "stale"
-	| "unknown";
+	| "unknown"
+	// #468: a delegated responder without `nocheck` — listed on the CA's CRL, or uncheckable.
+	| "responder_revoked"
+	| "responder_status_unavailable";
 
 export type OcspCertificateStatus =
 	| { readonly status: "good" }
@@ -239,6 +251,13 @@ export type OcspLookup =
 			/** The responder whose answer this is. */
 			readonly responder: string;
 			readonly status: OcspCertificateStatus;
+			/**
+			 * #468: the answer came from a delegated responder whose certificate
+			 * lacks `id-pkix-ocsp-nocheck`, and no `responderRevocation` source was
+			 * available to check it — RFC 6960 §4.2.2.2.1's local-policy deviation,
+			 * for the caller to log.
+			 */
+			readonly responderUnchecked?: boolean;
 	  }
 	| { readonly ok: false; readonly reason: OcspUnavailableReason; readonly detail: string };
 
@@ -348,7 +367,12 @@ const equalBytes = (a: Uint8Array, b: Uint8Array): boolean =>
 const describeError = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /** Reasons remembered for the negative window, and at which granularity. */
-type RespondersFailure = "fetch_failed" | "unparseable" | "responder_error";
+type RespondersFailure =
+	| "fetch_failed"
+	| "unparseable"
+	| "responder_error"
+	| "responder_revoked"
+	| "responder_status_unavailable";
 type CertificateFailure =
 	| "no_matching_response"
 	| "unsupported_critical_extension"
@@ -362,6 +386,8 @@ const RESPONDER_FAILURES: ReadonlySet<string> = new Set<RespondersFailure>([
 	"fetch_failed",
 	"unparseable",
 	"responder_error",
+	"responder_revoked",
+	"responder_status_unavailable",
 ]);
 const CERTIFICATE_FAILURES: ReadonlySet<string> = new Set<CertificateFailure>([
 	"no_matching_response",
@@ -390,7 +416,13 @@ type CacheEntry =
 
 /** What one responder produced for one certificate, after every check. */
 type Answer =
-	| { readonly ok: true; readonly status: OcspCertificateStatus; readonly expiresAt: number }
+	| {
+			readonly ok: true;
+			readonly status: OcspCertificateStatus;
+			readonly expiresAt: number;
+			/** #468: a delegated responder without `nocheck`, taken because no source could check it. */
+			readonly responderUnchecked?: boolean;
+	  }
 	| { readonly ok: false; readonly reason: OcspUnavailableReason; readonly detail: string };
 
 export interface OcspResolverOptions {
@@ -422,7 +454,29 @@ export interface OcspResolverOptions {
 	readonly requireNonce?: boolean;
 	/** Bound on cache size. Entries are per certificate, so the default is roomier than the CRL cache's. */
 	readonly maxCacheEntries?: number;
+	/**
+	 * #468: how a delegated responder's own certificate is checked for
+	 * revocation when it lacks `id-pkix-ocsp-nocheck` (RFC 6960 §4.2.2.2.1).
+	 * `validate.mts` wires the CRL arm under `mode = "both"`. Absent, or
+	 * answering `unspecified`, such a responder's answer is taken and flagged
+	 * `responderUnchecked`.
+	 */
+	readonly responderRevocation?: ResponderRevocationCheck;
 }
+
+/** What {@link ResponderRevocationCheck} learned about a delegated responder's certificate (#468). */
+export type ResponderRevocationOutcome =
+	| { readonly kind: "determined" }
+	/** The CA named no source for the responder's certificate (§4.2.2.2.1, third option): local policy decides, which is to take the answer and report `responderUnchecked`. */
+	| { readonly kind: "unspecified" }
+	| { readonly kind: "revoked"; readonly detail: string }
+	| { readonly kind: "unavailable"; readonly reason: string; readonly detail: string };
+
+export type ResponderRevocationCheck = (
+	responder: pkijs.Certificate,
+	issuer: pkijs.Certificate,
+	now: Date,
+) => Promise<ResponderRevocationOutcome>;
 
 export interface OcspResolver {
 	/**
@@ -707,6 +761,10 @@ const checkDelegatedResponder = async (
 	return { ok: true };
 };
 
+/** Whether a delegated responder's certificate carries `id-pkix-ocsp-nocheck` (#468). */
+const hasNoCheck = (certificate: pkijs.Certificate): boolean =>
+	certificate.extensions?.some((ext) => ext.extnID === OID_OCSP_NOCHECK) === true;
+
 /** The certificate whose key must have signed `basic`: the CA, or a responder it delegated to. */
 const identifySigner = async (
 	basic: pkijs.BasicOCSPResponse,
@@ -714,13 +772,15 @@ const identifySigner = async (
 	now: Date,
 	crypto: pkijs.ICryptoEngine,
 	algorithms: AlgorithmPolicy,
-): Promise<{ ok: true; signer: pkijs.Certificate } | SignerRefusal> => {
+): Promise<
+	{ ok: true; signer: pkijs.Certificate; delegate?: pkijs.Certificate } | SignerRefusal
+> => {
 	const responderId: unknown = basic.tbsResponseData.responderID;
 	if (await isNamedResponder(issuer, responderId, crypto)) return { ok: true, signer: issuer };
 	for (const candidate of basic.certs ?? []) {
 		if (!(await isNamedResponder(candidate, responderId, crypto))) continue;
 		const delegated = await checkDelegatedResponder(candidate, issuer, now, crypto, algorithms);
-		return delegated.ok ? { ok: true, signer: candidate } : delegated;
+		return delegated.ok ? { ok: true, signer: candidate, delegate: candidate } : delegated;
 	}
 	return {
 		ok: false,
@@ -918,6 +978,40 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		if (!signer.ok) return { ok: false, reason: signer.reason, detail: signer.detail };
 		const signature = await verifySignature(basic, signer.signer, crypto);
 		if (!signature.ok) return { ok: false, reason: "bad_signature", detail: signature.detail };
+		// #468: the delegated responder's own certificate. RFC 6960 §4.2.2.2.1
+		// lets a client skip its revocation check only when it carries
+		// `id-pkix-ocsp-nocheck`; without the extension the responder is checked
+		// like any certificate — through the source the caller wired, which is
+		// the CA's CRL, the one source the responder cannot answer for itself. A
+		// revoked responder's `good` is worth nothing: a CA that revokes a
+		// compromised responder key expects its signatures to stop counting
+		// then, not at the certificate's notAfter. With no source wired the
+		// answer is taken and the deviation is reported to the caller.
+		let responderUnchecked = false;
+		if (signer.delegate !== undefined && !hasNoCheck(signer.delegate)) {
+			if (options.responderRevocation === undefined) {
+				responderUnchecked = true;
+			} else {
+				const own = await options.responderRevocation(signer.delegate, issuer, now);
+				if (own.kind === "unspecified") responderUnchecked = true;
+				if (own.kind === "revoked") {
+					return {
+						ok: false,
+						reason: "responder_revoked",
+						detail: `the delegated responder's certificate is revoked: ${own.detail}`,
+					};
+				}
+				if (own.kind === "unavailable") {
+					return {
+						ok: false,
+						reason: "responder_status_unavailable",
+						detail:
+							"the delegated responder's own revocation status is unavailable " +
+							`(${own.reason}): ${own.detail}`,
+					};
+				}
+			}
+		}
 
 		// The nonce is judged on bytes the responder actually signed.
 		const echoed = basic.tbsResponseData.responseExtensions?.find(
@@ -955,7 +1049,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				detail: `the responder at ${url} does not know the certificate (RFC 6960 §2.2)`,
 			};
 		}
-		return { ok: true, status: decoded.status, expiresAt: fresh.expiresAt };
+		return { ok: true, responderUnchecked, status: decoded.status, expiresAt: fresh.expiresAt };
 	};
 
 	/** `query`, joining a request for the same certificate that is already in flight. */
@@ -1028,7 +1122,14 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			const failures: { url: string; reason: OcspUnavailableReason; detail: string }[] = [];
 			for (const url of responders.urls) {
 				const answer = await lookup(url, certificate, issuer, issuerId, serial, now);
-				if (answer.ok) return { ok: true, responder: url, status: answer.status };
+				if (answer.ok) {
+					return {
+						ok: true,
+						responder: url,
+						status: answer.status,
+						...(answer.responderUnchecked ? { responderUnchecked: true } : {}),
+					};
+				}
 				failures.push({ url, reason: answer.reason, detail: answer.detail });
 			}
 			const last = failures[failures.length - 1];
