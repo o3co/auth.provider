@@ -34,15 +34,31 @@ export {
 // App factory — v0.5.0 boot planner. Re-exports from ./boot/index.mjs through
 // ./app.mjs for backwards-compatible import-path stability.
 export { createApp } from "./app.mjs";
+// #525: the trust registry behind the jwt-bearer grant — which issuers are
+// accepted, on what keys, on what terms — and the verifier over it. The
+// one-key `createJwtAssertionVerifier` is a one-entry registry.
+export {
+	type AssertionIssuerEntry,
+	type AssertionIssuerKeySource,
+	type AssertionIssuerRegistry,
+	checkAssertionIssuerEntry,
+	createMemoryAssertionIssuerRegistry,
+	type MutableAssertionIssuerRegistry,
+} from "./assertions/issuerRegistry.mjs";
 export type {
 	JwtAssertionVerifierOptions,
 	SubjectHandleReader,
 } from "./assertions/jwtAssertionVerifier.mjs";
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
+export {
+	createRegistryAssertionVerifier,
+	type RegistryAssertionVerifierOptions,
+} from "./assertions/registryAssertionVerifier.mjs";
 // #301: possession proof for the RFC 7523 jwt-bearer grant. The port is here;
 // the JWT implementation is the vendor-neutral one, and a platform attestation
 // (DeviceCheck, Play Integrity) is the operator's own.
 export type {
+	AssertionVerificationContext,
 	AssertionVerificationResult,
 	AssertionVerifier,
 } from "./assertions/types.mjs";

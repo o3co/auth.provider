@@ -205,4 +205,14 @@ describe("createJwtAssertionVerifier — construction (#301)", () => {
 	it("reports its kind", () => {
 		expect(verifier().kind).toBe("jwt");
 	});
+
+	it("is a one-entry registry since #525: reports the issuer, takes the context, terms unchanged", async () => {
+		// The static-key configuration every existing deployment has keeps
+		// working; what it verifies now also says which issuer it was, and it
+		// accepts the presenting client without caring who that is.
+		const result = await verifier().verify(await mint({ sub: "device:abc" }), {
+			clientId: "any-client",
+		});
+		expect(result).toEqual({ subjectHandle: "device:abc", issuer: ISSUER });
+	});
 });

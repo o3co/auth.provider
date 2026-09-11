@@ -396,6 +396,7 @@ stream — its level is fixed at `info`.
 | `mtls_revocation_unavailable_allowed` (warn), **any**, if you chose `allow` | same | each line is a certificate that was not revocation-checked; a steady rate means the PKI is effectively unrevocable |
 | `jwt_bearer_assertion_verifier_unavailable`, `jwt_bearer_user_repository_unavailable` (error) | `oauth/src/grants/jwtBearer.mts` | the attestation service or the Store is down (`503` to devices) |
 | `jwt_bearer_policy_audience_refused` (warn) | `oauth/src/grants/jwtBearer.mts` | your `grantPolicy` returned an audience outside the client's `allowedAudiences`, or one with no authenticated client to supply that ceiling. Devices get `500 server_error`; the policy, not the device, is what to fix (#520, #521) |
+| `jwt_bearer_issuer_audience_mismatch` (warn) | `oauth/src/grants/jwtBearer.mts` | the presenting client's `allowedAudiences` and the assertion issuer's `allowedAudiences` (its trust-registry entry) admit no audience in common, so no token could name one both stand behind. Devices get `invalid_grant`; compare the two registrations (#525) |
 | `dpop_replay_store_unavailable` | `dpop/src/verifier.mts` | DPoP proofs cannot be checked for replay |
 | `graceful shutdown: drain deadline exceeded, closing remaining connections`, `graceful shutdown: cleanup failed`, `graceful shutdown: server close failed` (error) + non-zero exit | `templates/standalone/src/shutdown.mts` | a replica did not drain within `drainTimeoutMs` (default 10 s) or could not release its connections |
 

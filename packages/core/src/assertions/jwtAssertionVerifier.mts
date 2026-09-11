@@ -14,9 +14,11 @@
  * limitations under the License.
  */
 
-import { type JWTPayload, jwtVerify } from "jose";
+import type { JWTPayload } from "jose";
 import type { KeyLike } from "../keys/KeyStore.mjs";
-import type { AssertionVerificationResult, AssertionVerifier } from "./types.mjs";
+import { createMemoryAssertionIssuerRegistry } from "./issuerRegistry.mjs";
+import { createRegistryAssertionVerifier } from "./registryAssertionVerifier.mjs";
+import type { AssertionVerifier } from "./types.mjs";
 
 /**
  * How the handle is derived from a verified assertion's claims.
@@ -64,14 +66,6 @@ export interface JwtAssertionVerifierOptions {
 	readonly readScope?: (claims: JWTPayload) => readonly string[] | undefined;
 }
 
-const defaultReadSubjectHandle: SubjectHandleReader = (claims) =>
-	typeof claims.sub === "string" && claims.sub.length > 0 ? claims.sub : null;
-
-const defaultReadScope = (claims: JWTPayload): readonly string[] | undefined =>
-	typeof claims.scope === "string" && claims.scope.length > 0
-		? claims.scope.split(" ").filter((s) => s.length > 0)
-		: undefined;
-
 /**
  * The vendor-neutral {@link AssertionVerifier}: a JWT signed by an authority
  * this deployment trusts (#301).
@@ -82,6 +76,12 @@ const defaultReadScope = (claims: JWTPayload): readonly string[] | undefined =>
  * identifier was accepted as a login" comes from. Platform attestations (Apple
  * DeviceCheck, Play Integrity) need a vendor call and are the operator's own
  * implementation of the port.
+ *
+ * Since #525 this is a one-entry {@link createRegistryAssertionVerifier}: the
+ * same checks, the same refusals, one issuer with one static key. A deployment
+ * that trusts several issuers, fetches keys from a JWKS endpoint, or admits an
+ * issuer on terms (subjects, scopes, audiences, clients) builds a registry and
+ * uses that verifier directly.
  *
  * ## What it refuses, and why each one is here
  *
@@ -112,15 +112,8 @@ const defaultReadScope = (claims: JWTPayload): readonly string[] | undefined =>
 export function createJwtAssertionVerifier(
 	options: JwtAssertionVerifierOptions,
 ): AssertionVerifier {
-	const {
-		key,
-		issuer,
-		audience,
-		algorithms,
-		clockToleranceSeconds = 60,
-		readSubjectHandle = defaultReadSubjectHandle,
-		readScope = defaultReadScope,
-	} = options;
+	const { key, issuer, audience, algorithms, clockToleranceSeconds, readSubjectHandle, readScope } =
+		options;
 
 	if (issuer.length === 0 || audience.length === 0) {
 		throw new Error(
@@ -137,36 +130,18 @@ export function createJwtAssertionVerifier(
 		);
 	}
 
-	return {
+	return createRegistryAssertionVerifier({
 		kind: "jwt",
-
-		async verify(assertion: string): Promise<AssertionVerificationResult | null> {
-			let claims: JWTPayload;
-			try {
-				({ payload: claims } = await jwtVerify(assertion, key as never, {
-					issuer,
-					audience,
-					clockTolerance: clockToleranceSeconds,
-					algorithms: [...algorithms],
-					// RFC 7523 §3 item 4: `exp` is mandatory. jose validates it only
-					// when present, so without naming it here an assertion that
-					// simply omits `exp` never expires — a credential whose theft
-					// is permanent. `iat` and `nbf` stay optional (items 5 and 6
-					// are MAYs), and both are validated when present.
-					requiredClaims: ["exp"],
-				}));
-			} catch {
-				// Not verified. Deliberately not rethrown: a caller must not be
-				// able to tell a bad signature from a wrong audience from an
-				// expired token, and the grant answers all of them the same way.
-				return null;
-			}
-
-			const subjectHandle = readSubjectHandle(claims);
-			if (subjectHandle === null || subjectHandle.length === 0) return null;
-
-			const scope = readScope(claims);
-			return scope === undefined ? { subjectHandle } : { subjectHandle, scope };
-		},
-	};
+		audience,
+		registry: createMemoryAssertionIssuerRegistry([
+			{
+				issuer,
+				keys: { type: "key", key },
+				algorithms,
+				...(clockToleranceSeconds === undefined ? {} : { clockToleranceSeconds }),
+				...(readSubjectHandle === undefined ? {} : { readSubjectHandle }),
+				...(readScope === undefined ? {} : { readScope }),
+			},
+		]),
+	});
 }

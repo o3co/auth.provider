@@ -30,6 +30,11 @@ export interface AssertionVerificationResult {
 	/** Opaque handle for `UserRepository.authenticateByToken`. */
 	readonly subjectHandle: string;
 	/**
+	 * The issuer the assertion verified against, when the verifier knows one
+	 * (#525). For logs, and for anything that scopes state per issuer.
+	 */
+	readonly issuer?: string;
+	/**
 	 * Scopes the assertion itself authorizes, if it says.
 	 *
 	 * A ceiling, never a grant: the issued token's scope is the intersection of
@@ -37,6 +42,30 @@ export interface AssertionVerificationResult {
 	 * scope constrains nothing by itself and leaves the other two in charge.
 	 */
 	readonly scope?: readonly string[];
+	/**
+	 * Audiences a token minted from this assertion may name, if the issuer's
+	 * terms say (#525).
+	 *
+	 * A ceiling, and — with no authenticated client — the source: it bounds
+	 * the issued `aud` whatever chose it (a policy, a `resource` parameter,
+	 * the client registration), and stands in for the registration's
+	 * `allowedAudiences` when there is none (#520). Absent, the issuer says
+	 * nothing about audiences and the other parties stay in charge.
+	 */
+	readonly audience?: readonly string[];
+}
+
+/**
+ * What the grant knows about the presentation, handed to the verifier so
+ * trust can depend on it (#525).
+ */
+export interface AssertionVerificationContext {
+	/**
+	 * The authenticated client presenting the assertion. Absent for an
+	 * unauthenticated presenter — RFC 7523 §3 makes client authentication
+	 * optional — which a verifier may admit or refuse on its own terms.
+	 */
+	readonly clientId?: string;
 }
 
 /**
@@ -77,8 +106,15 @@ export interface AssertionVerifier {
 	 * Verify possession. Resolves to the handle to look up, or `null` when the
 	 * assertion does not prove possession. Throws when verification could not
 	 * be attempted.
+	 *
+	 * `context` says who is presenting (#525). A verifier that does not care
+	 * ignores it; the registry verifier refuses a presenter an issuer's entry
+	 * does not admit.
 	 */
-	verify(assertion: string): Promise<AssertionVerificationResult | null>;
+	verify(
+		assertion: string,
+		context?: AssertionVerificationContext,
+	): Promise<AssertionVerificationResult | null>;
 }
 
 // ---------------------------------------------------------------------------
