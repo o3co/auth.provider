@@ -142,7 +142,8 @@ export const mtlsConfigSchema = z.object({
 								 * `"crl"` fetches distribution points, `"ocsp"` asks the
 								 * responders named in `authorityInfoAccess`, `"both"` asks OCSP
 								 * first and falls back to the CRL when the responder cannot
-								 * answer (#431). `"disabled"` is an explicit statement, not an
+								 * answer (#431) — an `unknown` is an answer, and final (#471).
+								 * `"disabled"` is an explicit statement, not an
 								 * omission — see the boot check below.
 								 */
 								mode: z.enum(["crl", "ocsp", "both", "disabled"]),
