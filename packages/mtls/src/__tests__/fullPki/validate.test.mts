@@ -53,11 +53,13 @@ import {
 	mintCrl,
 	mintIntermediate,
 	mintLeaf,
+	mintOcspResponder,
 	mintOcspResponse,
 	mustStaple,
 	nameConstraints,
 	nonceOf,
 	ocspAia,
+	ocspSigningEku,
 	reasonPartitionedCrlDistributionPoint,
 	reasonPartitionedDistributionPoint,
 	serverAuthEku,
@@ -2046,5 +2048,131 @@ describe("full-pki — OCSP must-staple (RFC 7633, #431)", () => {
 		const result = await validator([root]).validate(leaf.x509, [int.x509], NOW);
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.step).toBe("unrecognised critical extension");
+	});
+});
+
+describe("full-pki revocation — a delegated responder's own revocation (#468)", () => {
+	/** A delegated responder the CA issued without `id-pkix-ocsp-nocheck`, naming the CA's CRL. */
+	const responderWithoutNoCheck = (int: Minted) =>
+		mintOcspResponder("OCSP Responder", 50, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				ocspSigningEku(),
+				crlDistributionPoints([INT_CRL_URL]),
+			],
+		});
+	/** A delegated responder naming neither `nocheck` nor a CRL: the CA specified no method. */
+	const responderUnspecified = (int: Minted) =>
+		mintOcspResponder("OCSP Responder", 50, int, {
+			extensions: [basicConstraints(false), keyUsage(KEY_USAGE.digitalSignature), ocspSigningEku()],
+		});
+
+	it("under both, a responder the CA's CRL lists is refused as responder_revoked and the CRL decides the leaf", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const responder = await responderWithoutNoCheck(int);
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signer: responder }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [responder] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+		// The compromised responder's "good" is discarded; the CRL — which does
+		// not list the leaf — is what decided.
+		expect(result).toEqual({ ok: true });
+		expect(calls).toContain(INT_CRL_URL);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ reason: "responder_revoked" }),
+			"mtls_revocation_ocsp_fallback",
+		);
+	});
+
+	it("under both, the CRL that revokes the responder also refuses a leaf it lists — the forged good buys nothing", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const responder = await responderWithoutNoCheck(int);
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signer: responder }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [responder, leaf] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "allow"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("certificate revoked");
+	});
+
+	it("a responder carrying nocheck is not checked — its answer stands and the CRL is not fetched", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const responder = await mintOcspResponder("OCSP Responder", 50, int);
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signer: responder }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [responder] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+		expect(result).toEqual({ ok: true });
+		expect(calls).not.toContain(INT_CRL_URL);
+	});
+
+	it("under both, a responder naming no CRL is the CA specifying no method — the answer is taken and logged once, the CRL not fetched", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const responder = await responderUnspecified(int);
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signer: responder }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [responder] }),
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const v = validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+			logger,
+		});
+		expect(await v.validate(leaf.x509, [int.x509], NOW)).toEqual({ ok: true });
+		expect(await v.validate(leaf.x509, [int.x509], NOW)).toEqual({ ok: true });
+		expect(calls).not.toContain(INT_CRL_URL);
+		expect(
+			logger.warn.mock.calls.filter((call) => call[1] === "mtls_ocsp_responder_unchecked"),
+		).toHaveLength(1);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"mtls_revocation_ocsp_fallback",
+		);
+	});
+
+	it("under ocsp alone the answer is taken and the deviation is logged once per responder", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const responder = await responderUnspecified(int);
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signer: responder }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+		});
+		const v = validator([root], {
+			revocation: fetchingPolicy("ocsp", "reject"),
+			fetchImpl: impl,
+			logger,
+		});
+		expect(await v.validate(leaf.x509, [int.x509], NOW)).toEqual({ ok: true });
+		expect(await v.validate(leaf.x509, [int.x509], NOW)).toEqual({ ok: true });
+		const unchecked = logger.warn.mock.calls.filter(
+			(call) => call[1] === "mtls_ocsp_responder_unchecked",
+		);
+		expect(unchecked).toHaveLength(1);
+		expect(unchecked[0]?.[0]).toMatchObject({ responder: INT_OCSP_URL });
 	});
 });

@@ -34,6 +34,7 @@ import {
 	OCSP_NEGATIVE_CACHE_TTL_MS,
 	OCSP_UNDATED_RESPONSE_MAX_AGE_MS,
 	ocspResponders,
+	type ResponderRevocationCheck,
 } from "#/fullPki/ocsp.mjs";
 import type { Minted, MintOcspResponseOptions } from "./pkiFactory.mjs";
 import {
@@ -119,13 +120,21 @@ const answeringWithoutNonce =
 
 const resolver = (
 	fetch: GuardedFetch,
-	extra: { requireNonce?: boolean; cacheTtlSeconds?: number; algorithms?: AlgorithmPolicy } = {},
+	extra: {
+		requireNonce?: boolean;
+		cacheTtlSeconds?: number;
+		algorithms?: AlgorithmPolicy;
+		responderRevocation?: ResponderRevocationCheck;
+	} = {},
 ) =>
 	createOcspResolver({
 		fetch,
 		cacheTtlSeconds: extra.cacheTtlSeconds ?? 3_600,
 		algorithms: extra.algorithms ?? POLICY,
 		...(extra.requireNonce === undefined ? {} : { requireNonce: extra.requireNonce }),
+		...(extra.responderRevocation === undefined
+			? {}
+			: { responderRevocation: extra.responderRevocation }),
 	});
 
 const sha1 = (bytes: Uint8Array): Buffer => createHash("sha1").update(bytes).digest();
@@ -1092,5 +1101,102 @@ describe("OCSP resolver — through the guarded fetch", () => {
 			ok: true,
 			status: { status: "good" },
 		});
+	});
+});
+
+describe("delegated responder revocation (#468)", () => {
+	/** A delegated responder the CA issued, without `id-pkix-ocsp-nocheck`. */
+	const responderWithoutNoCheck = (int: Minted) =>
+		mintOcspResponder("OCSP Responder", 50, int, {
+			extensions: [basicConstraints(false), keyUsage(KEY_USAGE.digitalSignature), ocspSigningEku()],
+		});
+
+	it("checks a responder that lacks nocheck through the hook, and refuses a revoked one as responder_revoked", async () => {
+		const { int, leaf } = await chain();
+		const responder = await responderWithoutNoCheck(int);
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+		const hook = vi.fn(async () => ({
+			kind: "revoked" as const,
+			detail: "listed on the CA's CRL",
+		}));
+		const out = await resolver(fetch, { responderRevocation: hook }).resolve(
+			leaf.cert,
+			int.cert,
+			NOW,
+		);
+		expect(out).toMatchObject({ ok: false, reason: "responder_revoked" });
+		expect(hook).toHaveBeenCalledTimes(1);
+		const [checked, issuer, at] = hook.mock.calls[0] as unknown as [
+			pkijs.Certificate,
+			pkijs.Certificate,
+			Date,
+		];
+		expect(checked.subject.isEqual(responder.cert.subject)).toBe(true);
+		expect(issuer).toBe(int.cert);
+		expect(at).toBe(NOW);
+	});
+
+	it("is unavailable when the hook cannot say, and takes the answer when it can", async () => {
+		const { int, leaf } = await chain();
+		const responder = await responderWithoutNoCheck(int);
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+		const down = await resolver(fetch, {
+			responderRevocation: async () => ({
+				kind: "unavailable",
+				reason: "fetch_failed",
+				detail: "CRL down",
+			}),
+		}).resolve(leaf.cert, int.cert, NOW);
+		expect(down).toMatchObject({ ok: false, reason: "responder_status_unavailable" });
+
+		const fine = await resolver(fetch, {
+			responderRevocation: async () => ({ kind: "determined" }),
+		}).resolve(leaf.cert, int.cert, NOW);
+		expect(fine).toMatchObject({ ok: true, status: { status: "good" } });
+		expect((fine as { responderUnchecked?: boolean }).responderUnchecked).toBeUndefined();
+	});
+
+	it("does not ask the hook for a responder carrying nocheck, nor when the CA answers itself", async () => {
+		const { int, leaf } = await chain();
+		const hook = vi.fn(async () => ({ kind: "revoked" as const, detail: "would refuse" }));
+		const trusted = await mintOcspResponder("OCSP Responder", 50, int); // carries nocheck
+		const viaDelegate = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: trusted }),
+		});
+		expect(
+			await resolver(viaDelegate.fetch, { responderRevocation: hook }).resolve(
+				leaf.cert,
+				int.cert,
+				NOW,
+			),
+		).toMatchObject({ ok: true });
+		const viaCa = stubResponders({ [RESPONDER_URL]: answering({ issuer: int, subject: leaf }) });
+		expect(
+			await resolver(viaCa.fetch, { responderRevocation: hook }).resolve(leaf.cert, int.cert, NOW),
+		).toMatchObject({ ok: true });
+		expect(hook).not.toHaveBeenCalled();
+	});
+
+	it("without a hook, takes the answer and says so — responderUnchecked — unless nocheck was present", async () => {
+		const { int, leaf } = await chain();
+		const unchecked = await responderWithoutNoCheck(int);
+		const a = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: unchecked }),
+		});
+		expect(await resolver(a.fetch).resolve(leaf.cert, int.cert, NOW)).toMatchObject({
+			ok: true,
+			responderUnchecked: true,
+		});
+		const trusted = await mintOcspResponder("OCSP Responder", 51, int);
+		const b = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: trusted }),
+		});
+		const out = await resolver(b.fetch).resolve(leaf.cert, int.cert, NOW);
+		expect(out).toMatchObject({ ok: true });
+		expect((out as { responderUnchecked?: boolean }).responderUnchecked).toBeUndefined();
 	});
 });
