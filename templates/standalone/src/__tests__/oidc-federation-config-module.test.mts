@@ -117,6 +117,17 @@ describe("buildModules gating for OIDC federations (#524)", () => {
 		expect(names).not.toContain("federation:google");
 	});
 
+	it("a google section of type oidc is the generic provider, not the built-in Google pair", () => {
+		// The section's `type` names the implementation. Composing both would
+		// contribute the same federation and redirect-policy keys twice.
+		const names = buildModules(
+			configWith({ google: { enabled: true, type: "oidc", ...okta } }),
+		).map((m) => m.name);
+		expect(names).toContain("federation:oidc:google");
+		expect(names).not.toContain("federation:google");
+		expect(names).not.toContain("standalone:google-federation-config");
+	});
+
 	it("lists nothing OIDC when no section is enabled (the shipped default)", () => {
 		const names = buildModules(
 			configWith({ google: { enabled: false }, oidc: { enabled: false, type: "oidc" } }),

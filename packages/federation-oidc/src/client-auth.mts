@@ -56,8 +56,17 @@ const formUrlEncode = (value: string): string =>
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/**
+ * The client-authentication hook openid-client applies to every token-endpoint
+ * request — structurally `oidc.ClientAuth`, declared here so the vendor type
+ * does not surface in this package's public declarations (CI's vendor-leak
+ * guard keeps `openid-client` out of every `.d.mts`). Its one consumer,
+ * `oidc.mts`, narrows it back at the call site.
+ */
+export type OidcClientAuth = (...args: never[]) => void | Promise<void>;
+
 /** `client_secret_basic` with a secret that may be resolved per request. */
-export function clientSecretBasic(clientSecret: FederationClientSecret): oidc.ClientAuth {
+export function clientSecretBasic(clientSecret: FederationClientSecret): OidcClientAuth {
 	// oauth4webapi awaits the callback, so the resolver can be asynchronous;
 	// openid-client's declared type is the synchronous narrowing, hence the cast.
 	const auth = async (
@@ -104,7 +113,7 @@ function inferAlg(label: string, key: KeyObject): string {
 export async function privateKeyJwt(
 	label: string,
 	privateKey: string | OidcPrivateKey,
-): Promise<oidc.ClientAuth> {
+): Promise<OidcClientAuth> {
 	const spec = typeof privateKey === "string" ? { pem: privateKey } : privateKey;
 	if (typeof spec.pem !== "string" || !spec.pem.includes("-----BEGIN")) {
 		throw new Error(`${label}: privateKey must be a PEM-encoded PKCS#8 private key`);
@@ -129,7 +138,12 @@ export async function privateKeyJwt(
 export async function clientAuthFor(
 	label: string,
 	credentials: OidcClientCredentials,
-): Promise<oidc.ClientAuth> {
+): Promise<OidcClientAuth> {
+	// An empty static secret is a misconfiguration to refuse now, not at the
+	// first token request; a resolver function is checked when it runs.
+	if (credentials.clientSecret === "") {
+		throw new Error(`${label}: clientSecret must not be empty`);
+	}
 	const hasSecret = credentials.clientSecret !== undefined;
 	const hasKey = credentials.privateKey !== undefined;
 	if (hasSecret === hasKey) {

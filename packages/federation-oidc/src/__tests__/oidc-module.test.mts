@@ -230,3 +230,20 @@ describe("readOidcFederationConfigs (#524)", () => {
 		).toThrow(/federations\.okta\.privateKey/);
 	});
 });
+
+describe("readOidcFederationConfigs — the accumulator (#524 review)", () => {
+	it("refuses a section named __proto__ by name, rather than assigning through the prototype setter", () => {
+		// JSON.parse (like a config parser) creates an own "__proto__" key; an
+		// object literal here would set the prototype instead.
+		const federations = JSON.parse(
+			'{"__proto__": {"enabled": true, "type": "oidc", "issuer": "https://idp.example.com", "clientId": "c", "clientSecret": "s", "callbackURL": "https://rp.example.com/cb"}}',
+		) as Record<string, unknown>;
+		expect(() => readOidcFederationConfigs(federations)).toThrow(/OIDC federation name/);
+	});
+
+	it("returns a map with no inherited members, so a name is looked up as an own entry only", () => {
+		const out = readOidcFederationConfigs({});
+		expect("constructor" in out).toBe(false);
+		expect(Object.getPrototypeOf(out)).toBeNull();
+	});
+});

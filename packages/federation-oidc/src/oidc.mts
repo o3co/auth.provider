@@ -246,7 +246,8 @@ export async function createOidcProvider(
 		throw new Error(`${label}: callbackURL is required`);
 	}
 	const scopes = checkScopes(label, config.scopes);
-	const clientAuth = await clientAuthFor(label, config);
+	// `OidcClientAuth` is `oidc.ClientAuth` kept out of the public declarations.
+	const clientAuth = (await clientAuthFor(label, config)) as oidc.ClientAuth;
 	const clientMetadata: Partial<oidc.ClientMetadata> = {
 		...(config.idTokenSignedResponseAlg
 			? { id_token_signed_response_alg: config.idTokenSignedResponseAlg }

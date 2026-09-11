@@ -343,6 +343,10 @@ federations {
 }
 ```
 
+The section's `type` names the implementation. `federations.google` without a
+`type` is the built-in Google federation; with `type = "oidc"` it is a generic
+OIDC instance named `google`, and the built-in module is not composed.
+
 Every field the package accepts — `scopes`, `discovery` / `endpoints`,
 `privateKey`, `userInfo`, `idTokenSignedResponseAlg`, `clockToleranceSeconds` —
 is documented in [its README](../../packages/federation-oidc/README.md).
