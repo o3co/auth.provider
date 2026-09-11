@@ -20,6 +20,7 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	type CodeRepository,
+	type ConsentStore,
 	checkCanonicalIssuer,
 	consoleLogger,
 	createRateLimitGuard,
@@ -61,6 +62,7 @@ import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 import { createAuthorizeHandler } from "./routes/authorize.mjs";
+import { createConsentRouter } from "./routes/consent.mjs";
 import * as federationTokenRoute from "./routes/federationToken.mjs";
 import * as logoutRoute from "./routes/logout.mjs";
 import { createRevokeRouter } from "./routes/revoke.mjs";
@@ -106,6 +108,7 @@ export const createOAuthRouter = async (
 		sessionFederationIndex,
 		federationTokenStore,
 		replaySeenSet,
+		consentStore,
 		getFederationProviders = () => undefined,
 		logger = consoleLogger,
 	}: {
@@ -140,6 +143,12 @@ export const createOAuthRouter = async (
 		 * Optional to wire; an assertion request without it is `server_error`.
 		 */
 		replaySeenSet?: ReplaySeenSet;
+		/**
+		 * #527: where an end-user's consent to a client that is not first-party
+		 * is recorded. Optional: without it `/authorize` refuses such clients
+		 * and the consent endpoints are not mounted.
+		 */
+		consentStore?: ConsentStore;
 		/**
 		 * Lazy getter for the federation providers Map. Evaluated at request time so
 		 * module init order does not affect resolution — pass `() => context.federationProviders`
@@ -227,6 +236,10 @@ export const createOAuthRouter = async (
 		logger,
 		issuer: canonicalIssuer,
 		loginUrl: () => config.endpoints.login.url,
+		// #527: the consent page, read like the login page. The default lives
+		// in HOCON; a hand-built config without the key falls back the same way.
+		consentUrl: () => config.endpoints.consent?.url ?? "/consent",
+		consentStore,
 		oauth: options,
 		// R1b: `/authorize` re-checks that the express-session's `sid` still
 		// names a live `UserSession` before minting. Optional here for the same
@@ -928,6 +941,22 @@ export const createOAuthRouter = async (
 			tokenEndpoint,
 		}),
 	);
+
+	// #527: the consent step's endpoints, mounted only when a store is wired.
+	// Without one there is nothing to record, and `/authorize` refuses the
+	// clients that would need it.
+	if (consentStore) {
+		router.use(
+			createConsentRouter(express, {
+				consentStore,
+				clientRepository,
+				auditSink,
+				logger,
+				// #527 review: the same liveness read `/authorize` performs.
+				userSessionStore,
+			}),
+		);
+	}
 
 	return { router, registry };
 };

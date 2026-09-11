@@ -692,23 +692,30 @@ describe("/authorize — prompt=none (#284)", () => {
 		expect(params.get("error")).toBe("invalid_request");
 	});
 
-	it("refuses consent and select_account rather than ignoring them", async () => {
+	it("refuses select_account and login rather than ignoring them", async () => {
 		// Ignoring would hand back a token the RP believes was freshly
-		// consented to. This AS is first-party only and has no consent step.
+		// re-authenticated or account-picked. There is no account picker, and
+		// a forced re-authentication cannot yet be told apart from a loop.
 		const { app } = await makeApp({});
 		// Collected then asserted as a set, so a failure names which value
 		// behaved differently rather than stopping at the first.
 		const outcomes: string[] = [];
-		for (const prompt of ["consent", "select_account", "login"]) {
+		for (const prompt of ["select_account", "login"]) {
 			const params = redirectParams(await authorize(app, { ...baseQuery, prompt }));
 			const namesTheValue = (params.get("error_description") ?? "").includes(prompt);
 			outcomes.push(`${prompt}:${params.get("error")}:names=${namesTheValue}`);
 		}
 		expect(outcomes).toEqual([
-			"consent:invalid_request:names=true",
 			"select_account:invalid_request:names=true",
 			"login:invalid_request:names=true",
 		]);
+	});
+
+	it("honours prompt=consent since #527 — a no-op for a first-party client, which has nothing to consent to", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "consent" }));
+		expect(params.get("error")).toBeNull();
+		expect(params.get("code")).toBe("code-x");
 	});
 
 	it("refuses a repeated prompt parameter instead of picking one", async () => {

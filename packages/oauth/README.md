@@ -138,7 +138,9 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **`prompt=login` re-authenticates** (#481) — see [Step-up and re-authentication](#step-up-and-re-authentication-481) below.
 
-**`prompt=consent` and `select_account` are refused** with `invalid_request` naming the value, not ignored: there is no consent step or account picker, by design. `/authorize` admits only clients marked `firstParty: true` (#267), and consent is a question about a third party you are being asked to trust. For a client you operate, an auto-consent model is the honest one — but that makes `prompt=consent` impossible to honour, and returning a token an RP believes was freshly consented to is worse than refusing.
+**`prompt=consent` is honoured** (#527): for a client that is not first-party it forces the consent page even when a recorded consent covers the request; for a first-party client it is a no-op — the deployment operates that client, so there is nothing to consent to. See [Consent for third-party clients](#consent-for-third-party-clients-527).
+
+**`select_account` is refused** with `invalid_request` naming the value, not ignored: there is no account picker, and ignoring it would hand back a token the RP believes was freshly account-picked.
 
 **`request` and `request_uri` are refused** with `request_not_supported` / `request_uri_not_supported`. Ignoring them was the pre-#284 behaviour and the dangerous one: a signed request object exists to make the parameters tamper-proof, so processing the query string instead gives an attacker precisely what the object was there to prevent while the RP believes it was honoured. The discovery document now says `request_uri_parameter_supported: false` for the same reason — OIDC Discovery **defaults that field to `true`**, so omitting it was a claim.
 
@@ -203,6 +205,21 @@ grant_type=client_credentials
 &client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer
 &client_assertion=eyJhbGciOiJFUzI1NiIsImtpZCI6IjIwMjYtMDkifQ...
 ```
+
+## Consent for third-party clients (#527)
+
+`/oauth/authorize` mints a code for a client marked `firstParty: true` as soon as the session is authenticated — the deployment operates that client, and auto-consent is the honest model. Every other client goes through **consent**: the user is asked, on the deployment's own page, and the answer is recorded so they are not asked again for what they already allowed. Before #527 the only way to serve such a client was to mark it first-party, which minted with no consent step at all.
+
+Wire a `consentStore` (`consentStore.adapter = "memory"` in the standalone template — single replica; a multi-replica deployment needs a shared store) and point `endpoints.consent.url` at your page. Then, for a client that is not first-party:
+
+1. `/authorize` runs every request-shape check as usual, then looks up the consent record for (`sub`, `client_id`). A live record covering the requested scopes (a subset of what was granted) mints the code with no interaction.
+2. Otherwise the request is **parked in the session** under a 32-byte challenge, and the browser is redirected to `endpoints.consent.url?challenge=<id>`. `prompt=none` gets `consent_required` at the `redirect_uri` instead (OIDC Core §3.1.2.6); `prompt=consent` parks the request even when a record covers it.
+3. The page calls **`GET /oauth/consent?challenge=<id>`** (session cookie, uncacheable) and receives `client_id`, `client_name`, `client_uri` (from the registration), `scopes` (what is asked), `granted_scopes` (what the user already agreed to, so the page can highlight the delta), `redirect_uri` (show its host — this is where the code goes) and `expires_in`.
+4. The page **`POST`s `/oauth/consent`** with `{ "challenge": "<id>", "decision": "accept" | "deny" }` (JSON or a form). `accept` records the union of what was granted and what is asked, emits `consent.granted`, and answers `303` to the parked `/authorize` URL — which now finds the record and mints. `deny` emits `consent.denied` and answers `303` to the client's `redirect_uri` with `error=access_denied` and the `state`. Either way the challenge is spent.
+
+The challenge is bound to the session that parked the request and reaches the page only through the redirect URL, which a cross-site page cannot read; a POST carrying the matching value was composed by same-origin code (the synchronizer-token pattern, with the session as the synchronizer). A foreign, replayed or expired (10 minutes) challenge is `400`. A consent-store outage at `/authorize` is `temporarily_unavailable`, never a code and never a refusal the user could act on. An operator revokes a consent by removing the record (`consentStore.revoke(sub, clientId)`); the next `/authorize` for that client asks again.
+
+Register what the page will show: `clientName` (RFC 7591 `client_name`) and `clientUri` (`client_uri`) on the client record. A native client with a loopback `redirect_uri` is the case the MCP authorization spec asks the page to warn about — `redirect_uri` is in the response for exactly that.
 
 ## Introspection: which tokens a caller may ask about
 

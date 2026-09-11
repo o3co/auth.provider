@@ -139,6 +139,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
 	// #484: the replay seen-set behind private_key_jwt client authentication.
 	REPLAY_SEEN_SET_ADAPTER: "redis",
+	CONSENT_STORE_ADAPTER: "none",
 	REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX: "atdeny:",
 	REDIS_SESSION_STORES_KEY_PREFIX: "ss:",
 	REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "rtfam:",
@@ -182,6 +183,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 
 	// --- endpoints ----------------------------------------------------
 	ENDPOINTS_LOGIN_URL: "/login",
+	ENDPOINTS_CONSENT_URL: "/consent",
 
 	// --- cors ---------------------------------------------------------
 	// #500: a list, in the only shape an environment variable can carry one.

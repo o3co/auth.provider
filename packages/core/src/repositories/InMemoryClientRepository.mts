@@ -216,6 +216,13 @@ export const ClientEntrySchema = z
 		// adapters had no working configuration at all. Absent still means "not
 		// first-party" — the marking is deliberately opt-in.
 		firstParty: z.boolean().optional(),
+		// #527: what the consent page shows for a client that is not first-party.
+		clientName: z.string().min(1).optional(),
+		// #527 review: the consent page renders this as a link, so it is held
+		// to the same http(s) rule as every other user-facing client URL here.
+		// `z.string().url()` admits `javascript:` and `data:`, which a page
+		// that links it would execute.
+		clientUri: httpUrlSchema.optional(),
 		// #273: the ONLY way to reach the RFC 7636 `plain` challenge method.
 		// Optional with no default, because absent must stay distinguishable
 		// from an explicit `false` in the record the repositories surface, and
@@ -361,6 +368,8 @@ export class InMemoryClientRepository implements ClientRepository {
 			...(entry.firstParty !== undefined && {
 				firstParty: entry.firstParty,
 			}),
+			...(entry.clientName !== undefined && { clientName: entry.clientName }),
+			...(entry.clientUri !== undefined && { clientUri: entry.clientUri }),
 			...(entry.allowPlainPkce !== undefined && {
 				allowPlainPkce: entry.allowPlainPkce,
 			}),
@@ -425,6 +434,8 @@ export class InMemoryClientRepository implements ClientRepository {
 			...(entry.firstParty !== undefined && {
 				firstParty: entry.firstParty,
 			}),
+			...(entry.clientName !== undefined && { clientName: entry.clientName }),
+			...(entry.clientUri !== undefined && { clientUri: entry.clientUri }),
 			...(entry.allowPlainPkce !== undefined && {
 				allowPlainPkce: entry.allowPlainPkce,
 			}),

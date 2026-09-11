@@ -1097,6 +1097,10 @@ export const fullSectionsSchema = z.object({
 		// no longer types the field as optional + downstream consumers don't
 		// need null guards. Default `/login` lives in HOCON.
 		login: z.object({ url: z.string() }),
+		// #527: the deployment-owned consent page a client that is not
+		// first-party is routed through, same pattern as `login`. Optional here;
+		// `/oauth/consent` is the default, from HOCON.
+		consent: z.object({ url: z.string() }).optional(),
 		// IH-10: `client` / `authCallback` removed — no production consumer
 		// reads them. The pre-fix env-var-only HOCON lines silently leaked
 		// values into AppConfig that nothing consumed.
@@ -1360,6 +1364,15 @@ export const fullSectionsSchema = z.object({
 	replaySeenSet: z
 		.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	// #527: where consent to a client that is not first-party is recorded.
+	// `"none"` (the HOCON default) wires nothing, and such clients are refused
+	// as before; `"memory"` forks per replica and is refused by name under
+	// `deployment.mode = "multi"`.
+	consentStore: z
+		.object({
+			adapter: z.enum(["none", "memory"]).optional(),
 		})
 		.optional(),
 	// #277: module-internal config for `redisAccessTokenDenylistModule`.

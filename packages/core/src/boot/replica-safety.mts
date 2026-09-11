@@ -16,6 +16,7 @@
 
 import { memoryAccessTokenDenylistModule } from "../access-token-denylist/module.mjs";
 import { memoryChallengeStoreModule } from "../challenges/module.mjs";
+import { memoryConsentStoreModule } from "../consents/module.mjs";
 import { memoryDeviceCodeStoreModule } from "../device-authorization/module.mjs";
 import { memoryFederationTokenStoreModule } from "../federation-tokens/module.mjs";
 import type { Logger } from "../logging/Logger.mjs";
@@ -113,6 +114,7 @@ export const REPLICA_UNSAFE_BUNDLED_MODULES: readonly Module[] = [
 	memoryWebAuthnCredentialStoreModule,
 	memoryDeviceCodeStoreModule,
 	memoryFederationTokenStoreModule,
+	memoryConsentStoreModule,
 ];
 
 /**
