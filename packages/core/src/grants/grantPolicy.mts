@@ -107,6 +107,12 @@ export async function evaluateGrantPolicy(
 	if (decision.grantedScope === undefined) {
 		return { ok: true, scopes: effectiveScopes, decision };
 	}
+	if (!Array.isArray(decision.grantedScope)) {
+		// #521: a JS policy returning a string passes a truthiness check, and
+		// `.filter` would then throw a TypeError that dispatch does not catch —
+		// fail-closed, but ungraceful. Refuse it as what it is.
+		return { ok: false, result: policyOutOfBounds("policy returned a non-array grantedScope") };
+	}
 	const requestedSet = new Set(effectiveScopes);
 	const exceeded = decision.grantedScope.filter((s) => !requestedSet.has(s));
 	if (exceeded.length > 0) {
@@ -152,7 +158,12 @@ export function boundPolicyAudience(
 	ceiling: readonly string[] | undefined,
 ): PolicyAudienceOutcome {
 	const granted = decision.grantedAudience;
-	if (granted === undefined || granted.length === 0) return { ok: true, audience: null };
+	if (granted === undefined) return { ok: true, audience: null };
+	if (!Array.isArray(granted)) {
+		// #521: the same guard as the scope half — a string would reach `.filter`.
+		return { ok: false, result: policyOutOfBounds("policy returned a non-array grantedAudience") };
+	}
+	if (granted.length === 0) return { ok: true, audience: null };
 	if (ceiling === undefined) {
 		return {
 			ok: false,

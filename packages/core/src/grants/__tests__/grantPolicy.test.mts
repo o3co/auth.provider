@@ -141,6 +141,26 @@ describe("evaluateGrantPolicy", () => {
 		);
 		expect(outcome.ok && outcome.decision.grantedAudience).toEqual(["https://api.example"]);
 	});
+
+	it("refuses a non-array grantedScope as 500 server_error instead of throwing (#521)", async () => {
+		// A JS policy returning a string passes a truthiness check, and
+		// `.filter` then throws a TypeError that /token dispatch does not
+		// catch — fail-closed, but ungraceful.
+		const outcome = await evaluateGrantPolicy(
+			allow({ grantedScope: "read" as unknown as readonly string[] }),
+			request,
+			context,
+			["read"],
+		);
+		expect(outcome).toEqual({
+			ok: false,
+			result: {
+				status: 500,
+				error: "server_error",
+				errorDescription: "policy returned a non-array grantedScope",
+			},
+		});
+	});
 });
 
 describe("boundPolicyAudience", () => {
@@ -197,5 +217,23 @@ describe("boundPolicyAudience", () => {
 				"https://other.example",
 			]),
 		).toEqual({ ok: true, audience: "https://other.example" });
+	});
+
+	it("refuses a non-array grantedAudience as 500 server_error instead of throwing (#521)", () => {
+		const outcome = boundPolicyAudience(
+			{
+				outcome: "allow",
+				grantedAudience: "https://api.example" as unknown as readonly string[],
+			},
+			["https://api.example"],
+		);
+		expect(outcome).toEqual({
+			ok: false,
+			result: {
+				status: 500,
+				error: "server_error",
+				errorDescription: "policy returned a non-array grantedAudience",
+			},
+		});
 	});
 });
