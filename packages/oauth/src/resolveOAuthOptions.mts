@@ -112,16 +112,22 @@ type OAuthConfigShape = {
 	};
 };
 
-/** A list from an array, a comma-separated string, or nothing (#529). */
-const listOf = (value: unknown): readonly string[] =>
-	Array.isArray(value)
+/**
+ * A list from an array, a comma-separated string, or nothing (#529).
+ *
+ * Trimmed and emptied the same way whichever shape it arrived in: a HOCON
+ * array entry can carry surrounding space as surely as an environment
+ * override can, and a host policy that silently keeps `" .trusted.example"`
+ * refuses the URL the operator meant to allow.
+ */
+const listOf = (value: unknown): readonly string[] => {
+	const parts = Array.isArray(value)
 		? value.filter((v): v is string => typeof v === "string")
 		: typeof value === "string"
-			? value
-					.split(",")
-					.map((v) => v.trim())
-					.filter((v) => v.length > 0)
+			? value.split(",")
 			: [];
+	return parts.map((v) => v.trim()).filter((v) => v.length > 0);
+};
 
 const positiveIntOrUndefined = (value: unknown): number | undefined => {
 	const n = typeof value === "string" ? Number(value) : value;

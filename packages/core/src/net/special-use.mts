@@ -71,20 +71,75 @@ for (const [net, prefix] of [
  * or benchmarking block, or a multicast / reserved block — none of which a
  * URL supplied by an untrusted party may legitimately resolve to.
  *
- * An IPv4-mapped IPv6 address (`::ffff:10.0.0.1`) is judged by its IPv4
- * half. A string that is not an IP address at all answers `false`: the
- * caller resolves names first and asks about each address.
+ * An IPv4-mapped or -compatible IPv6 address is judged by its IPv4 half,
+ * in **every** spelling of it: `::ffff:10.0.0.1`, `::ffff:0a00:0001`,
+ * `0:0:0:0:0:ffff:10.0.0.1`. The dotted forms are the ones a resolver
+ * usually returns, but nothing stops a DNS answer from carrying another,
+ * and `::ffff:0:0/96` is deliberately absent from the IPv6 table — so a
+ * spelling that fell through to the IPv6 check used to answer `false` for
+ * a private IPv4 address. A string that is not an IP address at all
+ * answers `false`: the caller resolves names first and asks about each
+ * address.
  */
+/** The 16 bytes of an IPv6 address written as groups, a dotted IPv4 tail included. */
+function toBytes(parts: readonly string[]): number[] | null {
+	const out: number[] = [];
+	for (const part of parts) {
+		if (part.includes(".")) {
+			if (isIP(part) !== 4) return null;
+			for (const octet of part.split(".")) out.push(Number(octet));
+		} else {
+			if (!/^[0-9a-f]{1,4}$/i.test(part)) return null;
+			const value = Number.parseInt(part, 16);
+			out.push(value >> 8, value & 0xff);
+		}
+	}
+	return out;
+}
+
+/**
+ * The IPv4 address an IPv4-mapped (`::ffff:0:0/96`) or IPv4-compatible
+ * (`::/96`, deprecated) IPv6 address embeds, in any legal spelling, or
+ * `null` when it embeds none.
+ *
+ * The address is expanded to its sixteen bytes and the prefix is read from
+ * them, so `::ffff:10.0.0.1`, `::ffff:0a00:0001` and
+ * `0:0:0:0:0:ffff:10.0.0.1` are one address, which is the point: they
+ * reach the same host.
+ */
+function embeddedIpv4(address: string): string | null {
+	const bare = address.split("%")[0] ?? "";
+	const halves = bare.split("::");
+	if (halves.length > 2) return null;
+	const head = toBytes(halves[0] ? halves[0].split(":") : []);
+	const tail = halves.length === 2 ? toBytes(halves[1] ? halves[1].split(":") : []) : [];
+	if (head === null || tail === null) return null;
+	const gap = 16 - head.length - tail.length;
+	if (halves.length === 1 ? gap !== 0 : gap < 0) return null;
+	const bytes = [...head, ...Array.from({ length: gap }, () => 0), ...tail];
+	if (bytes.length !== 16) return null;
+	for (let i = 0; i < 10; i += 1) {
+		if (bytes[i] !== 0) return null;
+	}
+	const marker = ((bytes[10] ?? 0) << 8) | (bytes[11] ?? 0);
+	if (marker !== 0 && marker !== 0xffff) return null;
+	const v4 = bytes.slice(12);
+	// `::` and `::1` are the unspecified and loopback addresses — already in
+	// the IPv6 table — not an embedded 0.0.0.0 or 0.0.0.1.
+	if (marker === 0 && v4[0] === 0 && v4[1] === 0 && v4[2] === 0 && (v4[3] ?? 0) <= 1) {
+		return null;
+	}
+	return v4.join(".");
+}
+
 export function isSpecialUseAddress(address: string): boolean {
 	const family = isIP(address);
 	if (family === 4) return SPECIAL_USE.check(address, "ipv4");
 	if (family === 6) {
-		// `::ffff:a.b.c.d` (mapped) and `::a.b.c.d` (compatible, deprecated):
-		// the IPv4 half is what the packet reaches.
-		const embedded = /^::(?:ffff:)?(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
-		if (embedded?.[1] !== undefined && isIP(embedded[1]) === 4) {
-			return SPECIAL_USE.check(embedded[1], "ipv4");
-		}
+		// The IPv4 half is what the packet reaches, whichever way the address
+		// was written.
+		const embedded = embeddedIpv4(address);
+		if (embedded !== null) return SPECIAL_USE.check(embedded, "ipv4");
 		return SPECIAL_USE.check(address, "ipv6");
 	}
 	return false;

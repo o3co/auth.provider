@@ -315,6 +315,10 @@ describe("createClientIdMetadataDocumentResolver — the document (#529)", () =>
 
 	it("checks the shapes of what the consent page will show", async () => {
 		await refuses("client_name", { client_name: 42 }, /client_name/);
+		// #529 review: the consent page shows this, and a document client is by
+		// definition one the deployment never registered.
+		await refuses("client_name absent", { client_name: undefined }, /client_name/);
+		await refuses("client_name blank", { client_name: "   " }, /client_name/);
 		await refuses("client_uri http", { client_uri: "http://client.example" }, /client_uri/);
 		await refuses("client_uri junk", { client_uri: "nope" }, /client_uri/);
 		await refuses("scope", { scope: ["read"] }, /scope/);
@@ -421,5 +425,42 @@ describe("withClientIdMetadataDocuments (#529)", () => {
 		});
 		expect((await repo.findById("https://other.example/meta"))?.firstParty).toBe(false);
 		expect(await repo.authenticate("https://other.example/meta", "secret")).toBeNull();
+	});
+});
+
+describe("the document cache is bounded (#529 review)", () => {
+	it("evicts the oldest entry rather than growing without limit", async () => {
+		// An unauthenticated caller chooses the keys: every URL that serves a
+		// valid document is a `client_id`, so the map cannot be unbounded.
+		const urls = [
+			"https://a.example/meta.json",
+			"https://b.example/meta.json",
+			"https://c.example/meta.json",
+		];
+		const { fetch, calls } = fakeFetch(
+			Array.from({ length: 8 }, () => () => json(document({ client_id: "PLACEHOLDER" }))),
+		);
+		// Each response must name the URL it was fetched from.
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			maxCacheEntries: 2,
+			lookup: publicLookup,
+			fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+				const url = typeof input === "string" ? input : input.toString();
+				void (await fetch(url, init));
+				return json(document({ client_id: url }));
+			}) as unknown as typeof globalThis.fetch,
+		});
+
+		for (const url of urls) expect(await r.resolve(url)).not.toBeNull();
+		expect(calls).toHaveLength(3);
+		// The two most recent are remembered; the first was evicted and is
+		// fetched again.
+		expect(await r.resolve(urls[1] as string)).not.toBeNull();
+		expect(await r.resolve(urls[2] as string)).not.toBeNull();
+		expect(calls).toHaveLength(3);
+		expect(await r.resolve(urls[0] as string)).not.toBeNull();
+		expect(calls).toHaveLength(4);
 	});
 });

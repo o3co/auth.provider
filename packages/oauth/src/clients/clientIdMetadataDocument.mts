@@ -95,6 +95,8 @@ export interface ClientIdMetadataDocumentOptions {
 	readonly timeoutMs?: number;
 	/** Upper bound on how long a valid document is served from cache. Default 10 minutes. */
 	readonly cacheMaxAgeMs?: number;
+	/** Bound on remembered documents. Default {@link DEFAULT_CIMD_MAX_CACHE_ENTRIES}. */
+	readonly maxCacheEntries?: number;
 	readonly logger?: Logger;
 	/** Test seams. */
 	readonly fetch?: typeof fetch;
@@ -103,6 +105,12 @@ export interface ClientIdMetadataDocumentOptions {
 }
 
 export const DEFAULT_CIMD_MAX_BYTES = 5 * 1024;
+/**
+ * How many documents the resolver remembers at once. An unauthenticated
+ * caller chooses the keys — any URL that serves a valid document is a
+ * `client_id` — so the map is bounded, like the CRL and OCSP caches.
+ */
+export const DEFAULT_CIMD_MAX_CACHE_ENTRIES = 256;
 export const DEFAULT_CIMD_TIMEOUT_MS = 5_000;
 export const DEFAULT_CIMD_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 
@@ -242,8 +250,11 @@ function toClient(
 			throw new DocumentRejected("response_types must include code");
 		}
 	}
-	if (doc.client_name !== undefined && typeof doc.client_name !== "string") {
-		throw new DocumentRejected("client_name must be a string");
+	// The consent page shows this, and a document client is by definition one
+	// the deployment did not register: a blank name would put an unnamed
+	// third party in front of the user.
+	if (typeof doc.client_name !== "string" || doc.client_name.trim().length === 0) {
+		throw new DocumentRejected("client_name is required and must be a non-empty string");
 	}
 	if (doc.client_uri !== undefined) {
 		let uri: URL | null = null;
@@ -301,7 +312,22 @@ export function createClientIdMetadataDocumentResolver(
 	const timeoutMs = opts.timeoutMs ?? DEFAULT_CIMD_TIMEOUT_MS;
 	const cacheMaxAgeMs = opts.cacheMaxAgeMs ?? DEFAULT_CIMD_CACHE_MAX_AGE_MS;
 	const logger = opts.logger;
+	const maxCacheEntries = opts.maxCacheEntries ?? DEFAULT_CIMD_MAX_CACHE_ENTRIES;
 	const cache = new Map<string, CacheEntry>();
+	/**
+	 * Bounded, because an unauthenticated caller chooses the keys: every
+	 * distinct `client_id` URL that resolves to a valid document would
+	 * otherwise hold a `PublicClient` until it expired. Oldest insertion
+	 * first, as in the CRL and OCSP caches — the bound exists so the map
+	 * cannot grow without limit, not to maximise hits.
+	 */
+	const remember = (clientId: string, entry: CacheEntry): void => {
+		if (cache.size >= maxCacheEntries && !cache.has(clientId)) {
+			const oldest = cache.keys().next();
+			if (!oldest.done) cache.delete(oldest.value);
+		}
+		cache.set(clientId, entry);
+	};
 	const inFlight = new Map<string, Promise<PublicClient | null>>();
 
 	const hostAllowed = (hostname: string): boolean => {
@@ -369,7 +395,7 @@ export function createClientIdMetadataDocumentResolver(
 			const { client, etag, cacheControl } = await fetchDocument(clientId, cached);
 			const granted = maxAgeMsOf(cacheControl);
 			const ttl = Math.min(granted ?? cacheMaxAgeMs, cacheMaxAgeMs);
-			if (ttl > 0) cache.set(clientId, { client, etag, expiresAt: now() + ttl });
+			if (ttl > 0) remember(clientId, { client, etag, expiresAt: now() + ttl });
 			else cache.delete(clientId);
 			return client;
 		} catch (err) {

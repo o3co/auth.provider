@@ -240,6 +240,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						| "sessionFederationIndex"
 						| "federationTokenStore"
 						| "federationProviders"
+						| "consentStore"
 						| "logger"
 					>,
 				) => {
@@ -295,12 +296,16 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					// would put a non-standard claim in a standard document. The
 					// access-token answer lives at the endpoint.
 					const revocationSupported = revokesRefreshTokens || revokesAccessTokens;
-					// #529: advertised only when on. MCP clients select Client ID
-					// Metadata Documents on this flag plus `none` in
+					// #529: advertised only when on **and** completable. MCP clients
+					// select Client ID Metadata Documents on this flag plus `none` in
 					// token_endpoint_auth_methods_supported (below, unconditional).
+					// Every document client is by definition not first-party, so
+					// `/authorize` refuses it without a consent store (#527): saying
+					// otherwise would send a client down a flow this deployment cannot
+					// finish.
 					const cimdSupported =
 						(deps.config as { oauth?: { clientIdMetadataDocuments?: { enabled?: unknown } } }).oauth
-							?.clientIdMetadataDocuments?.enabled === true;
+							?.clientIdMetadataDocuments?.enabled === true && deps.consentStore !== undefined;
 					// #283: RFC 8414 §2 says an OMITTED `grant_types_supported` means
 					// `["authorization_code", "implicit"]` — so saying nothing advertised
 					// an implicit flow this AS has never implemented, while hiding the

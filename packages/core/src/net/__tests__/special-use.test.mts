@@ -98,3 +98,43 @@ describe("isSpecialUseAddress (RFC 6890, #529)", () => {
 		expect(isSpecialUseAddress("")).toBe(false);
 	});
 });
+
+describe("isSpecialUseAddress — every spelling of an embedded IPv4 address (#529 review)", () => {
+	it("judges a mapped or compatible address by its IPv4 half, however it was written", () => {
+		// A DNS answer can carry any legal spelling. `::ffff:0:0/96` is
+		// deliberately absent from the IPv6 table, so a spelling that fell
+		// through to the IPv6 check used to pass the SSRF guard.
+		for (const address of [
+			"::ffff:10.0.0.1",
+			"::ffff:0a00:0001",
+			"0:0:0:0:0:ffff:10.0.0.1",
+			"0:0:0:0:0:ffff:0a00:0001",
+			"::FFFF:0A00:0001",
+			"::ffff:127.0.0.1",
+			"::ffff:7f00:0001",
+			"::ffff:169.254.169.254",
+			"::10.0.0.1",
+			"::0a00:0001",
+		]) {
+			expect(isSpecialUseAddress(address)).toBe(true);
+		}
+	});
+
+	it("leaves a public embedded address alone, in the same spellings", () => {
+		for (const address of [
+			"::ffff:93.184.216.34",
+			"::ffff:5db8:d822",
+			"0:0:0:0:0:ffff:93.184.216.34",
+		]) {
+			expect(isSpecialUseAddress(address)).toBe(false);
+		}
+	});
+
+	it("still answers for the addresses that embed nothing", () => {
+		expect(isSpecialUseAddress("::1")).toBe(true);
+		expect(isSpecialUseAddress("::")).toBe(true);
+		expect(isSpecialUseAddress("fe80::1")).toBe(true);
+		expect(isSpecialUseAddress("2606:2800:220:1:248:1893:25c8:1946")).toBe(false);
+		expect(isSpecialUseAddress("not-an-address")).toBe(false);
+	});
+});
