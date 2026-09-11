@@ -83,6 +83,8 @@ const FULLY_POPULATED_CLIENT = {
 	backchannelLogoutSessionRequired: true,
 	frontchannelLogoutUri: "https://app.example.com/frontchannel",
 	frontchannelLogoutSessionRequired: true,
+	clientName: "Example App",
+	clientUri: "https://app.example.com",
 	allowedAzpForFederationToken: true,
 	senderConstrained: { required: true, methods: ["dpop"] },
 	firstParty: true,

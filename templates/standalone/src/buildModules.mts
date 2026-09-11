@@ -20,6 +20,7 @@ import {
 	jwksModule,
 	type Module,
 	memoryAccessTokenDenylistModule,
+	memoryConsentStoreModule,
 	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
@@ -151,6 +152,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const accessTokenDenylistAdapter = config.accessTokenDenylist?.adapter ?? "memory";
 	// #484: the jti single-use record behind private_key_jwt client auth.
 	const replaySeenSetAdapter = config.replaySeenSet?.adapter ?? "memory";
+	// #527: the consent store behind /authorize for clients that are not
+	// first-party. `"none"` (the default) wires nothing — such clients are
+	// refused, as before — so a first-party-only deployment pays nothing and
+	// a multi-replica one is not handed a memory store it cannot run.
+	const consentStoreAdapter = config.consentStore?.adapter ?? "none";
 	// #456: adapter switch for the federation token store. `"memory"` by
 	// default, the template's local-dev shape; `"redis"` mounts
 	// `redisFederationTokenStoreModule` off the shared socket — what the README
@@ -231,6 +237,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			? [redisAccessTokenDenylistModule]
 			: [memoryAccessTokenDenylistModule];
 
+	// #527: opt-in, memory only for now. The module declares itself
+	// replica-unsafe, so `deployment.mode = "multi"` refuses it by name.
+	const consentStoreModules: Module[] =
+		consentStoreAdapter === "memory" ? [memoryConsentStoreModule] : [];
+
 	// #455 / #456: mutually-exclusive federation-token-store pair, the same
 	// shape as the session stores. One module per adapter, so the memory one
 	// can declare `replicaSafety` on its manifest and the Redis one can
@@ -303,6 +314,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// (single-instance dev). Always wired — see the switch above.
 		...accessTokenDenylistModules,
 		...replaySeenSetModules,
+		// Consent records for clients that are not first-party: memory, or
+		// nothing (#527).
+		...consentStoreModules,
 		// RT family store: redis by default (closes OR-1); override path
 		// swaps to `[memoryRefreshTokenFamilyStoreModule]` for unit tests.
 		...refreshTokenFamilyModules,

@@ -40,6 +40,8 @@ import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"authorize.granted",
 	"authorize.rejected",
+	"consent.denied",
+	"consent.granted",
 	"device.approved",
 	"device.denied",
 	"device.rate_limited",

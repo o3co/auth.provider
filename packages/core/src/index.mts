@@ -680,6 +680,16 @@ export type { AccessTokenDenylist } from "./access-token-denylist/types.mjs";
 // #375: the declared-absence policy the denylist readers share — #277's boot
 // refusal, expressed through the #363 vocabulary instead of a bespoke stage.
 export { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } from "./access-token-denylist/types.mjs";
+// #527: where an end-user's consent to a client that is not first-party is
+// recorded. Optional — without it `/authorize` refuses such clients.
+export {
+	type ConsentStoreFactory,
+	createConsentStoreFactory,
+	registerBuiltinConsentStores,
+} from "./consents/factory.mjs";
+export { createMemoryConsentStore, type MemoryConsentStore } from "./consents/memory.mjs";
+export { memoryConsentStoreModule } from "./consents/module.mjs";
+export { type ConsentRecord, type ConsentStore, consentCovers } from "./consents/types.mjs";
 
 // SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
 // root because `packages/core/package.json#exports` does not register a

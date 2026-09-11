@@ -19,6 +19,8 @@ import {
 	buildCanonicalRequestUrl,
 	type ClientRepository,
 	type CodeRepository,
+	type ConsentStore,
+	consentCovers,
 	emitAuditEvent,
 	type GrantPolicyHook,
 	isEmailVerified,
@@ -41,6 +43,7 @@ import {
 	pkceMethodsForClient,
 } from "../grants/pkce.mjs";
 import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
+import { newConsentChallenge } from "./consent.mjs";
 
 export interface AuthorizeHandlerOptions {
 	readonly clientRepository: ClientRepository;
@@ -61,6 +64,16 @@ export interface AuthorizeHandlerOptions {
 	 * missing key into a boot failure for schema-validated deployments.
 	 */
 	readonly loginUrl: () => string;
+	/**
+	 * Consent-page URL for a client that is not first-party (#527). A thunk
+	 * like `loginUrl`, for the same reason.
+	 */
+	readonly consentUrl: () => string;
+	/**
+	 * #527: where consent records live. Optional: without it a client that is
+	 * not first-party is refused, exactly as before the slot existed.
+	 */
+	readonly consentStore?: ConsentStore;
 	/** The `oauth.*` knobs, resolved once at router composition (#328). */
 	readonly oauth: ResolvedOAuthOptions;
 	/**
@@ -134,6 +147,8 @@ interface AuthorizeContext {
 	readonly req: Request;
 	readonly res: Response;
 	readonly opts: AuthorizeHandlerOptions;
+	/** The configured issuer's origin — what a parked request's URL is built from. */
+	readonly issuerOrigin: string;
 	readonly clientId: string;
 	readonly redirectUri: string;
 	/** Verbatim `state` when it was a single string; echoed on every response. */
@@ -286,38 +301,116 @@ const checkAuthorizationCodeGrantAllowed = async (
 	return false;
 };
 
-// #267: `/authorize` mints a code as soon as the session is
-// authenticated, with no consent step. A forced top-level
-// navigation from an attacker's page therefore makes a logged-in
-// victim's browser mint a code, bound to the victim's session and
-// delivered to the named client's registered `redirect_uri` —
-// and since the attacker chose the `code_challenge`, they redeem
-// it. That is defensible in a pure first-party OP and only there.
-//
-// The assumption is now enforced instead of assumed. This does
-// not make the endpoint safe against forced navigation for a
-// client that *is* first-party; it stops a client that should
-// never have been trusted with a silent code from being
-// registered into that position. Consent (#284) is the step that
-// changes the former.
-const checkFirstPartyInvariant = async (
+// #267 / #527: a client that is not first-party is served only through the
+// consent step, so with no consent store wired it is refused here — the #267
+// refusal, in the position it always had (ahead of the request-shape gates),
+// so what such a deployment answers does not change.
+const checkFirstPartyOrConsentable = async (
 	ctx: AuthorizeContext,
 	client: PublicClient,
 ): Promise<boolean> => {
-	// Anything that is not an explicit `true` is refused — a
-	// registration with no `firstParty` field and one carrying
-	// `false` alike. The one-time migration flag that admitted
-	// unmarked registrations (`oauth.authorize.allowUnmarkedClients`,
-	// #317) was removed in #330: the config schema rejects a config
-	// still setting it, and this handler no longer reads it, so
-	// there is no permissive path left.
-	if (client.firstParty === true) return true;
+	if (client.firstParty === true || ctx.opts.consentStore !== undefined) return true;
 	await auditFailure(ctx, { reason: "client_not_first_party" });
 	redirectError(
 		ctx,
 		"unauthorized_client",
 		"client is not authorized for the authorization endpoint",
 	);
+	return false;
+};
+
+/** The end-user the session names, or `null` when it names nobody. */
+const subjectOf = (req: Request): string | null => {
+	const id = req.session?.user?.id;
+	return typeof id === "string" && id.length > 0 ? id : null;
+};
+
+// #267 / #527: `/authorize` mints a code as soon as the session is
+// authenticated — for a first-party client. That is the accepted model for a
+// client the deployment operates, and only there: a forced top-level
+// navigation from an attacker's page makes a logged-in victim's browser mint
+// a code, bound to the victim's session, delivered to the named client's
+// registered `redirect_uri`, and since the attacker chose the
+// `code_challenge` they redeem it. Consent is the step that changes that,
+// and it is what every other client goes through: the user is asked, on the
+// deployment's own page, before a code is minted, and what they answered is
+// recorded so they are not asked again for what they already allowed.
+//
+// Anything that is not an explicit `firstParty: true` goes through it — a
+// registration with no field and one carrying `false` alike (the one-time
+// migration flag that admitted unmarked registrations, #317, was removed in
+// #330). Without a consent store there is no way to ask, and the refusal
+// #267 introduced stands: an operator who wants to serve a third-party
+// client wires `consentStore` rather than marking the client first-party.
+//
+// Runs after every request-shape check and before the policy hook: a user
+// is not asked to consent to a request that would fail anyway, and the
+// policy sees the request only once the user has allowed it.
+const checkConsent = async (
+	ctx: AuthorizeContext,
+	client: PublicClient,
+	scopes: readonly string[],
+	prompt: PromptDirective,
+): Promise<boolean> => {
+	if (client.firstParty === true) return true;
+	const store = ctx.opts.consentStore;
+	if (store === undefined) {
+		await auditFailure(ctx, { reason: "client_not_first_party" });
+		redirectError(
+			ctx,
+			"unauthorized_client",
+			"client is not authorized for the authorization endpoint",
+		);
+		return false;
+	}
+	const sub = subjectOf(ctx.req);
+	if (sub === null) {
+		await auditFailure(ctx, { reason: "consent_without_subject" });
+		redirectError(ctx, "access_denied", "the session names no subject to ask for consent");
+		return false;
+	}
+	let record: Awaited<ReturnType<ConsentStore["find"]>>;
+	try {
+		record = await store.find(sub, ctx.clientId);
+	} catch (err) {
+		// An outage is not a decision either way: neither a code nor a refusal
+		// the user could act on. The same rule the session-liveness read applies.
+		ctx.opts.logger.error({ err, clientId: ctx.clientId }, "authorize_consent_store_unavailable");
+		redirectError(ctx, "temporarily_unavailable", "consent store unavailable");
+		return false;
+	}
+	if (!prompt.consent && consentCovers(record, scopes)) return true;
+	if (prompt.silent) {
+		// OIDC Core §3.1.2.6: no interaction was permitted, and interaction is
+		// what is needed.
+		await auditFailure(ctx, { reason: "consent_required" });
+		redirectError(
+			ctx,
+			"consent_required",
+			"prompt=none was requested but the end-user has not consented to this client",
+		);
+		return false;
+	}
+	// Park the request under an unguessable challenge and hand the browser to
+	// the deployment's page. The challenge is what the page's answer carries
+	// back, and being session-bound and unreadable cross-site it is the
+	// synchronizer token that keeps a forged POST from answering for the user.
+	const challenge = newConsentChallenge();
+	ctx.req.session.pendingConsent = {
+		challenge,
+		clientId: ctx.clientId,
+		scopes: [...scopes],
+		grantedScopes: record === null ? [] : [...record.scopes],
+		authorizeUrl: buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl),
+		redirectUri: ctx.redirectUri,
+		...(ctx.state === undefined ? {} : { state: ctx.state }),
+		createdAt: Date.now(),
+	};
+	// `endpoints.consent.url` may already carry a query string, like the
+	// login URL.
+	const consentUrl = ctx.opts.consentUrl();
+	const joiner = consentUrl.includes("?") ? "&" : "?";
+	ctx.res.redirect(`${consentUrl}${joiner}challenge=${encodeURIComponent(challenge)}`);
 	return false;
 };
 
@@ -485,11 +578,15 @@ export const authorizeParams = (req: Request): Record<string, unknown> =>
  * hidden iframe, where it does nothing and produces a timeout rather than an
  * error the RP can act on.
  *
+ * `consent` is honoured since #527: for a client that is not first-party it
+ * forces the consent page even when a record already covers the request; for
+ * a first-party client it is a no-op, since the deployment operates that
+ * client and there is nothing to consent to.
+ *
  * Every other value is **refused**, not ignored, and each for its own reason:
  *
- * - `consent` / `select_account` — this AS admits only first-party clients
- *   (#267) and has no consent step or account picker by design. Ignoring them
- *   would hand back a token the RP believes was freshly consented to.
+ * - `select_account` — there is no account picker. Ignoring it would hand
+ *   back a token the RP believes was freshly account-picked.
  * - `login` — forcing re-authentication needs a way to know that it just
  *   happened, or the user returns from the login page with the same
  *   `prompt=login` and goes round again. That marker is `auth_time`, which
@@ -502,11 +599,17 @@ export const authorizeParams = (req: Request): Record<string, unknown> =>
  *
  * Returns the resolved directive, or `null` when it has already answered.
  */
-type PromptDirective = { readonly silent: boolean; readonly login: boolean };
+type PromptDirective = {
+	readonly silent: boolean;
+	readonly login: boolean;
+	readonly consent: boolean;
+};
+
+const NO_PROMPT: PromptDirective = { silent: false, login: false, consent: false };
 
 const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 	const raw = ctx.params.prompt;
-	if (raw === undefined) return { silent: false, login: false };
+	if (raw === undefined) return NO_PROMPT;
 	if (typeof raw !== "string") {
 		redirectError(ctx, "invalid_request", "prompt must be a single string value");
 		return null;
@@ -515,23 +618,30 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 	// other value — "if this parameter contains none with any other value, an
 	// error is returned".
 	const values = raw.split(" ").filter((v) => v.length > 0);
-	if (values.length === 0) return { silent: false, login: false };
+	if (values.length === 0) return NO_PROMPT;
 	if (values.includes("none") && values.length > 1) {
 		redirectError(ctx, "invalid_request", "prompt=none cannot be combined with other values");
 		return null;
 	}
 	// #481: `login` is honoured — see `evaluateReauthentication`.
-	const unsupported = values.filter((v) => v !== "none" && v !== "login");
+	// #527: so is `consent` — see `checkConsent`.
+	const unsupported = values.filter(
+		(v) => v !== "none" && v !== "login" && v !== "consent",
+	);
 	if (unsupported.length > 0) {
 		redirectError(
 			ctx,
 			"invalid_request",
 			`prompt values not supported: ${unsupported.join(" ")} — this authorization server ` +
-				"serves first-party clients only, so it has no consent step or account picker",
+				"has no account picker",
 		);
 		return null;
 	}
-	return { silent: values.includes("none"), login: values.includes("login") };
+	return {
+		silent: values.includes("none"),
+		login: values.includes("login"),
+		consent: values.includes("consent"),
+	};
 };
 
 /**
@@ -1147,6 +1257,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			req,
 			res,
 			opts,
+			issuerOrigin,
 			clientId: resolved.clientId,
 			redirectUri: resolved.redirectUri,
 			state: toStr(state),
@@ -1196,7 +1307,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		if (acr === null) return;
 		if (!checkResponseTypeIsCode(ctx)) return;
 		if (!(await checkAuthorizationCodeGrantAllowed(ctx, client))) return;
-		if (!(await checkFirstPartyInvariant(ctx, client))) return;
+		if (!(await checkFirstPartyOrConsentable(ctx, client))) return;
 		if (!(await checkEmailVerified(ctx))) return;
 		const pkce = checkPkce(ctx, client, code_challenge, code_challenge_method);
 		if (!pkce) return;
@@ -1204,6 +1315,10 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 
 		const scopes = resolveScopes(ctx, scope, client);
 		if (!scopes) return;
+
+		// #527: a client that is not first-party mints only with the user's
+		// recorded consent — asked for on the deployment's page otherwise.
+		if (!(await checkConsent(ctx, client, scopes.allowedFilteredScopes, prompt))) return;
 
 		// RFC 8707 §2 at the authorization endpoint (Stage 2, #173). Read
 		// through `authorizeParams`, so a GET's query string and a POST's

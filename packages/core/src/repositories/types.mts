@@ -176,6 +176,16 @@ export interface Client {
 	 */
 	readonly firstParty?: boolean;
 	/**
+	 * Human-readable name of the client (RFC 7591 `client_name`), shown on the
+	 * consent page a client that is not first-party is routed through (#527).
+	 */
+	readonly clientName?: string;
+	/**
+	 * URL of the client's home page (RFC 7591 `client_uri`), shown on the
+	 * consent page beside the name (#527).
+	 */
+	readonly clientUri?: string;
+	/**
 	 * Whether this client may use the RFC 7636 `plain` PKCE challenge method
 	 * (#273).
 	 *

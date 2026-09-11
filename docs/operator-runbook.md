@@ -445,9 +445,10 @@ after a deploy means a key or an encoding changed under live data — see
 to the emission sites in both directions by a drift test, so this list is
 complete as of #482:
 
-`authorize.granted`, `authorize.rejected`, `device.approved`, `device.denied`,
-`device.rate_limited`, `federation.identity.link_refused`,
-`federation.identity.linked`, `federation.logout.idp_unreachable`,
+`authorize.granted`, `authorize.rejected`, `consent.denied`, `consent.granted`,
+`device.approved`, `device.denied`, `device.rate_limited`,
+`federation.identity.link_refused`, `federation.identity.linked`,
+`federation.logout.idp_unreachable`,
 `federation.logout.success`, `federation.token.family_revoked`,
 `federation.token.forbidden`, `federation.token.reauthentication_required`,
 `federation.token.refresh_failed`, `federation.token.success`,

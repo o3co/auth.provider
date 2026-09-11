@@ -405,6 +405,7 @@ needs a key.
 | Variable | Default | Description |
 |---|---|---|
 | `FEDERATION_TOKEN_STORE_TYPE` | `memory` | Federation token store backend: `memory` or `redis` |
+| `CONSENT_STORE_ADAPTER` | `none` | Consent store for clients that are not first-party (#527): `none` (such clients are refused) or `memory` (single replica) |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` | — | AES-256-GCM key for records at rest: 32 bytes, base64-encoded (`openssl rand -base64 32`). **Required** with `redis` unless the mode below is `allow-plaintext` |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused when the config was selected by a production/staging environment (`CONFIG_ENV` or `NODE_ENV`) and under `DEPLOYMENT_MODE=multi` in any environment, unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
 
@@ -432,6 +433,7 @@ Use values that include the deployment name, for example `tenant-a:ss:`,
 | Variable | Default | Description |
 |---|---|---|
 | `ENDPOINTS_LOGIN_URL` | `/login` | URL of the login page (for redirects) |
+| `ENDPOINTS_CONSENT_URL` | `/consent` | URL of the consent page a client that is not first-party is routed through, with `?challenge=<id>` (#527) |
 
 `ENDPOINTS_CLIENT_URL` and `ENDPOINTS_AUTH_CALLBACK_URL` were removed (IH-10) —
 no production consumer read them, and the config lines leaked values into

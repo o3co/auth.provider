@@ -241,6 +241,8 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 		// #474: express-session's own store. Not a module of this template but
 		// built here from its config, which is what lets the manifest declare.
 		["SESSION_STORAGE_TYPE", "sessionStoreModule"],
+		// #527: the consent store, wired only when the switch says so.
+		["CONSENT_STORE_ADAPTER", "core-consent-store-memory"],
 		// Core's, selected by the same kind of switch. The guard knew these by
 		// name; pinned so the name table's departure (#455) did not lose them.
 		["RATE_LIMITER_ADAPTER", "core-rate-limiter-memory"],
@@ -270,6 +272,7 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 			RATE_LIMITER_ADAPTER: "memory",
 			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
 			REPLAY_SEEN_SET_ADAPTER: "memory",
+			CONSENT_STORE_ADAPTER: "memory",
 		});
 		await expect(boot(config)).rejects.toMatchObject({
 			reason: "replica-unsafe-adapter",

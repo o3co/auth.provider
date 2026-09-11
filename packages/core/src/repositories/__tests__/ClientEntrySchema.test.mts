@@ -116,6 +116,19 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		});
 		expect(result.success).toBe(false);
 	});
+
+	it("#527: accepts client_name and client_uri for the consent page, refusing a non-URL client_uri", () => {
+		const base = { tokenEndpointAuthMethod: "client_secret_basic", clientSecret: "s" };
+		expect(
+			ClientEntrySchema.safeParse({
+				...base,
+				clientName: "Acme Chat",
+				clientUri: "https://chat.example",
+			}).success,
+		).toBe(true);
+		expect(ClientEntrySchema.safeParse({ ...base, clientName: "" }).success).toBe(false);
+		expect(ClientEntrySchema.safeParse({ ...base, clientUri: "chat.example" }).success).toBe(false);
+	});
 	it("#316/#330: accepts firstParty, the marking /authorize requires", () => {
 		// The `.strict()` schema had no `firstParty` key, so a YAML/static
 		// registration could not carry the marking /authorize demands: writing
