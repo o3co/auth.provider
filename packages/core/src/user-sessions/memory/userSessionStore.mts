@@ -28,6 +28,7 @@ interface Stored {
 	createdAt: Date;
 	expiresAt: Date;
 	claims: Record<string, unknown>;
+	amr?: readonly string[];
 }
 
 /**
@@ -80,6 +81,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 				createdAt: new Date(),
 				expiresAt: new Date(input.expiresAt.getTime()),
 				claims: cloneClaims(input.claims),
+				...(input.amr ? { amr: [...input.amr] } : {}),
 			});
 		},
 		async get(sid: string): Promise<UserSession | null> {
@@ -92,6 +94,7 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 				createdAt: new Date(s.createdAt.getTime()),
 				expiresAt: new Date(s.expiresAt.getTime()),
 				claims: cloneClaims(s.claims) as UserSessionClaims,
+				...(s.amr ? { amr: [...s.amr] } : {}),
 			};
 		},
 		async delete(sid: string) {

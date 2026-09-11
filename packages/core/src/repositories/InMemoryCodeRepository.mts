@@ -25,6 +25,7 @@ interface StoredCode extends Code {
 	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
 	nonce?: string;
 	sid?: string;
+	acr?: string;
 }
 
 export class InMemoryCodeRepository implements CodeRepository {
@@ -58,6 +59,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			grantedAudience: params.grantedAudience,
 			nonce: params.nonce,
 			sid: params.sid,
+			acr: params.acr,
 		};
 		this.codes.set(code, stored);
 		return {
@@ -71,6 +73,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			grantedAudience: params.grantedAudience,
 			nonce: params.nonce,
 			sid: params.sid,
+			acr: params.acr,
 		};
 	}
 
@@ -92,6 +95,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			grantedAudience: stored.grantedAudience,
 			nonce: stored.nonce,
 			sid: stored.sid,
+			acr: stored.acr,
 		};
 	}
 
@@ -111,6 +115,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 			grantedAudience: stored.grantedAudience,
 			nonce: stored.nonce,
 			sid: stored.sid,
+			acr: stored.acr,
 		};
 	}
 

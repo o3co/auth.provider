@@ -309,6 +309,10 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					const grantTypesSupported = [...deps.grantHandlerResolver.entries()].map(
 						([grantType]) => grantType,
 					);
+					const acrValuesSupported = Object.keys(
+						(deps.config as { oauth?: { authorize?: { acrValues?: Record<string, unknown> } } })
+							.oauth?.authorize?.acrValues ?? {},
+					);
 					return {
 						// oauth owns the authorization-server surface, so it is the
 						// provider root: this is the explicit signal that core should
@@ -404,6 +408,12 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// So the advertised set is what EVERY authorization-code client
 							// may use and the AS always accepts, which is exactly `S256`.
 							code_challenge_methods_supported: ["S256"],
+							// #481: the acr table's keys, when there is one. Omitted otherwise —
+							// an RP that sends `acr_values` to a server with no table gets
+							// `unmet_authentication_requirements`, and the metadata says so.
+							...(acrValuesSupported.length > 0
+								? { acr_values_supported: acrValuesSupported }
+								: {}),
 							...(logoutSupported
 								? {
 										backchannel_logout_supported: true,

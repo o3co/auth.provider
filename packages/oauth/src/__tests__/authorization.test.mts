@@ -1170,6 +1170,7 @@ describe("createAuthorizationGrant", () => {
 				sub: string;
 				authTime: Date;
 				claims: Record<string, unknown>;
+				amr?: readonly string[];
 			}) {
 				return {
 					kind: "spy",
@@ -1183,6 +1184,7 @@ describe("createAuthorizationGrant", () => {
 							createdAt: new Date(),
 							expiresAt: new Date(Date.now() + 3600_000),
 							claims: session.claims,
+							...(session.amr ? { amr: session.amr } : {}),
 						};
 					},
 					async delete() {},
@@ -1243,6 +1245,56 @@ describe("createAuthorizationGrant", () => {
 				expect(idPayload.email).toBe("a@b.com");
 				// profile scope not granted — name must NOT appear
 				expect(idPayload.name).toBeUndefined();
+			});
+
+			it("carries amr from the session and acr from the code record, and mirrors both into the access token (#481)", async () => {
+				const authTime = new Date("2026-04-21T00:00:00Z");
+				const userSessionStore = makeUserSessionStore({
+					sid: "sid-1",
+					sub: "u-1",
+					authTime,
+					claims: {},
+					amr: ["pwd", "mfa"],
+				});
+				const deps = {
+					...makeDepsWithIssuer(
+						vi.fn().mockResolvedValue({
+							code: "c1",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_challenge: S256_CHALLENGE,
+							code_challenge_method: "S256",
+							sid: "sid-1",
+							grantedScope: ["openid"],
+							acr: "urn:example:mfa",
+						}),
+					),
+					userSessionStore,
+					sessionFamilyIndex: makeSessionFamilyIndex(),
+					sessionRPRegistry: makeSessionRPRegistry(),
+				};
+				const handler = createAuthorizationGrant(deps);
+				const { result } = await handler.handle({
+					body: {
+						code: "c1",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
+					session: { code: "c1", code_client_id: "client1" },
+					issuer: "https://auth.example.com",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+				expect(result.status).toBe(200);
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				const id = decodeJwt(result.tokens.id_token as string) as Record<string, unknown>;
+				expect(id.amr).toEqual(["pwd", "mfa"]);
+				expect(id.acr).toBe("urn:example:mfa");
+				expect(id.auth_time).toBe(Math.floor(authTime.getTime() / 1000));
+				const at = decodeJwt(result.tokens.access_token as string) as Record<string, unknown>;
+				expect(at.amr).toEqual(["pwd", "mfa"]);
+				expect(at.acr).toBe("urn:example:mfa");
 			});
 
 			it("does NOT include id_token when issuer is absent (avoids OIDC-noncompliant iss:'')", async () => {

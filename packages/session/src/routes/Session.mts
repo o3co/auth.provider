@@ -412,6 +412,8 @@ export const createRouter = (
 							authTime: now,
 							expiresAt,
 							claims,
+							// #481: a password login (RFC 8176 `pwd`).
+							amr: ["pwd"],
 						});
 						// #296: record the session against its subject so a later
 						// credential change can find it. Best-effort and AFTER the

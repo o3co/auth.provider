@@ -485,6 +485,10 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				{
 					...(client ? { client_id: client.clientId } : {}),
 					...(familyId ? { family_id: familyId } : {}),
+					// #481: a passkey login, on the token itself — this grant mints no
+					// id_token and creates no session. RFC 8176 `hwk`: passkeys are
+					// platform- or hardware-bound keys, and the assertion just proved one.
+					amr: ["hwk"],
 				},
 				{
 					expiresIn: config.oauth.accessToken.expiresIn,

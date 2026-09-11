@@ -57,6 +57,8 @@ export interface ResolvedOAuthOptions {
 	readonly nonceMaxLength: number;
 	/** Wave 1 §5.3 (RFC 8707): opt-in gate for Resource Indicator enforcement. */
 	readonly resourceIndicatorEnabled: boolean;
+	/** #481: `oauth.authorize.acrValues` — acr → the amr values a session must carry. Empty when unset. */
+	readonly acrValues: Readonly<Record<string, readonly string[]>>;
 	/**
 	 * #311: when true, a client that declares no `allowedGrantTypes` is denied
 	 * every grant instead of being unrestricted. Resolved here so both
@@ -109,6 +111,19 @@ type OAuthConfigShape = {
  * warning. Resolution runs once at composition, so an operator sees one
  * boot-time warning instead of one per `/authorize` request.
  */
+/** #481: the configured acr table, or `{}`. The schema already held the shape at boot. */
+const readAcrValues = (oauth: unknown): Readonly<Record<string, readonly string[]>> => {
+	const raw = (oauth as { authorize?: { acrValues?: unknown } } | undefined)?.authorize?.acrValues;
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+	const out: Record<string, readonly string[]> = {};
+	for (const [acr, amr] of Object.entries(raw as Record<string, unknown>)) {
+		if (Array.isArray(amr) && amr.length > 0 && amr.every((v) => typeof v === "string")) {
+			out[acr] = [...(amr as string[])];
+		}
+	}
+	return out;
+};
+
 export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedOAuthOptions => {
 	const oauth = (config as { oauth?: OAuthConfigShape } | undefined)?.oauth;
 
@@ -126,6 +141,7 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 		pkce: resolvePkceOptions(pkceConfig, logger),
 		nonceMaxLength: oauth?.nonce?.maxLength ?? 256,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
+		acrValues: readAcrValues(oauth),
 		requireGrantTypeAllowlist: oauth?.requireGrantTypeAllowlist === true,
 	};
 };

@@ -72,6 +72,24 @@ declare module "express-session" {
 const DEFAULT_SESSION_TTL_MS = 86_400_000; // 24 h
 
 /**
+ * #481 — the `amr` a federated login records: whatever the upstream IdP
+ * asserted (a provider that surfaces the id_token's `amr` puts it on the
+ * profile) plus `fed`, the deployment-defined marker for "authenticated
+ * through a federation". RFC 8176 registers no value for that, and OIDC
+ * Core leaves `amr` values to the deployment, so the marker is documented
+ * rather than borrowed.
+ */
+export const FEDERATED_AMR = "fed";
+
+const federatedAmr = (profile: Readonly<Record<string, unknown>>): readonly string[] => {
+	const upstream =
+		Array.isArray(profile.amr) && profile.amr.every((v) => typeof v === "string")
+			? (profile.amr as string[])
+			: [];
+	return [...new Set([...upstream, FEDERATED_AMR])];
+};
+
+/**
  * The session cookie name assumed when the caller passes neither
  * `federationTransactionCookieName` nor a config carrying `session.name`.
  *
@@ -573,6 +591,7 @@ export const createRouter = (
 				authTime,
 				expiresAt,
 				claims,
+				amr: federatedAmr(profile),
 			});
 		} catch (err) {
 			log.warn({ err }, "userSession create failed");

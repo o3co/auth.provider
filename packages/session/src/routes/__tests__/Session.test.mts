@@ -313,6 +313,8 @@ describe("Session routes — POST /session/login", () => {
 			// authTime and expiresAt are present
 			expect(saved.authTime).toBeTruthy();
 			expect(saved.expiresAt).toBeTruthy();
+			// #481: a password login records how the user authenticated (RFC 8176).
+			expect((saved as { amr?: unknown }).amr).toEqual(["pwd"]);
 
 			// req.session.sid must equal the store's sid after regenerate completes
 			expect(capturedSession.current).not.toBeNull();

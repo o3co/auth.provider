@@ -268,6 +268,8 @@ export interface CodeData {
 	// These fields are persisted at /authorize and read at /token.
 	readonly nonce?: string;
 	readonly sid?: string;
+	/** #481: the acr `/authorize` satisfied for this request; the id_token's `acr`. */
+	readonly acr?: string;
 }
 
 export interface Code extends CodeData {

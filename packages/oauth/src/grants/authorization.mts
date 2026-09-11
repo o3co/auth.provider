@@ -525,7 +525,14 @@ export const createAuthorizationGrant = (
 			// can propagate them without re-reading the session store on every request.
 			// sid is omitted when no userSessionStore is wired (backward-compat path).
 			const accessToken = await generateToken(
-				{ family_id: familyId, ...(sid ? { sid } : {}) },
+				{
+					family_id: familyId,
+					...(sid ? { sid } : {}),
+					// #481: mirror the authentication method and context onto the access
+					// token, so a resource server (or auth.policy-verifier) can gate on them.
+					...(userSession?.amr ? { amr: userSession.amr } : {}),
+					...(codeData.acr ? { acr: codeData.acr } : {}),
+				},
 				{
 					expiresIn: config.oauth.accessToken.expiresIn,
 					keyStore,
@@ -742,6 +749,9 @@ export const createAuthorizationGrant = (
 					authTime: userSession.authTime,
 					...(nonce ? { nonce } : {}),
 					sid,
+					// #481: how, and to which acr, the user authenticated.
+					...(userSession.amr ? { amr: userSession.amr } : {}),
+					...(codeData.acr ? { acr: codeData.acr } : {}),
 					scopes: grantedScopes,
 					userClaims: userSession.claims,
 					keyStore,

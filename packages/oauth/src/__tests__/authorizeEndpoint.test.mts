@@ -929,3 +929,221 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 		expect(createCode).toHaveBeenCalled();
 	});
 });
+
+describe("/authorize — step-up and re-authentication (#481)", () => {
+	const SID = "sid-1";
+	const session = { isAuthenticated: true, sid: SID, user: { id: "user-1" } };
+	const storeWith = (authTime: Date, amr?: readonly string[]): UserSessionStore =>
+		({
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async (sid: string) =>
+				sid === SID
+					? {
+							sid: SID,
+							sub: "user-1",
+							authTime,
+							createdAt: authTime,
+							expiresAt: new Date(Date.now() + 3_600_000),
+							claims: {},
+							...(amr ? { amr } : {}),
+						}
+					: null,
+			),
+			delete: vi.fn(async () => {}),
+		}) as unknown as UserSessionStore;
+	const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
+	const nowSeconds = (): number => Math.floor(Date.now() / 1000);
+	const mintingCode = () =>
+		vi.fn(async () => ({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }));
+	/** The login-page redirect, with the round-tripped authorize URL parsed. */
+	const loginRedirectTo = (res: request.Response): URL => {
+		expect(res.status).toBe(302);
+		const location = res.headers.location as string;
+		expect(location.startsWith("/login?redirect_to=")).toBe(true);
+		return new URL(decodeURIComponent(location.split("redirect_to=")[1] as string));
+	};
+
+	describe("max_age", () => {
+		it("passes a session younger than max_age straight through and mints a code", async () => {
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(5)),
+				createCode,
+			});
+			const res = await authorize(app, { ...baseQuery, max_age: "3600" });
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("sends a session older than max_age back to the login page, round-tripping the request with a reauth_after marker", async () => {
+			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
+			const res = await authorize(app, { ...baseQuery, max_age: "60" });
+			const back = loginRedirectTo(res);
+			expect(back.searchParams.get("max_age")).toBe("60");
+			expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
+			expect(back.searchParams.get("state")).toBe("xyz");
+			const marker = Number(back.searchParams.get("reauth_after"));
+			expect(marker).toBeGreaterThanOrEqual(nowSeconds() - 5);
+			expect(marker).toBeLessThanOrEqual(nowSeconds());
+		});
+
+		it("max_age=0 always re-authenticates", async () => {
+			const { app } = await makeApp({
+				session,
+				userSessionStore: storeWith(new Date(Date.now() - 2_000)),
+			});
+			const res = await authorize(app, { ...baseQuery, max_age: "0" });
+			expect(loginRedirectTo(res).searchParams.get("reauth_after")).toBeTruthy();
+		});
+
+		it("refuses a max_age that is not a non-negative integer", async () => {
+			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(1)) });
+			for (const bad of ["-1", "abc", "1.5", ""]) {
+				const res = await authorize(app, { ...baseQuery, max_age: bad });
+				expect(redirectParams(res).get("error"), bad).toBe("invalid_request");
+			}
+		});
+
+		it("refuses a repeated max_age like every other single-valued parameter", async () => {
+			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(1)) });
+			const res = await authorize(app, { ...baseQuery, max_age: ["60", "120"] });
+			expect(redirectParams(res).get("error")).toBe("invalid_request");
+		});
+	});
+
+	describe("prompt=login", () => {
+		it("re-authenticates even a fresh session, carrying prompt=login and the marker back", async () => {
+			const { app } = await makeApp({ session, userSessionStore: storeWith(new Date()) });
+			const res = await authorize(app, { ...baseQuery, prompt: "login" });
+			const back = loginRedirectTo(res);
+			expect(back.searchParams.get("prompt")).toBe("login");
+			expect(back.searchParams.get("reauth_after")).toBeTruthy();
+		});
+
+		it("is satisfied once the session was authenticated after the marker, and mints a code", async () => {
+			const createCode = mintingCode();
+			const asked = nowSeconds() - 30;
+			const { app } = await makeApp({
+				session,
+				userSessionStore: storeWith(new Date((asked + 10) * 1000)),
+				createCode,
+			});
+			const res = await authorize(app, {
+				...baseQuery,
+				prompt: "login",
+				reauth_after: String(asked),
+			});
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("answers login_required — no second round trip — when the user came back without re-authenticating", async () => {
+			const asked = nowSeconds() - 30;
+			const { app } = await makeApp({
+				session,
+				userSessionStore: storeWith(new Date((asked - 600) * 1000)),
+			});
+			const res = await authorize(app, {
+				...baseQuery,
+				prompt: "login",
+				reauth_after: String(asked),
+			});
+			const params = redirectParams(res);
+			expect(params.get("error")).toBe("login_required");
+			expect(params.get("state")).toBe("xyz");
+		});
+
+		it("the marker satisfies max_age=0 on the way back too", async () => {
+			const createCode = mintingCode();
+			const asked = nowSeconds() - 30;
+			const { app } = await makeApp({
+				session,
+				userSessionStore: storeWith(new Date((asked + 5) * 1000)),
+				createCode,
+			});
+			const res = await authorize(app, { ...baseQuery, max_age: "0", reauth_after: String(asked) });
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("still refuses prompt=none combined with login", async () => {
+			const { app } = await makeApp({ session, userSessionStore: storeWith(new Date()) });
+			const res = await authorize(app, { ...baseQuery, prompt: "none login" });
+			expect(redirectParams(res).get("error")).toBe("invalid_request");
+		});
+	});
+
+	describe("prompt=none stays silent", () => {
+		it("answers login_required for a stale session instead of a login redirect", async () => {
+			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
+			const res = await authorize(app, { ...baseQuery, prompt: "none", max_age: "60" });
+			expect(redirectParams(res).get("error")).toBe("login_required");
+		});
+
+		it("still proceeds silently for a fresh one", async () => {
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(1)),
+				createCode,
+			});
+			const res = await authorize(app, { ...baseQuery, prompt: "none", max_age: "3600" });
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+	});
+
+	describe("acr_values", () => {
+		const acrValues = { "urn:example:pwd": ["pwd"], "urn:example:mfa": ["pwd", "mfa"] };
+
+		it("records the first requested acr the session satisfies into the code", async () => {
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd"]),
+				createCode,
+			});
+			const res = await authorize(app, {
+				...baseQuery,
+				acr_values: "urn:example:mfa urn:example:pwd",
+			});
+			expect(redirectParams(res).get("code")).toBe("code-x");
+			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:pwd" }));
+		});
+
+		it("refuses with unmet_authentication_requirements when the session meets none of them", async () => {
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd"]),
+			});
+			const res = await authorize(app, { ...baseQuery, acr_values: "urn:example:mfa" });
+			const params = redirectParams(res);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+			expect(params.get("error_description")).toMatch(/urn:example:mfa/);
+		});
+
+		it("refuses an acr this deployment has not configured rather than accepting it silently", async () => {
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa"]),
+			});
+			const res = await authorize(app, { ...baseQuery, acr_values: "urn:nope" });
+			const params = redirectParams(res);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+			expect(params.get("error_description")).toMatch(/urn:nope/);
+		});
+
+		it("records no acr when none was requested", async () => {
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd"]),
+				createCode,
+			});
+			await authorize(app, baseQuery);
+			expect(createCode.mock.calls[0]?.[0]).not.toHaveProperty("acr");
+		});
+	});
+});

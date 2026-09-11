@@ -67,6 +67,14 @@ export interface UserSession {
 	readonly createdAt: Date;
 	readonly expiresAt: Date;
 	readonly claims: UserSessionClaims;
+	/**
+	 * #481: how the user authenticated — RFC 8176 values (`pwd`, `hwk`,
+	 * `mfa`, `otp`, …) plus the deployment-defined `fed` for a federated
+	 * login. Surfaced as the id_token `amr` claim and consulted by
+	 * `/authorize` for `acr_values`. Absent when the login path recorded
+	 * nothing (a session written before #481).
+	 */
+	readonly amr?: readonly string[];
 }
 
 /**
@@ -83,6 +91,14 @@ export interface CreateUserSessionInput {
 	readonly authTime: Date;
 	readonly expiresAt: Date;
 	readonly claims: UserSessionClaims;
+	/**
+	 * #481: how the user authenticated — RFC 8176 values (`pwd`, `hwk`,
+	 * `mfa`, `otp`, …) plus the deployment-defined `fed` for a federated
+	 * login. Surfaced as the id_token `amr` claim and consulted by
+	 * `/authorize` for `acr_values`. Absent when the login path recorded
+	 * nothing (a session written before #481).
+	 */
+	readonly amr?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------

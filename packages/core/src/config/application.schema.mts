@@ -381,7 +381,18 @@ const refreshTokenSchema = withRemovedKeys(
 const authorizeSchema = withRemovedKeys(
 	"oauth.authorize",
 	REMOVED_AUTHORIZE_FIELDS,
-	z.object({}).optional(),
+	z
+		.object({
+			// #481: the Authentication Context Class References this deployment
+			// can vouch for, each mapped to the RFC 8176 `amr` values a session
+			// must carry to satisfy it. `/authorize` answers `acr_values` from
+			// this table alone — an acr that is not here is refused rather than
+			// silently accepted — and discovery advertises the keys as
+			// `acr_values_supported`. An acr that requires nothing is refused:
+			// it would be satisfied by every session and vouch for nothing.
+			acrValues: z.record(z.string().min(1), z.array(z.string().min(1)).min(1)).optional(),
+		})
+		.optional(),
 );
 
 /**

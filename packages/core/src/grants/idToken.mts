@@ -21,6 +21,10 @@ export interface GenerateIdTokenOptions {
 	readonly keyStore: KeyStore;
 	readonly issuer: string;
 	readonly expiresIn?: number; // default 3600 seconds
+	/** #481: RFC 8176 authentication methods the session recorded. Omitted when empty. */
+	readonly amr?: readonly string[];
+	/** #481: the Authentication Context Class Reference `/authorize` satisfied. */
+	readonly acr?: string;
 }
 
 /**
@@ -62,6 +66,8 @@ export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Tok
 		sid: opts.sid,
 		...(opts.azp ? { azp: opts.azp } : {}),
 		...(opts.nonce ? { nonce: opts.nonce } : {}),
+		...(opts.amr && opts.amr.length > 0 ? { amr: [...opts.amr] } : {}),
+		...(opts.acr ? { acr: opts.acr } : {}),
 		...filterClaimsByScope(opts.userClaims, opts.scopes),
 	};
 	const token = await opts.keyStore.sign({ claims, header: { typ: "JWT" } });
