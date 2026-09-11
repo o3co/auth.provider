@@ -8,16 +8,11 @@ export default defineConfig({
 		include: ["src/**/__tests__/**/*.test.mts"],
 		typecheck: {
 			enabled: true,
-			// vitest 5 collects a typecheck-included file's tests from the file
-			// itself: one that only calls an imported contract runner declares
-			// none there and fails as "No test suite found". Those files assert
-			// no types either, so the list names the directories and files that
-			// do.
 			include: [
 				"src/modules/manifest/**/*.test.mts",
 				"src/boot/**/*.test.mts",
-				"src/refresh-token-family/__tests__/types.test.mts",
-				"src/user-sessions/__tests__/types.test.mts",
+				"src/refresh-token-family/**/*.test.mts",
+				"src/user-sessions/__tests__/**/*.test.mts",
 				// D-1 FOLLOW-UP: explicit single-file include (not the
 				// `repositories/__tests__/**` glob) because
 				// `InMemoryClientRepository.test.mts` has 16 pre-existing TS
@@ -42,6 +37,20 @@ export default defineConfig({
 				"src/__tests__/contributes-map-substitution.test.mts",
 				// Wave 1 §2.3.1 — WebAuthnCredential + WebAuthnCredentialStore type contract.
 				"src/webauthn-credentials/__tests__/types.test.mts",
+			],
+			// vitest 5 collects a typecheck-included file's tests from the file
+			// itself, where 4 was content to let an imported helper register
+			// them. These five call a shared contract runner and declare nothing
+			// locally, so the typecheck pass reports "No test suite found in
+			// file"; none of them asserts a type either. Every other file in the
+			// globs above — `wiring.test.mts` and its `satisfies … as
+			// BootstrapMap` contract included — stays.
+			exclude: [
+				"src/refresh-token-family/__tests__/adapters.memory.test.mts",
+				"src/user-sessions/__tests__/memory.sessionFamilyIndex.test.mts",
+				"src/user-sessions/__tests__/memory.sessionFederationIndex.test.mts",
+				"src/user-sessions/__tests__/memory.sessionRPRegistry.test.mts",
+				"src/user-sessions/__tests__/memory.userSessionStore.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},
