@@ -48,8 +48,9 @@ import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
 import { defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
+import { createDPoPNonceIssuer } from "./nonce.mjs";
 import type { DPoPReplayStore } from "./replay-store.mjs";
-import { createDPoPMechanism } from "./verifier.mjs";
+import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
 
 // ---------------------------------------------------------------------------
 // ComponentMap augmentation — dpopReplayStore slot
@@ -107,6 +108,18 @@ export const dpopConfigSchema = z.object({
 				"replay-store": z.enum(["memory", "redis"]).default("memory"),
 				/** TTL for replay entries in seconds. Default: 300. */
 				"replay-store-ttl-seconds": z.number().int().positive().default(300),
+				// #530: server-provided nonce (RFC 9449 §8 / §9). "never" (the
+				// default) asks for none; "as" asks at the token endpoint; "as+rs"
+				// also at protected resources. The nonce is an HMAC under `secret`,
+				// which every replica shares — required once `required` is not
+				// "never", and at least 32 bytes.
+				nonce: z
+					.object({
+						required: z.enum(["never", "as", "as+rs"]).default("never"),
+						"ttl-seconds": z.coerce.number().int().positive().default(300),
+						secret: z.string().optional(),
+					})
+					.default(() => ({ required: "never" as const, "ttl-seconds": 300 })),
 			})
 			.default(() => ({
 				enabled: false,
@@ -114,6 +127,7 @@ export const dpopConfigSchema = z.object({
 				"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
 				"replay-store": "memory" as const,
 				"replay-store-ttl-seconds": 300,
+				nonce: { required: "never" as const, "ttl-seconds": 300 },
 			})),
 	}),
 });
@@ -200,6 +214,11 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 							"alg-whitelist": readonly string[];
 							"replay-store": "memory" | "redis";
 							"replay-store-ttl-seconds": number;
+							nonce?: {
+								required?: "never" | "as" | "as+rs";
+								"ttl-seconds"?: number;
+								secret?: unknown;
+							};
 						};
 					};
 				};
@@ -240,6 +259,33 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 				}
 				const replayStore: DPoPReplayStore = deps.dpopReplayStore ?? createMemoryDPoPReplayStore();
 
+				// #530: the nonce is an HMAC under a secret every replica shares.
+				// Required once a nonce is asked for: a per-replica random key
+				// would mint nonces no other replica could verify, and a client
+				// bouncing between replicas would never get past use_dpop_nonce.
+				const nonceConfig = typedConfig.oauth.dpop.nonce;
+				const nonceRequired = nonceConfig?.required ?? "never";
+				let nonce: DPoPMechanismOptions["nonce"];
+				if (nonceRequired !== "never") {
+					const secret = nonceConfig?.secret;
+					if (typeof secret !== "string" || secret.length === 0) {
+						throw new Error(
+							`dpopModule: config.oauth.dpop.nonce.required = "${nonceRequired}" but ` +
+								"config.oauth.dpop.nonce.secret is unset (OAUTH_DPOP_NONCE_SECRET). The nonce " +
+								"is an HMAC under a secret every replica shares; without one, no nonce this " +
+								"replica issues could be verified by another. Set at least 32 bytes of random " +
+								'material, or set nonce.required = "never".',
+						);
+					}
+					nonce = {
+						required: nonceRequired,
+						issuer: createDPoPNonceIssuer({
+							secret,
+							ttlSeconds: nonceConfig?.["ttl-seconds"] ?? 300,
+						}),
+					};
+				}
+
 				return createDPoPMechanism({
 					issuer,
 					replayStore,
@@ -247,6 +293,7 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 					algWhitelist: typedConfig.oauth.dpop["alg-whitelist"],
 					replayTtlSeconds: typedConfig.oauth.dpop["replay-store-ttl-seconds"],
 					logger: deps.logger,
+					...(nonce === undefined ? {} : { nonce }),
 				});
 			},
 		],

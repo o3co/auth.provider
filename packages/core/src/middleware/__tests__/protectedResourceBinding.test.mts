@@ -333,3 +333,41 @@ describe("protectedResourceBindingMw — compound cnf", () => {
 		expect(res.statusCode).toBe(401);
 	});
 });
+
+describe("protectedResourceBindingMw — the nonce challenge (#530, RFC 9449 §9)", () => {
+	it("answers 401 use_dpop_nonce with the challenge naming it and the DPoP-Nonce header", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
+		const err = Object.assign(new Error("no nonce"), {
+			code: "use_dpop_nonce",
+			responseHeaders: { "DPoP-Nonce": "n1" },
+		});
+		const { next, res } = await run(
+			protectedResourceBindingMw({ mechanisms: [throwingMechanism("dpop", err)] }),
+			`DPoP ${token}`,
+		);
+		expect(next).not.toHaveBeenCalled();
+		expect(res.statusCode).toBe(401);
+		expect(res.body).toMatchObject({ error: "use_dpop_nonce" });
+		expect(res.headers["WWW-Authenticate"]).toBe('DPoP error="use_dpop_nonce"');
+		expect(res.headers["DPoP-Nonce"]).toBe("n1");
+	});
+
+	it("sets the headers a succeeding binding carries, then continues", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
+		const mechanism: TokenBindingMechanism = {
+			kind: "dpop",
+			intentExplicit: true,
+			extract: async () => ({
+				kind: "dpop",
+				confirmation: { jkt: JKT },
+				responseHeaders: { "DPoP-Nonce": "n2" },
+			}),
+		};
+		const { next, res } = await run(
+			protectedResourceBindingMw({ mechanisms: [mechanism] }),
+			`DPoP ${token}`,
+		);
+		expect(next).toHaveBeenCalledOnce();
+		expect(res.headers["DPoP-Nonce"]).toBe("n2");
+	});
+});

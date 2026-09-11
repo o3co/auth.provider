@@ -16,10 +16,11 @@
 
 import type { Request } from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { computeAth } from "#/ath.mjs";
 import { DPoPError } from "#/errors.mjs";
 import { createMemoryDPoPReplayStore } from "#/memory/replay-store.mjs";
+import { createDPoPNonceIssuer } from "#/nonce.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
 import { createDPoPMechanism } from "#/verifier.mjs";
 
@@ -742,5 +743,114 @@ describe("createDPoPMechanism — the issuer is required at construction (#292)"
 				replayStore: createMemoryDPoPReplayStore(),
 			}),
 		).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #530: server-provided nonce (RFC 9449 §8 / §9)
+// ---------------------------------------------------------------------------
+
+describe("createDPoPMechanism — server-provided nonce (#530)", () => {
+	let t = 1_700_000_000_000;
+	const issuer = createDPoPNonceIssuer({
+		secret: "a-dpop-nonce-secret-of-at-least-32-bytes!!",
+		ttlSeconds: 300,
+		now: () => t,
+	});
+	const build = (required: "as" | "as+rs", replayStore = createMemoryDPoPReplayStore()) =>
+		createDPoPMechanism({
+			issuer: ISSUER,
+			replayStore,
+			iatWindowSeconds: 60,
+			nonce: { required, issuer },
+		});
+
+	it("refuses a proof with no nonce as use_dpop_nonce, handing the client one to retry with", async () => {
+		const { proof } = await mintProof();
+		await expect(build("as").extract(makeReq(proof) as Request)).rejects.toMatchObject({
+			code: "use_dpop_nonce",
+			reason: "nonce_required",
+			responseHeaders: { "DPoP-Nonce": issuer.issue() },
+		});
+	});
+
+	it("refuses a foreign or stale nonce as use_dpop_nonce, with a fresh one", async () => {
+		const foreign = await mintProof({ extraClaims: { nonce: "0.not-ours" } });
+		await expect(build("as").extract(makeReq(foreign.proof) as Request)).rejects.toMatchObject({
+			code: "use_dpop_nonce",
+			reason: "nonce_invalid",
+			responseHeaders: { "DPoP-Nonce": issuer.issue() },
+		});
+		t -= 600_000; // two buckets ago
+		const stale = issuer.issue();
+		t += 600_000;
+		const old = await mintProof({ extraClaims: { nonce: stale } });
+		await expect(build("as").extract(makeReq(old.proof) as Request)).rejects.toMatchObject({
+			reason: "nonce_invalid",
+		});
+	});
+
+	it("accepts the current nonce and the previous bucket's, and answers with the current one", async () => {
+		const current = await mintProof({ extraClaims: { nonce: issuer.issue() } });
+		const result = await build("as").extract(makeReq(current.proof) as Request);
+		expect(result).toMatchObject({
+			kind: "dpop",
+			confirmation: { jkt: current.jkt },
+			responseHeaders: { "DPoP-Nonce": issuer.issue() },
+		});
+
+		t -= 300_000;
+		const previous = issuer.issue();
+		t += 300_000;
+		const older = await mintProof({ extraClaims: { nonce: previous } });
+		expect(await build("as").extract(makeReq(older.proof) as Request)).toMatchObject({
+			responseHeaders: { "DPoP-Nonce": issuer.issue() },
+		});
+	});
+
+	it("asks a resource server's caller for a nonce under as+rs only", async () => {
+		const token = "an.access.token";
+		const ath = await computeAth(token);
+		const withoutNonce = await mintProof({ htm: "GET", extraClaims: { ath } });
+		const req = makeReq(withoutNonce.proof, "GET") as Request;
+		// Under `as` the resource server does not ask.
+		expect(await build("as").extract(req, { boundAccessToken: token })).toMatchObject({
+			kind: "dpop",
+		});
+		// Under `as+rs` it does.
+		await expect(build("as+rs").extract(req, { boundAccessToken: token })).rejects.toMatchObject({
+			code: "use_dpop_nonce",
+			reason: "nonce_required",
+		});
+		const withNonce = await mintProof({
+			htm: "GET",
+			extraClaims: { ath, nonce: issuer.issue() },
+		});
+		expect(
+			await build("as+rs").extract(makeReq(withNonce.proof, "GET") as Request, {
+				boundAccessToken: token,
+			}),
+		).toMatchObject({ responseHeaders: { "DPoP-Nonce": issuer.issue() } });
+	});
+
+	it("checks the nonce before the replay store is consulted", async () => {
+		// A proof refused for its nonce must not spend a replay entry: the
+		// client is about to retry the same jti with the nonce filled in.
+		const seen = vi.fn(async () => false);
+		const { proof } = await mintProof();
+		await expect(
+			build("as", { seen } as never).extract(makeReq(proof) as Request),
+		).rejects.toMatchObject({ reason: "nonce_required" });
+		expect(seen).not.toHaveBeenCalled();
+	});
+
+	it("asks for nothing when no nonce policy is configured", async () => {
+		const { proof } = await mintProof();
+		const result = await createDPoPMechanism({
+			issuer: ISSUER,
+			replayStore: createMemoryDPoPReplayStore(),
+		}).extract(makeReq(proof) as Request);
+		expect(result).toMatchObject({ kind: "dpop" });
+		expect(result).not.toHaveProperty("responseHeaders");
 	});
 });

@@ -17,6 +17,7 @@ import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
+import { applyResponseHeaders } from "./_responseHeaders.mjs";
 
 /**
  * Extra request-scope facts a mechanism needs when the material is
@@ -161,9 +162,20 @@ export const tokenBindingMw = ({
 			} catch (err) {
 				const code = hasOAuthErrorCode(err) ? err.code : `invalid_${mechanism.kind}_proof`;
 				logger?.warn({ mechanism: mechanism.kind, code }, "token_binding_proof_invalid");
+				// #530: a refusal may carry headers the client needs to retry —
+				// `DPoP-Nonce` on `use_dpop_nonce` (RFC 9449 §8), which is an
+				// instruction rather than a verdict and says so.
+				applyResponseHeaders(res, err);
 				res
 					.status(400)
-					.json(errorEnvelope(code, `${mechanism.kind} mechanism rejected the presented material`));
+					.json(
+						errorEnvelope(
+							code,
+							code === "use_dpop_nonce"
+								? "a server-provided nonce is required; retry with the value of the DPoP-Nonce header"
+								: `${mechanism.kind} mechanism rejected the presented material`,
+						),
+					);
 				return;
 			}
 			if (binding !== null) {
@@ -191,6 +203,7 @@ export const tokenBindingMw = ({
 					);
 				return;
 			}
+			applyResponseHeaders(res, firstSuccess.binding);
 			req.tokenBinding = firstSuccess.binding;
 			next();
 			return;
@@ -212,6 +225,7 @@ export const tokenBindingMw = ({
 		}
 		const [firstExplicit] = explicit;
 		if (firstExplicit) {
+			applyResponseHeaders(res, firstExplicit.binding);
 			req.tokenBinding = firstExplicit.binding;
 			next();
 			return;
@@ -230,6 +244,7 @@ export const tokenBindingMw = ({
 		// `__tests__/tokenBinding.test.mts` ("two ambient mechanisms
 		// succeeding → first-registered wins"), so changing it is an explicit
 		// test edit rather than a silent behavior change (#199 M2).
+		applyResponseHeaders(res, firstSuccess.binding);
 		req.tokenBinding = firstSuccess.binding;
 		next();
 	};

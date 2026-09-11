@@ -440,3 +440,85 @@ describe("dpopModule — integration via createApp", () => {
 		expect(() => buildMechanism(boot.config)).toThrow(/issuer/i);
 	});
 });
+
+describe("dpopModule — server-provided nonce from config (#530)", () => {
+	const withNonce = (secret: string | undefined, required: "as" | "as+rs" = "as"): BootstrapMap => {
+		const boot = makeBoot(true);
+		const config = boot.config as { oauth: { dpop: Record<string, unknown> } };
+		return {
+			...boot,
+			config: {
+				...config,
+				oauth: {
+					...config.oauth,
+					dpop: {
+						...config.oauth.dpop,
+						nonce: { required, "ttl-seconds": 300, ...(secret === undefined ? {} : { secret }) },
+					},
+				},
+			} as never,
+		};
+	};
+
+	it("refuses to build a mechanism when a nonce is required but no shared secret is configured", () => {
+		expect(() => buildMechanism(withNonce(undefined).config)).toThrow(/oauth\.dpop\.nonce\.secret/);
+	});
+
+	it("asks the token endpoint's caller for a nonce and admits the retry, keeping it current", async () => {
+		const received: { tokenBinding?: unknown } = {};
+		const observerModule = defineModule({
+			name: "observer",
+			requires: [],
+			optional: [],
+			contributes: {
+				routes: [
+					() => {
+						const router = Router();
+						router.use(express.json());
+						router.post("/token", makeTokenBindingObserver(received));
+						return { id: "test-token", mountPath: "/oauth", handler: router };
+					},
+				],
+			},
+		});
+		const handle = await createApp({
+			modules: [dpopModule, observerModule],
+			bootstrapComponents: withNonce("a-dpop-nonce-secret-of-at-least-32-bytes!!"),
+		});
+		const app = express();
+		app.use(express.json());
+		app.use(handle.router);
+
+		const { publicKey, privateKey } = await generateKeyPair("ES256");
+		const jwk = await exportJWK(publicKey);
+		const proof = async (nonce?: string) =>
+			new SignJWT({
+				htm: "POST",
+				htu: `${ISSUER_ORIGIN}/oauth/token`,
+				iat: Math.floor(Date.now() / 1000),
+				jti: crypto.randomUUID(),
+				...(nonce === undefined ? {} : { nonce }),
+			})
+				.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+				.sign(privateKey);
+
+		const first = await request(app)
+			.post("/oauth/token")
+			.set("DPoP", await proof())
+			.send({});
+		expect(first.status).toBe(400);
+		expect(first.body.error).toBe("use_dpop_nonce");
+		const nonce = first.headers["dpop-nonce"];
+		expect(typeof nonce).toBe("string");
+
+		const second = await request(app)
+			.post("/oauth/token")
+			.set("DPoP", await proof(nonce))
+			.send({});
+		expect(second.status).toBe(200);
+		expect(received.tokenBinding).toMatchObject({ kind: "dpop" });
+		expect(typeof second.headers["dpop-nonce"]).toBe("string");
+
+		await handle.dispose();
+	});
+});

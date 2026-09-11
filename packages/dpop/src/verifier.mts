@@ -54,6 +54,7 @@ import { importJWK, jwtVerify } from "jose";
 import { athMatches } from "./ath.mjs";
 import { DPoPError } from "./errors.mjs";
 import { normalizeHtu } from "./htu-normalize.mjs";
+import type { DPoPNonceIssuer } from "./nonce.mjs";
 import { parseProof } from "./proof.mjs";
 import type { DPoPReplayStore } from "./replay-store.mjs";
 
@@ -118,6 +119,19 @@ export interface DPoPMechanismOptions {
 	 */
 	readonly replayTtlSeconds?: number;
 	readonly logger?: Logger;
+	/**
+	 * Server-provided nonce (RFC 9449 §8 / §9, #530). Absent, no nonce is asked
+	 * for and `iat` skew is the only freshness control. `"as"` asks at the
+	 * token endpoint; `"as+rs"` also at protected resources — the mechanism
+	 * tells the two apart by whether it was handed a bound access token.
+	 * A proof without a valid nonce is refused as `use_dpop_nonce`, carrying
+	 * the nonce to retry with; every accepted proof's answer carries the
+	 * current nonce too, so a client learns of a rotation before it needs to.
+	 */
+	readonly nonce?: {
+		readonly required: "as" | "as+rs";
+		readonly issuer: DPoPNonceIssuer;
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -181,7 +195,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 	const algWhitelist = options.algWhitelist ?? DEFAULT_ALG_WHITELIST;
 	const iatWindowSeconds = options.iatWindowSeconds ?? DEFAULT_IAT_WINDOW_SECONDS;
 	const replayTtlSeconds = options.replayTtlSeconds ?? DEFAULT_REPLAY_TTL_SECONDS;
-	const { replayStore, logger } = options;
+	const { replayStore, logger, nonce } = options;
 
 	// Replay entries must outlive the acceptance window they protect. The iat
 	// check is symmetric AND second-truncated (`Math.abs(floor(now) - iat) > W`),
@@ -298,6 +312,36 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				);
 			}
 
+			// #530: the server-provided nonce, checked before the replay store is
+			// consulted — a proof refused here is one the client is about to
+			// present again with the nonce filled in, and it must not have spent
+			// its jti. `ctx` is what a protected resource hands over; its absence
+			// means the token endpoint.
+			const nonceRequired =
+				nonce !== undefined && (ctx === undefined || nonce.required === "as+rs");
+			let currentNonce: string | undefined;
+			if (nonceRequired) {
+				currentNonce = nonce.issuer.issue();
+				const headers = { "DPoP-Nonce": currentNonce };
+				const presented = proof.claims.nonce;
+				if (presented === undefined) {
+					throw new DPoPError(
+						"nonce_required",
+						"DPoP proof carries no nonce; this server requires one",
+						undefined,
+						headers,
+					);
+				}
+				if (!nonce.issuer.verify(presented)) {
+					throw new DPoPError(
+						"nonce_invalid",
+						"DPoP proof nonce is not one this server issued within its window",
+						undefined,
+						headers,
+					);
+				}
+			}
+
 			// RFC 9449 §7.1: at a protected resource the proof MUST carry an
 			// `ath` binding it to the access token it accompanies. Without it,
 			// a proof captured alongside one request authorises any other
@@ -388,6 +432,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			return {
 				kind: "dpop",
 				confirmation: { jkt },
+				...(currentNonce === undefined ? {} : { responseHeaders: { "DPoP-Nonce": currentNonce } }),
 			};
 		},
 	};
