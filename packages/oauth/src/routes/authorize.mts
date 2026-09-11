@@ -1168,6 +1168,16 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			);
 			return;
 		}
+		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
+		// it is interpreted — a repeat read as absence is a different request
+		// from the one the client sent. This runs ahead of the re-authentication
+		// evaluation as well as the client-policy gates: a repeated
+		// `reauth_after` read as "no marker" would send a stale session to the
+		// login page, whose redirect rebuilds the URL with one server-written
+		// marker, and the request would then succeed where it should have been
+		// refused. A malformed request never reaches the repository or the
+		// policy hook either.
+		if (!checkSingleValuedParams(ctx)) return;
 		// #481: is the authentication fresh enough for what the RP asked?
 		const maxAge = parseMaxAge(ctx);
 		if (maxAge === null) return;
@@ -1183,12 +1193,6 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		const acr = resolveAcr(ctx, liveSession.session);
 		if (acr === null) return;
 		if (!checkResponseTypeIsCode(ctx)) return;
-		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
-		// it is interpreted — a repeat read as absence is a different request
-		// from the one the client sent, and this runs ahead of the client-policy
-		// gates so a malformed request never reaches the repository or the
-		// policy hook.
-		if (!checkSingleValuedParams(ctx)) return;
 		if (!(await checkAuthorizationCodeGrantAllowed(ctx, client))) return;
 		if (!(await checkFirstPartyInvariant(ctx, client))) return;
 		if (!(await checkEmailVerified(ctx))) return;

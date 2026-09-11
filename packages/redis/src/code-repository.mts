@@ -46,6 +46,8 @@ interface StoredCodePayload {
 	code_challenge_method?: string;
 	nonce?: string;
 	sid?: string;
+	/** #481: the acr `/authorize` satisfied, for the id_token. */
+	acr?: string;
 	expiresIn?: number;
 	grantedScope?: string[];
 	grantedAudience?: string[];
@@ -100,6 +102,7 @@ export class RedisCodeRepository implements CodeRepository {
 		code_challenge_method,
 		nonce,
 		sid,
+		acr,
 		expiresIn = this.defaultExpiresIn,
 		grantedScope,
 		grantedAudience,
@@ -112,6 +115,7 @@ export class RedisCodeRepository implements CodeRepository {
 			code_challenge_method,
 			nonce,
 			sid,
+			acr,
 			expiresIn,
 			grantedScope: grantedScope ? [...grantedScope] : undefined,
 			grantedAudience: grantedAudience ? [...grantedAudience] : undefined,
@@ -173,6 +177,7 @@ export class RedisCodeRepository implements CodeRepository {
 				code_challenge_method: p.code_challenge_method,
 				nonce: p.nonce,
 				sid: p.sid,
+				acr: p.acr,
 				expiresIn: p.expiresIn,
 				grantedScope,
 				grantedAudience,

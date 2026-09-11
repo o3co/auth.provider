@@ -309,6 +309,20 @@ describe("RedisCodeRepository", () => {
 			expect(consumed?.redirect_uri).toBe("https://rp.example/cb");
 		});
 
+		it("persists and returns acr, and leaves it absent when none was recorded (#481)", async () => {
+			const withAcr = await repo.createCode({
+				client_id: "client-abc",
+				redirect_uri: "https://rp.example/cb",
+				acr: "urn:example:mfa",
+			});
+			expect((await repo.consumeByCode(withAcr.code))?.acr).toBe("urn:example:mfa");
+			const without = await repo.createCode({
+				client_id: "client-abc",
+				redirect_uri: "https://rp.example/cb",
+			});
+			expect((await repo.consumeByCode(without.code))?.acr).toBeUndefined();
+		});
+
 		it("persists and returns sid, nonce, grantedScope, grantedAudience via consumeByCode", async () => {
 			const result = await repo.createCode({
 				client_id: "client-abc",

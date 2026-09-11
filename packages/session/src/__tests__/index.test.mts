@@ -84,6 +84,8 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect(typeof mod.resolveClientSecret).toBe("function");
 		expect(mod.DEFAULT_FEDERATION_RESPONSE_MODE).toBe("query");
 		expect(mod.FEDERATION_RESPONSE_MODES).toEqual(["query", "form_post"]);
+		// #481: the amr marker a federated login records is part of the contract.
+		expect((mod as { FEDERATED_AMR?: unknown }).FEDERATED_AMR).toBe("fed");
 	});
 
 	it("does NOT export the deleted v0.4.x federation factory surface", async () => {
