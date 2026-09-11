@@ -552,6 +552,33 @@ What an entry says, and what it means at `/oauth/token`:
 
 `createJwtAssertionVerifier({ key, issuer, audience, algorithms })` — the static one-key shape — is a one-entry registry and keeps working unchanged. A deployment that registers issuers at runtime and needs them to survive a restart implements `AssertionIssuerRegistry` (`findIssuer`) over its own store.
 
+With several issuers, namespace the handle per entry (`readSubjectHandle`) unless every issuer's `sub` values are known to be disjoint: the Store receives the handle alone.
+
+### The ID-JAG profile (#526)
+
+An entry with `profile: "id-jag"` accepts the [Identity Assertion JWT Authorization Grant](https://datatracker.ietf.org/doc/draft-ietf-oauth-identity-assertion-authz-grant/) — what an enterprise IdP mints for a client so that this server, as the resource's authorization server, can issue it an access token (the MCP "Enterprise Managed Authorization" flow, Cross-App Access). The client sends it as a plain jwt-bearer request, **with client authentication**:
+
+```ts
+const assertionVerifier = createRegistryAssertionVerifier({
+  registry: createMemoryAssertionIssuerRegistry([
+    {
+      issuer: "https://idp.example",
+      keys: { type: "jwks_uri", uri: "https://idp.example/.well-known/jwks.json" },
+      algorithms: ["RS256"],
+      profile: "id-jag",
+      allowedClients: ["mcp-client"],
+      allowedScopes: ["read", "write"],
+      allowedAudiences: ["https://mcp.example"],
+    },
+  ]),
+  audience: "https://auth.example",
+  issuerIdentifier: "https://auth.example", // the only aud an ID-JAG may name
+  replaySeenSet,                             // each jti is accepted once
+});
+```
+
+On top of the registry's checks, an ID-JAG must carry `typ: oauth-id-jag+jwt`, `aud` exactly this server's issuer identifier (the token endpoint URL is not an alias), a `client_id` naming the authenticated client (an unauthenticated presenter is refused), and `jti`, `iat`, `sub`; each `jti` is accepted once for the assertion's lifetime. `scope` and `resource` travel as claims: the scope ceiling is the claim ∩ `allowedScopes`, the audience ceiling is `resource` ∩ `allowedAudiences` (a resource the entry does not admit is refused), and the grant then bounds both by the client's registration. The handle handed to the Store is `<iss>#<sub>` (or `<iss>#<tenant>#<sub>`) — `sub` is unique only within its issuer — and an identity the Store has not linked is refused there. No refresh token is issued: the assertion is the refresh mechanism.
+
 ## See Also
 
 - [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes

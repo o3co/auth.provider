@@ -92,6 +92,20 @@ export interface AssertionIssuerEntry {
 	readonly allowedClients?: readonly string[];
 	/** After this instant the entry is refused. The only mutable field. */
 	readonly expiresAt?: Date;
+	/**
+	 * Which assertion profile this issuer mints (#526).
+	 *
+	 * - `"rfc7523"` (default): the plain RFC 7523 §2.1 assertion — `iss`,
+	 *   `sub`, `aud` (any of the verifier's audiences), `exp`; a device
+	 *   credential.
+	 * - `"id-jag"`: the Identity Assertion JWT Authorization Grant an
+	 *   enterprise IdP mints for a client. `typ` `oauth-id-jag+jwt`, `aud`
+	 *   exactly this server's issuer identifier, `client_id` naming the
+	 *   authenticated presenter, `jti` accepted once, and `scope` / `resource`
+	 *   carried as claims. Needs `issuerIdentifier` and `replaySeenSet` on the
+	 *   verifier.
+	 */
+	readonly profile?: "rfc7523" | "id-jag";
 	/** Clock skew for `exp` / `nbf`, in seconds. Default 60. */
 	readonly clockToleranceSeconds?: number;
 	/** How the handle is read from the claims. Defaults to `sub`. */

@@ -25,6 +25,7 @@ import {
 	createMemoryAssertionIssuerRegistry,
 } from "#/assertions/issuerRegistry.mjs";
 import { createRegistryAssertionVerifier } from "#/assertions/registryAssertionVerifier.mjs";
+import { createMemoryReplaySeenSet } from "#/replay-seen-set/adapters/memory.mjs";
 
 /**
  * #525 — "we trust these N issuers, each with their own keys and terms", where
@@ -392,5 +393,223 @@ describe("createRegistryAssertionVerifier — what every entry refuses (#525)", 
 				kind: "custom",
 			}).kind,
 		).toBe("custom");
+	});
+});
+
+describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => {
+	// draft-ietf-oauth-identity-assertion-authz-grant: what an enterprise IdP
+	// mints for a client so this server can issue it a token. Cases are built
+	// from the draft's own requirements; almost all are refusals.
+	const RS_AS = "https://auth.example";
+	const IDP = "https://idp.example";
+	const idp = generateKeyPairSync("ed25519");
+
+	const idJagEntry = (over: Partial<AssertionIssuerEntry> = {}): AssertionIssuerEntry => ({
+		issuer: IDP,
+		keys: { type: "key", key: idp.publicKey },
+		algorithms: ["EdDSA"],
+		profile: "id-jag",
+		allowedAudiences: ["https://api.example", "https://other.example"],
+		allowedScopes: ["read", "write"],
+		...over,
+	});
+
+	const idJag = async (
+		claims: Record<string, unknown> = {},
+		opts: { typ?: string | null; aud?: string | string[]; iat?: boolean; exp?: number } = {},
+	): Promise<string> => {
+		const builder = new SignJWT({
+			client_id: "app",
+			jti: `jti-${Math.random()}`,
+			scope: "read",
+			resource: "https://api.example",
+			...claims,
+		})
+			.setProtectedHeader({
+				alg: "EdDSA",
+				...(opts.typ === null ? {} : { typ: opts.typ ?? "oauth-id-jag+jwt" }),
+			})
+			.setIssuer(IDP)
+			.setAudience(opts.aud ?? RS_AS)
+			.setExpirationTime(opts.exp ?? Math.floor(Date.now() / 1000) + 300);
+		if (opts.iat !== false) builder.setIssuedAt();
+		if (!("sub" in claims)) builder.setSubject("user-1");
+		return builder.sign(idp.privateKey);
+	};
+
+	const make = (
+		entries: readonly AssertionIssuerEntry[] = [idJagEntry()],
+		over: Partial<Parameters<typeof createRegistryAssertionVerifier>[0]> = {},
+	) =>
+		createRegistryAssertionVerifier({
+			registry: createMemoryAssertionIssuerRegistry(entries),
+			audience: [RS_AS, `${RS_AS}/oauth/token`],
+			issuerIdentifier: RS_AS,
+			replaySeenSet: createMemoryReplaySeenSet(),
+			...over,
+		});
+	const asApp = { clientId: "app" };
+
+	it("accepts a conformant ID-JAG and hands back the issuer, a namespaced handle, and the claims' ceilings", async () => {
+		const result = await make().verify(await idJag({ scope: "read admin" }), asApp);
+		expect(result).toEqual({
+			subjectHandle: `${IDP}#user-1`,
+			issuer: IDP,
+			scope: ["read"],
+			audience: ["https://api.example"],
+		});
+	});
+
+	it("namespaces the handle by tenant too, and honours a custom reader instead", async () => {
+		expect((await make().verify(await idJag({ tenant: "acme" }), asApp))?.subjectHandle).toBe(
+			`${IDP}#acme#user-1`,
+		);
+		const custom = make([idJagEntry({ readSubjectHandle: (c) => `u:${String(c.sub)}` })]);
+		expect((await custom.verify(await idJag(), asApp))?.subjectHandle).toBe("u:user-1");
+	});
+
+	it("requires the oauth-id-jag+jwt typ", async () => {
+		expect(await make().verify(await idJag({}, { typ: "JWT" }), asApp)).toBeNull();
+		expect(await make().verify(await idJag({}, { typ: null }), asApp)).toBeNull();
+	});
+
+	it("requires aud to be this server's issuer identifier — the token endpoint URL is not an alias", async () => {
+		expect(await make().verify(await idJag({}, { aud: `${RS_AS}/oauth/token` }), asApp)).toBeNull();
+		expect(await make().verify(await idJag({}, { aud: [RS_AS] }), asApp)).not.toBeNull();
+		// One issuer identifier, as a string or a one-element array (§3).
+		expect(
+			await make().verify(await idJag({}, { aud: [RS_AS, "https://other-as.example"] }), asApp),
+		).toBeNull();
+	});
+
+	it("requires client_id to name the authenticated client, and refuses an unauthenticated presenter", async () => {
+		expect(await make().verify(await idJag({ client_id: "other-app" }), asApp)).toBeNull();
+		expect(await make().verify(await idJag({ client_id: undefined }), asApp)).toBeNull();
+		expect(await make().verify(await idJag(), {})).toBeNull();
+		expect(await make().verify(await idJag())).toBeNull();
+	});
+
+	it("requires jti, iat and sub", async () => {
+		expect(await make().verify(await idJag({ jti: undefined }), asApp)).toBeNull();
+		expect(await make().verify(await idJag({ jti: "" }), asApp)).toBeNull();
+		expect(await make().verify(await idJag({}, { iat: false }), asApp)).toBeNull();
+		expect(await make().verify(await idJag({ sub: undefined }), asApp)).toBeNull();
+	});
+
+	it("accepts each jti once — a replay within its lifetime is refused, per issuer", async () => {
+		const seen = createMemoryReplaySeenSet();
+		const second = generateKeyPairSync("ed25519");
+		const verifier = make(
+			[
+				idJagEntry(),
+				idJagEntry({
+					issuer: "https://second-idp.example",
+					keys: { type: "key", key: second.publicKey },
+				}),
+			],
+			{ replaySeenSet: seen },
+		);
+		const assertion = await idJag({ jti: "once" });
+		expect(await verifier.verify(assertion, asApp)).not.toBeNull();
+		expect(await verifier.verify(assertion, asApp)).toBeNull();
+		// The same jti from another issuer is another assertion.
+		const other = await new SignJWT({ client_id: "app", jti: "once", scope: "read" })
+			.setProtectedHeader({ alg: "EdDSA", typ: "oauth-id-jag+jwt" })
+			.setIssuer("https://second-idp.example")
+			.setSubject("user-9")
+			.setAudience(RS_AS)
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(second.privateKey);
+		expect(await verifier.verify(other, asApp)).not.toBeNull();
+	});
+
+	it("bounds the resource claim by allowedAudiences, refusing one the entry does not admit", async () => {
+		expect(
+			(
+				await make().verify(
+					await idJag({ resource: ["https://other.example", "https://api.example"] }),
+					asApp,
+				)
+			)?.audience,
+		).toEqual(["https://other.example", "https://api.example"]);
+		expect(
+			(
+				await make().verify(
+					await idJag({ resource: ["https://evil.example", "https://api.example"] }),
+					asApp,
+				)
+			)?.audience,
+		).toEqual(["https://api.example"]);
+		expect(
+			await make().verify(await idJag({ resource: "https://evil.example" }), asApp),
+		).toBeNull();
+		// No resource claim: the entry's list stands, or nothing.
+		expect((await make().verify(await idJag({ resource: undefined }), asApp))?.audience).toEqual([
+			"https://api.example",
+			"https://other.example",
+		]);
+		expect(
+			(
+				await make([idJagEntry({ allowedAudiences: undefined })]).verify(
+					await idJag({ resource: undefined }),
+					asApp,
+				)
+			)?.audience,
+		).toBeUndefined();
+	});
+
+	it("intersects the scope claim with allowedScopes — wider is narrowed, not refused", async () => {
+		expect((await make().verify(await idJag({ scope: "read admin" }), asApp))?.scope).toEqual([
+			"read",
+		]);
+		expect((await make().verify(await idJag({ scope: undefined }), asApp))?.scope).toEqual([
+			"read",
+			"write",
+		]);
+	});
+
+	it("keeps the entry's other terms: allowedClients, allowedSubjects, expiry", async () => {
+		expect(
+			await make([idJagEntry({ allowedClients: ["other-app"] })]).verify(await idJag(), asApp),
+		).toBeNull();
+		expect(
+			await make([idJagEntry({ allowedSubjects: ["user-2"] })]).verify(await idJag(), asApp),
+		).toBeNull();
+		expect(
+			await make([idJagEntry({ expiresAt: new Date(Date.now() - 1) })]).verify(
+				await idJag(),
+				asApp,
+			),
+		).toBeNull();
+	});
+
+	it("throws, not refuses, on a half-configured verifier: no issuerIdentifier or no replaySeenSet", async () => {
+		await expect(
+			make([idJagEntry()], { issuerIdentifier: undefined }).verify(await idJag(), asApp),
+		).rejects.toThrow(/issuerIdentifier/);
+		await expect(
+			make([idJagEntry()], { replaySeenSet: undefined }).verify(await idJag(), asApp),
+		).rejects.toThrow(/replaySeenSet/);
+		expect(() => make([idJagEntry()], { issuerIdentifier: "" })).toThrow(/issuerIdentifier/);
+	});
+
+	it("lets a replay-store outage propagate — the grant answers 503, never accepts a possible replay", async () => {
+		const verifier = make([idJagEntry()], {
+			replaySeenSet: {
+				kind: "down",
+				markSeen: async () => {
+					throw new Error("replay store unreachable");
+				},
+				contains: async () => false,
+			},
+		});
+		await expect(verifier.verify(await idJag(), asApp)).rejects.toThrow(/unreachable/);
+	});
+
+	it("leaves RFC 7523 entries alone: no typ, no jti, the audience list, the plain sub handle", async () => {
+		const verifier = make([entryA()]);
+		const plain = await mint({ sub: "device:1" }, { aud: `${AS}/oauth/token` });
+		expect(await verifier.verify(plain)).toEqual({ subjectHandle: "device:1", issuer: ISSUER_A });
 	});
 });

@@ -952,6 +952,14 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 			expect("error" in result && result.error).toBe("server_error");
 		});
 
+		it("issues no refresh token — the assertion is the refresh mechanism (ID-JAG §5, #526)", async () => {
+			const { result } = await build({ verifier: trusted(["https://api.example"]) }).handle(
+				ctx({}, client({ allowedAudiences: ["https://api.example"] })),
+			);
+			expect(result.status).toBe(200);
+			expect("tokens" in result && result.tokens.refresh_token).toBeUndefined();
+		});
+
 		it("leaves the registration in charge when the issuer says nothing about audiences", async () => {
 			const { result } = await build({
 				verifier: verifierFor({ subjectHandle: "device:abc", issuer: "https://devices.example" }),

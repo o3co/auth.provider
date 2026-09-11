@@ -52,6 +52,7 @@ export type {
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
 export {
 	createRegistryAssertionVerifier,
+	ID_JAG_TYP,
 	type RegistryAssertionVerifierOptions,
 } from "./assertions/registryAssertionVerifier.mjs";
 // #301: possession proof for the RFC 7523 jwt-bearer grant. The port is here;
