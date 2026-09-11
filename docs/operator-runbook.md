@@ -723,8 +723,9 @@ before you flip — and a relying party holding the secret can also mint.
 ### Before you upgrade
 
 1. Read the release's section in `CHANGELOG.md` — entries that start
-   **`BREAKING:`** and every **Migration:** paragraph. Between cuts the pending
-   entries sit under `## [Unreleased]`; no entry ever predicts a future version
+   **`BREAKING:`** and every **Migration:** paragraph. Between cuts there is no
+   pending section — the release-cut PR writes the section from the commit log
+   — and no entry ever predicts a future version
    ([release-policy.md](release-policy.md) R1/R2), so what a release removed is
    stated only once it is cut.
 2. Grep your config for the keys the release retired. A retired key does not
