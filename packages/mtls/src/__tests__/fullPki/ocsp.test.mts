@@ -43,6 +43,7 @@ import {
 	clientAuthEku,
 	KEY_USAGE,
 	keyUsage,
+	malformedOcspNoCheck,
 	mintCa,
 	mintIntermediate,
 	mintLeaf,
@@ -1198,5 +1199,70 @@ describe("delegated responder revocation (#468)", () => {
 		const out = await resolver(b.fetch).resolve(leaf.cert, int.cert, NOW);
 		expect(out).toMatchObject({ ok: true });
 		expect((out as { responderUnchecked?: boolean }).responderUnchecked).toBeUndefined();
+	});
+});
+
+describe("delegated responder revocation — the cached answer (#550 review)", () => {
+	const responderWithoutNoCheck = (int: Minted) =>
+		mintOcspResponder("OCSP Responder", 50, int, {
+			extensions: [basicConstraints(false), keyUsage(KEY_USAGE.digitalSignature), ocspSigningEku()],
+		});
+
+	it("re-checks the responder on a cache hit, so a revocation stops the cached answer counting", async () => {
+		// The status cache outlives the check that admitted it. A responder
+		// revoked after the first lookup must not keep authorizing the
+		// certificate until the OCSP entry expires.
+		const { int, leaf } = await chain();
+		const responder = await responderWithoutNoCheck(int);
+		const { fetch, calls } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+		const hook = vi
+			.fn()
+			.mockResolvedValueOnce({ kind: "determined" })
+			.mockResolvedValue({ kind: "revoked", detail: "listed on the CA's CRL" });
+		const resolver_ = resolver(fetch, { responderRevocation: hook });
+
+		expect(await resolver_.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
+		const after = await resolver_.resolve(leaf.cert, int.cert, NOW);
+		expect(after).toMatchObject({ ok: false, reason: "responder_revoked" });
+		expect(hook).toHaveBeenCalledTimes(2);
+		// The second answer came from the cache — the responder was not asked again.
+		expect(calls).toHaveLength(1);
+	});
+
+	it("does not re-check a responder carrying nocheck on a cache hit", async () => {
+		const { int, leaf } = await chain();
+		const trusted = await mintOcspResponder("OCSP Responder", 51, int);
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: trusted }),
+		});
+		const hook = vi.fn(async () => ({ kind: "revoked" as const, detail: "would refuse" }));
+		const resolver_ = resolver(fetch, { responderRevocation: hook });
+		expect(await resolver_.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
+		expect(await resolver_.resolve(leaf.cert, int.cert, NOW)).toMatchObject({ ok: true });
+		expect(hook).not.toHaveBeenCalled();
+	});
+
+	it("treats a nocheck extension that is not the DER NULL as absent", async () => {
+		// RFC 6960 §4.2.2.2.1 specifies the value; anything else is a broken or
+		// forged certificate, and must not buy the exemption.
+		const { int, leaf } = await chain();
+		const responder = await mintOcspResponder("OCSP Responder", 52, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				ocspSigningEku(),
+				malformedOcspNoCheck(),
+			],
+		});
+		const { fetch } = stubResponders({
+			[RESPONDER_URL]: answering({ issuer: int, subject: leaf, signer: responder }),
+		});
+		const hook = vi.fn(async () => ({ kind: "revoked" as const, detail: "listed" }));
+		expect(
+			await resolver(fetch, { responderRevocation: hook }).resolve(leaf.cert, int.cert, NOW),
+		).toMatchObject({ ok: false, reason: "responder_revoked" });
+		expect(hook).toHaveBeenCalledTimes(1);
 	});
 });

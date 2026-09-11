@@ -405,6 +405,8 @@ type CacheEntry =
 			readonly status: OcspCertificateStatus;
 			/** Epoch millis after which the responder must be asked again. */
 			readonly expiresAt: number;
+			/** #550: the delegated responder to re-check before this entry is believed. */
+			readonly delegate?: pkijs.Certificate;
 	  }
 	| {
 			readonly kind: "unavailable";
@@ -422,6 +424,13 @@ type Answer =
 			readonly expiresAt: number;
 			/** #468: a delegated responder without `nocheck`, taken because no source could check it. */
 			readonly responderUnchecked?: boolean;
+			/**
+			 * #550: the delegated responder this answer depended on, when its
+			 * certificate lacks `nocheck`. Remembered with the cached status so a
+			 * later hit re-checks it: the cache outlives the check that admitted
+			 * it, and a responder revoked in between must stop counting.
+			 */
+			readonly delegate?: pkijs.Certificate;
 	  }
 	| { readonly ok: false; readonly reason: OcspUnavailableReason; readonly detail: string };
 
@@ -761,9 +770,19 @@ const checkDelegatedResponder = async (
 	return { ok: true };
 };
 
-/** Whether a delegated responder's certificate carries `id-pkix-ocsp-nocheck` (#468). */
-const hasNoCheck = (certificate: pkijs.Certificate): boolean =>
-	certificate.extensions?.some((ext) => ext.extnID === OID_OCSP_NOCHECK) === true;
+/**
+ * Whether a delegated responder's certificate carries `id-pkix-ocsp-nocheck`
+ * (#468) — the extension, and the DER `NULL` RFC 6960 §4.2.2.2.1 specifies
+ * as its value. Anything else is a broken or forged certificate, and buys
+ * no exemption: the extension is the CA saying "do not check this one",
+ * and a value it did not write is not that statement (#550).
+ */
+const hasNoCheck = (certificate: pkijs.Certificate): boolean => {
+	const extension = certificate.extensions?.find((ext) => ext.extnID === OID_OCSP_NOCHECK);
+	if (extension === undefined) return false;
+	const bytes = extension.extnValue.valueBlock.valueHexView;
+	return bytes.length === 2 && bytes[0] === 0x05 && bytes[1] === 0x00;
+};
 
 /** The certificate whose key must have signed `basic`: the CA, or a responder it delegated to. */
 const identifySigner = async (
@@ -978,39 +997,15 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		if (!signer.ok) return { ok: false, reason: signer.reason, detail: signer.detail };
 		const signature = await verifySignature(basic, signer.signer, crypto);
 		if (!signature.ok) return { ok: false, reason: "bad_signature", detail: signature.detail };
-		// #468: the delegated responder's own certificate. RFC 6960 §4.2.2.2.1
-		// lets a client skip its revocation check only when it carries
-		// `id-pkix-ocsp-nocheck`; without the extension the responder is checked
-		// like any certificate — through the source the caller wired, which is
-		// the CA's CRL, the one source the responder cannot answer for itself. A
-		// revoked responder's `good` is worth nothing: a CA that revokes a
-		// compromised responder key expects its signatures to stop counting
-		// then, not at the certificate's notAfter. With no source wired the
-		// answer is taken and the deviation is reported to the caller.
+		// #468 / #550: the delegated responder's own certificate, checked here
+		// and again whenever this answer is served from the cache.
+		const delegate =
+			signer.delegate !== undefined && !hasNoCheck(signer.delegate) ? signer.delegate : undefined;
 		let responderUnchecked = false;
-		if (signer.delegate !== undefined && !hasNoCheck(signer.delegate)) {
-			if (options.responderRevocation === undefined) {
-				responderUnchecked = true;
-			} else {
-				const own = await options.responderRevocation(signer.delegate, issuer, now);
-				if (own.kind === "unspecified") responderUnchecked = true;
-				if (own.kind === "revoked") {
-					return {
-						ok: false,
-						reason: "responder_revoked",
-						detail: `the delegated responder's certificate is revoked: ${own.detail}`,
-					};
-				}
-				if (own.kind === "unavailable") {
-					return {
-						ok: false,
-						reason: "responder_status_unavailable",
-						detail:
-							"the delegated responder's own revocation status is unavailable " +
-							`(${own.reason}): ${own.detail}`,
-					};
-				}
-			}
+		if (delegate !== undefined) {
+			const verdict = await checkResponder(delegate, issuer, now);
+			if (!verdict.ok) return { ok: false, reason: verdict.reason, detail: verdict.detail };
+			responderUnchecked = verdict.unchecked;
 		}
 
 		// The nonce is judged on bytes the responder actually signed.
@@ -1049,10 +1044,57 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				detail: `the responder at ${url} does not know the certificate (RFC 6960 §2.2)`,
 			};
 		}
-		return { ok: true, responderUnchecked, status: decoded.status, expiresAt: fresh.expiresAt };
+		return {
+			ok: true,
+			responderUnchecked,
+			status: decoded.status,
+			expiresAt: fresh.expiresAt,
+			...(delegate === undefined ? {} : { delegate }),
+		};
 	};
 
 	/** `query`, joining a request for the same certificate that is already in flight. */
+	/**
+	 * A delegated responder's own certificate (#468). RFC 6960 §4.2.2.2.1 lets
+	 * a client skip this only for a responder carrying `id-pkix-ocsp-nocheck`;
+	 * without it the responder is checked through the source the caller wired,
+	 * which is the CA's CRL — the one source a responder cannot answer for
+	 * itself. A revoked responder's `good` is worth nothing: a CA that revokes
+	 * a compromised responder key expects its signatures to stop counting then,
+	 * not at the certificate's notAfter. With no source wired, or none the CA
+	 * named, the answer is taken and the deviation is reported to the caller.
+	 *
+	 * Called when the answer is built and again on every cache hit (#550): the
+	 * cached status outlives the check that admitted it.
+	 */
+	const checkResponder = async (
+		delegate: pkijs.Certificate,
+		issuer: pkijs.Certificate,
+		now: Date,
+	): Promise<
+		{ ok: true; unchecked: boolean } | { ok: false; reason: OcspUnavailableReason; detail: string }
+	> => {
+		if (options.responderRevocation === undefined) return { ok: true, unchecked: true };
+		const own = await options.responderRevocation(delegate, issuer, now);
+		if (own.kind === "revoked") {
+			return {
+				ok: false,
+				reason: "responder_revoked",
+				detail: `the delegated responder's certificate is revoked: ${own.detail}`,
+			};
+		}
+		if (own.kind === "unavailable") {
+			return {
+				ok: false,
+				reason: "responder_status_unavailable",
+				detail:
+					"the delegated responder's own revocation status is unavailable " +
+					`(${own.reason}): ${own.detail}`,
+			};
+		}
+		return { ok: true, unchecked: own.kind === "unspecified" };
+	};
+
 	const load = (
 		key: string,
 		url: string,
@@ -1076,8 +1118,27 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		serial: string,
 		now: Date,
 	): Promise<Answer> => {
-		const known = cache.get(statusKey(url, issuerId, serial));
+		const statusCacheKey = statusKey(url, issuerId, serial);
+		const known = cache.get(statusCacheKey);
 		if (known?.kind === "status" && known.expiresAt > now.getTime()) {
+			// #550: a cached answer from a delegated responder is only as good as
+			// that responder still is. Re-check it — the source behind the hook
+			// has its own cache, so this is cheap — and drop the entry when it
+			// has been revoked since.
+			if (known.delegate !== undefined) {
+				const verdict = await checkResponder(known.delegate, issuer, now);
+				if (!verdict.ok) {
+					cache.delete(statusCacheKey);
+					return { ok: false, reason: verdict.reason, detail: verdict.detail };
+				}
+				return {
+					ok: true,
+					status: known.status,
+					expiresAt: known.expiresAt,
+					responderUnchecked: verdict.unchecked,
+					delegate: known.delegate,
+				};
+			}
 			return { ok: true, status: known.status, expiresAt: known.expiresAt };
 		}
 		for (const key of [responderDownKey(url), certificateDownKey(url, issuerId, serial)]) {
@@ -1089,10 +1150,11 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 
 		const answer = await load(`${url}\n${issuerId}\n${serial}`, url, certificate, issuer, now);
 		if (answer.ok) {
-			store(statusKey(url, issuerId, serial), {
+			store(statusCacheKey, {
 				kind: "status",
 				status: answer.status,
 				expiresAt: answer.expiresAt,
+				...(answer.delegate === undefined ? {} : { delegate: answer.delegate }),
 			});
 			return answer;
 		}

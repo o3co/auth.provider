@@ -323,9 +323,24 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 						? {
 								responderRevocation: async (responder, issuer, now) => {
 									const own = await byCrl(responder, issuer, now);
-									return own.kind === "unavailable" && own.reason === "no_distribution_point"
-										? { kind: "unspecified" }
-										: own;
+									if (own.kind === "unavailable") {
+										return own.reason === "no_distribution_point" ? { kind: "unspecified" } : own;
+									}
+									// #550: a CRL the resolver could only partly use does not
+									// say the responder is clean — it is the same partial answer
+									// `on-unavailable` judges for any certificate (#446), and a
+									// responder is not the place to guess in the permissive
+									// direction: its answer is discarded and the leaf falls back
+									// to its own CRL.
+									if (own.kind === "determined" && own.unavailable.length > 0) {
+										const last = own.unavailable[own.unavailable.length - 1] as CrlPointUnavailable;
+										return {
+											kind: "unavailable",
+											reason: last.reason,
+											detail: describeUnavailable(own.unavailable),
+										};
+									}
+									return own;
 								},
 							}
 						: {}),
