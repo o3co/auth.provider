@@ -15,7 +15,7 @@ OAuth 2.0 / OIDC provider. Issue JWTs via session-based login or the authorizati
 - **Modular composition** — Pick only the modules you need. Skip session, federation, or authorization code for API-only deployments.
 - **JWT algorithm selection** — EdDSA (default), ES256, RS256, HS256. The default is asymmetric, so the JWKS endpoint (`/.well-known/jwks.json`) publishes a real verification key and relying parties never hold one that can also mint tokens. HS256 stays selectable and publishes no JWKS.
 - **OAuth 2.0 compliance** — Authorization code flow with PKCE (RFC 7636), token introspection (RFC 7662), refresh tokens
-- **Session authentication** — Local username/password login + OAuth federation (Google, GitHub, and custom providers via per-federation `defineModule(...)` modules)
+- **Session authentication** — Local username/password login + OAuth federation (Google, GitHub, Apple, any OpenID Connect provider, and custom providers via per-federation `defineModule(...)` modules)
 - **Rate limiting** — Per-endpoint configurable limits
 - **HOCON configuration** — Type-safe config with Zod validation and environment variable overrides
 
@@ -47,7 +47,7 @@ pnpm build
 - **core** — Interfaces, config schemas, token service, app factory. Always required.
 - **oauth** — OAuth routes (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`). Required for any token issuance.
 - **session** — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.
-- **federation-google / federation-github / federation-apple** — Concrete OAuth federation providers. Optional — install only the providers you register. An iOS app offering Google or GitHub login must offer Sign in with Apple too (App Store Review Guideline 4.8).
+- **federation-google / federation-github / federation-apple / federation-oidc** — Concrete OAuth federation providers; `federation-oidc` brokers to any OpenID Connect IdP by issuer, one instance per issuer. Optional — install only the providers you register. An iOS app offering Google or GitHub login must offer Sign in with Apple too (App Store Review Guideline 4.8).
 - **foundation** — Production HTTP user-authentication adapter (client of "the Store"). Optional.
 - **webauthn / dpop / mtls / oauth-token-exchange / device-grant / redis** — Optional capability and adapter modules; see [Packages](#packages).
 
@@ -66,6 +66,7 @@ pnpm build
 | [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google federation provider |
 | [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub federation provider |
 | [`packages/federation-apple`](packages/federation-apple/) | `@o3co/auth-provider-federation-apple` | Sign in with Apple federation provider — `form_post` callback, rotating ES256 client secret |
+| [`packages/federation-oidc`](packages/federation-oidc/) | `@o3co/auth-provider-federation-oidc` | Generic OpenID Connect federation provider — any OIDC IdP by issuer (Okta, Entra ID, Auth0, Keycloak), one instance per issuer, no JIT provisioning |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis-backed adapters and `defineModule` manifests |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Production HTTP user-authentication adapter ("the Store" client) |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |
@@ -145,6 +146,7 @@ federations {
     # clientId, clientSecret, callbackURL — required when enabled = true
   }
   # github { enabled = false }
+  # okta { enabled = false, type = "oidc" }   # any OpenID Connect IdP, by issuer
 }
 ```
 

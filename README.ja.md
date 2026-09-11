@@ -58,6 +58,7 @@ pnpm build
 | [`packages/federation-google`](packages/federation-google/) | `@o3co/auth-provider-federation-google` | Google フェデレーションプロバイダー |
 | [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub フェデレーションプロバイダー |
 | [`packages/federation-apple`](packages/federation-apple/) | `@o3co/auth-provider-federation-apple` | Sign in with Apple フェデレーションプロバイダー — `form_post` コールバック、ローテーションする ES256 クライアントシークレット |
+| [`packages/federation-oidc`](packages/federation-oidc/) | `@o3co/auth-provider-federation-oidc` | 汎用 OpenID Connect フェデレーションプロバイダー — issuer 指定で任意の OIDC IdP（Okta, Entra ID, Auth0, Keycloak）、issuer ごとに 1 インスタンス、JIT プロビジョニングなし |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis バックエンドのアダプターと `defineModule` マニフェスト |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | 本番向け HTTP ユーザー認証アダプター（「the Store」のクライアント） |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |

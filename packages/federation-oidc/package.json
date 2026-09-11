@@ -1,0 +1,58 @@
+{
+	"name": "@o3co/auth-provider-federation-oidc",
+	"description": "Generic OpenID Connect federation provider for auth.provider — any OIDC-compliant IdP, configured by issuer",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/federation-oidc"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"jose": "^6.2.10",
+		"openid-client": "^6.8.7"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:^",
+		"@o3co/auth-provider-session": "workspace:^"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-session": "workspace:*",
+		"@types/express": "^5.0.6",
+		"@types/supertest": "^7.2.1",
+		"express": "^5.2.1",
+		"supertest": "^7.2.2",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.11",
+		"@vitest/coverage-v8": "^4.1.10"
+	}
+}

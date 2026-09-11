@@ -311,6 +311,42 @@ all — no headers, no `Vary`, nothing changed.
 | `FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret |
 | `FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth callback URL |
 
+### OIDC Federation (any OpenID Connect provider)
+
+One instance ships in `config/application.conf` under `federations.oidc`
+(`@o3co/auth-provider-federation-oidc`, #524): Okta, Entra ID, Auth0, Keycloak
+or your own tenant, selected by issuer. Discovery runs at boot and a failure
+refuses boot. The identity handed to the Store is `oidc:<sub>`; an identity
+the Store does not know is refused with 401 — nothing is provisioned.
+
+| Variable | Default | Description |
+|---|---|---|
+| `FEDERATIONS_OIDC_ENABLED` | `false` | Enable the OIDC federation |
+| `FEDERATIONS_OIDC_ISSUER` | — | Issuer identifier (https), exactly as the IdP writes `iss` |
+| `FEDERATIONS_OIDC_CLIENT_ID` | — | Client ID registered at the IdP |
+| `FEDERATIONS_OIDC_CLIENT_SECRET` | — | Client secret (`client_secret_basic`); set `privateKey` in the config file for `private_key_jwt` instead |
+| `FEDERATIONS_OIDC_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/oidc/callback` | Where the IdP sends the browser back |
+
+A second IdP is another section with `type = "oidc"` and its own callback:
+
+```hocon
+federations {
+  okta {
+    enabled = true
+    type = "oidc"
+    issuer = "https://dev-123.okta.com"
+    clientId = ${OKTA_CLIENT_ID}
+    clientSecret = ${OKTA_CLIENT_SECRET}
+    callbackURL = "https://auth.example.com/session/oauth/federation/okta/callback"
+    redirectAllowlist = ["https://app.example.com/welcome"]
+  }
+}
+```
+
+Every field the package accepts — `scopes`, `discovery` / `endpoints`,
+`privateKey`, `userInfo`, `idTokenSignedResponseAlg`, `clockToleranceSeconds` —
+is documented in [its README](../../packages/federation-oidc/README.md).
+
 ### Client Repository
 
 | Variable | Default | Description |

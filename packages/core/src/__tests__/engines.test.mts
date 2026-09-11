@@ -34,6 +34,7 @@ const PUBLISHED_PACKAGES = [
 	"packages/foundation",
 	"packages/federation-github",
 	"packages/federation-google",
+	"packages/federation-oidc",
 	"packages/oauth-token-exchange",
 	"packages/webauthn",
 	"packages/dpop",
