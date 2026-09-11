@@ -72,8 +72,8 @@ function removedInStamps(): Stamp[] {
 }
 
 /** CHANGELOG sections as `[heading, body]`, oldest first. */
-function changelogSections(): [string, string][] {
-	return changelog
+function changelogSections(text: string = changelog): [string, string][] {
+	return text
 		.split(/^(?=## \[)/m)
 		.flatMap((section): [string, string][] => {
 			const heading = /^## \[([^\]]+)\]/.exec(section)?.[1];
@@ -85,6 +85,18 @@ function changelogSections(): [string, string][] {
 /** Whether `body` cites `#<pr>` (and not, say, `#3300` for pr `330`). */
 const cites = (body: string, pr: string): boolean => new RegExp(`#${pr}(?!\\d)`).test(body);
 
+/**
+ * The oldest *version* section citing `#<pr>` — a later release may mention
+ * the PR in passing. A `## [Unreleased]` heading is never a release: the
+ * policy has no standing one (R2, #475), and one left behind must not force
+ * a tag to be stamped before the version section exists.
+ */
+const versionSectionCiting = (
+	sections: readonly [string, string][],
+	pr: string,
+): [string, string] | undefined =>
+	sections.find(([heading, body]) => heading !== "Unreleased" && cites(body, pr));
+
 /** A released tag, optionally followed by a marker: `v0.10.0 (#330)`. */
 const RELEASED_TAG = /^v\d+\.\d+\.\d+(?:\s|$)/;
 
@@ -93,6 +105,16 @@ describe("removedIn stamps (#458)", () => {
 
 	it("finds stamps at all — the scan is not vacuously passing", () => {
 		expect(stamps.length).toBeGreaterThan(0);
+	});
+
+	it("never reads a legacy ## [Unreleased] section as the release that shipped a PR (#547 review)", () => {
+		// The policy has no standing Unreleased section (R2), but one left behind
+		// must not force a tag to be stamped before a version section exists.
+		const sections = changelogSections(
+			"## [Unreleased]\n- pending (#123)\n\n## [0.9.0] - 2026-01-01\n- shipped (#100)\n",
+		);
+		expect(versionSectionCiting(sections, "123")).toBeUndefined();
+		expect(versionSectionCiting(sections, "100")?.[0]).toBe("0.9.0");
 	});
 
 	it("names a released tag, or cites a PR no CHANGELOG version section lists yet", () => {
@@ -105,10 +127,9 @@ describe("removedIn stamps (#458)", () => {
 					`${file}: "${value}" is neither a released tag nor a placeholder citing its PR as #NNN`,
 				];
 			}
-			// Oldest section first: a later release may mention the PR in passing.
 			// The section is written at cut time (R2, #475): a PR no version section
 			// lists has not been cut, and its placeholder stands.
-			const shipped = sections.find(([, body]) => cites(body, pr));
+			const shipped = versionSectionCiting(sections, pr);
 			if (shipped === undefined) return [];
 			return [
 				`${file}: "${value}" — #${pr} is under CHANGELOG [${shipped[0]}]; ` +
