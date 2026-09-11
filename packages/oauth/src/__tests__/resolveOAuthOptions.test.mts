@@ -124,3 +124,41 @@ describe("resolveOAuthOptions", () => {
 		);
 	});
 });
+
+describe("resolveOAuthOptions — Client ID Metadata Documents (#529)", () => {
+	const cimd = (config: Record<string, unknown>) =>
+		resolveOAuthOptions({ oauth: { clientIdMetadataDocuments: config } } as never)
+			.clientIdMetadataDocuments;
+
+	it("reads a list from an array, a comma-separated string, or neither", () => {
+		// HOCON gives an array; an environment override gives one string.
+		expect(cimd({ allowedHosts: ["a.example", "b.example"] }).allowedHosts).toEqual([
+			"a.example",
+			"b.example",
+		]);
+		expect(cimd({ allowedHosts: " a.example , b.example ,, " }).allowedHosts).toEqual([
+			"a.example",
+			"b.example",
+		]);
+		expect(cimd({ allowedHosts: 7 }).allowedHosts).toEqual([]);
+		expect(cimd({}).allowedHosts).toEqual([]);
+		// A list is strings only, whatever else the array held.
+		expect(cimd({ deniedHosts: ["a.example", 3, null] }).deniedHosts).toEqual(["a.example"]);
+	});
+
+	it("reads a bound from a number or its string, and refuses what is not one", () => {
+		expect(cimd({ maxBytes: 4096 }).maxBytes).toBe(4096);
+		expect(cimd({ maxBytes: "4096" }).maxBytes).toBe(4096);
+		expect(cimd({ maxBytes: 0 }).maxBytes).toBe(0);
+		expect(cimd({ maxBytes: -1 }).maxBytes).toBeUndefined();
+		expect(cimd({ maxBytes: 1.5 }).maxBytes).toBeUndefined();
+		expect(cimd({ maxBytes: "not-a-number" }).maxBytes).toBeUndefined();
+		expect(cimd({}).maxBytes).toBeUndefined();
+	});
+
+	it("is off unless the flag says exactly true", () => {
+		expect(cimd({}).enabled).toBe(false);
+		expect(cimd({ enabled: "true" }).enabled).toBe(false);
+		expect(cimd({ enabled: true }).enabled).toBe(true);
+	});
+});
