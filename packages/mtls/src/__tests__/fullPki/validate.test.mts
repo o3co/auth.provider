@@ -1777,21 +1777,52 @@ describe("full-pki revocation — mode = both (#431)", () => {
 		);
 	});
 
-	it("falls back to the CRL when the responder answers unknown", async () => {
+	it("treats an OCSP unknown as final under both — the CRL is not consulted (#471)", async () => {
+		// RFC 6960 §2.2: `unknown` is the responder's answer — it does not know
+		// the certificate — and for a serial the CA never issued that is the
+		// whole finding. A CRL cannot list a never-issued serial, so falling
+		// back would judge exactly that certificate by the source that cannot
+		// see it: `both` would be weaker than `ocsp` for the case that matters.
 		const { root, int, leaf } = await ocspAndCrlChain();
 		const { impl, calls } = stubFetch({
 			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
 			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
 			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
 		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
 
 		const result = await validator([root], {
 			revocation: fetchingPolicy("both", "reject"),
 			fetchImpl: impl,
+			logger,
 		}).validate(leaf.x509, [int.x509], NOW);
 
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.step).toBe("revocation status unavailable");
+		expect(calls).not.toContain(INT_CRL_URL);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"mtls_revocation_ocsp_fallback",
+		);
+	});
+
+	it("under both with on-unavailable = allow, an OCSP unknown is admitted as unavailable, never CRL-checked (#471)", async () => {
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl, calls } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [leaf] }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "allow"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		// `allow` admits an unavailable status by policy; the CRL that would have
+		// refused this certificate did not decide, because it was never asked.
 		expect(result).toEqual({ ok: true });
-		expect(calls).toContain(INT_CRL_URL);
+		expect(calls).not.toContain(INT_CRL_URL);
 	});
 
 	it.each(["reject", "allow"] as const)(

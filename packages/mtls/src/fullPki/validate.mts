@@ -357,8 +357,10 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 	/**
 	 * The certificate's status from the configured source(s). Under `"both"`
 	 * the responder goes first and the CRL is consulted only when it could
-	 * not answer; a status either source determined is final, and the
-	 * certificate is unavailable only when both are.
+	 * not answer — could not, not would not: an OCSP `unknown` is final
+	 * (#471). A status either source determined is final, and the
+	 * certificate is unavailable only when both are, or when the responder
+	 * said `unknown`.
 	 */
 	const decide = async (
 		certificate: pkijs.Certificate,
@@ -369,6 +371,14 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		if (revocation.mode === "ocsp") return byOcsp(certificate, issuer, now);
 		const ocsp = await byOcsp(certificate, issuer, now);
 		if (ocsp.kind !== "unavailable") return ocsp;
+		// #471: `unknown` is an answer, not an outage. RFC 6960 §2.2: the
+		// responder does not know the certificate — for a serial the CA never
+		// issued, that is the whole finding — and a CRL cannot list a
+		// never-issued serial, so consulting it would judge exactly that
+		// certificate by the one source that cannot see it. The fallback
+		// covers the transport-, freshness- and signature-shaped reasons only;
+		// an `unknown` stands, and `on-unavailable` decides what it means.
+		if (ocsp.reason === "unknown") return ocsp;
 		// A certificate that names no responder is a normal shape under
 		// "both" — a CA that publishes only CRLs for some of its
 		// certificates — not an outage. A responder that was asked and did
