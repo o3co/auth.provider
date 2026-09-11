@@ -1010,6 +1010,19 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			const res = await authorize(app, { ...baseQuery, max_age: ["60", "120"] });
 			expect(redirectParams(res).get("error")).toBe("invalid_request");
 		});
+
+		it("refuses a repeated reauth_after before interpreting it, rather than sending a stale session to login with the marker collapsed", async () => {
+			// Read as "no marker", a repeat would earn a login redirect whose
+			// rebuilt URL carries one server-written marker, and the request
+			// would then succeed where it should have been refused.
+			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
+			const res = await authorize(app, {
+				...baseQuery,
+				prompt: "login",
+				reauth_after: ["1", "2"],
+			});
+			expect(redirectParams(res).get("error")).toBe("invalid_request");
+		});
 	});
 
 	describe("prompt=login", () => {

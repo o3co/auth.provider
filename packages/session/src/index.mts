@@ -122,6 +122,8 @@ export {
 	sessionStoreModule,
 	sessionStoreModuleFor,
 } from "./modules/sessionStoreModule.mjs";
+// #481 — the `amr` value a federated login records beside the upstream IdP's.
+export { FEDERATED_AMR } from "./routes/Federation.mjs";
 export type { SessionStoreFactory } from "./store/factory.mjs";
 export {
 	createSessionStoreFactory,
