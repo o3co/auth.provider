@@ -155,6 +155,25 @@ describe("verifyWebAuthnAttestation (spec §2.5)", () => {
 		expect(result).toEqual({ ok: false, reason: "rp_id_mismatch" });
 	});
 
+	it("accepts only the algorithms registration offered (#516 review)", async () => {
+		// The options test pins what is advertised; this pins what is accepted.
+		// Without both, dropping this argument would let SimpleWebAuthn's
+		// runtime-dependent default accept an ML-DSA credential the offer never
+		// made — which is the drift the explicit set exists to prevent.
+		mockVerifyRegistration.mockResolvedValueOnce({ verified: false });
+
+		await verifyWebAuthnAttestation({
+			response: STUB_REGISTRATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+
+		expect(mockVerifyRegistration).toHaveBeenCalledWith(
+			expect.objectContaining({ supportedAlgorithmIDs: [-8, -7, -257] }),
+		);
+	});
+
 	it("returns attestation_invalid when verified=false", async () => {
 		mockVerifyRegistration.mockResolvedValueOnce({ verified: false });
 
