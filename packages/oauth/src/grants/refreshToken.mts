@@ -29,7 +29,6 @@ import {
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
-import { decodeJwtPayload } from "./_jwtPayload.mjs";
 import {
 	deriveAudienceFromResources,
 	extractResourceParam,
@@ -545,6 +544,190 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			const bindNewRefreshToken =
 				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
+			// #449: the rotation is a reservation, and a lost race must not have
+			// cost a signature. The new refresh token's identity — its `jti`, and
+			// the instant its lifetime is measured from — is decided here,
+			// committed to the family store below, and signed only once that
+			// commit holds. A replay or a revoked family therefore returns having
+			// signed nothing, which is what it costs that matters under a
+			// KMS-backed signing key (#303): a billable remote call per lost race,
+			// for tokens that are never issued.
+			const issuedAt = Math.floor(Date.now() / 1000);
+			const newRefreshJti = randomUUID();
+			const newRefreshExp = issuedAt + config.oauth.refreshToken.expiresIn;
+
+			if (deps.refreshTokenFamilyRotation) {
+				// SF-6 fail-fast above already returned for missing
+				// jti/family_id when rotation is wired. The check below
+				// documents that invariant, narrows for TS, and acts as
+				// defense-in-depth if a future refactor moves the gate.
+				if (previousJti === null || familyId === null) {
+					throw new Error(
+						"invariant violation: SF-6 fail-fast must run before refresh-token rotation block",
+					);
+				}
+				// CP-17: fail-closed when the store is unavailable. Same
+				// rationale as CP-16 — we cannot atomically consume the old
+				// jti and register the new one, so replay detection cannot
+				// be guaranteed. Return 503 so the client retries rather
+				// than bubbling an unhandled 500 HTML from express.
+				let rotateResult: Awaited<ReturnType<typeof deps.refreshTokenFamilyRotation.rotate>>;
+				try {
+					rotateResult = await deps.refreshTokenFamilyRotation.rotate(
+						previousJti,
+						newRefreshJti,
+						newFamilyId,
+						newRefreshExp * 1000,
+					);
+				} catch {
+					return {
+						result: {
+							status: 503,
+							error: "temporarily_unavailable",
+							errorDescription: "refresh token store unavailable",
+						},
+					};
+				}
+				// Exhaustive switch over the 4-outcome rotation union.
+				// Each case explicitly handles the security-relevant
+				// outcome; falling through to issuance (the v0.4.x
+				// behavior for unknown_family) is now an explicit
+				// policy decision under operator control (CC-2).
+				switch (rotateResult.outcome) {
+					case "rotated":
+						// Successful rotation — fall through to the
+						// success path below (token issuance).
+						break;
+					case "replayed": {
+						// PB-1: RFC 6819 §5.2.2 / OAuth 2.1 BCP §4.14.2
+						// require revoking the entire family on replay
+						// so siblings cannot continue to redeem.
+						//
+						// #274: the shipped rotation now revokes the family
+						// inside the same compare-and-swap that detected the
+						// replay and says so with `familyRevoked: true`. That
+						// is the ONLY ordering with no race — this handler
+						// used to issue the revoke as a second write, and a
+						// sibling holding the still-active token could rotate
+						// successfully in between.
+						//
+						// The fallback below is not dead code: `familyRevoked`
+						// is optional, so a custom `RefreshTokenFamilyRotation`
+						// written before #274 still reports a bare
+						// `{ outcome: "replayed" }`. Absence is treated as "not
+						// revoked" and we revoke separately — the pre-#274
+						// behaviour, race and all, but never worse than it.
+						// Fail closed when the revocation dep is missing or
+						// throws: silently rejecting only the present request
+						// would leave sibling RTs valid.
+						if (rotateResult.familyRevoked !== true) {
+							if (!deps.refreshTokenFamilyRevocation) {
+								logger?.error(
+									{ clientId: authenticatedClientId },
+									"rt_reuse_detected_but_no_revocation_dep",
+								);
+								return {
+									result: {
+										status: 503,
+										error: "temporarily_unavailable",
+										errorDescription: "refresh token family revocation not configured",
+									},
+								};
+							}
+							try {
+								await deps.refreshTokenFamilyRevocation.revokeFamily(newFamilyId);
+							} catch {
+								return {
+									result: {
+										status: 503,
+										error: "temporarily_unavailable",
+										errorDescription: "refresh token store unavailable",
+									},
+								};
+							}
+						}
+						logger?.warn(
+							{ familyId: newFamilyId, clientId: authenticatedClientId },
+							"rt_reuse_detected_family_revoked",
+						);
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "replay_detected",
+							},
+						};
+					}
+					case "revoked":
+						return {
+							result: {
+								status: 400,
+								error: "invalid_grant",
+								errorDescription: "family_revoked",
+							},
+						};
+					case "unknown_family": {
+						// CC-2: defense-in-depth — SF-6 already rejects
+						// tokens with familyId === null when rotation is
+						// wired, but if a future change reorders gates,
+						// fall through to a hard reject regardless of
+						// policy when there was never a family to consult.
+						if (familyId === null) {
+							logger?.warn(
+								{ clientId: authenticatedClientId },
+								"unknown_family_rejected_no_family_id_claim",
+							);
+							return {
+								result: {
+									status: 400,
+									error: "invalid_grant",
+									errorDescription: "unknown_family",
+								},
+							};
+						}
+						const policy = config.oauth.refreshToken.unknownFamilyPolicy ?? "reject";
+						if (policy === "reject") {
+							logger?.warn(
+								{
+									familyId: newFamilyId,
+									jti: previousJti,
+									clientId: authenticatedClientId,
+								},
+								"unknown_family_rejected",
+							);
+							return {
+								result: {
+									status: 400,
+									error: "invalid_grant",
+									errorDescription: "unknown_family",
+								},
+							};
+						}
+						// "accept" — legacy migration mode only; emit
+						// audit log and fall through to issuance.
+						logger?.warn(
+							{
+								familyId: newFamilyId,
+								jti: previousJti,
+								clientId: authenticatedClientId,
+							},
+							"unknown_family_accepted_legacy_mode",
+						);
+						break;
+					}
+					default: {
+						// Exhaustiveness guard: every outcome above
+						// either returns or breaks. A future addition
+						// to RefreshTokenFamilyRotationOutcome that
+						// forgets to update this switch will produce a
+						// compile error here rather than silently
+						// falling through to token issuance.
+						const _exhaustive: never = rotateResult;
+						throw new Error(`unhandled rotation outcome: ${JSON.stringify(_exhaustive)}`);
+					}
+				}
+			}
+
 			const newAccessToken = await generateToken(
 				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
 				{
@@ -579,186 +762,12 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					authorizedParty: authenticatedClientId,
 					scope: scopeClaim,
 					tokenType: "rt+jwt",
+					// #449: the identity reserved with the family store above.
+					jti: newRefreshJti,
+					issuedAt,
 					...(bindNewRefreshToken ? { confirmation: presentedConfirmation } : {}),
 				},
 			);
-
-			if (deps.refreshTokenFamilyRotation) {
-				// SF-6 fail-fast above already returned for missing
-				// jti/family_id when rotation is wired. The check below
-				// documents that invariant, narrows for TS, and acts as
-				// defense-in-depth if a future refactor moves the gate.
-				if (previousJti === null || familyId === null) {
-					throw new Error(
-						"invariant violation: SF-6 fail-fast must run before refresh-token rotation block",
-					);
-				}
-				const newRefreshPayload = decodeJwtPayload(newRefreshToken.token);
-				const newJti = newRefreshPayload.jti as string | undefined;
-				const newExp = newRefreshPayload.exp as number | undefined;
-				if (typeof newJti === "string" && typeof newExp === "number") {
-					// CP-17: fail-closed when the store is unavailable. Same
-					// rationale as CP-16 — we cannot atomically consume the old
-					// jti and register the new one, so replay detection cannot
-					// be guaranteed. Return 503 so the client retries rather
-					// than bubbling an unhandled 500 HTML from express.
-					let rotateResult: Awaited<ReturnType<typeof deps.refreshTokenFamilyRotation.rotate>>;
-					try {
-						rotateResult = await deps.refreshTokenFamilyRotation.rotate(
-							previousJti,
-							newJti,
-							newFamilyId,
-							newExp * 1000,
-						);
-					} catch {
-						return {
-							result: {
-								status: 503,
-								error: "temporarily_unavailable",
-								errorDescription: "refresh token store unavailable",
-							},
-						};
-					}
-					// Exhaustive switch over the 4-outcome rotation union.
-					// Each case explicitly handles the security-relevant
-					// outcome; falling through to issuance (the v0.4.x
-					// behavior for unknown_family) is now an explicit
-					// policy decision under operator control (CC-2).
-					switch (rotateResult.outcome) {
-						case "rotated":
-							// Successful rotation — fall through to the
-							// success path below (token issuance).
-							break;
-						case "replayed": {
-							// PB-1: RFC 6819 §5.2.2 / OAuth 2.1 BCP §4.14.2
-							// require revoking the entire family on replay
-							// so siblings cannot continue to redeem.
-							//
-							// #274: the shipped rotation now revokes the family
-							// inside the same compare-and-swap that detected the
-							// replay and says so with `familyRevoked: true`. That
-							// is the ONLY ordering with no race — this handler
-							// used to issue the revoke as a second write, and a
-							// sibling holding the still-active token could rotate
-							// successfully in between.
-							//
-							// The fallback below is not dead code: `familyRevoked`
-							// is optional, so a custom `RefreshTokenFamilyRotation`
-							// written before #274 still reports a bare
-							// `{ outcome: "replayed" }`. Absence is treated as "not
-							// revoked" and we revoke separately — the pre-#274
-							// behaviour, race and all, but never worse than it.
-							// Fail closed when the revocation dep is missing or
-							// throws: silently rejecting only the present request
-							// would leave sibling RTs valid.
-							if (rotateResult.familyRevoked !== true) {
-								if (!deps.refreshTokenFamilyRevocation) {
-									logger?.error(
-										{ clientId: authenticatedClientId },
-										"rt_reuse_detected_but_no_revocation_dep",
-									);
-									return {
-										result: {
-											status: 503,
-											error: "temporarily_unavailable",
-											errorDescription: "refresh token family revocation not configured",
-										},
-									};
-								}
-								try {
-									await deps.refreshTokenFamilyRevocation.revokeFamily(newFamilyId);
-								} catch {
-									return {
-										result: {
-											status: 503,
-											error: "temporarily_unavailable",
-											errorDescription: "refresh token store unavailable",
-										},
-									};
-								}
-							}
-							logger?.warn(
-								{ familyId: newFamilyId, clientId: authenticatedClientId },
-								"rt_reuse_detected_family_revoked",
-							);
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "replay_detected",
-								},
-							};
-						}
-						case "revoked":
-							return {
-								result: {
-									status: 400,
-									error: "invalid_grant",
-									errorDescription: "family_revoked",
-								},
-							};
-						case "unknown_family": {
-							// CC-2: defense-in-depth — SF-6 already rejects
-							// tokens with familyId === null when rotation is
-							// wired, but if a future change reorders gates,
-							// fall through to a hard reject regardless of
-							// policy when there was never a family to consult.
-							if (familyId === null) {
-								logger?.warn(
-									{ clientId: authenticatedClientId },
-									"unknown_family_rejected_no_family_id_claim",
-								);
-								return {
-									result: {
-										status: 400,
-										error: "invalid_grant",
-										errorDescription: "unknown_family",
-									},
-								};
-							}
-							const policy = config.oauth.refreshToken.unknownFamilyPolicy ?? "reject";
-							if (policy === "reject") {
-								logger?.warn(
-									{
-										familyId: newFamilyId,
-										jti: previousJti,
-										clientId: authenticatedClientId,
-									},
-									"unknown_family_rejected",
-								);
-								return {
-									result: {
-										status: 400,
-										error: "invalid_grant",
-										errorDescription: "unknown_family",
-									},
-								};
-							}
-							// "accept" — legacy migration mode only; emit
-							// audit log and fall through to issuance.
-							logger?.warn(
-								{
-									familyId: newFamilyId,
-									jti: previousJti,
-									clientId: authenticatedClientId,
-								},
-								"unknown_family_accepted_legacy_mode",
-							);
-							break;
-						}
-						default: {
-							// Exhaustiveness guard: every outcome above
-							// either returns or breaks. A future addition
-							// to RefreshTokenFamilyRotationOutcome that
-							// forgets to update this switch will produce a
-							// compile error here rather than silently
-							// falling through to token issuance.
-							const _exhaustive: never = rotateResult;
-							throw new Error(`unhandled rotation outcome: ${JSON.stringify(_exhaustive)}`);
-						}
-					}
-				}
-			}
 
 			return {
 				result: {

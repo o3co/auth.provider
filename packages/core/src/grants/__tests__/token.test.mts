@@ -337,3 +337,39 @@ describe("generateToken cnf coexists with other claims", () => {
 		expect(payload.cnf).toEqual({ jkt: "abc123" });
 	});
 });
+
+describe("generateToken — a reserved identity (#449)", () => {
+	const keyStore = createSymmetricKeyStore("a-test-secret-at-least-32-chars!!");
+	const claimsOf = (token: string): Record<string, unknown> =>
+		JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf-8")) as Record<
+			string,
+			unknown
+		>;
+
+	it("signs the jti and the issuing instant the caller reserved", async () => {
+		// The refresh grant commits a rotation to the family store before it
+		// signs anything, so the identity it reserved must be the identity the
+		// token carries — the same jti, and an exp measured from the same
+		// instant the reservation's expiry was.
+		const issuedAt = 1_700_000_000;
+		const { token } = await generateToken(
+			{},
+			{ keyStore, expiresIn: 3600, jti: "reserved-jti", issuedAt },
+		);
+		const claims = claimsOf(token);
+		expect(claims.jti).toBe("reserved-jti");
+		expect(claims.iat).toBe(issuedAt);
+		expect(claims.exp).toBe(issuedAt + 3600);
+	});
+
+	it("still mints a fresh jti and reads the clock when neither is given", async () => {
+		const before = Math.floor(Date.now() / 1000);
+		const a = claimsOf((await generateToken({}, { keyStore, expiresIn: 60 })).token);
+		const b = claimsOf((await generateToken({}, { keyStore, expiresIn: 60 })).token);
+		expect(a.jti).not.toBe(b.jti);
+		expect(a.jti as string).toMatch(
+			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+		);
+		expect(a.iat as number).toBeGreaterThanOrEqual(before);
+	});
+});

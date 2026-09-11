@@ -96,6 +96,20 @@ export interface GenerateTokenOptions {
 	 * (Bearer semantics).
 	 */
 	confirmation?: Confirmation;
+	/**
+	 * The token's `jti`. A fresh UUID unless the caller supplies one — which
+	 * it does when the token's identity has to be reserved somewhere before
+	 * it is signed (#449): the refresh grant commits the rotation to the
+	 * family store first and signs only once the reservation holds, so a
+	 * lost race costs no signature.
+	 */
+	jti?: string;
+	/**
+	 * Epoch seconds for `iat`, and what `exp` is measured from. The clock
+	 * unless the caller supplies it — supplied alongside `jti` so the
+	 * expiry that was reserved is exactly the expiry that is signed.
+	 */
+	readonly issuedAt?: number;
 }
 
 export const generateToken = async (
@@ -110,15 +124,17 @@ export const generateToken = async (
 		scope = null,
 		tokenType = undefined,
 		confirmation = undefined,
+		jti = randomUUID(),
+		issuedAt = undefined,
 	}: GenerateTokenOptions,
 ): Promise<Token> => {
-	const now = Math.floor(Date.now() / 1000);
+	const now = issuedAt ?? Math.floor(Date.now() / 1000);
 	const claims: JWTPayload = {
 		...(data as Record<string, unknown>),
 		...(authorizedParty ? { azp: authorizedParty } : {}),
 		...(scope ? { scope } : {}),
 		iat: now,
-		jti: randomUUID(),
+		jti,
 		...(expiresIn !== undefined ? { exp: now + expiresIn } : {}),
 		...(issuer != null ? { iss: issuer } : {}),
 		...(audience != null ? { aud: audience } : {}),

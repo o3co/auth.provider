@@ -1725,3 +1725,102 @@ describe("createRefreshTokenGrant", () => {
 		});
 	});
 });
+
+describe("refresh rotation reserves before it signs (#449)", () => {
+	/** The key store, with every signature counted. */
+	const countingKeyStore = () => {
+		const signed: unknown[] = [];
+		return {
+			signed,
+			keyStore: {
+				...keyStore,
+				sign: async (args: Parameters<typeof keyStore.sign>[0]) => {
+					signed.push(args);
+					return keyStore.sign(args);
+				},
+			} as typeof keyStore,
+		};
+	};
+
+	const presented = async () =>
+		new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("localhost")
+			.setAudience(DEFAULT_CLIENT_ID)
+			.setIssuedAt()
+			.setExpirationTime("24h")
+			.setJti("old-jti")
+			.sign(new TextEncoder().encode(SECRET));
+
+	const run = async (
+		rotation: RefreshTokenFamilyRotation,
+		store: ReturnType<typeof countingKeyStore>,
+	) => {
+		const handler = createRefreshTokenGrant({
+			...mockDeps,
+			keyStore: store.keyStore,
+			refreshTokenFamilyRotation: rotation,
+			refreshTokenFamilyRevocation: {
+				async revokeFamily() {},
+				async isFamilyRevoked() {
+					return false;
+				},
+			},
+		});
+		return handler.handle({
+			body: { refresh_token: await presented() },
+			session: {},
+			issuer: "localhost",
+			metadata: {},
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+	};
+
+	it("spends no signature when the family store refuses the rotation", async () => {
+		// A lost race — a replay, a revoked family — used to cost two
+		// signatures for tokens that are never issued. With a KMS-backed
+		// signing key that is a billable remote call per lost race.
+		for (const outcome of ["replayed", "revoked", "unknown_family"] as const) {
+			const store = countingKeyStore();
+			const { result } = await run(
+				{
+					async register() {},
+					async rotate() {
+						return { outcome };
+					},
+				},
+				store,
+			);
+			expect(result.status).toBe(400);
+			expect(store.signed).toHaveLength(0);
+		}
+	});
+
+	it("signs the jti and expiry it reserved, once the reservation holds", async () => {
+		const reserved: { jti?: string; expiresAt?: number } = {};
+		const store = countingKeyStore();
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate(_previousJti: string, newJti: string, _family: string, expiresAt: number) {
+					reserved.jti = newJti;
+					reserved.expiresAt = expiresAt;
+					return { outcome: "rotated" as const };
+				},
+			},
+			store,
+		);
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) return expect.fail("expected tokens");
+		const claims = JSON.parse(
+			Buffer.from(
+				(result.tokens.refresh_token as string).split(".")[1] ?? "",
+				"base64url",
+			).toString("utf-8"),
+		) as Record<string, unknown>;
+		expect(claims.jti).toBe(reserved.jti);
+		expect((claims.exp as number) * 1000).toBe(reserved.expiresAt);
+		// The access token and the refresh token, and nothing before them.
+		expect(store.signed).toHaveLength(2);
+	});
+});
