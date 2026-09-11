@@ -40,6 +40,7 @@ const GUARDED_PATHS = [
 	"/oauth/userinfo",
 	"/oauth/revoke",
 	"/.well-known/openid-configuration",
+	"/.well-known/oauth-authorization-server",
 	"/.well-known/jwks.json",
 ] as const;
 
@@ -464,5 +465,29 @@ describe("assembleApp mounts the CORS middleware from config (#500)", () => {
 			expect(res.headers["access-control-allow-origin"], path).toBeUndefined();
 		}
 		await handle.dispose();
+	});
+});
+
+describe("browserFacingCorsRoutes — discovery paths follow the issuer (#528)", () => {
+	const wellKnown = (config: Parameters<typeof browserFacingCorsRoutes>[0]) =>
+		browserFacingCorsRoutes(config)
+			.map((r) => r.path)
+			.filter((path) => path.includes("/.well-known/"));
+
+	it("guards the RFC 8414 form beside the OIDC one, and for a path-bearing issuer the inserted and appended forms", () => {
+		expect(wellKnown({})).toEqual(
+			expect.arrayContaining([
+				"/.well-known/openid-configuration",
+				"/.well-known/oauth-authorization-server",
+				"/.well-known/jwks.json",
+			]),
+		);
+		expect(wellKnown({ oauth: { jwt: { issuer: "https://auth.test/tenant-a" } } })).toEqual(
+			expect.arrayContaining([
+				"/.well-known/openid-configuration",
+				"/tenant-a/.well-known/openid-configuration",
+				"/.well-known/oauth-authorization-server/tenant-a",
+			]),
+		);
 	});
 });

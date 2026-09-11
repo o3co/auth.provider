@@ -145,6 +145,128 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		await handle.dispose();
 	});
 
+	it("also serves the RFC 8414 path with a byte-identical document (#528)", async () => {
+		// Some clients probe /.well-known/oauth-authorization-server first and
+		// fall back to OIDC discovery; some never fall back. One handler serves
+		// both, so bodies and headers cannot differ.
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+
+		const oidc = await request(app).get("/.well-known/openid-configuration");
+		const oauth = await request(app).get("/.well-known/oauth-authorization-server");
+		expect(oauth.status).toBe(200);
+		expect(oauth.text).toBe(oidc.text);
+		expect(oauth.headers["content-type"]).toBe(oidc.headers["content-type"]);
+		expect(oauth.headers["cache-control"]).toBe(oidc.headers["cache-control"]);
+		// RFC 8414 §3.3: the document's issuer equals the identifier the client
+		// formed the URL from, exactly.
+		expect(oauth.body.issuer).toBe("https://auth.example.com");
+
+		await handle.dispose();
+	});
+
+	it("a path-bearing issuer: RFC 8414 inserts the well-known string, OIDC appends it (#528)", async () => {
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com/tenant-a"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+
+		const inserted = await request(app).get("/.well-known/oauth-authorization-server/tenant-a");
+		expect(inserted.status).toBe(200);
+		expect(inserted.body.issuer).toBe("https://auth.example.com/tenant-a");
+		const appended = await request(app).get("/tenant-a/.well-known/openid-configuration");
+		expect(appended.status).toBe(200);
+		expect(appended.text).toBe(inserted.text);
+		// The root RFC 8414 form names a different issuer and is not served.
+		expect((await request(app).get("/.well-known/oauth-authorization-server")).status).toBe(404);
+
+		await handle.dispose();
+	});
+
+	it("an issuer path is a literal, not a route pattern: metacharacters boot and serve (#528 review)", async () => {
+		// Express 5 parses a route string with path-to-regexp, where `+`, `*`,
+		// `(`, `)`, `:` and `{}` are syntax. An issuer is a URL, and those
+		// characters are legal in its path: passing it verbatim to
+		// `router.get` either fails the boot or matches the wrong requests.
+		for (const tenant of ["tenant+blue", "tenant(a)", "a*b", "x:y", "g{h}"]) {
+			const issuer = `https://auth.example.com/${tenant}`;
+			const handle = await createTestApp({
+				modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+				bootstrapComponents: { config: withIssuer(issuer), pathResolver: (s) => s },
+			});
+			const app = express();
+			app.use(handle.router);
+
+			const inserted = await request(app).get(`/.well-known/oauth-authorization-server/${tenant}`);
+			expect(inserted.status).toBe(200);
+			expect(inserted.body.issuer).toBe(issuer);
+			const appended = await request(app).get(`/${tenant}/.well-known/openid-configuration`);
+			expect(appended.status).toBe(200);
+			expect(appended.text).toBe(inserted.text);
+
+			await handle.dispose();
+		}
+	});
+
+	it("matches the advertised path and nothing else — no pattern, no neighbour (#528 review)", async () => {
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com/a*b"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+
+		// The `*` is a character of this tenant's name, so it matches that
+		// name and not the tenant next door.
+		expect(
+			(await request(app).get("/.well-known/oauth-authorization-server/anything")).status,
+		).toBe(404);
+		// A trailing slash still reaches it, as Express's own non-strict
+		// routing did before.
+		expect((await request(app).get("/.well-known/oauth-authorization-server/a*b/")).status).toBe(
+			200,
+		);
+
+		await handle.dispose();
+	});
+
+	it("answers GET and HEAD, and leaves every other method to the rest of the app (#528 review)", async () => {
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, keyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+		app.use((_req, res) => res.status(404).json({ error: "not_found" }));
+
+		expect((await request(app).head("/.well-known/openid-configuration")).status).toBe(200);
+		// A POST to the metadata path is not this route's business; it passes
+		// through, as it did when the route was registered with `router.get`.
+		const posted = await request(app).post("/.well-known/oauth-authorization-server");
+		expect(posted.status).toBe(404);
+		expect(posted.body.error).toBe("not_found");
+
+		await handle.dispose();
+	});
+
 	it("issuer set but no discoveryMetadata contributions → no route, no boot error", async () => {
 		// A minimal composition that configures an issuer but wires no
 		// discovery-contributing module is not participating in the discovery

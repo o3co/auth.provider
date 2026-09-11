@@ -527,7 +527,10 @@ Until [#500](https://github.com/o3co/auth.provider/issues/500) the key was decla
 | `/oauth/userinfo` | `GET`, `POST` |
 | `/oauth/revoke` | `POST` |
 | `/.well-known/openid-configuration` | `GET` |
+| `/.well-known/oauth-authorization-server` | `GET` |
 | `oauth.jwt.jwksPath` (default `/.well-known/jwks.json`) | `GET` |
+
+The two discovery rows are the same document ([#528](https://github.com/o3co/auth.provider/issues/528)): OIDC Discovery 1.0 appends its suffix to the issuer, RFC 8414 inserts its well-known string between host and path, and `discoveryPathsFor` (`src/discovery/wellKnownPaths.mts`) forms both for the configured issuer — for `https://as.example/tenant-a` that is `/tenant-a/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/tenant-a` — so the route, its advertisement and this table cannot drift.
 
 `/oauth/introspect` is off the list because it is server-to-server and already refuses public clients; `/oauth/authorize` because it is a top-level navigation, not a `fetch`. The `/oauth/*` paths are coupled to the bundled `oauthModule`'s mountPath, like the `/oauth/token` mounts in `boot/assemble-app.mts` — a downstream that re-mounts the OAuth router elsewhere builds its own table and passes it to `corsMw`.
 
