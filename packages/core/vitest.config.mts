@@ -8,11 +8,16 @@ export default defineConfig({
 		include: ["src/**/__tests__/**/*.test.mts"],
 		typecheck: {
 			enabled: true,
+			// vitest 5 collects a typecheck-included file's tests from the file
+			// itself: one that only calls an imported contract runner declares
+			// none there and fails as "No test suite found". Those files assert
+			// no types either, so the list names the directories and files that
+			// do.
 			include: [
 				"src/modules/manifest/**/*.test.mts",
 				"src/boot/**/*.test.mts",
-				"src/refresh-token-family/**/*.test.mts",
-				"src/user-sessions/__tests__/**/*.test.mts",
+				"src/refresh-token-family/__tests__/types.test.mts",
+				"src/user-sessions/__tests__/types.test.mts",
 				// D-1 FOLLOW-UP: explicit single-file include (not the
 				// `repositories/__tests__/**` glob) because
 				// `InMemoryClientRepository.test.mts` has 16 pre-existing TS
