@@ -21,6 +21,7 @@ import {
 	type KeyStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
+	type ReplaySeenSet,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Router } from "express";
@@ -56,6 +57,14 @@ export interface RevokeRouterOptions {
 	readonly accessTokenRevocation?: AccessTokenRevocationMode;
 	readonly logger: Logger;
 	readonly issuer: string;
+	/**
+	 * #484: the composition's replay store and the canonical token endpoint,
+	 * for `private_key_jwt`. The discovery document advertises the method
+	 * for revocation, so the endpoint must verify an assertion the same way
+	 * `/oauth/token` does — the same `jti` spent once across both.
+	 */
+	readonly replaySeenSet?: ReplaySeenSet;
+	readonly tokenEndpoint?: string;
 }
 
 /**
@@ -126,6 +135,8 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 	const clientAuth = createClientAuthMiddleware(opts.clientRepository, {
 		issuer: opts.issuer,
 		logger: opts.logger,
+		...(opts.replaySeenSet === undefined ? {} : { replaySeenSet: opts.replaySeenSet }),
+		...(opts.tokenEndpoint === undefined ? {} : { tokenEndpoint: opts.tokenEndpoint }),
 		// RFC 7009 §2.1: public clients may revoke their own tokens.
 		// Wave 1 dogfood (yoshi SPA + Mobile) uses public-client flows — enabling here
 		// is required for the dogfood to work. Ownership check (token's client_id claim

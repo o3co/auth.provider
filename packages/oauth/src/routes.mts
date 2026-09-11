@@ -923,6 +923,9 @@ export const createOAuthRouter = async (
 			accessTokenRevocation: readAccessTokenRevocationMode(config),
 			logger,
 			issuer: canonicalIssuer,
+			// #484: private_key_jwt at /oauth/revoke, verified as at /oauth/token.
+			replaySeenSet,
+			tokenEndpoint,
 		}),
 	);
 

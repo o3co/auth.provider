@@ -348,6 +348,35 @@ describe("createClientAssertionVerifier (#484)", () => {
 			).toMatchObject({ kind: "ok" });
 		});
 
+		it("bounds iat when present: not ahead of the clock beyond tolerance, not older than the lifetime ceiling", async () => {
+			const now = Math.floor(Date.now() / 1000);
+			const future = refused(
+				await build().verify(body(await mint({ iat: now + 120 })), findClient()),
+			);
+			expect(future).toMatchObject({ status: 401 });
+			expect(future.description).toMatch(/iat/);
+			const stale = refused(
+				await build().verify(
+					body(await mint({ iat: now - MAX_CLIENT_ASSERTION_LIFETIME_SECONDS - 120 })),
+					findClient(),
+				),
+			);
+			expect(stale.description).toMatch(/iat/);
+			// Inside the tolerance either way, and RFC 7523 §3 makes iat optional.
+			expect(await build().verify(body(await mint({ iat: now + 20 })), findClient())).toMatchObject(
+				{ kind: "ok" },
+			);
+			expect(
+				await build().verify(
+					body(await mint({ iat: now - MAX_CLIENT_ASSERTION_LIFETIME_SECONDS - 20 })),
+					findClient(),
+				),
+			).toMatchObject({ kind: "ok" });
+			expect(
+				await build().verify(body(await mint({ iat: undefined })), findClient()),
+			).toMatchObject({ kind: "ok" });
+		});
+
 		it("requires a jti and spends it: the same assertion is refused the second time", async () => {
 			expect(
 				refused(await build().verify(body(await mint({ jti: undefined })), findClient())),

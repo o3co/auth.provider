@@ -714,6 +714,17 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			});
 			expect(withSecret.status).toBe(401);
 			expect(withSecret.body.error_description).toMatch(/one client authentication method/i);
+
+			// Presence, not validity: `client_secret=` with nothing after it is
+			// still a second method on the wire.
+			const withEmptySecret = await send(app, {
+				client_id: "acme",
+				client_secret: "",
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+			expect(withEmptySecret.status).toBe(401);
+			expect(withEmptySecret.body.error_description).toMatch(/one client authentication method/i);
 		});
 
 		it("answers server_error when no replay store is wired — never an unchecked jti", async () => {

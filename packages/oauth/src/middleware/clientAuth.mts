@@ -262,7 +262,9 @@ export function createClientAuthMiddleware(
 		// the combination is the signature of one party pinning an identity in
 		// a place the other check does not look.
 		if (hasClientAssertion(body)) {
-			if (basic.kind !== "absent" || bodyClientSecret !== undefined) {
+			// Presence, not validity: `client_secret=` with an empty value is
+			// still a second method on the wire.
+			if (basic.kind !== "absent" || body?.client_secret !== undefined) {
 				rejectPlain(
 					res,
 					401,

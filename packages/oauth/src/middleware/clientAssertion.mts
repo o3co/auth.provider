@@ -87,7 +87,7 @@ export interface ClientAssertionVerifierOptions {
 	/** Where `jti` values are spent. Absent → assertions are answered `server_error`. */
 	readonly replaySeenSet?: ReplaySeenSet;
 	readonly logger?: Logger;
-	/** Clock tolerance on `exp` / `nbf` / `iat`, in seconds. Default 30. */
+	/** Clock tolerance on `exp` / `nbf` / `iat`, in seconds. Default 30. `iat` is also held to the lifetime ceiling. */
 	readonly clockToleranceSeconds?: number;
 	/** The fetch used for `jwksUri`. A proxy, or a test seam. */
 	readonly fetch?: typeof fetch;
@@ -310,6 +310,31 @@ export function createClientAssertionVerifier(
 					"lifetime",
 					{ clientId: iss },
 				);
+			}
+			// RFC 7523 §3 (6): `iat`, when present, must not be unreasonably far in
+			// the past — and a client whose clock runs ahead of ours beyond the
+			// tolerance is refused too, since jose checks the claim's type only.
+			// The ceiling for age is the same one `exp` is held to.
+			const iat = payload.iat;
+			if (iat !== undefined) {
+				if (iat - nowSeconds > clockTolerance) {
+					return refuse(
+						401,
+						"invalid_client",
+						"client assertion iat is in the future",
+						"iat_future",
+						{ clientId: iss },
+					);
+				}
+				if (nowSeconds - iat > MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + clockTolerance) {
+					return refuse(
+						401,
+						"invalid_client",
+						`client assertion iat is too old (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} seconds)`,
+						"iat_stale",
+						{ clientId: iss },
+					);
+				}
 			}
 			const jti = payload.jti;
 			if (typeof jti !== "string" || jti.length === 0) {
