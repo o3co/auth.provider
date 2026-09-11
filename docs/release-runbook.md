@@ -36,7 +36,7 @@ is how `removedIn: "this release (#330)"` shipped in v0.10.0 *and* v0.11.0
 doc comments that describe the convention as well as any real placeholder, and
 the block says how to tell them apart. Backing it up,
 `packages/core/src/config/__tests__/removedIn.drift.test.mts` fails the cut
-that moves a still-placeholdered PR out of `## [Unreleased]`, so a miss there
+that lists a still-placeholdered PR under a version heading, so a miss there
 is a red CI run rather than a released error message naming no release.
 
 ```bash
@@ -62,7 +62,7 @@ git grep -n '"this release' -- ':(glob)packages/*/src/**' ':(glob)templates/*/sr
 # a README heading both shipped that way in v0.12.0 and were caught only at
 # the v0.12.1 cut. Stamp each hit with the PR number (vocabulary table) or
 # the released tag (README). The policy / runbook prose that describes the
-# `## [Unreleased]` convention is filtered out and is correct as it stands.
+# cut-time convention (R2) is filtered out and is correct as it stands.
 git grep -n -i 'unreleased' -- docs ':(glob)packages/*/README.md' | grep -v -E 'release-(policy|runbook)\.md|\[Unreleased\]'
 ```
 
@@ -80,7 +80,7 @@ If **Important** only: decide explicitly — fold into this release, or file fol
 
 ### Step 2. R6 label audit
 
-Follow [release-policy.md §R6](release-policy.md#r6-release-cut-audit-pass-mandatory-checklist-before-tagging) verbatim. The CHANGELOG roll-up commit (`## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD`) is part of this step.
+Follow [release-policy.md §R6](release-policy.md#r6-release-cut-audit-pass-mandatory-checklist-before-tagging) verbatim. Writing the `## [X.Y.Z] - YYYY-MM-DD` section from `git log <lastTag>..HEAD` is part of this step (R2), and the cut PR's description lists that range.
 
 ### Step 3. npm new-package bootstrap pre-flight
 
@@ -203,17 +203,26 @@ until s=$(gh run view "$RUN" --json status --jq '.status'); [ "$s" = "completed"
 
 `gh run watch <run-id>` streams the workflow live and exits when the run completes. Prefer this over polling — it handles cancellation and shows live step progress.
 
-### Rebase artifacts in `## [Unreleased]`
+### The cut section is complete, and clean
 
-A rebase onto `develop` can leave the Unreleased section with a second `### Fixed` (or `### Added`, `### Security`) heading and entries repeated verbatim — the v0.11 pre-cut review found three entries duplicated up to four times. R6 step 2 renames the section as-is, so check before stamping:
+The section is written at cut from `git log <lastTag>..HEAD` (R2, #475), so
+there is no standing `## [Unreleased]` to accumulate rebase artifacts — but
+two things are still worth a look before the cut PR merges. Completeness:
+the PR description lists the range, and every operator-visible commit in it
+(a config key, an endpoint, an error code, a log or audit event, a boot
+refusal, a default) has an entry — a `multi` boot refusal merged mid-cycle
+was invisible until its cut once, and the listed range is what makes the
+omission reviewable. Cleanliness: one heading per type in the new section,
+no repeated entry openers, order Added / Changed / Removed / Fixed /
+Security (as in `v0.9.0`):
 
 ```bash
-# one heading per type under Unreleased, and no repeated entry openers
-awk '/^## \[Unreleased\]/{f=1} /^## \[[0-9]/{f=0} f && /^### /' CHANGELOG.md | sort | uniq -d
-awk '/^## \[Unreleased\]/{f=1} /^## \[[0-9]/{f=0} f && /^- \*\*/' CHANGELOG.md | sort | uniq -d
+# the section being cut is the first version section in the file
+awk '/^## \[/{n++} n==1 && /^### /' CHANGELOG.md | sort | uniq -d
+awk '/^## \[/{n++} n==1 && /^- \*\*/' CHANGELOG.md | sort | uniq -d
 ```
 
-Both commands print nothing when the section is clean. Order is Added / Changed / Removed / Fixed / Security (as in `v0.9.0`).
+Both commands print nothing when the section is clean.
 
 ### Dependency bumps merged just before tag
 

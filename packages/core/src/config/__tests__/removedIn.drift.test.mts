@@ -26,10 +26,12 @@
  * release with no name.
  *
  * The guard follows the policy rather than fighting it: a stamp is either a
- * released tag (`vX.Y.Z ...`) or a placeholder whose PR the CHANGELOG still
- * lists under `## [Unreleased]`. The roll-up commit that moves the PR under a
- * version heading — the R6 pass itself — is the moment this starts failing,
- * and the failure names the section to copy the tag from.
+ * released tag (`vX.Y.Z ...`) or a placeholder citing a PR that no CHANGELOG
+ * version section lists yet — the section is written at cut time (R2,
+ * #475), so between cuts a placeholder's PR appears nowhere. The cut PR that
+ * lists the PR under a version heading — the R6 pass itself — is the moment
+ * this starts failing, and the failure names the section to copy the tag
+ * from.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -93,9 +95,8 @@ describe("removedIn stamps (#458)", () => {
 		expect(stamps.length).toBeGreaterThan(0);
 	});
 
-	it("names a released tag, or cites a PR the CHANGELOG still lists as unreleased", () => {
+	it("names a released tag, or cites a PR no CHANGELOG version section lists yet", () => {
 		const sections = changelogSections();
-		const unreleased = sections.find(([heading]) => heading === "Unreleased")?.[1] ?? "";
 		const stale = stamps.flatMap(({ file, value }) => {
 			if (RELEASED_TAG.test(value)) return [];
 			const pr = /#(\d+)/.exec(value)?.[1];
@@ -104,14 +105,14 @@ describe("removedIn stamps (#458)", () => {
 					`${file}: "${value}" is neither a released tag nor a placeholder citing its PR as #NNN`,
 				];
 			}
-			if (cites(unreleased, pr)) return [];
 			// Oldest section first: a later release may mention the PR in passing.
-			const shipped = sections.find(
-				([heading, body]) => heading !== "Unreleased" && cites(body, pr),
-			);
+			// The section is written at cut time (R2, #475): a PR no version section
+			// lists has not been cut, and its placeholder stands.
+			const shipped = sections.find(([, body]) => cites(body, pr));
+			if (shipped === undefined) return [];
 			return [
-				`${file}: "${value}" — #${pr} is under CHANGELOG ${shipped === undefined ? "no section" : `[${shipped[0]}]`}, ` +
-					"not [Unreleased]; stamp the released tag (docs/release-policy.md R6 step 5)",
+				`${file}: "${value}" — #${pr} is under CHANGELOG [${shipped[0]}]; ` +
+					"stamp the released tag (docs/release-policy.md R6 step 5)",
 			];
 		});
 		expect(stale).toEqual([]);

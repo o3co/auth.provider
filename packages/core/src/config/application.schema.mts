@@ -231,8 +231,9 @@ const LEGACY_JWT_FIELDS = [
  * the released-tag portion is filled in at release-cut time (R6 step 5) — an
  * entry added on HEAD between cuts reads `"this release (#NNN)"` until then.
  * The PR number is not decoration: `removedIn.drift.test.mts` (#458) accepts
- * a placeholder only while the CHANGELOG lists that PR under `[Unreleased]`,
- * so the cut that ships it cannot forget the stamp again — `"this release
+ * a placeholder only until the CHANGELOG lists that PR under a version
+ * section — the section is written at cut time (R2, #475) — so the cut that
+ * ships it cannot forget the stamp again — `"this release
  * (#330)"` went out in v0.10.0 and v0.11.0 before that guard existed.
  */
 const REMOVED_REFRESH_TOKEN_FIELDS: readonly RemovedKey[] = [

@@ -26,7 +26,7 @@ This policy codifies how to handle release labels going forward so the same drif
 | --- | --- | --- |
 | Tagged release notes / CHANGELOG section heading | ✅ (the version itself) | ❌ |
 | CHANGELOG entry body, current release | ✅ (cross-reference past releases) | ❌ |
-| CHANGELOG `## [Unreleased]` body | ✅ (cross-reference past releases) | ❌ (do NOT write "removed in vX.Y" predictions) |
+| CHANGELOG section written at cut (from `git log <lastTag>..HEAD`) | ✅ (cross-reference past releases) | ❌ (do NOT write "removed in vX.Y" predictions) |
 | JSDoc `@deprecated since` | ✅ | — |
 | JSDoc `@deprecated removed-in` | ❌ (do not predict) | ❌ |
 | Code comments (line or block) | ✅ (cross-reference past) | ❌ |
@@ -47,11 +47,13 @@ code / JSDoc / public docs (README, migration guide) / config comments / error m
 **Bad**: `@deprecated since vX.Y, removed in 1.0` / `error: field foo was removed in NEXT_RELEASE`
 **Good**: `@deprecated since vX.Y; see CHANGELOG for removal version` / `error: field foo was removed in vX.Y.Z` (where `vX.Y.Z` is the released tag that performed the removal — filled in at release-cut time)
 
-### R2. CHANGELOG uses `## [Unreleased]` until cut
+### R2. The CHANGELOG section is written at cut time
 
-Follow Keep a Changelog convention. The Unreleased section accumulates entries describing what changed on HEAD. **Do not pre-stamp** specific version numbers (e.g., `## [0.6.0]`, `## [1.0.0]`, `## [0.0.4] — Unreleased`) before the tag is cut. At cut time, rename `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD` in a single commit; then create the git tag pointing at that commit (the tag and the rename commit are separate git operations, but happen as one atomic release-cut step).
+HEAD carries **no** `## [Unreleased]` section between cuts. The release-cut PR writes the whole `## [X.Y.Z] - YYYY-MM-DD` section (Keep a Changelog headings: Added / Changed / Removed / Fixed / Security) from the commit log — `git log <lastTag>..HEAD` — and its description lists that range (`git log vA..HEAD --oneline`) so the reviewer can check that every operator-visible change in it has an entry. A feature or fix PR therefore does **not** touch `CHANGELOG.md`; it says in its own description what an operator will notice, which is what the cut reads. **Do not pre-stamp** specific version numbers anywhere (e.g., `## [0.6.0]`, `## [1.0.0]`, `## [0.0.4] — Unreleased`) before the tag is cut. The cut PR's merge and the tag are separate git operations that happen as one atomic release-cut step: the tag points at the merge commit.
 
-When tagging a release, also grep for forward-version references in the Unreleased body and either rewrite to the actual version or generalize. **Specifically**: any "removed in NEXT" / "deprecated will be removed in X" / "before X" forward-promise must be resolved to the actual release where it lands.
+When writing the section, also grep it for forward-version references and either rewrite to the actual version or generalize. **Specifically**: any "removed in NEXT" / "deprecated will be removed in X" / "before X" forward-promise must be resolved to the actual release where it lands.
+
+The earlier wording of this rule had every PR append to a standing `## [Unreleased]` section. Practice in every repository that shares this policy had settled on cut-time authoring — HEAD never carried the section, and the cut PR wrote it from the log — so the rule now says what is done (#475). The cost is that a change merged mid-cycle has no CHANGELOG trace until the cut; the range listed in the cut PR is the compensating control, and a reviewer who cannot tick every operator-visible commit against an entry blocks the cut.
 
 ### R3. JSDoc `@deprecated` says "since" only
 
@@ -102,8 +104,8 @@ If a removal is announced in advance (deprecated now, will be removed later), th
 Before tagging a release `vX.Y.Z`:
 
 1. `git grep -i -E "(removed|deprecated|planned).*(1\.0 GA|next major|next release|in v[0-9]+\.[0-9]+)"` — review every match and resolve
-2. Replace `## [Unreleased]` → `## [X.Y.Z] - YYYY-MM-DD` in CHANGELOG (where `X.Y.Z` is the tag being cut)
-3. In CHANGELOG body (now the named release section): replace any forward-version reference (e.g., "removed in 1.0 GA", "this release", "next release") with the actual release name `X.Y.Z`
+2. Write `## [X.Y.Z] - YYYY-MM-DD` in CHANGELOG from `git log <lastTag>..HEAD` (where `X.Y.Z` is the tag being cut), and list that range in the cut PR's description so completeness can be reviewed (R2)
+3. In the new CHANGELOG section: replace any forward-version reference (e.g., "removed in 1.0 GA", "this release", "next release") with the actual release name `X.Y.Z`
 4. JSDoc / code comments / config comments: replace forward-version references with `X.Y.Z` or remove the version mention entirely
 5. Schema metadata strings (Zod `removedIn`, etc.): replace neutral / forward-version values with `X.Y.Z` so operator error messages name the release that actually removed the field
 6. PR title for the release-cut PR uses "release: vX.Y.Z" (no Phase / GA / "next-release" labels)
