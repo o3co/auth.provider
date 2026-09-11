@@ -189,4 +189,34 @@ describe("createAppleClientSecret — caching and rotation", () => {
 		privateKey = key.privateKeyPem;
 		await expect(resolve()).resolves.toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
 	});
+
+	it("re-imports the key and re-signs when the material is rotated under a valid cache (#498)", async () => {
+		// The previous case covers broken → repaired. This is valid → rotated: a
+		// leaked .p8 revoked and replaced while the cached secret is still inside
+		// its lifetime. The cache must follow the material, or the deployment
+		// keeps presenting a secret signed under the revoked key until the next
+		// restart.
+		const rotated = await makeTestSigningKey();
+		let privateKey = key.privateKeyPem;
+		const options: AppleClientSecretOptions = {
+			teamId: TEAM_ID,
+			clientId: CLIENT_ID,
+			keyId: KEY_ID,
+			get privateKey() {
+				return privateKey;
+			},
+		};
+		const resolve = createAppleClientSecret(options);
+		const first = await resolve();
+		await jwtVerify(first, key.publicKey);
+
+		privateKey = rotated.privateKeyPem;
+		const second = await resolve();
+		expect(second).not.toBe(first);
+		await jwtVerify(second, rotated.publicKey);
+		await expect(jwtVerify(second, key.publicKey)).rejects.toThrow();
+
+		// Unchanged material keeps the cache, as before.
+		expect(await resolve()).toBe(second);
+	});
 });

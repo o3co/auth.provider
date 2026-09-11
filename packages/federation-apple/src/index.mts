@@ -17,6 +17,7 @@
 export type { AppleProvider, AppleProviderConfig } from "./apple.mjs";
 export {
 	APPLE_ISSUER,
+	APPLE_NAME_PART_MAX_LENGTH,
 	APPLE_PRIVATE_RELAY_DOMAIN,
 	appleFederationModule,
 	createAppleProvider,

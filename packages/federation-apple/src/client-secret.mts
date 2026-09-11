@@ -92,7 +92,12 @@ const requireNonEmpty = (value: unknown, field: string): string => {
  *
  * Concurrent callers share one in-flight signature rather than each starting
  * their own, and a failed signature leaves the cache untouched so the next
- * call retries instead of inheriting a poisoned entry.
+ * call retries instead of inheriting a poisoned entry. The key is imported
+ * once per distinct key material: whenever `options.privateKey` reads
+ * differently from what the held key was imported from, the key is
+ * re-imported and the cached secret dropped (#498), so a `.p8` rotated
+ * under a running process takes effect on the next token exchange rather
+ * than at the next restart.
  *
  * Validation is at construction where it can be (a boot-time misconfiguration
  * should fail at boot) and at signing where it must be (the key material is
@@ -116,23 +121,32 @@ export function createAppleClientSecret(options: AppleClientSecretOptions): () =
 
 	const now = options.now ?? Date.now;
 
-	let signingKey: Promise<CryptoKey> | undefined;
-	const importSigningKey = (): Promise<CryptoKey> => {
-		if (!signingKey) {
-			signingKey = (importPKCS8(options.privateKey, "ES256") as Promise<CryptoKey>).catch(
-				(err: unknown) => {
-					// Drop the rejected promise so a later call re-reads the key
-					// material rather than replaying this failure forever.
-					signingKey = undefined;
-					throw err;
-				},
-			);
-		}
-		return signingKey;
-	};
-
 	let cached: { readonly jwt: string; readonly expiresAtSeconds: number } | undefined;
 	let inFlight: Promise<string> | undefined;
+
+	// The imported key, remembered with the PEM it came from. #498: a key
+	// memoised on success alone recovers from broken → repaired but never from
+	// valid → rotated — a leaked `.p8` revoked and replaced under a running
+	// process would keep signing with the old one until a restart. Comparing
+	// the material is a string comparison; importing happens only when it has
+	// changed.
+	let signingKey: { readonly pem: string; readonly key: Promise<CryptoKey> } | undefined;
+	const importSigningKey = (): Promise<CryptoKey> => {
+		const pem = options.privateKey;
+		if (signingKey?.pem !== pem) {
+			// New material (or the first call): forget any secret signed under the
+			// old key along with the key itself.
+			cached = undefined;
+			const key = (importPKCS8(pem, "ES256") as Promise<CryptoKey>).catch((err: unknown) => {
+				// Drop the rejected entry so a later call re-reads the key material
+				// rather than replaying this failure forever.
+				if (signingKey?.pem === pem) signingKey = undefined;
+				throw err;
+			});
+			signingKey = { pem, key };
+		}
+		return signingKey.key;
+	};
 
 	const sign = async (): Promise<string> => {
 		const key = await importSigningKey();
@@ -151,6 +165,12 @@ export function createAppleClientSecret(options: AppleClientSecretOptions): () =
 	};
 
 	return async (): Promise<string> => {
+		// Rotation is noticed here, not only when the cache expires: a valid
+		// secret signed under a revoked key is not one to keep presenting.
+		if (signingKey !== undefined && signingKey.pem !== options.privateKey) {
+			signingKey = undefined;
+			cached = undefined;
+		}
 		const nowSeconds = Math.floor(now() / 1000);
 		if (
 			cached &&
