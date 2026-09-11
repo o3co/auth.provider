@@ -55,6 +55,7 @@ const {
 
 import {
 	APPLE_ISSUER,
+	APPLE_NAME_PART_MAX_LENGTH,
 	APPLE_PRIVATE_RELAY_DOMAIN,
 	createAppleProvider,
 	isPrivateRelayEmail,
@@ -253,6 +254,39 @@ describe("buildAuthorizationUrl", () => {
 	});
 });
 
+describe("the return URL the flow sends is the one the boot guard checked (#498)", () => {
+	// The boot-time guard validates `config.callbackURL`, but the redirect_uri
+	// the route hands in is derived from `config.federations.<name>.callbackURL`
+	// by the session module. They are one value in every shipped composition;
+	// this is what makes a composition where they drift fail loudly instead of
+	// sending Apple a return URL nobody validated.
+	it("refuses to build an authorization URL for a redirectUri that is not the configured callbackURL", () => {
+		const p = createAppleProvider(baseConfig);
+		expect(() =>
+			p.buildAuthorizationUrl({
+				redirectUri: "https://other.example.com/cb",
+				state: "s",
+				codeVerifier: "v",
+				nonce: "n",
+			}),
+		).toThrow(/callbackURL/);
+		expect(mockBuildAuthorizationUrl).not.toHaveBeenCalled();
+	});
+
+	it("refuses to exchange a code against a redirectUri that is not the configured callbackURL", async () => {
+		const p = createAppleProvider(baseConfig);
+		await expect(
+			p.exchangeCode({
+				code: "c",
+				codeVerifier: "v",
+				redirectUri: "http://localhost:3000/cb",
+				nonce: "n",
+			}),
+		).rejects.toThrow(/callbackURL/);
+		expect(mockAuthorizationCodeGrant).not.toHaveBeenCalled();
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Token exchange
 // ---------------------------------------------------------------------------
@@ -392,6 +426,41 @@ describe("exchangeCode", () => {
 			callbackParams: { user: JSON.stringify({ name: { firstName: "Ada" } }) },
 		});
 		expect(profile.name).toBe("Ada");
+	});
+
+	it("drops a name part longer than the cap rather than truncating it (#498)", async () => {
+		// The `user` body is unsigned and relayed through the user agent, and
+		// `name` is promotable: without a bound, tens of kilobytes of
+		// attacker-supplied text could reach the claims envelope. A part over the
+		// cap is not a name, so it is dropped whole — a truncated one would still
+		// be an attacker's choice of text, just shorter.
+		const tooLong = "A".repeat(APPLE_NAME_PART_MAX_LENGTH + 1);
+		const atCap = "B".repeat(APPLE_NAME_PART_MAX_LENGTH);
+		mockAuthorizationCodeGrant
+			.mockResolvedValueOnce(appleTokenResponse())
+			.mockResolvedValueOnce(appleTokenResponse())
+			.mockResolvedValueOnce(appleTokenResponse());
+		const p = createAppleProvider(baseConfig);
+
+		const dropped = await p.exchangeCode({
+			...exchangeArgs,
+			callbackParams: {
+				user: JSON.stringify({ name: { firstName: tooLong, lastName: "Lovelace" } }),
+			},
+		});
+		expect(dropped.name).toBe("Lovelace");
+
+		const kept = await p.exchangeCode({
+			...exchangeArgs,
+			callbackParams: { user: JSON.stringify({ name: { firstName: atCap } }) },
+		});
+		expect(kept.name).toBe(atCap);
+
+		const nothing = await p.exchangeCode({
+			...exchangeArgs,
+			callbackParams: { user: JSON.stringify({ name: { firstName: tooLong, lastName: tooLong } }) },
+		});
+		expect(nothing.name).toBeUndefined();
 	});
 
 	it("leaves name absent on a later authorization, where Apple sends no user body", async () => {

@@ -96,6 +96,12 @@ const normalizeBooleanClaim = (value: unknown): boolean | undefined => {
  * layer's `state` check binds it to this session and nothing more — so what
  * comes back is self-asserted and reaches the claims envelope only under the
  * ordinary promotion rules.
+ *
+ * #498: each part is bounded by {@link APPLE_NAME_PART_MAX_LENGTH}. `name`
+ * is promotable, so an unbounded part would let tens of kilobytes of
+ * attacker-supplied text into the claims envelope and the session store; a
+ * part over the cap is dropped whole rather than truncated, because a
+ * truncated one is still the attacker's text.
  */
 const parseUserName = (raw: string | undefined): string | undefined => {
 	if (typeof raw !== "string" || raw.length === 0) return undefined;
@@ -110,10 +116,18 @@ const parseUserName = (raw: string | undefined): string | undefined => {
 	if (name == null || typeof name !== "object") return undefined;
 	const { firstName, lastName } = name as { firstName?: unknown; lastName?: unknown };
 	const parts = [firstName, lastName].filter(
-		(part): part is string => typeof part === "string" && part.length > 0,
+		(part): part is string =>
+			typeof part === "string" && part.length > 0 && part.length <= APPLE_NAME_PART_MAX_LENGTH,
 	);
 	return parts.length > 0 ? parts.join(" ") : undefined;
 };
+
+/**
+ * The longest `firstName` / `lastName` the unsigned `user` body may
+ * contribute to the display name, in UTF-16 code units (#498). Generous
+ * for any real name; a part beyond it is dropped, not truncated.
+ */
+export const APPLE_NAME_PART_MAX_LENGTH = 128;
 
 export interface AppleProviderConfig {
 	/**
@@ -217,7 +231,8 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 
 	// Apple's return URL is checked here, at boot, because every way it can be
 	// wrong produces the same opaque `invalid_request` from the authorization
-	// endpoint at the worst possible moment — the first login attempt.
+	// endpoint at the worst possible moment — the first login attempt. The
+	// value the flow actually sends is held to this one below (#498).
 	let callbackUrl: URL;
 	try {
 		callbackUrl = new URL(config.callbackURL);
@@ -244,6 +259,21 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			`Apple federation "apple" refuses a loopback callbackURL (${config.callbackURL}) — Apple rejects localhost, 127.0.0.0/8 and [::1] return URLs even over https, so local development needs a tunnel or a dev hostname holding a certificate`,
 		);
 	}
+
+	// #498: the guard above validated `config.callbackURL`, but the
+	// `redirect_uri` the flow sends is what the session module derived from
+	// `config.federations.<name>.callbackURL`. In every shipped composition
+	// they are one value; this makes a composition where they drift fail
+	// loudly at the first request instead of sending Apple a return URL
+	// nobody validated.
+	const requireConfiguredCallback = (redirectUri: string): string => {
+		if (redirectUri !== config.callbackURL) {
+			throw new Error(
+				`Apple federation "apple" was handed a redirect URI (${redirectUri}) that is not the configured callbackURL (${config.callbackURL}) — the route derives it from federations.<name>.callbackURL, and the two must agree`,
+			);
+		}
+		return redirectUri;
+	};
 
 	const clientSecret = resolveSecretSource(config);
 
@@ -312,7 +342,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 		}): URL {
 			const nonce = requireNonce(params.nonce);
 			return oidc.buildAuthorizationUrl(authorizationConfig, {
-				redirect_uri: params.redirectUri,
+				redirect_uri: requireConfiguredCallback(params.redirectUri),
 				scope: SCOPES.join(" "),
 				state: params.state,
 				code_challenge: codeChallenge(params.codeVerifier),
@@ -335,7 +365,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			// there is no such URL to hand it — it is synthesized from the
 			// registered return URL plus the code, exactly as the Google adapter
 			// does for a query-mode callback.
-			const callbackUrl = new URL(params.redirectUri);
+			const callbackUrl = new URL(requireConfiguredCallback(params.redirectUri));
 			callbackUrl.searchParams.set("code", params.code);
 
 			// `expectedNonce` activates openid-client's nonce check (OIDC §3.1.3.7)

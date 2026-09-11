@@ -74,7 +74,13 @@ satisfies the first and still fails, as do `https://127.0.0.1/cb`, the rest of
 a dev hostname holding a certificate. The provider checks both at
 construction, through the repo's one loopback predicate (`isLoopbackHostname`,
 #364), rather than letting the authorization endpoint answer the first login
-with an opaque `invalid_request`.
+with an opaque `invalid_request`. The value the flow actually sends is held
+to it as well: the session module derives the `redirect_uri` from
+`federations.<name>.callbackURL`, and a request whose derived URL is not the
+configured `callbackURL` is refused before anything reaches Apple (#498) —
+the two are one value in the shipped bridge, and a composition where they
+drift fails at the first request instead of validating one URL and sending
+another.
 
 ## The rotating client secret
 
@@ -95,8 +101,13 @@ short of Apple's 15 777 000-second ceiling, so clock skew between this process
 and Apple's cannot turn a boundary comparison into an outage.
 
 Concurrent logins share one in-flight signature, and a failed signature leaves
-the cache untouched: a deployment whose mounted key is repaired or rotated
-under it recovers on the next request instead of at the next restart.
+the cache untouched. The key is imported once per distinct key material: when
+`privateKey` reads differently from what the held key was imported from — a
+repaired mount, or a leaked `.p8` revoked and replaced — the key is
+re-imported and the cached secret dropped on the next request, without a
+restart (#498). That works through whatever you passed as `privateKey`: the
+option is read at every token exchange, not copied at construction, so a
+getter or a re-read file is enough.
 
 If you already produce the secret elsewhere, pass `clientSecret` instead —
 either a string or a resolver (`() => string | Promise<string>`), the widened
@@ -245,6 +256,10 @@ both fail closed without one.
 - **The `user` body is not signed.** The `state` check binds it to the session
   and binds nothing else, so treat the name as self-asserted — which is exactly
   what claim precedence already assumes of every federated claim.
+- **Each name part is capped** at 128 characters (`APPLE_NAME_PART_MAX_LENGTH`):
+  a longer `firstName` or `lastName` is dropped whole, not truncated, so the
+  unsigned body cannot push tens of kilobytes into the claims envelope and the
+  session store (#498).
 - **No `picture`.** Apple asserts none.
 
 ## Logout
