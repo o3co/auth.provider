@@ -16,6 +16,8 @@
 
 import {
 	type AuthenticatedClient,
+	boundPolicyAudience,
+	evaluateGrantPolicy,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -23,7 +25,6 @@ import {
 	generateToken,
 	generateTokenResponse,
 } from "@o3co/auth-provider-core";
-import { evaluateGrantPolicy } from "./_grantPolicy.mjs";
 import {
 	deriveAudienceFromResources,
 	extractResourceParam,
@@ -111,8 +112,8 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 				// and the scope re-validation — the policy may only narrow the
 				// already-narrowed effective scope, never draw on the allowlist,
 				// and an empty array is strip-all — live in `evaluateGrantPolicy`,
-				// shared with the jwt-bearer grant. The audience half stays here
-				// because its ceiling is this client's `allowedAudiences`.
+				// shared by every minting path through core. The audience half is
+				// `boundPolicyAudience`, handed this client's `allowedAudiences`.
 				const resource = requestedResource;
 				const policy = await evaluateGrantPolicy(
 					deps.grantPolicy,
@@ -132,27 +133,14 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;
-				const { decision } = policy;
-				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
-					// Fail-closed audience validation: policy may only narrow to
-					// audiences already in client.allowedAudiences. An out-of-bounds
-					// audience from a buggy/compromised policy would mint a token
-					// accepted by a resource server the client is not authorized for.
-					const allowedAudSet = new Set(client.allowedAudiences ?? []);
-					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
-					if (exceeded.length > 0) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_request",
-								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
-							},
-						};
-					}
-					// Use the policy-narrowed audience (flatten to first, matching
-					// the refresh_token and authorization_code grant patterns).
-					policyGrantedAudience = decision.grantedAudience[0];
-				}
+				// The audience half of the same fail-closed rule, bounded by this
+				// client's `allowedAudiences` (#520): a policy may narrow to one of
+				// them and nothing else, so a buggy or compromised policy cannot
+				// mint a token a resource server the client is not registered for
+				// would accept.
+				const policyAudience = boundPolicyAudience(policy.decision, client.allowedAudiences ?? []);
+				if (!policyAudience.ok) return { result: policyAudience.result };
+				policyGrantedAudience = policyAudience.audience;
 			}
 
 			// RFC 8707 §2 audience derivation (Stage 2, #173). When a `resource`

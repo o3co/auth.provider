@@ -280,7 +280,7 @@ describe("createClientCredentialsGrant — grantPolicy scope validation (CP-18 f
 		expect(payload.scope).toBe("read:foo");
 	});
 
-	it("rejects policy grantedScope that exceeds allowedScopes with 400 invalid_scope (CP-18)", async () => {
+	it("answers 500 server_error when policy grantedScope exceeds allowedScopes (CP-18, #520)", async () => {
 		// Policy returns 'admin' which is NOT in client.allowedScopes → fail-closed.
 		const client = makeClient({ allowedScopes: ["read:foo"] });
 		const handler = createClientCredentialsGrant(
@@ -292,8 +292,8 @@ describe("createClientCredentialsGrant — grantPolicy scope validation (CP-18 f
 
 		const { result } = await handler.handle(makeCtx(client));
 
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_scope");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toContain("admin");
 	});
 });
@@ -341,7 +341,7 @@ describe("createClientCredentialsGrant — grantPolicy audience validation (Code
 		expect(payload.aud).toBe("https://rs2");
 	});
 
-	it("rejects policy grantedAudience outside allowedAudiences with 400 invalid_request", async () => {
+	it("answers 500 server_error when policy grantedAudience is outside allowedAudiences (#520)", async () => {
 		// Policy returns an audience not in client.allowedAudiences → fail-closed.
 		const client = makeClient({ allowedAudiences: ["https://rs1"] });
 		const handler = createClientCredentialsGrant(
@@ -353,8 +353,8 @@ describe("createClientCredentialsGrant — grantPolicy audience validation (Code
 
 		const { result } = await handler.handle(makeCtx(client));
 
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_request");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toContain(
 			"https://other.example",
 		);
@@ -399,7 +399,7 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 		} as unknown as GrantDependencies["grantPolicy"],
 	});
 
-	it("returns 400 when policy grantedScope is outside the requested (effectiveScopes) set even if within allowedScopes (Codex Round 2 P1-1)", async () => {
+	it("answers 500 server_error when policy grantedScope is outside the requested (effectiveScopes) set even if within allowedScopes (Codex Round 2 P1-1, #520)", async () => {
 		// Client allowedScopes: ["read", "write"]. Request narrows to scope=read.
 		// effectiveScopes becomes ["read"]. Policy returns grantedScope: ["write"].
 		// write ∈ allowedScopes but NOT ∈ effectiveScopes (the requested set).
@@ -424,8 +424,8 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 			makeCtx(client, { grant_type: "client_credentials", scope: "read" }),
 		);
 
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_scope");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toContain("write");
 	});
 

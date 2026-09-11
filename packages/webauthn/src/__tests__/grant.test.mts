@@ -832,7 +832,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 		expect("error" in result && result.error).toBe("temporarily_unavailable");
 	});
 
-	it("returns 400 invalid_scope when policy grantedScope exceeds effectiveScopes ceiling (Codex P1-1 pattern)", async () => {
+	it("answers 500 server_error when policy grantedScope exceeds the effectiveScopes ceiling (Codex P1-1 pattern, #520)", async () => {
 		// Requested scope: "read". Policy returns ["write"]. write ∉ effectiveScopes → fail-closed.
 		const { store, deps } = makeDepsWith(async () => ({
 			outcome: "allow",
@@ -847,8 +847,8 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 			makeCtx({ assertion, resource: "https://rs1", scope: "read" }),
 		);
 
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_scope");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toContain("write");
 	});
 
@@ -873,7 +873,7 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 		expect(payload.scope ?? "").toBe("");
 	});
 
-	it("returns 400 invalid_request when policy grantedAudience exceeds client.allowedAudiences", async () => {
+	it("answers 500 server_error when policy grantedAudience exceeds client.allowedAudiences (#520)", async () => {
 		const { store, deps } = makeDepsWith(async () => ({
 			outcome: "allow",
 			grantedAudience: ["https://rogue.example"],
@@ -896,8 +896,8 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 			),
 		);
 
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_request");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toContain(
 			"https://rogue.example",
 		);
@@ -920,8 +920,8 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 		const assertion = makeAssertionResponse();
 		const { result } = await handler.handle(makeCtx({ assertion, resource: "https://rs1" }, null));
 
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_request");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toMatch(
 			/no authenticated client/,
 		);

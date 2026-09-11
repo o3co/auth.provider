@@ -905,15 +905,17 @@ const applyGrantPolicy = async (
 			// CP-13: policy MUST NOT expand the client's scope ceiling.
 			// Enforce grantedScope ⊆ allowedFilteredScopes (the
 			// pre-policy-narrowed set) — a policy returning a scope
-			// outside this is a bug or a compromised policy, and we
-			// fail closed with invalid_scope per RFC 6749.
+			// outside this is a bug or a compromised policy. Fail closed
+			// with `server_error` (RFC 6749 §4.1.2.1), the answer every
+			// grant gives a policy that exceeds its authority (#520): the
+			// request was fine, the deployment's policy was not.
 			const invalidFromPolicy = decision.grantedScope.filter(
 				(s) => !allowedFilteredScopes.includes(s),
 			);
 			if (invalidFromPolicy.length > 0) {
 				redirectError(
 					ctx,
-					"invalid_scope",
+					"server_error",
 					`policy returned scopes outside client allowance: ${invalidFromPolicy.join(" ")}`,
 				);
 				return null;
