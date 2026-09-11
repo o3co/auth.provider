@@ -37,6 +37,7 @@ import {
 	registerBuiltinKeyStores,
 } from "@o3co/auth-provider-core";
 import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";
+import { readOidcFederationConfigs } from "@o3co/auth-provider-federation-oidc";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
 import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
@@ -747,5 +748,23 @@ export const googleFederationConfigModule: Module = defineModule({
 				...optionalString(slice, "clientUrl"),
 			};
 		},
+	},
+});
+
+/**
+ * OIDC federation config bridge (#524) — supplies the `oidcFederationConfigs`
+ * slot every `oidcFederationModule(<name>)` in the manifest reads its entry
+ * from. One bridge for all instances: `readOidcFederationConfigs` walks
+ * `config.federations` and reads every enabled section of type `oidc`,
+ * refusing a malformed field by `federations.<name>.<field>` at boot.
+ * `buildModules` lists this module only when at least one such section
+ * exists.
+ */
+export const oidcFederationConfigModule: Module = defineModule({
+	name: "standalone:oidc-federation-config",
+	requires: ["config"] as const,
+	provides: {
+		oidcFederationConfigs: ({ config }) =>
+			readOidcFederationConfigs((config as AppConfig).federations),
 	},
 });

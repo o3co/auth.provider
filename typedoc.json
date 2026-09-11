@@ -4,6 +4,7 @@
 		"packages/federation-google",
 		"packages/federation-github",
 		"packages/federation-apple",
+		"packages/federation-oidc",
 		"packages/oauth",
 		"packages/session",
 		"packages/foundation"

@@ -154,6 +154,12 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
 	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
 	FEDERATIONS_GOOGLE_CALLBACK_URL: "https://auth.test/session/oauth/federation/google/callback",
+	// #524: the generic OIDC federation the template ships disabled.
+	FEDERATIONS_OIDC_ENABLED: "true",
+	FEDERATIONS_OIDC_ISSUER: "https://idp.test",
+	FEDERATIONS_OIDC_CLIENT_ID: "oidc-client-id",
+	FEDERATIONS_OIDC_CLIENT_SECRET: "oidc-client-secret",
+	FEDERATIONS_OIDC_CALLBACK_URL: "https://auth.test/session/oauth/federation/oidc/callback",
 
 	// --- repositories -------------------------------------------------
 	CLIENT_TYPE: "yaml",
@@ -288,6 +294,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.oauth.requireEmailVerified).toBe(true);
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
 		expect(config.federations.google?.enabled).toBe(true);
+		expect(config.federations.oidc?.enabled).toBe(true);
 	});
 
 	it("turns every non-boolean override into its declared type", () => {

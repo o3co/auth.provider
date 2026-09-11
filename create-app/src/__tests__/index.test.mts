@@ -143,6 +143,7 @@ describe("scaffold", () => {
 		expect(pkg.dependencies["@o3co/auth-provider-core"]).toMatch(/^\^/);
 		expect(pkg.dependencies["@o3co/auth-provider-federation-google"]).toMatch(/^\^/);
 		expect(pkg.dependencies["@o3co/auth-provider-federation-github"]).toBeUndefined();
+		expect(pkg.dependencies["@o3co/auth-provider-federation-oidc"]).toMatch(/^\^/);
 		expect(pkg.dependencies["@o3co/auth-provider-foundation"]).toMatch(/^\^/);
 	});
 
@@ -175,6 +176,7 @@ describe("scaffold", () => {
 			"@o3co/auth-provider-federation-apple": "../packages/federation-apple/package.json",
 			"@o3co/auth-provider-federation-github": "../packages/federation-github/package.json",
 			"@o3co/auth-provider-federation-google": "../packages/federation-google/package.json",
+			"@o3co/auth-provider-federation-oidc": "../packages/federation-oidc/package.json",
 			"@o3co/auth-provider-foundation": "../packages/foundation/package.json",
 			"@o3co/auth-provider-oauth": "../packages/oauth/package.json",
 			"@o3co/auth-provider-oauth-token-exchange": "../packages/oauth-token-exchange/package.json",

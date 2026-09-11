@@ -23,6 +23,7 @@ import {
 	memoryRateLimiterModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+import { oidcFederationModule, oidcFederationNames } from "@o3co/auth-provider-federation-oidc";
 import {
 	oauthAuthorizationModule,
 	oauthModule,
@@ -44,6 +45,7 @@ import {
 	inMemoryFederationTokenStoreModule,
 	inMemorySessionStoresModule,
 	keyStoreModule,
+	oidcFederationConfigModule,
 	repositoriesModule,
 	standaloneRedisClientsModule,
 } from "./modules.mjs";
@@ -105,10 +107,16 @@ export interface BuildModulesOverrides {
  * absent), the config-bridge module's provider throws — so the entire pair
  * MUST be conditionally included at composition time, not gated inside the
  * provider.
+ *
+ * #524: the generic OIDC federation follows the same rule, once per enabled
+ * `federations.<name>` of type "oidc": `oidcFederationModule(name)` per
+ * instance plus the one `oidcFederationConfigModule` that reads every
+ * instance's config into the slot they share.
  */
 export function buildModules(config: AppConfig, overrides: BuildModulesOverrides = {}): Module[] {
 	const googleEnabled =
 		(config.federations?.google as { enabled?: boolean } | undefined)?.enabled === true;
+	const oidcFederations = oidcFederationNames(config.federations ?? {});
 
 	// Wave 5d (IH-14 + OR-M1 + OR-4) + OR-9: adapter-driven branching for
 	// the OAuth-endpoint rate limiter, the user-session-store family, AND
@@ -245,6 +253,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		jwksModule,
 		sessionModule,
 		...(googleEnabled ? [googleFederationModule, googleFederationConfigModule] : []),
+		...(oidcFederations.length > 0
+			? [oidcFederationConfigModule, ...oidcFederations.map((name) => oidcFederationModule(name))]
+			: []),
 		overrides.keyStoreModule ?? keyStoreModule,
 		overrides.repositoriesModule ?? repositoriesModule,
 		// #287: the audit sink, always wired. Unlike every switch above there is

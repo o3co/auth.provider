@@ -498,6 +498,14 @@ Providers implementing `SupportsRefresh` can keep federation tokens alive withou
 - `FederationProfile.sub` is the GitHub numeric user ID.
 - Federation token format: `${federationName}:${sub}` where `federationName` equals the configured `name` (e.g. `"github"` by default, or `"github-enterprise"` for a custom tenant).
 
+**`@o3co/auth-provider-federation-oidc`** (#524)
+
+- Any OpenID Connect provider, selected by `issuer`; `oidcFederationModule(<name>)` is a factory, one call per issuer, so several IdPs coexist in one deployment with their own callbacks.
+- Discovery runs at boot and a failure refuses boot; `discovery = false` plus `endpoints { ... }` runs from hand-typed values instead.
+- `client_secret_basic` (`clientSecret`, a string or a resolver) or `private_key_jwt` (`privateKey`, a PEM key) — exactly one.
+- Default scope is `["openid", "profile", "email"]`; `openid` is mandatory. The id_token is verified against the issuer's JWKS — `iss`, `aud`, `exp`, `iat`, `nonce`, and `at_hash` when present — and UserInfo, when the issuer publishes it, is bound to the id_token's `sub`.
+- `FederationProfile.sub` is whatever the issuer says: opaque and stable per issuer, never keyed on `email`. The Store decides who exists; an unlinked `<name>:<sub>` is a 401.
+
 ---
 
 ### `FederationResult<T>` (type)
@@ -598,6 +606,10 @@ federations {
 ```
 
 Mixed shape — top-level fields alongside a nested sub-section — is rejected with a clear error at startup.
+
+`type = "oidc"` selects the generic OpenID Connect provider from
+`@o3co/auth-provider-federation-oidc` (#524) — any issuer, one section per IdP,
+each with its own callback; its fields are in that package's README.
 
 ### Redirect allowlist (`redirectAllowlist`)
 
