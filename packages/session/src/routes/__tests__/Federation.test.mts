@@ -581,6 +581,105 @@ describe("account linking across federations (#482)", () => {
 			expect(fts.delete).not.toHaveBeenCalled();
 		});
 
+		it("answers 503 when the session store cannot be read, before asking the Store", async () => {
+			const repo = linkableRepo({ current: null });
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: {
+					...makeUserSessionStore(),
+					get: vi.fn(async () => {
+						throw new Error("session store down");
+					}),
+				},
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "Session store unavailable",
+			});
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+
+		it("answers 503 when the Store throws, and attaches nothing", async () => {
+			const repo = linkableRepo({ current: null });
+			repo.linkFederatedIdentity.mockRejectedValueOnce(new Error("directory down"));
+			const sfi = makeSessionFederationIndex();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				sessionFederationIndex: sfi,
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "User directory temporarily unavailable",
+			});
+			expect(sfi.addFederation).not.toHaveBeenCalled();
+		});
+
+		it("words a refusal the Store did not describe", async () => {
+			const repo = linkableRepo({ current: null, outcome: { ok: false, reason: "refused" } });
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(403);
+			expect(res.body).toEqual({
+				error: "link_refused",
+				error_description: "The user directory refused to link this identity",
+			});
+		});
+
+		it("answers 500 without a redirect policy for the provider, and relays a policy refusal", async () => {
+			const unregistered = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				federationRedirectPolicyResolver: new Map(),
+			});
+			const none = await callback(await plantAndGetAgent(unregistered.app));
+			expect(none.status).toBe(500);
+			expect(none.body.error).toBe("internal_error");
+
+			const refusing = {
+				...makePermissivePolicy(),
+				resolveCallbackRedirect: () => ({
+					ok: false as const,
+					status: 400,
+					error: "invalid_redirect",
+					errorDescription: "redirect target not allowed",
+				}),
+			} as unknown as ReturnType<typeof makePermissivePolicy>;
+			const refused = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				federationRedirectPolicyResolver: new Map([["test", refusing]]),
+			});
+			const res = await callback(await plantAndGetAgent(refused.app));
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_redirect",
+				error_description: "redirect target not allowed",
+			});
+		});
+
 		it("refuses without an authenticated session, and never asks the Store", async () => {
 			const repo = linkableRepo({ current: null });
 			const { app } = buildCallbackApp({
