@@ -301,6 +301,19 @@ describe("ClientEntrySchema — private_key_jwt (#484)", () => {
 		expect(await repo.authenticate("rp", "anything")).toBeNull();
 	});
 
+	it("refuses private or symmetric key material in jwks — a registration carries public keys only", () => {
+		const pkj = (keys: unknown[]) =>
+			issues({ tokenEndpointAuthMethod: "private_key_jwt", jwks: { keys } });
+		expect(pkj([{ ...jwk, d: "AQAB-not-for-here" }])).toMatch(/private key material \(d\)/);
+		expect(
+			pkj([{ kty: "RSA", n: "AQAB", e: "AQAB", p: "x", q: "y", dp: "z", dq: "w", qi: "v" }]),
+		).toMatch(/private key material \(p, q, dp, dq, qi\)/);
+		expect(pkj([{ kty: "oct", k: "c2VjcmV0" }])).toMatch(/symmetric/);
+		expect(pkj([{ crv: "P-256", x: jwk.x, y: jwk.y }])).toMatch(/kty/);
+		// The public key alone is what was always accepted.
+		expect(pkj([jwk])).toBe("");
+	});
+
 	it("accepts jwksUri over https, over http only on a loopback host, and exposes it", async () => {
 		expect(
 			issues({

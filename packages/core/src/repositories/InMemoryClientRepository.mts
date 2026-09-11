@@ -59,6 +59,35 @@ const httpUrlSchema = z
  * @internal
  */
 /**
+ * The members a public JWK never carries (RFC 7518 §6.2.2, §6.3.2, §6.4):
+ * a registration is the client's *public* keys, and one that smuggles the
+ * private half in would expose it through the `PublicClient` projection.
+ */
+const PRIVATE_JWK_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"] as const;
+
+/** One public JWK: a `kty`, asymmetric, and none of the private members. */
+const publicJwkSchema = z.record(z.string(), z.unknown()).superRefine((jwk, ctx) => {
+	if (typeof jwk.kty !== "string" || jwk.kty.length === 0) {
+		ctx.addIssue({ code: z.ZodIssueCode.custom, message: "jwks.keys[]: a JWK requires kty" });
+		return;
+	}
+	if (jwk.kty === "oct") {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: 'jwks.keys[]: kty "oct" is a symmetric key; register public keys only',
+		});
+		return;
+	}
+	const leaked = PRIVATE_JWK_MEMBERS.filter((member) => member in jwk);
+	if (leaked.length > 0) {
+		ctx.addIssue({
+			code: z.ZodIssueCode.custom,
+			message: `jwks.keys[]: private key material (${leaked.join(", ")}) must not be registered; publish the public key only`,
+		});
+	}
+});
+
+/**
  * #484: where a `private_key_jwt` client publishes its keys. `https`, or
  * `http` on a loopback host for local development — the same carve-out
  * every other operator-registered URL in this schema gets. The URI is
@@ -119,7 +148,7 @@ export const ClientEntrySchema = z
 		clientSecret: z.string().min(1).optional(),
 		// #484: the key sources for `private_key_jwt`. Exactly one of the two
 		// for that method, neither for any other — the superRefine below.
-		jwks: z.object({ keys: z.array(z.record(z.string(), z.unknown())).min(1) }).optional(),
+		jwks: z.object({ keys: z.array(publicJwkSchema).min(1) }).optional(),
 		jwksUri: jwksUriSchema.optional(),
 		// #395: held to the registered-redirect-URI shape (net/redirect-uri.mts)
 		// at boot — a `javascript:` target, a fragment, userinfo, or plain http

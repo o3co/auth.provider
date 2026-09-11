@@ -14,17 +14,20 @@
  * limitations under the License.
  */
 
-import { createSecretKey } from "node:crypto";
+import { createSecretKey, randomUUID } from "node:crypto";
 import {
 	type ClientRepository,
 	createMemoryAccessTokenDenylist,
+	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	type RefreshTokenFamilyRevocation,
+	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
 import express from "express";
-import { SignJWT } from "jose";
+import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { JWT_BEARER_CLIENT_ASSERTION_TYPE } from "#/middleware/clientAssertion.mjs";
 import { createRevokeRouter } from "#/routes/revoke.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -273,5 +276,95 @@ describe("POST /oauth/revoke — C1: cross-type fallback (hint=refresh_token + A
 		expect(await crossDenylist.has("cross-jti-1")).toBe(true);
 		// RT family must NOT have been "revoked" for the AT
 		expect(crossRevocations).toEqual([]);
+	});
+});
+
+describe("POST /oauth/revoke — private_key_jwt client authentication (#484)", () => {
+	let privateKey: CryptoKey;
+	let publicJwk: JWK;
+	beforeAll(async () => {
+		const pair = await generateKeyPair("ES256");
+		privateKey = pair.privateKey;
+		publicJwk = { ...(await exportJWK(pair.publicKey)), kid: "k1" };
+	});
+	const jwtRepository: ClientRepository = {
+		findById: async (id) =>
+			id === "rp"
+				? {
+						clientId: "rp",
+						tokenEndpointAuthMethod: "private_key_jwt",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						jwks: { keys: [publicJwk] },
+					}
+				: null,
+		authenticate: async () => null,
+	};
+	const assertion = async (): Promise<string> => {
+		const now = Math.floor(Date.now() / 1000);
+		return new SignJWT({
+			iss: "rp",
+			sub: "rp",
+			aud: `${ISSUER}/oauth/token`,
+			iat: now,
+			exp: now + 60,
+			jti: randomUUID(),
+		})
+			.setProtectedHeader({ alg: "ES256", kid: "k1" })
+			.sign(privateKey);
+	};
+	const buildApp = (replaySeenSet?: ReplaySeenSet) => {
+		const router = createRevokeRouter(express, {
+			clientRepository: jwtRepository,
+			keyStore,
+			refreshTokenFamilyRevocation: {
+				revokeFamily: vi.fn(async () => {}),
+				isFamilyRevoked: vi.fn(async () => false),
+			},
+			accessTokenRevocation: "unsupported",
+			accessTokenDenylist: undefined,
+			logger: createMockLogger(),
+			issuer: ISSUER,
+			...(replaySeenSet === undefined
+				? {}
+				: { replaySeenSet, tokenEndpoint: `${ISSUER}/oauth/token` }),
+		});
+		const app = express();
+		app.use("/oauth", router);
+		return app;
+	};
+
+	it("verifies the assertion against the composition's replay store, and refuses its replay", async () => {
+		// The discovery document advertises private_key_jwt for revocation, so
+		// the endpoint must reach the verifier with the store the composition
+		// wired — the same jti must not be usable here after /token spent it,
+		// or twice here.
+		const app = buildApp(createMemoryReplaySeenSet());
+		const jwt = await assertion();
+		const form = {
+			client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+			client_assertion: jwt,
+			token: "not-a-token",
+		};
+		// A silent 200 for an unparseable token is the authenticated answer.
+		const first = await request(app).post("/oauth/revoke").type("form").send(form);
+		expect(first.status).toBe(200);
+
+		const replay = await request(app).post("/oauth/revoke").type("form").send(form);
+		expect(replay.status).toBe(401);
+		expect(replay.body.error).toBe("invalid_client");
+	});
+
+	it("answers server_error without a replay store rather than accepting an unchecked jti", async () => {
+		const res = await request(buildApp())
+			.post("/oauth/revoke")
+			.type("form")
+			.send({
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+				token: "not-a-token",
+			});
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("server_error");
 	});
 });
