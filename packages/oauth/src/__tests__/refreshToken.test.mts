@@ -1267,7 +1267,7 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
-		it("rejects invalid_scope when policy grantedScope exceeds original (CP-15 RFC 6749 §6)", async () => {
+		it("answers 500 server_error when policy grantedScope exceeds the original grant (CP-15 RFC 6749 §6, #520)", async () => {
 			const token = await makeRefreshToken({ scope: "read" });
 			const policy = createStubPolicy(async () => ({
 				outcome: "allow",
@@ -1285,9 +1285,9 @@ describe("createRefreshTokenGrant", () => {
 
 			const { result } = await handler.handle(ctx);
 
-			expect(result.status).toBe(400);
+			expect(result.status).toBe(500);
 			if (!("error" in result)) expect.fail("Expected error in result");
-			expect(result.error).toBe("invalid_scope");
+			expect(result.error).toBe("server_error");
 			expect(result.errorDescription).toContain("admin");
 		});
 
@@ -1356,7 +1356,7 @@ describe("createRefreshTokenGrant", () => {
 			};
 		}
 
-		it("rejects policy grantedAudience outside client.allowedAudiences with 400 invalid_request (Test A)", async () => {
+		it("answers 500 server_error when policy grantedAudience is outside client.allowedAudiences (Test A, #520)", async () => {
 			// Policy returns an audience not in client.allowedAudiences → fail-closed.
 			const token = await makeRefreshToken({ scope: "read" });
 			const deps = depsWithAudiencePolicy(async () => ({
@@ -1376,9 +1376,9 @@ describe("createRefreshTokenGrant", () => {
 				},
 			});
 
-			expect(result.status).toBe(400);
+			expect(result.status).toBe(500);
 			if (!("error" in result)) expect.fail("Expected error in result");
-			expect(result.error).toBe("invalid_request");
+			expect(result.error).toBe("server_error");
 			expect(result.errorDescription).toContain("https://other.example");
 		});
 

@@ -161,6 +161,16 @@ export {
 	ownedConfirmation,
 } from "./grants/confirmationMatch.mjs";
 export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
+// Grant-policy evaluation and its bounds (#520): the one answer every minting
+// path gives a policy that throws, denies, or exceeds its ceiling.
+export {
+	boundPolicyAudience,
+	evaluateGrantPolicy,
+	type GrantPolicyAllow,
+	type GrantPolicyOutcome,
+	type PolicyAudienceOutcome,
+	policyOutOfBounds,
+} from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
 export {
 	type GenerateIdTokenOptions,

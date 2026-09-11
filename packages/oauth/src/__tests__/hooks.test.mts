@@ -681,7 +681,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(captured?.grantedAudience).toBeUndefined();
 		});
 
-		it("rejects with invalid_scope when grantPolicy returns scopes outside client allowance (CP-13)", async () => {
+		it("redirects server_error when grantPolicy returns scopes outside client allowance (CP-13, #520)", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
 				allowedScopes: ["read"],
 				// #396: the old implicit omitted-scope grant, now declared.
@@ -714,8 +714,11 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				scope: "read",
 			});
 
+			// #520: the policy exceeded its authority, the client did not —
+			// `server_error` is the authorization endpoint's word for that
+			// (RFC 6749 §4.1.2.1).
 			expect(res.status).toBe(302);
-			expect(res.headers.location).toContain("error=invalid_scope");
+			expect(res.headers.location).toContain("error=server_error");
 			expect(res.headers.location).toContain("admin");
 		});
 

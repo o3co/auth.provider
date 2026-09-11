@@ -16,6 +16,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+	boundPolicyAudience,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -24,6 +25,7 @@ import {
 	generateTokenResponse,
 	isRevocationUnavailable,
 	matchConfirmation,
+	policyOutOfBounds,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
@@ -374,41 +376,26 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					const originalSet = scopeStr ? scopeStr.split(" ") : [];
 					const exceeded = decision.grantedScope.filter((s) => !originalSet.includes(s));
 					if (exceeded.length > 0) {
+						// #520: the policy exceeded its authority; the caller did not.
 						return {
-							result: {
-								status: 400,
-								error: "invalid_scope",
-								errorDescription: `policy returned scopes exceeding original grant: ${exceeded.join(" ")}`,
-							},
+							result: policyOutOfBounds(
+								`policy returned scopes exceeding original grant: ${exceeded.join(" ")}`,
+							),
 						};
 					}
 					// CP-15: empty array → null so response omits scope.
 					finalScope = decision.grantedScope.length > 0 ? decision.grantedScope.join(" ") : null;
 				}
-				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
-					// Fail-closed audience validation: policy may only narrow to
-					// audiences already in client.allowedAudiences. An out-of-bounds
-					// audience from a buggy/compromised policy would mint a token
-					// accepted by a resource server the client is not authorized for.
-					// Mirrors clientCredentials.mts exactly (same ceiling, error code,
-					// message phrasing). Activated by T18 wiring resource into this
-					// path; pre-T18 grantPolicy paths that returned no grantedAudience
-					// are byte-equivalent (this block only runs on non-empty arrays).
-					const allowedAudSet = new Set(ctx.authenticatedClient.allowedAudiences ?? []);
-					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
-					if (exceeded.length > 0) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_request",
-								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
-							},
-						};
-					}
-					// Flatten to first entry (multi-audience tokens are out of scope
-					// for this grant path — matches cc and authorization_code patterns).
-					finalAudience = decision.grantedAudience[0];
-				}
+				// Fail-closed audience validation, bounded by this client's
+				// `allowedAudiences` (#520): a policy may narrow to one of them and
+				// nothing else. A decision that names none leaves `finalAudience`
+				// as it was.
+				const policyAudience = boundPolicyAudience(
+					decision,
+					ctx.authenticatedClient.allowedAudiences ?? [],
+				);
+				if (!policyAudience.ok) return { result: policyAudience.result };
+				if (policyAudience.audience !== null) finalAudience = policyAudience.audience;
 			}
 
 			// RFC 8707 §2 audience derivation (Stage 2, #173). `finalAudience` is

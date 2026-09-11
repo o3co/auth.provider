@@ -102,7 +102,9 @@
 import { randomUUID } from "node:crypto";
 
 import {
+	boundPolicyAudience,
 	type ChallengeCeremony,
+	evaluateGrantPolicy,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -326,102 +328,44 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					: null;
 				const client = ctx.authenticatedClient;
 
-				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
-				try {
-					decision = await deps.grantPolicy.evaluate(
-						{
-							grantType: WEBAUTHN_GRANT_TYPE,
-							// clientId from authenticated client when present; undefined otherwise
-							// (webauthn grant does not require client auth — the passkey IS the
-							// auth event).
-							clientId: client?.clientId,
-							subject: credential.userId,
-							requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
-							// RFC 8707: resource is null when body has no `resource` param;
-							// undefined passed to policy signals "no resource requested".
-							resource: resource ?? undefined,
-						},
-						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
-					);
-				} catch {
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "policy evaluation unavailable",
-						},
-					};
-				}
+				const policy = await evaluateGrantPolicy(
+					deps.grantPolicy,
+					{
+						grantType: WEBAUTHN_GRANT_TYPE,
+						// clientId from authenticated client when present; undefined otherwise
+						// (webauthn grant does not require client auth — the passkey IS the
+						// auth event).
+						clientId: client?.clientId,
+						subject: credential.userId,
+						requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
+						// RFC 8707: resource is null when body has no `resource` param;
+						// undefined passed to policy signals "no resource requested".
+						resource: resource ?? undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					effectiveScopes,
+				);
+				if (!policy.ok) return { result: policy.result };
+				// CP-18 / CP-15: the scope came back re-validated against the
+				// requested set — never a broader allowlist; this grant has none —
+				// and an empty array is honoured as strip-all.
+				effectiveScopes = policy.scopes;
 
-				if (decision.outcome === "deny") {
-					return {
-						result: {
-							status: 400,
-							error: decision.error,
-							errorDescription: decision.errorDescription,
-						},
-					};
-				}
-
-				if (decision.grantedScope !== undefined) {
-					// CP-18: fail-closed. Re-validate the policy's returned scopes
-					// against effectiveScopes (the post-narrowing set from the request),
-					// NOT against some broader allowedScopes ceiling. A buggy/compromised
-					// policy returning a scope outside the requested set is scope expansion.
-					// Mirrors clientCredentials.mts CP-18 exactly.
-					const requestedSet = new Set(effectiveScopes);
-					const exceeded = decision.grantedScope.filter((s) => !requestedSet.has(s));
-					if (exceeded.length > 0) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_scope",
-								errorDescription: `policy returned scopes exceeding requested scope: ${exceeded.join(" ")}`,
-							},
-						};
-					}
-					// CP-15 mirror: assign unconditionally — empty array honored as strip-all.
-					effectiveScopes = decision.grantedScope;
-				}
-
-				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
-					// Fail-closed audience validation: policy may only narrow to
-					// audiences already in client.allowedAudiences.
-					//
-					// #520: without an authenticated client there is no ceiling to
-					// narrow within, and the answer is the one the jwt-bearer grant
-					// gives, and every scope ceiling gives a scope with nothing to
-					// bound it: refused. This used to be the one path where a policy
-					// could put ANY audience on a token (the "trust asymmetry" of the
-					// Wave 1 audit, M-4), staged for a library-side ceiling that #173
-					// then delivered only for client_credentials, refresh_token and
-					// /authorize. Policy may narrow, never originate: a deployment
-					// that wants a resource `aud` on a passkey token registers a client
-					// with `allowedAudiences` and authenticates it.
-					const client = ctx.authenticatedClient;
-					if (!client) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_request",
-								errorDescription:
-									"policy returned an audience but no authenticated client supplies an allowedAudiences ceiling",
-							},
-						};
-					}
-					const allowedAudSet = new Set(client.allowedAudiences ?? []);
-					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
-					if (exceeded.length > 0) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_request",
-								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
-							},
-						};
-					}
-					policyGrantedAudience = decision.grantedAudience[0];
-				}
+				// #520: the audience half, bounded by the client's `allowedAudiences`.
+				// Without an authenticated client there is no ceiling to narrow
+				// within and a policy audience is refused. This used to be the one
+				// path where a policy could put ANY audience on a token (the "trust
+				// asymmetry" of the Wave 1 audit, M-4), staged for a library-side
+				// ceiling that #173 then delivered only for client_credentials,
+				// refresh_token and /authorize. Policy may narrow, never originate:
+				// a deployment that wants a resource `aud` on a passkey token
+				// registers a client with `allowedAudiences` and authenticates it.
+				const policyAudience = boundPolicyAudience(
+					policy.decision,
+					client ? (client.allowedAudiences ?? []) : undefined,
+				);
+				if (!policyAudience.ok) return { result: policyAudience.result };
+				policyGrantedAudience = policyAudience.audience;
 			}
 
 			// ------------------------------------------------------------------

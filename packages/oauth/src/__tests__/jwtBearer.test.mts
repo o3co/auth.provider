@@ -562,8 +562,9 @@ describe("jwt-bearer grant — grantPolicy is consulted, fail-closed (CP-18)", (
 		const { result } = await build({
 			grantPolicy: allow({ grantedScope: ["read", "write"] }),
 		}).handle(ctx({ scope: "read" }, authed));
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_scope");
+		// #520: the policy exceeded its authority, the caller did not.
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 	});
 
 	it("leaves the effective scope alone when the policy says nothing about it", async () => {
@@ -655,8 +656,8 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		const { result } = await build({
 			grantPolicy: allow({ grantedAudience: ["https://evil.example"] }),
 		}).handle(ctx({}, client({ allowedAudiences: ["https://api.example"] })));
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_request");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toMatch(/allowedAudiences/);
 	});
 
@@ -668,8 +669,8 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		const { result } = await build({
 			grantPolicy: allow({ grantedAudience: ["https://api.example"] }),
 		}).handle(ctx({}, { authenticatedClient: null }));
-		expect(result.status).toBe(400);
-		expect("error" in result && result.error).toBe("invalid_request");
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
 		expect("errorDescription" in result && result.errorDescription).toMatch(/allowedAudiences/);
 	});
 

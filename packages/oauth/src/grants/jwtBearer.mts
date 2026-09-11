@@ -22,9 +22,14 @@ import type {
 	GrantHandlerResult,
 	UserRepository,
 } from "@o3co/auth-provider-core";
-import { generateToken, generateTokenResponse, isEmailVerified } from "@o3co/auth-provider-core";
+import {
+	boundPolicyAudience,
+	evaluateGrantPolicy,
+	generateToken,
+	generateTokenResponse,
+	isEmailVerified,
+} from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
-import { evaluateGrantPolicy } from "./_grantPolicy.mjs";
 
 /** RFC 7523 §2.1. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -98,10 +103,11 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   credential, and answering `invalid_grant` would send an operator to
  *   re-enrol a device that was fine — the distinction #408 drew for revocation.
  * - `grantPolicy`, when wired, runs after all of the above and fails closed
- *   (throw → `503`, deny → its own error, a widened scope → `invalid_scope`)
- *   — see `evaluateGrantPolicy`. A `grantedAudience` outside the client's
+ *   (throw → `503`, deny → its own error) — see `evaluateGrantPolicy`. A
+ *   widened scope, a `grantedAudience` outside the client's
  *   `allowedAudiences`, or one returned when no authenticated client
- *   supplies that ceiling, is `invalid_request` (#518).
+ *   supplies that ceiling, is `500 server_error` (#520): the policy exceeded
+ *   its authority, the caller did not.
  */
 export const createJwtBearerGrant = (
 	deps: GrantDependencies & {
@@ -247,43 +253,20 @@ export const createJwtBearerGrant = (
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;
-				const { decision } = policy;
-				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
-					// #518: the audience ceiling is the client's `allowedAudiences`,
-					// the same one `client_credentials` and `refresh_token` hold a
-					// policy to. Fail closed: an out-of-bounds audience from a buggy
-					// or compromised policy would mint a token accepted by a resource
-					// server the client was never registered for.
-					//
-					// Without an authenticated client there is no ceiling at all, and
-					// the answer is the one `resolveScope` gives a scope with nothing
-					// to bound it: refused, not granted. Dropping the audience
-					// silently — what this grant did before — let a policy believe it
-					// had narrowed a token that carries no `aud`.
-					if (!client) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_request",
-								errorDescription:
-									"policy returned an audience but no authenticated client supplies an allowedAudiences ceiling",
-							},
-						};
-					}
-					const allowedAudSet = new Set(client.allowedAudiences ?? []);
-					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
-					if (exceeded.length > 0) {
-						return {
-							result: {
-								status: 400,
-								error: "invalid_request",
-								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
-							},
-						};
-					}
-					// Flatten to the first entry, as every other grant does.
-					policyGrantedAudience = decision.grantedAudience[0];
-				}
+				// #518: the audience ceiling is the client's `allowedAudiences`,
+				// the same one `client_credentials` and `refresh_token` hold a
+				// policy to. Without an authenticated client there is no ceiling
+				// at all, and the answer is the one `resolveScope` gives a scope
+				// with nothing to bound it: refused, not granted — dropping the
+				// audience silently, what this grant did before, let a policy
+				// believe it had narrowed a token that carries no `aud`. Both
+				// refusals are `boundPolicyAudience`'s (#520).
+				const policyAudience = boundPolicyAudience(
+					policy.decision,
+					client ? (client.allowedAudiences ?? []) : undefined,
+				);
+				if (!policyAudience.ok) return { result: policyAudience.result };
+				policyGrantedAudience = policyAudience.audience;
 			}
 
 			// #518: the audience rule the session and device grants apply — the

@@ -99,6 +99,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/ratelimit/deviceVerificationSpec.mts",
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
+	{
+		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition:
+			/(?:function|const)\s+(?:evaluateGrantPolicy|boundPolicyAudience|policyOutOfBounds)\b/,
+	},
 ];
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */
