@@ -244,3 +244,148 @@ describe("#407 — the two READMEs agree on security advice", () => {
 		expect(read("/README.ja.md")).not.toMatch(/HTTP_TRUST_PROXY=true/);
 	});
 });
+
+/**
+ * Issue #512 — the suite that ships with a scaffolded project has to be green
+ * in that project, not only in this workspace.
+ *
+ * A scaffold installs `@o3co/auth-provider-*` from npm, where the packages sit
+ * under `node_modules` and vitest externalizes them: Node loads them natively
+ * and their own `import "ioredis"` / `import "redis"` never meet the
+ * `vi.mock` registry. In this workspace the same packages are symlinks to
+ * source outside `node_modules`, vitest inlines them, and the mocks apply —
+ * which is how replica-safety.test.mts stayed green here while dialling
+ * `redis.test` for real in every scaffold. The second half is `make test`:
+ * it runs this suite inside the `test` image, where a file the Dockerfile
+ * never copied simply does not exist.
+ */
+describe("#512 — the shipped suite is green outside this repository", () => {
+	it("runs the published packages through vitest, so module mocks reach them", async () => {
+		// The config is loaded, not grepped: what matters is the value vitest
+		// resolves, and a `server.deps.inline` naming the wrong package would
+		// satisfy a substring check just as well.
+		const configPath = fileURLToPath(new URL("../../vitest.config.mts", import.meta.url));
+		const { default: config } = (await import(configPath)) as {
+			default: {
+				test?: { server?: { deps?: { inline?: ReadonlyArray<string | RegExp> | true } } };
+			};
+		};
+		const inline = config.test?.server?.deps?.inline;
+		expect(inline).toBeDefined();
+		if (inline === true) return;
+		for (const name of [
+			"@o3co/auth-provider-core",
+			"@o3co/auth-provider-redis",
+			"@o3co/auth-provider-session",
+		]) {
+			expect(
+				(inline ?? []).some((m) => (m instanceof RegExp ? m.test(name) : m === name)),
+				`${name} is not inlined`,
+			).toBe(true);
+		}
+	});
+
+	/**
+	 * Every file this suite reads from the project root. `config/` and `src/`
+	 * reach the image through the builder stage; these do not, so the `test`
+	 * stage has to bring them — and `.dockerignore` has to let them into the
+	 * build context first.
+	 */
+	const READ_FROM_THE_PROJECT_ROOT = [
+		"Dockerfile",
+		".dockerignore",
+		".env.example",
+		".gitignore",
+		"README.md",
+		"README.ja.md",
+		"docker-compose.yml",
+		"docker-compose.production.yml",
+	] as const;
+
+	it("reads only files the template actually ships", () => {
+		for (const file of READ_FROM_THE_PROJECT_ROOT) {
+			expect(existsSync(`${standaloneDir}${file}`), file).toBe(true);
+		}
+	});
+
+	it("copies each of them into the image the `test` target runs", () => {
+		const copied = copiedIntoStage(read("/Dockerfile"), "test");
+		for (const file of READ_FROM_THE_PROJECT_ROOT) {
+			expect(copied.has(file), `${file} is not copied into the test image`).toBe(true);
+		}
+	});
+
+	it("lets each of them through .dockerignore", () => {
+		const dockerignore = read("/.dockerignore");
+		for (const file of READ_FROM_THE_PROJECT_ROOT) {
+			expect(
+				dockerignoreExcludes(dockerignore, file),
+				`${file} is excluded from the build context`,
+			).toBe(false);
+		}
+	});
+});
+
+/**
+ * The build-context sources every `COPY` in `stage` and its ancestors brings
+ * into the image. `COPY --from=` is skipped — it reads another stage, not
+ * the context — and `--chown` / other flags are dropped. Sources are
+ * normalised to the bare entry name (`./config/` → `config`).
+ */
+function copiedIntoStage(dockerfile: string, stage: string): Set<string> {
+	const stages = new Map<string, { parent: string; sources: string[] }>();
+	let current: { parent: string; sources: string[] } | undefined;
+	// Continuation lines are joined first, so a multi-line instruction reads
+	// as one.
+	for (const line of dockerfile.replace(/\\\n/g, " ").split("\n")) {
+		const text = line.trim();
+		if (text === "" || text.startsWith("#")) continue;
+		const from = /^FROM\s+(\S+)(?:\s+AS\s+(\S+))?/i.exec(text);
+		if (from) {
+			const parent = from[1] as string;
+			current = { parent, sources: [] };
+			stages.set(from[2] ?? parent, current);
+			continue;
+		}
+		if (!current || !/^COPY\b/i.test(text)) continue;
+		const args = text.split(/\s+/).slice(1);
+		if (args.some((a) => a.startsWith("--from="))) continue;
+		const operands = args.filter((a) => !a.startsWith("--"));
+		for (const source of operands.slice(0, -1)) {
+			current.sources.push(source.replace(/^\.\//, "").replace(/\/$/, ""));
+		}
+	}
+	const copied = new Set<string>();
+	for (let name: string | undefined = stage; name !== undefined; ) {
+		const s = stages.get(name);
+		if (!s) break;
+		for (const source of s.sources) copied.add(source);
+		name = s.parent;
+	}
+	return copied;
+}
+
+/**
+ * Whether `.dockerignore` keeps a root-level entry out of the build context.
+ * The last matching pattern wins and a leading `!` re-includes; `*` and `?`
+ * stop at a `/` while `**` does not — the subset of Docker's matching that
+ * root-level file names exercise.
+ */
+function dockerignoreExcludes(dockerignore: string, file: string): boolean {
+	let excluded = false;
+	for (const raw of dockerignore.split("\n")) {
+		const line = raw.trim();
+		if (line === "" || line.startsWith("#")) continue;
+		const negated = line.startsWith("!");
+		const pattern = negated ? line.slice(1) : line;
+		// `**` is split out first so the single-`*` rewrite cannot see it.
+		const segment = (s: string): string =>
+			s
+				.replace(/[.+^${}()|[\]\\]/g, "\\$&")
+				.replace(/\*/g, "[^/]*")
+				.replace(/\?/g, "[^/]");
+		const regex = new RegExp(`^${pattern.split("**").map(segment).join(".*")}$`);
+		if (regex.test(file)) excluded = !negated;
+	}
+	return excluded;
+}

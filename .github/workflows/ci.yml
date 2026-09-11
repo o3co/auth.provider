@@ -466,12 +466,17 @@ jobs:
       - name: Check versions.json sync
         run: node create-app/scripts/check-versions-json.mjs
 
-      - name: Build templates/standalone against packed tarballs
+      - name: Build and test templates/standalone against packed tarballs
         run: |
           set -euo pipefail
           SCRATCH=$(mktemp -d)
           cp -R templates/standalone "$SCRATCH/standalone"
           pushd "$SCRATCH/standalone" >/dev/null
+          # The workspace copy carries node_modules symlinked to packages/*
+          # source. Drop it so every @o3co package below is the packed
+          # tarball under node_modules — the layout a scaffold runs in, and
+          # the one the shipped suite has to be green in (#512).
+          rm -rf node_modules dist
           # Rewrite workspace:* in direct deps to file: tarball URLs AND add
           # an `overrides` block pinning every workspace package to its
           # tarball. The overrides block is required so transitive workspace
@@ -504,7 +509,15 @@ jobs:
           # Use npm rather than pnpm here: pnpm in workspace context would
           # try to re-resolve; standalone npm install consumes the file:
           # tarballs straight (with overrides forcing transitives too).
-          npm install --no-package-lock --omit=optional
+          # Optional dependencies stay in: vitest's rolldown and esbuild ship
+          # their native bindings as optionalDependencies, and `--omit=optional`
+          # left `npm run test` below unable to start (#512).
+          npm install --no-package-lock
           npm run build
+          # The suite that ships with a scaffold, run where a scaffold runs it:
+          # published packages under node_modules, project root not at
+          # templates/standalone. Green here means green after
+          # `create-auth-provider` (#512).
+          npm run test
           popd >/dev/null
-          echo "OK: templates/standalone builds against packed tarballs"
+          echo "OK: templates/standalone builds and tests against packed tarballs"

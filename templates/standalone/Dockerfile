@@ -105,6 +105,13 @@ FROM builder AS test
 
 COPY --chown=node:node vitest.config.mts ./
 COPY --chown=node:node tests/ ./tests/
+# #512: the suite reads these from the project root (scaffold-assets,
+# documented-env-overrides, smoke). The builder stage brings only what the
+# build needs, so inside this image they did not exist and `make test` failed
+# on files that were never a test's business. `.dockerignore` lets them into
+# the context for the same reason; nothing copies them into `runtime`.
+COPY --chown=node:node Dockerfile .dockerignore .env.example .gitignore README.md README.ja.md \
+  docker-compose.yml docker-compose.production.yml ./
 
 CMD ["pnpm", "run", "test", "--", "--passWithNoTests"]
 

@@ -1,9 +1,10 @@
 node_modules
 dist
 .git
-.gitignore
 .env*
 !.env.example
-*.md
-docker-compose*.yml
 Makefile
+# .gitignore, the READMEs and the compose files stay in the context: the
+# `test` image copies them because the shipped suite reads them (#512). The
+# runtime image never copies them, so they cost the context a few kilobytes
+# and the image nothing.
