@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AppConfig, AppConfigSchema } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
@@ -477,10 +478,15 @@ describe("#288: the shipped config boots with every documented override supplied
 		});
 	});
 
-	it("resolves against the shipped standalone template, not a fixture", () => {
+	it("resolves against the shipped standalone artifact, not a fixture", () => {
 		// Guards the guard: if the paths above ever stop pointing at the real
-		// artifact these tests would pass while testing nothing.
-		expect(standaloneDir).toMatch(/templates[/\\]standalone[/\\]?$/);
+		// artifact these tests would pass while testing nothing. Checked by
+		// what the directory holds, not by what it is called: this file ships
+		// in every scaffolded project, and none of those lives at
+		// `templates/standalone` (#512).
+		for (const file of ["config/application.conf", "config/production.conf", "src/app.mts"]) {
+			expect(existsSync(join(standaloneDir, file)), file).toBe(true);
+		}
 		expect(liveSubstitutions().size).toBeGreaterThan(40);
 	});
 });

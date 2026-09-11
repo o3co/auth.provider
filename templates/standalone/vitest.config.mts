@@ -11,5 +11,14 @@ export default defineConfig({
 		// 20s.
 		testTimeout: 20_000,
 		hookTimeout: 20_000,
+		// #512: run the @o3co/auth-provider-* packages through vitest instead of
+		// letting Node load them natively. In a scaffolded project they are
+		// installed from npm under node_modules, which vitest externalizes by
+		// default — and an externalized package's own `import "ioredis"` /
+		// `import "redis"` never sees a `vi.mock` from a test file, so
+		// replica-safety.test.mts dialled a Redis that is not there. Inside the
+		// monorepo the same packages are symlinks to source and are inlined
+		// anyway; this makes the two layouts behave the same.
+		server: { deps: { inline: [/@o3co\/auth-provider-/] } },
 	},
 });
