@@ -26,6 +26,7 @@ import {
 	type Logger,
 	matchesRegisteredRedirectUri,
 	type PublicClient,
+	type UserSession,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
@@ -99,15 +100,27 @@ export interface AuthorizeHandlerOptions {
  * unauthenticated request still answers without touching any repository
  * (#284) — this function is only reached once the session claims otherwise.
  */
-const sessionSidIsLive = async (req: Request, opts: AuthorizeHandlerOptions): Promise<boolean> => {
+/**
+ * The live `UserSession` behind the request's `sid`, when this composition
+ * wires a store (#481 widened it from a boolean: `max_age`, `prompt=login`
+ * and `acr_values` all read the record, not just its presence).
+ *
+ * `live: true, session: null` is the no-store composition — authenticated
+ * on the cookie's word alone, with no `auth_time` to reason about.
+ */
+const readLiveSession = async (
+	req: Request,
+	opts: AuthorizeHandlerOptions,
+): Promise<{ readonly live: boolean; readonly session: UserSession | null }> => {
 	const store = opts.userSessionStore;
 	const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
-	if (!store || sid === undefined) return true;
+	if (!store || sid === undefined) return { live: true, session: null };
 	try {
-		return (await store.get(sid)) != null;
+		const session = await store.get(sid);
+		return { live: session != null, session };
 	} catch (err) {
 		opts.logger.warn({ err, sid }, "authorize_session_liveness_unavailable");
-		return false;
+		return { live: false, session: null };
 	}
 };
 
@@ -432,6 +445,10 @@ const SINGLE_VALUED_QUERY_PARAMS = [
 	"state",
 	"code_challenge",
 	"code_challenge_method",
+	// #481
+	"max_age",
+	"acr_values",
+	"reauth_after",
 ] as const;
 
 /**
@@ -485,11 +502,11 @@ export const authorizeParams = (req: Request): Record<string, unknown> =>
  *
  * Returns the resolved directive, or `null` when it has already answered.
  */
-type PromptDirective = { readonly silent: boolean };
+type PromptDirective = { readonly silent: boolean; readonly login: boolean };
 
 const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 	const raw = ctx.params.prompt;
-	if (raw === undefined) return { silent: false };
+	if (raw === undefined) return { silent: false, login: false };
 	if (typeof raw !== "string") {
 		redirectError(ctx, "invalid_request", "prompt must be a single string value");
 		return null;
@@ -498,23 +515,147 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 	// other value — "if this parameter contains none with any other value, an
 	// error is returned".
 	const values = raw.split(" ").filter((v) => v.length > 0);
-	if (values.length === 0) return { silent: false };
+	if (values.length === 0) return { silent: false, login: false };
 	if (values.includes("none") && values.length > 1) {
 		redirectError(ctx, "invalid_request", "prompt=none cannot be combined with other values");
 		return null;
 	}
-	const unsupported = values.filter((v) => v !== "none");
+	// #481: `login` is honoured — see `evaluateReauthentication`.
+	const unsupported = values.filter((v) => v !== "none" && v !== "login");
 	if (unsupported.length > 0) {
 		redirectError(
 			ctx,
 			"invalid_request",
 			`prompt values not supported: ${unsupported.join(" ")} — this authorization server ` +
-				"serves first-party clients only, so it has no consent step or account picker, " +
-				"and it cannot yet tell that a forced re-authentication has happened",
+				"serves first-party clients only, so it has no consent step or account picker",
 		);
 		return null;
 	}
-	return { silent: true };
+	return { silent: values.includes("none"), login: values.includes("login") };
+};
+
+/**
+ * #481 — `max_age` (OIDC Core §3.1.2.1): the seconds since the End-User's
+ * authentication that the RP will accept. A non-negative integer, or a
+ * refusal; absent means no constraint.
+ */
+const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefined } | null => {
+	const raw = ctx.params.max_age;
+	if (raw === undefined) return { value: undefined };
+	if (typeof raw !== "string" || !/^[0-9]+$/.test(raw)) {
+		redirectError(ctx, "invalid_request", "max_age must be a non-negative integer");
+		return null;
+	}
+	return { value: Number(raw) };
+};
+
+/**
+ * #481 — the marker this endpoint puts on the authorize URL it sends the
+ * browser back to when it asks for a re-authentication: the epoch second
+ * of the ask. On the way back, a session authenticated at or after it is
+ * the re-authentication that was asked for; one authenticated before it is
+ * not, and gets `login_required` instead of a second round trip. Only
+ * this server ever writes it, and it decides nothing an RP relies on —
+ * `auth_time` in the id_token is what the RP verifies.
+ */
+const REAUTH_MARKER_PARAM = "reauth_after";
+
+const readReauthMarker = (ctx: AuthorizeContext): number | undefined => {
+	const raw = ctx.params[REAUTH_MARKER_PARAM];
+	return typeof raw === "string" && /^[0-9]+$/.test(raw) ? Number(raw) : undefined;
+};
+
+type ReauthOutcome = "proceed" | "login" | "answered";
+
+/**
+ * #481 — decide whether the session's authentication is fresh enough.
+ *
+ * `prompt=login` and a `max_age` the session's `auth_time` is older than
+ * both mean "re-authenticate". The first time through, the browser is sent
+ * to the login page with the request round-tripped and the marker set —
+ * unless the RP asked for `prompt=none`, in which case the only honest
+ * answer is `login_required`. When the marker is already on the request the
+ * user has been to the login page: a session authenticated after the ask
+ * satisfies both `prompt=login` and any `max_age` (it is as fresh as this
+ * request), and one that was not is refused with `login_required` rather
+ * than looped.
+ */
+const evaluateReauthentication = (
+	ctx: AuthorizeContext,
+	prompt: PromptDirective,
+	maxAge: number | undefined,
+	session: UserSession | null,
+): ReauthOutcome => {
+	if (!prompt.login && maxAge === undefined) return "proceed";
+	if (session === null) {
+		// No UserSessionStore in this composition: there is no `auth_time` to
+		// measure against, and pretending would be the silent acceptance the
+		// parameters exist to prevent.
+		redirectError(
+			ctx,
+			"invalid_request",
+			"max_age and prompt=login need a user session store, which this deployment does not wire",
+		);
+		return "answered";
+	}
+	const nowSeconds = Math.floor(Date.now() / 1000);
+	const authTimeSeconds = Math.floor(session.authTime.getTime() / 1000);
+	const marker = readReauthMarker(ctx);
+	if (marker !== undefined) {
+		if (authTimeSeconds >= marker) return "proceed";
+		redirectError(
+			ctx,
+			"login_required",
+			"re-authentication was requested but the session was not re-established",
+		);
+		return "answered";
+	}
+	const stale = maxAge !== undefined && nowSeconds - authTimeSeconds > maxAge;
+	if (!prompt.login && !stale) return "proceed";
+	if (prompt.silent) {
+		redirectError(
+			ctx,
+			"login_required",
+			"the session is older than max_age and prompt=none forbids re-authenticating",
+		);
+		return "answered";
+	}
+	return "login";
+};
+
+/**
+ * #481 — `acr_values` (OIDC Core §3.1.2.1) against the configured table
+ * (`oauth.authorize.acrValues`): the first requested value whose `amr`
+ * requirement the session's recorded `amr` covers is the `acr` the code —
+ * and so the id_token — carries. None satisfied, or a value this
+ * deployment never configured, is `unmet_authentication_requirements`
+ * rather than a token the RP would read as meeting its requirement.
+ */
+const resolveAcr = (
+	ctx: AuthorizeContext,
+	session: UserSession | null,
+): { readonly value: string | undefined } | null => {
+	const raw = ctx.params.acr_values;
+	if (raw === undefined) return { value: undefined };
+	const requested = typeof raw === "string" ? raw.split(" ").filter((v) => v.length > 0) : [];
+	if (requested.length === 0) return { value: undefined };
+	const table = ctx.opts.oauth.acrValues;
+	const held = new Set(session?.amr ?? []);
+	for (const acr of requested) {
+		const required = table[acr];
+		if (required?.every((method) => held.has(method))) {
+			return { value: acr };
+		}
+	}
+	const unknown = requested.filter((acr) => table[acr] === undefined);
+	redirectError(
+		ctx,
+		"unmet_authentication_requirements",
+		unknown.length > 0
+			? `acr_values not configured on this authorization server: ${unknown.join(" ")}`
+			: `the session's authentication does not satisfy any requested acr: ${requested.join(" ")}`,
+	);
+	return null;
 };
 
 /**
@@ -849,6 +990,8 @@ const mintCode = async (
 		codeChallengeMethod: string | undefined;
 		grantedScope: readonly string[] | undefined;
 		grantedAudience: readonly string[] | undefined;
+		/** #481 */
+		acr?: string | undefined;
 	},
 ): Promise<{ code: string } | null> => {
 	let issue: Awaited<ReturnType<CodeRepository["createCode"]>>;
@@ -863,6 +1006,7 @@ const mintCode = async (
 			// NEW (TODO-F-3): OIDC round-trip state on the code record.
 			nonce: typeof ctx.params.nonce === "string" ? ctx.params.nonce : undefined,
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
+			...(params.acr !== undefined ? { acr: params.acr } : {}),
 		});
 	} catch {
 		redirectError(ctx, "server_error", "Failed to create authorization code");
@@ -955,8 +1099,12 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// both the login redirect below and the `prompt=none` refusal further
 		// down answer from the same fact. The `&&` short-circuits, which is
 		// what keeps the anonymous path free of the store read.
-		const authenticated =
-			Boolean(req.session.isAuthenticated) && (await sessionSidIsLive(req, opts));
+		// The store is read only for a session that claims to be authenticated —
+		// a genuinely anonymous request costs no lookup (R1b).
+		const liveSession = req.session.isAuthenticated
+			? await readLiveSession(req, opts)
+			: { live: false, session: null };
+		const authenticated = Boolean(req.session.isAuthenticated) && liveSession.live;
 
 		if (!authenticated && !wantsSilentAuth) {
 			// `endpoints.login.url` may already carry a query string (e.g.
@@ -1020,6 +1168,20 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			);
 			return;
 		}
+		// #481: is the authentication fresh enough for what the RP asked?
+		const maxAge = parseMaxAge(ctx);
+		if (maxAge === null) return;
+		const reauth = evaluateReauthentication(ctx, prompt, maxAge.value, liveSession.session);
+		if (reauth === "answered") return;
+		if (reauth === "login") {
+			const back = new URL(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
+			back.searchParams.set(REAUTH_MARKER_PARAM, String(Math.floor(Date.now() / 1000)));
+			const loginUrl = opts.loginUrl();
+			const joiner = loginUrl.includes("?") ? "&" : "?";
+			return res.redirect(`${loginUrl}${joiner}redirect_to=${encodeURIComponent(back.toString())}`);
+		}
+		const acr = resolveAcr(ctx, liveSession.session);
+		if (acr === null) return;
 		if (!checkResponseTypeIsCode(ctx)) return;
 		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
 		// it is interpreted — a repeat read as absence is a different request
@@ -1073,6 +1235,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			codeChallengeMethod: pkce.method,
 			grantedScope: scopeForPersist,
 			grantedAudience: audience.audienceForPersist,
+			acr: acr.value,
 		});
 		if (!minted) return;
 

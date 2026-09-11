@@ -34,6 +34,8 @@ export interface CodeRepository {
 		// NEW (TODO-F-3): OIDC authorize → token round-trip state.
 		nonce?: string;
 		sid?: string;
+		// #481: the satisfied Authentication Context Class Reference.
+		acr?: string;
 	}): Promise<Code>;
 	/**
 	 * Retrieve a code record by the authorization code string. Returns

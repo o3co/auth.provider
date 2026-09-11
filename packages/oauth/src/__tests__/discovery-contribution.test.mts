@@ -312,3 +312,27 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		expect(all).not.toHaveProperty("frontchannel_logout_session_supported");
 	});
 });
+
+describe("acr_values_supported (#481)", () => {
+	const withAcr = (acrValues: Record<string, string[]> | undefined): AppConfig => {
+		const base = configWithRevocation();
+		return {
+			...base,
+			oauth: { ...base.oauth, authorize: acrValues ? { acrValues } : {} },
+		} as unknown as AppConfig;
+	};
+
+	it("advertises the keys of the configured acr table", () => {
+		const meta = discoveryContribution(
+			{},
+			withAcr({ "urn:example:pwd": ["pwd"], "urn:example:mfa": ["pwd", "mfa"] }),
+		);
+		expect(meta.metadata?.acr_values_supported).toEqual(["urn:example:pwd", "urn:example:mfa"]);
+	});
+
+	it("says nothing when there is no table — an acr_values request is then unmet", () => {
+		expect(discoveryContribution({}, withAcr(undefined)).metadata).not.toHaveProperty(
+			"acr_values_supported",
+		);
+	});
+});

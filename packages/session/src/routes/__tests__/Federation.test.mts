@@ -1740,3 +1740,38 @@ describe("federation login: subject session index (#296)", () => {
 		expect(res.status).toBe(503);
 	});
 });
+
+describe("amr on federated sessions (#481)", () => {
+	it("records the upstream amr plus the deployment marker fed, or fed alone", async () => {
+		const cases: ReadonlyArray<readonly [readonly string[] | undefined, readonly string[]]> = [
+			[["hwk"], ["hwk", "fed"]],
+			[undefined, ["fed"]],
+		];
+		for (const [upstream, expected] of cases) {
+			const provider = makeFakeProvider({
+				exchangeCode: vi.fn(async () => ({
+					issuer: "https://idp.example.com",
+					sub: "external-42",
+					accessToken: "at",
+					expiresAt: null,
+					...(upstream ? { amr: upstream } : {}),
+				})),
+			});
+			const uss = makeUserSessionStore();
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", provider]]),
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+				userSessionStore: uss,
+			});
+			const res = await (await plantAndGetAgent(app)).get(
+				"/oauth/federation/test/callback?state=s1&code=c1",
+			);
+			expect(res.status).toBe(302);
+			const createArg = (uss.create as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as {
+				amr?: unknown;
+			};
+			expect(createArg.amr).toEqual(expected);
+		}
+	});
+});

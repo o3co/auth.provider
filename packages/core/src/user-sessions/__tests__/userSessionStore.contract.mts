@@ -27,6 +27,7 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 	authTime: overrides.authTime ?? new Date(),
 	expiresAt: overrides.expiresAt ?? FUTURE(),
 	claims: overrides.claims ?? { email: "user@example.com" },
+	...(overrides.amr ? { amr: overrides.amr } : {}),
 });
 
 export function runUserSessionStoreContract(factory: UserSessionStoreContractFactory): void {
@@ -39,6 +40,14 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			expect(s?.sid).toBe("sid-1");
 			expect(s?.sub).toBe("user-1");
 			expect(s?.claims.email).toBe("user@example.com");
+		});
+
+		it("round-trips amr (#481), and leaves it absent when none was recorded", async () => {
+			const store = await factory();
+			await store.create(INPUT({ sid: "sid-amr", amr: ["pwd", "mfa"] }));
+			expect((await store.get("sid-amr"))?.amr).toEqual(["pwd", "mfa"]);
+			await store.create(INPUT({ sid: "sid-plain" }));
+			expect((await store.get("sid-plain"))?.amr).toBeUndefined();
 		});
 
 		it("create rejects duplicate sid", async () => {

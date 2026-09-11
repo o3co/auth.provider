@@ -151,3 +151,36 @@ describe("generateIdToken", () => {
 		expect((p.exp as number) - (p.iat as number)).toBe(600);
 	});
 });
+
+describe("generateIdToken — amr / acr (#481)", () => {
+	const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxxxx");
+	const base = {
+		sub: "u-1",
+		aud: "client-1",
+		authTime: new Date("2026-04-21T00:00:00Z"),
+		sid: "sid-1",
+		scopes: ["openid"],
+		userClaims: {},
+		keyStore,
+		issuer: "https://auth.example.com",
+	};
+	const payload = (token: string): Record<string, unknown> =>
+		JSON.parse(Buffer.from(token.split(".")[1] ?? "", "base64url").toString("utf8"));
+
+	it("carries amr and acr when the session recorded them", async () => {
+		const { token } = await generateIdToken({
+			...base,
+			amr: ["pwd", "mfa"],
+			acr: "urn:example:mfa",
+		});
+		expect(payload(token).amr).toEqual(["pwd", "mfa"]);
+		expect(payload(token).acr).toBe("urn:example:mfa");
+	});
+
+	it("omits both when absent — an empty amr is absent, not []", async () => {
+		const plain = payload((await generateIdToken(base)).token);
+		expect(plain.amr).toBeUndefined();
+		expect(plain.acr).toBeUndefined();
+		expect(payload((await generateIdToken({ ...base, amr: [] })).token).amr).toBeUndefined();
+	});
+});

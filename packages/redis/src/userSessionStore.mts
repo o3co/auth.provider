@@ -45,6 +45,8 @@ interface Envelope {
 	createdAtMs: number;
 	expiresAtMs: number;
 	claims: Record<string, unknown>;
+	/** #481: RFC 8176 values recorded by the login path. */
+	amr?: string[];
 }
 
 /**
@@ -99,7 +101,8 @@ const isValidEnvelope = (v: unknown): v is Envelope => {
 		isValidTimestamp(e.expiresAtMs) &&
 		typeof e.claims === "object" &&
 		e.claims !== null &&
-		!Array.isArray(e.claims)
+		!Array.isArray(e.claims) &&
+		(e.amr === undefined || (Array.isArray(e.amr) && e.amr.every((v) => typeof v === "string")))
 	);
 };
 
@@ -110,6 +113,7 @@ const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelop
 	createdAtMs,
 	expiresAtMs: input.expiresAt.getTime(),
 	claims: { ...input.claims },
+	...(input.amr ? { amr: [...input.amr] } : {}),
 });
 
 const fromEnvelope = (e: Envelope): UserSession => ({
@@ -119,6 +123,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	createdAt: new Date(e.createdAtMs),
 	expiresAt: new Date(e.expiresAtMs),
 	claims: { ...e.claims } as UserSessionClaims,
+	...(e.amr ? { amr: [...e.amr] } : {}),
 });
 
 /**

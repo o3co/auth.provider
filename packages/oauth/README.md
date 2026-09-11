@@ -136,14 +136,39 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **`prompt=none` is supported.** No session answers `login_required` at the client's `redirect_uri` — which is the point, since a hidden renewal iframe cannot act on a login page. A session proceeds silently.
 
-**`prompt=login`, `consent` and `select_account` are refused** with `invalid_request` naming the value, not ignored:
+**`prompt=login` re-authenticates** (#481) — see [Step-up and re-authentication](#step-up-and-re-authentication-481) below.
 
-- There is no consent step or account picker, by design. `/authorize` admits only clients marked `firstParty: true` (#267), and consent is a question about a third party you are being asked to trust. For a client you operate, an auto-consent model is the honest one — but that makes `prompt=consent` impossible to honour, and returning a token an RP believes was freshly consented to is worse than refusing.
-- `prompt=login` needs a way to know that a forced re-authentication just happened, or the user comes back from the login page with the same parameter and loops. That marker is `auth_time`, which arrives with `max_age`; a looping implementation would be worse than the refusal.
+**`prompt=consent` and `select_account` are refused** with `invalid_request` naming the value, not ignored: there is no consent step or account picker, by design. `/authorize` admits only clients marked `firstParty: true` (#267), and consent is a question about a third party you are being asked to trust. For a client you operate, an auto-consent model is the honest one — but that makes `prompt=consent` impossible to honour, and returning a token an RP believes was freshly consented to is worse than refusing.
 
 **`request` and `request_uri` are refused** with `request_not_supported` / `request_uri_not_supported`. Ignoring them was the pre-#284 behaviour and the dangerous one: a signed request object exists to make the parameters tamper-proof, so processing the query string instead gives an attacker precisely what the object was there to prevent while the RP believes it was honoured. The discovery document now says `request_uri_parameter_supported: false` for the same reason — OIDC Discovery **defaults that field to `true`**, so omitting it was a claim.
 
-**Not implemented:** `max_age` / `auth_time`, the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document already tells the truth about them by saying nothing.
+**Not implemented:** the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document already tells the truth about them by saying nothing.
+
+## Step-up and re-authentication (#481)
+
+A native app needs two things from the OP for a sensitive action: to **force a fresh authentication** (a payment, a credential change) and to **know how the user authenticated** (passkey, password, password plus a second factor), so it — or the resource server — can require a level. Both rest on what the session records at login.
+
+**What a session records.** `UserSession.authTime` (already there) and, since #481, `UserSession.amr` — RFC 8176 values written by the login path: `["pwd"]` for `POST /session/login`; the upstream IdP's `amr` (when the provider surfaces it on the profile) plus the deployment-defined `fed` for a federation callback; the WebAuthn grant, which mints tokens without a session, stamps `amr: ["hwk"]` on its access token directly. RFC 8176 registers no value for "federated", and OIDC Core §2 leaves `amr` values to the deployment, so `fed` is documented here rather than borrowed. A composition that resumes a login after `POST /auth/mfa/verify` (the MFA route is not composed in this repository; its resume handlers are the deployment's) records `mfa` — and the factor's own value, `otp` say — in the session it creates; `CreateUserSessionInput.amr` is the seam.
+
+**What the tokens carry.** The id_token has `auth_time` always (it did before #481), `amr` when the session recorded one, and `acr` when `/authorize` satisfied an `acr_values` request. The access token mirrors `amr` and `acr` when present, so `auth.policy-verifier` or a resource server can gate on them without an id_token.
+
+**`max_age`.** A non-negative integer (anything else is `invalid_request`). A session whose `auth_time` is older than `max_age` seconds — `max_age=0` is always older — is sent to the login page with the request round-tripped, exactly as an unauthenticated one is, plus one thing: the authorize URL the browser is sent back to carries `reauth_after=<epoch seconds of the ask>`. On the way back, a session authenticated at or after that instant is the re-authentication that was asked for, and the request proceeds — `max_age=0` included, which is what keeps it from looping; one authenticated before it is answered `login_required` rather than sent round again. Under `prompt=none` a stale session is `login_required` straight away: silent means silent. `reauth_after` is written only by this server and decides nothing an RP relies on — `auth_time` in the id_token is what the RP verifies, and it is always the truth.
+
+**`prompt=login`** uses the same mechanism with the staleness test replaced by "always": to the login page with the marker, then satisfied by a session authenticated after the ask, else `login_required`. `prompt=none login` is still refused as OIDC Core §3.1.2.1 says.
+
+**`acr_values`** is answered from a configured table and from nothing else:
+
+```hocon
+oauth.authorize.acrValues {
+  "urn:example:pwd" = ["pwd"]
+  "urn:example:mfa" = ["pwd", "mfa"]
+  "urn:example:passkey" = ["hwk"]
+}
+```
+
+Each key is an Authentication Context Class Reference this deployment vouches for; its value is the `amr` set a session must carry to satisfy it. The first requested value the session satisfies becomes the `acr` of the code and of the id_token. None satisfied — or a value that is not in the table at all — is `unmet_authentication_requirements` at the `redirect_uri`, naming what was unmet; there is no silent acceptance, and no step-up redirect, because the login page cannot be told which factor to add. Discovery advertises the keys as `acr_values_supported` when the table is non-empty. An acr that requires nothing is refused at boot: every session would satisfy it, and it would vouch for nothing.
+
+**Both login paths must re-authenticate when asked.** The login page the deployment serves receives `redirect_to` carrying `prompt=login` / `max_age` and the marker; a page that bounces an already-authenticated browser straight back gets `login_required`, never a loop. `POST /session/login` and the federation callback always establish a *new* session with a fresh `auth_time`, which is the re-authentication.
 
 ## Client authentication: `private_key_jwt` (RFC 7523 §2.2)
 

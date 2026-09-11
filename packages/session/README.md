@@ -508,6 +508,19 @@ Providers implementing `SupportsRefresh` can keep federation tokens alive withou
 
 ---
 
+### What a session records about the authentication (#481)
+
+Every session carries `authTime`, and since #481 `amr` — RFC 8176 values naming how the user authenticated — so `/authorize` can honour `max_age`, `prompt=login` and `acr_values`, and the id_token can say `auth_time`, `amr` and `acr` (the whole picture is in the [oauth package README](../oauth/README.md#step-up-and-re-authentication-481)):
+
+| login path | `amr` |
+| --- | --- |
+| `POST /session/login` | `["pwd"]` |
+| federation callback | the upstream IdP's `amr` when the provider surfaces it on the profile (`profile.amr`, a string array), plus `fed` — the deployment-defined marker for "through a federation", exported as `FEDERATED_AMR`. RFC 8176 has no value for it, and OIDC Core leaves `amr` values to the deployment. |
+| a resumed MFA login (`POST /auth/mfa/verify`, composed by the deployment) | whatever the deployment's resume handler records: the first factor's value plus `mfa`, and the factor's own (`otp`, …). `CreateUserSessionInput.amr` is the seam. |
+| account linking (`?link=1`) | unchanged — a link is not a login |
+
+Re-authentication is a *new* session: `POST /session/login` and the federation callback always create one with a fresh `authTime`, which is what `max_age` and `prompt=login` measure. A login page that bounces an already-authenticated browser straight back to `/authorize` is answered `login_required` there, not looped.
+
 ### `FederationResult<T>` (type)
 
 ```typescript

@@ -396,6 +396,8 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 
 		const payload = decodeJwtPayload(tokens.access_token) as Record<string, unknown>;
 		expect(payload.sub).toBe(USER_ID);
+		// #481: a passkey login says so on the access token (RFC 8176 `hwk`).
+		expect(payload.amr).toEqual(["hwk"]);
 	});
 
 	// Post-merge audit H-1: when client authenticated, the AT carries client_id +

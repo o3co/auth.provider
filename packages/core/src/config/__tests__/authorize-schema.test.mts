@@ -60,3 +60,21 @@ describe("oauth.authorize schema — removed-field preprocess (#330)", () => {
 		expect(issue?.message).toMatch(/Remove this field from your config/);
 	});
 });
+
+describe("oauth.authorize.acrValues (#481)", () => {
+	it("accepts a table of acr value → the amr values a session must carry", () => {
+		const parsed = authorizeSchema.parse({
+			acrValues: { "urn:example:pwd": ["pwd"], "urn:example:mfa": ["pwd", "mfa"] },
+		}) as { acrValues?: Record<string, string[]> };
+		expect(parsed.acrValues).toEqual({
+			"urn:example:pwd": ["pwd"],
+			"urn:example:mfa": ["pwd", "mfa"],
+		});
+	});
+
+	it("refuses an acr that requires nothing, a non-string amr, and a non-table", () => {
+		expect(authorizeSchema.safeParse({ acrValues: { "urn:x": [] } }).success).toBe(false);
+		expect(authorizeSchema.safeParse({ acrValues: { "urn:x": [1] } }).success).toBe(false);
+		expect(authorizeSchema.safeParse({ acrValues: "urn:x" }).success).toBe(false);
+	});
+});
